@@ -211,6 +211,47 @@ class TestCodeIndexCLI:
         assert "Indexed" in r.output
 
 
+class TestSuggestCodeAsk:
+    """Context-aware Try-it line: pulls a real file from the index, varies
+    across runs, falls back gracefully when nothing is indexed yet."""
+
+    def test_references_real_file_after_index(self, cli_db, fake_repo):
+        # Run code-index against fake_repo so the DB has real samples.
+        r = runner.invoke(app, ["code-index", str(fake_repo), "--no-embed"])
+        assert r.exit_code == 0, r.output
+        flat = " ".join(r.output.split())
+        assert "Try it:" in flat
+        # Should reference one of the real things we just indexed,
+        # NOT the old hardcoded `cli.py wire MCP` string.
+        assert "cli.py wire MCP" not in r.output
+        assert any(name in flat for name in (
+            "main.py", "README.md", "run.sh", "config.toml",
+            "binary.py", "myrepo",
+            # Or the parent dir of any indexed file
+            str(fake_repo), "src",
+        ))
+
+    def test_varies_across_runs(self, cli_db, fake_repo):
+        from org_llm.cli import _suggest_code_ask
+        # Index once so samples exist, then call the suggester many times.
+        runner.invoke(app, ["code-index", str(fake_repo), "--no-embed"])
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            seen = {_suggest_code_ask(s, [fake_repo]) for _ in range(40)}
+        # With multiple files × multiple templates × cloud-flag toggle,
+        # 40 draws should produce more than one distinct suggestion.
+        assert len(seen) > 1, f"Suggester is deterministic — only saw: {seen}"
+
+    def test_fallback_when_no_samples(self, cli_db, tmp_path):
+        # Empty DB, fake root path — should still produce a usable Try-it line.
+        from org_llm.cli import _suggest_code_ask
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            out = _suggest_code_ask(s, [tmp_path / "nowhere"])
+        assert "Try it:" in out
+        assert "org-llm ask" in out
+
+
 # ── _parse_tag_hints regression ─────────────────────────────────────────────
 
 class TestTagHints:

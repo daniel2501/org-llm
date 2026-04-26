@@ -720,6 +720,127 @@ def index(
     make_it_so()
 
 
+def _suggest_code_ask(session, roots: list[Path]) -> str:
+    """Build a context-aware `org-llm ask` suggestion from what was just indexed.
+
+    Samples real nodes under `roots` from the DB, picks one at random, derives
+    its language from the `code:<lang>` tag, and renders a template from a
+    per-language pool. Output varies across runs by design.
+    """
+    import random
+    from .db import File, Node
+
+    samples: list[tuple[str, str, str]] = []  # (title, path, lang)
+    prefixes = [str(r.resolve()) + "/" for r in roots]
+    rows = (
+        session.query(Node.title, Node.tags, File.path)
+        .join(File, Node.file_id == File.id)
+        .filter(Node.tags.like("%code%"))
+        .order_by(File.mtime.desc())
+        .limit(80)
+        .all()
+    )
+    for title, tags, path in rows:
+        if not any(path.startswith(p) for p in prefixes):
+            continue
+        lang = next((t.split(":", 1)[1]
+                     for t in (tags or "").split(":")
+                     if t.startswith("code:")), "")
+        samples.append((title, path, lang))
+        if len(samples) >= 30:
+            break
+
+    # Generic templates always available; specific pools take priority when matched.
+    pools: dict[str, list[str]] = {
+        "":         [
+            "what does {file} do?",
+            "summarise the architecture under {dir}",
+            "find every TODO/FIXME under {dir}",
+            "what's the entry point for {project}?",
+            "what looks out of place in {file}?",
+        ],
+        "python":   [
+            "what does {file} do?",
+            "which functions in {file} would I document first?",
+            "where is the public API defined in {project}?",
+            "find every place {project} catches a bare Exception",
+            "summarise the data model in {file}",
+        ],
+        "elisp":    [
+            "what does {file} do?",
+            "which interactive commands does {project} expose?",
+            "find every defcustom in {project}",
+            "what hooks does {file} register?",
+        ],
+        "rust":     [
+            "what does {file} do?",
+            "find unsafe blocks under {dir}",
+            "which traits does {project} define?",
+            "what's the public API of {project}?",
+        ],
+        "typescript": [
+            "what does {file} do?",
+            "find every TODO in {project}",
+            "which exports does {file} provide?",
+            "what's the type model in {file}?",
+        ],
+        "javascript": [
+            "what does {file} do?",
+            "find every console.log under {dir}",
+            "summarise the module graph in {project}",
+        ],
+        "go":       [
+            "what does {file} do?",
+            "find every goroutine launch under {dir}",
+            "which interfaces does {project} define?",
+        ],
+        "shell":    [
+            "what does {file} do?",
+            "find every set -e missing from scripts under {dir}",
+        ],
+        "scheme":   [
+            "what does {file} do?",
+            "what does {project} expose at the top level?",
+        ],
+        "markdown": [
+            "summarise {file}",
+            "extract every heading from {project}",
+        ],
+        "org":      [
+            "what's the latest section in {file}?",
+            "summarise the workflow under {dir}",
+        ],
+    }
+
+    if not samples:
+        # No code samples yet (nothing under roots, or unembedded). Fall back
+        # to a non-cloud generic pick referencing the actual root.
+        root_label = str(roots[0]) if roots else "your code"
+        question = random.choice([
+            f"summarise the architecture under {root_label}",
+            f"what looks important under {root_label}?",
+            f"find every TODO under {root_label}",
+        ])
+        return f"Try it: [bold]org-llm ask {question!r}[/bold]"
+
+    title, path, lang = random.choice(samples)
+    file_name = Path(path).name
+    # Project = first path segment under any of the roots
+    project = file_name
+    for pref in prefixes:
+        if path.startswith(pref):
+            tail = path[len(pref):]
+            project = tail.split("/", 1)[0] or file_name
+            break
+    parent_dir = str(Path(path).parent)
+
+    pool = pools.get(lang) or pools[""]
+    template = random.choice(pool)
+    question = template.format(file=file_name, dir=parent_dir, project=project)
+    cloud_flag = " --cloud" if random.random() < 0.5 else ""
+    return f"Try it: [bold]org-llm ask{cloud_flag} \"{question}\"[/bold]"
+
+
 @app.command(name="code-index")
 def code_index(
     paths: Annotated[list[str], typer.Argument(
@@ -822,7 +943,8 @@ def code_index(
                                         force=False, progress_cb=tick)
             hail(f"Embedded {count} new code nodes.")
 
-    on_screen("Try it: [bold]org-llm ask --cloud \"how does cli.py wire MCP?\"[/bold]")
+    with get_session(engine) as session:
+        on_screen(_suggest_code_ask(session, roots))
     make_it_so()
 
 
