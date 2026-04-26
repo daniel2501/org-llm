@@ -686,8 +686,9 @@ def install(
     skip_opencode: Annotated[bool, typer.Option("--skip-opencode")] = False,
     skip_gh:       Annotated[bool, typer.Option("--skip-gh")]       = False,
     skip_claude:   Annotated[bool, typer.Option("--skip-claude")]   = False,
+    skip_pass:     Annotated[bool, typer.Option("--skip-pass")]     = False,
 ):
-    """Install Ollama, models, Nerd Fonts, opencode, gh CLI, and Claude Code."""
+    """Install Ollama, models, Nerd Fonts, opencode, gh CLI, Claude Code, and pass."""
     import platform
     import shutil
     import subprocess
@@ -809,6 +810,22 @@ def install(
         else:
             hail("Installing Claude Code CLI…")
             _install_claude_bin()
+
+    # ── pass (credential manager) ─────────────────────────────────────────────
+    if not skip_pass:
+        from . import creds as creds_mod
+        if creds_mod.is_installed():
+            hail(f"pass already installed at {shutil.which('pass')}")
+        else:
+            hail("Installing pass (Unix password manager)…")
+            if creds_mod.install():
+                hail("pass installed successfully")
+            else:
+                console.print()
+                console.print(creds_mod.install_help())
+        if creds_mod.is_installed() and not creds_mod.is_initialized():
+            console.print()
+            console.print(creds_mod.install_help())
 
     console.print()
     console.print(trans_stripe(52))
@@ -1183,28 +1200,33 @@ def doctor(
                 fail("  embed model unresponsive", str(e)[:80],
                      f"ollama pull {embed_mdl}")
 
-    # ── Cloud / RunPod ─────────────────────────────────────────────────────────
-    section("Cloud / RunPod")
+    # ── Cloud GPU backend ─────────────────────────────────────────────────────
+    section("Cloud GPU")
     with get_session(engine) as session:
         cloud_provider = _cfg(session, "cloud_provider")
         cloud_endpoint = _cfg(session, "cloud_endpoint_url")
-        cloud_api_key  = _cfg(session, "runpod_api_key")
+        cloud_api_key  = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
         cloud_model_   = _cfg(session, "cloud_model") or _cfg(session, "chat_model") or "llama3.2"
+    from .cloud import get_provider as _get_provider
+    provider_label = (_get_provider(cloud_provider).name
+                      if cloud_provider and _get_provider(cloud_provider)
+                      else (cloud_provider or "—"))
     if cloud_endpoint:
+        info("Provider", provider_label)
         try:
-            from .cloud import check_connection, assess_local_capability
+            from .cloud import check_connection
             cs = check_connection(cloud_endpoint, cloud_api_key, cloud_model_)
             if cs.reachable and cs.auth_ok:
                 ok("Cloud endpoint", f"{cloud_endpoint}  ({cs.latency_ms:.0f}ms)")
             elif cs.reachable:
-                warn("Cloud auth failed", "check runpod_api_key config")
+                warn("Cloud auth failed", "check cloud_api_key config")
             else:
                 fail("Cloud endpoint unreachable", cloud_endpoint,
-                     "check pod is running: org-llm cloud --console")
+                     f"check pod is running: org-llm cloud --console {cloud_provider or ''}".rstrip())
         except Exception as e:
             warn("Cloud check failed", str(e)[:60])
     else:
-        info("Cloud (RunPod)", "not configured — org-llm cloud --signup to set up")
+        info("Cloud GPU", "not configured — org-llm cloud --providers to compare options")
 
     with get_session(engine) as session:
         all_models = [_cfg(session, k) for _, k, _ in _TASK_MODEL_KEYS if _cfg(session, k)]
@@ -1252,17 +1274,41 @@ def doctor(
         warn("gh CLI not installed",
              "run: org-llm install --skip-ollama --skip-models --skip-fonts --skip-opencode")
 
+    # ── Credentials (pass) ─────────────────────────────────────────────────────
+    section("Credentials (pass)")
+    from . import creds as _creds
+    if _creds.is_installed():
+        ok("pass installed", shutil.which("pass") or "")
+        if _creds.is_initialized():
+            ok("pass store initialized", str(_creds.PASS_STORE))
+            secrets = _creds.list_secrets("org-llm")
+            if secrets:
+                info("stored secrets", f"{len(secrets)} (org-llm/*)")
+                for s in secrets:
+                    info(f"  ↪ {s}", "")
+            else:
+                info("stored secrets", "none yet — org-llm cloud --signup <slug>")
+        else:
+            warn("pass store not initialized",
+                 "run: pass init <gpg-key-id>  (see: org-llm tutor creds)")
+    else:
+        warn("pass not installed",
+             "run: org-llm install --skip-ollama --skip-models --skip-fonts "
+             "--skip-opencode --skip-gh --skip-claude")
+
     # ── Claude Code ────────────────────────────────────────────────────────────
     section("Claude Code")
     claude = _claude_bin()
     if claude:
         ok("claude installed", str(claude))
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        api_key = (os.environ.get("ANTHROPIC_API_KEY", "")
+                   or (_creds.read_secret(_creds.anthropic_slug()) or ""))
         if api_key:
-            ok("ANTHROPIC_API_KEY", f"set ({len(api_key)} chars)")
+            src = "env" if os.environ.get("ANTHROPIC_API_KEY") else "pass"
+            ok("ANTHROPIC_API_KEY", f"set ({len(api_key)} chars, source: {src})")
         else:
             warn("ANTHROPIC_API_KEY not set",
-                 "needed for claude CLI — set in shell or ~/.profile")
+                 f"set in shell, or: pass insert {_creds.anthropic_slug()}")
     else:
         warn("Claude Code not installed",
              "run: org-llm install --skip-ollama --skip-models --skip-fonts --skip-opencode --skip-gh")
@@ -1429,7 +1475,7 @@ _TUTOR_STEPS = [
         "All steps:     [bold]org-llm tutor --all[/bold]\n"
         "Steps: welcome → init → index → embed → search → ask → capture → tag → code\n"
         "       → config → skills → report → doctor → install → db → dbt → opencode\n"
-        "       → source → cloud → launch → emacs → claude → done",
+        "       → source → creds → cloud → launch → emacs → claude → done",
     ),
     (
         "init",
@@ -1715,7 +1761,7 @@ _TUTOR_STEPS = [
         "  value       TEXT         — setting value\n\n"
         "  Notable keys: org_dir, ollama_url, embed_model, chat_model,\n"
         "  code_model, reason_model, fast_model, instruct_model, text_model,\n"
-        "  embed_dim, cloud_endpoint_url, runpod_api_key, cloud_model\n\n"
+        "  embed_dim, cloud_provider, cloud_endpoint_url, cloud_api_key, cloud_model\n\n"
         "━━  DBT VIEWS  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "dbt builds analytics views on top of the same SQLite file:\n\n"
         "  staging/stg_nodes    — cleaned nodes: relative paths, formatted dates\n"
@@ -1836,27 +1882,65 @@ _TUTOR_STEPS = [
         "[dim]Source: doom/org-llm.el  |  org-llm source cli[/dim]",
     ),
     (
+        "creds",
+        "[lcars2]org-llm credentials[/lcars2] — encrypted secrets via [bold]pass[/bold]\n\n"
+        "API keys for cloud providers and Claude Code are stored in the standard\n"
+        "Unix password manager [bold]pass[/bold] (passwordstore.org), under slugs of the form\n"
+        "  [lcars3]org-llm/cloud/<provider>/api-key[/lcars3]\n"
+        "  [lcars3]org-llm/anthropic/api-key[/lcars3]\n\n"
+        "[lcars1]Why pass?[/lcars1]\n"
+        "  • One file per secret, GPG-encrypted at rest under ~/.password-store/\n"
+        "  • Standard tooling (browser extensions, mobile, Emacs auth-source)\n"
+        "  • Versioned with git if you `pass git init`\n"
+        "  • Keys never touch SQLite or any plaintext config\n\n"
+        "[lcars1]One-time setup:[/lcars1]\n"
+        "  1. [bold]org-llm install[/bold]                  — installs pass + gnupg\n"
+        "  2. [bold]gpg --full-generate-key[/bold]          — pick RSA 4096, no expiry, your name+email\n"
+        "  3. [bold]gpg --list-secret-keys[/bold]           — copy the long key id\n"
+        "  4. [bold]pass init <KEY-ID>[/bold]               — initializes the store\n\n"
+        "[lcars1]Storing keys:[/lcars1]\n"
+        "  [bold]org-llm cloud --signup runpod[/bold]   — opens browser, then prompts for key\n"
+        "  [bold]org-llm cloud --configure[/bold]        — pick provider, paste endpoint + key\n"
+        "  [bold]pass insert org-llm/anthropic/api-key[/bold]  — manual entry for claude\n\n"
+        "[lcars1]Inspecting + managing:[/lcars1]\n"
+        "  [bold]org-llm cloud --creds[/bold]    — list stored slugs, show pass status\n"
+        "  [bold]pass ls org-llm[/bold]          — tree view of all org-llm secrets\n"
+        "  [bold]pass show <slug>[/bold]         — print one secret\n"
+        "  [bold]pass rm <slug>[/bold]           — delete one secret\n\n"
+        "[lcars1]Resolution order at runtime:[/lcars1]\n"
+        "  Anthropic key:  ANTHROPIC_API_KEY env  →  pass  →  prompt\n"
+        "  Cloud GPU key:  pass  →  cloud_api_key in SQLite (legacy)  →  none\n\n"
+        "[lcars1]Migrating from SQLite:[/lcars1]\n"
+        "  When you run [bold]--configure[/bold] with pass available, an existing SQLite key is\n"
+        "  copied into pass and removed from the DB.\n\n"
+        "[lcars1]Override store location:[/lcars1]\n"
+        "  export PASSWORD_STORE_DIR=~/sync/secrets\n\n"
+        "[dim]Source: org_llm/creds.py  |  org-llm source creds[/dim]",
+    ),
+    (
         "cloud",
-        "[lcars2]org-llm cloud[/lcars2] — RunPod cloud LLM backend\n\n"
-        "When local Ollama can't run a model (not enough VRAM/RAM), the app can\n"
-        "transparently fall back to a RunPod cloud endpoint.\n\n"
+        "[lcars2]org-llm cloud[/lcars2] — multi-provider GPU cloud backend\n\n"
+        "When local Ollama can't run a model (not enough VRAM/RAM), point the app\n"
+        "at any Ollama- or OpenAI-compatible cloud endpoint.\n\n"
+        "[lcars1]Supported providers:[/lcars1]\n"
+        "  RunPod        Vast.ai      Lambda Labs    TensorDock\n"
+        "  Salad Cloud   Paperspace   CoreWeave\n\n"
         "[lcars1]Setup flow:[/lcars1]\n"
-        "  1. [bold]org-llm cloud --signup[/bold]      — opens runpod.io in browser\n"
-        "  2. Deploy an Ollama template pod from their marketplace\n"
-        "  3. [bold]org-llm cloud --configure[/bold]   — enter your pod URL + API key\n"
-        "  4. [bold]org-llm cloud --test[/bold]         — verify connection\n\n"
-        "[lcars1]Assessment:[/lcars1]\n"
-        "  [bold]org-llm cloud --assess[/bold]  — shows which configured models fit locally\n"
-        "  vs which require cloud. Checks GPU VRAM and RAM.\n\n"
-        "[lcars1]Cost estimation:[/lcars1]\n"
-        "  [bold]org-llm cloud --cost[/bold]   — RunPod GPU pricing + tokens/$ table\n\n"
+        "  1. [bold]org-llm cloud --providers[/bold]        — compare prices and APIs\n"
+        "  2. [bold]org-llm cloud --signup <slug>[/bold]    — open signup for chosen provider\n"
+        "  3. Deploy an Ollama or OpenAI-compatible inference endpoint\n"
+        "  4. [bold]org-llm cloud --configure[/bold]        — pick provider + paste URL + API key\n"
+        "  5. [bold]org-llm cloud --test[/bold]              — verify connection\n\n"
+        "[lcars1]Assessment + cost:[/lcars1]\n"
+        "  [bold]org-llm cloud --assess[/bold]  — which models need cloud (VRAM/RAM check)\n"
+        "  [bold]org-llm cloud --cost[/bold]    — side-by-side GPU pricing across providers\n\n"
         "[lcars1]Config keys set by --configure:[/lcars1]\n"
-        "  cloud_provider      runpod\n"
-        "  cloud_endpoint_url  https://{pod_id}-11434.proxy.runpod.net\n"
-        "  runpod_api_key      (optional, for private pods)\n"
-        "  cloud_model         model to use on cloud (default: chat_model)\n\n"
+        "  cloud_provider       runpod | vast | lambda | tensordock | salad | …\n"
+        "  cloud_endpoint_url   provider-specific URL (see endpoint_hint)\n"
+        "  cloud_api_key        bearer token (blank for unauthenticated pods)\n"
+        "  cloud_model          model tag on the cloud endpoint\n\n"
         "[lcars1]Doctor integration:[/lcars1]\n"
-        "  org-llm doctor now shows a Cloud section with connection status.\n\n"
+        "  org-llm doctor shows a Cloud GPU section with provider + connection status.\n\n"
         "[lcars1]Theme levels (env vars):[/lcars1]\n"
         "  ORG_LLM_TREK_LEVEL=0..3    — Trek references intensity (default: 2)\n"
         "  ORG_LLM_COMMIE_LEVEL=0..3  — Solidarity messaging intensity (default: 2)\n\n"
@@ -1918,7 +2002,7 @@ _TUTOR_STEPS = [
         "done",
         "[bold lcars1]You're ready to explore your second brain.[/bold lcars1]\n\n"
         "[lcars1]Recommended first flight:[/lcars1]\n\n"
-        "  1. [bold]org-llm install[/bold]         — Ollama + models + fonts + opencode + claude\n"
+        "  1. [bold]org-llm install[/bold]         — Ollama + models + fonts + opencode + claude + pass\n"
         "  2. [bold]org-llm init[/bold]             — create DB + default config\n"
         "  3. [bold]org-llm index[/bold]            — parse all org files into DB\n"
         "  4. [bold]org-llm embed[/bold]            — generate embeddings (takes a while)\n"
@@ -1927,7 +2011,8 @@ _TUTOR_STEPS = [
         "[lcars1]Explore further:[/lcars1]\n"
         "  [bold]org-llm launch[/bold]              — opencode workspace (SPC l o in Emacs)\n"
         "  [bold]org-llm claude[/bold]              — Claude Code workspace (SPC l C in Emacs)\n"
-        "  [bold]org-llm cloud --assess[/bold]      — check which models need RunPod cloud\n"
+        "  [bold]org-llm cloud --assess[/bold]      — check which models need a cloud GPU\n"
+        "  [bold]org-llm cloud --creds[/bold]       — list stored API keys (in pass)\n"
         "  [bold]org-llm report all[/bold]          — analytics on your vault\n"
         "  [bold]org-llm skill-new my_skill[/bold]  — create your first skill\n"
         "  [bold]org-llm tag[/bold]                 — auto-tag untagged nodes\n"
@@ -2012,6 +2097,7 @@ _MODULE_MAP = {
     "ui":         "org_llm.ui",
     "mcp_server": "org_llm.mcp_server",
     "cloud":      "org_llm.cloud",
+    "creds":      "org_llm.creds",
     "models":     "org_llm.models",
 }
 
@@ -2282,19 +2368,21 @@ def launch(
         pct_e      = int(n_embedded / n_nodes * 100) if n_nodes else 0
         skill_names = [s.name for s in session.query(Skill).all()]
         from datetime import datetime, timedelta
-        since  = (datetime.now() - timedelta(days=7)).isoformat()
-        recent = (
-            session.query(Node)
+        since  = (datetime.now() - timedelta(days=7)).timestamp()
+        recent = [
+            (n.title, n.mtime)
+            for n in session.query(Node)
             .filter(Node.mtime >= since)
             .order_by(Node.mtime.desc())
             .limit(8).all()
-        )
+        ]
 
     org_llm_dir = Path(__file__).parent.parent.resolve()
 
     # ── Build system prompt ───────────────────────────────────────────────────
     recent_str = "\n".join(
-        f"  - {n.title} ({n.mtime[:10] if n.mtime else '?'})" for n in recent
+        f"  - {title} ({datetime.fromtimestamp(mtime).date().isoformat() if mtime else '?'})"
+        for title, mtime in recent
     ) or "  (no recent activity)"
     skill_str = ", ".join(skill_names) if skill_names else "none — run org-llm skill-index"
 
@@ -2434,18 +2522,20 @@ def claude_frontend(
         pct_e       = int(n_embedded / n_nodes * 100) if n_nodes else 0
         skill_names = [s.name for s in session.query(Skill).all()]
         from datetime import datetime, timedelta
-        since  = (datetime.now() - timedelta(days=7)).isoformat()
-        recent = (
-            session.query(Node)
+        since  = (datetime.now() - timedelta(days=7)).timestamp()
+        recent = [
+            (n.title, n.mtime)
+            for n in session.query(Node)
             .filter(Node.mtime >= since)
             .order_by(Node.mtime.desc())
             .limit(8).all()
-        )
+        ]
 
     org_llm_dir = Path(__file__).parent.parent.resolve()
 
     recent_str = "\n".join(
-        f"  - {n.title} ({n.mtime[:10] if n.mtime else '?'})" for n in recent
+        f"  - {title} ({datetime.fromtimestamp(mtime).date().isoformat() if mtime else '?'})"
+        for title, mtime in recent
     ) or "  (no recent activity)"
     skill_str = ", ".join(skill_names) if skill_names else "none — run org-llm skill-index"
 
@@ -2530,15 +2620,23 @@ org-roam second brain via org-llm MCP tools.
     settings_path.write_text(json.dumps(existing_settings, indent=2))
     (claude_dir / "CLAUDE.md").write_text(claude_md)
 
-    # ── Check for API key ─────────────────────────────────────────────────────
+    # ── Check for API key (env → pass → prompt) ──────────────────────────────
+    from . import creds as _creds
     if not os.environ.get("ANTHROPIC_API_KEY"):
-        console.print()
-        console.print("[bold yellow]⚠  ANTHROPIC_API_KEY not set[/bold yellow]")
-        console.print(
-            "  Claude Code needs an API key (or claude.ai Pro subscription).\n"
-            "  Get one at [bold]console.anthropic.com[/bold] and set:\n"
-            "    export ANTHROPIC_API_KEY=sk-ant-...\n"
-        )
+        stored = _creds.read_secret(_creds.anthropic_slug()) if _creds.is_available() else None
+        if stored:
+            os.environ["ANTHROPIC_API_KEY"] = stored
+            hail(f"Loaded ANTHROPIC_API_KEY from pass ({_creds.anthropic_slug()})")
+        else:
+            console.print()
+            console.print("[bold yellow]⚠  ANTHROPIC_API_KEY not set[/bold yellow]")
+            console.print(
+                "  Claude Code needs an API key (or claude.ai Pro subscription).\n"
+                "  Get one at [bold]console.anthropic.com[/bold]\n\n"
+                "  Persist it via either:\n"
+                "    export ANTHROPIC_API_KEY=sk-ant-...\n"
+                f"    pass insert {_creds.anthropic_slug()}\n"
+            )
 
     # ── Launch banner ─────────────────────────────────────────────────────────
     solidarity()
@@ -2574,12 +2672,20 @@ def cloud(
     providers: Annotated[bool, typer.Option("--providers", "-p",  help="List all supported cloud providers")] = False,
     signup:    Annotated[str,  typer.Option("--signup",          help="Open signup page (provider slug or 'list')")] = "",
     console_:  Annotated[str,  typer.Option("--console",         help="Open console for a provider slug")] = "",
-    configure: Annotated[bool, typer.Option("--configure", "-c",  help="Set up provider, endpoint, and API key")] = False,
+    configure: Annotated[bool, typer.Option("--configure", "-c",  help="Set up provider, endpoint, and API key (stores key in `pass`)")] = False,
     test:      Annotated[bool, typer.Option("--test",      "-t",  help="Ping the configured endpoint")] = False,
     assess:    Annotated[bool, typer.Option("--assess",    "-a",  help="Assess which models need cloud vs local")] = False,
     cost:      Annotated[bool, typer.Option("--cost",             help="Show cost table across providers")] = False,
+    creds:     Annotated[bool, typer.Option("--creds",            help="Show stored cloud credentials in `pass`")] = False,
 ):
-    """Manage cloud GPU backends — RunPod, Vast.ai, Lambda, TensorDock, Salad, and more."""
+    """Manage cloud GPU backends — RunPod, Vast.ai, Lambda, TensorDock, Salad, and more.
+
+    API keys are stored in the standard Unix password manager `pass`
+    (https://www.passwordstore.org) under the slug
+    `org-llm/cloud/<provider>/api-key`. If `pass` is not installed or the store
+    is not initialized, keys fall back to the SQLite config table — see
+    `org-llm tutor creds` for setup instructions.
+    """
     from rich.panel import Panel
     from rich.table import Table
     from .cloud import (
@@ -2589,12 +2695,43 @@ def cloud(
     )
     from .ui import TREK_MSGS, stardate, COMRADE_STAR
     from .db import Config
+    from . import creds as creds_mod
 
     engine = _engine()
 
     # default: show status
-    if not any([status, providers, signup, console_, configure, test, assess, cost]):
+    if not any([status, providers, signup, console_, configure, test, assess, cost, creds]):
         status = True
+
+    # ── Stored credentials snapshot ──────────────────────────────────────────
+    if creds:
+        cs = creds_mod.status()
+        console.print()
+        console.rule("[lcars1]Cloud Credentials  ·  pass[/lcars1]")
+        tbl = Table(box=None, pad_edge=False, show_header=False)
+        tbl.add_column("Key", style="lcars1", width=20)
+        tbl.add_column("Value", style="lcars2")
+        tbl.add_row("pass installed",   "[green]yes[/green]" if cs.installed else "[red]no[/red]")
+        tbl.add_row("store initialized", "[green]yes[/green]" if cs.initialized else "[red]no[/red]")
+        tbl.add_row("store path",        str(cs.store_path))
+        if cs.gpg_id:
+            tbl.add_row("gpg key id",    cs.gpg_id)
+        console.print(Panel(tbl, title="[lcars1]pass[/lcars1]", border_style="lcars2"))
+
+        if cs.secrets:
+            console.print()
+            tbl2 = Table(title="Stored secrets (org-llm/*)", box=None, pad_edge=False)
+            tbl2.add_column("Slug", style="lcars3")
+            for s in cs.secrets:
+                tbl2.add_row(s)
+            console.print(tbl2)
+        elif cs.installed and cs.initialized:
+            on_screen("No org-llm secrets stored yet. Use [bold]org-llm cloud --configure[/bold].")
+        else:
+            console.print()
+            console.print(creds_mod.install_help())
+            on_screen("Detailed setup: [bold]org-llm tutor creds[/bold]")
+        return
 
     # ── Provider list ─────────────────────────────────────────────────────────
     if providers:
@@ -2647,7 +2784,23 @@ def cloud(
             on_screen(f"Deploy an Ollama pod/container. Endpoint format: [bold]{p.endpoint_hint}[/bold]")
         else:
             on_screen(f"Endpoint format: [bold]{p.endpoint_hint}[/bold]  (OpenAI-compatible)")
-        on_screen("Then run: [bold]org-llm cloud --configure[/bold]")
+        console.print()
+
+        # Offer to capture the API key right now (after the user has signed up)
+        if creds_mod.is_available():
+            on_screen("After signing up, paste your API key to store it securely.")
+            on_screen(f"  ↪ slot: [dim]{creds_mod.cloud_slug(p.slug)}[/dim]")
+            api_key = typer.prompt("API key (blank to skip)", default="", hide_input=True)
+            if api_key:
+                if creds_mod.write_secret(creds_mod.cloud_slug(p.slug), api_key):
+                    hail(f"Stored API key in pass at {creds_mod.cloud_slug(p.slug)}")
+                else:
+                    red_alert("Failed to store API key in pass — run: org-llm cloud --configure")
+        else:
+            on_screen("Tip: install `pass` for encrypted credential storage.")
+            console.print()
+            console.print(creds_mod.install_help())
+        on_screen("Then run: [bold]org-llm cloud --configure[/bold] to set the endpoint URL.")
         return
 
     # ── Console ───────────────────────────────────────────────────────────────
@@ -2670,6 +2823,21 @@ def cloud(
         console.print()
         console.rule("[lcars1]Cloud Configuration[/lcars1]")
 
+        # Pre-flight: pass status + offer to install
+        if not creds_mod.is_installed():
+            console.print()
+            on_screen("`pass` is not installed — your API key would be stored in plain SQLite.")
+            if typer.confirm("Install `pass` now?", default=True):
+                if creds_mod.install():
+                    hail("`pass` installed.")
+                else:
+                    red_alert("Could not install `pass` automatically.")
+                    console.print(creds_mod.install_help())
+        if creds_mod.is_installed() and not creds_mod.is_initialized():
+            console.print()
+            console.print(creds_mod.install_help())
+            on_screen("Continuing with SQLite fallback — re-run after `pass init <key>`.")
+
         # Provider selection
         console.print()
         on_screen("Available providers:")
@@ -2689,31 +2857,60 @@ def cloud(
         console.print()
 
         endpoint = typer.prompt(f"{chosen.name} endpoint URL", default="")
-        api_key  = typer.prompt("API key (leave blank if public endpoint)", default="")
-        model    = typer.prompt("Model on cloud endpoint (blank = use chat_model)", default="")
+        existing_key_in_pass = creds_mod.read_secret(creds_mod.cloud_slug(chosen.slug))
+        with get_session(engine) as _s:
+            existing_key_in_db = (_cfg(_s, "cloud_api_key")
+                                  or _cfg(_s, "runpod_api_key"))
+
+        prompt_default_hint = ""
+        if existing_key_in_pass:
+            prompt_default_hint = "  [stored in pass; blank = keep]"
+        elif existing_key_in_db:
+            prompt_default_hint = "  [in SQLite; blank = migrate to pass]"
+        api_key = typer.prompt(
+            f"API key (blank if public endpoint){prompt_default_hint}",
+            default="", hide_input=True,
+        )
+        model = typer.prompt("Model on cloud endpoint (blank = use chat_model)", default="")
 
         if endpoint:
+            stored_in_pass = False
+            slug = creds_mod.cloud_slug(chosen.slug)
+            key_to_store = api_key or (existing_key_in_db if not existing_key_in_pass else "")
+            if creds_mod.is_available() and key_to_store:
+                if creds_mod.write_secret(slug, key_to_store):
+                    stored_in_pass = True
+                    hail(f"API key stored in pass at {slug}")
+
             with get_session(engine) as session:
                 for key, val in [
                     ("cloud_provider",    chosen.slug),
                     ("cloud_endpoint_url", endpoint.rstrip("/")),
-                    ("cloud_api_key",     api_key),
                 ]:
                     row = session.get(Config, key)
-                    if row:
-                        row.value = val
-                    else:
-                        session.add(Config(key=key, value=val))
+                    if row: row.value = val
+                    else:   session.add(Config(key=key, value=val))
+
+                if stored_in_pass:
+                    # Clear any plaintext copies from SQLite (migration)
+                    for stale in ("cloud_api_key", "runpod_api_key"):
+                        row = session.get(Config, stale)
+                        if row:
+                            session.delete(row)
+                            on_screen(f"Migrated {stale} from SQLite → pass.")
+                elif api_key:
+                    # Fallback: pass not available, store in SQLite
+                    row = session.get(Config, "cloud_api_key")
+                    if row: row.value = api_key
+                    else:   session.add(Config(key="cloud_api_key", value=api_key))
+                    on_screen("API key stored in SQLite (`pass` not available).")
+
                 if model:
                     row = session.get(Config, "cloud_model")
-                    if row:
-                        row.value = model
-                    else:
-                        session.add(Config(key="cloud_model", value=model))
+                    if row: row.value = model
+                    else:   session.add(Config(key="cloud_model", value=model))
                 session.commit()
             hail(f"Cloud endpoint saved: {endpoint}")
-            if api_key:
-                hail("API key saved.")
             if model:
                 hail(f"Cloud model: {model}")
 
@@ -2724,9 +2921,11 @@ def cloud(
     with get_session(engine) as session:
         provider_slug = _cfg(session, "cloud_provider")
         endpoint_url  = _cfg(session, "cloud_endpoint_url")
-        api_key       = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
         cloud_model   = _cfg(session, "cloud_model") or _cfg(session, "chat_model") or "llama3.2"
         all_models    = [_cfg(session, k) for _, k, _ in _TASK_MODEL_KEYS if _cfg(session, k)]
+        db_api_key    = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
+    api_key = (creds_mod.read_secret(creds_mod.cloud_slug(provider_slug))
+               if provider_slug else None) or db_api_key
 
     provider_info = get_provider(provider_slug)
 
@@ -2809,12 +3008,18 @@ def cloud(
             cs = check_connection(endpoint_url, api_key, cloud_model)
 
     pname = provider_info.name if provider_info else (provider_slug or "not configured")
+    if api_key and provider_slug and creds_mod.read_secret(creds_mod.cloud_slug(provider_slug)):
+        key_source = "set (pass)"
+    elif api_key:
+        key_source = "set (SQLite — run --configure to migrate to pass)"
+    else:
+        key_source = "—"
     tbl = Table(box=None, pad_edge=False, show_header=False)
     tbl.add_column("Key",   style="lcars1", width=22)
     tbl.add_column("Value", style="lcars2")
     tbl.add_row("Provider",    pname)
     tbl.add_row("Endpoint",    endpoint_url or "—")
-    tbl.add_row("API key",     "set" if api_key else "—")
+    tbl.add_row("API key",     key_source)
     tbl.add_row("Cloud model", cloud_model)
     if cs:
         if cs.reachable and cs.auth_ok:

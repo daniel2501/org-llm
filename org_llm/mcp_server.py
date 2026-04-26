@@ -114,6 +114,7 @@ def create_mcp_server():
     @server.tool()
     def get_node(title: str) -> str:
         """Fetch the full content of a note by title (partial/fuzzy match)."""
+        from datetime import datetime
         from .db import Node
         with get_session(engine) as session:
             node = (
@@ -124,12 +125,16 @@ def create_mcp_server():
             )
             if not node:
                 return f"No node found matching '{title}'. Try search_notes() to explore."
+            modified = (
+                datetime.fromtimestamp(node.mtime).isoformat(timespec="seconds")
+                if node.mtime else "?"
+            )
             return (
                 f"**{node.title}**\n"
-                f"File:     {node.file_path}\n"
+                f"File:     {node.file.path}\n"
                 f"Tags:     {node.tags or 'none'}\n"
                 f"ID:       {node.node_id or 'none'}\n"
-                f"Modified: {node.mtime or '?'}\n\n"
+                f"Modified: {modified}\n\n"
                 f"{node.body}"
             )
 
@@ -137,28 +142,29 @@ def create_mcp_server():
     @server.tool()
     def list_nodes_by_tag(tag: str, limit: int = 30) -> str:
         """List all notes that contain a given tag."""
-        from .db import Node
+        from .db import File, Node
         with get_session(engine) as session:
-            nodes = (
-                session.query(Node)
+            rows = (
+                session.query(Node.title, Node.tags, File.path)
+                .join(File, File.id == Node.file_id)
                 .filter(Node.tags.ilike(f"%{tag}%"))
                 .limit(limit).all()
             )
-        if not nodes:
+        if not rows:
             return f"No nodes tagged '{tag}'."
         return "\n".join(
-            f"- {n.title}  [{n.tags}]  ({Path(n.file_path).name})"
-            for n in nodes
+            f"- {title}  [{tags}]  ({Path(path).name})"
+            for title, tags, path in rows
         )
 
     # ── list_recent_nodes ─────────────────────────────────────────────────────
     @server.tool()
     def list_recent_nodes(days: int = 14) -> str:
         """List notes modified in the last N days, most recent first."""
-        from .db import Node
         from datetime import datetime, timedelta
+        from .db import Node
         with get_session(engine) as session:
-            since = (datetime.now() - timedelta(days=days)).isoformat()
+            since = (datetime.now() - timedelta(days=days)).timestamp()
             nodes = (
                 session.query(Node)
                 .filter(Node.mtime >= since)
@@ -168,7 +174,7 @@ def create_mcp_server():
         if not nodes:
             return f"No nodes modified in the last {days} days."
         return "\n".join(
-            f"- {n.title}  ({n.mtime[:10] if n.mtime else '?'})"
+            f"- {n.title}  ({datetime.fromtimestamp(n.mtime).date().isoformat() if n.mtime else '?'})"
             for n in nodes
         )
 

@@ -103,13 +103,13 @@ def run_skill(
         return result.stdout.strip() or result.stderr.strip()
 
     elif skill.lang in ("sh", "shell", "bash"):
+        import os
         with tempfile.NamedTemporaryFile(suffix=".sh", mode="w", delete=False) as f:
             f.write("#!/usr/bin/env sh\n" + src)
             tmp = f.name
         Path(tmp).chmod(0o755)
-        result = subprocess.run([tmp], capture_output=True, text=True,
-                                env={"PATH": "/usr/bin:/bin:/home/daniel/.local/bin",
-                                     **cfg})
+        env = {**os.environ, **cfg}
+        result = subprocess.run([tmp], capture_output=True, text=True, env=env)
         Path(tmp).unlink(missing_ok=True)
         return result.stdout.strip()
 
