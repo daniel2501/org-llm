@@ -446,84 +446,257 @@ def report(
 
 
 @app.command()
-def doctor():
-    """Run a health check on the org-llm installation."""
+def doctor(
+    diagnose: Annotated[bool, typer.Option("--diagnose", "-d",
+              help="Use LLM to explain failures and suggest fixes")] = False,
+    fix:      Annotated[bool, typer.Option("--fix",
+              help="Auto-apply safe fixes (init DB, start Ollama)")] = False,
+):
+    """Deep health check: system, DB, index, Ollama, fonts — with LLM diagnosis."""
     import shutil
+    import subprocess
+    import sys
+    import time
+    from datetime import datetime
+    from rich.panel import Panel
+    from rich.rule  import Rule
+    from rich.text  import Text
     from rich.table import Table
-    from rich.text import Text
-    from .ui import trans_stripe, PRIDE_BANNER
+    from .db import Node, File
+    from .ui import trans_stripe, PRIDE_BANNER, NERD_FONTS
 
-    PASS = "[bold green]✓ OK[/bold green]"
-    FAIL = "[bold red]✗ FAIL[/bold red]"
-    WARN = "[bold yellow]⚠ WARN[/bold yellow]"
+    PASS = "[bold green]✓[/bold green]"
+    FAIL = "[bold red]✗[/bold red]"
+    WARN = "[bold yellow]⚠[/bold yellow]"
+    INFO = "[dim]·[/dim]"
 
-    table = Table(box=None, pad_edge=False, show_header=False)
-    table.add_column("Status", width=10)
-    table.add_column("Check", style="lcars2")
-    table.add_column("Detail", style="dim")
+    issues:   list[str] = []   # failures for LLM diagnosis
+    warnings: list[str] = []   # non-fatal
+    checks:   list[tuple[str, str, str]] = []  # (status, label, detail)
 
-    def row(ok, label, detail=""):
-        table.add_row(PASS if ok else FAIL, label, detail)
+    def ok(label: str, detail: str = "") -> None:
+        checks.append((PASS, label, detail))
 
-    def warn_row(label, detail=""):
-        table.add_row(WARN, label, detail)
+    def fail(label: str, detail: str = "", fix_hint: str = "") -> None:
+        checks.append((FAIL, label, detail))
+        msg = f"FAIL: {label}"
+        if detail:
+            msg += f" — {detail}"
+        if fix_hint:
+            msg += f". Fix: {fix_hint}"
+        issues.append(msg)
 
-    # DB
+    def warn(label: str, detail: str = "") -> None:
+        checks.append((WARN, label, detail))
+        warnings.append(f"WARN: {label} — {detail}")
+
+    def info(label: str, detail: str = "") -> None:
+        checks.append((INFO, label, detail))
+
+    def section(title: str) -> None:
+        checks.append(("", f"[lcars1]{title}[/lcars1]", ""))
+
+    # ── System ─────────────────────────────────────────────────────────────────
+    section("System")
+    py = sys.version.split()[0]
+    ok("Python", py) if tuple(int(x) for x in py.split(".")[:2]) >= (3, 11) else \
+        fail("Python ≥ 3.11 required", py)
+
+    uv_bin = shutil.which("uv")
+    ok("uv", uv_bin or "") if uv_bin else warn("uv not on PATH", "install: pip install uv")
+
+    ollama_bin = shutil.which("ollama") or str(Path("~/.local/bin/ollama").expanduser())
+    ok("ollama binary", ollama_bin) if Path(ollama_bin).exists() else \
+        fail("Ollama not installed", "~/.local/bin/ollama missing",
+             "org-llm install --skip-models --skip-fonts")
+
+    opencode_bin = shutil.which("opencode") or str(Path("~/.local/bin/opencode").expanduser())
+    if Path(opencode_bin).exists():
+        ok("opencode", opencode_bin)
+    else:
+        warn("opencode not installed", "run: org-llm install --skip-ollama --skip-models --skip-fonts")
+
+    # Disk space for DB and org_dir
+    try:
+        import shutil as _sh
+        db_dir = DB_PATH.parent
+        db_dir.mkdir(parents=True, exist_ok=True)
+        usage = _sh.disk_usage(db_dir)
+        free_gb = usage.free / 1_073_741_824
+        db_size = DB_PATH.stat().st_size / 1_048_576 if DB_PATH.exists() else 0
+        if free_gb < 1:
+            fail("Disk space", f"{free_gb:.1f} GB free — very low",
+                 "free up disk space")
+        elif free_gb < 5:
+            warn("Disk space", f"{free_gb:.1f} GB free; DB is {db_size:.0f} MB")
+        else:
+            ok("Disk space", f"{free_gb:.0f} GB free; DB is {db_size:.0f} MB")
+    except Exception as e:
+        warn("Disk space check failed", str(e))
+
+    # ── Database ───────────────────────────────────────────────────────────────
+    section("Database")
     engine = _engine()
+    db_ok = False
     try:
         init_db(engine)
-        row(True, "Database reachable", str(engine.url))
+        db_ok = True
+        ok("DB reachable", str(DB_PATH))
+        if fix:
+            hail("DB initialised (--fix)")
     except Exception as e:
-        row(False, "Database", str(e))
+        fail("DB not reachable", str(e), "org-llm init")
+        if fix:
+            hail("Attempting org-llm init …")
+            try:
+                init_db(make_engine(DB_PATH))
+                ok("DB init (auto-fixed)", str(DB_PATH))
+                db_ok = True
+            except Exception as e2:
+                fail("DB init failed", str(e2))
 
-    # sqlite-vec
-    try:
-        import sqlite_vec  # noqa: F401
-        row(True, "sqlite-vec loaded")
-    except Exception as e:
-        row(False, "sqlite-vec", str(e))
+    if db_ok:
+        # sqlite-vec
+        try:
+            import sqlite_vec  # noqa: F401
+            ok("sqlite-vec extension")
+        except Exception as e:
+            fail("sqlite-vec not loadable", str(e),
+                 "uv add sqlite-vec && uv run org-llm init")
 
-    # org_dir
-    with get_session(engine) as session:
-        org_dir = Path(_cfg(session, "org_dir") or "~/org").expanduser()
-        org_files = list(org_dir.rglob("*.org")) if org_dir.exists() else []
-        row(org_dir.exists(), "org_dir exists", str(org_dir))
-        if org_dir.exists():
-            row(bool(org_files), "org files found", f"{len(org_files)} .org files")
+        # PRAGMA integrity_check
+        try:
+            from sqlalchemy import text as _text
+            with get_session(engine) as _s:
+                result = _s.execute(_text("PRAGMA integrity_check")).scalar()
+            if result == "ok":
+                ok("DB integrity", "PRAGMA integrity_check = ok")
+            else:
+                fail("DB integrity", result or "unknown",
+                     "backup DB, then: org-llm init --force")
+        except Exception as e:
+            warn("DB integrity check failed", str(e))
 
-        # index counts
-        from .db import Node, File
-        with get_session(engine) as s2:
-            file_count  = s2.query(File).count()
-            node_count  = s2.query(Node).count()
-            embed_count = s2.query(Node).filter(Node.embedding.isnot(None)).count()
-        row(node_count > 0, "Index populated",
-            f"{file_count} files / {node_count} nodes")
+        # Index state
+        with get_session(engine) as session:
+            file_count  = session.query(File).count()
+            node_count  = session.query(Node).count()
+            embed_count = session.query(Node).filter(Node.embedding.isnot(None)).count()
+
+            # Last index time
+            last_file = session.query(File).order_by(File.indexed_at.desc()).first()
+            last_ts = last_file.indexed_at if last_file else None
+
+            # Stale files (in DB but not on disk)
+            all_paths = [f.path for f in session.query(File).all()]
+            stale = [p for p in all_paths if not Path(p).exists()]
+
+        if node_count > 0:
+            ok("Index populated", f"{file_count} files / {node_count} nodes")
+        else:
+            fail("Index empty", "no nodes found", "org-llm index")
+
+        if last_ts:
+            info("Last indexed", last_ts)
+
+        if stale:
+            warn("Stale DB records",
+                 f"{len(stale)} file(s) in DB no longer exist on disk — "
+                 "run: org-llm index --force")
+
         if node_count > 0:
             pct = int(embed_count / node_count * 100)
-            row(embed_count > 0, "Embeddings present",
-                f"{embed_count}/{node_count} ({pct}%)")
+            if pct == 100:
+                ok("Embeddings", f"{embed_count}/{node_count} (100%)")
+            elif pct >= 80:
+                warn("Embeddings partial", f"{embed_count}/{node_count} ({pct}%) — run: org-llm embed")
+            else:
+                fail("Embeddings low", f"{embed_count}/{node_count} ({pct}%)",
+                     "org-llm embed")
 
-        # Ollama
+    # ── Org Files ──────────────────────────────────────────────────────────────
+    section("Org Files")
+    with get_session(engine) as session:
+        org_dir = Path(_cfg(session, "org_dir") or "~/org").expanduser()
+    if org_dir.exists():
+        org_files = list(org_dir.rglob("*.org"))
+        ok("org_dir", str(org_dir))
+        if org_files:
+            ok("org files found", f"{len(org_files)} .org files")
+            if db_ok:
+                with get_session(engine) as session:
+                    db_paths = {f.path for f in session.query(File).all()}
+                unindexed = [p for p in org_files if str(p) not in db_paths]
+                if unindexed:
+                    warn("Unindexed files",
+                         f"{len(unindexed)} .org file(s) not yet in DB — run: org-llm index")
+                else:
+                    ok("All org files indexed")
+        else:
+            fail("No org files", f"no .org files in {org_dir}", f"add .org files to {org_dir}")
+    else:
+        fail("org_dir missing", str(org_dir),
+             f"mkdir -p {org_dir}  or  org-llm config org_dir /path/to/your/org")
+
+    # ── Ollama ─────────────────────────────────────────────────────────────────
+    section("Ollama")
+    with get_session(engine) as session:
         url = _ollama_url(session)
-        try:
-            from .llm import list_models
-            pulled = list_models(url)
-            row(True, "Ollama reachable", url)
-            model_keys = [
-                "embed_model", "chat_model", "code_model",
-                "reason_model", "fast_model", "instruct_model", "text_model",
-            ]
+    pulled_models: list[str] = []
+    ollama_live = False
+    try:
+        from .llm import list_models
+        pulled_models = list_models(url)
+        ollama_live = True
+        ok("Ollama API", url)
+    except Exception as e:
+        fail("Ollama not reachable", f"{url} — {e}",
+             "ollama serve &  (or: org-llm install --skip-models --skip-fonts)")
+        if fix and Path(ollama_bin).exists():
+            hail("Starting ollama serve (--fix) …")
+            subprocess.Popen(
+                [ollama_bin, "serve"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            time.sleep(2)
+            try:
+                pulled_models = list_models(url)
+                ollama_live = True
+                ok("Ollama API (auto-started)", url)
+            except Exception:
+                fail("Ollama still unreachable after start attempt", url)
+
+    if ollama_live:
+        info("Pulled models", ", ".join(pulled_models) or "none")
+        model_keys = [
+            "embed_model", "chat_model", "code_model",
+            "reason_model", "fast_model", "instruct_model", "text_model",
+        ]
+        with get_session(engine) as session:
+            missing_models = []
             for key in model_keys:
                 model = _cfg(session, key)
-                ok = any(model in m for m in pulled)
-                row(ok, f"  model: {key}", model)
-        except Exception as e:
-            row(False, "Ollama reachable", f"{url} — {e}")
-            warn_row("Models not checked", "Ollama must be running")
+                if any(model in m for m in pulled_models):
+                    ok(f"  {key}", model)
+                else:
+                    fail(f"  {key} not pulled", model,
+                         f"ollama pull {model}")
+                    missing_models.append(model)
 
-    # Nerd Font — check multiple locations
-    from .ui import NERD_FONTS
+        # Ping embed model to verify it actually responds
+        with get_session(engine) as session:
+            embed_mdl = _cfg(session, "embed_model") or "nomic-embed-text"
+        if any(embed_mdl in m for m in pulled_models):
+            try:
+                from .llm import embed as _embed
+                _embed("ping", model=embed_mdl, base_url=url)
+                ok("  embed model ping", f"{embed_mdl} responded")
+            except Exception as e:
+                fail("  embed model unresponsive", str(e)[:80],
+                     f"ollama pull {embed_mdl}")
+
+    # ── Fonts / UI ─────────────────────────────────────────────────────────────
+    section("Fonts & UI")
     font_dirs = [
         Path("~/.local/share/fonts/NerdFonts").expanduser(),
         Path("/usr/share/fonts"),
@@ -534,20 +707,103 @@ def doctor():
         if fd.exists():
             nf_files += list(fd.rglob("*Nerd*")) + list(fd.rglob("*NFM*"))
     if nf_files:
-        row(True,  "Nerd Font installed", f"{len(nf_files)} file(s) found")
+        ok("Nerd Font files", f"{len(nf_files)} found")
     else:
-        row(False, "Nerd Font installed", "run: org-llm install --skip-ollama --skip-models")
-    if not NERD_FONTS:
-        warn_row("Nerd Font detection", "icons may show as □ — set ORG_LLM_NERD_FONTS=1 to override")
+        fail("Nerd Font not installed",
+             "icons will show as □",
+             "org-llm install --skip-ollama --skip-models")
+    if NERD_FONTS:
+        ok("Nerd Font detection", "icons enabled")
+    else:
+        warn("Nerd Font detection off",
+             "icons disabled — set ORG_LLM_NERD_FONTS=1 to force-enable")
+
+    # ── Render table ──────────────────────────────────────────────────────────
+    table = Table(box=None, pad_edge=False, show_header=False)
+    table.add_column("St", width=3)
+    table.add_column("Check", style="lcars2")
+    table.add_column("Detail", style="dim")
+    for status, label, detail in checks:
+        table.add_row(status, label, detail)
 
     console.print()
     console.print(trans_stripe(52))
     console.print(PRIDE_BANNER)
-    from rich.panel import Panel
     console.print(Panel(table, title="[lcars1]org-llm doctor[/lcars1]",
                         border_style="lcars1"))
+
+    fail_count = len(issues)
+    warn_count = len(warnings)
+    summary = (
+        f"[bold green]{fail_count == 0 and 'All checks passed' or ''}[/bold green]"
+        f"[bold red]{fail_count} failure(s)[/bold red]  " if fail_count else ""
+    ) + (f"[bold yellow]{warn_count} warning(s)[/bold yellow]" if warn_count else "")
+    if summary:
+        console.print(f"  {summary.strip()}")
+
     console.print(trans_stripe(52))
     console.print()
+
+    # ── LLM Diagnosis ─────────────────────────────────────────────────────────
+    if (issues or diagnose) and ollama_live:
+        with get_session(engine) as session:
+            url = _ollama_url(session)
+        # Use whichever model is actually pulled, prefer chat > fast > any
+        with get_session(engine) as session:
+            preferred = [
+                _cfg(session, "chat_model"),
+                _cfg(session, "fast_model"),
+                _cfg(session, "text_model"),
+            ]
+        diag_model = next(
+            (m for m in preferred if any(m in p for p in pulled_models)),
+            pulled_models[0] if pulled_models else None,
+        )
+        if not diag_model:
+            red_alert("No chat models pulled — cannot run LLM diagnosis.")
+            on_screen("Pull a model first:  [bold]ollama pull llama3.2[/bold]  (small, fast)")
+            return
+
+        state_summary = "\n".join(
+            [f"- {i}" for i in issues] +
+            [f"- {w}" for w in warnings]
+        ) or "All checks passed — user requested diagnosis anyway."
+
+        system = (
+            "You are an expert assistant for org-llm, a Python CLI tool that indexes org-roam "
+            "notes and provides LLM-powered search and Q&A using Ollama. "
+            "You are given a health-check report. Respond with:\n"
+            "1. A brief plain-English explanation of each failure/warning\n"
+            "2. Ordered fix steps with exact commands\n"
+            "3. Any follow-up checks the user should run after fixing\n"
+            "Be concise, specific, and helpful. Use plain text (no markdown)."
+        )
+        prompt = (
+            f"org-llm health check results:\n\n{state_summary}\n\n"
+            f"System: Python {sys.version.split()[0]}, Ollama at {url}\n"
+            f"DB: {DB_PATH}\n"
+            f"Org dir: {org_dir}\n"
+        )
+
+        from .llm import chat
+        try:
+            with warp(f"[lcars2]{diag_model}[/lcars2] diagnosing …"):
+                diagnosis = chat(prompt, model=diag_model, base_url=url, system=system)
+            console.print(Panel(
+                diagnosis,
+                title=f"[lcars1]LLM Diagnosis ({diag_model})[/lcars1]",
+                border_style="lcars2",
+                padding=(1, 2),
+            ))
+        except Exception as e:
+            red_alert(f"LLM diagnosis failed ({diag_model}): {e}")
+            on_screen("Pull a chat-capable model:  [bold]ollama pull llama3.2[/bold]")
+        console.print()
+    elif issues and not ollama_live:
+        red_alert(
+            f"{len(issues)} issue(s) found but Ollama is not running — "
+            "start it with 'ollama serve' then run 'org-llm doctor --diagnose'"
+        )
 
 
 _TUTOR_STEPS = [
