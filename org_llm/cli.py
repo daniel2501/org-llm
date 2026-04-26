@@ -12,7 +12,7 @@ from typer.core import TyperGroup
 
 from .db import DB_PATH, MODEL_DEFAULTS, get_session, init_db, make_engine
 from .indexer import index_directory
-from .ui import TREK_MSGS, console, hail, impulse, make_it_so, on_screen, red_alert, warp
+from .ui import TREK_MSGS, console, hail, impulse, make_it_so, on_screen, red_alert, thinking, warp
 
 
 # ── Shortest-unique-prefix command resolution ────────────────────────────────
@@ -838,6 +838,7 @@ def _llm_one_liner(prompt: str, *, system: str = "",
     )
     try:
         from .llm import chat as _chat
+        from .ui  import thinking as _thinking
         import threading
         result: dict = {"text": ""}
         def _run():
@@ -846,8 +847,9 @@ def _llm_one_liner(prompt: str, *, system: str = "",
                                        system=system or sys_default) or ""
             except Exception:
                 pass
-        t = threading.Thread(target=_run, daemon=True)
-        t.start(); t.join(timeout=timeout)
+        with _thinking("Composing", model=mdl):
+            t = threading.Thread(target=_run, daemon=True)
+            t.start(); t.join(timeout=timeout)
         if t.is_alive():
             return fallback
     except Exception:
@@ -1802,7 +1804,7 @@ def ask(
         with get_session(engine) as session:
             local_fallback = (_cfg(session, "chat_model")
                               or MODEL_DEFAULTS["chat_model"])
-        with warp(f"Hailing cloud {chat_mdl}"):
+        with thinking("Asking cloud", model=chat_mdl):
             try:
                 answer = _cloud_chat_with_local_fallback(
                     prompt, cloud_model=chat_mdl,
@@ -1814,7 +1816,7 @@ def ask(
                 raise typer.Exit(1)
         label = f"{cloud_provider}:{chat_mdl}"
     else:
-        with warp(f"Hailing {chat_mdl}"):
+        with thinking("Asking", model=chat_mdl):
             answer = _local_chat_or_friendly_error(
                 prompt, model=chat_mdl, base_url=url, system=system,
                 cloud_hint=f"org-llm ask --cloud {query!r}",
@@ -2980,7 +2982,7 @@ def _doctor_walkthrough(report_to: str = "") -> None:
     )
     from .cloud import cloud_chat
     try:
-        with warp(f"Asking {cloud_model} for assessment"):
+        with thinking("Walkthrough assessment", model=cloud_model):
             assessment = cloud_chat(payload, model=cloud_model,
                                     endpoint_url=cloud_endpoint,
                                     api_key=api_key, system=sys_prompt)
@@ -3922,7 +3924,7 @@ def doctor(
 
         from .llm import chat
         try:
-            with warp(f"[lcars2]{diag_model}[/lcars2] diagnosing …"):
+            with thinking("Diagnosing", model=diag_model):
                 diagnosis = chat(prompt, model=diag_model, base_url=url, system=system)
             console.print(Panel(
                 diagnosis,
@@ -5108,7 +5110,7 @@ def capture(
             "where appropriate. Do not include the title. Output only the org-mode markup."
         )
         from .llm import chat
-        with warp(f"Polishing with {model}"):
+        with thinking("Polishing", model=model):
             content = chat(body, model=model, base_url=url, system=system)
 
     node_id  = str(uuid.uuid4())
@@ -5336,7 +5338,7 @@ def code(
             local_fallback = (_cfg(session, "code_model")
                               or _cfg(session, "chat_model")
                               or MODEL_DEFAULTS["chat_model"])
-        with warp(f"Hailing cloud {code_mdl}"):
+        with thinking("Generating code", model=code_mdl):
             try:
                 generated = _cloud_chat_with_local_fallback(
                     prompt, cloud_model=code_mdl,
@@ -5560,7 +5562,7 @@ def review_emacs(
             chat_mdl = model or cloud_model or chat_mdl
         from .cloud import cloud_chat
         try:
-            with warp(f"Hailing cloud {chat_mdl}"):
+            with thinking("Reviewing", model=chat_mdl):
                 review = cloud_chat(prompt, model=chat_mdl,
                                     endpoint_url=cloud_endpoint,
                                     api_key=api_key, system=system)

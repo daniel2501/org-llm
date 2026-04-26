@@ -278,7 +278,12 @@ Propose up to {max_themes} evocative themes. JSON only."""
         return "\n".join(lines).strip()
 
     # Run with a hard timeout so a slow / hung model can't block the user.
+    # Wrap in the themed `thinking` spinner so the wait isn't silent.
     import threading
+    try:
+        from .ui import thinking
+    except Exception:
+        thinking = None
     result: dict = {"resp": ""}
     def _run():
         try:
@@ -286,8 +291,13 @@ Propose up to {max_themes} evocative themes. JSON only."""
                                    system=_THEME_SYNTHESIS_SYSTEM) or ""
         except Exception:
             pass
-    t = threading.Thread(target=_run, daemon=True)
-    t.start(); t.join(timeout=90.0)
+    if thinking is not None:
+        with thinking("Synthesising themes", model=model):
+            t = threading.Thread(target=_run, daemon=True)
+            t.start(); t.join(timeout=90.0)
+    else:
+        t = threading.Thread(target=_run, daemon=True)
+        t.start(); t.join(timeout=90.0)
     if t.is_alive():
         return []
     cleaned = _strip_fences(result["resp"])
@@ -437,10 +447,16 @@ def _llm_messages(proposal: ThemeProposal, *, model: str,
         + f"\nGenerate exactly {n} messages."
     )
     try:
-        resp = chat(prompt, model=model, base_url=base_url,
-                     system=_MESSAGE_SYSTEM)
+        from .ui import thinking
+        with thinking(f"Writing {proposal.name}", model=model):
+            resp = chat(prompt, model=model, base_url=base_url,
+                         system=_MESSAGE_SYSTEM)
     except Exception:
-        return None
+        try:
+            resp = chat(prompt, model=model, base_url=base_url,
+                         system=_MESSAGE_SYSTEM)
+        except Exception:
+            return None
     if not resp:
         return None
     lines = []

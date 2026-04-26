@@ -576,6 +576,51 @@ Inspect with `org-llm knob list`; tune levels with
 
 ---
 
+## Themed spinners — your knobs animate the wait
+
+Every LLM call shows a spinner via the new `thinking()` context manager.
+The spinner's animation and colour are picked per-call from the user's
+**currently-active theme knobs and dials**, so LLM waits visually
+reflect the same vibe as the completion-message pool.
+
+How it picks:
+
+1. Reads built-in dials (`trek` / `commie` / `queer`) — env-var or DB
+   level > 0 adds that dial to the candidate pool, weighted by level.
+2. Reads user-defined knobs from the `user_theme_knobs` config row.
+   Each active knob name is fuzzy-matched (longest-substring wins)
+   against a 50-entry spinner catalogue (`SPINNER_CATALOG` in
+   `org_llm.ui`) — `synthwave` → `dots12` in violet, `homelab` →
+   `bouncingBar` in blue, `laboratory` → `dots3` in green, etc.
+3. If multiple knobs are active, picks one randomly per call —
+   different LLM waits in the same session show different spinners.
+4. **Default fallback (no active knobs)** is a Doom-Emacs-aligned
+   smooth purple `dots11`.
+
+```sh
+# Silence everything → Doom-default purple dots
+ORG_LLM_TREK_LEVEL=0 ORG_LLM_COMMIE_LEVEL=0 ORG_LLM_QUEER_LEVEL=0 \
+  org-llm ask 'x'
+
+# Cyberpunk vibes → aesthetic + violet
+ORG_LLM_QUEER_LEVEL=3 org-llm ask 'x'
+
+# After `personalize --apply` registered a synthwave knob:
+ORG_LLM_SYNTHWAVE_LEVEL=3 org-llm ask 'x'   # neon dots12 violet
+```
+
+The same `thinking()` context manager wraps every user-facing LLM call
+in the app: chat answers, code generation, capture polishing, doctor
+diagnosis, theme synthesis, message generation, intent repair. So you
+see a themed spinner everywhere there's a wait.
+
+`warp()` (the original LCARS arc-spinner) is still used for non-LLM
+blocking I/O — indexing, embedding, file walks. The visual difference
+lets you tell at a glance whether the wait is local work or a model
+generating tokens.
+
+---
+
 ## LLM copywriting throughout
 
 Most user-facing prompts that used to be string templates now go

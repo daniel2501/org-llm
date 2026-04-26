@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import subprocess
 from contextlib import contextmanager
+from pathlib    import Path
 
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
@@ -352,6 +353,213 @@ def warp(msg: str = "Processing", transient: bool = True):
         console=console,
     ) as progress:
         progress.add_task(msg, total=None)
+        yield progress
+
+
+# ── Themed spinner catalogue ──────────────────────────────────────────────
+# Each entry: (rich-spinner-name, style key into PALETTE) keyed by a theme
+# substring. The "thinking" context manager picks a spinner based on the
+# user's currently-active theme knobs/dials so LLM waits reflect their
+# personal vibe instead of a single global default.
+#
+# Default is tuned to Doom Emacs: purple/violet palette with a smooth dots
+# animation, which sits comfortably in any Doom-themed terminal.
+
+SPINNER_CATALOG: dict[str, tuple[str, str]] = {
+    # Built-in dials
+    "trek":      ("arc",            "lcars1"),
+    "commie":    ("dots12",         "pride.red"),
+    "queer":     ("aesthetic",      "pride.violet"),
+
+    # Theme-name keywords (substring-matched against active knob names)
+    "synth":     ("dots12",         "pride.violet"),
+    "wave":      ("bouncingBar",    "lcars3"),
+    "neon":      ("aesthetic",      "pride.violet"),
+    "homelab":   ("bouncingBar",    "lcars3"),
+    "lab":       ("dots3",          "pride.green"),
+    "schema":    ("dots4",          "lcars3"),
+    "work":      ("growHorizontal", "lcars1"),
+    "bench":     ("dots5",          "lcars1"),
+    "shop":      ("growHorizontal", "lcars1"),
+    "brain":     ("dots11",         "lcars2"),
+    "garden":    ("growVertical",   "pride.green"),
+    "solar":     ("growVertical",   "pride.yellow"),
+    "espresso":  ("dots2",          "lcars1"),
+    "coffee":    ("dots",           "lcars1"),
+    "tea":       ("dots6",          "pride.green"),
+    "punk":      ("aesthetic",      "pride.red"),
+    "core":      ("dots12",         "lcars3"),
+    "academic":  ("dots5",          "lcars3"),
+    "academia":  ("dots5",          "lcars3"),
+    "art":       ("aesthetic",      "pride.violet"),
+    "music":     ("aesthetic",      "pride.violet"),
+    "code":      ("dots3",          "lcars3"),
+    "dev":       ("dots4",          "lcars3"),
+    "data":      ("dots7",          "lcars3"),
+    "ml":        ("dots8",          "pride.violet"),
+    "ai":        ("dots11",         "pride.violet"),
+    "writing":   ("dots5",          "lcars2"),
+    "research":  ("dots6",          "lcars3"),
+    "system":    ("dots7",          "lcars1"),
+    "ops":       ("bouncingBar",    "lcars3"),
+    "off-grid":  ("growVertical",   "pride.green"),
+    "cottage":   ("growVertical",   "pride.green"),
+    "witch":     ("aesthetic",      "pride.violet"),
+    "occult":    ("aesthetic",      "pride.violet"),
+    "pirate":    ("dots9",          "pride.red"),
+    "radio":     ("bouncingBar",    "lcars3"),
+    "moon":      ("moon",           "lcars2"),
+    "earth":     ("earth",          "pride.green"),
+    "weather":   ("weather",        "lcars3"),
+    "clock":     ("clock",          "lcars1"),
+    "circuit":   ("dots11",         "pride.green"),
+    "federation": ("arc",           "lcars3"),
+    "warp":      ("arc",            "lcars1"),
+    "hifi":      ("dots12",         "lcars2"),
+    "jazz":      ("dots10",         "lcars2"),
+    "zine":      ("dots3",          "pride.violet"),
+    "guild":     ("dots5",          "lcars1"),
+    "rpg":       ("dots4",          "pride.violet"),
+}
+
+# Doom Emacs feels at home with purple+blue accents; this is the default.
+_SPINNER_DEFAULT: tuple[str, str] = ("dots11", "lcars2")
+
+
+def _resolve_spinner_for_theme(theme: str) -> tuple[str, str] | None:
+    """Find the catalogue entry whose key best matches `theme` (substring)."""
+    if not theme:
+        return None
+    t = theme.lower()
+    # Exact match first
+    if t in SPINNER_CATALOG:
+        return SPINNER_CATALOG[t]
+    # Substring match — pick the longest matching key
+    best: tuple[str, str] | None = None
+    best_len = 0
+    for key, val in SPINNER_CATALOG.items():
+        if key in t and len(key) > best_len:
+            best = val
+            best_len = len(key)
+    return best
+
+
+def _pick_thinking_spinner() -> tuple[str, str]:
+    """Choose a (spinner_name, style) tuple based on active theme knobs.
+
+    Reads ORG_LLM_<NAME>_LEVEL env vars + config DB rows + user_theme_knobs
+    and picks deterministically-but-varied across calls. Falls back to the
+    Doom-aligned default when nothing is active.
+    """
+    import os
+    import random
+    candidates: list[tuple[str, str]] = []
+
+    # Built-in dials
+    for name in ("trek", "commie", "queer"):
+        try:
+            level = int(os.environ.get(f"ORG_LLM_{name.upper()}_LEVEL", "") or 0)
+        except ValueError:
+            level = 0
+        if level <= 0:
+            # Try config DB
+            try:
+                lvl = _theme_level_from_config(f"{name}_level")
+                if lvl and lvl > 0:
+                    level = lvl
+            except Exception:
+                pass
+        if level > 0 and name in SPINNER_CATALOG:
+            for _ in range(level):
+                candidates.append(SPINNER_CATALOG[name])
+
+    # User-defined knobs from config DB
+    try:
+        from .db import Config, get_session, make_engine, DB_PATH
+        import json as _json
+        path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if path.exists():
+            engine = make_engine(path)
+            with get_session(engine) as s:
+                row = s.get(Config, "user_theme_knobs")
+                if row and row.value:
+                    knobs = _json.loads(row.value)
+                    for k in (knobs if isinstance(knobs, list) else []):
+                        kname = (k.get("name") or "").lower()
+                        if not kname:
+                            continue
+                        # Active level
+                        env_level = os.environ.get(
+                            f"ORG_LLM_{kname.upper().replace('-', '_')}_LEVEL", "")
+                        try:
+                            level = int(env_level) if env_level else \
+                                    int(k.get("default_level") or 0)
+                        except ValueError:
+                            level = 0
+                        if level <= 0:
+                            continue
+                        match = _resolve_spinner_for_theme(kname)
+                        if match:
+                            for _ in range(level):
+                                candidates.append(match)
+    except Exception:
+        pass
+
+    if not candidates:
+        return _SPINNER_DEFAULT
+    return random.choice(candidates)
+
+
+# Late import to break a circular dep (cli.py imports from ui)
+def _theme_level_from_config(key: str) -> int | None:
+    try:
+        from .db import Config, get_session, make_engine, DB_PATH
+        path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if not path.exists():
+            return None
+        engine = make_engine(path)
+        with get_session(engine) as s:
+            row = s.get(Config, key)
+            if row and row.value:
+                try:
+                    return int(row.value)
+                except ValueError:
+                    return None
+    except Exception:
+        return None
+    return None
+
+
+@contextmanager
+def thinking(msg: str = "Thinking", model: str = "",
+             transient: bool = True,
+             spinner: tuple[str, str] | None = None):
+    """Spinner for LLM calls — themed by the user's active knobs/dials.
+
+    Distinct from `warp` (which is for general I/O work) so the user can
+    see at a glance whether the wait is the model thinking. The spinner
+    animation + colour are picked per-call based on which theme dials
+    (trek/commie/queer) and user knobs (synthwave/homelab/laboratory…)
+    are currently active. If you have `synthwave` at level 3, expect to
+    see neon-violet ditherings; if `homelab` is dominant, a green
+    bouncingBar; etc. Default (no knobs) is a Doom-Emacs-aligned smooth
+    purple `dots11`.
+
+    Pass an explicit `spinner=(name, style)` to override.
+
+    Example:
+        with thinking("Synthesising themes", model="llama3.2:1b"):
+            resp = chat(...)
+    """
+    name, style = spinner or _pick_thinking_spinner()
+    label = f"{msg} [{model}]" if model else msg
+    with Progress(
+        SpinnerColumn(spinner_name=name, style=style),
+        TextColumn("[lcars3]{task.description}[/lcars3]"),
+        transient=transient,
+        console=console,
+    ) as progress:
+        progress.add_task(label, total=None)
         yield progress
 
 

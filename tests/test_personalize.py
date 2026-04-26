@@ -160,6 +160,55 @@ class TestProposalsToKnobs:
                 assert isinstance(entry, list) and len(entry) == 2
 
 
+class TestThemedSpinners:
+    """Spinner picker reads active theme knobs/dials and chooses
+    matching animation + colour. Default (no knobs) is Doom-aligned."""
+
+    def test_default_when_no_active_knobs(self, tmp_path, monkeypatch):
+        # Empty DB → no knobs configured → default fallback.
+        monkeypatch.setenv("ORG_LLM_DB", str(tmp_path / "empty.db"))
+        for k in ("TREK", "COMMIE", "QUEER"):
+            monkeypatch.delenv(f"ORG_LLM_{k}_LEVEL", raising=False)
+        from org_llm.ui import _pick_thinking_spinner, _SPINNER_DEFAULT
+        assert _pick_thinking_spinner() == _SPINNER_DEFAULT
+
+    def test_synthwave_resolves(self):
+        from org_llm.ui import _resolve_spinner_for_theme
+        match = _resolve_spinner_for_theme("synthwave")
+        assert match is not None
+        # synthwave should map to a violet-styled spinner
+        _, style = match
+        assert "violet" in style or "lcars" in style
+
+    def test_homelab_resolves(self):
+        from org_llm.ui import _resolve_spinner_for_theme
+        assert _resolve_spinner_for_theme("homelab") is not None
+
+    def test_unknown_theme_falls_through(self):
+        from org_llm.ui import _resolve_spinner_for_theme
+        # Random gibberish shouldn't resolve to anything specific
+        assert _resolve_spinner_for_theme("xyzzyplugh") is None
+
+    def test_substring_match_picks_longest(self):
+        from org_llm.ui import _resolve_spinner_for_theme
+        # "homelab-pro" should match "homelab" (8 chars) over "lab" (3 chars)
+        match = _resolve_spinner_for_theme("homelab-pro")
+        assert match is not None
+        # The longest catalogued substring is "homelab" → bouncingBar/lcars3
+        from org_llm.ui import SPINNER_CATALOG
+        assert match == SPINNER_CATALOG["homelab"]
+
+    def test_active_dial_via_env(self, tmp_path, monkeypatch):
+        # Environment-set dial level should weight selection
+        monkeypatch.setenv("ORG_LLM_DB", str(tmp_path / "empty.db"))
+        monkeypatch.setenv("ORG_LLM_QUEER_LEVEL", "3")
+        from org_llm.ui import _pick_thinking_spinner, SPINNER_CATALOG
+        # With queer_level=3, the queer entry is in the candidates list
+        # 3 times — highly likely to be picked
+        picks = {_pick_thinking_spinner() for _ in range(20)}
+        assert SPINNER_CATALOG["queer"] in picks
+
+
 class TestIdentifierFilter:
     """Spot-check `_looks_like_identifier`."""
     def test_rejects_long_underscored(self):
