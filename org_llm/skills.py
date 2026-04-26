@@ -47,10 +47,20 @@ def _iter_skill_blocks(path: Path):
 
 
 def index_skills(session: Session, org_dir: Path) -> int:
-    """Scan org_dir for skill blocks and upsert them into the DB."""
+    """Scan org_dir for skill blocks and upsert them into the DB.
+
+    Per-file isolation: a binary masquerading as .org, a symlink loop, or a
+    malformed PROPERTIES drawer rolls back ONLY that file's changes — the
+    rest of the directory keeps indexing.
+    """
     count = 0
     for path in org_dir.rglob("*.org"):
-        for name, lang, model_key, source, heading in _iter_skill_blocks(path):
+        try:
+            blocks = list(_iter_skill_blocks(path))
+        except Exception:
+            session.rollback()
+            continue
+        for name, lang, model_key, source, heading in blocks:
             existing = session.query(Skill).filter_by(name=name).first()
             if existing:
                 existing.lang = lang

@@ -96,10 +96,19 @@ def create_mcp_server():
         import uuid
         from datetime import datetime
         with get_session(engine) as session:
-            org_dir = Path(_cfg(session, "org_dir") or "~/org").expanduser()
+            org_dir = Path(os.environ.get("ORG_LLM_ORG_DIR")
+                           or _cfg(session, "org_dir") or "~/org").expanduser()
         node_id  = str(uuid.uuid4())
         ts       = datetime.now().strftime("%Y%m%d%H%M%S")
-        org_file = org_dir / file
+        # Path-traversal guard: refuse writes outside org_dir
+        org_dir_r = org_dir.resolve()
+        target = (org_dir / file).expanduser()
+        normalized = Path(os.path.normpath(str(target)))
+        try:
+            normalized.relative_to(org_dir_r)
+        except ValueError:
+            return f"Refused: '{file}' resolves outside org_dir ({org_dir_r})."
+        org_file = normalized
         org_file.parent.mkdir(parents=True, exist_ok=True)
         entry = (
             f"\n* {title}\n"

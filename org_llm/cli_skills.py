@@ -23,6 +23,18 @@ def _cfg(session, key):
     return r.value if r else ""
 
 
+def _org_dir(session):
+    """Mirror cli._org_dir — env var first, then config, then default.
+
+    Defined here too so cli_skills doesn't depend on cli (avoids circular
+    import at module load time).
+    """
+    import os
+    from pathlib import Path
+    return Path(os.environ.get("ORG_LLM_ORG_DIR")
+                or _cfg(session, "org_dir") or "~/org").expanduser()
+
+
 def register(app: typer.Typer) -> None:
     """Attach skill sub-commands to a Typer app."""
 
@@ -53,15 +65,61 @@ def register(app: typer.Typer) -> None:
         input: Annotated[str, typer.Argument(help="Input text")] = "",
         node:  Annotated[str, typer.Option("--node", "-n",
                help="Use body of this node title as input")] = "",
+        yes:   Annotated[bool, typer.Option("--yes", "-y",
+               help="Skip the trust-on-first-use confirmation")] = False,
     ):
-        """Run a skill by name, optionally pulling input from an indexed node."""
+        """Run a skill by name, optionally pulling input from an indexed node.
+
+        Skills execute arbitrary Python or shell as the current user. The first
+        time a given skill source is run, you'll be asked to confirm — the SHA
+        of the source is then stored in `trusted_skills` and re-runs are quiet
+        until the source changes (any edit invalidates trust). Pass --yes to
+        skip the prompt for scripted use.
+        """
+        import hashlib
         from .skills import Skill, run_skill
+        from .db import Config as Cfg
         engine = _engine()
         with get_session(engine) as session:
             sk = session.query(Skill).filter_by(name=name).first()
             if not sk:
                 red_alert(f"Skill {name!r} not found. Run `org-llm skills` to list.")
                 raise typer.Exit(1)
+
+            # Trust-on-first-use: hash the source, compare to stored allow-list
+            sig = hashlib.sha256(sk.source.encode()).hexdigest()[:16]
+            trusted_row = session.get(Cfg, "trusted_skills")
+            trusted = set((trusted_row.value if trusted_row else "").split(",")) - {""}
+            entry = f"{name}:{sig}"
+            if entry not in trusted and not yes:
+                console.print()
+                from rich.panel import Panel as _P
+                from rich.syntax import Syntax as _S
+                console.print(_P(
+                    f"[bold yellow]⚠  Trust check[/bold yellow]\n\n"
+                    f"This is the first time skill [bold]{name}[/bold] (lang: {sk.lang}, "
+                    f"model_key: {sk.model_key}) has been run with this source.\n\n"
+                    f"Skills execute arbitrary code as [bold]{__import__('os').environ.get('USER','you')}[/bold]. "
+                    f"Inspect the source below before approving — anything that ships in a shared org file "
+                    f"could be hostile.\n\n"
+                    f"  source file: {sk.file_path}\n"
+                    f"  heading:     {sk.heading}\n"
+                    f"  sha-256:     {sig}",
+                    border_style="yellow", padding=(1, 2),
+                ))
+                console.print(_S(sk.source, sk.lang if sk.lang in ("python","sh","bash","shell") else "text",
+                                 theme="monokai", line_numbers=True))
+                if not typer.confirm("Trust this skill source and run it?", default=False):
+                    on_screen("Aborted. Edit the skill or pass --yes to bypass next time.")
+                    raise typer.Exit(1)
+                # Record trust
+                new_trusted = ",".join(sorted(trusted | {entry}))
+                if trusted_row:
+                    trusted_row.value = new_trusted
+                else:
+                    session.add(Cfg(key="trusted_skills", value=new_trusted))
+                session.commit()
+                hail(f"Trust recorded for {name}@{sig}")
 
             cfg_dict = {
                 r.key: r.value
@@ -89,7 +147,7 @@ def register(app: typer.Typer) -> None:
         from .skills import index_skills
         engine = _engine()
         with get_session(engine) as session:
-            org_dir = Path(_cfg(session, "org_dir") or "~/org").expanduser()
+            org_dir = _org_dir(session)
             with warp(TREK_MSGS["index"] + " for skills"):
                 count = index_skills(session, org_dir)
         hail(f"Registered {count} skills.")
@@ -111,7 +169,7 @@ def register(app: typer.Typer) -> None:
 
         engine = _engine()
         with get_session(engine) as session:
-            org_dir = Path(_cfg(session, "org_dir") or "~/org").expanduser()
+            org_dir = _org_dir(session)
 
         heading = name.replace("_", " ").title()
         if lang == "python":

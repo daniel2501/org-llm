@@ -142,7 +142,7 @@ class TestDbCommand:
     def test_query_rejects_non_select(self, cli_db):
         r = runner.invoke(app, ["db", "-q", "DROP TABLE config"])
         assert r.exit_code == 1
-        assert "Only SELECT" in r.output
+        assert "read-only" in r.output.lower() or "Only SELECT" in r.output
 
 
 # ── models subcommand ────────────────────────────────────────────────────────

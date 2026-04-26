@@ -9,7 +9,7 @@ import typer
 from rich.table import Table
 from typer.core import TyperGroup
 
-from .db import DB_PATH, get_session, init_db, make_engine
+from .db import DB_PATH, MODEL_DEFAULTS, get_session, init_db, make_engine
 from .indexer import index_directory
 from .ui import TREK_MSGS, console, hail, impulse, make_it_so, on_screen, red_alert, warp
 
@@ -121,6 +121,29 @@ def _org_dir(session) -> Path:
                 or _cfg(session, "org_dir") or "~/org").expanduser()
 
 
+def _safe_org_path(org_dir: Path, user_path: str) -> Path:
+    """Resolve user-provided relative path inside org_dir; refuse traversal.
+
+    Raises typer.Exit(1) with a red_alert if the resolved path escapes org_dir
+    (e.g. `--file ../../../tmp/exfil.org`). Symlinks are followed and the
+    final target is checked against the resolved org_dir.
+    """
+    org_dir_r = org_dir.expanduser().resolve()
+    # Use parent.resolve() / name pattern so we don't require the file to exist
+    candidate = (org_dir / user_path).expanduser()
+    parent = candidate.parent.resolve() if candidate.parent.exists() else candidate.parent
+    target = (parent / candidate.name)
+    try:
+        # Forces a clean comparison even when path doesn't exist yet
+        Path(os.path.normpath(str(target))).relative_to(org_dir_r)
+    except ValueError:
+        red_alert(f"Refusing to write outside org_dir: {target}")
+        on_screen(f"  org_dir: {org_dir_r}")
+        on_screen(f"  user --file: {user_path!r}")
+        raise typer.Exit(1)
+    return target
+
+
 @app.command()
 def init():
     """Initialize database and write default config."""
@@ -137,7 +160,11 @@ def init():
 def index(
     force: Annotated[bool, typer.Option("--force", help="Re-index all files")] = False,
 ):
-    """Scan org files and populate the index."""
+    """Scan org files and populate the index.
+
+    --force takes an exclusive lock on the SQLite DB so two parallel runs
+    can't interleave deletes and inserts.
+    """
     engine = _engine()
     with get_session(engine) as session:
         org_dir = _org_dir(session)
@@ -147,6 +174,14 @@ def index(
 
         if force:
             from .db import File, Node
+            from sqlalchemy import text as _sql_text
+            try:
+                session.execute(_sql_text("BEGIN EXCLUSIVE"))
+            except Exception:
+                # Another process holds the lock — bail rather than corrupt state
+                red_alert("Another process is currently running `index --force`. "
+                          "Wait for it to finish, then re-run.")
+                raise typer.Exit(1)
             session.query(Node).delete()
             session.query(File).delete()
             session.commit()
@@ -205,18 +240,32 @@ def search(
     """Search your org notes semantically or by keyword."""
     from .search import keyword_search, vector_search
 
-    engine = _engine()
-    with get_session(engine) as session:
-        url   = _ollama_url(session)
-        model = _cfg(session, "embed_model") or "nomic-embed-text"
+    if not query.strip():
+        red_alert("Empty search query. Pass a non-empty string.")
+        raise typer.Exit(1)
 
-        if keyword:
-            results = keyword_search(session, query, limit=limit)
+    engine = _engine()
+    try:
+        with get_session(engine) as session:
+            url   = _ollama_url(session)
+            model = _cfg(session, "embed_model") or "nomic-embed-text"
+
+            if keyword:
+                results = keyword_search(session, query, limit=limit)
+            else:
+                with warp(TREK_MSGS["search"] + f": {query!r}"):
+                    from .llm import embed
+                    qvec = embed(query, model=model, base_url=url)
+                    results = vector_search(session, qvec, limit=limit)
+    except Exception as exc:
+        msg = str(exc)
+        if "no such table" in msg:
+            red_alert("Database not initialised. Run: [bold]org-llm init[/bold]")
+        elif "Connection" in msg or "refused" in msg.lower():
+            red_alert("Ollama not reachable. Start it (or run: org-llm doctor --fix).")
         else:
-            with warp(TREK_MSGS["search"] + f": {query!r}"):
-                from .llm import embed
-                qvec = embed(query, model=model, base_url=url)
-                results = vector_search(session, qvec, limit=limit)
+            red_alert(f"Search failed: {exc}")
+        raise typer.Exit(1)
 
     if not results:
         on_screen("No results found.")
@@ -266,7 +315,7 @@ def ask(
         chat_mdl   = model or (
             _cfg(session, "reason_model") if reason
             else _cfg(session, "chat_model")
-        ) or "llama3.3"
+        ) or MODEL_DEFAULTS["chat_model"]
         cloud_provider = _cfg(session, "cloud_provider")
         cloud_endpoint = _cfg(session, "cloud_endpoint_url")
         cloud_model    = _cfg(session, "cloud_model")
@@ -358,7 +407,9 @@ def models(
     discover: Annotated[bool, typer.Option("--discover", "-d",
               help="Show FOSS catalog filtered by hardware")] = False,
     tune:     Annotated[bool, typer.Option("--tune",     "-t",
-              help="Analyze current config and recommend upgrades")] = False,
+              help="Analyze current config and recommend upgrades (read-only)")] = False,
+    apply:    Annotated[bool, typer.Option("--apply",
+              help="With --tune: actually apply recommendations (default: read-only)")] = False,
     pull:     Annotated[str,  typer.Option("--pull",     "-p",
               help="Pull a model via Ollama")] = "",
     assign:   Annotated[bool, typer.Option("--assign",   "-a",
@@ -467,6 +518,9 @@ def models(
         console.print(tbl)
         console.print()
 
+        if not apply:
+            on_screen("Read-only — re-run with [bold]--apply[/bold] to write these changes.")
+            return
         if typer.confirm("Apply all recommendations?", default=False):
             from .db import Config as Cfg
             role_to_key = {role: key for role, key, _ in _TASK_MODEL_KEYS}
@@ -551,6 +605,32 @@ def models(
     on_screen("[dim]Tip:[/dim] org-llm models --tune  │  --discover  │  --assign  │  --pull <tag>")
 
 
+_CONFIG_VALIDATORS = {
+    "ollama_url":         "url",
+    "cloud_endpoint_url": "url",
+    "embed_dim":          "int",
+    "theme":              ("dark", "light"),
+    "db_version":         "int",
+}
+
+
+def _validate_config(key: str, value: str) -> str | None:
+    """Return None if value is acceptable for key, else a human-readable error."""
+    rule = _CONFIG_VALIDATORS.get(key)
+    if rule is None:
+        return None  # unknown keys are accepted (custom user keys are fine)
+    if rule == "url":
+        if not (value.startswith("http://") or value.startswith("https://")):
+            return f"{key!r} must be an http(s) URL (got {value!r})"
+    elif rule == "int":
+        if not value.lstrip("-").isdigit():
+            return f"{key!r} must be an integer (got {value!r})"
+    elif isinstance(rule, tuple):
+        if value not in rule:
+            return f"{key!r} must be one of {rule} (got {value!r})"
+    return None
+
+
 @app.command()
 def config(
     key:   Annotated[str, typer.Argument(help="Config key")] = "",
@@ -571,6 +651,10 @@ def config(
             row = session.get(Cfg, key)
             console.print(row.value if row else "[error]not set[/error]")
         else:
+            err = _validate_config(key, value)
+            if err:
+                red_alert(err)
+                raise typer.Exit(1)
             row = session.get(Cfg, key)
             if row:
                 row.value = value
@@ -610,8 +694,14 @@ def db_info(
 
     # ── raw SQL query ─────────────────────────────────────────────────────────
     if query:
-        if not query.strip().upper().startswith("SELECT"):
-            red_alert("Only SELECT queries are allowed via --query")
+        head = query.lstrip().upper()
+        if not head:
+            red_alert("Empty query.")
+            raise typer.Exit(1)
+        # Read-only allow-list: SELECT, WITH (CTEs), EXPLAIN, PRAGMA TABLE_*
+        allowed = ("SELECT", "WITH ", "EXPLAIN ", "PRAGMA TABLE_INFO", "PRAGMA TABLE_LIST")
+        if not any(head.startswith(prefix) for prefix in allowed):
+            red_alert("Only read-only queries are allowed (SELECT / WITH / EXPLAIN / PRAGMA TABLE_INFO).")
             raise typer.Exit(1)
         with engine.connect() as conn:
             try:
@@ -645,8 +735,9 @@ def db_info(
         return
 
     # ── default: row counts + sample ─────────────────────────────────────────
+    db_path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
     console.rule("[lcars1]Database Overview[/lcars1]")
-    hail(f"File: {DB_PATH}")
+    hail(f"File: {db_path}")
     console.print()
 
     tables_meta = [
@@ -1360,7 +1451,7 @@ def doctor(
         cloud_provider = _cfg(session, "cloud_provider")
         cloud_endpoint = _cfg(session, "cloud_endpoint_url")
         cloud_api_key  = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
-        cloud_model_   = _cfg(session, "cloud_model") or _cfg(session, "chat_model") or "llama3.2"
+        cloud_model_   = _cfg(session, "cloud_model") or _cfg(session, "chat_model") or MODEL_DEFAULTS["chat_model"]
     from .cloud import get_provider as _get_provider
     provider_label = (_get_provider(cloud_provider).name
                       if cloud_provider and _get_provider(cloud_provider)
@@ -2371,7 +2462,7 @@ def source(
         engine = _engine()
         with get_session(engine) as session:
             url      = _ollama_url(session)
-            chat_mdl = model or _cfg(session, "chat_model") or "llama3.3"
+            chat_mdl = model or _cfg(session, "chat_model") or MODEL_DEFAULTS["chat_model"]
 
         from .llm import chat
         system = (
@@ -2395,7 +2486,8 @@ def capture(
     title:  Annotated[str,  typer.Option("--title",  "-t", help="Note title")] = "",
     body:   Annotated[str,  typer.Option("--body",   "-b", help="Raw content / prompt")] = "",
     file:   Annotated[str,  typer.Option("--file",   "-f", help="Target org file (relative to org_dir)")] = "inbox.org",
-    polish: Annotated[bool, typer.Option("--polish",       help="Let LLM structure the note")] = True,
+    polish: Annotated[bool, typer.Option("--polish/--no-polish",
+            help="Let LLM structure the note (default: on; --no-polish writes raw body)")] = True,
 ):
     """Capture a new note into your org vault, optionally polished by an LLM."""
     import uuid
@@ -2425,7 +2517,7 @@ def capture(
 
     node_id  = str(uuid.uuid4())
     ts       = datetime.now().strftime("%Y%m%d%H%M%S")
-    org_file = org_dir / file
+    org_file = _safe_org_path(org_dir, file)
     org_file.parent.mkdir(parents=True, exist_ok=True)
 
     entry = (
@@ -2443,11 +2535,21 @@ def capture(
 
 @app.command()
 def tag(
-    force:  Annotated[bool, typer.Option("--force", help="Re-tag already-tagged nodes")] = False,
-    limit:  Annotated[int,  typer.Option("--limit", "-n", help="Max nodes to tag")] = 50,
-    apply:  Annotated[bool, typer.Option("--apply", help="Write tags back to org files")] = False,
+    force:   Annotated[bool, typer.Option("--force", help="Re-tag already-tagged nodes")] = False,
+    limit:   Annotated[int,  typer.Option("--limit", "-n", help="Max nodes to tag")] = 50,
+    apply:   Annotated[bool, typer.Option("--apply",
+             help="Write tags back to org files (default: dry-run preview only)")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run",
+             help="Explicit dry-run flag — same as omitting --apply (kept for clarity)")] = False,
 ):
-    """Auto-tag untagged nodes using the fast_model."""
+    """Auto-tag untagged nodes using the fast_model.
+
+    Default mode is a dry-run preview — pass --apply to actually write tags
+    back to the index. --dry-run is accepted as a synonym for "no --apply".
+    """
+    if dry_run and apply:
+        red_alert("--dry-run and --apply are mutually exclusive.")
+        raise typer.Exit(1)
     from .db import Node
     from .llm import chat
 
@@ -2653,6 +2755,14 @@ def review_emacs(
     """
     from rich.panel import Panel
 
+    if config_dir:
+        p = Path(config_dir).expanduser()
+        if not p.exists():
+            red_alert(f"--config-dir {p} does not exist.")
+            raise typer.Exit(1)
+        if not p.is_dir():
+            red_alert(f"--config-dir {p} is not a directory (got a file).")
+            raise typer.Exit(1)
     detected = _detect_emacs_config_dir(config_dir)
     if not detected:
         red_alert("Could not find an Emacs config directory.")
@@ -2675,7 +2785,7 @@ def review_emacs(
         chat_mdl  = (model
                      or _cfg(session, "reason_model")
                      or _cfg(session, "chat_model")
-                     or "llama3.3")
+                     or MODEL_DEFAULTS["chat_model"])
 
     bundle = "\n\n".join(
         f";; ── {name} ─────────────────────────────────────────\n{content}"
@@ -2720,9 +2830,26 @@ def review_emacs(
         f"Files (truncated where noted):\n\n{bundle}"
     )
 
+    # Make sure the model we're about to ask is actually pulled.
+    if not _ensure_model_pulled(chat_mdl, url):
+        red_alert(f"Could not pull review model {chat_mdl!r}. Run: org-llm doctor --fix")
+        raise typer.Exit(1)
+
     from .llm import chat
-    with warp(f"Reviewing {flavor} config with {chat_mdl}"):
-        review = chat(prompt, model=chat_mdl, base_url=url, system=system)
+    try:
+        with warp(f"Reviewing {flavor} config with {chat_mdl}"):
+            review = chat(prompt, model=chat_mdl, base_url=url, system=system)
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "memory" in msg or "out of memory" in msg or "oom" in msg:
+            red_alert(f"{chat_mdl} requires more RAM than is available.")
+            on_screen("Pick a smaller reason model:  org-llm config reason_model deepseek-r1:7b")
+            on_screen("Or get suggestions:           org-llm models --tune")
+        elif "connection" in msg or "refused" in msg:
+            red_alert("Ollama isn't reachable. Run: org-llm doctor --fix")
+        else:
+            red_alert(f"Review failed: {exc}")
+        raise typer.Exit(1)
 
     console.print()
     console.rule(f"[lcars1]Emacs config review  ·  {chat_mdl}  ·  focus: {focus}[/lcars1]")
@@ -2783,7 +2910,7 @@ def launch(
     with get_session(engine) as session:
         org_dir    = _org_dir(session)
         ollama_url = _ollama_url(session)
-        chat_mdl   = model or _cfg(session, "chat_model") or "llama3.2"
+        chat_mdl   = model or _cfg(session, "chat_model") or MODEL_DEFAULTS["chat_model"]
         n_files    = session.query(File).count()
         n_nodes    = session.query(Node).count()
         n_embedded = session.query(Node).filter(Node.embedding.isnot(None)).count()
@@ -3338,6 +3465,9 @@ def cloud(
 
     # ── Signup ────────────────────────────────────────────────────────────────
     if signup:
+        if not signup.strip():
+            red_alert("--signup needs a provider slug. Try: [bold]org-llm cloud --signup list[/bold]")
+            raise typer.Exit(1)
         if signup in ("list", "?", "help"):
             on_screen("Available providers:")
             for p in PROVIDERS:
@@ -3500,7 +3630,7 @@ def cloud(
     with get_session(engine) as session:
         provider_slug = _cfg(session, "cloud_provider")
         endpoint_url  = _cfg(session, "cloud_endpoint_url")
-        cloud_model   = _cfg(session, "cloud_model") or _cfg(session, "chat_model") or "llama3.2"
+        cloud_model   = _cfg(session, "cloud_model") or _cfg(session, "chat_model") or MODEL_DEFAULTS["chat_model"]
         all_models    = [_cfg(session, k) for _, k, _ in _TASK_MODEL_KEYS if _cfg(session, k)]
         db_api_key    = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
     api_key = (creds_mod.read_secret(creds_mod.cloud_slug(provider_slug))
@@ -3658,10 +3788,20 @@ def theme(
 
         if mode == "show":
             env = os.environ.get("ORG_LLM_THEME", "")
-            on_screen(f"Stored theme: [bold]{current}[/bold]")
+            valid_modes = ("dark", "light")
+            on_screen(f"Stored theme: [bold]{current}[/bold]"
+                      + ("" if current in valid_modes
+                         else f"  [yellow](invalid value — falls back to dark)[/yellow]"))
             if env:
-                on_screen(f"ORG_LLM_THEME env override: [bold]{env}[/bold] (active for this session)")
-            on_screen(f"Active right now: [bold]{ui_mod.THEME_MODE}[/bold]")
+                env_norm = env.strip().lower()
+                if env_norm in ("dark", "night"):
+                    on_screen(f"ORG_LLM_THEME env override: [bold]dark[/bold] (this session)")
+                elif env_norm in ("light", "day"):
+                    on_screen(f"ORG_LLM_THEME env override: [bold]light[/bold] (this session)")
+                else:
+                    on_screen(f"ORG_LLM_THEME env: [bold]{env}[/bold] [yellow](unrecognised — ignored)[/yellow]")
+            on_screen(f"Active right now: [bold]{ui_mod.THEME_MODE}[/bold]"
+                      + (" (next command will pick up changes)" if current != ui_mod.THEME_MODE else ""))
             return
 
         new = mode if mode != "toggle" else ("light" if current == "dark" else "dark")

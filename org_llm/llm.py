@@ -10,8 +10,13 @@ def list_models(base_url: str = "http://localhost:11434") -> list[str]:
 
 
 def embed(text: str, model: str, base_url: str) -> list[float]:
+    if not text or not text.strip():
+        raise ValueError("embed() called with empty text")
     client = ollama.Client(host=base_url)
-    return client.embed(model=model, input=text).embeddings[0]
+    resp = client.embed(model=model, input=text)
+    if not resp.embeddings:
+        raise RuntimeError(f"Ollama returned no embeddings for model {model!r}")
+    return resp.embeddings[0]
 
 
 def chat(prompt: str, model: str, base_url: str, system: str = "") -> str:
