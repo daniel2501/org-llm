@@ -174,11 +174,17 @@ class TestCodeIndexCLI:
         assert r.exit_code == 0, r.output
         assert "Indexed" in r.output
 
-    def test_missing_dir_errors(self, cli_db, tmp_path):
+    def test_missing_dir_autoheals_or_errors(self, cli_db, tmp_path):
+        # User declines the auto-heal offer → exit 1.
         r = runner.invoke(app, ["code-index", str(tmp_path / "ghost"),
-                                "--no-embed"])
+                                "--no-embed"], input="n\n")
         assert r.exit_code == 1
-        assert "Path does not exist" in r.output
+        # Rich may wrap output, so collapse whitespace before searching.
+        flat = " ".join(r.output.lower().split())
+        assert "does not exist" in flat
+        # Either offered candidates ("scanning filesystem") or none-found path.
+        assert ("scanning filesystem" in flat
+                or "none of the requested paths exist" in flat)
 
     def test_force_clears_existing(self, cli_db, fake_repo):
         runner.invoke(app, ["code-index", str(fake_repo), "--no-embed"])

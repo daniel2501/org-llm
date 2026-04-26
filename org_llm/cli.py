@@ -250,7 +250,7 @@ def _auto_start_ollama_if_needed(base_url: str, silent: bool = False) -> bool:
 _LLM_FIXABLE_VERBS = (
     "config", "models", "doctor", "embed", "index", "code-index",
     "knob", "grant", "grant-root", "grant-browser",
-    "performance", "theme",
+    "performance", "theme", "discover",
 )
 
 
@@ -748,12 +748,36 @@ def code_index(
         paths = [p.strip() for p in raw.split(",") if p.strip()]
     roots = [Path(p).expanduser() for p in paths]
 
+    # Partition: skip missing paths with a warning rather than bailing.
+    # Only fail if ZERO of the requested paths exist.
+    valid   = [r for r in roots if r.exists() and r.is_dir()]
     missing = [r for r in roots if not r.exists()]
-    if missing:
-        for m in missing:
-            red_alert(f"Path does not exist: {m}")
-        on_screen("Set code_dirs explicitly:  org-llm config code_dirs ~/path/to/code")
-        raise typer.Exit(1)
+    not_dir = [r for r in roots if r.exists() and not r.is_dir()]
+    for m in missing:
+        on_screen(f"[yellow]Skipping {m}: path does not exist[/yellow]")
+    for nd in not_dir:
+        on_screen(f"[yellow]Skipping {nd}: not a directory[/yellow]")
+    if not valid:
+        # Auto-heal: probe the filesystem for code-shaped roots before bailing.
+        from .discover import discover, suggest_code_dirs
+        on_screen("[yellow]None of the given paths exist — scanning filesystem for code roots…[/yellow]")
+        found = discover()
+        suggested = suggest_code_dirs(found)
+        if not suggested:
+            red_alert(f"None of the requested paths exist: {', '.join(str(r) for r in roots)}")
+            on_screen("No fallback code roots found either. Try:")
+            on_screen("  org-llm discover                            — see what's on disk")
+            on_screen("  org-llm config code_dirs ~/path/to/code     — set explicitly")
+            raise typer.Exit(1)
+        on_screen("[green]Found these instead:[/green]")
+        for s in suggested:
+            on_screen(f"  · {s}")
+        if not typer.confirm("Index these?", default=True):
+            on_screen("Aborted. Run [bold]org-llm discover[/bold] to see what's available.")
+            raise typer.Exit(1)
+        roots = suggested
+    else:
+        roots = valid
 
     if force:
         # Wipe rows whose file path lives under any code dir
@@ -800,6 +824,65 @@ def code_index(
 
     on_screen("Try it: [bold]org-llm ask --cloud \"how does cli.py wire MCP?\"[/bold]")
     make_it_so()
+
+
+@app.command()
+def discover(
+    extra: Annotated[list[str], typer.Argument(
+        help="Additional directories to probe alongside the standard set.")] = None,
+):
+    """Probe the filesystem for things org-llm could use.
+
+    Looks at standard locations (~/org, ~/repos, ~/.config/doom, …) plus
+    any extras you pass, and reports vaults, repo roots, dotfiles, and
+    Emacs configs that actually exist. Used to bootstrap `code-index`,
+    `grant-root`, and as a one-shot "what's here?" report.
+    """
+    from rich.table import Table as _T
+    from .discover import (
+        discover as _do_discover, suggest_code_dirs, suggest_grant_roots,
+        detect_preferred_language,
+    )
+
+    found = _do_discover(extra_dirs=extra)
+    if not found:
+        on_screen("[yellow]Nothing found at standard locations.[/yellow]")
+        on_screen("Pass paths to probe explicitly: "
+                  "[bold]org-llm discover ~/some/dir[/bold]")
+        return
+
+    tbl = _T(title="[lcars2]Filesystem discoveries[/lcars2]",
+             box=None, pad_edge=False)
+    tbl.add_column("Path",        style="lcars2", no_wrap=True)
+    tbl.add_column("Kind",        style="dim", width=14)
+    tbl.add_column("Description", style="white")
+    for f in found:
+        tbl.add_row(str(f.path), f.kind, f.description)
+    console.print()
+    console.print(tbl)
+    console.print()
+
+    code_dirs   = suggest_code_dirs(found)
+    grant_roots = suggest_grant_roots(found)
+    pref_lang   = detect_preferred_language()
+
+    if code_dirs:
+        on_screen("[lcars3]Suggested code-index roots:[/lcars3]")
+        for c in code_dirs:
+            on_screen(f"  · {c}")
+        on_screen(f"  → [bold]org-llm code-index "
+                  f"{' '.join(str(c) for c in code_dirs)}[/bold]")
+        console.print()
+    if grant_roots:
+        on_screen("[lcars3]Suggested MCP auto-grant roots:[/lcars3]")
+        for g in grant_roots:
+            on_screen(f"  · {g}")
+        for g in grant_roots:
+            on_screen(f"  → [bold]org-llm grant-root {g}[/bold]")
+        console.print()
+    if pref_lang:
+        on_screen(f"[dim]Detected preferred language: [bold]{pref_lang}[/bold] "
+                  "(used by `code` for default language)[/dim]")
 
 
 @app.command()
@@ -5793,6 +5876,16 @@ def grants_list():
     else:
         on_screen("[dim]No auto-grant roots. LLM cannot self-grant; "
                   "every path needs an explicit `org-llm grant`.[/dim]")
+        # Proactive: offer concrete candidates discovered on disk.
+        try:
+            from .discover import suggest_grant_roots
+            cands = suggest_grant_roots()
+        except Exception:
+            cands = []
+        if cands:
+            on_screen("[dim]Suggested roots based on what's on disk:[/dim]")
+            for c in cands:
+                on_screen(f"  → [bold]org-llm grant-root {c}[/bold]")
     console.print()
     on_screen(f"Browser access: "
               f"{'[green]enabled[/green]' if access.browser_enabled() else '[dim]disabled[/dim]'}")
