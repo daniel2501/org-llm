@@ -1,0 +1,14 @@
+name: org_llm
+version: "1.0.0"
+profile: org_llm
+
+model-paths: ["models"]
+target-path: "target"
+clean-targets: ["target"]
+
+models:
+  org_llm:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table

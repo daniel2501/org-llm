@@ -1,0 +1,8 @@
+org_llm:
+  target: dev
+  outputs:
+    dev:
+      type: sqlite
+      threads: 1
+      database: "{{ env_var('ORG_LLM_DB', '~/.local/share/org-llm/org-llm.db') }}"
+      schema: main
