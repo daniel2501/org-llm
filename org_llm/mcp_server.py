@@ -358,6 +358,262 @@ def create_mcp_server():
             rows = session.query(Config).all()
         return "\n".join(f"  {r.key} = {r.value}" for r in rows)
 
+    # ── set_config (allow-listed safe keys) ───────────────────────────────────
+    _SETTABLE_KEYS = {
+        "chat_model", "embed_model", "code_model", "tag_model", "review_model",
+        "ollama_url", "temperature", "top_p", "context_window",
+        "code_dirs", "fixer_model", "trek_level", "commie_level", "queer_level",
+    }
+
+    @server.tool()
+    def set_config(key: str, value: str) -> str:
+        """Update an allow-listed config key (safe subset only).
+
+        Allow-listed keys: chat_model, embed_model, code_model, tag_model,
+        review_model, ollama_url, temperature, top_p, context_window,
+        code_dirs, fixer_model, trek_level, commie_level, queer_level.
+
+        Refuses keys outside this list — credentials, grants, telemetry, and
+        secrets are NEVER writeable from MCP.
+        """
+        if key not in _SETTABLE_KEYS:
+            return (f"Refused: '{key}' is not in the MCP allow-list.\n"
+                    f"Allow-listed keys: {', '.join(sorted(_SETTABLE_KEYS))}")
+        from .db import Config
+        with get_session(engine) as session:
+            row = session.get(Config, key)
+            old = row.value if row else "(unset)"
+            if row:
+                row.value = value
+            else:
+                session.add(Config(key=key, value=value))
+            session.commit()
+        return f"Updated {key}: {old!r} → {value!r}"
+
+    # ── discover_filesystem ───────────────────────────────────────────────────
+    @server.tool()
+    def discover_filesystem() -> str:
+        """Probe the user's filesystem for vaults, repos, dotfiles, Emacs configs.
+
+        Returns a structured report of what actually exists on disk —
+        useful for picking code-index roots, MCP grant roots, or just
+        understanding the user's environment before answering questions.
+        """
+        from .discover import (
+            discover, suggest_code_dirs, suggest_grant_roots,
+            detect_preferred_language,
+        )
+        found = discover()
+        if not found:
+            return "No standard locations found. The user has an unusual layout."
+        lines = ["FILESYSTEM INVENTORY"]
+        for f in found:
+            lines.append(f"  {f.path}  [{f.kind}]  {f.description}")
+        lines.append("")
+        code = suggest_code_dirs(found)
+        if code:
+            lines.append("Suggested code-index roots:")
+            for c in code:
+                lines.append(f"  - {c}")
+        grants = suggest_grant_roots(found)
+        if grants:
+            lines.append("Suggested MCP grant roots:")
+            for g in grants:
+                lines.append(f"  - {g}")
+        lang = detect_preferred_language()
+        if lang:
+            lines.append(f"Detected preferred language: {lang}")
+        return "\n".join(lines)
+
+    # ── doctor_health ─────────────────────────────────────────────────────────
+    @server.tool()
+    def doctor_health() -> str:
+        """Concise health report: DB, Ollama, models, free RAM, vault index."""
+        from .db import Node, File, Config
+        import shutil
+        lines = ["ORG-LLM HEALTH"]
+        try:
+            with get_session(engine) as session:
+                n_files    = session.query(File).count()
+                n_nodes    = session.query(Node).count()
+                n_embedded = session.query(Node).filter(
+                    Node.embedding.isnot(None)).count()
+                cfg = {r.key: r.value for r in session.query(Config).all()}
+            lines.append(f"  DB: ok  ({n_files} files, {n_nodes} nodes, "
+                         f"{n_embedded} embedded)")
+        except Exception as e:
+            lines.append(f"  DB: ERROR — {e}")
+            return "\n".join(lines)
+        ollama = cfg.get("ollama_url", "http://localhost:11434")
+        try:
+            import urllib.request
+            urllib.request.urlopen(f"{ollama}/api/tags", timeout=2).read()
+            lines.append(f"  Ollama: reachable  ({ollama})")
+        except Exception as e:
+            lines.append(f"  Ollama: UNREACHABLE — {type(e).__name__}")
+        lines.append(f"  chat_model:  {cfg.get('chat_model', '(unset)')}")
+        lines.append(f"  embed_model: {cfg.get('embed_model', '(unset)')}")
+        try:
+            from .cloud import local_ram_gb, local_vram_gb
+            lines.append(f"  Hardware:   {local_ram_gb():.1f} GB free RAM, "
+                         f"{local_vram_gb():.1f} GB VRAM")
+        except Exception:
+            pass
+        du = shutil.disk_usage(Path.home())
+        lines.append(f"  Disk free:  {du.free / 2**30:.1f} GB")
+        return "\n".join(lines)
+
+    # ── performance_status ────────────────────────────────────────────────────
+    @server.tool()
+    def performance_status() -> str:
+        """Hardware fit summary: free RAM/VRAM vs current model assignments."""
+        try:
+            from .performance import probe_hardware, recommend
+            from .db import Config
+            with get_session(engine) as session:
+                cfg = {r.key: r.value for r in session.query(Config).all()}
+            hw   = probe_hardware()
+            recs = recommend(hw, role_assignments=cfg, benchmarks={},
+                             pulled=set(), cloud_configured=bool(cfg.get("cloud_provider")))
+            head = (f"Free RAM: {hw.ram_free_gb:.1f} GB"
+                    + (f"  |  Free VRAM: {hw.vram_free_gb:.1f} GB"
+                       if hw.vram_free_gb is not None else ""))
+            lines = [head]
+            for r in recs:
+                marker = {"downgrade": "↓", "upgrade": "↑",
+                          "missing": "+", "fit": "="}.get(r.severity, "?")
+                lines.append(f"  {marker} {r.role}: {r.current or '(unset)'} "
+                             f"→ {r.suggested}  ({r.reason})")
+            return "\n".join(lines) if recs else head + "\n  (no role assignments)"
+        except Exception as e:
+            return f"performance check failed: {e}"
+
+    # ── index_vault ───────────────────────────────────────────────────────────
+    @server.tool()
+    def index_vault() -> str:
+        """Re-scan the org vault and update the index incrementally."""
+        from .indexer import index_directory
+        with get_session(engine) as session:
+            org_dir = _cfg(session, "org_dir")
+            if not org_dir:
+                return "org_dir not configured. Run: org-llm config org_dir <path>"
+            try:
+                files, nodes = index_directory(Path(org_dir).expanduser(), session)
+                session.commit()
+                return f"Indexed: {files} files, {nodes} nodes."
+            except Exception as e:
+                return f"Index failed: {e}"
+
+    # ── embed_pending ─────────────────────────────────────────────────────────
+    @server.tool()
+    def embed_pending() -> str:
+        """Generate embeddings for any unembedded nodes."""
+        from .indexer import embed_nodes
+        from .db import Node
+        with get_session(engine) as session:
+            url    = _cfg(session, "ollama_url") or "http://localhost:11434"
+            model  = _cfg(session, "embed_model") or "nomic-embed-text"
+            n_pending = session.query(Node).filter(
+                Node.embedding.is_(None)).count()
+            if n_pending == 0:
+                return "Nothing to embed — all nodes already embedded."
+            try:
+                count = embed_nodes(session, model=model, base_url=url,
+                                    force=False)
+                return f"Embedded {count} new nodes (model: {model})."
+            except Exception as e:
+                return f"Embed failed: {e}. Is Ollama up?"
+
+    # ── code_search ───────────────────────────────────────────────────────────
+    @server.tool()
+    def code_search(query: str, lang: str = "", limit: int = 10) -> str:
+        """Search the code-index corpus only (excludes notes).
+
+        Filters to nodes tagged 'code'. If `lang` is given (e.g. 'python',
+        'elisp', 'rust'), further restricts to that language.
+        """
+        from .db import Node
+        from .search import vector_search
+        from .llm import embed as _embed
+        with get_session(engine) as session:
+            url    = _cfg(session, "ollama_url") or "http://localhost:11434"
+            model  = _cfg(session, "embed_model") or "nomic-embed-text"
+            try:
+                qvec = _embed(query, model=model, base_url=url)
+                hits = vector_search(session, qvec, limit=limit * 4)
+            except Exception as e:
+                return f"Search failed: {e}"
+            results = []
+            for h in hits:
+                tags = (h.tags or "").split(":")
+                if "code" not in tags:
+                    continue
+                if lang and f"code:{lang}" not in tags:
+                    continue
+                results.append(h)
+                if len(results) >= limit:
+                    break
+        if not results:
+            return f"No code matches for '{query}'" + (f" in {lang}" if lang else "")
+        lines = []
+        for h in results:
+            tag_lang = next((t.split(":", 1)[1] for t in (h.tags or "").split(":")
+                             if t.startswith("code:")), "?")
+            lines.append(f"- {h.title}  [{tag_lang}]")
+        return "\n".join(lines)
+
+    # ── recent_files ──────────────────────────────────────────────────────────
+    @server.tool()
+    def recent_files(days: int = 7) -> str:
+        """List org files modified in the last N days (file-level, not node-level)."""
+        from datetime import datetime, timedelta
+        from .db import File
+        with get_session(engine) as session:
+            since = (datetime.now() - timedelta(days=days)).timestamp()
+            files = (
+                session.query(File)
+                .filter(File.mtime >= since)
+                .order_by(File.mtime.desc())
+                .limit(40).all()
+            )
+        if not files:
+            return f"No files modified in the last {days} days."
+        return "\n".join(
+            f"- {Path(f.path).name}  "
+            f"({datetime.fromtimestamp(f.mtime).date().isoformat() if f.mtime else '?'})"
+            for f in files
+        )
+
+    # ── list_models ───────────────────────────────────────────────────────────
+    @server.tool()
+    def list_models() -> str:
+        """List Ollama models pulled locally with their role assignments."""
+        try:
+            import urllib.request, json as _json
+            from .db import Config
+            with get_session(engine) as session:
+                url = _cfg(session, "ollama_url") or "http://localhost:11434"
+                cfg = {r.key: r.value for r in session.query(Config).all()}
+            resp = urllib.request.urlopen(f"{url}/api/tags", timeout=3).read()
+            tags = _json.loads(resp).get("models", [])
+            role_for = {}
+            for k in ("chat_model", "embed_model", "code_model", "tag_model",
+                      "review_model", "fixer_model"):
+                v = cfg.get(k)
+                if v:
+                    role_for.setdefault(v, []).append(k)
+            lines = []
+            for m in tags:
+                name  = m.get("name", "?")
+                size  = m.get("size", 0)
+                roles = role_for.get(name, [])
+                size_gb = size / 2**30 if size else 0
+                roles_str = f"  ← {', '.join(roles)}" if roles else ""
+                lines.append(f"- {name}  ({size_gb:.1f} GB){roles_str}")
+            return "\n".join(lines) if lines else "No models pulled."
+        except Exception as e:
+            return f"list_models failed: {e}"
+
     # ── tutor tools ───────────────────────────────────────────────────────────
     @server.tool()
     def list_tutor_steps() -> str:

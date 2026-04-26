@@ -97,7 +97,7 @@ candidates.
 | `org-llm models` | Discover, tune (catalog-based), assign, or pull FOSS LLMs |
 | `org-llm performance` | Hardware-aware tuner — uses *free* RAM + measured tok/s (`--benchmark`) |
 | `org-llm cloud` | Multi-provider GPU cloud — signup, configure, status, cost, `--quick-start` |
-| `org-llm launch` | Open opencode in your vault with MCP wired up |
+| `org-llm launch [-w WORKSPACE]` | Open themed opencode TUI: 30 MCP tools, LCARS theme, slash-commands |
 | `org-llm claude` | Same, but Claude Code (`ANTHROPIC_API_KEY` from `pass`) |
 | `org-llm doctor` | Deep health check + LLM diagnosis; `--install all` bulk-installs FOSS tools |
 | `org-llm doctor -w` | LLM-driven self-test: 13 read-only probes + cloud-LLM judgement |
@@ -177,26 +177,80 @@ copy. See `org-llm tutor creds` for the full setup.
 
 ## MCP integration
 
-`org-llm mcp` runs an MCP stdio server that exposes 13 tools to any MCP-aware
-client (opencode, Claude Code, …):
+`org-llm mcp` runs an MCP stdio server that exposes **30 tools** to any
+MCP-aware client (opencode, Claude Code, …). The toolbox is designed
+to give the LLM in opencode parity with the CLI, not a stripped-down
+subset.
 
-| Tool | Purpose |
-|---|---|
-| `search_notes` | Semantic or keyword search |
-| `ask_notes` | RAG Q&A grounded in the vault |
-| `capture_note` | Add a new note to the vault |
-| `get_node` | Fetch full content of a note by title |
-| `list_nodes_by_tag` | Browse notes by tag |
-| `list_recent_nodes` | Recent activity (configurable window) |
-| `get_vault_stats` | Vault stats (files, nodes, embedded%) |
-| `list_skills` / `run_skill` | Org-babel skill workflows |
-| `tangle_file` | `org-babel-tangle` via `emacsclient` |
-| `get_config` | Current model/config assignments |
-| `list_tutor_steps` / `get_tutor_step` | Interactive tutorial content |
+**Reading notes:**
+`search_notes`, `ask_notes`, `get_node`, `list_nodes_by_tag`,
+`list_recent_nodes`, `get_vault_stats`, `recent_files`
 
-`org-llm launch` wires this up automatically for opencode (writing
-`.opencode.json` in your `org_dir`); `org-llm claude` does the same for Claude
-Code (`.claude/settings.json` + `.claude/CLAUDE.md`).
+**Writing / acting:**
+`capture_note`, `run_skill`, `tangle_file`, `index_vault`,
+`embed_pending`, `set_config` *(allow-listed keys only)*
+
+**Code corpus:**
+`code_search` *(language-filterable)*
+
+**Filesystem + ops:**
+`discover_filesystem`, `doctor_health`, `performance_status`,
+`list_models`, `list_grants`, `request_access`, `read_file`,
+`list_directory`
+
+**Browser (when granted):**
+`open_url`, `browser_command`
+
+**Skills + tutor + config:**
+`list_skills`, `list_tutor_steps`, `get_tutor_step`, `get_config`,
+`set_config`
+
+`set_config` is allow-listed to safe keys only (`chat_model`,
+`embed_model`, `code_model`, `temperature`, `code_dirs`, `trek_level`,
+…). Credentials, grants, and theme-knob payloads stay inaccessible
+from the LLM.
+
+`org-llm launch` wires this up automatically for opencode (writes
+`.opencode.json`, `.opencode/themes/`, `.opencode/command/`);
+`org-llm claude` does the same for Claude Code (`.claude/settings.json`
++ `.claude/CLAUDE.md`). See [opencode workspace](#opencode-workspace).
+
+---
+
+## opencode workspace
+
+`org-llm launch` is the *other face* of org-llm — a fully themed
+opencode TUI with the full MCP toolbox, slash-command starter pack,
+and a system prompt pre-loaded with vault stats, top tags, models,
+hardware, filesystem inventory, and any active theme dials/knobs.
+
+```sh
+org-llm launch                       # default workspace: all
+org-llm launch -w researcher         # read-heavy: search/ask/explore
+org-llm launch -w scribe             # capture-heavy + skill workflows
+org-llm launch -w engineer           # code-corpus + repo focus
+org-llm launch --no-theme            # skip writing .opencode/themes/
+org-llm launch --no-commands         # skip writing slash-commands
+org-llm launch -n                    # dry-run: print config, don't launch
+```
+
+What gets written into your vault:
+
+- `.opencode.json` — model, MCP server, instructions, theme reference.
+- `.opencode/themes/org-llm-lcars.json` — LCARS palette (orange /
+  purple / blue) matching the CLI, both light and dark variants.
+- `.opencode/command/<name>.md` — slash-commands for instant action:
+  `/discover`, `/recent`, `/health`, `/stats`, `/tags`, `/tutor`,
+  `/code`, plus workspace-specific extras (`/explore` for researcher,
+  `/capture` for scribe, `/repo` for engineer).
+
+The system prompt also surfaces your **active theme knobs**
+(`trek_level`, `commie_level`, `queer_level`, plus user-defined knobs
+like `dinosaur`) so the in-opencode model matches the energy of your
+CLI.
+
+Rule of thumb: if you'd otherwise pipe four CLI commands together,
+opencode is probably the right tool.
 
 ---
 

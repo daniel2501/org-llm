@@ -4132,29 +4132,50 @@ _TUTOR_STEPS = [
     ),
     (
         "launch",
-        "[lcars2]org-llm launch[/lcars2] — opencode workspace with full vault context\n\n"
-        "Transforms opencode into a second brain interface by:\n\n"
-        "  1. Writing [bold]{org_dir}/.opencode.json[/bold] — Ollama provider, MCP server,\n"
-        "     and a rich system prompt injected with vault stats + recent activity\n"
-        "  2. Launching opencode (installs if missing) in org_dir\n\n"
-        "[lcars1]The MCP server (org-llm mcp):[/lcars1]\n"
-        "  org-llm starts an MCP server over stdio that opencode connects to.\n"
-        "  Every org-llm capability is a native tool opencode can call:\n\n"
-        "    search_notes    ask_notes     capture_note\n"
-        "    get_node        list_skills   run_skill\n"
-        "    tangle_file     get_config    get_vault_stats\n"
-        "    list_recent_nodes  list_nodes_by_tag\n"
-        "    get_tutor_step  list_tutor_steps\n\n"
+        "[lcars2]org-llm launch[/lcars2] — themed opencode workspace, the *other face* of org-llm\n\n"
+        "opencode is intended to be as rich as the CLI — not a stripped chat\n"
+        "interface. [bold]launch[/bold] sets up a project-local =.opencode/= directory\n"
+        "with everything wired in.\n\n"
+        "[lcars1]What gets written:[/lcars1]\n"
+        "  • [bold].opencode.json[/bold]                       — model, MCP server, instructions, theme ref\n"
+        "  • [bold].opencode/themes/org-llm-lcars.json[/bold]  — LCARS palette matching CLI (light + dark)\n"
+        "  • [bold].opencode/command/<name>.md[/bold]          — slash-commands (see below)\n\n"
+        "[lcars1]Workspaces (--workspace / -w):[/lcars1]\n"
+        "  [bold]all[/bold]         — full toolbox (default)\n"
+        "  [bold]researcher[/bold]  — read-heavy: search/ask/get_node, no captures\n"
+        "  [bold]scribe[/bold]      — capture-heavy: capture_note + skill workflows\n"
+        "  [bold]engineer[/bold]    — code-corpus + repo focus, code_search emphasis\n\n"
+        "[lcars1]Slash-commands (default):[/lcars1]\n"
+        "  [lcars3]/discover[/lcars3]  /recent  /health  /stats  /tags  /tutor  /code\n"
+        "  Plus per-workspace: [lcars3]/explore[/lcars3] (researcher), [lcars3]/capture[/lcars3] (scribe), [lcars3]/repo[/lcars3] (engineer)\n\n"
+        "[lcars1]System prompt is pre-loaded with:[/lcars1]\n"
+        "  vault stats · recent activity · top-10 tags · model assignments ·\n"
+        "  free RAM/VRAM · filesystem inventory · active theme dials/knobs\n\n"
+        "[lcars1]30 MCP tools available inside opencode:[/lcars1]\n"
+        "  Reading:    search_notes ask_notes get_node list_nodes_by_tag\n"
+        "              list_recent_nodes recent_files get_vault_stats\n"
+        "  Writing:    capture_note run_skill tangle_file index_vault\n"
+        "              embed_pending set_config (allow-listed)\n"
+        "  Code:       code_search (lang-filterable)\n"
+        "  Filesystem: discover_filesystem doctor_health performance_status\n"
+        "              list_models read_file list_directory list_grants request_access\n"
+        "  Browser:    open_url browser_command (when granted)\n"
+        "  Skills:     list_skills list_tutor_steps get_tutor_step\n"
+        "  Config:     get_config set_config\n\n"
+        "[lcars1]Theme integration:[/lcars1]\n"
+        "  The TUI uses LCARS colors matching the CLI. The system prompt also\n"
+        "  surfaces your active dials ([bold]trek/commie/queer[/bold]) and any user-\n"
+        "  defined [bold]knob[/bold]s, so the in-opencode model matches your CLI vibe.\n\n"
         "[lcars1]From Doom Emacs:[/lcars1]  [lcars2]SPC l o[/lcars2] — opens vterm + launches workspace\n\n"
         "[lcars1]Commands:[/lcars1]\n"
-        "  [bold]org-llm launch[/bold]              — full context workspace\n"
-        "  [bold]org-llm launch --no-context[/bold] — minimal prompt\n"
-        "  [bold]org-llm launch --dry-run[/bold]    — preview .opencode.json\n"
-        "  [bold]org-llm launch --model phi4[/bold] — use a different model\n"
-        "  [bold]org-llm mcp[/bold]                 — start MCP server standalone\n\n"
-        "[lcars1]Tutor in opencode:[/lcars1]\n"
-        "  Inside opencode, ask: 'show me the tutor step for embeddings'\n"
-        "  opencode calls [bold]get_tutor_step('embed')[/bold] and presents the content.\n\n"
+        "  [bold]org-llm launch[/bold]                       — default (all) workspace\n"
+        "  [bold]org-llm launch -w researcher[/bold]         — researcher flavor\n"
+        "  [bold]org-llm launch --no-theme[/bold]            — skip writing theme file\n"
+        "  [bold]org-llm launch --no-commands[/bold]         — skip slash-commands\n"
+        "  [bold]org-llm launch --no-context[/bold]          — minimal prompt\n"
+        "  [bold]org-llm launch --dry-run[/bold]             — preview without launching\n"
+        "  [bold]org-llm launch --model phi4[/bold]          — override chat model\n"
+        "  [bold]org-llm mcp[/bold]                          — run MCP server standalone\n\n"
         "[dim]Source: org_llm/mcp_server.py + cli.py → launch()  |  org-llm source mcp_server[/dim]",
     ),
     (
@@ -4823,16 +4844,390 @@ def review_emacs(
     make_it_so()
 
 
+# ── opencode workspace helpers ─────────────────────────────────────────────
+# These keep `launch()` legible by extracting prompt/theme/slash-command
+# generation. opencode reads its config from .opencode.json in the project
+# dir, custom themes from .opencode/themes/<name>.json, and custom slash
+# commands from .opencode/command/<name>.md.
+
+OPENCODE_WORKSPACES = ("all", "researcher", "scribe", "engineer")
+
+
+def _opencode_workspace_prompt(workspace: str, n_files: int, n_nodes: int,
+                                n_embedded: int, pct_e: int, org_dir: str,
+                                skill_str: str, recent_str: str,
+                                top_tags_str: str, model_status: str,
+                                discover_str: str, knobs_str: str,
+                                hardware_str: str) -> str:
+    """Return the system prompt for a workspace flavor.
+
+    Workspaces:
+      all        — full vault + repos + skills + filesystem (default)
+      researcher — read-heavy: search/ask/get_node, no captures
+      scribe     — capture-heavy: capture_note/tangle/run_skill emphasis
+      engineer   — code-corpus + repos focus, code_search emphasis
+    """
+    common_header = f"""You are the user's interactive org-llm workspace, running inside opencode with full MCP access to their second brain.
+
+VAULT
+  Location: {org_dir}
+  Files: {n_files}  |  Nodes: {n_nodes}  |  Embedded: {n_embedded}/{n_nodes} ({pct_e}%)
+  Skills: {skill_str}
+
+RECENT ACTIVITY (last 7 days)
+{recent_str}
+
+TOP TAGS
+{top_tags_str}
+
+MODELS
+{model_status}
+
+HARDWARE
+{hardware_str}
+
+FILESYSTEM
+{discover_str}
+{knobs_str}"""
+
+    if workspace == "researcher":
+        focus = """
+ROLE: RESEARCHER
+You help the user think through their notes. Read-heavy mode.
+  - PREFER: search_notes, ask_notes, get_node, list_nodes_by_tag, list_recent_nodes
+  - AVOID:  capture_note unless the user is explicit
+  - When citing notes, use their exact titles
+  - Surface connections across notes the user may not have noticed"""
+    elif workspace == "scribe":
+        focus = """
+ROLE: SCRIBE
+You help the user capture, tag, and refine notes. Write-heavy mode.
+  - PREFER: capture_note, run_skill, tangle_file
+  - When capturing, propose tags from TOP TAGS above for consistency
+  - Confirm file path and resulting node ID after each capture
+  - Use list_skills first to see what org-babel workflows are registered"""
+    elif workspace == "engineer":
+        focus = """
+ROLE: ENGINEER
+You help with code that lives across the user's repos. Code-corpus mode.
+  - PREFER: code_search (lang-filtered), search_notes, read_file, list_directory
+  - When the user mentions a repo by name, check FILESYSTEM above first
+  - Cite file paths in answers; use read_file before claiming what code does
+  - For tasks spanning notes + code, run code_search AND search_notes in parallel"""
+    else:  # all
+        focus = """
+ROLE: GENERALIST
+Full access to notes, code, skills, and filesystem discovery.
+  - Always search_notes or ask_notes BEFORE answering questions about notes
+  - Use code_search for code questions; capture_note when saving ideas
+  - Use discover_filesystem when the user asks "what do I have"
+  - Use doctor_health if anything seems off; performance_status for tuning
+  - Cite note titles AND file paths when you draw from them"""
+
+    behaviour = """
+
+BEHAVIOUR
+  - Tools-first: don't speculate; the data is one MCP call away
+  - Theme-aware: the user runs LCARS-themed tooling. Match the energy.
+    If the user has knobs configured (above), nod to them when natural.
+  - Be concise. The user reads diffs and tool output, not paragraphs."""
+
+    return common_header + focus + behaviour
+
+
+def _opencode_pre_flight_context(session) -> dict:
+    """Gather rich runtime context for the system prompt."""
+    from datetime import datetime, timedelta
+    from .db    import Node, File, Config
+    from .skills import Skill
+
+    org_dir    = _org_dir(session)
+    ollama_url = _ollama_url(session)
+    n_files    = session.query(File).count()
+    n_nodes    = session.query(Node).count()
+    n_embedded = session.query(Node).filter(Node.embedding.isnot(None)).count()
+    pct_e      = int(n_embedded / n_nodes * 100) if n_nodes else 0
+    skills     = [s.name for s in session.query(Skill).all()]
+    cfg_rows   = {r.key: r.value for r in session.query(Config).all()}
+
+    since = (datetime.now() - timedelta(days=7)).timestamp()
+    recent = (
+        session.query(Node)
+        .filter(Node.mtime >= since)
+        .order_by(Node.mtime.desc())
+        .limit(8).all()
+    )
+    recent_str = "\n".join(
+        f"  - {n.title} ({datetime.fromtimestamp(n.mtime).date().isoformat() if n.mtime else '?'})"
+        for n in recent
+    ) or "  (no recent activity)"
+
+    # Top tags
+    from collections import Counter
+    tag_counts: Counter = Counter()
+    for (tags,) in session.query(Node.tags).filter(Node.tags.isnot(None)).all():
+        for t in (tags or "").split(":"):
+            t = t.strip()
+            if t and not t.startswith("code"):
+                tag_counts[t] += 1
+    top_tags = tag_counts.most_common(10)
+    top_tags_str = "\n".join(f"  - {t}  ({c})" for t, c in top_tags) \
+                   or "  (none — try: org-llm tag --apply)"
+
+    # Models
+    model_lines = []
+    for k in ("chat_model", "embed_model", "code_model", "tag_model",
+              "review_model", "fixer_model"):
+        v = cfg_rows.get(k)
+        if v:
+            model_lines.append(f"  {k}: {v}")
+    model_status = "\n".join(model_lines) or "  (no model assignments)"
+
+    # Hardware
+    try:
+        from .cloud import local_ram_gb, local_vram_gb
+        hardware_str = f"  Free RAM: {local_ram_gb():.1f} GB"
+        vram = local_vram_gb()
+        if vram:
+            hardware_str += f"  |  VRAM: {vram:.1f} GB"
+    except Exception:
+        hardware_str = "  (hardware probe unavailable)"
+
+    # Filesystem discovery
+    try:
+        from .discover import discover, suggest_code_dirs, detect_preferred_language
+        found = discover()
+        lang = detect_preferred_language()
+        code_roots = suggest_code_dirs(found)
+        d_lines = []
+        for f in found[:8]:
+            d_lines.append(f"  - {f.path}  [{f.kind}]  {f.description}")
+        if code_roots:
+            d_lines.append(f"  Suggested code roots: "
+                           f"{', '.join(str(c) for c in code_roots[:3])}")
+        if lang:
+            d_lines.append(f"  Preferred language: {lang}")
+        discover_str = "\n".join(d_lines) or "  (nothing standard found)"
+    except Exception:
+        discover_str = "  (discover unavailable)"
+
+    # Knobs
+    try:
+        knobs = _read_user_knobs()
+    except Exception:
+        knobs = []
+    knob_lines = []
+    for k in knobs:
+        name  = k.get("name", "?")
+        env   = f"ORG_LLM_{name.upper()}_LEVEL"
+        level = os.environ.get(env, str(k.get("default_level", 2)))
+        knob_lines.append(f"  - {name}  (level: {level})")
+    knobs_str = ""
+    if knob_lines:
+        knobs_str = "\n\nUSER THEME KNOBS\n" + "\n".join(knob_lines)
+    # Built-in dials too
+    try:
+        from .ui import trek_level, commie_level, queer_level
+        levels = (("trek",   trek_level()),
+                  ("commie", commie_level()),
+                  ("queer",  queer_level()))
+        active = [f"  - {n}  (level: {l})" for n, l in levels if l > 0]
+        if active:
+            if not knobs_str:
+                knobs_str = "\n\nACTIVE THEME DIALS"
+            else:
+                knobs_str += "\n\nACTIVE THEME DIALS"
+            knobs_str += "\n" + "\n".join(active)
+    except Exception:
+        pass
+
+    return {
+        "org_dir": str(org_dir), "ollama_url": ollama_url,
+        "n_files": n_files, "n_nodes": n_nodes, "n_embedded": n_embedded,
+        "pct_e": pct_e, "skills": skills,
+        "skill_str": ", ".join(skills) if skills else "none — run org-llm skill-index",
+        "recent_str": recent_str, "top_tags_str": top_tags_str,
+        "model_status": model_status, "hardware_str": hardware_str,
+        "discover_str": discover_str, "knobs_str": knobs_str,
+    }
+
+
+def _opencode_lcars_theme() -> dict:
+    """LCARS-themed opencode theme using the same palette as the CLI.
+
+    Best-effort: opencode's theme schema is JSON. We provide both light
+    and dark variants so opencode can pick based on its own theme mode.
+    """
+    from .ui import DARK_PALETTE, LIGHT_PALETTE
+
+    def _t(p: dict) -> dict:
+        return {
+            "primary":   p["lcars1"],   # signature LCARS orange
+            "secondary": p["lcars2"],   # purple
+            "accent":    p["lcars3"],   # blue
+            "info":      p["lcars3"],
+            "warning":   p["lcars1"],
+            "error":     p.get("pride.red", "#FF4444"),
+            "success":   p.get("pride.green", "#44CC44"),
+        }
+
+    return {
+        "$schema": "https://opencode.ai/theme.json",
+        "name":    "org-llm-lcars",
+        "description": "LCARS-themed colour scheme matching org-llm CLI",
+        "defs": {
+            "lcars1_dark":   DARK_PALETTE["lcars1"],
+            "lcars2_dark":   DARK_PALETTE["lcars2"],
+            "lcars3_dark":   DARK_PALETTE["lcars3"],
+            "lcars1_light":  LIGHT_PALETTE["lcars1"],
+            "lcars2_light":  LIGHT_PALETTE["lcars2"],
+            "lcars3_light":  LIGHT_PALETTE["lcars3"],
+        },
+        "theme": {
+            "primary":   {"dark": DARK_PALETTE["lcars1"], "light": LIGHT_PALETTE["lcars1"]},
+            "secondary": {"dark": DARK_PALETTE["lcars2"], "light": LIGHT_PALETTE["lcars2"]},
+            "accent":    {"dark": DARK_PALETTE["lcars3"], "light": LIGHT_PALETTE["lcars3"]},
+            "info":      {"dark": DARK_PALETTE["lcars3"], "light": LIGHT_PALETTE["lcars3"]},
+            "warning":   {"dark": DARK_PALETTE["lcars1"], "light": LIGHT_PALETTE["lcars1"]},
+            "error":     {"dark": DARK_PALETTE.get("pride.red",   "#FF4444"),
+                           "light": LIGHT_PALETTE.get("pride.red", "#CC2222")},
+            "success":   {"dark": DARK_PALETTE.get("pride.green", "#44CC44"),
+                           "light": LIGHT_PALETTE.get("pride.green", "#228822")},
+        },
+        # Flat fallback in case the consuming opencode build expects a
+        # mode-less map under the same key.
+        "colors": _t(DARK_PALETTE),
+    }
+
+
+def _opencode_slash_commands(workspace: str) -> dict:
+    """Return {name: markdown-body} for slash commands written to
+    .opencode/command/<name>.md. opencode treats these as stored prompts
+    the user can invoke with /<name>."""
+
+    cmds = {
+        "discover": (
+            "---\n"
+            "description: Probe the filesystem and report what org-llm can use\n"
+            "---\n"
+            "Call the `discover_filesystem` MCP tool and present the inventory\n"
+            "to me. Highlight: vault, repo roots with code, and any dotfiles\n"
+            "or Emacs configs that could be MCP grant roots. End with one\n"
+            "concrete next-step suggestion (code-index, grant-root, or none).\n"
+        ),
+        "recent": (
+            "---\n"
+            "description: Show what I've been working on lately\n"
+            "---\n"
+            "Call `list_recent_nodes` (last 14 days) and `recent_files`\n"
+            "(last 7 days). Group by date; for each date list the notes\n"
+            "and files modified. End with a one-line summary of themes\n"
+            "you notice in the activity.\n"
+        ),
+        "health": (
+            "---\n"
+            "description: Run a concise org-llm health check\n"
+            "---\n"
+            "Call `doctor_health` and `performance_status`. Surface anything\n"
+            "concerning (downgrade markers, OOM risk, unreachable Ollama,\n"
+            "missing models). If everything is healthy, say so in one line.\n"
+        ),
+        "stats": (
+            "---\n"
+            "description: Vault + corpus statistics\n"
+            "---\n"
+            "Call `get_vault_stats` and `list_models`. Format as two short\n"
+            "tables. End with: total nodes, % embedded, top-3 pulled models.\n"
+        ),
+        "tags": (
+            "---\n"
+            "description: Show the tag landscape of my vault\n"
+            "---\n"
+            "Use `search_notes` and `list_nodes_by_tag` to survey my top\n"
+            "tags. Show the top 15 tags with counts. Note any clusters\n"
+            "or themes. Suggest one tag that could be split or merged.\n"
+        ),
+        "tutor": (
+            "---\n"
+            "description: Walk me through an org-llm tutor step\n"
+            "---\n"
+            "Call `list_tutor_steps`, then ask which step I want.\n"
+            "When I name one, call `get_tutor_step` and explain it\n"
+            "conversationally — not as a copy-paste of the original.\n"
+            "Cite specific commands I should try.\n"
+        ),
+        "code": (
+            "---\n"
+            "description: Search my code corpus for a topic\n"
+            "---\n"
+            "Ask me what I'm looking for, then call `code_search` with\n"
+            "the query. If I mention a language, pass it as the `lang`\n"
+            "argument. Show top 5 hits with file path and one-line summary\n"
+            "drawn from `read_file` of the most relevant match.\n"
+        ),
+    }
+
+    if workspace == "researcher":
+        cmds["explore"] = (
+            "---\n"
+            "description: Free-form vault exploration\n"
+            "---\n"
+            "Pick a tag from my top-10, call `list_nodes_by_tag` for it,\n"
+            "skim 3 notes via `get_node`, and surface a connection or\n"
+            "open question I hadn't named explicitly.\n"
+        )
+    elif workspace == "scribe":
+        cmds["capture"] = (
+            "---\n"
+            "description: Capture an idea with consistent tagging\n"
+            "---\n"
+            "Ask me what I want to capture. Propose a title and 2-3 tags\n"
+            "drawn from my existing TOP TAGS. After I confirm, call\n"
+            "`capture_note` and report the new node ID.\n"
+        )
+    elif workspace == "engineer":
+        cmds["repo"] = (
+            "---\n"
+            "description: Brief me on one of my repos\n"
+            "---\n"
+            "Ask which repo (offer suggestions from `discover_filesystem`).\n"
+            "Then `code_search` for entry points (cli, main, init), summarise\n"
+            "the architecture in 5-7 bullets, and name one thing that looks\n"
+            "interesting or out of place.\n"
+        )
+
+    return cmds
+
+
 @app.command()
 def launch(
+    workspace:  Annotated[str,  typer.Option("--workspace",  "-w",
+                help="Workspace flavor: all | researcher | scribe | engineer")] = "all",
     model:      Annotated[str,  typer.Option("--model",      "-m",
                 help="Override chat model (default: chat_model from config)")] = "",
     no_context: Annotated[bool, typer.Option("--no-context", "-N",
                 help="Skip vault context injection into system prompt")] = False,
+    no_theme:   Annotated[bool, typer.Option("--no-theme",   "-T",
+                help="Skip writing LCARS theme to .opencode/themes/")] = False,
+    no_commands:Annotated[bool, typer.Option("--no-commands","-C",
+                help="Skip writing slash-commands to .opencode/command/")] = False,
     dry_run:    Annotated[bool, typer.Option("--dry-run",    "-n",
                 help="Print opencode config only, do not launch")] = False,
 ):
-    """Launch opencode as an interactive org-roam workspace with vault context and MCP tools."""
+    """Launch opencode as an interactive org-roam workspace.
+
+    Sets up a project-local .opencode/ directory with:
+      - .opencode.json — model, MCP, instructions, theme reference
+      - themes/lcars.json — LCARS palette matching the CLI
+      - command/<name>.md — slash-commands (/discover, /recent, /health,
+        /stats, /tags, /tutor, /code, plus workspace-specific extras)
+
+    Workspaces shape the system prompt and slash-command set:
+      all         — full toolbox (default)
+      researcher  — read-heavy: search/ask/get_node, no captures
+      scribe      — capture-heavy: capture_note + skills emphasis
+      engineer    — code-corpus + repos focus, code_search emphasis
+    """
     import json
     import os
     import shutil
@@ -4844,6 +5239,11 @@ def launch(
     from .db         import Node, File
     from .skills     import Skill
 
+    if workspace not in OPENCODE_WORKSPACES:
+        red_alert(f"Unknown workspace {workspace!r}. "
+                  f"Choose one of: {', '.join(OPENCODE_WORKSPACES)}")
+        raise typer.Exit(1)
+
     # ── Locate or install opencode ────────────────────────────────────────────
     oc_path = _opencode_bin()
     if not dry_run and oc_path is None:
@@ -4853,74 +5253,37 @@ def launch(
             raise typer.Exit(1)
     oc_bin = str(oc_path) if oc_path else "opencode"
 
-    # ── Gather vault context ──────────────────────────────────────────────────
+    # ── Gather rich vault + filesystem + theme context ─────────────────────
     engine = _engine()
     with get_session(engine) as session:
-        org_dir    = _org_dir(session)
-        ollama_url = _ollama_url(session)
-        chat_mdl   = model or _cfg(session, "chat_model") or MODEL_DEFAULTS["chat_model"]
-        n_files    = session.query(File).count()
-        n_nodes    = session.query(Node).count()
-        n_embedded = session.query(Node).filter(Node.embedding.isnot(None)).count()
-        pct_e      = int(n_embedded / n_nodes * 100) if n_nodes else 0
-        skill_names = [s.name for s in session.query(Skill).all()]
-        from datetime import datetime, timedelta
-        since  = (datetime.now() - timedelta(days=7)).timestamp()
-        recent = [
-            (n.title, n.mtime)
-            for n in session.query(Node)
-            .filter(Node.mtime >= since)
-            .order_by(Node.mtime.desc())
-            .limit(8).all()
-        ]
+        ctx = _opencode_pre_flight_context(session)
+        chat_mdl = model or _cfg(session, "chat_model") or MODEL_DEFAULTS["chat_model"]
 
+    org_dir     = Path(ctx["org_dir"]).expanduser()
+    ollama_url  = ctx["ollama_url"]
     org_llm_dir = Path(__file__).parent.parent.resolve()
 
     # ── Build system prompt ───────────────────────────────────────────────────
-    recent_str = "\n".join(
-        f"  - {title} ({datetime.fromtimestamp(mtime).date().isoformat() if mtime else '?'})"
-        for title, mtime in recent
-    ) or "  (no recent activity)"
-    skill_str = ", ".join(skill_names) if skill_names else "none — run org-llm skill-index"
-
     if no_context:
         instructions = (
-            "You are an intelligent assistant connected to an org-roam knowledge base "
-            "via org-llm MCP tools. Use the tools to help with note management, Q&A, "
-            "and org-babel automation workflows."
+            "You are an intelligent assistant connected to an org-roam "
+            "knowledge base via org-llm MCP tools. Use them to help with "
+            "note management, Q&A, code search, and org-babel workflows."
         )
     else:
-        instructions = f"""You are an intelligent personal assistant and knowledge worker with full access to the user's org-roam second brain via org-llm MCP tools.
+        instructions = _opencode_workspace_prompt(
+            workspace,
+            n_files=ctx["n_files"], n_nodes=ctx["n_nodes"],
+            n_embedded=ctx["n_embedded"], pct_e=ctx["pct_e"],
+            org_dir=ctx["org_dir"], skill_str=ctx["skill_str"],
+            recent_str=ctx["recent_str"], top_tags_str=ctx["top_tags_str"],
+            model_status=ctx["model_status"],
+            discover_str=ctx["discover_str"],
+            knobs_str=ctx["knobs_str"],
+            hardware_str=ctx["hardware_str"],
+        )
 
-VAULT SUMMARY
-  Location: {org_dir}
-  Files:    {n_files}  |  Nodes: {n_nodes}  |  Embedded: {n_embedded}/{n_nodes} ({pct_e}%)
-  Skills:   {skill_str}
-
-RECENT ACTIVITY (last 7 days)
-{recent_str}
-
-AVAILABLE MCP TOOLS
-  search_notes(query, limit, keyword)  — semantic or keyword search over all notes
-  ask_notes(question, top_k)           — RAG Q&A grounded in org notes
-  capture_note(title, body, file)      — add a new note to the vault
-  get_node(title)                      — fetch full note content by title
-  list_nodes_by_tag(tag, limit)        — browse notes by tag
-  list_recent_nodes(days)              — see recent activity
-  get_vault_stats()                    — vault statistics
-  list_skills()                        — available org-babel skill workflows
-  run_skill(name, input)               — execute a skill workflow
-  tangle_file(file_path)               — org-babel-tangle via emacsclient
-  get_config()                         — current model/config assignments
-
-BEHAVIOUR
-  - Always call search_notes or ask_notes before answering questions about the user's notes
-  - When saving something, use capture_note and confirm file path and ID
-  - When discussing automation, check list_skills first
-  - Cite note titles when drawing from the knowledge base
-  - Use tangle_file to materialise org-babel workflows after editing"""
-
-    # ── Write .opencode.json ──────────────────────────────────────────────────
+    # ── Build .opencode.json ──────────────────────────────────────────────────
     oc_config: dict = {
         "model": f"ollama/{chat_mdl}",
         "provider": {
@@ -4941,18 +5304,37 @@ BEHAVIOUR
             }
         },
     }
+    if not no_theme:
+        oc_config["theme"] = "org-llm-lcars"
 
-    config_path = org_dir / ".opencode.json"
+    config_path  = org_dir / ".opencode.json"
+    theme_path   = org_dir / ".opencode" / "themes"  / "org-llm-lcars.json"
+    command_dir  = org_dir / ".opencode" / "command"
+
+    slash_cmds = _opencode_slash_commands(workspace) if not no_commands else {}
 
     if dry_run:
         console.print()
         console.rule("[lcars1]opencode config (dry-run)[/lcars1]")
         console.print(Syntax(json.dumps(oc_config, indent=2), "json", theme="monokai"))
-        console.rule()
-        on_screen(f"Would write to: {config_path}")
+        console.rule(f"[lcars2]Workspace: {workspace}[/lcars2]")
+        on_screen(f"Would write config:   {config_path}")
+        if not no_theme:
+            on_screen(f"Would write theme:    {theme_path}")
+        if slash_cmds:
+            on_screen(f"Would write commands: {command_dir}/  "
+                      f"({', '.join('/' + n for n in slash_cmds)})")
         return
 
+    # ── Write all files ───────────────────────────────────────────────────────
     config_path.write_text(json.dumps(oc_config, indent=2))
+    if not no_theme:
+        theme_path.parent.mkdir(parents=True, exist_ok=True)
+        theme_path.write_text(json.dumps(_opencode_lcars_theme(), indent=2))
+    if slash_cmds:
+        command_dir.mkdir(parents=True, exist_ok=True)
+        for name, body in slash_cmds.items():
+            (command_dir / f"{name}.md").write_text(body)
 
     # ── Launch banner ─────────────────────────────────────────────────────────
     solidarity()
@@ -4961,15 +5343,21 @@ BEHAVIOUR
     tbl = Table(box=None, pad_edge=False, show_header=False)
     tbl.add_column("Key",   style="lcars1", width=20)
     tbl.add_column("Value", style="lcars2")
+    tbl.add_row("Workspace",   workspace)
     tbl.add_row("Model",       f"{chat_mdl}  (Ollama)")
     tbl.add_row("Vault",       str(org_dir))
-    tbl.add_row("Nodes",       f"{n_nodes}  ({pct_e}% embedded)")
-    tbl.add_row("Skills",      f"{len(skill_names)} registered")
+    tbl.add_row("Nodes",       f"{ctx['n_nodes']}  ({ctx['pct_e']}% embedded)")
+    tbl.add_row("Skills",      f"{len(ctx['skills'])} registered")
     tbl.add_row("MCP server",  "org-llm mcp  (stdio)")
+    if not no_theme:
+        tbl.add_row("Theme",   "org-llm-lcars (LCARS palette)")
+    if slash_cmds:
+        tbl.add_row("Commands", "/" + ", /".join(slash_cmds.keys()))
     tbl.add_row("Config",      str(config_path))
     console.print(Panel(
         tbl,
-        title="[lcars1]org-llm  ×  opencode  workspace[/lcars1]",
+        title=f"[lcars1]org-llm  ×  opencode  workspace[/lcars1]  "
+              f"[dim]({workspace})[/dim]",
         border_style="lcars2",
         padding=(1, 2),
     ))

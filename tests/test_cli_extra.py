@@ -223,6 +223,74 @@ class TestLaunchDryRun:
         assert r.exit_code == 0
 
 
+class TestLaunchWorkspaces:
+    """Workspace presets shape the system prompt + slash-command set."""
+    def test_default_workspace_is_all(self, populated_org):
+        r = runner.invoke(app, ["launch", "--dry-run"])
+        assert r.exit_code == 0
+        flat = " ".join(r.output.split())
+        assert "Workspace: all" in flat
+
+    def test_researcher_workspace(self, populated_org):
+        r = runner.invoke(app, ["launch", "--dry-run", "--workspace", "researcher"])
+        assert r.exit_code == 0
+        flat = " ".join(r.output.split())
+        assert "Workspace: researcher" in flat
+        # Research workspace should add /explore command
+        assert "/explore" in r.output
+
+    def test_scribe_workspace(self, populated_org):
+        r = runner.invoke(app, ["launch", "--dry-run", "--workspace", "scribe"])
+        assert r.exit_code == 0
+        assert "/capture" in r.output
+
+    def test_engineer_workspace(self, populated_org):
+        r = runner.invoke(app, ["launch", "--dry-run", "--workspace", "engineer"])
+        assert r.exit_code == 0
+        assert "/repo" in r.output
+
+    def test_invalid_workspace_errors(self, populated_org):
+        r = runner.invoke(app, ["launch", "--dry-run", "--workspace", "wizard"])
+        assert r.exit_code == 1
+        assert "Unknown workspace" in r.output
+
+    def test_short_flag(self, populated_org):
+        r = runner.invoke(app, ["launch", "-n", "-w", "scribe"])
+        assert r.exit_code == 0
+
+
+class TestOpenCodeHelpers:
+    """Theme + slash-command generators are pure — test directly."""
+
+    def test_lcars_theme_has_palette(self):
+        from org_llm.cli import _opencode_lcars_theme
+        t = _opencode_lcars_theme()
+        assert t["name"] == "org-llm-lcars"
+        assert "primary" in t["theme"]
+        # LCARS orange should be in the palette somewhere.
+        assert any("FF9900" in str(v) or "B36300" in str(v)
+                   for v in t["theme"].values())
+
+    def test_default_slash_commands(self):
+        from org_llm.cli import _opencode_slash_commands
+        cmds = _opencode_slash_commands("all")
+        for required in ("discover", "recent", "health", "stats",
+                          "tags", "tutor", "code"):
+            assert required in cmds
+            assert "description:" in cmds[required]
+
+    def test_workspace_specific_commands(self):
+        from org_llm.cli import _opencode_slash_commands
+        assert "explore" in _opencode_slash_commands("researcher")
+        assert "capture" in _opencode_slash_commands("scribe")
+        assert "repo"    in _opencode_slash_commands("engineer")
+        # 'all' workspace gets none of the workspace-specific extras.
+        all_cmds = _opencode_slash_commands("all")
+        assert "explore" not in all_cmds
+        assert "capture" not in all_cmds
+        assert "repo"    not in all_cmds
+
+
 class TestClaudeDryRun:
     """Regression test: claude used to crash with TypeError on n.mtime[:10]."""
     def test_dry_run_does_not_crash_with_recent_nodes(self, populated_org):

@@ -85,10 +85,15 @@ class TestServerBuilds:
     def test_expected_tools_registered(self, server):
         names = set(server._tool_manager._tools)
         expected = {
+            # original toolset
             "search_notes", "ask_notes", "capture_note", "get_node",
             "list_nodes_by_tag", "list_recent_nodes", "get_vault_stats",
             "list_skills", "run_skill", "tangle_file", "get_config",
             "list_tutor_steps", "get_tutor_step",
+            # opencode-parity additions
+            "set_config", "discover_filesystem", "doctor_health",
+            "performance_status", "index_vault", "embed_pending",
+            "code_search", "recent_files", "list_models",
         }
         assert expected <= names, f"Missing tools: {expected - names}"
 
@@ -340,4 +345,102 @@ class TestStdioInitialize:
         assert resp["result"]["serverInfo"]["name"] == "org-llm"
         # tools capability advertised
         assert "tools" in resp["result"]["capabilities"]
+
+
+# ── opencode-parity tools ─────────────────────────────────────────────────────
+
+class TestSetConfig:
+    def test_allow_listed_key_writes(self, server, mcp_db):
+        out = _tool(server, "set_config")(key="chat_model", value="qwen2.5:3b")
+        assert "Updated" in out
+        # confirm DB actually updated
+        engine = make_engine(mcp_db)
+        with get_session(engine) as s:
+            assert s.get(Config, "chat_model").value == "qwen2.5:3b"
+
+    def test_refuses_non_allow_listed_key(self, server):
+        out = _tool(server, "set_config")(key="cloud_api_key", value="leaked")
+        assert "Refused" in out
+        assert "allow-list" in out
+
+    def test_refuses_credentials_keys(self, server):
+        for key in ("openai_api_key", "anthropic_api_key", "user_theme_knobs"):
+            out = _tool(server, "set_config")(key=key, value="x")
+            assert "Refused" in out, f"Should refuse {key}"
+
+
+class TestDiscoverFilesystem:
+    def test_returns_inventory(self, server):
+        # Real filesystem, not mocked — assert structural shape only.
+        out = _tool(server, "discover_filesystem")()
+        assert isinstance(out, str) and out
+        # Either found things, or honestly says it didn't.
+        assert ("INVENTORY" in out) or ("unusual layout" in out)
+
+
+class TestDoctorHealth:
+    def test_reports_db_ok(self, server):
+        out = _tool(server, "doctor_health")()
+        assert "DB: ok" in out
+        assert "files" in out
+
+
+class TestPerformanceStatus:
+    def test_returns_string(self, server):
+        out = _tool(server, "performance_status")()
+        assert isinstance(out, str) and out
+        # Should mention RAM in any healthy probe path.
+        assert ("RAM" in out) or ("performance check failed" in out)
+
+
+class TestRecentFiles:
+    def test_includes_recent(self, server):
+        out = _tool(server, "recent_files")(days=7)
+        assert "recent.org" in out
+
+    def test_excludes_old(self, server):
+        out = _tool(server, "recent_files")(days=7)
+        assert "old.org" not in out
+
+
+class TestCodeSearch:
+    def test_handles_no_code_corpus(self, server):
+        # No code-tagged nodes in fixture; either we return "No code matches"
+        # cleanly, or the underlying vector_search errors (e.g. Ollama down or
+        # dim mismatch) — both must surface as a non-crashing string.
+        out = _tool(server, "code_search")(query="anything", limit=5)
+        assert isinstance(out, str) and out
+        assert ("No code matches" in out) or ("Search failed" in out)
+
+
+class TestListModels:
+    def test_returns_string(self, server):
+        # If Ollama isn't running it returns an error string; either way it
+        # must not raise.
+        out = _tool(server, "list_models")()
+        assert isinstance(out, str) and out
+
+
+class TestIndexVault:
+    def test_handles_missing_org_dir(self, server, mcp_db):
+        # Wipe org_dir from config so we hit the explicit error path.
+        engine = make_engine(mcp_db)
+        with get_session(engine) as s:
+            row = s.get(Config, "org_dir")
+            if row:
+                s.delete(row); s.commit()
+        out = _tool(server, "index_vault")()
+        assert "org_dir not configured" in out
+
+
+class TestEmbedPending:
+    def test_reports_when_nothing_pending(self, server, mcp_db):
+        # Mark all nodes as already embedded.
+        engine = make_engine(mcp_db)
+        with get_session(engine) as s:
+            for n in s.query(Node).filter(Node.embedding.is_(None)).all():
+                n.embedding = to_blob([0.5, 0.5, 0.0])
+            s.commit()
+        out = _tool(server, "embed_pending")()
+        assert "Nothing to embed" in out
 # test_mcp_server.py:1 ends here
