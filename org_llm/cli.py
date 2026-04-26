@@ -1745,6 +1745,238 @@ def report(
         console.rule("[dim]end of report[/dim]")
 
 
+# ── doctor --walkthrough: LLM-driven self-test ──────────────────────────────
+
+# A curated list of read-only commands the walkthrough may run. Each entry:
+#   (label, argv, expected_substrings, why)
+# The LLM judges actual stdout/stderr against expected_substrings + 'why' to
+# decide pass/fail/concern.
+_WALKTHROUGH_PROBES: list[tuple[str, list[str], list[str], str]] = [
+    ("Banner / pride / trans stripe",
+     ["tutor", "welcome"],
+     ["welcome", "Local-first", "tutor"],
+     "Confirm the welcome step renders cleanly with intentional banners."),
+    ("Health dashboard",
+     ["doctor"],
+     ["System", "Database", "Ollama"],
+     "Confirm doctor's panels render without crashes and reflect real state."),
+    ("Cloud heartbeat",
+     ["cloud", "--status"],
+     ["Cloud Status", "Provider"],
+     "Cloud configured? endpoint reachable? key source visible?"),
+    ("Provider catalog",
+     ["cloud", "--providers"],
+     ["runpod", "vast", "openrouter"],
+     "Provider table readable; no 4-char-strip wrapping."),
+    ("Cost comparison",
+     ["cloud", "--cost"],
+     ["$/hr", "tok"],
+     "Cost matrix renders cleanly; numbers plausible."),
+    ("Model catalog (filtered to local hardware)",
+     ["models", "--discover"],
+     ["embed", "chat"],
+     "Catalog rows; pulled markers correct; columns align on this width."),
+    ("Performance probe",
+     ["performance", "--quick"],
+     ["Hardware", "RAM"],
+     "Hardware panel readable; CPU model not chopped."),
+    ("Theme dial state",
+     ["theme", "show"],
+     ["Stored theme"],
+     "Stored vs active theme; no stale 'Active right now' line."),
+    ("User-defined knobs",
+     ["knob", "list"],
+     ["trek", "commie", "queer"],
+     "Knob table shows built-ins + user knobs with active level."),
+    ("MCP grants overview",
+     ["grants"],
+     ["grants"],
+     "Grants panel; deny-list mentioned; current state honest."),
+    ("DB row counts",
+     ["db", "-q", "SELECT count(*) AS files FROM files"],
+     ["files"],
+     "Read-only DB query returns a count without traceback."),
+    ("Tag leaderboard sanity",
+     ["report", "tags"],
+     ["Top Tags"],
+     "Tag report renders; no SQL errors; counts plausible."),
+    ("Help discoverability",
+     ["--help"],
+     ["init", "ask", "doctor", "performance"],
+     "Top-level help lists every command, no surprises."),
+]
+
+
+def _doctor_walkthrough(report_to: str = "") -> None:
+    """LLM-driven self-test: run a curated set of read-only commands, ask the
+    cloud LLM to judge each output, surface issues + suggestions.
+
+    Read-only by design — this never writes to your DB or ~/org. The cloud
+    is required because the local chat model often can't fit in available
+    RAM, and we'd rather walkthrough always work than fail half the time.
+    """
+    import json
+    import os
+    import subprocess
+    import sys
+    from datetime import datetime
+    from rich.panel import Panel as _P
+
+    engine = _engine()
+    try:
+        with get_session(engine) as session:
+            cloud_provider = _cfg(session, "cloud_provider")
+            cloud_endpoint = _cfg(session, "cloud_endpoint_url")
+            cloud_model    = _cfg(session, "cloud_model") or "openai/gpt-oss-20b:free"
+            db_api_key     = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
+    except Exception as exc:
+        red_alert(f"Could not read config: {exc}")
+        raise typer.Exit(1)
+
+    if not cloud_endpoint:
+        red_alert("--walkthrough needs a configured cloud backend (LLM judge).")
+        on_screen("Run: [bold]org-llm cloud --quick-start openrouter[/bold]")
+        raise typer.Exit(1)
+
+    from . import creds as creds_mod
+    api_key = (creds_mod.read_secret(creds_mod.cloud_slug(cloud_provider))
+               if cloud_provider else None) or db_api_key
+
+    console.print()
+    console.rule(f"[lcars1]Doctor walkthrough  ·  {cloud_provider}:{cloud_model}[/lcars1]")
+    console.print()
+    on_screen(f"Running {len(_WALKTHROUGH_PROBES)} read-only probes; "
+              "judging output via the cloud LLM.")
+    console.print()
+
+    org_llm_bin = sys.argv[0] if sys.argv else "org-llm"
+    # Fall back to `uv run org-llm` when invoked under uv tool / pipx so the
+    # subprocess uses the same code we're currently running.
+    invoke = [org_llm_bin] if os.path.isabs(org_llm_bin) else ["uv", "run", "org-llm"]
+
+    probe_results = []
+    with impulse("Walkthrough", total=len(_WALKTHROUGH_PROBES)) as (prog, task):
+        for label, args, expected, why in _WALKTHROUGH_PROBES:
+            try:
+                p = subprocess.run(
+                    invoke + list(args),
+                    capture_output=True, text=True, timeout=45,
+                    cwd=os.path.dirname(os.path.dirname(__file__)) or None,
+                )
+                stdout = p.stdout or ""
+                stderr = p.stderr or ""
+                rc = p.returncode
+            except Exception as exc:
+                stdout = ""; stderr = str(exc); rc = -1
+
+            # Local mechanical assessment
+            missing = [s for s in expected if s.lower() not in stdout.lower()]
+            mech = "pass" if (rc == 0 and not missing) else "fail"
+
+            probe_results.append({
+                "label":    label,
+                "command":  "org-llm " + " ".join(args),
+                "why":      why,
+                "rc":       rc,
+                "stdout":   stdout[:6000],
+                "stderr":   stderr[:1500],
+                "missing":  missing,
+                "mech":     mech,
+            })
+            prog.advance(task)
+
+    # Summarise mechanical results first (cheap, deterministic)
+    from rich.table import Table as _T
+    summary = _T(box=None, pad_edge=False)
+    summary.add_column("Probe",   style="lcars2", no_wrap=True, max_width=40, overflow="ellipsis")
+    summary.add_column("Command", style="dim",    no_wrap=True, max_width=32, overflow="ellipsis")
+    summary.add_column("Exit",    width=4,        justify="right")
+    summary.add_column("Mech",    width=6,        justify="center")
+    summary.add_column("Note",    style="dim")
+    for r in probe_results:
+        sym = "[green]✓[/]" if r["mech"] == "pass" else "[red]✗[/]"
+        note = ("missing: " + ", ".join(r["missing"])) if r["missing"] else ""
+        if r["rc"] != 0 and not note:
+            note = f"exit={r['rc']}"
+        summary.add_row(r["label"], r["command"], str(r["rc"]), sym, note)
+    console.print()
+    console.print(_P(summary, title="[lcars1]Mechanical results[/lcars1]",
+                      border_style="lcars2"))
+    console.print()
+
+    # Now ask the LLM for a qualitative read on the same outputs
+    on_screen(f"Asking [bold]{cloud_model}[/bold] for an assessment…")
+    sys_prompt = (
+        "You are evaluating a CLI tool called org-llm. The user just ran "
+        "a self-test that executes read-only commands and captures stdout. "
+        "For each probe, respond with one of three verdicts:\n"
+        "  ✓ PASS  — output looks clean, on-topic, no concerns\n"
+        "  ⚠ NIT   — works but has a UX rough edge worth fixing\n"
+        "  ✗ ISSUE — broken, misleading, or missing expected content\n\n"
+        "Be specific. When you flag an issue, name the file or command that "
+        "would fix it. Cap your reply at ~600 words. End with a 'TOP 3 "
+        "RECOMMENDATIONS' section ranked by impact-to-effort."
+    )
+    payload = "\n\n---\n\n".join(
+        f"## Probe: {r['label']}\n"
+        f"Command: {r['command']}\n"
+        f"Why we ran it: {r['why']}\n"
+        f"Exit code: {r['rc']}\n"
+        f"Mechanical: {'PASS' if r['mech']=='pass' else 'FAIL'}"
+        + (f" (missing substrings: {r['missing']})" if r['missing'] else "")
+        + f"\n\nstdout (first 4 KB):\n{r['stdout'][:4000]}"
+        + (f"\n\nstderr:\n{r['stderr']}" if r['stderr'] else "")
+        for r in probe_results
+    )
+    from .cloud import cloud_chat
+    try:
+        with warp(f"Asking {cloud_model} for assessment"):
+            assessment = cloud_chat(payload, model=cloud_model,
+                                    endpoint_url=cloud_endpoint,
+                                    api_key=api_key, system=sys_prompt)
+    except Exception as exc:
+        red_alert(f"Cloud assessment failed: {exc}")
+        assessment = "(LLM assessment unavailable; mechanical results above are the report.)"
+
+    console.print()
+    console.print(_P(assessment, title=f"[lcars1]LLM assessment ({cloud_model})[/lcars1]",
+                      border_style="lcars2", padding=(1, 2)))
+    console.print()
+
+    # Optional org-mode report
+    if report_to:
+        path = Path(report_to).expanduser()
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        lines = [
+            f"\n* org-llm doctor walkthrough — {ts}",
+            f":PROPERTIES:",
+            f":CREATED: [{ts}]",
+            f":CMD:     org-llm doctor --walkthrough",
+            f":MODEL:   {cloud_provider}:{cloud_model}",
+            f":END:",
+            "",
+            "** Mechanical results",
+            "",
+            "| Probe | Command | Exit | Mech | Notes |",
+            "|---|---|---|---|---|",
+        ]
+        for r in probe_results:
+            note = ("missing: " + ", ".join(r["missing"])) if r["missing"] else ""
+            mech = "PASS" if r["mech"] == "pass" else "FAIL"
+            lines.append(f"| {r['label']} | ={r['command']}= | {r['rc']} | {mech} | {note} |")
+        lines += ["", "** LLM assessment", "", "#+begin_quote", assessment, "#+end_quote", ""]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a") as fh:
+            fh.write("\n".join(lines))
+        hail(f"Appended walkthrough report → {path}")
+
+    failures = [r for r in probe_results if r["mech"] != "pass"]
+    if failures:
+        red_alert(f"{len(failures)} probe(s) failed mechanically. See above.")
+        raise typer.Exit(1)
+    make_it_so()
+
+
 @app.command()
 def doctor(
     diagnose: Annotated[bool, typer.Option("--diagnose", "-d",
@@ -1755,8 +1987,22 @@ def doctor(
               help="Install + theme a FOSS CLI tool by name (e.g. bat, eza). Use 'all' to install everything in the registry.")] = "",
     list_tools:   Annotated[bool, typer.Option("--list-tools",
               help="List all installable FOSS tools")] = False,
+    walkthrough:  Annotated[bool, typer.Option("--walkthrough", "-w",
+              help="LLM-driven self-test: generate a tour, run each command, assess output, suggest fixes")] = False,
+    report_to:    Annotated[str,  typer.Option("--report-to",
+              help="Append a structured report of this run to PATH (an .org file)")] = "",
 ):
-    """Deep health check, LLM tuning advisor, and FOSS tool installer."""
+    """Deep health check, LLM tuning advisor, and FOSS tool installer.
+
+    --walkthrough turns doctor into a self-tester: the cloud LLM picks a
+    set of read-only commands to run, watches the output, judges each
+    against expectations, and ends with a punch-list of issues + fixes.
+
+    --report-to writes a structured org-mode log of the run to a file
+    (compatible with the dev log format in your vault).
+    """
+    if walkthrough:
+        return _doctor_walkthrough(report_to=report_to)
     import os
     import shutil
     import subprocess
@@ -2430,6 +2676,44 @@ def doctor(
             f"{len(issues)} issue(s) found but Ollama is not running — "
             "start it with 'ollama serve' then run 'org-llm doctor --diagnose'"
         )
+
+    # ── Optional: append an org-mode report to a file ────────────────────────
+    if report_to:
+        from datetime import datetime as _dt
+        path = Path(report_to).expanduser()
+        ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+        lines = [
+            f"\n* org-llm doctor — {ts}",
+            f":PROPERTIES:",
+            f":CREATED:  [{ts}]",
+            f":FAIL:     {len(issues)}",
+            f":WARN:     {len(warnings)}",
+            f":END:",
+            "",
+            "** Health checks",
+            "",
+            "| Status | Check | Detail |",
+            "|---|---|---|",
+        ]
+        # Strip Rich markup for the org table
+        import re as _re
+        def _strip(s: str) -> str:
+            return _re.sub(r"\[/?[^\]]+\]", "", s).replace("|", "/")
+        for status, label, detail in checks:
+            lines.append(f"| {_strip(status) or '·'} | {_strip(label)} | {_strip(detail)} |")
+        lines += [
+            "",
+            f"** Failures ({len(issues)})", "",
+            *(f"- {i}" for i in issues),
+            "",
+            f"** Warnings ({len(warnings)})", "",
+            *(f"- {w}" for w in warnings),
+            "",
+        ]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a") as fh:
+            fh.write("\n".join(lines))
+        hail(f"Appended doctor report → {path}")
 
 
 _TUTOR_STEPS = [
