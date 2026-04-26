@@ -95,6 +95,7 @@ MODEL_DEFAULTS = {
     "text_model":     "gemma3",             # 5.4 GB — summarization, text analysis
     "embed_dim":      "768",
     "theme":          "dark",               # dark | light  (UI color mode)
+    "code_dirs":      "~/repos",            # comma-sep paths for `code-index`
     "db_version":     "1",
 }
 

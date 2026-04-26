@@ -183,6 +183,54 @@ _NUMBER_WORDS = {
 }
 
 
+_TAG_STOPWORDS = {
+    "a", "an", "the", "my", "any", "some", "this", "that", "tag", "tags",
+    "or", "and", "of", "for", "to", "from", "in", "with", "at", "on",
+    "all", "every", "specific", "particular", "given", "above",
+}
+
+
+def _parse_tag_hints(query: str) -> list[str]:
+    """Extract candidate tag names from a free-form question.
+
+    Recognises patterns like:
+      - "my politics tag"   / "the tech tag"   / "politics tag"
+      - "tagged politics"   / "tagged with X"
+      - ":lit:" / ":queer:" (literal org-mode tag syntax)
+
+    Returns a deduplicated list (in first-seen order). Whether each
+    candidate corresponds to a real tag is a separate validation step;
+    that's done by intersecting with `existing_tags(session)`.
+    """
+    if not query:
+        return []
+    import re
+    q = query.lower()
+    candidates: list[str] = []
+
+    def _add(t: str) -> None:
+        t = t.strip(":-_").strip()
+        if t and t not in _TAG_STOPWORDS and t not in candidates:
+            candidates.append(t)
+
+    # "my X tag" / "the X tag" / "X tag"
+    for m in re.finditer(r"\b(?:my|the|a|an)?\s*([a-z][a-z0-9_-]{1,40})\s+tags?\b", q):
+        _add(m.group(1))
+    # "tagged X" / "tagged with X"
+    for m in re.finditer(r"\btagged(?:\s+with)?\s+([a-z][a-z0-9_-]{1,40})\b", q):
+        _add(m.group(1))
+    # Literal org-mode tag syntax ":foo:"
+    for m in re.finditer(r":([a-z][a-z0-9_-]{1,40}):", q):
+        _add(m.group(1))
+    return candidates
+
+
+def _did_you_mean(target: str, candidates, n: int = 3) -> list[str]:
+    """Return up to n closest tags to a misspelled target via difflib."""
+    import difflib
+    return difflib.get_close_matches(target.lower(), list(candidates), n=n, cutoff=0.5)
+
+
 def _parse_days_window(query: str) -> int | None:
     """Extract a "last N days/weeks/months/years" intent from a free-form question.
 
@@ -298,6 +346,88 @@ def index(
             files, nodes = index_directory(org_dir, session)
 
     hail(f"Indexed {files} files, {nodes} nodes.")
+    make_it_so()
+
+
+@app.command(name="code-index")
+def code_index(
+    paths: Annotated[list[str], typer.Argument(
+        help="Code directories to index. Defaults to the `code_dirs` config row (~/repos).")] = None,
+    force: Annotated[bool, typer.Option("--force", help="Re-index unchanged files")] = False,
+    embed_after: Annotated[bool, typer.Option("--embed/--no-embed",
+                  help="Run `embed` after indexing so the new code is searchable immediately")] = True,
+):
+    """Index source-code repos so `ask` can answer across notes AND code.
+
+    Walks each directory, picking up files with extensions known to be
+    source-code-shaped (.py .el .rs .ts .md .org .yaml …). Skips obvious
+    noise (.git, node_modules, .venv, target, dist, …). One row per file,
+    body capped at 24 KB, tagged `code code:<lang>` so `ask` can scope.
+
+    After indexing, by default also runs `embed` against the new nodes so
+    they're semantically searchable in the same session — pass --no-embed
+    to skip and embed later.
+    """
+    from .code_index import index_code_dirs
+
+    engine = _engine()
+    if not paths:
+        with get_session(engine) as session:
+            raw = _cfg(session, "code_dirs") or "~/repos"
+        paths = [p.strip() for p in raw.split(",") if p.strip()]
+    roots = [Path(p).expanduser() for p in paths]
+
+    missing = [r for r in roots if not r.exists()]
+    if missing:
+        for m in missing:
+            red_alert(f"Path does not exist: {m}")
+        on_screen("Set code_dirs explicitly:  org-llm config code_dirs ~/path/to/code")
+        raise typer.Exit(1)
+
+    if force:
+        # Wipe rows whose file path lives under any code dir
+        from .db import File, Node
+        with get_session(engine) as session:
+            for r in roots:
+                prefix = str(r.resolve()) + "/"
+                stale = session.query(File).filter(File.path.like(f"{prefix}%")).all()
+                for f in stale:
+                    session.query(Node).filter_by(file_id=f.id).delete()
+                    session.delete(f)
+            session.commit()
+        hail("Cleared existing code index.")
+
+    def _per_dir(root, files, nodes):
+        on_screen(f"  {root}: {files} files, {nodes} nodes")
+
+    total_files = total_nodes = 0
+    with warp(f"Indexing code under {', '.join(str(r) for r in roots)}"):
+        with get_session(engine) as session:
+            total_files, total_nodes = index_code_dirs(roots, session,
+                                                        progress_cb=_per_dir)
+
+    hail(f"Indexed {total_files} code files / {total_nodes} nodes.")
+
+    # Embed the new code so `ask` can find it right away.
+    if embed_after and total_nodes > 0:
+        from .db import Node
+        from .indexer import embed_nodes
+        with get_session(engine) as session:
+            embed_mdl = _cfg(session, "embed_model") or "nomic-embed-text"
+            url       = _ollama_url(session)
+            unembedded = session.query(Node).filter(Node.embedding.is_(None)).count()
+        if unembedded > 0:
+            if not _ensure_model_pulled(embed_mdl, url):
+                red_alert(f"Could not pull embed model {embed_mdl!r}.")
+                raise typer.Exit(1)
+            with get_session(engine) as session:
+                with impulse(TREK_MSGS["embed"], total=unembedded) as (prog, task):
+                    def tick(): prog.advance(task)
+                    count = embed_nodes(session, model=embed_mdl, base_url=url,
+                                        force=False, progress_cb=tick)
+            hail(f"Embedded {count} new code nodes.")
+
+    on_screen("Try it: [bold]org-llm ask --cloud \"how does cli.py wire MCP?\"[/bold]")
     make_it_so()
 
 
@@ -417,7 +547,10 @@ def ask(
     --days 0 to disable the filter).
     """
     from .llm import chat as local_chat, embed
-    from .search import recent_in_path, recent_nodes, vector_search
+    from .search import (
+        existing_tags, nodes_with_tag,
+        recent_in_path, recent_nodes, vector_search,
+    )
 
     engine = _engine()
     try:
@@ -479,6 +612,14 @@ def ask(
         if keyword in q_lower and folder not in path_hints:
             path_hints.append(folder)
 
+    # Tag-anchored intents: "my politics tag", "tagged X", ":foo:".
+    # Validated against actual tags later (inside the session block) so we
+    # can also surface "did you mean…" hints when the user names a tag that
+    # doesn't exist.
+    tag_candidates = _parse_tag_hints(query)
+    valid_tags: list[str] = []
+    invalid_tag_suggestions: dict[str, list[str]] = {}
+
     with warp(TREK_MSGS["ask"] + " — retrieving context"):
         try:
             with get_session(engine) as session:
@@ -513,6 +654,31 @@ def ask(
                         fresh_path.append(r); seen.add(key)
                 if fresh_path:
                     results = fresh_path + results
+
+                # Tag-anchored augmentation. Validate candidates against the
+                # actual tag inventory; for valid tags pull notes; for
+                # invalid ones build "did you mean" suggestions.
+                if tag_candidates:
+                    all_tags = existing_tags(session)
+                    tag_aug: list = []
+                    for cand in tag_candidates:
+                        if cand in all_tags:
+                            valid_tags.append(cand)
+                            tag_aug += nodes_with_tag(session, cand,
+                                                      limit=max(top_k, 8))
+                        else:
+                            invalid_tag_suggestions[cand] = _did_you_mean(
+                                cand, all_tags, n=3,
+                            )
+                    fresh_tag = []
+                    for r in tag_aug:
+                        key = (r.node_id, r.title, r.file_path)
+                        if key not in seen:
+                            fresh_tag.append(r); seen.add(key)
+                    # Tag-anchored matches lead — that's the user's explicit
+                    # filter, even more specific than path hints.
+                    if fresh_tag:
+                        results = fresh_tag + results
         except Exception as e:
             red_alert(f"Embed/search failed: {e}")
             on_screen("If Ollama isn't running locally, run: ollama serve")
@@ -533,15 +699,26 @@ def ask(
     # whether retrieval was on-topic before the LLM responds.
     titles = ", ".join(r.title[:40] for r in results[:3])
     path_note = (f" + {'/'.join(path_hints)} folder" if path_hints else "")
+    tag_note  = (f" + tag:{','.join(valid_tags)}" if valid_tags else "")
     if days_window:
         if filter_relaxed:
             on_screen(f"[yellow]No notes in the last {days_window} days; "
-                      f"falling back to all-time top {len(results)}{path_note}: {titles}…[/yellow]")
+                      f"falling back to all-time top {len(results)}{path_note}{tag_note}: {titles}…[/yellow]")
         else:
             on_screen(f"Retrieved {len(results)} note(s) from the last "
-                      f"{days_window} days{path_note}: [dim]{titles}…[/dim]")
+                      f"{days_window} days{path_note}{tag_note}: [dim]{titles}…[/dim]")
     else:
-        on_screen(f"Retrieved {len(results)} note(s){path_note}: [dim]{titles}…[/dim]")
+        on_screen(f"Retrieved {len(results)} note(s){path_note}{tag_note}: [dim]{titles}…[/dim]")
+
+    # If the user named tags that don't exist, say so up front — they shouldn't
+    # have to wait for the LLM to refuse and then guess what's wrong.
+    for missing, suggestions in invalid_tag_suggestions.items():
+        if suggestions:
+            on_screen(f"[yellow]Note: tag [bold]'{missing}'[/bold] not found. "
+                      f"Closest existing: {', '.join(suggestions)}[/yellow]")
+        else:
+            on_screen(f"[yellow]Note: tag [bold]'{missing}'[/bold] not found and "
+                      "no close matches.[/yellow]")
 
     if context:
         for r in results:
@@ -578,8 +755,21 @@ def ask(
                        f"but no notes match that window — these {len(results)} are "
                        "the closest matches available. Use them; mention the dates "
                        "they're actually from.")
+    tag_note = ""
+    if invalid_tag_suggestions:
+        bits = []
+        for missing, suggestions in invalid_tag_suggestions.items():
+            if suggestions:
+                bits.append(f"'{missing}' (no such tag; closest existing: {', '.join(suggestions)})")
+            else:
+                bits.append(f"'{missing}' (no such tag, no close match)")
+        tag_note = (f"\n\nThe user referenced these tags that DO NOT exist in their vault: "
+                    f"{'; '.join(bits)}. Tell them which tags they actually have based "
+                    "on the retrieved notes' :tags: field, and answer using those.")
+    if valid_tags:
+        tag_note += f"\n\nNotes explicitly tagged {', '.join(valid_tags)} are PREPENDED in the list below — use them."
     prompt = (f"Question: {query}\n\n"
-              f"Retrieved notes ({len(results)}):{window_note}\n\n"
+              f"Retrieved notes ({len(results)}):{window_note}{tag_note}\n\n"
               f"{ctx_text}")
 
     if cloud_:
