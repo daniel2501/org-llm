@@ -441,6 +441,111 @@ def config(
             make_it_so()
 
 
+@app.command(name="db")
+def db_info(
+    schema: Annotated[bool, typer.Option("--schema", help="Show CREATE TABLE statements")] = False,
+    dict_:  Annotated[bool, typer.Option("--dict",   help="Print full data dictionary")] = False,
+    query:  Annotated[str,  typer.Option("--query", "-q", help="Run a raw SQL SELECT")] = "",
+):
+    """Inspect the SQLite database: row counts, schema, data dictionary, or raw SQL."""
+    from rich.panel  import Panel
+    from rich.syntax import Syntax
+    from sqlalchemy  import inspect, text
+
+    engine = _engine()
+
+    # ── tutor data dictionary ─────────────────────────────────────────────────
+    if dict_:
+        from .ui import trans_stripe
+        console.rule("[lcars1]org-llm Data Dictionary[/lcars1]")
+        console.print()
+        console.print(trans_stripe(52))
+        # Re-use the db tutor step body
+        match = next(((n, b) for n, b in _TUTOR_STEPS if n == "db"), None)
+        if match:
+            from rich.panel import Panel as P
+            console.print(P(match[1], title="[lcars1]db[/lcars1]", border_style="lcars2",
+                            padding=(1, 2)))
+        return
+
+    # ── raw SQL query ─────────────────────────────────────────────────────────
+    if query:
+        if not query.strip().upper().startswith("SELECT"):
+            red_alert("Only SELECT queries are allowed via --query")
+            raise typer.Exit(1)
+        with engine.connect() as conn:
+            try:
+                rows = list(conn.execute(text(query)))
+                if not rows:
+                    on_screen("(no rows)")
+                    return
+                tbl = Table(box=None, pad_edge=False)
+                for col in rows[0]._fields:
+                    tbl.add_column(col, style="lcars2")
+                for row in rows[:200]:
+                    tbl.add_row(*[str(v) for v in row])
+                console.print(tbl)
+                if len(rows) > 200:
+                    on_screen(f"(showing 200 of {len(rows)} rows)")
+            except Exception as exc:
+                red_alert(f"Query failed: {exc}")
+                raise typer.Exit(1)
+        return
+
+    # ── CREATE TABLE schema ───────────────────────────────────────────────────
+    if schema:
+        console.rule("[lcars1]Schema[/lcars1]")
+        with engine.connect() as conn:
+            for row in conn.execute(text(
+                "SELECT name, sql FROM sqlite_master "
+                "WHERE type='table' AND sql IS NOT NULL ORDER BY name"
+            )):
+                console.print(f"\n[lcars1]{row.name}[/lcars1]")
+                console.print(Syntax(row.sql, "sql", theme="monokai"))
+        return
+
+    # ── default: row counts + sample ─────────────────────────────────────────
+    console.rule("[lcars1]Database Overview[/lcars1]")
+    hail(f"File: {DB_PATH}")
+    console.print()
+
+    tables_meta = [
+        ("files",   "One row per indexed .org file"),
+        ("nodes",   "One row per org-mode heading (+ optional embedding)"),
+        ("history", "LLM interaction log"),
+        ("config",  "Key/value settings"),
+    ]
+    stats_tbl = Table(box=None, pad_edge=False)
+    stats_tbl.add_column("Table",       style="lcars1")
+    stats_tbl.add_column("Rows",        style="lcars2", justify="right")
+    stats_tbl.add_column("Description", style="dim")
+
+    with engine.connect() as conn:
+        for tname, desc in tables_meta:
+            try:
+                count = conn.execute(text(f"SELECT COUNT(*) FROM {tname}")).scalar()
+            except Exception:
+                count = "?"
+            stats_tbl.add_row(tname, str(count), desc)
+        # also show dbt views if present
+        views = [r[0] for r in conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='view' ORDER BY name"
+        ))]
+        if views:
+            stats_tbl.add_row("", "", "")
+            for v in views:
+                try:
+                    count = conn.execute(text(f"SELECT COUNT(*) FROM {v}")).scalar()
+                except Exception:
+                    count = "?"
+                stats_tbl.add_row(f"[dim]{v}[/dim]", str(count), "[dim]dbt view[/dim]")
+
+    console.print(stats_tbl)
+    console.print()
+    on_screen("[dim]Tip:[/dim]  --schema  │  --dict  │  --query 'SELECT ...'")
+    on_screen("         org-llm tutor db  — full data dictionary")
+
+
 def _opencode_bin() -> Path | None:
     """Return path to opencode binary if it exists anywhere on PATH or known locations."""
     import shutil
@@ -1323,7 +1428,7 @@ _TUTOR_STEPS = [
         "Navigate with: [bold]org-llm tutor <step>[/bold]\n"
         "All steps:     [bold]org-llm tutor --all[/bold]\n"
         "Steps: welcome → init → index → embed → search → ask → capture → tag → code\n"
-        "       → config → skills → report → doctor → install → dbt → opencode\n"
+        "       → config → skills → report → doctor → install → db → dbt → opencode\n"
         "       → source → cloud → launch → emacs → claude → done",
     ),
     (
@@ -1574,6 +1679,58 @@ _TUTOR_STEPS = [
         "[lcars1]Command:[/lcars1]  [bold]org-llm install[/bold]\n\n"
         "[dim]After install, run: org-llm init → index → embed → doctor[/dim]\n"
         "[dim]Source: org_llm/cli.py → install()  |  org-llm source cli[/dim]",
+    ),
+    (
+        "db",
+        "[lcars2]org-llm db[/lcars2] — the SQLite database powering everything\n\n"
+        "All data lives in a [bold]single SQLite file[/bold]:\n"
+        "  [lcars1]~/.local/share/org-llm/org-llm.db[/lcars1]\n\n"
+        "[lcars1]Extension:[/lcars1] sqlite-vec — adds vector similarity search inside SQLite.\n"
+        "No separate vector database. One file, zero infrastructure.\n\n"
+        "━━  TABLES  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "[bold lcars1]files[/bold lcars1]  — one row per indexed .org file\n"
+        "  id          INTEGER PK   — auto-increment\n"
+        "  path        TEXT         — absolute filesystem path\n"
+        "  indexed_at  TEXT         — ISO-8601 timestamp of last index\n"
+        "  node_count  INTEGER      — number of nodes parsed from this file\n"
+        "  mtime       REAL         — file modification time (Unix float)\n\n"
+        "[bold lcars2]nodes[/bold lcars2]  — one row per org-mode heading\n"
+        "  id          INTEGER PK\n"
+        "  file_id     INTEGER FK   → files.id (CASCADE DELETE)\n"
+        "  node_id     TEXT UNIQUE  — org-id property (UUID) or generated\n"
+        "  title       TEXT         — heading text\n"
+        "  body        TEXT         — full text content under heading\n"
+        "  tags        TEXT         — space-separated org tags\n"
+        "  mtime       REAL         — inherited from parent file mtime\n"
+        "  embedding   BLOB         — 768-dim float32 vector (nomic-embed-text)\n\n"
+        "  Indexes: idx_nodes_file, idx_nodes_title, idx_nodes_tags\n\n"
+        "[bold lcars3]history[/bold lcars3]  — LLM interaction log\n"
+        "  id          INTEGER PK\n"
+        "  timestamp   TEXT         — ISO-8601\n"
+        "  command     TEXT         — CLI command (ask / code / tag / capture)\n"
+        "  query       TEXT         — user input\n"
+        "  response    TEXT         — LLM response\n\n"
+        "[bold]config[/bold]  — key/value settings store\n"
+        "  key         TEXT PK      — setting name\n"
+        "  value       TEXT         — setting value\n\n"
+        "  Notable keys: org_dir, ollama_url, embed_model, chat_model,\n"
+        "  code_model, reason_model, fast_model, instruct_model, text_model,\n"
+        "  embed_dim, cloud_endpoint_url, runpod_api_key, cloud_model\n\n"
+        "━━  DBT VIEWS  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "dbt builds analytics views on top of the same SQLite file:\n\n"
+        "  staging/stg_nodes    — cleaned nodes: relative paths, formatted dates\n"
+        "  staging/stg_files    — files with days_since_modified\n"
+        "  marts/nodes_by_tag   — tag → node count (powers report tags)\n"
+        "  marts/recent_nodes   — modified in last 30 days\n"
+        "  marts/orphan_nodes   — nodes with no incoming links\n"
+        "  marts/daily_notes    — files under /daily/ path\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm db[/bold]           — show table row counts + sample rows\n"
+        "  [bold]org-llm db --schema[/bold]  — show CREATE TABLE statements\n"
+        "  [bold]org-llm db --dict[/bold]    — full data dictionary (this content)\n"
+        "  [bold]org-llm db --query[/bold]   — run a raw SQL query\n"
+        "  [bold]org-llm source db[/bold]    — see SQLAlchemy models source\n\n"
+        "[dim]File: ~/.local/share/org-llm/org-llm.db  |  ORM: org_llm/db.py[/dim]",
     ),
     (
         "dbt",
