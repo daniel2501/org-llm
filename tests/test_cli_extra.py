@@ -251,4 +251,44 @@ class TestTaskModelKeys:
         from org_llm.db import MODEL_DEFAULTS
         for _, key, _ in _TASK_MODEL_KEYS:
             assert key in MODEL_DEFAULTS, f"{key} not in MODEL_DEFAULTS"
+
+
+class TestEmbedModelDetection:
+    """Regression for the doctor-diagnose crash: an embedding model was
+    falling through as the chat model when nothing else was pulled.
+    """
+    def test_recognises_common_embed_models(self):
+        from org_llm.cli import _is_embed_model
+        for name in (
+            "nomic-embed-text:latest",
+            "nomic-embed-text",
+            "mxbai-embed-large:latest",
+            "snowflake-arctic-embed:33m",
+            "bge-m3:latest",
+            "bge-large:latest",
+            "all-minilm-l6-v2:latest",
+        ):
+            assert _is_embed_model(name), f"{name} should be flagged as embedding"
+
+    def test_does_not_flag_chat_models(self):
+        from org_llm.cli import _is_embed_model
+        for name in (
+            "llama3.2:latest", "llama3.2:3b", "llama3.3:70b",
+            "phi3.5:3.8b", "phi4:14b", "qwen2.5-coder:7b",
+            "deepseek-r1:7b", "mistral-nemo:12b", "gemma3:9b",
+        ):
+            assert not _is_embed_model(name), f"{name} should NOT be flagged as embedding"
+
+    def test_default_models_match_catalog_stems(self):
+        """Every MODEL_DEFAULTS *_model value should resolve to a non-default
+        quality score. This catches my earlier mistake of defaulting to `phi3`
+        when the catalog only has `phi3.5`.
+        """
+        from org_llm.db import MODEL_DEFAULTS
+        from org_llm.models import _quality
+        for key, val in MODEL_DEFAULTS.items():
+            if not key.endswith("_model") or key == "embed_model":
+                continue
+            q = _quality(val)
+            assert q > 50, f"{key}={val!r} → quality {q}: stem doesn't match any catalog entry"
 # test_cli_extra.py:1 ends here

@@ -66,6 +66,20 @@ def _ollama_url(session) -> str:
             or "http://localhost:11434")
 
 
+# Substrings that identify an embedding-only model — these don't support /api/chat.
+_EMBED_MODEL_SUBSTRINGS = (
+    "embed",          # nomic-embed-text, mxbai-embed-large, snowflake-arctic-embed
+    "bge-",           # bge-m3, bge-large
+    "all-minilm",     # all-minilm-l6-v2
+    "paraphrase-",    # paraphrase-multilingual-mpnet
+)
+
+
+def _is_embed_model(name: str) -> bool:
+    n = name.lower()
+    return any(sub in n for sub in _EMBED_MODEL_SUBSTRINGS)
+
+
 def _ollama_has(model: str, base_url: str) -> bool:
     """Return True if Ollama already has the given model tag pulled."""
     try:
@@ -1541,20 +1555,23 @@ def doctor(
     if (issues or diagnose) and ollama_live:
         with get_session(engine) as session:
             url = _ollama_url(session)
-        # Use whichever model is actually pulled, prefer chat > fast > any
-        with get_session(engine) as session:
             preferred = [
                 _cfg(session, "chat_model"),
                 _cfg(session, "fast_model"),
                 _cfg(session, "text_model"),
+                _cfg(session, "instruct_model"),
+                _cfg(session, "reason_model"),
             ]
+        # Embedding models can't do chat; never let them fall through.
+        chat_capable = [p for p in pulled_models if not _is_embed_model(p)]
         diag_model = next(
-            (m for m in preferred if any(m in p for p in pulled_models)),
-            pulled_models[0] if pulled_models else None,
+            (m for m in preferred if m and any(m in p for p in chat_capable)),
+            chat_capable[0] if chat_capable else None,
         )
         if not diag_model:
-            red_alert("No chat models pulled — cannot run LLM diagnosis.")
-            on_screen("Pull a model first:  [bold]ollama pull llama3.2[/bold]  (small, fast)")
+            red_alert("No chat-capable model pulled — cannot run LLM diagnosis.")
+            on_screen("Auto-fix everything missing:  [bold]org-llm doctor --fix[/bold]")
+            on_screen("Or pull manually:              [bold]org-llm models --pull llama3.2[/bold]")
             return
 
         state_summary = "\n".join(

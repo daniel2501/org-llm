@@ -90,7 +90,7 @@ MODEL_DEFAULTS = {
     "chat_model":     "llama3.2",           # 2.0 GB — ask / Q&A (first-flight friendly)
     "code_model":     "qwen2.5-coder",      # 4.7 GB — code generation
     "reason_model":   "deepseek-r1:7b",     # 4.7 GB — planning (full deepseek-r1 is 40 GB)
-    "fast_model":     "phi3",               # 2.2 GB — tagging, classification
+    "fast_model":     "phi3.5",             # 2.2 GB — tagging, classification
     "instruct_model": "mistral-nemo",       # 7.1 GB — capture, instruction following
     "text_model":     "gemma3",             # 5.4 GB — summarization, text analysis
     "embed_dim":      "768",
