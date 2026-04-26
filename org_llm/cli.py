@@ -156,6 +156,64 @@ def _ensure_model_pulled(model: str, base_url: str) -> bool:
     return _ollama_pull(model) and _ollama_has(model, base_url)
 
 
+def _model_fits_locally(model: str) -> tuple[bool, float, float]:
+    """Return (fits?, model_vram_estimate_gb, ram_free_gb).
+
+    Estimates the model's VRAM requirement from the catalog (stem-matched).
+    `fits` is True iff the estimated requirement is ≤ free RAM with a small
+    overhead buffer, OR we don't have a catalog estimate (assume yes; let
+    Ollama tell us no later).
+    """
+    try:
+        from .models import _vram_for_tag
+        from .performance import probe_hardware
+        needed = _vram_for_tag(model)
+        hw = probe_hardware()
+        free = hw.vram_free_gb if hw.vram_free_gb is not None else hw.ram_free_gb
+        if needed <= 0:
+            return (True, 0.0, free)        # unknown — let it try
+        return (needed <= free + 0.5, needed, free)
+    except Exception:
+        return (True, 0.0, 0.0)
+
+
+def _local_chat_or_friendly_error(prompt: str, model: str, base_url: str,
+                                    system: str = "", cloud_hint: str = "") -> str:
+    """Wrap a local Ollama chat call with the standard pre-flight + OOM
+    handling so we never dump a raw traceback on a memory exhaustion.
+
+    Returns the chat response, or calls red_alert + raises typer.Exit(1).
+    """
+    fits, needed, free = _model_fits_locally(model)
+    if not fits:
+        red_alert(f"{model} needs ~{needed:.1f} GB but only {free:.1f} GB is free.")
+        on_screen("Three ways to recover:")
+        on_screen(f"  • [bold]{cloud_hint or 'org-llm ask --cloud'}[/bold]"
+                  "  ← route this call to OpenRouter")
+        on_screen("  • [bold]org-llm performance --apply[/bold]"
+                  "  ← auto-pick a model that fits")
+        on_screen("  • [bold]org-llm config chat_model llama3.2[/bold]"
+                  "  ← swap in a 2 GB model")
+        raise typer.Exit(1)
+
+    from .llm import chat as local_chat
+    try:
+        return local_chat(prompt, model=model, base_url=base_url, system=system)
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "system memory" in msg or "out of memory" in msg or "oom" in msg or "memory" in msg:
+            red_alert(f"{model} ran out of memory at runtime: {str(exc)[:120]}")
+            on_screen(f"  • [bold]{cloud_hint or 'org-llm ask --cloud'}[/bold]"
+                      "  ← retry via OpenRouter")
+            on_screen("  • [bold]org-llm performance --benchmark --apply[/bold]"
+                      "  ← measure and pick a fitting model")
+        elif "connect" in msg or "refused" in msg:
+            red_alert("Ollama isn't reachable. Run: [bold]org-llm doctor --fix[/bold]")
+        else:
+            red_alert(f"Local chat failed: {exc}")
+        raise typer.Exit(1)
+
+
 # ── Temporal-phrase auto-detection for `ask` ────────────────────────────────
 
 _TIME_PHRASES = [
@@ -781,7 +839,10 @@ def ask(
         label = f"{cloud_provider}:{chat_mdl}"
     else:
         with warp(f"Hailing {chat_mdl}"):
-            answer = local_chat(prompt, model=chat_mdl, base_url=url, system=system)
+            answer = _local_chat_or_friendly_error(
+                prompt, model=chat_mdl, base_url=url, system=system,
+                cloud_hint=f"org-llm ask --cloud {query!r}",
+            )
         label = chat_mdl
 
     console.print()
@@ -3488,7 +3549,10 @@ def code(
         label = f"{cloud_provider}:{code_mdl}"
     else:
         with warp(f"{TREK_MSGS['code']} [{code_mdl}]"):
-            generated = local_chat(prompt, model=code_mdl, base_url=url, system=system)
+            generated = _local_chat_or_friendly_error(
+                prompt, model=code_mdl, base_url=url, system=system,
+                cloud_hint=f"org-llm code --cloud {task!r}",
+            )
         label = code_mdl
 
     # Small models often emit fences despite the system prompt — strip them.

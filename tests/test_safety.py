@@ -277,6 +277,70 @@ class TestSafePathEdgeCases:
         assert str(target).endswith("new.org")
 
 
+# ── ask: pre-flight RAM check + OOM friendly error ─────────────────────────
+
+class TestAskPreflightOOM:
+    """Regression: user got a 60-line traceback when llama3.3 (40 GB) couldn't
+    fit in 3.9 GB free RAM. Should now be a single red_alert with three
+    actionable recovery options."""
+
+    def _seed_node(self, cli_db):
+        """Populate at least one embedded node so `ask` reaches the chat call."""
+        from org_llm.db import File, Node, get_session, make_engine
+        from org_llm.search import to_blob
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            f = File(path="/tmp/seed.org", indexed_at="now",
+                     node_count=1, mtime=1.0)
+            s.add(f); s.flush()
+            s.add(Node(file_id=f.id, title="Seed", body="seed body",
+                       tags="", mtime=1.0,
+                       embedding=to_blob([1.0, 0.0, 0.0])))
+            s.commit()
+
+    def test_oversized_model_blocked_before_chat_call(self, cli_db, monkeypatch):
+        self._seed_node(cli_db)
+        from org_llm import cli as cli_mod
+        from org_llm import llm as llm_mod
+        # If we ever reach the chat call, the test fails — the pre-flight
+        # check should refuse before we get there.
+        def boom(*a, **kw):
+            raise AssertionError("local_chat should never be called when model doesn't fit")
+        monkeypatch.setattr(llm_mod, "chat", boom)
+        # Stub the embedding call so vector_search has a real qvec to work with.
+        monkeypatch.setattr(llm_mod, "embed", lambda *a, **kw: [1.0, 0.0, 0.0])
+        monkeypatch.setattr(cli_mod, "_model_fits_locally", lambda m: (False, 40.0, 3.0))
+        monkeypatch.setattr(cli_mod, "_ensure_model_pulled", lambda m, u: True)
+
+        r = runner.invoke(app, ["ask", "test query"])
+        assert r.exit_code == 1, r.output
+        assert "needs" in r.output and "free" in r.output
+        # All three recovery options must appear
+        assert "--cloud" in r.output
+        assert "performance --apply" in r.output
+        assert "config chat_model" in r.output
+
+    def test_oom_at_runtime_friendly(self, cli_db, monkeypatch):
+        """If pre-flight passes but Ollama itself OOMs, catch and recover."""
+        self._seed_node(cli_db)
+        from org_llm import cli as cli_mod
+        from org_llm import llm as llm_mod
+
+        monkeypatch.setattr(cli_mod, "_model_fits_locally", lambda m: (True, 0.0, 99.0))
+        monkeypatch.setattr(cli_mod, "_ensure_model_pulled", lambda m, u: True)
+        monkeypatch.setattr(llm_mod, "embed", lambda *a, **kw: [1.0, 0.0, 0.0])
+
+        def oom(*a, **kw):
+            raise RuntimeError("model requires more system memory (40.3 GiB) than is available")
+        monkeypatch.setattr(llm_mod, "chat", oom)
+
+        r = runner.invoke(app, ["ask", "test query"])
+        assert r.exit_code == 1, r.output
+        # No raw traceback should leak — friendly red_alert only
+        assert "Traceback" not in r.output
+        assert "ran out of memory" in r.output
+
+
 # ── doctor --install all (bulk install) ─────────────────────────────────────
 
 class TestInstallAll:
