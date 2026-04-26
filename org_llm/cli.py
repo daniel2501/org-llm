@@ -369,7 +369,7 @@ def init():
 
 @app.command()
 def index(
-    force: Annotated[bool, typer.Option("--force", help="Re-index all files")] = False,
+    force: Annotated[bool, typer.Option("--force", "-f", help="Re-index all files")] = False,
 ):
     """Scan org files and populate the index.
 
@@ -411,8 +411,8 @@ def index(
 def code_index(
     paths: Annotated[list[str], typer.Argument(
         help="Code directories to index. Defaults to the `code_dirs` config row (~/repos).")] = None,
-    force: Annotated[bool, typer.Option("--force", help="Re-index unchanged files")] = False,
-    embed_after: Annotated[bool, typer.Option("--embed/--no-embed",
+    force: Annotated[bool, typer.Option("--force", "-f", help="Re-index unchanged files")] = False,
+    embed_after: Annotated[bool, typer.Option("--embed/--no-embed", "-e/-E",
                   help="Run `embed` after indexing so the new code is searchable immediately")] = True,
 ):
     """Index source-code repos so `ask` can answer across notes AND code.
@@ -491,7 +491,7 @@ def code_index(
 
 @app.command()
 def embed(
-    force: Annotated[bool, typer.Option("--force", help="Re-embed all nodes")] = False,
+    force: Annotated[bool, typer.Option("--force", "-f", help="Re-embed all nodes")] = False,
 ):
     """Generate embeddings for indexed nodes (requires Ollama; pulls the embed model if missing)."""
     from .indexer import embed_nodes
@@ -588,9 +588,9 @@ def ask(
              help="Show retrieved context nodes with similarity scores")] = False,
     reason:  Annotated[bool, typer.Option("--reason", "-r",
              help="Use reason_model (deepseek-r1) instead of chat_model")] = False,
-    cloud_:  Annotated[bool, typer.Option("--cloud",
+    cloud_:  Annotated[bool, typer.Option("--cloud", "-C",
              help="Route the chat through the configured cloud backend instead of local Ollama")] = False,
-    days:    Annotated[int,  typer.Option("--days",
+    days:    Annotated[int,  typer.Option("--days", "-D",
              help="Restrict retrieval to nodes modified in the last N days (0 = no filter; auto-detected from query phrases like 'last week')")] = 0,
 ):
     """Ask a question answered from your org notes (RAG).
@@ -868,7 +868,7 @@ def models(
               help="Show FOSS catalog filtered by hardware")] = False,
     tune:     Annotated[bool, typer.Option("--tune",     "-t",
               help="Analyze current config and recommend upgrades (read-only)")] = False,
-    apply:    Annotated[bool, typer.Option("--apply",
+    apply:    Annotated[bool, typer.Option("--apply", "-A",
               help="With --tune: actually apply recommendations (default: read-only)")] = False,
     pull:     Annotated[str,  typer.Option("--pull",     "-p",
               help="Pull a model via Ollama")] = "",
@@ -1100,7 +1100,7 @@ def _validate_config(key: str, value: str) -> str | None:
 
 @app.command()
 def performance(
-    apply:     Annotated[bool, typer.Option("--apply",
+    apply:     Annotated[bool, typer.Option("--apply", "-a",
                help="Write recommended role assignments to config (default: read-only report)")] = False,
     benchmark: Annotated[bool, typer.Option("--benchmark", "-b",
                help="Run per-model timing tests (slow — ~1-3 min depending on pulled models)")] = False,
@@ -1312,8 +1312,8 @@ def config(
 
 @app.command(name="db")
 def db_info(
-    schema: Annotated[bool, typer.Option("--schema", help="Show CREATE TABLE statements")] = False,
-    dict_:  Annotated[bool, typer.Option("--dict",   help="Print full data dictionary")] = False,
+    schema: Annotated[bool, typer.Option("--schema", "-s", help="Show CREATE TABLE statements")] = False,
+    dict_:  Annotated[bool, typer.Option("--dict",   "-d", help="Print full data dictionary")] = False,
     query:  Annotated[str,  typer.Option("--query", "-q", help="Run a raw SQL SELECT")] = "",
 ):
     """Inspect the SQLite database: row counts, schema, data dictionary, or raw SQL."""
@@ -1556,13 +1556,13 @@ def _install_gh(bin_dir: Path) -> Path | None:
 
 @app.command()
 def install(
-    skip_ollama:   Annotated[bool, typer.Option("--skip-ollama")]   = False,
-    skip_models:   Annotated[bool, typer.Option("--skip-models")]   = False,
-    skip_fonts:    Annotated[bool, typer.Option("--skip-fonts")]    = False,
-    skip_opencode: Annotated[bool, typer.Option("--skip-opencode")] = False,
-    skip_gh:       Annotated[bool, typer.Option("--skip-gh")]       = False,
-    skip_claude:   Annotated[bool, typer.Option("--skip-claude")]   = False,
-    skip_pass:     Annotated[bool, typer.Option("--skip-pass")]     = False,
+    skip_ollama:   Annotated[bool, typer.Option("--skip-ollama",   "-O")] = False,
+    skip_models:   Annotated[bool, typer.Option("--skip-models",   "-M")] = False,
+    skip_fonts:    Annotated[bool, typer.Option("--skip-fonts",    "-F")] = False,
+    skip_opencode: Annotated[bool, typer.Option("--skip-opencode", "-P")] = False,
+    skip_gh:       Annotated[bool, typer.Option("--skip-gh",       "-G")] = False,
+    skip_claude:   Annotated[bool, typer.Option("--skip-claude",   "-K")] = False,
+    skip_pass:     Annotated[bool, typer.Option("--skip-pass",     "-A")] = False,
 ):
     """Install Ollama, models, Nerd Fonts, opencode, gh CLI, Claude Code, and pass."""
     import platform
@@ -1981,15 +1981,15 @@ def _doctor_walkthrough(report_to: str = "") -> None:
 def doctor(
     diagnose: Annotated[bool, typer.Option("--diagnose", "-d",
               help="Use LLM to explain failures and suggest fixes")] = False,
-    fix:      Annotated[bool, typer.Option("--fix",
+    fix:      Annotated[bool, typer.Option("--fix",          "-f",
               help="Auto-apply safe fixes (init DB, start Ollama)")] = False,
-    install_tool: Annotated[str, typer.Option("--install",
+    install_tool: Annotated[str, typer.Option("--install",   "-i",
               help="Install + theme a FOSS CLI tool by name (e.g. bat, eza). Use 'all' to install everything in the registry.")] = "",
-    list_tools:   Annotated[bool, typer.Option("--list-tools",
+    list_tools:   Annotated[bool, typer.Option("--list-tools","-l",
               help="List all installable FOSS tools")] = False,
     walkthrough:  Annotated[bool, typer.Option("--walkthrough", "-w",
               help="LLM-driven self-test: generate a tour, run each command, assess output, suggest fixes")] = False,
-    report_to:    Annotated[str,  typer.Option("--report-to",
+    report_to:    Annotated[str,  typer.Option("--report-to",   "-r",
               help="Append a structured report of this run to PATH (an .org file)")] = "",
 ):
     """Deep health check, LLM tuning advisor, and FOSS tool installer.
@@ -3620,7 +3620,7 @@ def capture(
     title:  Annotated[str,  typer.Option("--title",  "-t", help="Note title")] = "",
     body:   Annotated[str,  typer.Option("--body",   "-b", help="Raw content / prompt")] = "",
     file:   Annotated[str,  typer.Option("--file",   "-f", help="Target org file (relative to org_dir)")] = "inbox.org",
-    polish: Annotated[bool, typer.Option("--polish/--no-polish",
+    polish: Annotated[bool, typer.Option("--polish/--no-polish", "-p/-P",
             help="Let LLM structure the note (default: on; --no-polish writes raw body)")] = True,
 ):
     """Capture a new note into your org vault, optionally polished by an LLM."""
@@ -3669,11 +3669,11 @@ def capture(
 
 @app.command()
 def tag(
-    force:   Annotated[bool, typer.Option("--force", help="Re-tag already-tagged nodes")] = False,
+    force:   Annotated[bool, typer.Option("--force", "-f", help="Re-tag already-tagged nodes")] = False,
     limit:   Annotated[int,  typer.Option("--limit", "-n", help="Max nodes to tag")] = 50,
-    apply:   Annotated[bool, typer.Option("--apply",
+    apply:   Annotated[bool, typer.Option("--apply",   "-a",
              help="Write tags back to org files (default: dry-run preview only)")] = False,
-    dry_run: Annotated[bool, typer.Option("--dry-run",
+    dry_run: Annotated[bool, typer.Option("--dry-run", "-d",
              help="Explicit dry-run flag — same as omitting --apply (kept for clarity)")] = False,
 ):
     """Auto-tag untagged nodes using the fast_model.
@@ -3764,7 +3764,7 @@ def code(
               help="Retrieve relevant org notes as context")] = True,
     output:   Annotated[str,  typer.Option("--output", "-o",
               help="Write generated code to file")] = "",
-    cloud_:   Annotated[bool, typer.Option("--cloud",
+    cloud_:   Annotated[bool, typer.Option("--cloud", "-C",
               help="Route the chat through the configured cloud backend instead of local Ollama")] = False,
 ):
     """Generate code for an org/roam task using the code model.
@@ -3932,9 +3932,9 @@ def review_emacs(
                 help="Override review model (default: reason_model)")] = "",
     output:     Annotated[str,  typer.Option("--output", "-o",
                 help="Write the review to this file (markdown)")] = "",
-    diff_only:  Annotated[bool, typer.Option("--diff-only",
+    diff_only:  Annotated[bool, typer.Option("--diff-only", "-D",
                 help="Suggest concrete edits as patches, not prose advice")] = False,
-    cloud_:     Annotated[bool, typer.Option("--cloud",
+    cloud_:     Annotated[bool, typer.Option("--cloud",     "-C",
                 help="Route the review through the configured cloud backend (recommended for low-RAM hosts)")] = False,
 ):
     """Have an LLM review your Doom/vanilla Emacs config and suggest improvements.
@@ -4099,11 +4099,11 @@ def review_emacs(
 
 @app.command()
 def launch(
-    model:      Annotated[str,  typer.Option("--model", "-m",
+    model:      Annotated[str,  typer.Option("--model",      "-m",
                 help="Override chat model (default: chat_model from config)")] = "",
-    no_context: Annotated[bool, typer.Option("--no-context",
+    no_context: Annotated[bool, typer.Option("--no-context", "-N",
                 help="Skip vault context injection into system prompt")] = False,
-    dry_run:    Annotated[bool, typer.Option("--dry-run",
+    dry_run:    Annotated[bool, typer.Option("--dry-run",    "-n",
                 help="Print opencode config only, do not launch")] = False,
 ):
     """Launch opencode as an interactive org-roam workspace with vault context and MCP tools."""
@@ -4258,9 +4258,9 @@ BEHAVIOUR
 
 @app.command(name="claude")
 def claude_frontend(
-    no_context: Annotated[bool, typer.Option("--no-context",
+    no_context: Annotated[bool, typer.Option("--no-context", "-N",
                 help="Skip vault context in CLAUDE.md instructions")] = False,
-    dry_run:    Annotated[bool, typer.Option("--dry-run",
+    dry_run:    Annotated[bool, typer.Option("--dry-run",    "-n",
                 help="Print config only, do not launch")] = False,
 ):
     """Launch Claude Code as an interactive org-roam workspace with vault context and MCP tools."""
@@ -4441,13 +4441,13 @@ org-roam second brain via org-llm MCP tools.
 def cloud(
     status:    Annotated[bool, typer.Option("--status",    "-s",  help="Show configured provider status")] = False,
     providers: Annotated[bool, typer.Option("--providers", "-p",  help="List all supported cloud providers")] = False,
-    signup:    Annotated[str,  typer.Option("--signup",          help="Open signup page (provider slug or 'list')")] = "",
-    console_:  Annotated[str,  typer.Option("--console",         help="Open console for a provider slug")] = "",
-    configure: Annotated[bool, typer.Option("--configure", "-c",  help="Set up provider, endpoint, and API key (stores key in `pass`)")] = False,
-    test:      Annotated[bool, typer.Option("--test",      "-t",  help="Ping the configured endpoint")] = False,
-    assess:    Annotated[bool, typer.Option("--assess",    "-a",  help="Assess which models need cloud vs local")] = False,
-    cost:      Annotated[bool, typer.Option("--cost",             help="Show cost table across providers")] = False,
-    creds:     Annotated[bool, typer.Option("--creds",            help="Show stored cloud credentials in `pass`")] = False,
+    signup:    Annotated[str,  typer.Option("--signup",     "-S",  help="Open signup page (provider slug or 'list')")] = "",
+    console_:  Annotated[str,  typer.Option("--console",    "-O",  help="Open console for a provider slug")] = "",
+    configure: Annotated[bool, typer.Option("--configure",  "-c",  help="Set up provider, endpoint, and API key (stores key in `pass`)")] = False,
+    test:      Annotated[bool, typer.Option("--test",       "-t",  help="Ping the configured endpoint")] = False,
+    assess:    Annotated[bool, typer.Option("--assess",     "-a",  help="Assess which models need cloud vs local")] = False,
+    cost:      Annotated[bool, typer.Option("--cost",       "-x",  help="Show cost table across providers")] = False,
+    creds:     Annotated[bool, typer.Option("--creds",      "-r",  help="Show stored cloud credentials in `pass`")] = False,
     quick_start: Annotated[str, typer.Option("--quick-start", "-q",
                  help="Provider slug for one-shot signup flow (e.g. openrouter, groq)")] = "",
     key:         Annotated[str, typer.Option("--key", "-K",
