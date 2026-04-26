@@ -272,6 +272,55 @@ def config(
             make_it_so()
 
 
+def _opencode_bin() -> Path | None:
+    """Return path to opencode binary if it exists anywhere on PATH or known locations."""
+    import shutil
+    found = shutil.which("opencode")
+    if found:
+        return Path(found)
+    for candidate in [
+        Path("~/.opencode/bin/opencode").expanduser(),
+        Path("~/.local/bin/opencode").expanduser(),
+    ]:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _install_opencode_bin(bin_dir: Path) -> Path | None:
+    """Download and install opencode using its official installer. Returns path or None."""
+    import subprocess
+    import os
+    # The opencode installer always installs to ~/.opencode/bin regardless of env vars
+    default_install = Path("~/.opencode/bin/opencode").expanduser()
+    install_sh = bin_dir / "_opencode_install.sh"
+    try:
+        dl = subprocess.run(
+            ["curl", "-fsSL", "-o", str(install_sh), "https://opencode.ai/install"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if dl.returncode != 0:
+            red_alert(f"opencode download failed: {dl.stderr.strip()[:120]}")
+            return None
+        install_sh.chmod(0o755)
+        run = subprocess.run(
+            ["sh", str(install_sh)],
+            capture_output=True, text=True,
+            env={**os.environ},
+        )
+        install_sh.unlink(missing_ok=True)
+        result = _opencode_bin()
+        if result:
+            hail(f"opencode installed at {result}")
+            return result
+        red_alert(f"opencode install failed: {run.stderr.strip()[:200]}")
+        return None
+    except Exception as exc:
+        install_sh.unlink(missing_ok=True)
+        red_alert(f"opencode install error: {exc}")
+        return None
+
+
 def _gh_bin() -> str | None:
     """Return path to gh CLI, or None if not available."""
     import shutil
@@ -426,30 +475,12 @@ def install(
 
     # ── opencode ──────────────────────────────────────────────────────────────
     if not skip_opencode:
-        opencode_bin = bin_dir / "opencode"
-        if shutil.which("opencode") or opencode_bin.exists():
-            hail("opencode already installed — skipping.")
+        existing = _opencode_bin()
+        if existing:
+            hail(f"opencode already installed — skipping. ({existing})")
         else:
             hail("Installing opencode (AI coding agent)…")
-            try:
-                install_sh = bin_dir / "_opencode_install.sh"
-                urllib.request.urlretrieve(
-                    "https://opencode.ai/install", install_sh
-                )
-                install_sh.chmod(0o755)
-                result = subprocess.run(
-                    ["sh", str(install_sh)],
-                    capture_output=True, text=True,
-                    env={**__import__("os").environ,
-                         "OPENCODE_INSTALL": str(bin_dir)},
-                )
-                install_sh.unlink(missing_ok=True)
-                if result.returncode == 0:
-                    hail(f"opencode installed at {opencode_bin}")
-                else:
-                    red_alert(f"opencode install failed: {result.stderr.strip()[:200]}")
-            except Exception as exc:
-                red_alert(f"opencode install error: {exc}")
+            _install_opencode_bin(bin_dir)
 
     # ── gh CLI ────────────────────────────────────────────────────────────────
     if not skip_gh:
@@ -566,9 +597,9 @@ def doctor(
         fail("Ollama not installed", "~/.local/bin/ollama missing",
              "org-llm install --skip-models --skip-fonts")
 
-    opencode_bin = shutil.which("opencode") or str(Path("~/.local/bin/opencode").expanduser())
-    if Path(opencode_bin).exists():
-        ok("opencode", opencode_bin)
+    oc_path = _opencode_bin()
+    if oc_path:
+        ok("opencode", str(oc_path))
     else:
         warn("opencode not installed", "run: org-llm install --skip-ollama --skip-models --skip-fonts")
 
@@ -751,6 +782,48 @@ def doctor(
                 fail("  embed model unresponsive", str(e)[:80],
                      f"ollama pull {embed_mdl}")
 
+    # ── Cloud / RunPod ─────────────────────────────────────────────────────────
+    section("Cloud / RunPod")
+    with get_session(engine) as session:
+        cloud_provider = _cfg(session, "cloud_provider")
+        cloud_endpoint = _cfg(session, "cloud_endpoint_url")
+        cloud_api_key  = _cfg(session, "runpod_api_key")
+        cloud_model_   = _cfg(session, "cloud_model") or _cfg(session, "chat_model") or "llama3.2"
+    if cloud_endpoint:
+        try:
+            from .cloud import check_connection, assess_local_capability
+            cs = check_connection(cloud_endpoint, cloud_api_key, cloud_model_)
+            if cs.reachable and cs.auth_ok:
+                ok("Cloud endpoint", f"{cloud_endpoint}  ({cs.latency_ms:.0f}ms)")
+            elif cs.reachable:
+                warn("Cloud auth failed", "check runpod_api_key config")
+            else:
+                fail("Cloud endpoint unreachable", cloud_endpoint,
+                     "check pod is running: org-llm cloud --console")
+        except Exception as e:
+            warn("Cloud check failed", str(e)[:60])
+    else:
+        info("Cloud (RunPod)", "not configured — org-llm cloud --signup to set up")
+
+    with get_session(engine) as session:
+        all_models = [_cfg(session, k) for _, k, _ in _TASK_MODEL_KEYS if _cfg(session, k)]
+    try:
+        from .cloud import assess_local_capability, local_vram_gb
+        vram = local_vram_gb()
+        results = assess_local_capability(list(set(all_models)))
+        cloud_needed = [r["model"] for r in results if not r["can_local"]]
+        if cloud_needed:
+            if cloud_endpoint:
+                ok("Compute coverage", f"{len(cloud_needed)} model(s) offloaded to cloud")
+            else:
+                warn("Compute gap",
+                     f"{len(cloud_needed)} model(s) need cloud: {', '.join(cloud_needed)}")
+        else:
+            gpu_str = f"{vram:.0f}GB VRAM" if vram else "CPU/RAM"
+            ok("Local compute sufficient", f"{gpu_str} handles all models")
+    except Exception as e:
+        warn("Compute assessment failed", str(e)[:60])
+
     # ── gh CLI ─────────────────────────────────────────────────────────────────
     section("gh CLI")
     gh = _gh_bin()
@@ -905,7 +978,7 @@ _TUTOR_STEPS = [
         "All steps:     [bold]org-llm tutor --all[/bold]\n"
         "Steps: welcome → init → index → embed → search → ask → capture → tag → code\n"
         "       → config → skills → report → doctor → install → dbt → opencode\n"
-        "       → source → launch → emacs → done",
+        "       → source → cloud → launch → emacs → done",
     ),
     (
         "init",
@@ -1260,6 +1333,33 @@ _TUTOR_STEPS = [
         "[dim]Source: doom/org-llm.el  |  org-llm source cli[/dim]",
     ),
     (
+        "cloud",
+        "[lcars2]org-llm cloud[/lcars2] — RunPod cloud LLM backend\n\n"
+        "When local Ollama can't run a model (not enough VRAM/RAM), the app can\n"
+        "transparently fall back to a RunPod cloud endpoint.\n\n"
+        "[lcars1]Setup flow:[/lcars1]\n"
+        "  1. [bold]org-llm cloud --signup[/bold]      — opens runpod.io in browser\n"
+        "  2. Deploy an Ollama template pod from their marketplace\n"
+        "  3. [bold]org-llm cloud --configure[/bold]   — enter your pod URL + API key\n"
+        "  4. [bold]org-llm cloud --test[/bold]         — verify connection\n\n"
+        "[lcars1]Assessment:[/lcars1]\n"
+        "  [bold]org-llm cloud --assess[/bold]  — shows which configured models fit locally\n"
+        "  vs which require cloud. Checks GPU VRAM and RAM.\n\n"
+        "[lcars1]Cost estimation:[/lcars1]\n"
+        "  [bold]org-llm cloud --cost[/bold]   — RunPod GPU pricing + tokens/$ table\n\n"
+        "[lcars1]Config keys set by --configure:[/lcars1]\n"
+        "  cloud_provider      runpod\n"
+        "  cloud_endpoint_url  https://{pod_id}-11434.proxy.runpod.net\n"
+        "  runpod_api_key      (optional, for private pods)\n"
+        "  cloud_model         model to use on cloud (default: chat_model)\n\n"
+        "[lcars1]Doctor integration:[/lcars1]\n"
+        "  org-llm doctor now shows a Cloud section with connection status.\n\n"
+        "[lcars1]Theme levels (env vars):[/lcars1]\n"
+        "  ORG_LLM_TREK_LEVEL=0..3    — Trek references intensity (default: 2)\n"
+        "  ORG_LLM_COMMIE_LEVEL=0..3  — Solidarity messaging intensity (default: 2)\n\n"
+        "[dim]Source: org_llm/cloud.py  |  org-llm source cloud[/dim]",
+    ),
+    (
         "launch",
         "[lcars2]org-llm launch[/lcars2] — opencode workspace with full vault context\n\n"
         "Transforms opencode into a second brain interface by:\n\n"
@@ -1312,7 +1412,7 @@ _TUTOR_STEPS = [
 def tutor(
     step: Annotated[str, typer.Argument(
         help="Step name to jump to (welcome/init/index/embed/search/ask/capture/"
-             "tag/code/config/skills/report/doctor/install/dbt/opencode/source/launch/emacs/done)"
+             "tag/code/config/skills/report/doctor/install/dbt/opencode/source/cloud/launch/emacs/done)"
     )] = "welcome",
     all_steps: Annotated[bool, typer.Option("--all", "-a",
                help="Print all steps at once")] = False,
@@ -1381,6 +1481,7 @@ _MODULE_MAP = {
     "report":     "org_llm.report",
     "ui":         "org_llm.ui",
     "mcp_server": "org_llm.mcp_server",
+    "cloud":      "org_llm.cloud",
 }
 
 
@@ -1630,28 +1731,13 @@ def launch(
     from .skills     import Skill
 
     # ── Locate or install opencode ────────────────────────────────────────────
-    oc_bin = shutil.which("opencode") or str(Path("~/.local/bin/opencode").expanduser())
-    if not dry_run and not Path(oc_bin).exists():
-        hail("opencode not found — installing…")
-        bin_dir = Path("~/.local/bin").expanduser()
-        import urllib.request
-        install_sh = bin_dir / "_opencode_install.sh"
-        try:
-            urllib.request.urlretrieve("https://opencode.ai/install", install_sh)
-            install_sh.chmod(0o755)
-            result = subprocess.run(
-                ["sh", str(install_sh)], capture_output=True, text=True,
-                env={**os.environ, "OPENCODE_INSTALL": str(bin_dir)},
-            )
-            install_sh.unlink(missing_ok=True)
-            if result.returncode != 0:
-                red_alert(f"opencode install failed: {result.stderr.strip()[:200]}")
-                raise typer.Exit(1)
-            oc_bin = str(bin_dir / "opencode")
-            hail(f"opencode installed at {oc_bin}")
-        except Exception as exc:
-            red_alert(f"Could not install opencode: {exc}")
+    oc_path = _opencode_bin()
+    if not dry_run and oc_path is None:
+        hail("opencode not found — installing via curl…")
+        oc_path = _install_opencode_bin(Path("~/.local/bin").expanduser())
+        if not oc_path:
             raise typer.Exit(1)
+    oc_bin = str(oc_path) if oc_path else "opencode"
 
     # ── Gather vault context ──────────────────────────────────────────────────
     engine = _engine()
@@ -1778,6 +1864,211 @@ BEHAVIOUR
     # ── Hand off to opencode ──────────────────────────────────────────────────
     os.chdir(org_dir)
     os.execvp(oc_bin, [oc_bin])
+
+
+@app.command()
+def cloud(
+    status:    Annotated[bool, typer.Option("--status",    "-s",  help="Show cloud config and connection status")] = False,
+    signup:    Annotated[bool, typer.Option("--signup",          help="Open RunPod signup in browser")] = False,
+    console_:  Annotated[bool, typer.Option("--console",         help="Open RunPod console in browser")] = False,
+    configure: Annotated[bool, typer.Option("--configure", "-c",  help="Set up RunPod API key and endpoint")] = False,
+    test:      Annotated[bool, typer.Option("--test",      "-t",  help="Ping the cloud endpoint")] = False,
+    assess:    Annotated[bool, typer.Option("--assess",    "-a",  help="Assess which models need cloud vs local")] = False,
+    cost:      Annotated[bool, typer.Option("--cost",             help="Show cost estimates for configured models")] = False,
+):
+    """Manage RunPod cloud LLM backend — expand beyond local Ollama when needed."""
+    from rich.panel import Panel
+    from rich.table import Table
+    from .cloud import (
+        assess_local_capability, check_connection, cost_per_1k_tokens,
+        local_vram_gb, local_ram_gb,
+        open_signup, open_console,
+        RUNPOD_GPU_COSTS, RUNPOD_SIGNUP_URL,
+    )
+    from .ui import TREK_MSGS, stardate, lcars_panel, COMRADE_STAR
+
+    engine = _engine()
+
+    # ── default: show status ──────────────────────────────────────────────────
+    if not any([status, signup, console_, configure, test, assess, cost]):
+        status = True
+
+    if signup:
+        hail(f"Opening RunPod signup: {RUNPOD_SIGNUP_URL}")
+        open_signup()
+        on_screen("Create an account, then deploy an Ollama pod from the template gallery.")
+        on_screen("Run [bold]org-llm cloud --configure[/bold] once you have your pod URL.")
+        return
+
+    if console_:
+        hail("Opening RunPod console…")
+        open_console()
+        return
+
+    if configure:
+        console.print()
+        console.rule("[lcars1]RunPod Configuration[/lcars1]")
+        endpoint = typer.prompt(
+            "RunPod Ollama endpoint URL (e.g. https://abc123-11434.proxy.runpod.net)",
+            default="",
+        )
+        if endpoint:
+            with get_session(engine) as session:
+                from .db import Config
+                for key, val in [
+                    ("cloud_provider", "runpod"),
+                    ("cloud_endpoint_url", endpoint.rstrip("/")),
+                ]:
+                    row = session.get(Config, key)
+                    if row:
+                        row.value = val
+                    else:
+                        session.add(Config(key=key, value=val))
+                session.commit()
+            hail(f"Cloud endpoint saved: {endpoint}")
+
+        api_key = typer.prompt("RunPod API key (leave blank if endpoint is public)", default="")
+        if api_key:
+            with get_session(engine) as session:
+                from .db import Config
+                row = session.get(Config, "runpod_api_key")
+                if row:
+                    row.value = api_key
+                else:
+                    session.add(Config(key="runpod_api_key", value=api_key))
+                session.commit()
+            hail("API key saved.")
+
+        cloud_model = typer.prompt(
+            "Model name on cloud endpoint (e.g. llama3.2, leave blank = use chat_model)",
+            default="",
+        )
+        if cloud_model:
+            with get_session(engine) as session:
+                from .db import Config
+                row = session.get(Config, "cloud_model")
+                if row:
+                    row.value = cloud_model
+                else:
+                    session.add(Config(key="cloud_model", value=cloud_model))
+                session.commit()
+            hail(f"Cloud model saved: {cloud_model}")
+
+        make_it_so()
+        return
+
+    # Load cloud config
+    with get_session(engine) as session:
+        provider     = _cfg(session, "cloud_provider")
+        endpoint_url = _cfg(session, "cloud_endpoint_url")
+        api_key      = _cfg(session, "runpod_api_key")
+        cloud_model  = _cfg(session, "cloud_model") or _cfg(session, "chat_model") or "llama3.2"
+        all_models   = [_cfg(session, k) for _, k, _ in _TASK_MODEL_KEYS if _cfg(session, k)]
+
+    if test:
+        if not endpoint_url:
+            red_alert("No cloud endpoint configured. Run: org-llm cloud --configure")
+            raise typer.Exit(1)
+        with warp(f"{TREK_MSGS['cloud']}: {endpoint_url}"):
+            cs = check_connection(endpoint_url, api_key, cloud_model)
+        if cs.reachable and cs.auth_ok:
+            hail(f"Cloud endpoint reachable  ({cs.latency_ms:.0f}ms)")
+        elif cs.reachable:
+            red_alert("Endpoint reachable but authentication failed — check API key.")
+        else:
+            red_alert(f"Cloud endpoint unreachable: {endpoint_url}")
+        return
+
+    if assess:
+        console.print()
+        console.rule(f"[lcars1]{TREK_MSGS['assess']}[/lcars1]")
+        vram = local_vram_gb()
+        ram  = local_ram_gb()
+        hail(f"Hardware: {'%.0f GB VRAM' % vram if vram else 'no GPU detected'}  |  {ram:.0f} GB RAM")
+        hail(f"Stardate: {stardate()}")
+        console.print()
+
+        results = assess_local_capability(list(set(all_models)))
+        tbl = Table(box=None, pad_edge=False)
+        tbl.add_column("Model",        style="lcars2")
+        tbl.add_column("VRAM needed",  style="lcars3", justify="right")
+        tbl.add_column("Local?",       justify="center")
+        tbl.add_column("Verdict",      style="dim")
+        needs_cloud = []
+        for r in results:
+            status_str = "[bold green]✓[/bold green]" if r["can_local"] else "[bold red]→ cloud[/bold red]"
+            tbl.add_row(r["model"], f"{r['vram_needed']:.0f} GB", status_str, r["reason"])
+            if not r["can_local"]:
+                needs_cloud.append(r["model"])
+        console.print(tbl)
+
+        if needs_cloud:
+            console.print()
+            if endpoint_url:
+                on_screen(f"Cloud endpoint ready for: {', '.join(needs_cloud)}")
+            else:
+                on_screen(f"[bold]{len(needs_cloud)} model(s) need cloud.[/bold] "
+                          "Run: [bold]org-llm cloud --signup[/bold]  then  "
+                          "[bold]org-llm cloud --configure[/bold]")
+        return
+
+    if cost:
+        console.print()
+        console.rule("[lcars1]Cloud Cost Estimates[/lcars1]")
+        tbl = Table(box=None, pad_edge=False)
+        tbl.add_column("GPU",        style="lcars2")
+        tbl.add_column("$/hr",       style="lcars3", justify="right")
+        tbl.add_column("¢/1k tok",   style="lcars1", justify="right")
+        for gpu, hourly in RUNPOD_GPU_COSTS.items():
+            cpp = cost_per_1k_tokens(gpu, tokens_per_sec=25.0)
+            tbl.add_row(gpu, f"${hourly:.2f}", f"{cpp*100:.3f}¢")
+        console.print(tbl)
+        console.print()
+        on_screen("Prices are approximate spot rates. Check runpod.io for live pricing.")
+        return
+
+    # ── Status panel ─────────────────────────────────────────────────────────
+    console.print()
+    console.rule(f"[lcars1]Cloud Status  ·  stardate {stardate()}[/lcars1]")
+
+    cs = None
+    if endpoint_url:
+        with warp(f"{TREK_MSGS['cloud']}: {endpoint_url}"):
+            cs = check_connection(endpoint_url, api_key, cloud_model)
+
+    tbl = Table(box=None, pad_edge=False, show_header=False)
+    tbl.add_column("Key",   style="lcars1", width=22)
+    tbl.add_column("Value", style="lcars2")
+    tbl.add_row("Provider",     provider or "not configured")
+    tbl.add_row("Endpoint",     endpoint_url or "—")
+    tbl.add_row("API key",      "set" if api_key else "—")
+    tbl.add_row("Cloud model",  cloud_model)
+    if cs:
+        if cs.reachable and cs.auth_ok:
+            tbl.add_row("Connection",  f"[bold green]✓ reachable ({cs.latency_ms:.0f}ms)[/bold green]")
+        elif cs.reachable:
+            tbl.add_row("Connection",  "[bold yellow]⚠ reachable, auth failed[/bold yellow]")
+        else:
+            tbl.add_row("Connection",  "[bold red]✗ unreachable[/bold red]")
+
+    vram = local_vram_gb()
+    ram  = local_ram_gb()
+    tbl.add_row("Local GPU",    f"{vram:.0f} GB VRAM" if vram else "none detected")
+    tbl.add_row("Local RAM",    f"{ram:.0f} GB")
+
+    console.print(Panel(
+        tbl,
+        title=f"[lcars1]{COMRADE_STAR}  RunPod Cloud  {COMRADE_STAR}[/lcars1]",
+        border_style="lcars2", padding=(1, 2),
+    ))
+
+    if not endpoint_url:
+        console.print()
+        on_screen("No cloud backend configured. Options:")
+        on_screen("  [bold]org-llm cloud --signup[/bold]     — create RunPod account")
+        on_screen("  [bold]org-llm cloud --configure[/bold]  — enter endpoint URL + API key")
+        on_screen("  [bold]org-llm cloud --assess[/bold]     — see which models need cloud")
+    console.print()
 
 
 @app.command()

@@ -44,6 +44,19 @@ def _detect_nerd_fonts() -> bool:
 
 NERD_FONTS = _detect_nerd_fonts()
 
+# ── Trek / communist intensity levels (0–3, env-overridable) ─────────────────
+# 0 = minimal, 1 = normal, 2 = extra, 3 = maximum solidarity
+def _theme_level(env_var: str, default: int = 2) -> int:
+    raw = os.environ.get(env_var, "").strip()
+    if raw.isdigit():
+        return max(0, min(3, int(raw)))
+    if raw.lower() in ("off", "0", "false"): return 0
+    if raw.lower() in ("max", "3", "full"):  return 3
+    return default
+
+TREK_LEVEL      = _theme_level("ORG_LLM_TREK_LEVEL",      2)
+COMMIE_LEVEL    = _theme_level("ORG_LLM_COMMIE_LEVEL",     2)
+
 # ── colour palette ────────────────────────────────────────────────────────────
 # LCARS (Star Trek)
 _LCARS_ORANGE = "#FF9900"
@@ -102,6 +115,9 @@ TREK_MSGS = {
     "tag":     "Running pattern recognition",
     "capture": "Opening hailing channel",
     "code":    "Computing algorithms",
+    "cloud":   "Hailing starfleet relay",
+    "assess":  "Analyzing ship resources",
+    "launch":  "Initializing holodecks",
     "default": "Processing",
 }
 
@@ -198,24 +214,57 @@ PRIDE_BANNER = (
 )
 
 _DONE_MSGS = [
-    ("◀ Make it so.",                                          "success"),
-    ("◀ Engage.",                                              "lcars2"),
-    ("◀ From each according to ability, to each according to need.", "pride.green"),
-    ("◀ The needs of the many outweigh the needs of the few.", "pride.blue"),
-    ("◀ Live long and organize.",                              "trans.blue"),
-    ("◀ Solidarity achieved. ✊🏳️‍🌈",                          "pride.violet"),
-    ("◀ No one left behind — not on this ship.",               "trans.pink"),
-    ("◀ Trans rights are non-negotiable, even in the delta quadrant.", "trans.blue"),
-    ("◀ Queer, collective, free.",                             "pride.red"),
-    ("◀ To boldly go where no comrade has gone before.",       "lcars1"),
+    ("◀ Make it so.",                                                         "success"),
+    ("◀ Engage.",                                                             "lcars2"),
+    ("◀ From each according to ability, to each according to need.",          "pride.green"),
+    ("◀ The needs of the many outweigh the needs of the few.",                "pride.blue"),
+    ("◀ Live long and organize.",                                             "trans.blue"),
+    ("◀ Solidarity achieved. ✊",                                             "pride.violet"),
+    ("◀ No one left behind — not on this ship.",                             "trans.pink"),
+    ("◀ Trans rights are non-negotiable, even in the delta quadrant.",        "trans.blue"),
+    ("◀ Queer, collective, free.",                                            "pride.red"),
+    ("◀ To boldly go where no comrade has gone before.",                      "lcars1"),
+    ("◀ The revolution will be federated.",                                   "pride.green"),
+    ("◀ All power to the workers of the federation.",                         "lcars2"),
+    ("◀ Doom Emacs: the editor of the liberated.",                           "lcars3"),
+    ("◀ Warp speed toward a classless society.",                              "pride.orange"),
+    ("◀ We are the Borg — jk, we have unions.",                              "success"),
+    ("◀ On the holodeck of history, we are not NPCs.",                        "lcars1"),
+    ("◀ Property is theft. Knowledge is free.",                               "pride.violet"),
+    ("◀ Beam me up — there is no intelligent life in capitalism.",            "trans.blue"),
+    ("◀ The dialectic is irreversible. So is git push.",                     "lcars2"),
+    ("◀ Each node a comrade. Each link a bond of solidarity.",               "pride.green"),
 ]
 
 _msg_idx = 0
 
+# Filtered message lists by level
+_TREK_ONLY_MSGS = [m for m in _DONE_MSGS if any(
+    kw in m[0] for kw in ("Make it so", "Engage", "Borg", "holodeck",
+                           "Beam", "Warp", "warp", "federation", "delta quadrant",
+                           "starfleet", "ship")
+)]
+_COMMIE_ONLY_MSGS = [m for m in _DONE_MSGS if any(
+    kw in m[0] for kw in ("comrade", "solidarity", "workers", "property",
+                           "dialectic", "revolution", "communism", "class",
+                           "from each", "collective")
+)]
+
 
 def make_it_so() -> None:
     global _msg_idx
-    msg, style = _DONE_MSGS[_msg_idx % len(_DONE_MSGS)]
+    # Select pool based on level settings
+    if TREK_LEVEL >= 2 and COMMIE_LEVEL >= 2:
+        pool = _DONE_MSGS
+    elif TREK_LEVEL >= 1 and COMMIE_LEVEL == 0:
+        pool = _TREK_ONLY_MSGS or _DONE_MSGS[:2]
+    elif COMMIE_LEVEL >= 1 and TREK_LEVEL == 0:
+        pool = _COMMIE_ONLY_MSGS or _DONE_MSGS[2:5]
+    elif TREK_LEVEL == 0 and COMMIE_LEVEL == 0:
+        pool = [("◀ Done.", "success")]
+    else:
+        pool = _DONE_MSGS
+    msg, style = pool[_msg_idx % len(pool)]
     _msg_idx += 1
     console.print(f"[{style}]{msg}[/{style}]")
 
@@ -224,4 +273,42 @@ def solidarity() -> None:
     console.print(SOLIDARITY_BANNER)
     console.print(PRIDE_BANNER)
     console.print(trans_stripe())
+
+
+def stardate() -> str:
+    """Return a Trek-style stardate string."""
+    import datetime
+    now = datetime.datetime.now()
+    # Stardate: YYYY.DDD (year + fractional day of year)
+    day_of_year = now.timetuple().tm_yday
+    frac = (now.hour * 3600 + now.minute * 60 + now.second) / 86400
+    return f"{now.year}.{day_of_year + frac:.2f}"
+
+
+def lcars_panel(lines: list[tuple[str, str]], title: str = "") -> "Text":
+    """Render a minimal LCARS-style panel as a Rich Text object."""
+    from rich.text import Text
+    out = Text()
+    if title:
+        out.append(f"  ┌─ {title} ", style=f"bold {_LCARS_ORANGE}")
+        out.append("─" * max(0, 50 - len(title)), style=f"bold {_LCARS_ORANGE}")
+        out.append("\n")
+    for label, value in lines:
+        out.append(f"  │ ", style=f"bold {_LCARS_ORANGE}")
+        out.append(f"{label:<18}", style=f"bold {_LCARS_PURPLE}")
+        out.append(f"{value}\n", style=f"bold {_LCARS_BLUE}")
+    out.append(f"  └{'─' * 52}\n", style=f"bold {_LCARS_ORANGE}")
+    return out
+
+
+# Doom Emacs dark-theme palette hints (for panels/banners referencing Doom)
+_DOOM_GREEN  = "#98be65"
+_DOOM_CYAN   = "#46d9ff"
+_DOOM_MAGENTA = "#c678dd"
+_DOOM_RED    = "#ff6c6b"
+_DOOM_ORANGE = "#da8548"
+_DOOM_YELLOW = "#ecbe7b"
+
+# Communist star for solidarity decoration
+COMRADE_STAR = "★"
 # ui.py:1 ends here
