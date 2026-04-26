@@ -117,6 +117,79 @@ def install() -> bool:
     return is_installed()
 
 
+def list_gpg_keys() -> list[tuple[str, str]]:
+    """Return [(key_id, uid), …] for available secret keys, or []."""
+    if not shutil.which("gpg"):
+        return []
+    try:
+        r = subprocess.run(
+            ["gpg", "--list-secret-keys", "--with-colons"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:
+        return []
+    out: list[tuple[str, str]] = []
+    cur_id: str | None = None
+    for line in r.stdout.splitlines():
+        parts = line.split(":")
+        if not parts:
+            continue
+        if parts[0] == "sec":
+            cur_id = parts[4]
+        elif parts[0] == "uid" and cur_id:
+            out.append((cur_id, parts[9]))
+            cur_id = None
+    return out
+
+
+def bootstrap_gpg_key(name: str, email: str, passphrase: str = "") -> str | None:
+    """Generate a GPG key non-interactively. Returns the new key id, or None.
+
+    Defaults to a passwordless key (passphrase="") because anything else makes
+    `pass show` block on every read with a pinentry prompt. Users who want a
+    protected key should generate it themselves with `gpg --full-generate-key`
+    and run `pass init <KEYID>` manually.
+    """
+    if not shutil.which("gpg"):
+        return None
+    batch = (
+        ("%no-protection\n" if not passphrase else f"Passphrase: {passphrase}\n") +
+        "Key-Type: RSA\n"
+        "Key-Length: 4096\n"
+        f"Name-Real: {name}\n"
+        f"Name-Email: {email}\n"
+        "Expire-Date: 0\n"
+        "%commit\n"
+    )
+    try:
+        r = subprocess.run(
+            ["gpg", "--batch", "--gen-key"],
+            input=batch, capture_output=True, text=True, timeout=300,
+        )
+        if r.returncode != 0:
+            return None
+    except Exception:
+        return None
+    keys = list_gpg_keys()
+    # Find the freshly added key by matching email
+    for kid, uid in keys:
+        if email in uid:
+            return kid
+    return keys[-1][0] if keys else None
+
+
+def init_store(key_id: str) -> bool:
+    """Run `pass init <key_id>` to bootstrap the password store."""
+    if not is_installed():
+        return False
+    try:
+        r = subprocess.run(["pass", "init", key_id],
+                           capture_output=True, text=True, timeout=30)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 # ── Secret I/O ────────────────────────────────────────────────────────────────
 
 class _PassError(RuntimeError):

@@ -1513,7 +1513,7 @@ _TUTOR_STEPS = [
         "All steps:     [bold]org-llm tutor --all[/bold]\n"
         "Steps: welcome → init → index → embed → search → ask → capture → tag → code\n"
         "       → config → skills → report → doctor → install → db → dbt → opencode\n"
-        "       → source → env → review-emacs → creds → cloud → launch → emacs → claude → done",
+        "       → source → theme → env → review-emacs → creds → cloud → launch → emacs → claude → done",
     ),
     (
         "init",
@@ -1920,6 +1920,32 @@ _TUTOR_STEPS = [
         "[dim]Source: doom/org-llm.el  |  org-llm source cli[/dim]",
     ),
     (
+        "theme",
+        "[lcars2]org-llm theme[/lcars2] — dark (default) or light UI\n\n"
+        "Every colour the app emits — Rich text, banners, panels, progress bars,\n"
+        "trans/pride stripes, and the [bold]bat[/]/[bold]delta[/]/[bold]starship[/]/[bold]fzf[/] theme files\n"
+        "[bold]doctor --install <tool>[/bold] writes — switches with this setting.\n\n"
+        "[lcars1]Set persistently:[/lcars1]\n"
+        "  [bold]org-llm theme dark[/bold]      — bright LCARS oranges/purples on a dark terminal (default)\n"
+        "  [bold]org-llm theme light[/bold]     — darkened palette legible on a white terminal\n"
+        "  [bold]org-llm theme toggle[/bold]    — flip whatever is currently set\n"
+        "  [bold]org-llm theme show[/bold]      — print the stored mode + active mode\n\n"
+        "[lcars1]Override per command:[/lcars1]\n"
+        "  [bold]ORG_LLM_THEME=light org-llm doctor[/bold]\n"
+        "  [bold]ORG_LLM_THEME=dark  org-llm report all[/bold]\n\n"
+        "[lcars1]How it works:[/lcars1]\n"
+        "  [bold]ui.py[/bold] defines [lcars3]DARK_PALETTE[/lcars3] and [lcars3]LIGHT_PALETTE[/lcars3] with the same keys.\n"
+        "  Resolution order: ORG_LLM_THEME env → 'theme' config row → 'dark'.\n"
+        "  Tool theme generators ([bold]models.py[/bold]) read a live proxy onto [bold]ui.PALETTE[/bold]\n"
+        "  so re-running [bold]doctor --install <tool>[/bold] after a flip writes new colours.\n\n"
+        "[lcars1]What changes between modes:[/lcars1]\n"
+        "  • LCARS orange/purple/blue darkened ~40% in light mode\n"
+        "  • Pride yellow → mustard (#996600) — pure yellow is invisible on white\n"
+        "  • Trans white → gray (#444444) — same reason\n"
+        "  • Doom accents swap to one-light analogues\n\n"
+        "[dim]Source: ui.py → DARK_PALETTE / LIGHT_PALETTE / _build_theme()[/dim]",
+    ),
+    (
         "env",
         "[lcars2]Environment variables[/lcars2] — override config without touching the DB\n\n"
         "Resolution order: [bold]env var → SQLite config → built-in default[/bold].\n"
@@ -1932,6 +1958,7 @@ _TUTOR_STEPS = [
         "  [bold]ORG_LLM_OLLAMA_URL[/bold]    Ollama base URL  (default: ollama_url config, fallback http://localhost:11434)\n"
         "  [bold]ANTHROPIC_API_KEY[/bold]     Used by [bold]org-llm claude[/bold]; falls back to pass slug org-llm/anthropic/api-key\n\n"
         "[lcars1]UI / theme:[/lcars1]\n"
+        "  [bold]ORG_LLM_THEME[/bold]         dark | light  (default: dark; persisted via [bold]org-llm theme[/bold])\n"
         "  [bold]ORG_LLM_NERD_FONTS[/bold]    1/yes/true | 0/no/false — force icon mode\n"
         "  [bold]ORG_LLM_TREK_LEVEL[/bold]    0..3 — Trek messaging intensity (default: 2)\n"
         "  [bold]ORG_LLM_COMMIE_LEVEL[/bold]  0..3 — solidarity messaging intensity (default: 2)\n\n"
@@ -2953,6 +2980,8 @@ def cloud(
     assess:    Annotated[bool, typer.Option("--assess",    "-a",  help="Assess which models need cloud vs local")] = False,
     cost:      Annotated[bool, typer.Option("--cost",             help="Show cost table across providers")] = False,
     creds:     Annotated[bool, typer.Option("--creds",            help="Show stored cloud credentials in `pass`")] = False,
+    quick_start: Annotated[str, typer.Option("--quick-start", "-q",
+                 help="Provider slug for one-shot signup flow (e.g. openrouter, groq)")] = "",
 ):
     """Manage cloud GPU backends — RunPod, Vast.ai, Lambda, TensorDock, Salad, and more.
 
@@ -2976,8 +3005,160 @@ def cloud(
     engine = _engine()
 
     # default: show status
-    if not any([status, providers, signup, console_, configure, test, assess, cost, creds]):
+    if not any([status, providers, signup, console_, configure, test, assess, cost, creds, quick_start]):
         status = True
+
+    # ── Quick-start: one-shot onboarding for free-tier providers ─────────────
+    if quick_start:
+        from rich.panel import Panel
+        slug = quick_start.lower()
+        chosen = get_provider(slug)
+        if not chosen:
+            red_alert(f"Unknown provider {slug!r}. Try: openrouter, groq, huggingface")
+            raise typer.Exit(1)
+
+        # Default model + key-prefix hints per provider for the "test" call
+        model_for, key_hint = {
+            "openrouter": ("meta-llama/llama-3.1-8b-instruct:free", "sk-or-v1-…"),
+            "groq":       ("llama-3.1-8b-instant",                   "gsk_…"),
+            "huggingface":("meta-llama/Llama-3.1-8B-Instruct",      "hf_…"),
+        }.get(slug, (chosen.gpu_costs and list(chosen.gpu_costs)[0] or "", ""))
+
+        console.print()
+        console.rule(f"[lcars1]Quick-start: {chosen.name}[/lcars1]")
+        console.print(Panel(
+            f"[lcars2]{chosen.name}[/lcars2] — {chosen.description}\n\n"
+            f"This flow will:\n"
+            f"  1. Install [bold]pass[/bold] (if missing)\n"
+            f"  2. Bootstrap a passwordless GPG key (if missing)\n"
+            f"  3. Open [bold]{chosen.signup_url}[/bold] — you create a free account + API key\n"
+            f"  4. You paste the key once — we store it encrypted in pass\n"
+            f"  5. We configure org-llm to use it and run a real test call\n\n"
+            f"Total manual effort: 1 sign-in (Google/GitHub button) + 1 paste.",
+            border_style="lcars2", padding=(1, 2),
+        ))
+        if not typer.confirm("Proceed?", default=True):
+            return
+
+        # Step 1: pass installation
+        if not creds_mod.is_installed():
+            hail("Installing `pass`…")
+            if not creds_mod.install():
+                red_alert("Could not install `pass` automatically.")
+                console.print(creds_mod.install_help())
+                raise typer.Exit(1)
+        hail("`pass` is installed.")
+
+        # Step 2: GPG bootstrap (only if no key)
+        if not creds_mod.is_initialized():
+            keys = creds_mod.list_gpg_keys()
+            if not keys:
+                # Build a sane default identity from git config or env
+                import subprocess as _sp
+                try:
+                    git_email = _sp.run(["git", "config", "--global", "user.email"],
+                                        capture_output=True, text=True, timeout=3).stdout.strip()
+                    git_name  = _sp.run(["git", "config", "--global", "user.name"],
+                                        capture_output=True, text=True, timeout=3).stdout.strip()
+                except Exception:
+                    git_email = git_name = ""
+                default_email = git_email or os.environ.get("EMAIL", "you@example.invalid")
+                default_name  = git_name or "org-llm user"
+                console.print()
+                hail("No GPG key found — creating a passwordless RSA-4096 key for `pass`.")
+                on_screen(f"  identity: [bold]{default_name} <{default_email}>[/bold]")
+                if not typer.confirm("Create the key with these defaults?", default=True):
+                    on_screen("Run `gpg --full-generate-key` yourself, then `pass init <KEY-ID>`.")
+                    raise typer.Exit(1)
+                kid = creds_mod.bootstrap_gpg_key(default_name, default_email)
+                if not kid:
+                    red_alert("GPG key generation failed. Run `gpg --full-generate-key` manually.")
+                    raise typer.Exit(1)
+                hail(f"Generated GPG key {kid}")
+            else:
+                kid = keys[0][0]
+                hail(f"Using existing GPG key {kid}  ({keys[0][1]})")
+            if not creds_mod.init_store(kid):
+                red_alert("`pass init` failed. Check `pass` and `gpg` setup.")
+                raise typer.Exit(1)
+            hail("`pass` store initialized.")
+
+        # Step 3: open browser
+        console.print()
+        on_screen(f"Opening {chosen.name}…")
+        on_screen(f"  signup:  {chosen.signup_url}")
+        on_screen(f"  keys:    {chosen.console_url}")
+        open_url(chosen.console_url)
+        console.print()
+        on_screen("Sign in (Google/GitHub button), click [bold]Create Key[/bold], copy it, paste below.")
+        on_screen(f"  Key format: [dim]{key_hint}[/dim]")
+        console.print()
+
+        # Step 4: paste + store
+        api_key = typer.prompt(f"{chosen.name} API key", hide_input=True)
+        if not api_key.strip():
+            red_alert("No key entered — aborting.")
+            raise typer.Exit(1)
+        slug_path = creds_mod.cloud_slug(slug)
+        if not creds_mod.write_secret(slug_path, api_key.strip()):
+            red_alert(f"Could not store key in pass at {slug_path}")
+            raise typer.Exit(1)
+        hail(f"API key stored at {slug_path} (encrypted via GPG)")
+
+        # Step 5: configure org-llm + test
+        endpoint = chosen.endpoint_hint   # for these providers it's a literal URL
+        with get_session(engine) as session:
+            for k, v in [
+                ("cloud_provider",     slug),
+                ("cloud_endpoint_url", endpoint),
+                ("cloud_model",        model_for),
+            ]:
+                row = session.get(Config, k)
+                if row: row.value = v
+                else:   session.add(Config(key=k, value=v))
+            # Wipe any legacy plaintext copies
+            for stale in ("cloud_api_key", "runpod_api_key"):
+                row = session.get(Config, stale)
+                if row:
+                    session.delete(row)
+            session.commit()
+        hail(f"Configured: provider={slug}  endpoint={endpoint}  model={model_for}")
+
+        # Live ping
+        console.print()
+        with warp(f"{TREK_MSGS['cloud']}: {endpoint}"):
+            cs = check_connection(endpoint, api_key, model_for)
+        if cs.reachable and cs.auth_ok:
+            hail(f"Endpoint reachable in {cs.latency_ms:.0f}ms ✓")
+        elif cs.reachable:
+            red_alert("Endpoint responded but rejected the key. Re-check the paste and try again.")
+            raise typer.Exit(1)
+        else:
+            red_alert(f"Could not reach {endpoint}. Check your network.")
+            raise typer.Exit(1)
+
+        # Real chat call to confirm end-to-end
+        console.print()
+        on_screen("Running a test chat call…")
+        from .cloud import cloud_chat
+        try:
+            answer = cloud_chat(
+                "Reply with just the words: solidarity confirmed.",
+                model=model_for, endpoint_url=endpoint, api_key=api_key,
+                system="You are a concise assistant.",
+            )
+            console.print(Panel(answer.strip(), title=f"[lcars1]{model_for}[/lcars1]",
+                                border_style="lcars2", padding=(1, 2)))
+            hail("Cloud backend is live.")
+        except Exception as e:
+            red_alert(f"Test chat failed: {e}")
+            raise typer.Exit(1)
+
+        console.print()
+        on_screen("Try it now:  [bold]org-llm ask 'what did I write about <topic>?'[/bold]")
+        on_screen("View status: [bold]org-llm cloud --status[/bold]")
+        make_it_so()
+        return
 
     # ── Stored credentials snapshot ──────────────────────────────────────────
     if creds:
@@ -3331,6 +3512,47 @@ def mcp():
     """Start the org-llm MCP server over stdio (for opencode and other MCP clients)."""
     from .mcp_server import main as _mcp_main
     _mcp_main()
+
+
+@app.command()
+def theme(
+    mode: Annotated[str, typer.Argument(help="dark | light | toggle | show")] = "show",
+):
+    """Set the UI color mode. Default is dark; light mode darkens every color
+    so it's legible on a white terminal background. Override per-command via
+    `ORG_LLM_THEME=light org-llm …` instead.
+    """
+    from .db import Config as Cfg
+    from . import ui as ui_mod
+    valid = {"dark", "light", "toggle", "show"}
+    if mode not in valid:
+        red_alert(f"Unknown mode {mode!r}. Use: {', '.join(sorted(valid))}")
+        raise typer.Exit(1)
+
+    engine = _engine()
+    with get_session(engine) as session:
+        current_row = session.get(Cfg, "theme")
+        current = (current_row.value if current_row else "dark").strip().lower()
+
+        if mode == "show":
+            env = os.environ.get("ORG_LLM_THEME", "")
+            on_screen(f"Stored theme: [bold]{current}[/bold]")
+            if env:
+                on_screen(f"ORG_LLM_THEME env override: [bold]{env}[/bold] (active for this session)")
+            on_screen(f"Active right now: [bold]{ui_mod.THEME_MODE}[/bold]")
+            return
+
+        new = mode if mode != "toggle" else ("light" if current == "dark" else "dark")
+        if current_row:
+            current_row.value = new
+        else:
+            session.add(Cfg(key="theme", value=new))
+        session.commit()
+
+    hail(f"Theme set to [bold]{new}[/bold]. Restart the command (or unset ORG_LLM_THEME) to see it apply.")
+    if os.environ.get("ORG_LLM_THEME"):
+        on_screen("Note: ORG_LLM_THEME env var is set and overrides this config for the current shell.")
+    make_it_so()
 
 
 @app.command()

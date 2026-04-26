@@ -303,10 +303,33 @@ SCENES = [
 
 
 def main():
-    print(f"Generating {len(SCENES)} SVG screenshots → {IMG_DIR.relative_to(ROOT)}/")
+    """Generate every scene in dark + light modes.
+
+    The current process inherits the chosen theme via the ORG_LLM_THEME env
+    var. To get both modes we shell out to ourselves twice via a marker.
+    """
+    mode = os.environ.get("ORG_LLM_THEME", "dark").lower()
+    suffix = "" if mode == "dark" else f"-{mode}"
+    out_dir = IMG_DIR
+    print(f"Generating {len(SCENES)} {mode} SVGs → {out_dir.relative_to(ROOT)}/  (suffix: {suffix or '(none)'})")
+    # Patch _save to add the suffix
+    global _save
+    orig_save = _save
+
+    def save_with_suffix(con, name, title=None):
+        return orig_save(con, name + suffix, title)
+
+    _save = save_with_suffix
     for scene in SCENES:
         scene()
     print("Done.")
+
+    # If invoked plainly, also kick off the light pass
+    if mode == "dark" and not os.environ.get("ORG_LLM_GALLERY_RECURSE"):
+        env = {**os.environ, "ORG_LLM_THEME": "light", "ORG_LLM_GALLERY_RECURSE": "1"}
+        import subprocess
+        print()
+        subprocess.run([sys.executable, str(Path(__file__).resolve())], env=env, check=False)
 
 
 if __name__ == "__main__":

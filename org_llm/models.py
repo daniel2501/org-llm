@@ -191,19 +191,60 @@ TOOL_REGISTRY: list[ToolInfo] = [
 ]
 
 # ── LCARS / Doom Emacs colour palette for theme templates ─────────────────────
-PALETTE = {
-    "orange":  "#FF9900",
-    "purple":  "#CC88FF",
-    "blue":    "#4488FF",
-    "green":   "#98be65",
-    "cyan":    "#46d9ff",
-    "magenta": "#c678dd",
-    "red":     "#ff6c6b",
-    "yellow":  "#ecbe7b",
-    "bg":      "#1c1f24",
-    "fg":      "#bbc2cf",
-    "dim":     "#5b6268",
-}
+# This is what bat/delta/starship/fzf/etc. theme generators emit. It tracks
+# whichever mode (dark/light) the user has selected — see org_llm/ui.py for
+# DARK_PALETTE and LIGHT_PALETTE. Read fresh on each access via _palette()
+# so a runtime `theme` config change is picked up next call.
+
+def _palette() -> dict[str, str]:
+    from . import ui as _ui
+    p = _ui.PALETTE
+    return {
+        "orange":  p["lcars1"],
+        "purple":  p["lcars2"],
+        "blue":    p["lcars3"],
+        "green":   p["doom.green"],
+        "cyan":    p["doom.cyan"],
+        "magenta": p["doom.magenta"],
+        "red":     p["doom.red"],
+        "yellow":  p["doom.yellow"],
+        "bg":      p["bg"],
+        "fg":      p["fg"],
+        "dim":     p["dim"],
+    }
+
+
+class _PaletteProxy(dict):
+    """Dict that re-reads from ui.PALETTE on every access — keeps tool theme
+    files in sync with the active mode without forcing every theme_* function
+    to take a palette argument.
+    """
+    def __getitem__(self, key):
+        return _palette()[key]
+
+    def __contains__(self, key):
+        return key in _palette()
+
+    def __iter__(self):
+        return iter(_palette())
+
+    def __len__(self):
+        return len(_palette())
+
+    def items(self):
+        return _palette().items()
+
+    def keys(self):
+        return _palette().keys()
+
+    def values(self):
+        return _palette().values()
+
+    def get(self, key, default=None):
+        return _palette().get(key, default)
+
+
+PALETTE = _PaletteProxy()
 
 
 def _github_latest(owner: str, repo: str) -> str:

@@ -224,6 +224,42 @@ with `org-llm db -q "SELECT timestamp, query FROM history WHERE command='review-
 
 ---
 
+## Theme: dark + light
+
+Default is **dark** (LCARS-canonical bright orange/purple/blue on a dark
+terminal). Switch persistently with `org-llm theme light`, or per-command with
+`ORG_LLM_THEME=light org-llm …`. Every colour the app emits — Rich console,
+banners, panels, progress bars, plus the `bat`/`delta`/`starship`/`fzf` theme
+files written by `doctor --install` — switches in lockstep.
+
+<table>
+<tr>
+  <th align="center">Dark mode (default)</th>
+  <th align="center">Light mode</th>
+</tr>
+<tr>
+  <td><img src="docs/img/02-doctor.svg" alt="doctor — dark" /></td>
+  <td><img src="docs/img/02-doctor-light.svg" alt="doctor — light" /></td>
+</tr>
+<tr>
+  <td><img src="docs/img/05-models-discover.svg" alt="models --discover — dark" /></td>
+  <td><img src="docs/img/05-models-discover-light.svg" alt="models --discover — light" /></td>
+</tr>
+<tr>
+  <td><img src="docs/img/06-report-all.svg" alt="report — dark" /></td>
+  <td><img src="docs/img/06-report-all-light.svg" alt="report — light" /></td>
+</tr>
+</table>
+
+```sh
+org-llm theme show     # show stored + active mode
+org-llm theme light    # persist as light
+org-llm theme dark
+org-llm theme toggle   # flip whatever is set
+```
+
+---
+
 ## Environment variables
 
 | Variable | Effect |
@@ -231,6 +267,7 @@ with `org-llm db -q "SELECT timestamp, query FROM history WHERE command='review-
 | `ORG_LLM_DB` | Override the SQLite database path (default: `~/.local/share/org-llm/org-llm.db`) |
 | `ORG_LLM_ORG_DIR` | Override the org-roam directory (default: `org_dir` config key, fallback `~/org`) |
 | `ORG_LLM_OLLAMA_URL` | Override the Ollama endpoint (default: `ollama_url` config key, fallback `http://localhost:11434`) |
+| `ORG_LLM_THEME` | `dark` or `light` (default: `dark`). Persistent setting: `org-llm theme {dark,light,toggle}`. |
 | `ORG_LLM_NERD_FONTS` | Force-enable (`1`/`yes`) or disable (`0`/`no`) Nerd Font icons |
 | `ORG_LLM_TREK_LEVEL` | Star Trek messaging intensity, `0` (off) – `3` (max). Default: `2` |
 | `ORG_LLM_COMMIE_LEVEL` | Solidarity messaging intensity, `0`–`3`. Default: `2` |

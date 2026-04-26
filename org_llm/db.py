@@ -92,6 +92,7 @@ MODEL_DEFAULTS = {
     "instruct_model": "mistral-nemo",       # capture, instruction following
     "text_model":     "gemma3",             # summarization, text analysis
     "embed_dim":      "768",
+    "theme":          "dark",               # dark | light  (UI color mode)
     "db_version":     "1",
 }
 
