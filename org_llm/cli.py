@@ -214,32 +214,201 @@ _TASK_MODEL_KEYS = [
 
 
 @app.command()
-def models():
-    """Show task→model assignments and available Ollama models."""
+def models(
+    discover: Annotated[bool, typer.Option("--discover", "-d",
+              help="Show FOSS catalog filtered by hardware")] = False,
+    tune:     Annotated[bool, typer.Option("--tune",     "-t",
+              help="Analyze current config and recommend upgrades")] = False,
+    pull:     Annotated[str,  typer.Option("--pull",     "-p",
+              help="Pull a model via Ollama")] = "",
+    assign:   Annotated[bool, typer.Option("--assign",   "-a",
+              help="Interactively assign models to roles")] = False,
+):
+    """Show, discover, tune, and manage FOSS LLM assignments."""
+    from rich.panel import Panel
+    from .models import (
+        CATALOG, ROLE_KEYS, fitting_hardware, recommendations,
+    )
+    from .cloud import local_vram_gb, local_ram_gb
+
     engine = _engine()
     with get_session(engine) as session:
         url = _ollama_url(session)
+        current = {role: _cfg(session, key) for role, key, _ in _TASK_MODEL_KEYS}
 
-        assign = Table(title="Task → Model", box=None, pad_edge=False)
-        assign.add_column("Task",       style="lcars1")
-        assign.add_column("Config key", style="dim")
-        assign.add_column("Model",      style="lcars2")
-        assign.add_column("Purpose")
-        for task, key, purpose in _TASK_MODEL_KEYS:
-            assign.add_row(task, key, _cfg(session, key) or "—", purpose)
-        console.print(assign)
-
-    console.print()
     try:
         from .llm import list_models
-        names = list_models(url)
-        avail = Table(title="Pulled in Ollama", box=None, pad_edge=False)
-        avail.add_column("Model", style="lcars3")
-        for name in names:
-            avail.add_row(name)
-        console.print(avail)
-    except Exception as e:
-        console.print(f"[warn]Ollama not reachable ({url}):[/warn] {e}")
+        pulled = set(list_models(url))
+    except Exception:
+        pulled = set()
+
+    vram_gb = local_vram_gb()
+    ram_gb  = local_ram_gb()
+
+    # ── pull a model ─────────────────────────────────────────────────────────
+    if pull:
+        import subprocess, shutil
+        ollama_exe = shutil.which("ollama") or str(Path("~/.local/bin/ollama").expanduser())
+        hail(f"Pulling {pull}…")
+        result = subprocess.run([ollama_exe, "pull", pull])
+        if result.returncode == 0:
+            hail(f"Pulled: {pull}")
+            make_it_so()
+        else:
+            red_alert(f"Pull failed for {pull}")
+        return
+
+    # ── discover FOSS catalog ─────────────────────────────────────────────────
+    if discover:
+        console.rule("[lcars1]FOSS LLM Catalog[/lcars1]")
+        hw_info = (f"{vram_gb:.0f}GB VRAM" if vram_gb else f"{ram_gb:.0f}GB RAM (CPU)")
+        hail(f"Hardware: {hw_info}  |  showing models that fit + all others")
+        console.print()
+
+        fits = {m.tag for m in fitting_hardware(vram_gb, ram_gb)}
+        tbl = Table(box=None, pad_edge=False, show_header=True)
+        tbl.add_column("Fits", width=4)
+        tbl.add_column("Pulled", width=6)
+        tbl.add_column("Model",        style="lcars2",   no_wrap=True)
+        tbl.add_column("Params", width=6, style="dim")
+        tbl.add_column("VRAM",   width=6, style="lcars3")
+        tbl.add_column("License",       style="dim",     no_wrap=True)
+        tbl.add_column("Roles",         style="lcars1",  no_wrap=True)
+        tbl.add_column("Description")
+
+        prev_role_group = ""
+        for m in CATALOG:
+            role_group = m.roles[0]
+            if role_group != prev_role_group:
+                tbl.add_row("", "", "", "", "", "", "", "", style="dim")
+                prev_role_group = role_group
+            fit_sym  = "[bold green]✓[/]" if m.tag in fits   else "[dim]→cloud[/]"
+            pull_sym = "[bold cyan]✓[/]"  if m.tag in pulled else ""
+            tbl.add_row(
+                fit_sym, pull_sym,
+                m.tag, m.params, f"{m.vram_gb:.1f}G",
+                m.license, " ".join(m.roles), m.description,
+            )
+        console.print(tbl)
+        console.print()
+        on_screen(f"Pull any model: [bold]org-llm models --pull <tag>[/bold]")
+        on_screen(f"Tune assignments: [bold]org-llm models --tune[/bold]")
+        return
+
+    # ── tune recommendations ──────────────────────────────────────────────────
+    if tune:
+        console.rule("[lcars1]LLM Tuning Advisor[/lcars1]")
+        hw_info = (f"{vram_gb:.0f}GB VRAM" if vram_gb else f"{ram_gb:.0f}GB RAM (CPU)")
+        hail(f"Hardware: {hw_info}")
+
+        recs = recommendations(current, pulled, vram_gb, ram_gb)
+
+        if not recs:
+            console.print("\n[bold green]✓  All model assignments are optimal for your hardware.[/bold green]\n")
+            make_it_so()
+            return
+
+        console.print()
+        tbl = Table(box=None, pad_edge=False)
+        tbl.add_column("Role",      style="lcars1",  no_wrap=True)
+        tbl.add_column("Current",   style="dim",     no_wrap=True)
+        tbl.add_column("→",         width=2)
+        tbl.add_column("Suggested", style="lcars2",  no_wrap=True)
+        tbl.add_column("License",   style="dim",     no_wrap=True)
+        tbl.add_column("VRAM",      style="lcars3",  width=6)
+        tbl.add_column("Why",       style="dim")
+
+        for rec in recs:
+            arrow = "[bold yellow]↑[/]" if rec["upgrade"] else "[bold green]+[/]"
+            tbl.add_row(
+                rec["role"], rec["current"], arrow,
+                rec["suggested"], rec["license"], f"{rec['vram']:.1f}G", rec["reason"],
+            )
+        console.print(tbl)
+        console.print()
+
+        if typer.confirm("Apply all recommendations?", default=False):
+            from .db import Config as Cfg
+            role_to_key = {role: key for role, key, _ in _TASK_MODEL_KEYS}
+            with get_session(engine) as session:
+                for rec in recs:
+                    key = role_to_key.get(rec["role"])
+                    if not key:
+                        continue
+                    row = session.get(Cfg, key)
+                    if row:
+                        row.value = rec["suggested"]
+                    else:
+                        session.add(Cfg(key=key, value=rec["suggested"]))
+                session.commit()
+            hail("Config updated. Pull new models with: org-llm models --pull <tag>")
+            make_it_so()
+        return
+
+    # ── interactive assign ────────────────────────────────────────────────────
+    if assign:
+        console.rule("[lcars1]Model Assignment Wizard[/lcars1]")
+        fits = [m.tag for m in fitting_hardware(vram_gb, ram_gb)]
+        from .db import Config as Cfg
+        with get_session(engine) as session:
+            for role, key, purpose in _TASK_MODEL_KEYS:
+                cur = _cfg(session, key) or "—"
+                options = [m for m in fits
+                           if role in next((c.roles for c in CATALOG if c.tag == m), ())]
+                if not options:
+                    options = fits[:10]
+                console.print(f"\n[lcars1]{role}[/lcars1] ({purpose})  current: [lcars2]{cur}[/lcars2]")
+                for i, opt in enumerate(options[:8], 1):
+                    pulled_mark = " [cyan]✓ pulled[/cyan]" if opt in pulled else ""
+                    console.print(f"  {i}. {opt}{pulled_mark}")
+                choice = typer.prompt(
+                    f"Enter number or model tag (blank = keep {cur})", default=""
+                )
+                if not choice:
+                    continue
+                new_val = (
+                    options[int(choice) - 1]
+                    if choice.isdigit() and 1 <= int(choice) <= len(options)
+                    else choice
+                )
+                row = session.get(Cfg, key)
+                if row:
+                    row.value = new_val
+                else:
+                    session.add(Cfg(key=key, value=new_val))
+            session.commit()
+        hail("Model assignments saved.")
+        make_it_so()
+        return
+
+    # ── default: show current assignments + pulled models ─────────────────────
+    console.rule("[lcars1]Model Assignments[/lcars1]")
+    assign_tbl = Table(box=None, pad_edge=False)
+    assign_tbl.add_column("Role",    style="lcars1")
+    assign_tbl.add_column("Model",   style="lcars2")
+    assign_tbl.add_column("Purpose", style="dim")
+    assign_tbl.add_column("Status",  width=12)
+    for role, key, purpose in _TASK_MODEL_KEYS:
+        m = current.get(role) or "—"
+        status = (
+            "[green]✓ pulled[/green]" if m in pulled
+            else ("[dim]—[/dim]" if m == "—" else "[yellow]not pulled[/yellow]")
+        )
+        assign_tbl.add_row(role, m, purpose, status)
+    console.print(assign_tbl)
+
+    console.print()
+    if pulled:
+        pull_tbl = Table(title="Pulled in Ollama", box=None, pad_edge=False)
+        pull_tbl.add_column("Model", style="lcars3")
+        for name in sorted(pulled):
+            pull_tbl.add_row(name)
+        console.print(pull_tbl)
+    else:
+        console.print("[dim]Ollama not reachable or no models pulled.[/dim]")
+
+    console.print()
+    on_screen("[dim]Tip:[/dim] org-llm models --tune  │  --discover  │  --assign  │  --pull <tag>")
 
 
 @app.command()
@@ -584,8 +753,12 @@ def doctor(
               help="Use LLM to explain failures and suggest fixes")] = False,
     fix:      Annotated[bool, typer.Option("--fix",
               help="Auto-apply safe fixes (init DB, start Ollama)")] = False,
+    install_tool: Annotated[str, typer.Option("--install",
+              help="Install and theme a FOSS CLI tool by name (e.g. bat, eza, delta)")] = "",
+    list_tools:   Annotated[bool, typer.Option("--list-tools",
+              help="List all installable FOSS tools")] = False,
 ):
-    """Deep health check: system, DB, index, Ollama, fonts — with LLM diagnosis."""
+    """Deep health check, LLM tuning advisor, and FOSS tool installer."""
     import os
     import shutil
     import subprocess
@@ -598,6 +771,82 @@ def doctor(
     from rich.table import Table
     from .db import Node, File
     from .ui import trans_stripe, PRIDE_BANNER, NERD_FONTS
+    from .models import TOOL_REGISTRY, get_tool, apply_theme
+
+    # ── FOSS tool list ────────────────────────────────────────────────────────
+    if list_tools:
+        console.rule("[lcars1]Installable FOSS Tools[/lcars1]")
+        tbl = Table(box=None, pad_edge=False)
+        tbl.add_column("Name",        style="lcars2",  no_wrap=True)
+        tbl.add_column("Category",    style="lcars1",  width=10)
+        tbl.add_column("License",     style="dim",     no_wrap=True)
+        tbl.add_column("Installed",   width=10)
+        tbl.add_column("Themed",      width=8)
+        tbl.add_column("Description")
+        bin_dir = Path("~/.local/bin").expanduser()
+        for t in TOOL_REGISTRY:
+            try:
+                installed = bool(shutil.which(t.check_cmd.split()[0]) or
+                                 (bin_dir / t.check_cmd.split()[0]).exists())
+            except Exception:
+                installed = False
+            tbl.add_row(
+                t.name,
+                t.category,
+                t.license,
+                "[green]✓[/green]" if installed else "[dim]—[/dim]",
+                "[cyan]✓[/cyan]"  if t.theme_fn  else "[dim]—[/dim]",
+                t.description,
+            )
+        console.print(tbl)
+        console.print()
+        on_screen("Install: [bold]org-llm doctor --install <name>[/bold]")
+        return
+
+    # ── FOSS tool installer ───────────────────────────────────────────────────
+    if install_tool:
+        tool = get_tool(install_tool)
+        if not tool:
+            names = [t.name for t in TOOL_REGISTRY]
+            red_alert(f"Unknown tool: {install_tool!r}")
+            on_screen(f"Available: {', '.join(names)}")
+            on_screen("List all:  org-llm doctor --list-tools")
+            raise typer.Exit(1)
+
+        # check already installed
+        already = shutil.which(tool.check_cmd.split()[0])
+        if already:
+            hail(f"{tool.name} already installed at {already}")
+        else:
+            hail(f"Installing {tool.name} ({tool.license}) — {tool.description}")
+            import importlib
+            models_mod = importlib.import_module("org_llm.models")
+            fn = getattr(models_mod, tool.install_fn, None)
+            if fn is None:
+                red_alert(f"No install function for {tool.name}")
+                raise typer.Exit(1)
+            bin_dir = str(Path("~/.local/bin").expanduser())
+            ok_install = fn(bin_dir)
+            if ok_install:
+                hail(f"{tool.name} installed successfully")
+            else:
+                red_alert(f"Install failed for {tool.name} — check your internet connection")
+                raise typer.Exit(1)
+
+        # apply theme
+        if tool.theme_fn:
+            success, path = apply_theme(tool.name)
+            if success:
+                hail(f"Theme applied → {path}")
+                console.print(f"[dim]  Review and source/reload as needed.[/dim]")
+            else:
+                hail(f"Theme config already exists at {path} — not overwritten")
+        else:
+            hail(f"No theme template for {tool.name}")
+
+        console.print()
+        make_it_so()
+        return
 
     PASS = "[bold green]✓[/bold green]"
     FAIL = "[bold red]✗[/bold red]"
@@ -935,6 +1184,41 @@ def doctor(
     else:
         warn("Nerd Font detection off",
              "icons disabled — set ORG_LLM_NERD_FONTS=1 to force-enable")
+
+    # ── FOSS tool suggestions ──────────────────────────────────────────────────
+    section("FOSS Tools")
+    not_installed = []
+    for t in TOOL_REGISTRY:
+        cmd = t.check_cmd.split()[0]
+        if shutil.which(cmd):
+            ok(t.name, t.description)
+        else:
+            not_installed.append(t.name)
+    if not_installed:
+        warn("Suggested FOSS tools",
+             f"{len(not_installed)} not installed: "
+             f"{', '.join(not_installed[:6])}{'…' if len(not_installed) > 6 else ''}")
+        info("install any",
+             "org-llm doctor --install <name>  or  --list-tools")
+
+    # ── LLM tuning hint ───────────────────────────────────────────────────────
+    from .models import recommendations as model_recs
+    from .cloud import local_vram_gb, local_ram_gb
+    _vram = local_vram_gb()
+    _ram  = local_ram_gb()
+    with get_session(engine) as _s:
+        _cur = {role: _cfg(_s, key) for role, key, _ in _TASK_MODEL_KEYS}
+    try:
+        from .llm import list_models as _lm
+        with get_session(engine) as _s:
+            _pulled_set = set(_lm(_ollama_url(_s)))
+    except Exception:
+        _pulled_set = set()
+    _recs = model_recs(_cur, _pulled_set, _vram, _ram)
+    if _recs:
+        warn("LLM tuning available",
+             f"{len(_recs)} role(s) have better FOSS options for your hardware")
+        info("run tuner", "org-llm models --tune")
 
     # ── Render table ──────────────────────────────────────────────────────────
     table = Table(box=None, pad_edge=False, show_header=False)
@@ -1571,6 +1855,7 @@ _MODULE_MAP = {
     "ui":         "org_llm.ui",
     "mcp_server": "org_llm.mcp_server",
     "cloud":      "org_llm.cloud",
+    "models":     "org_llm.models",
 }
 
 
