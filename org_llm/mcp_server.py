@@ -244,16 +244,43 @@ def create_mcp_server():
     # ── tangle_file ───────────────────────────────────────────────────────────
     @server.tool()
     def tangle_file(file_path: str) -> str:
-        """Run org-babel-tangle on an org file via emacsclient (Emacs must be running)."""
-        import subprocess
-        try:
-            result = subprocess.run(
+        """Run org-babel-tangle on an org file via emacsclient.
+
+        If `emacsclient` reports no server is running, this tool tries to
+        start `emacs --daemon` once and retries — so the LLM can call
+        tangle_file without first asking the user to start Emacs.
+        """
+        import subprocess, shutil, time
+        def _try_tangle() -> tuple[int, str, str]:
+            r = subprocess.run(
                 ["emacsclient", "--eval", f'(org-babel-tangle-file "{file_path}")'],
                 capture_output=True, text=True, timeout=30,
             )
-            if result.returncode == 0:
-                return f"Tangled: {file_path}\n{result.stdout.strip()}"
-            return f"Tangle failed: {result.stderr.strip()}"
+            return r.returncode, r.stdout, r.stderr
+        try:
+            rc, stdout, stderr = _try_tangle()
+            if rc == 0:
+                return f"Tangled: {file_path}\n{stdout.strip()}"
+            # emacsclient prints "can't find socket" / "no socket" when the
+            # daemon isn't running. Try to autostart it once.
+            if "socket" in stderr.lower() or "server" in stderr.lower():
+                if shutil.which("emacs"):
+                    subprocess.Popen(
+                        ["emacs", "--daemon"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+                    # Brief poll: daemon usually up within ~3 s
+                    for _ in range(8):
+                        time.sleep(0.4)
+                        try:
+                            rc2, stdout2, stderr2 = _try_tangle()
+                            if rc2 == 0:
+                                return (f"Tangled (auto-started emacs --daemon): "
+                                        f"{file_path}\n{stdout2.strip()}")
+                        except Exception:
+                            continue
+            return f"Tangle failed: {stderr.strip() or stdout.strip()}"
         except FileNotFoundError:
             return "emacsclient not found. Ensure Emacs server is running: (server-start) in config.el."
         except Exception as e:

@@ -150,6 +150,39 @@ def _ollama_pull(model: str) -> bool:
     return subprocess.run([ollama, "pull", model]).returncode == 0
 
 
+def _cloud_chat_with_local_fallback(
+    prompt: str, *, cloud_model: str, cloud_endpoint: str, cloud_api_key: str,
+    local_model: str, local_url: str, system: str = "",
+    fallback_on: tuple[str, ...] = ("rate_limit", "auth_error", "server_error"),
+) -> str:
+    """Try cloud_chat; on classifiable failure, transparently fall back to local.
+
+    Surfaces a single yellow line ("Cloud {provider} hit {outcome}; falling
+    back to local {local_model}.") so the user knows they're getting the
+    weaker model. Re-raises any exception class it doesn't know how to
+    classify so users still see real bugs.
+    """
+    from .cloud import cloud_chat, _classify_error
+    from .llm   import chat as _local_chat
+    try:
+        return cloud_chat(prompt, model=cloud_model,
+                           endpoint_url=cloud_endpoint, api_key=cloud_api_key,
+                           system=system)
+    except Exception as e:
+        outcome, _ = _classify_error(e)
+        if outcome not in fallback_on:
+            raise
+        on_screen(f"[yellow]Cloud failed ({outcome}); falling back to "
+                  f"local {local_model}.[/yellow]")
+        try:
+            return _local_chat(prompt, model=local_model,
+                                base_url=local_url, system=system)
+        except Exception:
+            # If local fallback ALSO fails, re-raise the original cloud
+            # error so the user sees the more informative message.
+            raise e
+
+
 def _suggest_model_tag(bad_tag: str, base_url: str) -> str | None:
     """Fuzzy-match a typo'd model tag against pulled-locally + catalog."""
     import difflib as _dl
@@ -1325,14 +1358,16 @@ def ask(
 
     if cloud_:
         if not cloud_endpoint:
-            red_alert("--cloud requested but no cloud_endpoint_url configured.")
-            on_screen("Run: [bold]org-llm cloud --quick-start openrouter[/bold]")
-            raise typer.Exit(1)
-        from . import creds as creds_mod
-        api_key = (creds_mod.read_secret(creds_mod.cloud_slug(cloud_provider))
-                   if cloud_provider else None) or db_api_key
-        chat_mdl = model or cloud_model or chat_mdl
-    else:
+            on_screen("[yellow]--cloud requested but no cloud_endpoint_url configured. "
+                      "Falling back to local Ollama.[/yellow]")
+            on_screen("[dim]To enable cloud: org-llm cloud --quick-start openrouter[/dim]")
+            cloud_ = False
+        else:
+            from . import creds as creds_mod
+            api_key = (creds_mod.read_secret(creds_mod.cloud_slug(cloud_provider))
+                       if cloud_provider else None) or db_api_key
+            chat_mdl = model or cloud_model or chat_mdl
+    if not cloud_:
         # Local path: ensure the chat model is pulled before asking.
         if not _ensure_model_pulled(chat_mdl, url):
             # The auto-fix may have swapped chat_model in the config —
@@ -1418,8 +1453,34 @@ def ask(
         try:
             with get_session(engine) as session:
                 qvec    = embed(query, model=embed_mdl, base_url=url)
-                results = list(vector_search(session, qvec, limit=top_k,
-                                              since_mtime=since_mtime))
+                try:
+                    results = list(vector_search(session, qvec, limit=top_k,
+                                                  since_mtime=since_mtime))
+                except Exception as ve:
+                    # Embed-dimension mismatch: stored vectors don't match the
+                    # current embed model. Auto re-embed everything once.
+                    msg = str(ve).lower()
+                    if "dimension" in msg and ("mismatch" in msg or "mistmatch" in msg):
+                        from .db       import Node
+                        from .indexer  import embed_nodes
+                        n_total = session.query(Node).count()
+                        on_screen(f"[yellow]Embedding dimension mismatch — re-embedding "
+                                  f"all {n_total} nodes with {embed_mdl}…[/yellow]")
+                        # Force re-embed: clear all vectors first
+                        session.query(Node).update({Node.embedding: None})
+                        session.commit()
+                        if _ensure_model_pulled(embed_mdl, url):
+                            with impulse(TREK_MSGS["embed"], total=n_total) as (prog, task):
+                                def _t(): prog.advance(task)
+                                embed_nodes(session, model=embed_mdl, base_url=url,
+                                            force=True, progress_cb=_t)
+                            qvec = embed(query, model=embed_mdl, base_url=url)
+                            results = list(vector_search(session, qvec, limit=top_k,
+                                                          since_mtime=since_mtime))
+                        else:
+                            raise
+                    else:
+                        raise
                 seen = {(r.node_id, r.title, r.file_path) for r in results}
 
                 # When a time window is active, augment with mtime-DESC nodes
@@ -1633,11 +1694,22 @@ def ask(
               f"{ctx_text}")
 
     if cloud_:
-        from .cloud import cloud_chat
+        # Resolve a sensible local fallback in case the cloud is rate-limited
+        # or refuses the key. Use chat_model from config OR the same model
+        # the user requested if it happens to also be pulled locally.
+        with get_session(engine) as session:
+            local_fallback = (_cfg(session, "chat_model")
+                              or MODEL_DEFAULTS["chat_model"])
         with warp(f"Hailing cloud {chat_mdl}"):
-            answer = cloud_chat(prompt, model=chat_mdl,
-                                endpoint_url=cloud_endpoint,
-                                api_key=api_key, system=system)
+            try:
+                answer = _cloud_chat_with_local_fallback(
+                    prompt, cloud_model=chat_mdl,
+                    cloud_endpoint=cloud_endpoint, cloud_api_key=api_key,
+                    local_model=local_fallback, local_url=url, system=system,
+                )
+            except Exception as e:
+                red_alert(f"Cloud chat failed: {e}")
+                raise typer.Exit(1)
         label = f"{cloud_provider}:{chat_mdl}"
     else:
         with warp(f"Hailing {chat_mdl}"):
@@ -5061,14 +5133,16 @@ def code(
 
     if cloud_:
         if not cloud_endpoint:
-            red_alert("--cloud requested but no cloud_endpoint_url configured.")
-            on_screen("Run: [bold]org-llm cloud --quick-start openrouter[/bold]")
-            raise typer.Exit(1)
-        from . import creds as creds_mod
-        api_key = (creds_mod.read_secret(creds_mod.cloud_slug(cloud_provider))
-                   if cloud_provider else None) or db_api_key
-        code_mdl = model or cloud_model or code_mdl
-    else:
+            on_screen("[yellow]--cloud requested but no cloud_endpoint_url configured. "
+                      "Falling back to local Ollama.[/yellow]")
+            on_screen("[dim]To enable cloud: org-llm cloud --quick-start openrouter[/dim]")
+            cloud_ = False
+        else:
+            from . import creds as creds_mod
+            api_key = (creds_mod.read_secret(creds_mod.cloud_slug(cloud_provider))
+                       if cloud_provider else None) or db_api_key
+            code_mdl = model or cloud_model or code_mdl
+    if not cloud_:
         if not _ensure_model_pulled(code_mdl, url):
             red_alert(f"Could not pull local model {code_mdl!r}.")
             on_screen("Either run with --cloud, or: org-llm doctor --fix")
@@ -5115,11 +5189,20 @@ def code(
         prompt = f"Context from my org notes:\n\n{ctx_text}\n\n---\n\nTask: {task}"
 
     if cloud_:
-        from .cloud import cloud_chat
+        with get_session(engine) as session:
+            local_fallback = (_cfg(session, "code_model")
+                              or _cfg(session, "chat_model")
+                              or MODEL_DEFAULTS["chat_model"])
         with warp(f"Hailing cloud {code_mdl}"):
-            generated = cloud_chat(prompt, model=code_mdl,
-                                   endpoint_url=cloud_endpoint,
-                                   api_key=api_key, system=system)
+            try:
+                generated = _cloud_chat_with_local_fallback(
+                    prompt, cloud_model=code_mdl,
+                    cloud_endpoint=cloud_endpoint, cloud_api_key=api_key,
+                    local_model=local_fallback, local_url=url, system=system,
+                )
+            except Exception as e:
+                red_alert(f"Cloud code-gen failed: {e}")
+                raise typer.Exit(1)
         label = f"{cloud_provider}:{code_mdl}"
     else:
         with warp(f"{TREK_MSGS['code']} [{code_mdl}]"):
@@ -5323,13 +5406,15 @@ def review_emacs(
             cloud_model    = _cfg(session, "cloud_model")
             db_api_key     = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
         if not cloud_endpoint:
-            red_alert("--cloud requested but no cloud_endpoint_url configured.")
-            on_screen("Run: [bold]org-llm cloud --quick-start openrouter[/bold]")
-            raise typer.Exit(1)
-        from . import creds as creds_mod
-        api_key = (creds_mod.read_secret(creds_mod.cloud_slug(cloud_provider))
-                   if cloud_provider else None) or db_api_key
-        chat_mdl = model or cloud_model or chat_mdl
+            on_screen("[yellow]--cloud requested but no cloud_endpoint_url configured. "
+                      "Falling back to local Ollama.[/yellow]")
+            on_screen("[dim]To enable cloud: org-llm cloud --quick-start openrouter[/dim]")
+            cloud_ = False
+        else:
+            from . import creds as creds_mod
+            api_key = (creds_mod.read_secret(creds_mod.cloud_slug(cloud_provider))
+                       if cloud_provider else None) or db_api_key
+            chat_mdl = model or cloud_model or chat_mdl
         from .cloud import cloud_chat
         try:
             with warp(f"Hailing cloud {chat_mdl}"):

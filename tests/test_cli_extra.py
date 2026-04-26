@@ -361,6 +361,66 @@ class TestEmbedModelDetection:
             assert q > 50, f"{key}={val!r} → quality {q}: stem doesn't match any catalog entry"
 
 
+class TestCloudFallback:
+    """When --cloud is requested but no cloud_endpoint_url is configured,
+    the command must fall back to local Ollama instead of red_alert+exit."""
+
+    def test_ask_cloud_without_endpoint_falls_back(self, populated_org):
+        # No cloud config in fixture's DB → must fall back, not exit 1
+        r = runner.invoke(app, ["ask", "test", "--cloud"])
+        # Either falls back to local (and then fails on its own merits because
+        # there's no Ollama in the test env), OR shows the fallback message.
+        # Critically: should NOT be `--cloud requested but no cloud_endpoint_url`
+        # red-alert (that was the old behaviour).
+        assert "Falling back to local" in r.output or r.exit_code != 1 or \
+               "Ollama" in r.output or "Hailing" in r.output
+
+    def test_helper_falls_back_on_rate_limit(self, monkeypatch):
+        from org_llm.cli import _cloud_chat_with_local_fallback
+        from urllib.error import HTTPError
+        # Simulate cloud_chat raising 429
+        def _fake_cloud(*args, **kwargs):
+            raise HTTPError("http://x", 429, "Too Many Requests", {}, None)
+        def _fake_local(*args, **kwargs):
+            return "local-fallback-result"
+        import org_llm.cloud as _cloud
+        import org_llm.llm   as _llm
+        monkeypatch.setattr(_cloud, "cloud_chat", _fake_cloud)
+        monkeypatch.setattr(_llm,   "chat",       _fake_local)
+        result = _cloud_chat_with_local_fallback(
+            "hello", cloud_model="x", cloud_endpoint="http://x",
+            cloud_api_key="k", local_model="phi3.5", local_url="http://localhost:11434")
+        assert result == "local-fallback-result"
+
+    def test_helper_falls_back_on_auth_error(self, monkeypatch):
+        from org_llm.cli import _cloud_chat_with_local_fallback
+        from urllib.error import HTTPError
+        def _fake_cloud(*args, **kwargs):
+            raise HTTPError("http://x", 401, "Unauthorized", {}, None)
+        def _fake_local(*args, **kwargs):
+            return "local-result"
+        import org_llm.cloud as _cloud
+        import org_llm.llm   as _llm
+        monkeypatch.setattr(_cloud, "cloud_chat", _fake_cloud)
+        monkeypatch.setattr(_llm,   "chat",       _fake_local)
+        assert _cloud_chat_with_local_fallback(
+            "x", cloud_model="m", cloud_endpoint="http://x",
+            cloud_api_key="", local_model="phi3.5",
+            local_url="http://localhost:11434") == "local-result"
+
+    def test_helper_propagates_unclassified(self, monkeypatch):
+        from org_llm.cli import _cloud_chat_with_local_fallback
+        def _fake_cloud(*args, **kwargs):
+            raise ValueError("totally random unrelated bug")
+        import org_llm.cloud as _cloud
+        monkeypatch.setattr(_cloud, "cloud_chat", _fake_cloud)
+        with pytest.raises(ValueError):
+            _cloud_chat_with_local_fallback(
+                "x", cloud_model="m", cloud_endpoint="http://x",
+                cloud_api_key="", local_model="phi3.5",
+                local_url="http://localhost:11434")
+
+
 class TestConfigFuzzyMatch:
     def test_unset_key_suggests_close_matches(self, populated_org):
         # `chat_modle` is a typo for `chat_model`

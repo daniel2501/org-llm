@@ -359,10 +359,12 @@ Severity icons in the recommendation table:
 
 ## Self-healing
 
-Every `red_alert + Exit` path first attempts a deterministic safe fix.
-If the deterministic fix doesn't apply, the configured cloud LLM is
-asked for a structured remediation, parsed against an allow-list of
-safe `org-llm` subcommands, and executed.
+Every error path attempts at least one fallback before bailing. The
+chain is layered: deterministic fuzzy-match first (free), LLM-assisted
+intent reconstruction next (one cloud call), SRE-style infra fix last
+(`config`/`models`/`doctor` from an allow-list). When all layers fail
+the user sees the original error PLUS a concrete suggestion, never a
+naked "see the docs" line.
 
 What self-heals automatically:
 
@@ -372,11 +374,20 @@ What self-heals automatically:
 | Ollama not reachable | Background `ollama serve`, wait, retry |
 | Empty index but `~/org/` has `.org` files | Run `index` automatically |
 | `ask` returns 0 hits and unembedded nodes exist | Run `embed` and retry the search |
+| `ask` returns 0 hits even after embed | Suggest 2-3 alternative queries from your top tags + recent titles |
+| `code-index` paths all missing | Run `discover` and offer found code roots |
 | Model 404 at runtime (e.g. `llama3.2:latest` not pulled) | Pull and retry |
-| Configured model is bogus (`llama99-doesnt-exist`) | LLM picks a safe alternative, swaps `chat_model`, retries |
-| Out of memory | **Doesn't auto-fix** — RAM can't be conjured. Suggests `--cloud` / `performance --apply` |
+| Configured model is bogus (`llama99-doesnt-exist`) | Fuzzy-match against pulled + catalog → swap → LLM fallback |
+| Embedding dimension mismatch (changed embed model) | Auto re-embed all nodes with the new model |
+| Cloud rate-limit (429), auth fail (401/403), 5xx | Fall back to local Ollama with a yellow warning |
+| `--cloud` requested without configured backend | Fall back to local with a hint to run `cloud --quick-start` |
+| Bad config key (`chat_modle`) | Fuzzy-match against known keys → "did you mean?" |
+| Skill not found | Fuzzy-match against registered skills → run closest |
+| Typer `Got unexpected extra arguments` (shell quoting) | 3-layer recovery: deterministic re-glue → LLM intent reconstruction → SRE fix |
+| Unknown subcommand (typo) | Fuzzy-match top-level verbs and retry |
+| `tangle_file` and Emacs daemon isn't running | Auto-start `emacs --daemon`, retry once |
+| Out of memory | Suggest `--cloud` / `performance --apply` (RAM can't be conjured) |
 | Path-traversal / sensitive-path requests | **Doesn't auto-fix** — security boundary |
-| Missing API key for `--cloud` | **Doesn't auto-fix** — needs user paste |
 
 Pick the best LLM for fix duty by benchmarking:
 
