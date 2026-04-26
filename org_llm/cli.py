@@ -667,7 +667,20 @@ def init():
         init_db(engine)
     hail(f"Database ready at {path}")
     if is_new:
-        on_screen("Next: [bold]org-llm index[/bold]   then  [bold]org-llm embed[/bold]")
+        # Probe org_dir to tailor the next-step suggestion to actual content.
+        try:
+            engine_now = make_engine(path)
+            with get_session(engine_now) as session:
+                org_dir = _org_dir(session)
+            n_org = sum(1 for _ in org_dir.rglob("*.org")) if org_dir.exists() else 0
+        except Exception:
+            n_org = 0
+        if n_org > 0:
+            on_screen(f"Next: [bold]org-llm index[/bold]  — found {n_org} .org files in {org_dir}")
+            on_screen("Then: [bold]org-llm embed[/bold]   then  [bold]org-llm ask \"…\"[/bold]")
+            on_screen("Personalise the UI: [bold]org-llm personalize --apply[/bold]")
+        else:
+            on_screen(f"Next: drop some .org files into [bold]{org_dir}[/bold] then run [bold]org-llm index[/bold]")
         on_screen("Tour: [bold]org-llm tutor welcome[/bold]")
     else:
         on_screen("(Existing DB detected — config rows preserved)")
@@ -717,7 +730,68 @@ def index(
             files, nodes = index_directory(org_dir, session)
 
     hail(f"Indexed {files} files, {nodes} nodes.")
+    if nodes > 0:
+        with get_session(_engine()) as session:
+            on_screen(_suggest_note_ask(session, prefix="Try it: "))
     make_it_so()
+
+
+def _suggest_note_ask(session, prefix: str = "Try it: ") -> str:
+    """Build a context-aware `org-llm ask` suggestion from real vault state.
+
+    Samples top tags + recent note titles, picks one at random, renders a
+    template from a small pool. Falls back to a generic prompt when the
+    vault has no content yet. Used by index/embed/capture/tag completion
+    hints — anything that lands the user back at the `ask` prompt.
+    """
+    import random
+    from collections import Counter
+    from datetime import datetime, timedelta
+    from .db import Node
+
+    # Top tags (excluding code-index tags). Tags are stored space-separated.
+    tag_counts: Counter = Counter()
+    for (tags,) in session.query(Node.tags).filter(Node.tags.isnot(None)).all():
+        for t in (tags or "").split():
+            t = t.strip().lower()
+            if t and t != "code" and not t.startswith("code:"):
+                tag_counts[t] += 1
+    top_tags = [t for t, _ in tag_counts.most_common(15)]
+
+    # Recent note titles (last 30 days)
+    since = (datetime.now() - timedelta(days=30)).timestamp()
+    recents = (
+        session.query(Node.title)
+        .filter(Node.mtime >= since,
+                Node.tags.isnot(None),
+                ~Node.tags.like("%code%"))
+        .order_by(Node.mtime.desc())
+        .limit(15).all()
+    )
+    recent_titles = [t[0] for t in recents if t[0]]
+
+    pool: list[str] = []
+    for tag in top_tags:
+        pool.extend([
+            f'what did I write about "{tag}" lately?',
+            f'summarise my "{tag}" notes',
+            f'find the most-linked note tagged "{tag}"',
+        ])
+    for title in recent_titles:
+        # Trim very long titles to keep the suggestion readable
+        short = title if len(title) <= 60 else title[:57] + "…"
+        pool.extend([
+            f'what does "{short}" say?',
+            f'connect "{short}" to anything else in my vault',
+        ])
+
+    if not pool:
+        # Empty / brand-new vault.
+        return (f"{prefix}[bold]org-llm ask "
+                f"\"what do I have in this vault?\"[/bold]")
+
+    cloud_flag = " --cloud" if random.random() < 0.4 else ""
+    return f"{prefix}[bold]org-llm ask{cloud_flag} \"{random.choice(pool)}\"[/bold]"
 
 
 def _suggest_code_ask(session, roots: list[Path]) -> str:
@@ -730,23 +804,45 @@ def _suggest_code_ask(session, roots: list[Path]) -> str:
     import random
     from .db import File, Node
 
-    samples: list[tuple[str, str, str]] = []  # (title, path, lang)
+    import re as _re
+    samples: list[tuple[str, str, str, list[str]]] = []  # (title, path, lang, symbols)
     prefixes = [str(r.resolve()) + "/" for r in roots]
     rows = (
-        session.query(Node.title, Node.tags, File.path)
+        session.query(Node.title, Node.tags, File.path, Node.body)
         .join(File, Node.file_id == File.id)
         .filter(Node.tags.like("%code%"))
         .order_by(File.mtime.desc())
         .limit(80)
         .all()
     )
-    for title, tags, path in rows:
+    sym_patterns = {
+        "python":     _re.compile(r"^(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)", _re.M),
+        "elisp":      _re.compile(r"^\(defun\s+([A-Za-z_][A-Za-z0-9_/-]*)", _re.M),
+        "rust":       _re.compile(r"^\s*(?:pub\s+)?(?:fn|struct|enum|trait)\s+([A-Za-z_][A-Za-z0-9_]*)", _re.M),
+        "go":         _re.compile(r"^func\s+(?:\([^)]+\)\s+)?([A-Za-z_][A-Za-z0-9_]*)", _re.M),
+        "typescript": _re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)|^\s*(?:export\s+)?class\s+([A-Za-z_$][A-Za-z0-9_$]*)", _re.M),
+        "javascript": _re.compile(r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)", _re.M),
+        "scheme":     _re.compile(r"^\(define[*]?\s+\(?([A-Za-z_][A-Za-z0-9_!?/<>=+*-]*)", _re.M),
+    }
+    for title, tags, path, body in rows:
         if not any(path.startswith(p) for p in prefixes):
             continue
         lang = next((t.split(":", 1)[1]
-                     for t in (tags or "").split(":")
+                     for t in (tags or "").split()
                      if t.startswith("code:")), "")
-        samples.append((title, path, lang))
+        symbols: list[str] = []
+        pattern = sym_patterns.get(lang)
+        if pattern and body:
+            seen_syms: set[str] = set()
+            for m in pattern.finditer(body or ""):
+                # First non-empty group across the alternation handles TS/JS
+                sym = next((g for g in m.groups() if g), None)
+                if sym and not sym.startswith("_") and sym not in seen_syms:
+                    seen_syms.add(sym)
+                    symbols.append(sym)
+                    if len(symbols) >= 8:
+                        break
+        samples.append((title, path, lang, symbols))
         if len(samples) >= 30:
             break
 
@@ -823,7 +919,7 @@ def _suggest_code_ask(session, roots: list[Path]) -> str:
         ])
         return f"Try it: [bold]org-llm ask {question!r}[/bold]"
 
-    title, path, lang = random.choice(samples)
+    title, path, lang, symbols = random.choice(samples)
     file_name = Path(path).name
     # Project = first path segment under any of the roots
     project = file_name
@@ -834,7 +930,16 @@ def _suggest_code_ask(session, roots: list[Path]) -> str:
             break
     parent_dir = str(Path(path).parent)
 
-    pool = pools.get(lang) or pools[""]
+    pool = list(pools.get(lang) or pools[""])
+    # Symbol-aware extras when we extracted any from the file's body.
+    if symbols:
+        sym = random.choice(symbols)
+        pool.extend([
+            f"how is {sym} used across {{project}}?",
+            f"explain {sym} in {{file}}",
+            f"find every callsite of {sym}",
+        ])
+
     template = random.choice(pool)
     question = template.format(file=file_name, dir=parent_dir, project=project)
     cloud_flag = " --cloud" if random.random() < 0.5 else ""
@@ -1042,6 +1147,9 @@ def embed(
                                 force=force, progress_cb=tick)
 
     hail(f"Embedded {count} nodes.")
+    if count > 0:
+        with get_session(engine) as session:
+            on_screen(_suggest_note_ask(session, prefix="Try it: "))
     make_it_so()
 
 
@@ -1208,6 +1316,34 @@ def ask(
         from datetime import datetime, timedelta
         since_mtime = (datetime.now() - timedelta(days=days_window)).timestamp()
 
+    # Project-name detection: when the query names a real repo under one of
+    # the user's code roots, augment retrieval with that repo's README so the
+    # LLM has architecture context even if no notes match the project.
+    project_files: list[Path] = []
+    try:
+        from .discover import discover as _disc
+        for found in _disc():
+            if found.kind != "repos-root":
+                continue
+            try:
+                children = [p for p in found.path.iterdir()
+                            if p.is_dir() and not p.name.startswith(".")]
+            except OSError:
+                continue
+            for child in children:
+                if child.name.lower() in query.lower():
+                    for readme_name in ("README.md", "README.org", "README"):
+                        p = child / readme_name
+                        if p.exists():
+                            project_files.append(p)
+                            break
+        # De-dup, cap at 3 to avoid prompt bloat
+        seen_proj_files: set[Path] = set()
+        project_files = [p for p in project_files
+                          if not (p in seen_proj_files or seen_proj_files.add(p))][:3]
+    except Exception:
+        project_files = []
+
     # Detect path-anchored query intents (daily / journal / diary). When the
     # query references one of these subfolders, we augment retrieval with the
     # most-recent files from that path REGARDLESS of the mtime window — so
@@ -1324,6 +1460,37 @@ def ask(
                       "your vault may be empty.")
             raise typer.Exit(1)
 
+    # Empty-but-not-vault-empty path: vault HAS content, but no semantic match.
+    # Surface 2-3 alternative queries the user might mean, drawn from their
+    # actual top tags + recent titles. Best-effort — never block the answer.
+    if not results:
+        try:
+            with get_session(engine) as session:
+                from .db import Node
+                from collections import Counter as _C
+                tag_counts: _C = _C()
+                for (tags,) in session.query(Node.tags).filter(
+                        Node.tags.isnot(None)).all():
+                    for tk in (tags or "").split():
+                        tk = tk.strip().lower()
+                        if tk and tk != "code" and not tk.startswith("code:"):
+                            tag_counts[tk] += 1
+                top_tags = [t for t, _ in tag_counts.most_common(5)]
+                recent_titles = [
+                    t[0] for t in session.query(Node.title)
+                    .order_by(Node.mtime.desc()).limit(5).all() if t[0]
+                ]
+            on_screen("[yellow]No matches in the index. "
+                      "Maybe try one of these instead:[/yellow]")
+            for tag in top_tags[:3]:
+                on_screen(f"  [bold]org-llm ask \"what did I write about {tag}?\"[/bold]")
+            for title in recent_titles[:2]:
+                short = title if len(title) <= 50 else title[:47] + "…"
+                on_screen(f"  [bold]org-llm ask \"what does '{short}' say?\"[/bold]")
+        except Exception:
+            pass
+        raise typer.Exit(0)
+
     # Always show a one-line retrieval summary so the user can sanity-check
     # whether retrieval was on-topic before the LLM responds.
     titles = ", ".join(r.title[:40] for r in results[:3])
@@ -1357,6 +1524,20 @@ def ask(
     ctx_text = "\n\n---\n\n".join(
         f"# {r.title}\n{r.body[:800]}" for r in results
     )
+    # Project READMEs (when query named a real repo) come ahead of note
+    # context — the LLM should anchor to project-level shape first.
+    if project_files:
+        readme_chunks = []
+        for p in project_files:
+            try:
+                txt = p.read_text(errors="replace")[:1600]
+                readme_chunks.append(f"# Project: {p.parent.name} ({p.name})\n{txt}")
+            except Exception:
+                continue
+        if readme_chunks:
+            ctx_text = "\n\n---\n\n".join(readme_chunks) + "\n\n---\n\n" + ctx_text
+            on_screen(f"[dim]Augmented with {len(readme_chunks)} project README(s): "
+                      f"{', '.join(p.parent.name for p in project_files)}[/dim]")
 
     system = (
         "You are answering using ONLY the org-roam notes the user has "
@@ -1640,7 +1821,27 @@ def models(
         console.print("[dim]Ollama not reachable or no models pulled.[/dim]")
 
     console.print()
-    on_screen("[dim]Tip:[/dim] org-llm models --tune  │  --discover  │  --assign  │  --pull <tag>")
+    # Context-aware recommendation: highlight first concrete gap, not generic Tip.
+    unassigned = [role for role, _, _ in _TASK_MODEL_KEYS
+                  if not (current.get(role) or "").strip() or current.get(role) == "—"]
+    not_pulled = [(role, current[role]) for role, _, _ in _TASK_MODEL_KEYS
+                  if current.get(role) and current[role] != "—"
+                  and not _is_pulled(current[role], pulled)]
+    if unassigned:
+        role = unassigned[0]
+        on_screen(f"[dim]Next:[/dim] {role} is unassigned — "
+                  f"[bold]org-llm models --tune --apply[/bold] picks one for your hardware")
+    elif not_pulled:
+        role, model = not_pulled[0]
+        on_screen(f"[dim]Next:[/dim] {role}={model} is configured but not pulled — "
+                  f"[bold]org-llm models --pull {model}[/bold]")
+    elif not pulled:
+        on_screen("[dim]Next:[/dim] no Ollama models pulled — "
+                  "[bold]org-llm install --skip-fonts --skip-opencode --skip-gh --skip-claude[/bold]")
+    else:
+        on_screen("[dim]All roles assigned and pulled.[/dim] "
+                  "[bold]org-llm performance --benchmark[/bold] "
+                  "measures real tok/s if you want tuning data.")
 
 
 _CONFIG_VALIDATORS = {
@@ -3504,6 +3705,36 @@ def doctor(
             fh.write("\n".join(lines))
         hail(f"Appended doctor report → {path}")
 
+    # ── Finding-aware closing suggestion ─────────────────────────────────────
+    # Anchor the next-step prompt to the worst real finding rather than a
+    # generic "see the docs". If everything is clean, surface the next
+    # discovery the user could try.
+    if issues:
+        first = issues[0]
+        on_screen(f"[dim]Worst finding:[/dim] {first}")
+        on_screen("[dim]Auto-fix:[/dim]      [bold]org-llm doctor --fix[/bold]")
+    elif warnings:
+        first = warnings[0]
+        on_screen(f"[dim]Top warning:[/dim] {first}")
+    else:
+        try:
+            from .discover import discover, suggest_grant_roots
+            from .db import Node
+            with get_session(_engine()) as session:
+                n_nodes = session.query(Node).count()
+            roots = suggest_grant_roots()
+            if n_nodes == 0:
+                on_screen("[dim]Healthy.[/dim] Vault is empty — "
+                          "[bold]org-llm index[/bold] when ready.")
+            elif roots:
+                on_screen("[dim]Healthy.[/dim] Try: "
+                          "[bold]org-llm discover[/bold] for filesystem suggestions.")
+            else:
+                on_screen("[dim]Healthy.[/dim] Try: "
+                          "[bold]org-llm performance --benchmark[/bold] for tuning data.")
+        except Exception:
+            pass
+
 
 _TUTOR_STEPS = [
     (
@@ -4080,6 +4311,32 @@ _TUTOR_STEPS = [
         "[dim]Source: org_llm/ui.py → _enabled_msgs()  |  org-llm source ui[/dim]",
     ),
     (
+        "personalize",
+        "[lcars2]org-llm personalize[/lcars2] — auto-create theme knobs from your content\n\n"
+        "Reads your actual vault + filesystem and proposes theme knobs that\n"
+        "match your real interests. Detection is deterministic; only the\n"
+        "completion-message generation can call out to the local LLM.\n\n"
+        "[lcars1]What it scans:[/lcars1]\n"
+        "  • Top non-boring tags in your =Node.tags= (≥3 occurrences each)\n"
+        "  • Project names under repos-roots from [bold]org-llm discover[/bold]\n"
+        "  • Detected preferred language (from code-shaped file extensions)\n\n"
+        "[lcars1]What you get:[/lcars1]\n"
+        "  Each proposal becomes a [bold]knob[/bold]: a name, default level (1–2),\n"
+        "  and 4–8 messages spread across LCARS / pride colours. The LLM in\n"
+        "  opencode also sees these knobs in its system prompt and is asked\n"
+        "  to match the energy.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm personalize[/bold]                  — dry-run preview (default)\n"
+        "  [bold]org-llm personalize --apply[/bold]          — register the proposed knobs\n"
+        "  [bold]org-llm personalize -a --no-llm[/bold]      — apply with template messages only\n"
+        "  [bold]org-llm personalize -a --overwrite[/bold]   — replace existing user knobs\n"
+        "  [bold]org-llm personalize --max 3[/bold]          — cap proposed count\n\n"
+        "[lcars1]Inspect after:[/lcars1]\n"
+        "  [bold]org-llm knob list[/bold]                    — see all dials + active levels\n"
+        "  [bold]org-llm config <name>_level 0..3[/bold]     — tune individually\n\n"
+        "[dim]Source: org_llm/personalize.py  |  org-llm source personalize[/dim]",
+    ),
+    (
         "doctor-walkthrough",
         "[lcars2]org-llm doctor --walkthrough[/lcars2] — LLM-driven self-test\n\n"
         "Doctor in self-tester mode. Runs a curated set of read-only commands,\n"
@@ -4411,6 +4668,54 @@ def tutor(
         console.print("  " + "    ".join(nav))
     console.print()
 
+    # Personalized tail: read real vault state and recommend the most-useful
+    # next tutor step. Only fires on `welcome` to avoid distraction elsewhere.
+    if name == "welcome":
+        try:
+            from .db import Node, File
+            from .discover import discover, detect_preferred_language
+            engine = _engine()
+            with get_session(engine) as session:
+                n_files    = session.query(File).count()
+                n_nodes    = session.query(Node).count()
+                n_embedded = session.query(Node).filter(Node.embedding.isnot(None)).count()
+            n_org_on_disk = 0
+            try:
+                with get_session(engine) as session:
+                    org_dir = _org_dir(session)
+                if org_dir.exists():
+                    n_org_on_disk = sum(1 for _ in org_dir.rglob("*.org"))
+            except Exception:
+                pass
+            lang = ""
+            try:
+                lang = detect_preferred_language()
+            except Exception:
+                pass
+
+            # Pick the most-relevant next step for this user's actual state.
+            if n_org_on_disk == 0 and n_nodes == 0:
+                rec = ("init", f"start with [bold]org-llm init[/bold] — your vault is empty")
+            elif n_files == 0 and n_org_on_disk > 0:
+                rec = ("index", f"jump to [bold]org-llm tutor index[/bold] — you have {n_org_on_disk} .org files un-indexed")
+            elif n_nodes > 0 and n_embedded < n_nodes:
+                rec = ("embed", f"jump to [bold]org-llm tutor embed[/bold] — {n_nodes - n_embedded} nodes still need embeddings")
+            elif n_nodes > 0 and n_embedded == n_nodes:
+                rec = ("ask", "jump to [bold]org-llm tutor ask[/bold] — your vault is fully searchable")
+            else:
+                rec = ("init", "start with [bold]org-llm tutor init[/bold]")
+
+            on_screen(f"[lcars3]Recommended for you[/lcars3]: {rec[1]}")
+            stats_bits = [f"{n_files} files", f"{n_nodes} nodes",
+                          f"{n_embedded}/{n_nodes} embedded" if n_nodes else None]
+            stats = " · ".join(b for b in stats_bits if b)
+            if lang:
+                stats += f" · top language: {lang}"
+            on_screen(f"[dim]Your vault: {stats}[/dim]")
+        except Exception:
+            pass
+        console.print()
+
 
 _MODULE_MAP = {
     "cli":        "org_llm.cli",
@@ -4533,6 +4838,11 @@ def capture(
 
     hail(f"Captured to {org_file}")
     on_screen(f"  Node ID: {node_id}")
+    try:
+        with get_session(_engine()) as session:
+            on_screen(_suggest_note_ask(session, prefix="Try it: "))
+    except Exception:
+        pass
     make_it_so()
 
 
@@ -4601,6 +4911,13 @@ def tag(
     hail(f"Tagged {tagged} nodes.")
     if apply:
         on_screen("[warn]--apply (write to org files) not yet implemented.[/warn]")
+    if tagged > 0:
+        # Show a Try-it weighted toward the freshly-popular tag.
+        try:
+            with get_session(engine) as session:
+                on_screen(_suggest_note_ask(session, prefix="Try it: "))
+        except Exception:
+            pass
     make_it_so()
 
 
@@ -4684,11 +5001,42 @@ def code(
             on_screen("Either run with --cloud, or: org-llm doctor --fix")
             raise typer.Exit(1)
 
+    # Pull filesystem context: top language + recent code files. The model
+    # benefits from knowing the user's actual code corpus when generating
+    # snippets — e.g. recommend stdlib idioms that match their existing
+    # codebase rather than pulling in random new dependencies.
+    fs_context = ""
+    try:
+        from .discover import detect_preferred_language
+        from .db        import File, Node
+        pref_lang = detect_preferred_language()
+        with get_session(engine) as session:
+            recent_code = (
+                session.query(File.path)
+                .join(Node, Node.file_id == File.id)
+                .filter(Node.tags.like("%code%"))
+                .order_by(File.mtime.desc())
+                .distinct()
+                .limit(5).all()
+            )
+        if pref_lang or recent_code:
+            bits = []
+            if pref_lang:
+                bits.append(f"My most-used language is {pref_lang}.")
+            if recent_code:
+                names = ", ".join(Path(r[0]).name for r in recent_code)
+                bits.append(f"Recently-touched code files: {names}.")
+            fs_context = "\n".join(bits)
+    except Exception:
+        pass
+
     system = (
         f"You are an expert {lang} programmer who specialises in org-mode and Emacs tooling. "
         f"Output ONLY the {lang} code with no explanation or markdown fences. "
         f"The code should be complete and directly runnable."
     )
+    if fs_context:
+        system += f"\n\nUser environment hints:\n{fs_context}"
     prompt = task
     if ctx_text:
         prompt = f"Context from my org notes:\n\n{ctx_text}\n\n---\n\nTask: {task}"
@@ -4963,6 +5311,36 @@ def review_emacs(
         ))
         session.commit()
 
+    # Closing recommendation: ask the same model for the single most-impactful
+    # change drawn from its own review. Best-effort — always succeed even if
+    # the model refuses or the endpoint is unreliable.
+    try:
+        close_sys = (
+            "Given a review of an Emacs configuration, return ONE sentence: "
+            "the single most impactful change the user should make. Be "
+            "concrete (cite a symbol, file, or package). 8-22 words. No "
+            "preamble, no list, no quotes."
+        )
+        close_prompt = (f"Review:\n\n{review[:6000]}\n\n"
+                        "What's the single most impactful change?")
+        if cloud_:
+            from .cloud import cloud_chat as _cc
+            most_impactful = _cc(close_prompt, model=chat_mdl,
+                                  endpoint_url=cloud_endpoint,
+                                  api_key=api_key, system=close_sys)
+        else:
+            from .llm import chat as _lc
+            most_impactful = _lc(close_prompt, model=chat_mdl,
+                                  base_url=url, system=close_sys)
+        line = next((l.strip(" -–—•\"'").strip()
+                      for l in (most_impactful or "").splitlines()
+                      if 8 <= len(l.strip()) <= 250), "")
+        if line:
+            console.print()
+            on_screen(f"[lcars3]Most impactful change[/lcars3]: {line}")
+    except Exception:
+        pass
+
     make_it_so()
 
 
@@ -4980,7 +5358,9 @@ def _opencode_workspace_prompt(workspace: str, n_files: int, n_nodes: int,
                                 skill_str: str, recent_str: str,
                                 top_tags_str: str, model_status: str,
                                 discover_str: str, knobs_str: str,
-                                hardware_str: str) -> str:
+                                hardware_str: str,
+                                todays_prompt: str = "",
+                                projects_str: str = "") -> str:
     """Return the system prompt for a workspace flavor.
 
     Workspaces:
@@ -5010,7 +5390,7 @@ HARDWARE
 
 FILESYSTEM
 {discover_str}
-{knobs_str}"""
+{('USER PROJECTS' + chr(10) + projects_str + chr(10)) if projects_str else ''}{knobs_str}{('TODAY OPENING PROMPT' + chr(10) + '  ' + todays_prompt + chr(10) + '  (offer this if the user opens with no question)' + chr(10)) if todays_prompt else ''}"""
 
     if workspace == "researcher":
         focus = """
@@ -5084,13 +5464,14 @@ def _opencode_pre_flight_context(session) -> dict:
         for n in recent
     ) or "  (no recent activity)"
 
-    # Top tags
+    # Top tags. Tags are stored space-separated; code-index nodes carry
+    # `code` plus `code:<lang>` so filter both prefixes.
     from collections import Counter
     tag_counts: Counter = Counter()
     for (tags,) in session.query(Node.tags).filter(Node.tags.isnot(None)).all():
-        for t in (tags or "").split(":"):
-            t = t.strip()
-            if t and not t.startswith("code"):
+        for t in (tags or "").split():
+            t = t.strip().lower()
+            if t and t != "code" and not t.startswith("code:"):
                 tag_counts[t] += 1
     top_tags = tag_counts.most_common(10)
     top_tags_str = "\n".join(f"  - {t}  ({c})" for t, c in top_tags) \
@@ -5163,6 +5544,96 @@ def _opencode_pre_flight_context(session) -> dict:
     except Exception:
         pass
 
+    # User projects: skim READMEs of repos under ~/repos/ etc. The LLM gets
+    # one-line summaries so it can name projects when the user mentions them.
+    projects_str = ""
+    try:
+        from .discover import discover, suggest_code_dirs
+        proj_lines: list[str] = []
+        seen_proj: set[str] = set()
+        for found in discover():
+            if found.kind != "repos-root":
+                continue
+            try:
+                children = sorted(p for p in found.path.iterdir()
+                                  if p.is_dir() and not p.name.startswith("."))
+            except OSError:
+                continue
+            for child in children[:8]:
+                if child.name in seen_proj:
+                    continue
+                seen_proj.add(child.name)
+                # Look for a README under common names
+                readme = next((child / n for n in
+                                ("README.md", "README.org", "Readme.md", "README")
+                                if (child / n).exists()), None)
+                summary = ""
+                if readme:
+                    try:
+                        text = readme.read_text(errors="replace")
+                        # First non-blank, non-heading line up to 120 chars
+                        for line in text.splitlines():
+                            stripped = line.strip()
+                            if not stripped:
+                                continue
+                            if stripped.startswith(("#", "*", "=", "-")):
+                                # First H1 from md/org also counts as a fallback
+                                stripped = stripped.lstrip("# *=-").strip()
+                                if stripped:
+                                    summary = stripped[:120]
+                                    break
+                                continue
+                            summary = stripped[:120]
+                            break
+                    except Exception:
+                        pass
+                proj_lines.append(f"  - {child.name}"
+                                    + (f" — {summary}" if summary else ""))
+            if len(proj_lines) >= 12:
+                break
+        if proj_lines:
+            projects_str = "\n".join(proj_lines)
+    except Exception:
+        pass
+
+    # Today's prompt: a single concrete starter question seeded from the
+    # last 7 days of activity. Cheap LLM call (best-effort) so opencode
+    # always opens with something actionable instead of a blank cursor.
+    todays_prompt = ""
+    try:
+        if recent and ollama_url:
+            from .llm import chat as _chat
+            recent_titles = [n.title for n in recent[:5] if n.title]
+            top_words = ", ".join(t for t, _ in tag_counts.most_common(5)) \
+                        if tag_counts else "(no tags yet)"
+            chat_mdl = (cfg_rows.get("fast_model")
+                        or cfg_rows.get("chat_model")
+                        or "llama3.2")
+            sys_msg = (
+                "You suggest one short, concrete starter question that helps "
+                "a user re-engage with their org-roam knowledge base. Output "
+                "ONE question only — no preamble, no quotes, no numbering. "
+                "8-18 words."
+            )
+            user_msg = (
+                f"Recent note titles: {recent_titles}\n"
+                f"Top tags: {top_words}\n\n"
+                "Suggest one question they might want to start their session with."
+            )
+            try:
+                resp = _chat(user_msg, model=chat_mdl,
+                             base_url=ollama_url, system=sys_msg)
+                # Take first non-empty line, trim quoting/numbering cruft.
+                for line in (resp or "").splitlines():
+                    line = line.strip(" -–—•\"'").strip()
+                    if 8 <= len(line) <= 200:
+                        todays_prompt = line
+                        break
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     return {
         "org_dir": str(org_dir), "ollama_url": ollama_url,
         "n_files": n_files, "n_nodes": n_nodes, "n_embedded": n_embedded,
@@ -5171,6 +5642,8 @@ def _opencode_pre_flight_context(session) -> dict:
         "recent_str": recent_str, "top_tags_str": top_tags_str,
         "model_status": model_status, "hardware_str": hardware_str,
         "discover_str": discover_str, "knobs_str": knobs_str,
+        "todays_prompt": todays_prompt,
+        "projects_str": projects_str,
     }
 
 
@@ -5403,6 +5876,8 @@ def launch(
             discover_str=ctx["discover_str"],
             knobs_str=ctx["knobs_str"],
             hardware_str=ctx["hardware_str"],
+            todays_prompt=ctx.get("todays_prompt", ""),
+            projects_str=ctx.get("projects_str", ""),
         )
 
     # ── Build .opencode.json ──────────────────────────────────────────────────
@@ -5956,7 +6431,11 @@ def cloud(
             raise typer.Exit(1)
 
         console.print()
-        on_screen("Try it now:  [bold]org-llm ask 'what did I write about <topic>?'[/bold]")
+        try:
+            with get_session(_engine()) as session:
+                on_screen(_suggest_note_ask(session, prefix="Try it now:  "))
+        except Exception:
+            on_screen("Try it now:  [bold]org-llm ask 'what's interesting in my vault?'[/bold]")
         on_screen("View status: [bold]org-llm cloud --status[/bold]")
         make_it_so()
         return
@@ -6596,6 +7075,94 @@ def knob_list():
     on_screen("Add a knob:    [bold]org-llm knob add <name> -m 'msg|style' …[/bold]")
     on_screen("Remove a knob: [bold]org-llm knob remove <name>[/bold]")
     on_screen("Override:      [bold]ORG_LLM_<NAME>_LEVEL=0..3[/bold]")
+    on_screen("Auto-create:   [bold]org-llm personalize --apply[/bold]")
+
+
+@app.command()
+def personalize(
+    apply:    Annotated[bool, typer.Option("--apply",    "-a",
+              help="Write proposed knobs to the config DB")] = False,
+    no_llm:   Annotated[bool, typer.Option("--no-llm",   "-L",
+              help="Use deterministic templates only — skip LLM message generation")] = False,
+    max_themes: Annotated[int, typer.Option("--max",     "-n",
+              help="Cap on number of proposed knobs")] = 5,
+    overwrite: Annotated[bool, typer.Option("--overwrite",
+              help="Replace existing user knobs instead of merging")] = False,
+):
+    """Auto-create theme knobs from your vault + filesystem content.
+
+    Reads your top non-boring tags, recent note titles, project names
+    under your code roots, and detected preferred language. Each surfaces
+    as a proposed [bold]knob[/bold] — a named bundle of make_it_so
+    completion messages controlled by ORG_LLM_<NAME>_LEVEL.
+
+    Default mode is dry-run (preview only). Pass --apply to actually
+    register the knobs in the config DB.
+
+    Examples:
+      org-llm personalize                  — preview proposals (dry-run)
+      org-llm personalize --apply          — register all proposals
+      org-llm personalize -a --no-llm      — apply with template messages only
+      org-llm personalize -a --overwrite   — replace existing user knobs
+
+    The personalisation pipeline is read-only by default and *always*
+    deterministic in detection. Only message generation can call out to
+    the local LLM (chat_model / fast_model). Use --no-llm to keep the
+    whole flow offline.
+    """
+    from rich.table import Table as _T
+    from . import personalize as _p
+
+    _auto_init_db_if_needed()
+    engine = _engine()
+    with get_session(engine) as session:
+        url       = _ollama_url(session)
+        chat_mdl  = _cfg(session, "fast_model") or _cfg(session, "chat_model") or "llama3.2"
+        proposals = _p.detect_themes(session, max_themes=max_themes)
+
+    if not proposals:
+        on_screen("No themes detected yet. Index more notes first:")
+        on_screen("  [bold]org-llm index[/bold]   then re-run [bold]org-llm personalize[/bold]")
+        return
+
+    use_llm = not no_llm
+    with warp(f"Generating messages for {len(proposals)} theme(s)"
+              + (f" via {chat_mdl}" if use_llm else " (templates only)")):
+        knobs = _p.proposals_to_knobs(proposals, model=chat_mdl,
+                                        base_url=url, use_llm=use_llm)
+
+    tbl = _T(box=None, pad_edge=False)
+    tbl.add_column("Knob",     style="lcars1", no_wrap=True)
+    tbl.add_column("Source",   style="dim",    width=14)
+    tbl.add_column("Level",    style="lcars3", justify="right", width=6)
+    tbl.add_column("Sample message", style="lcars2")
+    for p, k in zip(proposals, knobs):
+        msgs = k.get("messages", [])
+        sample = msgs[0][0] if msgs else "(none)"
+        tbl.add_row(k["name"], p.source, str(k["default_level"]),
+                     sample[:60])
+    console.print()
+    console.rule("[lcars1]Personalised theme proposals[/lcars1]")
+    console.print(tbl)
+    console.print()
+
+    if not apply:
+        on_screen(f"Dry-run only. Apply with: [bold]org-llm personalize --apply[/bold]")
+        return
+
+    # Merge / overwrite into user_theme_knobs
+    existing = _read_user_knobs() if not overwrite else []
+    by_name = {k["name"]: k for k in existing}
+    for k in knobs:
+        # strip provenance key before persisting
+        cleaned = {kk: vv for kk, vv in k.items() if not kk.startswith("_")}
+        by_name[k["name"]] = cleaned
+    _write_user_knobs(list(by_name.values()))
+
+    hail(f"Registered {len(knobs)} knob(s).")
+    on_screen("Inspect:  [bold]org-llm knob list[/bold]")
+    on_screen("Adjust:   [bold]ORG_LLM_<NAME>_LEVEL=0..3[/bold]")
+    make_it_so()
 
 
 @app.command(name="grant-root")

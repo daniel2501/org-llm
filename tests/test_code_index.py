@@ -251,6 +251,26 @@ class TestSuggestCodeAsk:
         assert "Try it:" in out
         assert "org-llm ask" in out
 
+    def test_symbol_extraction_for_python(self, cli_db, tmp_path):
+        """When a Python file has obvious symbols, they should sometimes show
+        up in the Try-it pool as `how is X used` style suggestions."""
+        from org_llm.cli import _suggest_code_ask
+        repo = tmp_path / "symrepo"
+        repo.mkdir()
+        (repo / "core.py").write_text(
+            "def widget_factory():\n    return 1\n\n"
+            "class GearTrain:\n    pass\n"
+        )
+        runner.invoke(app, ["code-index", str(repo), "--no-embed"])
+        engine = make_engine(cli_db)
+        # Sample many times — symbol templates are one of several pools
+        with get_session(engine) as s:
+            outs = {_suggest_code_ask(s, [repo]) for _ in range(80)}
+        joined = " ".join(outs)
+        # At least one of the extracted symbols should appear across 80 draws
+        assert ("widget_factory" in joined) or ("GearTrain" in joined), \
+            f"No symbol-based suggestion in: {outs}"
+
 
 # ── _parse_tag_hints regression ─────────────────────────────────────────────
 

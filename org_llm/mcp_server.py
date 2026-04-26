@@ -545,7 +545,8 @@ def create_mcp_server():
                 return f"Search failed: {e}"
             results = []
             for h in hits:
-                tags = (h.tags or "").split(":")
+                # Tags are stored space-separated, e.g. "code code:python"
+                tags = (h.tags or "").split()
                 if "code" not in tags:
                     continue
                 if lang and f"code:{lang}" not in tags:
@@ -557,7 +558,7 @@ def create_mcp_server():
             return f"No code matches for '{query}'" + (f" in {lang}" if lang else "")
         lines = []
         for h in results:
-            tag_lang = next((t.split(":", 1)[1] for t in (h.tags or "").split(":")
+            tag_lang = next((t.split(":", 1)[1] for t in (h.tags or "").split()
                              if t.startswith("code:")), "?")
             lines.append(f"- {h.title}  [{tag_lang}]")
         return "\n".join(lines)

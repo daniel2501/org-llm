@@ -110,6 +110,7 @@ candidates.
 | `org-llm grant <path>` / `revoke` / `grants` | Allow LLM file reads via MCP (with deny-list + auto-roots) |
 | `org-llm grant-browser` / `revoke-browser` | Toggle LLM browser tools (`open_url`, `browser_command`) |
 | `org-llm knob add <name>` | Define your own theme knob (e.g. `dinosaur`, `coffee`) |
+| `org-llm personalize [--apply]` | Auto-create theme knobs from your top tags + projects |
 | `org-llm completion fish --install` | Install shell completions |
 | `org-llm install` | One-shot install Ollama, models, fonts, opencode, gh, claude, pass |
 
@@ -500,6 +501,65 @@ org-llm knob list
 User knobs live in the SQLite `user_theme_knobs` row; their levels
 follow the same `<name>_level` pattern. Built-in knobs can't be removed
 but can be set to 0.
+
+---
+
+## Auto-personalize: themes from your content
+
+`org-llm personalize` reads your **actual content** — top non-boring
+tags, recent note titles, project names under your code roots,
+detected preferred language — and proposes theme knobs that match
+your real interests.
+
+```sh
+org-llm personalize                 # dry-run preview
+org-llm personalize --apply         # register the proposed knobs
+org-llm personalize -a --no-llm     # apply with template messages only
+org-llm personalize -a --overwrite  # replace existing user knobs
+```
+
+How it works:
+
+- **Detection is deterministic** (no LLM required): scan `Node.tags` for
+  recurring non-boring tags (≥3 occurrences), walk repos-roots from
+  `discover()` for project names, infer the user's preferred language.
+- **Message generation can use the local LLM** for richer, theme-flavoured
+  completion lines — falls back to a per-theme template pool (`◀ Engaging
+  {theme} systems.`) when offline.
+- **Each proposal becomes a knob**: a name, a default level (1–2), and 4–8
+  styled messages spread across LCARS / pride colours. The LLM in opencode
+  also sees these knobs in its system prompt under "USER THEME KNOBS" and
+  is asked to match the energy.
+
+Inspect with `org-llm knob list`; tune levels with
+`org-llm config <name>_level 0..3` or `ORG_LLM_<NAME>_LEVEL=0..3`.
+
+---
+
+## Context-aware suggestions everywhere
+
+The app reads its own state to make every suggestion concrete and
+relevant — no static "Try it: how does X work?" lines that assume
+files you don't have.
+
+| Command | What it personalises from |
+|---|---|
+| `org-llm init` | counts `.org` files in `org_dir`, recommends index/personalize |
+| `org-llm index` / `embed` | top tags + recent note titles → "Try it" line |
+| `org-llm capture` | suggests a follow-up `ask` from the freshly-popular tag |
+| `org-llm tag --apply` | same — "Try it" anchored to the tagged set |
+| `org-llm code-index` | samples a real file + extracts symbols (`def`/`class`/`defun`/`fn`/...) → varied per-language Try-it |
+| `org-llm models` | recommends one concrete next step (assign / pull / install / benchmark) |
+| `org-llm doctor` | closing line cites the worst real finding instead of a generic Tip |
+| `org-llm ask` zero-results | suggests 2-3 alternative queries from your top tags + recent titles |
+| `org-llm code` | injects detected language + recent code files into the system prompt |
+| `org-llm review-emacs` | closes with a "single most impactful change" follow-up call |
+| `org-llm tutor welcome` | recommends the *next* tutor step based on whether your vault is empty/indexed/embedded |
+| `org-llm launch` | system prompt includes top tags, models, hardware, projects with READMEs, today's LLM-generated starter prompt, active knobs/dials |
+
+`ask` also expands retrieval with a project's README when the query
+mentions a real repo under your code roots — so "what does bh-gh-spcs
+do?" reads `~/repos/bh-gh-spcs/README.md` even if no notes match.
 
 ---
 
