@@ -80,6 +80,21 @@ def _is_embed_model(name: str) -> bool:
     return any(sub in n for sub in _EMBED_MODEL_SUBSTRINGS)
 
 
+def _normalize_tag(name: str) -> str:
+    """Canonicalize an Ollama model tag for comparison.
+
+    Ollama returns tags like 'llama3.3:latest', 'nomic-embed-text:latest',
+    'qwen2.5-coder:7b'. The catalog often has stems like 'llama3.3' (no tag,
+    meaning :latest) or specific variants like 'llama3.3:70b'. Naive set
+    comparison breaks because ':latest' is implicit. Drop ':latest' and
+    return everything lowercased so 'llama3.3:latest' == 'llama3.3'.
+    """
+    n = (name or "").strip().lower()
+    if n.endswith(":latest"):
+        n = n[: -len(":latest")]
+    return n
+
+
 def _ollama_has(model: str, base_url: str) -> bool:
     """Return True if Ollama already has the given model tag pulled."""
     try:
@@ -87,8 +102,33 @@ def _ollama_has(model: str, base_url: str) -> bool:
         pulled = list_models(base_url)
     except Exception:
         return False
-    # Match either exact tag or with the implicit ":latest" suffix
-    return any(model in m for m in pulled)
+    target = _normalize_tag(model)
+    target_stem = target.split(":")[0]
+    for m in pulled:
+        m_norm = _normalize_tag(m)
+        if m_norm == target or m_norm.split(":")[0] == target_stem and ":" not in target:
+            return True
+    return False
+
+
+def _pulled_normalized(base_url: str) -> set[str]:
+    """Return the set of normalized pulled model tags."""
+    try:
+        from .llm import list_models
+        return {_normalize_tag(m) for m in list_models(base_url)}
+    except Exception:
+        return set()
+
+
+def _is_pulled(model: str, pulled_norm: set[str]) -> bool:
+    """Check if a (possibly stem-only) model name is satisfied by any pulled tag."""
+    if not model:
+        return False
+    target = _normalize_tag(model)
+    if target in pulled_norm:
+        return True
+    target_stem = target.split(":")[0]
+    return any(p.split(":")[0] == target_stem for p in pulled_norm)
 
 
 def _ollama_pull(model: str) -> bool:
@@ -147,12 +187,17 @@ def _safe_org_path(org_dir: Path, user_path: str) -> Path:
 @app.command()
 def init():
     """Initialize database and write default config."""
-    import os
     path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+    is_new = not path.exists()
     with warp(TREK_MSGS["init"]):
         engine = make_engine(path)
         init_db(engine)
     hail(f"Database ready at {path}")
+    if is_new:
+        on_screen("Next: [bold]org-llm index[/bold]   then  [bold]org-llm embed[/bold]")
+        on_screen("Tour: [bold]org-llm tutor welcome[/bold]")
+    else:
+        on_screen("(Existing DB detected — config rows preserved)")
     make_it_so()
 
 
@@ -309,17 +354,24 @@ def ask(
     from .search import vector_search
 
     engine = _engine()
-    with get_session(engine) as session:
-        url        = _ollama_url(session)
-        embed_mdl  = _cfg(session, "embed_model") or "nomic-embed-text"
-        chat_mdl   = model or (
-            _cfg(session, "reason_model") if reason
-            else _cfg(session, "chat_model")
-        ) or MODEL_DEFAULTS["chat_model"]
-        cloud_provider = _cfg(session, "cloud_provider")
-        cloud_endpoint = _cfg(session, "cloud_endpoint_url")
-        cloud_model    = _cfg(session, "cloud_model")
-        db_api_key     = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
+    try:
+        with get_session(engine) as session:
+            url        = _ollama_url(session)
+            embed_mdl  = _cfg(session, "embed_model") or "nomic-embed-text"
+            chat_mdl   = model or (
+                _cfg(session, "reason_model") if reason
+                else _cfg(session, "chat_model")
+            ) or MODEL_DEFAULTS["chat_model"]
+            cloud_provider = _cfg(session, "cloud_provider")
+            cloud_endpoint = _cfg(session, "cloud_endpoint_url")
+            cloud_model    = _cfg(session, "cloud_model")
+            db_api_key     = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
+    except Exception as exc:
+        if "no such table" in str(exc):
+            red_alert("Database not initialised. Run: [bold]org-llm init[/bold]")
+        else:
+            red_alert(f"Config read failed: {exc}")
+        raise typer.Exit(1)
 
     if cloud_:
         if not cloud_endpoint:
@@ -427,11 +479,7 @@ def models(
         url = _ollama_url(session)
         current = {role: _cfg(session, key) for role, key, _ in _TASK_MODEL_KEYS}
 
-    try:
-        from .llm import list_models
-        pulled = set(list_models(url))
-    except Exception:
-        pulled = set()
+    pulled = _pulled_normalized(url)
 
     vram_gb = local_vram_gb()
     ram_gb  = local_ram_gb()
@@ -473,8 +521,8 @@ def models(
             if role_group != prev_role_group:
                 tbl.add_row("", "", "", "", "", "", "", "", style="dim")
                 prev_role_group = role_group
-            fit_sym  = "[bold green]✓[/]" if m.tag in fits   else "[dim]→cloud[/]"
-            pull_sym = "[bold cyan]✓[/]"  if m.tag in pulled else ""
+            fit_sym  = "[bold green]✓[/]" if m.tag in fits else "[dim]→cloud[/]"
+            pull_sym = "[bold cyan]✓[/]"  if _is_pulled(m.tag, pulled) else ""
             tbl.add_row(
                 fit_sym, pull_sym,
                 m.tag, m.params, f"{m.vram_gb:.1f}G",
@@ -553,7 +601,7 @@ def models(
                     options = fits[:10]
                 console.print(f"\n[lcars1]{role}[/lcars1] ({purpose})  current: [lcars2]{cur}[/lcars2]")
                 for i, opt in enumerate(options[:8], 1):
-                    pulled_mark = " [cyan]✓ pulled[/cyan]" if opt in pulled else ""
+                    pulled_mark = " [cyan]✓ pulled[/cyan]" if _is_pulled(opt, pulled) else ""
                     console.print(f"  {i}. {opt}{pulled_mark}")
                 choice = typer.prompt(
                     f"Enter number or model tag (blank = keep {cur})", default=""
@@ -585,7 +633,7 @@ def models(
     for role, key, purpose in _TASK_MODEL_KEYS:
         m = current.get(role) or "—"
         status = (
-            "[green]✓ pulled[/green]" if m in pulled
+            "[green]✓ pulled[/green]" if _is_pulled(m, pulled)
             else ("[dim]—[/dim]" if m == "—" else "[yellow]not pulled[/yellow]")
         )
         assign_tbl.add_row(role, m, purpose, status)
@@ -629,6 +677,181 @@ def _validate_config(key: str, value: str) -> str | None:
         if value not in rule:
             return f"{key!r} must be one of {rule} (got {value!r})"
     return None
+
+
+@app.command()
+def performance(
+    apply:     Annotated[bool, typer.Option("--apply",
+               help="Write recommended role assignments to config (default: read-only report)")] = False,
+    benchmark: Annotated[bool, typer.Option("--benchmark", "-b",
+               help="Run per-model timing tests (slow — ~1-3 min depending on pulled models)")] = False,
+    quick:     Annotated[bool, typer.Option("--quick", "-q",
+               help="Hardware probe only; skip Ollama probe and model recommendations")] = False,
+):
+    """Tune org-llm to your real hardware.
+
+    Probes free RAM/VRAM (not total — you have other apps open), pings Ollama,
+    optionally benchmarks each pulled chat/embed model for tokens-per-second,
+    then recommends role assignments that:
+      • fit your *available* memory
+      • prefer already-pulled models (no download required)
+      • flag oversize current assignments as DOWNGRADE NEEDED
+      • route to the configured cloud backend when nothing fits locally
+
+    With --apply, recommendations are written to the config DB.
+    """
+    from rich.panel import Panel
+    from rich.table import Table as _T
+    from . import performance as perf
+
+    console.rule(f"[lcars1]Performance probe  ·  stardate {__import__('org_llm.ui', fromlist=['stardate']).stardate()}[/lcars1]")
+    console.print()
+
+    # ── Hardware ──────────────────────────────────────────────────────────────
+    with warp("Probing hardware"):
+        hw = perf.probe_hardware()
+
+    hw_tbl = _T(box=None, pad_edge=False, show_header=False)
+    hw_tbl.add_column("Key",   style="lcars1", width=18)
+    hw_tbl.add_column("Value", style="lcars2")
+    hw_tbl.add_row("CPU",        f"{hw.cpu_model}  ({hw.cpu_count} cores)")
+    hw_tbl.add_row("RAM total",  f"{hw.ram_total_gb:.1f} GB")
+    hw_tbl.add_row("RAM free",   f"[bold]{hw.ram_free_gb:.1f} GB[/bold]"
+                                  + ("  [yellow](used as budget)[/yellow]"
+                                     if hw.vram_total_gb is None else ""))
+    if hw.vram_total_gb is not None:
+        hw_tbl.add_row("VRAM total", f"{hw.vram_total_gb:.1f} GB")
+        hw_tbl.add_row("VRAM free",  f"[bold]{hw.vram_free_gb:.1f} GB[/bold]  [yellow](used as budget)[/yellow]")
+    else:
+        hw_tbl.add_row("GPU",        "[dim]none detected (CPU inference only)[/dim]")
+    hw_tbl.add_row("Disk free",  f"{hw.disk_free_gb:.0f} GB (in $HOME)")
+    console.print(Panel(hw_tbl, title="[lcars1]Hardware[/lcars1]", border_style="lcars2"))
+
+    if quick:
+        return
+
+    # ── Ollama state + cloud check ────────────────────────────────────────────
+    engine = _engine()
+    try:
+        with get_session(engine) as session:
+            url      = _ollama_url(session)
+            current  = {role: _cfg(session, key) for role, key, _ in _TASK_MODEL_KEYS}
+            cloud_endpoint = _cfg(session, "cloud_endpoint_url")
+    except Exception as exc:
+        if "no such table" in str(exc):
+            red_alert("Database not initialised. Run: [bold]org-llm init[/bold] first.")
+        else:
+            red_alert(f"Config read failed: {exc}")
+        raise typer.Exit(1)
+
+    pulled_norm = _pulled_normalized(url)
+    if not pulled_norm:
+        red_alert(f"Ollama not reachable at {url}. Start it (or run: org-llm doctor --fix).")
+        on_screen("Cloud-only recommendations still possible if you have --cloud configured.")
+        if not cloud_endpoint:
+            raise typer.Exit(1)
+
+    console.print()
+    pulled_tbl = _T(box=None, pad_edge=False)
+    pulled_tbl.add_column("Pulled tag", style="lcars3")
+    if pulled_norm:
+        for p in sorted(pulled_norm):
+            pulled_tbl.add_row(p)
+        console.print(Panel(pulled_tbl,
+                            title=f"[lcars1]Local models  ({len(pulled_norm)} pulled)[/lcars1]",
+                            border_style="lcars3"))
+
+    # ── Optional benchmarks ───────────────────────────────────────────────────
+    benchmarks: dict[str, perf.BenchmarkResult] = {}
+    if benchmark and pulled_norm:
+        on_screen("Benchmarking each pulled chat-capable model (1 short prompt each)…")
+        for tag in sorted(pulled_norm):
+            full_tag = tag + (":latest" if ":" not in tag else "")
+            if _is_embed_model(full_tag):
+                bench = perf.benchmark_embed_model(full_tag, url)
+            else:
+                bench = perf.benchmark_chat_model(full_tag, url)
+            benchmarks[tag] = bench
+
+        bench_tbl = _T(box=None, pad_edge=False)
+        bench_tbl.add_column("Model",        style="lcars2")
+        bench_tbl.add_column("Role",         style="dim", width=7)
+        bench_tbl.add_column("Latency",      style="lcars3", justify="right", width=10)
+        bench_tbl.add_column("Tokens/s",     style="lcars1", justify="right", width=10)
+        bench_tbl.add_column("Notes",        style="dim")
+        for tag, b in benchmarks.items():
+            if b.error:
+                bench_tbl.add_row(tag, b.role, "—", "—", f"[red]{b.error}[/red]")
+            else:
+                bench_tbl.add_row(tag, b.role,
+                                   f"{b.latency_ms:.0f} ms",
+                                   f"{b.tokens_per_sec:.1f}", "")
+        console.print()
+        console.print(Panel(bench_tbl, title="[lcars1]Measured throughput[/lcars1]",
+                            border_style="lcars2"))
+
+    # ── Recommendations ───────────────────────────────────────────────────────
+    recs = perf.recommend(
+        hw, current, benchmarks, pulled_norm,
+        cloud_configured=bool(cloud_endpoint),
+    )
+    rec_tbl = _T(box=None, pad_edge=False)
+    rec_tbl.add_column("Role",      style="lcars1", width=10)
+    rec_tbl.add_column("Current",   style="dim",    no_wrap=True)
+    rec_tbl.add_column("→",         width=2)
+    rec_tbl.add_column("Suggested", style="lcars2", no_wrap=True)
+    rec_tbl.add_column("Why",       style="dim")
+    rec_tbl.add_column("tok/s",     style="lcars3", justify="right", width=7)
+
+    severity_arrow = {
+        "downgrade": "[bold red]↓[/]",
+        "upgrade":   "[bold yellow]↑[/]",
+        "missing":   "[bold cyan]+[/]",
+        "fit":       "[bold green]=[/]",
+    }
+
+    has_changes = False
+    for r in recs:
+        arrow = severity_arrow.get(r.severity, "·")
+        tps   = f"{r.measured_tps:.1f}" if r.measured_tps is not None else "—"
+        rec_tbl.add_row(r.role, r.current, arrow, r.suggested, r.reason, tps)
+        if r.severity in ("upgrade", "downgrade", "missing"):
+            has_changes = True
+
+    console.print()
+    console.print(Panel(rec_tbl, title="[lcars1]Recommendations[/lcars1]",
+                        border_style="lcars2"))
+    console.print()
+
+    if not has_changes:
+        on_screen("[bold green]✓  Your role assignments already fit this hardware.[/bold green]")
+        make_it_so()
+        return
+
+    if not apply:
+        on_screen("Read-only report. Re-run with [bold]--apply[/bold] to write these changes.")
+        on_screen("Or override individual roles: [bold]org-llm config <role>_model <tag>[/bold]")
+        return
+
+    # ── Apply ────────────────────────────────────────────────────────────────
+    from .db import Config as Cfg
+    role_to_key = {role: key for role, key, _ in _TASK_MODEL_KEYS}
+    with get_session(engine) as session:
+        for r in recs:
+            if r.severity not in ("upgrade", "downgrade", "missing"):
+                continue
+            key = role_to_key.get(r.role)
+            if not key:
+                continue
+            row = session.get(Cfg, key)
+            if row:
+                row.value = r.suggested
+            else:
+                session.add(Cfg(key=key, value=r.suggested))
+        session.commit()
+    hail("Config updated.")
+    on_screen("Pull any newly-suggested models with: [bold]org-llm doctor --fix[/bold]")
+    make_it_so()
 
 
 @app.command()
@@ -1713,7 +1936,7 @@ _TUTOR_STEPS = [
         "[bold lcars1]Welcome aboard, officer.[/bold lcars1]\n\n"
         "[lcars1]org-llm[/lcars1] is your personal LLM-powered second brain, "
         "built entirely on your org-roam notes.\n\n"
-        "  ✦ Runs 100% locally — Ollama serves all models, nothing leaves your machine.\n"
+        "  ✦ Local-first — Ollama serves models locally; cloud is opt-in via [bold]--cloud[/bold].\n"
         "  ✦ SQLite stores the index and config — one file, zero infra.\n"
         "  ✦ sqlite-vec provides vector search inside that same file.\n"
         "  ✦ Skills let you define LLM workflows as org-babel blocks.\n"
@@ -2601,6 +2824,24 @@ def tag(
     make_it_so()
 
 
+def _strip_code_fences(s: str, lang: str = "") -> str:
+    """Remove leading ``` fences and trailing ``` from LLM-generated code.
+
+    Small models routinely ignore "no fences" instructions. Strip them post-hoc
+    so `--output` produces files that actually parse.
+    """
+    s = (s or "").strip()
+    if not s.startswith("```"):
+        return s
+    lines = s.splitlines()
+    # Drop the first fence line (``` or ```python or ```elisp)
+    lines = lines[1:]
+    # Drop trailing closing fence if present
+    if lines and lines[-1].rstrip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
 @app.command()
 def code(
     task:     Annotated[str,  typer.Argument(help="What to generate")],
@@ -2612,9 +2853,16 @@ def code(
               help="Retrieve relevant org notes as context")] = True,
     output:   Annotated[str,  typer.Option("--output", "-o",
               help="Write generated code to file")] = "",
+    cloud_:   Annotated[bool, typer.Option("--cloud",
+              help="Route the chat through the configured cloud backend instead of local Ollama")] = False,
 ):
-    """Generate code for an org/roam task using the code model."""
-    from .llm import chat, embed
+    """Generate code for an org/roam task using the code model.
+
+    Pass --cloud to use the configured cloud provider (set up via
+    `org-llm cloud --quick-start <slug>`) when the local code_model is too
+    big for available RAM.
+    """
+    from .llm import chat as local_chat, embed
     from .search import vector_search
     from rich.syntax import Syntax
 
@@ -2623,6 +2871,10 @@ def code(
         url       = _ollama_url(session)
         embed_mdl = _cfg(session, "embed_model") or "nomic-embed-text"
         code_mdl  = model or _cfg(session, "code_model") or "qwen2.5-coder"
+        cloud_provider = _cfg(session, "cloud_provider")
+        cloud_endpoint = _cfg(session, "cloud_endpoint_url")
+        cloud_model    = _cfg(session, "cloud_model")
+        db_api_key     = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
 
         ctx_text = ""
         if context:
@@ -2637,6 +2889,21 @@ def code(
             except Exception:
                 pass
 
+    if cloud_:
+        if not cloud_endpoint:
+            red_alert("--cloud requested but no cloud_endpoint_url configured.")
+            on_screen("Run: [bold]org-llm cloud --quick-start openrouter[/bold]")
+            raise typer.Exit(1)
+        from . import creds as creds_mod
+        api_key = (creds_mod.read_secret(creds_mod.cloud_slug(cloud_provider))
+                   if cloud_provider else None) or db_api_key
+        code_mdl = model or cloud_model or code_mdl
+    else:
+        if not _ensure_model_pulled(code_mdl, url):
+            red_alert(f"Could not pull local model {code_mdl!r}.")
+            on_screen("Either run with --cloud, or: org-llm doctor --fix")
+            raise typer.Exit(1)
+
     system = (
         f"You are an expert {lang} programmer who specialises in org-mode and Emacs tooling. "
         f"Output ONLY the {lang} code with no explanation or markdown fences. "
@@ -2646,11 +2913,23 @@ def code(
     if ctx_text:
         prompt = f"Context from my org notes:\n\n{ctx_text}\n\n---\n\nTask: {task}"
 
-    with warp(f"{TREK_MSGS['code']} [{code_mdl}]"):
-        generated = chat(prompt, model=code_mdl, base_url=url, system=system)
+    if cloud_:
+        from .cloud import cloud_chat
+        with warp(f"Hailing cloud {code_mdl}"):
+            generated = cloud_chat(prompt, model=code_mdl,
+                                   endpoint_url=cloud_endpoint,
+                                   api_key=api_key, system=system)
+        label = f"{cloud_provider}:{code_mdl}"
+    else:
+        with warp(f"{TREK_MSGS['code']} [{code_mdl}]"):
+            generated = local_chat(prompt, model=code_mdl, base_url=url, system=system)
+        label = code_mdl
+
+    # Small models often emit fences despite the system prompt — strip them.
+    generated = _strip_code_fences(generated, lang)
 
     console.print()
-    console.rule(f"[lcars2]{lang}  ·  {code_mdl}[/lcars2]")
+    console.rule(f"[lcars2]{lang}  ·  {label}[/lcars2]")
     console.print(Syntax(generated, lang, theme="monokai", line_numbers=True))
     console.rule()
 
@@ -2741,6 +3020,8 @@ def review_emacs(
                 help="Write the review to this file (markdown)")] = "",
     diff_only:  Annotated[bool, typer.Option("--diff-only",
                 help="Suggest concrete edits as patches, not prose advice")] = False,
+    cloud_:     Annotated[bool, typer.Option("--cloud",
+                help="Route the review through the configured cloud backend (recommended for low-RAM hosts)")] = False,
 ):
     """Have an LLM review your Doom/vanilla Emacs config and suggest improvements.
 
@@ -2830,29 +3111,56 @@ def review_emacs(
         f"Files (truncated where noted):\n\n{bundle}"
     )
 
-    # Make sure the model we're about to ask is actually pulled.
-    if not _ensure_model_pulled(chat_mdl, url):
-        red_alert(f"Could not pull review model {chat_mdl!r}. Run: org-llm doctor --fix")
-        raise typer.Exit(1)
-
-    from .llm import chat
-    try:
-        with warp(f"Reviewing {flavor} config with {chat_mdl}"):
-            review = chat(prompt, model=chat_mdl, base_url=url, system=system)
-    except Exception as exc:
-        msg = str(exc).lower()
-        if "memory" in msg or "out of memory" in msg or "oom" in msg:
-            red_alert(f"{chat_mdl} requires more RAM than is available.")
-            on_screen("Pick a smaller reason model:  org-llm config reason_model deepseek-r1:7b")
-            on_screen("Or get suggestions:           org-llm models --tune")
-        elif "connection" in msg or "refused" in msg:
-            red_alert("Ollama isn't reachable. Run: org-llm doctor --fix")
-        else:
-            red_alert(f"Review failed: {exc}")
-        raise typer.Exit(1)
+    # Cloud override: skip local pull, use OpenRouter / Groq / etc.
+    if cloud_:
+        with get_session(engine) as session:
+            cloud_provider = _cfg(session, "cloud_provider")
+            cloud_endpoint = _cfg(session, "cloud_endpoint_url")
+            cloud_model    = _cfg(session, "cloud_model")
+            db_api_key     = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
+        if not cloud_endpoint:
+            red_alert("--cloud requested but no cloud_endpoint_url configured.")
+            on_screen("Run: [bold]org-llm cloud --quick-start openrouter[/bold]")
+            raise typer.Exit(1)
+        from . import creds as creds_mod
+        api_key = (creds_mod.read_secret(creds_mod.cloud_slug(cloud_provider))
+                   if cloud_provider else None) or db_api_key
+        chat_mdl = model or cloud_model or chat_mdl
+        from .cloud import cloud_chat
+        try:
+            with warp(f"Hailing cloud {chat_mdl}"):
+                review = cloud_chat(prompt, model=chat_mdl,
+                                    endpoint_url=cloud_endpoint,
+                                    api_key=api_key, system=system)
+        except Exception as exc:
+            red_alert(f"Cloud review failed: {exc}")
+            raise typer.Exit(1)
+        label = f"{cloud_provider}:{chat_mdl}"
+    else:
+        # Local path: ensure the model is pulled before asking.
+        if not _ensure_model_pulled(chat_mdl, url):
+            red_alert(f"Could not pull review model {chat_mdl!r}. Run: org-llm doctor --fix")
+            on_screen("Or use the cloud backend:  [bold]org-llm review-emacs --cloud[/bold]")
+            raise typer.Exit(1)
+        from .llm import chat
+        try:
+            with warp(f"Reviewing {flavor} config with {chat_mdl}"):
+                review = chat(prompt, model=chat_mdl, base_url=url, system=system)
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "memory" in msg or "out of memory" in msg or "oom" in msg:
+                red_alert(f"{chat_mdl} requires more RAM than is available.")
+                on_screen("Try the cloud backend:        org-llm review-emacs --cloud")
+                on_screen("Or pick a smaller model:      org-llm config reason_model deepseek-r1:7b")
+            elif "connection" in msg or "refused" in msg:
+                red_alert("Ollama isn't reachable. Run: org-llm doctor --fix")
+            else:
+                red_alert(f"Review failed: {exc}")
+            raise typer.Exit(1)
+        label = chat_mdl
 
     console.print()
-    console.rule(f"[lcars1]Emacs config review  ·  {chat_mdl}  ·  focus: {focus}[/lcars1]")
+    console.rule(f"[lcars1]Emacs config review  ·  {label}  ·  focus: {focus}[/lcars1]")
     console.print(Panel(review, border_style="lcars2", padding=(1, 2)))
     console.rule()
 

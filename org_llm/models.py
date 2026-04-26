@@ -105,6 +105,26 @@ def fitting_hardware(vram_gb: float | None, ram_gb: float) -> list[ModelInfo]:
     return [m for m in CATALOG if m.vram_gb <= budget]
 
 
+def _norm(tag: str) -> str:
+    """Local copy of cli._normalize_tag — drop :latest, lowercase."""
+    n = (tag or "").strip().lower()
+    if n.endswith(":latest"):
+        n = n[: -len(":latest")]
+    return n
+
+
+def _matches_pulled(tag: str, pulled: set[str]) -> bool:
+    """A catalog tag matches the pulled set if its stem matches any pulled stem."""
+    if not pulled:
+        return False
+    pulled_norm = {_norm(p) for p in pulled}
+    t = _norm(tag)
+    if t in pulled_norm:
+        return True
+    stem = t.split(":")[0]
+    return any(p.split(":")[0] == stem for p in pulled_norm)
+
+
 def best_for_role(
     role: str,
     available_vram: float | None,
@@ -120,8 +140,21 @@ def best_for_role(
     if not candidates:
         return None
     # prefer pulled, then rank by quality descending
-    candidates.sort(key=lambda m: (_quality(m.tag), m.tag in pulled), reverse=True)
+    candidates.sort(key=lambda m: (_quality(m.tag), _matches_pulled(m.tag, pulled)), reverse=True)
     return candidates[0]
+
+
+def _vram_for_tag(tag: str) -> float:
+    """Estimate VRAM for an arbitrary tag using catalog stem-match."""
+    norm = _norm(tag)
+    for m in CATALOG:
+        if _norm(m.tag) == norm:
+            return m.vram_gb
+    stem = norm.split(":")[0]
+    for m in CATALOG:
+        if _norm(m.tag).split(":")[0] == stem:
+            return m.vram_gb
+    return 0.0
 
 
 def recommendations(
@@ -131,27 +164,42 @@ def recommendations(
     ram_gb:  float,
 ) -> list[dict]:
     """
-    Return a list of {role, current, suggested, reason, upgrade} dicts.
-    Only entries where the suggestion differs from current (or current is missing).
+    Return a list of {role, current, suggested, reason, upgrade, downgrade} dicts.
+    Surfaces:
+      - missing assignments
+      - quality upgrades available (within budget)
+      - DOWNGRADES needed when current model exceeds available memory
     """
+    budget = vram_gb if vram_gb is not None else ram_gb * 0.55
     results = []
     for role in ROLE_KEYS:
-        cur_tag  = current.get(role, "").split(":")[0]  # strip tag for fuzzy match
-        best     = best_for_role(role, vram_gb, ram_gb, pulled)
+        current_tag  = current.get(role, "")
+        cur_stem     = current_tag.split(":")[0]
+        best         = best_for_role(role, vram_gb, ram_gb, pulled)
         if best is None:
             continue
-        cur_quality  = _quality(cur_tag)
+        cur_quality  = _quality(cur_stem)
         best_quality = _quality(best.tag)
+        cur_vram     = _vram_for_tag(current_tag)
+        is_missing   = not current_tag
+        is_oversize  = bool(current_tag) and cur_vram > budget + 0.5
         is_upgrade   = best_quality > cur_quality + 5
-        is_missing   = not current.get(role)
-        if is_missing or is_upgrade:
-            reason = "not assigned" if is_missing else f"higher quality ({best.params}, {best.license})"
+
+        if is_missing or is_oversize or is_upgrade:
+            if is_oversize:
+                reason = (f"current {current_tag} needs ~{cur_vram:.1f} GB but you have "
+                          f"{budget:.1f} GB — DOWNGRADE recommended")
+            elif is_missing:
+                reason = "not assigned"
+            else:
+                reason = f"higher quality ({best.params}, {best.license})"
             results.append({
                 "role":      role,
-                "current":   current.get(role) or "—",
+                "current":   current_tag or "—",
                 "suggested": best.tag,
                 "reason":    reason,
-                "upgrade":   is_upgrade,
+                "upgrade":   is_upgrade and not is_oversize,
+                "downgrade": is_oversize,
                 "license":   best.license,
                 "vram":      best.vram_gb,
                 "params":    best.params,
