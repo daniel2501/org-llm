@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -96,19 +97,21 @@ def _normalize_tag(name: str) -> str:
 
 
 def _ollama_has(model: str, base_url: str) -> bool:
-    """Return True if Ollama already has the given model tag pulled."""
+    """Return True if Ollama already has EXACTLY this tag pulled.
+
+    Strict match (after :latest normalization). Stem-matching here was a
+    bug: the user's `llama3.2` (which Ollama resolves to `llama3.2:latest`)
+    would falsely succeed when only `llama3.2:1b` was pulled, then chat()
+    would 404 at runtime. Use _is_pulled() for fuzzy "do we have anything
+    in this family" questions instead.
+    """
     try:
         from .llm import list_models
         pulled = list_models(base_url)
     except Exception:
         return False
     target = _normalize_tag(model)
-    target_stem = target.split(":")[0]
-    for m in pulled:
-        m_norm = _normalize_tag(m)
-        if m_norm == target or m_norm.split(":")[0] == target_stem and ":" not in target:
-            return True
-    return False
+    return any(_normalize_tag(m) == target for m in pulled)
 
 
 def _pulled_normalized(base_url: str) -> set[str]:
@@ -147,13 +150,242 @@ def _ollama_pull(model: str) -> bool:
     return subprocess.run([ollama, "pull", model]).returncode == 0
 
 
-def _ensure_model_pulled(model: str, base_url: str) -> bool:
-    """Idempotent: make sure `model` is locally available, pulling if needed."""
+def _ensure_model_pulled(model: str, base_url: str, _try_llm_fix: bool = True) -> bool:
+    """Idempotent: make sure `model` is locally available, pulling if needed.
+
+    If the pull fails (typically because the user configured a bogus tag),
+    the LLM is asked for a remediation — usually a `models --pull <real-tag>`
+    or `config <role>_model <real-tag>` — which is auto-executed and the
+    check is repeated.
+    """
     if not model:
         return False
     if _ollama_has(model, base_url):
         return True
-    return _ollama_pull(model) and _ollama_has(model, base_url)
+    if _ollama_pull(model) and _ollama_has(model, base_url):
+        return True
+    if _try_llm_fix and _llm_assisted_fix(
+        error=f"Failed to pull or load Ollama model {model!r}",
+        attempted_command=f"_ensure_model_pulled({model!r})",
+        context="The user may have configured a non-existent model tag.",
+    ):
+        # Re-resolve config in case the LLM swapped chat_model/embed_model
+        return _ollama_has(model, base_url) or _ensure_model_pulled(
+            model, base_url, _try_llm_fix=False)  # one retry, no recursion
+    return False
+
+
+# ── Self-healing helpers ─────────────────────────────────────────────────────
+#
+# Anywhere a failure has a deterministic, safe remediation we run it ourselves
+# instead of asking the user to. Three rules:
+#   1. Recovery must be safe (idempotent / no destructive writes).
+#   2. The user sees a one-line note that we self-healed (auditability).
+#   3. If the recovery itself fails, fall back to a friendly error.
+
+def _auto_init_db_if_needed(silent: bool = False) -> bool:
+    """Initialize the SQLite DB if it doesn't exist yet. Idempotent.
+
+    Returns True iff init was actually performed (False if already there).
+    Used by every command that needs config rows so 'no such table: config'
+    becomes a self-heal instead of a red alert.
+    """
+    path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+    if path.exists():
+        # Quick probe: if the path exists but tables don't, init is still safe
+        try:
+            from sqlalchemy import inspect as _inspect
+            engine = make_engine(path)
+            tables = set(_inspect(engine).get_table_names())
+            if "config" in tables:
+                return False
+        except Exception:
+            pass
+    try:
+        engine = make_engine(path)
+        init_db(engine)
+        if not silent:
+            hail(f"Auto-initialised database at {path}")
+        return True
+    except Exception:
+        return False
+
+
+def _auto_start_ollama_if_needed(base_url: str, silent: bool = False) -> bool:
+    """Try to start `ollama serve` if it's not reachable. Returns True on success."""
+    try:
+        from .llm import list_models
+        list_models(base_url)
+        return True   # already up
+    except Exception:
+        pass
+    import shutil, subprocess
+    ollama = shutil.which("ollama") or str(Path("~/.local/bin/ollama").expanduser())
+    if not Path(ollama).exists():
+        return False
+    if not silent:
+        hail("Ollama isn't running — auto-starting in the background…")
+    try:
+        subprocess.Popen([ollama, "serve"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        import time
+        for _ in range(8):   # up to ~4 s
+            time.sleep(0.5)
+            try:
+                from .llm import list_models
+                list_models(base_url)
+                return True
+            except Exception:
+                continue
+    except Exception:
+        return False
+    return False
+
+
+# Allow-list of org-llm subcommands the LLM may auto-invoke as fixes.
+# Critically excludes destructive verbs: tag --apply (writes to org files),
+# capture (writes), revoke (removes grants), skill (RCE), claude/launch
+# (interactive workspaces), install (heavy side effects).
+_LLM_FIXABLE_VERBS = (
+    "config", "models", "doctor", "embed", "index", "code-index",
+    "knob", "grant", "grant-root", "grant-browser",
+    "performance", "theme",
+)
+
+
+def _llm_assisted_fix(error: str, attempted_command: str,
+                       context: str = "", _depth: int = 0) -> bool:
+    """Ask the configured cloud LLM for a remediation when deterministic
+    auto-fix isn't possible. Executes the suggestion only if it's an
+    allow-listed `org-llm` subcommand. Logs loudly so the user sees what
+    we did.
+
+    Returns True iff a fix was successfully run (caller should retry the
+    original operation). Guarded against runaway recursion: depth ≤ 1.
+    """
+    if _depth >= 1:
+        return False  # don't recursively self-fix the auto-fixer
+    try:
+        engine = _engine()
+        with get_session(engine) as session:
+            cloud_provider = _cfg(session, "cloud_provider")
+            cloud_endpoint = _cfg(session, "cloud_endpoint_url")
+            cloud_model    = _cfg(session, "cloud_model") or "openai/gpt-oss-20b:free"
+            db_api_key     = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
+    except Exception:
+        return False
+    if not cloud_endpoint:
+        return False  # No cloud configured; can't ask the LLM
+
+    from . import creds as _creds
+    api_key = (_creds.read_secret(_creds.cloud_slug(cloud_provider))
+               if cloud_provider else None) or db_api_key
+
+    sys_prompt = (
+        "You are an SRE assistant for a CLI tool called `org-llm`. The user "
+        "just hit an error. Reply with STRICT JSON, no prose, no markdown fences:\n\n"
+        '  {"action": "run", "argv": ["doctor", "--fix"], "reason": "…"}\n\n'
+        'OR {"action": "skip", "reason": "explain why no auto-fix is safe"}\n\n'
+        "Allowed verbs (argv[0] MUST be one of these):\n"
+        "  " + ", ".join(_LLM_FIXABLE_VERBS) + "\n\n"
+        "Decision rules:\n"
+        "  • The attempted command JUST FAILED. NEVER suggest re-running the\n"
+        "    same operation; that loops. Pick a DIFFERENT remediation.\n"
+        "  • 'pull model manifest: file does not exist' → the model tag is\n"
+        "    bogus. Suggest [\"config\", \"<role>_model\", \"llama3.2\"] to\n"
+        "    swap to a known-good 2 GB model. Don't try to pull the bogus tag.\n"
+        "  • 'system memory ... than is available' → suggest\n"
+        "    [\"performance\", \"--apply\"] to auto-pick a fitting model.\n"
+        "  • 'no such table: config' → suggest [\"doctor\", \"--fix\"].\n"
+        "  • 'connection refused' / 'Connection error' → [\"doctor\", \"--fix\"].\n"
+        "  • Empty index / no nodes → [\"index\"] then [\"embed\"]; suggest\n"
+        "    just [\"index\"] (embed will run automatically afterward).\n"
+        "  • Configured model not in our catalog (qwen99, llama99, etc.) →\n"
+        "    swap it via config. Common-good defaults: chat_model=llama3.2,\n"
+        "    embed_model=nomic-embed-text, code_model=qwen2.5-coder:7b,\n"
+        "    fast_model=phi3.5, reason_model=deepseek-r1:7b.\n"
+        "  • If the error involves user creds / API keys / sensitive paths,\n"
+        "    return action=skip — those need user input.\n"
+        "  • When unsure, action=skip with one sentence of reasoning.\n"
+    )
+    user_prompt = (
+        f"Failed command: {attempted_command}\n\n"
+        f"Error message:\n{error[:1500]}\n\n"
+        + (f"Additional context:\n{context[:500]}\n" if context else "")
+    )
+
+    try:
+        from .cloud import cloud_chat
+        reply = cloud_chat(user_prompt, model=cloud_model,
+                           endpoint_url=cloud_endpoint,
+                           api_key=api_key, system=sys_prompt)
+    except Exception:
+        return False
+
+    # Strip any markdown fences the LLM emitted despite the rules
+    cleaned = _strip_code_fences(reply, "json").strip()
+    import json as _json
+    try:
+        plan = _json.loads(cleaned)
+    except Exception:
+        # The LLM gave prose; surface the suggestion but don't execute
+        on_screen(f"[dim]LLM suggested:[/dim] {reply[:300]}")
+        return False
+
+    if plan.get("action") != "run":
+        on_screen(f"[dim]LLM declined to auto-fix:[/dim] "
+                  f"{plan.get('reason', '(no reason given)')}")
+        return False
+
+    argv = plan.get("argv") or []
+    if not isinstance(argv, list) or not argv:
+        return False
+    verb = str(argv[0])
+    if verb not in _LLM_FIXABLE_VERBS:
+        on_screen(f"[yellow]LLM suggested unsafe verb {verb!r}; ignoring.[/yellow]")
+        return False
+
+    hail(f"LLM auto-fix: org-llm {' '.join(str(x) for x in argv)}")
+    if plan.get("reason"):
+        on_screen(f"  [dim]reason: {plan['reason']}[/dim]")
+
+    import subprocess
+    invoke = [sys.argv[0]] if sys.argv and os.path.isabs(sys.argv[0]) \
+             else ["uv", "run", "org-llm"]
+    try:
+        result = subprocess.run(
+            invoke + [str(x) for x in argv],
+            timeout=180,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _auto_index_if_empty(silent: bool = False) -> bool:
+    """If the index is empty but org_dir has .org files, run `index` automatically."""
+    try:
+        from .db import File, Node
+        engine = _engine()
+        with get_session(engine) as session:
+            n_nodes = session.query(Node).count()
+            org_dir = _org_dir(session)
+        if n_nodes > 0:
+            return False
+        if not org_dir.exists():
+            return False
+        org_files = list(org_dir.rglob("*.org"))
+        if not org_files:
+            return False
+        if not silent:
+            hail(f"Index is empty — auto-indexing {len(org_files)} .org files from {org_dir}…")
+        with warp(TREK_MSGS["index"] + f": {org_dir}"):
+            with get_session(engine) as session:
+                index_directory(org_dir, session)
+        return True
+    except Exception:
+        return False
 
 
 def _model_fits_locally(model: str) -> tuple[bool, float, float]:
@@ -182,6 +414,11 @@ def _local_chat_or_friendly_error(prompt: str, model: str, base_url: str,
     """Wrap a local Ollama chat call with the standard pre-flight + OOM
     handling so we never dump a raw traceback on a memory exhaustion.
 
+    Self-healing for the recoverable failure modes:
+      • Model not found (404)  → auto-pull the exact tag, retry once
+      • Connection refused     → ollama serve isn't running; suggest doctor --fix
+      • Memory exhaustion      → can't fix; suggest --cloud / smaller model
+
     Returns the chat response, or calls red_alert + raises typer.Exit(1).
     """
     fits, needed, free = _model_fits_locally(model)
@@ -197,20 +434,85 @@ def _local_chat_or_friendly_error(prompt: str, model: str, base_url: str,
         raise typer.Exit(1)
 
     from .llm import chat as local_chat
+
+    def _is_oom(msg: str) -> bool:
+        m = msg.lower()
+        return ("system memory" in m or "out of memory" in m or "oom" in m
+                or ("memory" in m and "available" in m))
+
+    def _is_not_found(msg: str) -> bool:
+        m = msg.lower()
+        return ("not found" in m or "404" in m
+                or "no such model" in m or "manifest" in m and "not" in m)
+
+    def _is_conn(msg: str) -> bool:
+        m = msg.lower()
+        return "connect" in m or "refused" in m or "actively refused" in m
+
     try:
         return local_chat(prompt, model=model, base_url=base_url, system=system)
     except Exception as exc:
-        msg = str(exc).lower()
-        if "system memory" in msg or "out of memory" in msg or "oom" in msg or "memory" in msg:
-            red_alert(f"{model} ran out of memory at runtime: {str(exc)[:120]}")
+        msg = str(exc)
+
+        # Recoverable: model isn't pulled. Pull it and retry once.
+        if _is_not_found(msg):
+            hail(f"{model!r} isn't pulled. Pulling now…")
+            if _ollama_pull(model):
+                try:
+                    return local_chat(prompt, model=model, base_url=base_url, system=system)
+                except Exception as exc2:
+                    msg = str(exc2)  # fall through to the failure paths below
+                    # Re-evaluate: maybe the pull resolved to a model that's too big
+                    if _is_oom(msg):
+                        # Treat as OOM; let the OOM branch run
+                        pass
+                    elif _is_not_found(msg):
+                        red_alert(f"Pulled {model!r} but Ollama still can't load it: {msg[:200]}")
+                        raise typer.Exit(1)
+                    else:
+                        red_alert(f"Retry after pull failed: {msg[:200]}")
+                        raise typer.Exit(1)
+            else:
+                red_alert(f"Could not pull {model!r}.")
+                on_screen(f"  • [bold]{cloud_hint or 'org-llm ask --cloud'}[/bold]"
+                          "  ← skip the local pull and use the cloud")
+                on_screen(f"  • [bold]ollama pull {model}[/bold]"
+                          "  ← try the pull manually for the actual error")
+                raise typer.Exit(1)
+
+        # Memory exhaustion (initial call OR retry-after-pull)
+        if _is_oom(msg):
+            red_alert(f"{model} ran out of memory at runtime: {msg[:120]}")
             on_screen(f"  • [bold]{cloud_hint or 'org-llm ask --cloud'}[/bold]"
                       "  ← retry via OpenRouter")
             on_screen("  • [bold]org-llm performance --benchmark --apply[/bold]"
                       "  ← measure and pick a fitting model")
-        elif "connect" in msg or "refused" in msg:
-            red_alert("Ollama isn't reachable. Run: [bold]org-llm doctor --fix[/bold]")
-        else:
-            red_alert(f"Local chat failed: {exc}")
+            raise typer.Exit(1)
+
+        if _is_conn(msg):
+            red_alert("Ollama isn't reachable. Auto-fixing…")
+            # doctor --fix knows how to start ollama serve. Run it.
+            import subprocess
+            subprocess.run(
+                [sys.argv[0] if sys.argv else "org-llm", "doctor", "--fix"],
+                capture_output=True, timeout=30,
+            )
+            try:
+                return local_chat(prompt, model=model, base_url=base_url, system=system)
+            except Exception as exc3:
+                red_alert(f"Ollama still unreachable after auto-fix: {exc3}")
+                on_screen(f"  • [bold]{cloud_hint or 'org-llm ask --cloud'}[/bold]")
+                raise typer.Exit(1)
+
+        # Last resort: ask the LLM for a fix
+        if _llm_assisted_fix(msg, f"local chat with model {model!r}",
+                              context=f"prompt length={len(prompt)} chars"):
+            try:
+                return local_chat(prompt, model=model, base_url=base_url, system=system)
+            except Exception as exc4:
+                red_alert(f"LLM-suggested fix ran but chat still failed: {exc4}")
+                raise typer.Exit(1)
+        red_alert(f"Local chat failed: {msg[:200]}")
         raise typer.Exit(1)
 
 
@@ -376,12 +678,18 @@ def index(
     --force takes an exclusive lock on the SQLite DB so two parallel runs
     can't interleave deletes and inserts.
     """
+    _auto_init_db_if_needed()
     engine = _engine()
     with get_session(engine) as session:
         org_dir = _org_dir(session)
         if not org_dir.exists():
-            red_alert(f"org_dir not found: {org_dir}")
-            raise typer.Exit(1)
+            # Auto-fix: create the org_dir if it doesn't exist yet
+            try:
+                org_dir.mkdir(parents=True, exist_ok=True)
+                hail(f"Auto-created org_dir at {org_dir}")
+            except Exception:
+                red_alert(f"Could not create org_dir: {org_dir}")
+                raise typer.Exit(1)
 
         if force:
             from .db import File, Node
@@ -495,8 +803,11 @@ def embed(
 ):
     """Generate embeddings for indexed nodes (requires Ollama; pulls the embed model if missing)."""
     from .indexer import embed_nodes
-
     from .db import Node
+
+    _auto_init_db_if_needed()
+    _auto_index_if_empty()
+
     engine = _engine()
     with get_session(engine) as session:
         url   = _ollama_url(session)
@@ -506,8 +817,9 @@ def embed(
         else:
             total = session.query(Node).filter(Node.embedding.is_(None)).count()
 
+    _auto_start_ollama_if_needed(url)
     if not _ensure_model_pulled(model, url):
-        red_alert(f"Could not pull embed model {model!r}. Is Ollama running?")
+        red_alert(f"Could not pull embed model {model!r}. Tried: ollama pull {model}")
         raise typer.Exit(1)
 
     hail(f"Embedding {total} nodes with [bold]{model}[/bold]")
@@ -537,11 +849,16 @@ def search(
         red_alert("Empty search query. Pass a non-empty string.")
         raise typer.Exit(1)
 
+    _auto_init_db_if_needed()
+    _auto_index_if_empty()
+
     engine = _engine()
     try:
         with get_session(engine) as session:
             url   = _ollama_url(session)
             model = _cfg(session, "embed_model") or "nomic-embed-text"
+            if not keyword:
+                _auto_start_ollama_if_needed(url)
 
             if keyword:
                 results = keyword_search(session, query, limit=limit)
@@ -552,10 +869,8 @@ def search(
                     results = vector_search(session, qvec, limit=limit)
     except Exception as exc:
         msg = str(exc)
-        if "no such table" in msg:
-            red_alert("Database not initialised. Run: [bold]org-llm init[/bold]")
-        elif "Connection" in msg or "refused" in msg.lower():
-            red_alert("Ollama not reachable. Start it (or run: org-llm doctor --fix).")
+        if "Connection" in msg or "refused" in msg.lower():
+            red_alert("Ollama not reachable. Run: org-llm doctor --fix")
         else:
             red_alert(f"Search failed: {exc}")
         raise typer.Exit(1)
@@ -610,6 +925,9 @@ def ask(
         recent_in_path, recent_nodes, vector_search,
     )
 
+    # Auto-fix #1: missing DB
+    _auto_init_db_if_needed()
+
     engine = _engine()
     try:
         with get_session(engine) as session:
@@ -624,11 +942,18 @@ def ask(
             cloud_model    = _cfg(session, "cloud_model")
             db_api_key     = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
     except Exception as exc:
-        if "no such table" in str(exc):
-            red_alert("Database not initialised. Run: [bold]org-llm init[/bold]")
-        else:
-            red_alert(f"Config read failed: {exc}")
+        red_alert(f"Config read failed: {exc}")
         raise typer.Exit(1)
+
+    # Auto-fix #2: ollama not running (only matters for embed; cloud bypasses it)
+    if not cloud_:
+        _auto_start_ollama_if_needed(url)
+    else:
+        # Even with --cloud, embeddings still go through local Ollama
+        _auto_start_ollama_if_needed(url, silent=True)
+
+    # Auto-fix #3: empty index — run `index` if org_dir has files
+    _auto_index_if_empty()
 
     if cloud_:
         if not cloud_endpoint:
@@ -642,9 +967,24 @@ def ask(
     else:
         # Local path: ensure the chat model is pulled before asking.
         if not _ensure_model_pulled(chat_mdl, url):
-            red_alert(f"Could not pull local model {chat_mdl!r}.")
-            on_screen("Either run with --cloud, or: org-llm doctor --fix")
-            raise typer.Exit(1)
+            # The auto-fix may have swapped chat_model in the config —
+            # re-read so we don't keep retrying a bogus tag.
+            with get_session(engine) as session:
+                fresh_mdl = (model or
+                             (_cfg(session, "reason_model") if reason
+                              else _cfg(session, "chat_model"))
+                             or MODEL_DEFAULTS["chat_model"])
+            if fresh_mdl != chat_mdl:
+                hail(f"Config swapped chat_model → {fresh_mdl}; retrying.")
+                chat_mdl = fresh_mdl
+                if not _ensure_model_pulled(chat_mdl, url, _try_llm_fix=False):
+                    red_alert(f"Could not pull {chat_mdl!r} either.")
+                    on_screen("Try --cloud, or:  org-llm performance --apply")
+                    raise typer.Exit(1)
+            else:
+                red_alert(f"Could not pull local model {chat_mdl!r}.")
+                on_screen("Either run with --cloud, or: org-llm doctor --fix")
+                raise typer.Exit(1)
 
     # Embeddings always come from local Ollama — make sure the embed model is here too
     if not _ensure_model_pulled(embed_mdl, url):
@@ -750,8 +1090,29 @@ def ask(
             results = vector_search(session, qvec, limit=top_k, since_mtime=None)
 
     if not results:
-        red_alert("No indexed nodes found. Run `org-llm embed` first.")
-        raise typer.Exit(1)
+        # Try one round of auto-fix: maybe nothing has been embedded yet.
+        from .db import Node
+        with get_session(engine) as session:
+            unembedded = session.query(Node).filter(Node.embedding.is_(None)).count()
+        if unembedded > 0:
+            hail(f"Index has {unembedded} unembedded nodes — running embed automatically…")
+            from .indexer import embed_nodes
+            if _ensure_model_pulled(embed_mdl, url):
+                with get_session(engine) as session:
+                    with impulse(TREK_MSGS["embed"], total=unembedded) as (prog, task):
+                        def _tick(): prog.advance(task)
+                        embed_nodes(session, model=embed_mdl, base_url=url,
+                                    force=False, progress_cb=_tick)
+                # Retry the search with the freshly-embedded vault
+                with warp(TREK_MSGS["ask"] + " — retrying search after auto-embed"):
+                    with get_session(engine) as session:
+                        qvec = embed(query, model=embed_mdl, base_url=url)
+                        results = list(vector_search(session, qvec, limit=top_k,
+                                                      since_mtime=since_mtime))
+        if not results:
+            red_alert("No indexed nodes found. Tried auto-index + auto-embed; "
+                      "your vault may be empty.")
+            raise typer.Exit(1)
 
     # Always show a one-line retrieval summary so the user can sanity-check
     # whether retrieval was on-topic before the LLM responds.
@@ -1826,6 +2187,7 @@ def _doctor_walkthrough(report_to: str = "") -> None:
     from datetime import datetime
     from rich.panel import Panel as _P
 
+    _auto_init_db_if_needed()
     engine = _engine()
     try:
         with get_session(engine) as session:
