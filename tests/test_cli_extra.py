@@ -359,4 +359,70 @@ class TestEmbedModelDetection:
                 continue
             q = _quality(val)
             assert q > 50, f"{key}={val!r} → quality {q}: stem doesn't match any catalog entry"
+
+
+class TestShellQuoteRepair:
+    def test_glues_extra_args_for_ask(self):
+        from org_llm.cli import _shell_quote_repair
+        broken = ["ask", "connect", "Foo", "Bar", "to", "vault"]
+        repaired = _shell_quote_repair(broken)
+        assert repaired == ["ask", "connect Foo Bar to vault"]
+
+    def test_returns_none_for_unknown_verb(self):
+        from org_llm.cli import _shell_quote_repair
+        # `init` doesn't take a single string arg → out of scope
+        assert _shell_quote_repair(["init", "extra"]) is None
+
+    def test_returns_none_for_short_argv(self):
+        from org_llm.cli import _shell_quote_repair
+        assert _shell_quote_repair(["ask"]) is None
+        assert _shell_quote_repair(["ask", "single-token"]) is None
+
+    def test_preserves_flags_unmodified(self):
+        from org_llm.cli import _shell_quote_repair
+        broken = ["ask", "what", "is", "this", "--cloud"]
+        repaired = _shell_quote_repair(broken)
+        assert repaired is not None
+        assert "--cloud" in repaired
+        assert any("what is this" in x for x in repaired)
+
+
+class TestSuggestNoteAskShellSafety:
+    """The Try-it suggestion must be safely copy-pasteable. Wrap in single
+    quotes; never embed unescaped double quotes that would close the outer
+    string."""
+    def test_suggestion_is_single_quoted(self, tmp_path, monkeypatch):
+        from pathlib import Path
+        from org_llm.cli import _suggest_note_ask
+        from org_llm.db import (Config, File, Node, get_session, init_db,
+                                  make_engine)
+        import time
+        db_path = tmp_path / "shell.db"
+        monkeypatch.setenv("ORG_LLM_DB", str(db_path))
+        engine = make_engine(Path(db_path))
+        init_db(engine)
+        now = time.time()
+        with get_session(engine) as s:
+            f = File(path="/v/a.org", indexed_at="now",
+                     node_count=1, mtime=now)
+            s.add(f); s.flush()
+            s.add(Node(file_id=f.id, node_id="n1",
+                        title="Has a 'single' and \"double\" quote",
+                        body="x", tags="poetry",
+                        mtime=now))
+            s.commit()
+        with get_session(engine) as s:
+            out = _suggest_note_ask(s, prefix="Try: ")
+        assert "org-llm ask" in out
+        # Must be single-quoted (so nested double quotes are safe)
+        assert "'[/bold]" in out
+        # And no inner single quotes that would close the outer wrapper —
+        # the title's apostrophes should have been stripped.
+        # Strip Rich markup before counting.
+        import re as _re
+        plain = _re.sub(r"\[/?[^\]]+\]", "", out)
+        # Outer '...' wrapper plus possibly stripped inner content; should be
+        # exactly two single quotes (open + close).
+        assert plain.count("'") == 2, (
+            f"Unexpected single-quote count in {plain!r}")
 # test_cli_extra.py:1 ends here

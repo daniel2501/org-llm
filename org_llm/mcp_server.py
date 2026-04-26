@@ -351,6 +351,53 @@ def create_mcp_server():
         return msg
 
     @server.tool()
+    def org_llm_run(command_string: str, timeout: int = 60) -> str:
+        """Run an arbitrary `org-llm` subcommand from natural-language intent.
+
+        Pass a free-form command string (e.g. "ask connect synthwave to my
+        recent notes" or "personalize --apply"). The same three-layer
+        recovery chain the CLI uses kicks in:
+
+          1. Deterministic shell-quoting repair.
+          2. LLM intent reconstruction (if you mangled the syntax).
+          3. SRE-style fix (config / doctor / models repairs).
+
+        Refuses dangerous verbs: `mcp` (would recurse), `claude` / `launch`
+        (would try to take over the terminal), `install` and `grant*`
+        (sensitive). Returns combined stdout/stderr from the run, capped
+        at 8000 chars. Use this when the user gives a vague intent and
+        you want the CLI's auto-fix layer to figure out the exact argv.
+        """
+        import shlex, subprocess
+        DANGEROUS = {"mcp", "claude", "launch", "install",
+                     "grant", "grant-root", "grant-browser",
+                     "revoke", "revoke-root", "revoke-browser"}
+        try:
+            argv = shlex.split(command_string or "")
+        except ValueError as e:
+            return f"Could not parse command_string: {e}"
+        if not argv:
+            return "Empty command_string."
+        verb = argv[0]
+        if verb in DANGEROUS:
+            return (f"Refused: '{verb}' is not safe to run from MCP. "
+                    f"The user must run it themselves in a terminal.")
+        try:
+            proc = subprocess.run(
+                ["org-llm", *argv],
+                capture_output=True, text=True, timeout=timeout,
+            )
+        except FileNotFoundError:
+            return "org-llm binary not on PATH inside the MCP server env."
+        except subprocess.TimeoutExpired:
+            return f"Command timed out after {timeout}s."
+        out = (proc.stdout or "") + (("\n[stderr]\n" + proc.stderr) if proc.stderr else "")
+        if len(out) > 8000:
+            out = out[:8000] + "\n…(truncated)"
+        suffix = f"\n[exit {proc.returncode}]" if proc.returncode != 0 else ""
+        return out + suffix
+
+    @server.tool()
     def get_config() -> str:
         """Return current org-llm configuration (model assignments, org_dir, etc.)."""
         from .db import Config

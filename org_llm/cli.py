@@ -770,28 +770,35 @@ def _suggest_note_ask(session, prefix: str = "Try it: ") -> str:
     )
     recent_titles = [t[0] for t in recents if t[0]]
 
+    # Sanitize titles for shell-paste safety: strip single quotes so we can
+    # safely wrap the whole suggestion in single quotes for the user to copy.
+    def _safe(s: str) -> str:
+        return s.replace("'", "")
+
     pool: list[str] = []
     for tag in top_tags:
+        t = _safe(tag)
         pool.extend([
-            f'what did I write about "{tag}" lately?',
-            f'summarise my "{tag}" notes',
-            f'find the most-linked note tagged "{tag}"',
+            f'what did I write about {t} lately?',
+            f'summarise my {t} notes',
+            f'find the most-linked note tagged {t}',
         ])
     for title in recent_titles:
         # Trim very long titles to keep the suggestion readable
         short = title if len(title) <= 60 else title[:57] + "…"
+        s = _safe(short)
         pool.extend([
-            f'what does "{short}" say?',
-            f'connect "{short}" to anything else in my vault',
+            f'what does {s} say?',
+            f'connect {s} to anything else in my vault',
         ])
 
     if not pool:
         # Empty / brand-new vault.
         return (f"{prefix}[bold]org-llm ask "
-                f"\"what do I have in this vault?\"[/bold]")
+                f"'what do I have in this vault?'[/bold]")
 
     cloud_flag = " --cloud" if random.random() < 0.4 else ""
-    return f"{prefix}[bold]org-llm ask{cloud_flag} \"{random.choice(pool)}\"[/bold]"
+    return f"{prefix}[bold]org-llm ask{cloud_flag} '{random.choice(pool)}'[/bold]"
 
 
 def _suggest_code_ask(session, roots: list[Path]) -> str:
@@ -908,32 +915,38 @@ def _suggest_code_ask(session, roots: list[Path]) -> str:
         ],
     }
 
+    # Strip single quotes from every interpolated value so we can wrap the
+    # final shell command in single quotes safely (any double quotes inside
+    # the question are fine that way).
+    def _safe(s: str) -> str:
+        return (s or "").replace("'", "")
+
     if not samples:
         # No code samples yet (nothing under roots, or unembedded). Fall back
         # to a non-cloud generic pick referencing the actual root.
-        root_label = str(roots[0]) if roots else "your code"
+        root_label = _safe(str(roots[0]) if roots else "your code")
         question = random.choice([
             f"summarise the architecture under {root_label}",
             f"what looks important under {root_label}?",
             f"find every TODO under {root_label}",
         ])
-        return f"Try it: [bold]org-llm ask {question!r}[/bold]"
+        return f"Try it: [bold]org-llm ask '{question}'[/bold]"
 
     title, path, lang, symbols = random.choice(samples)
-    file_name = Path(path).name
+    file_name = _safe(Path(path).name)
     # Project = first path segment under any of the roots
     project = file_name
     for pref in prefixes:
         if path.startswith(pref):
             tail = path[len(pref):]
-            project = tail.split("/", 1)[0] or file_name
+            project = _safe(tail.split("/", 1)[0]) or file_name
             break
-    parent_dir = str(Path(path).parent)
+    parent_dir = _safe(str(Path(path).parent))
 
     pool = list(pools.get(lang) or pools[""])
     # Symbol-aware extras when we extracted any from the file's body.
     if symbols:
-        sym = random.choice(symbols)
+        sym = _safe(random.choice(symbols))
         pool.extend([
             f"how is {sym} used across {{project}}?",
             f"explain {sym} in {{file}}",
@@ -943,7 +956,7 @@ def _suggest_code_ask(session, roots: list[Path]) -> str:
     template = random.choice(pool)
     question = template.format(file=file_name, dir=parent_dir, project=project)
     cloud_flag = " --cloud" if random.random() < 0.5 else ""
-    return f"Try it: [bold]org-llm ask{cloud_flag} \"{question}\"[/bold]"
+    return f"Try it: [bold]org-llm ask{cloud_flag} '{question}'[/bold]"
 
 
 @app.command(name="code-index")
@@ -5429,10 +5442,17 @@ Full access to notes, code, skills, and filesystem discovery.
     behaviour = """
 
 BEHAVIOUR
-  - Tools-first: don't speculate; the data is one MCP call away
+  - Tools-first: don't speculate; the data is one MCP call away.
   - Theme-aware: the user runs LCARS-themed tooling. Match the energy.
     If the user has knobs configured (above), nod to them when natural.
-  - Be concise. The user reads diffs and tool output, not paragraphs."""
+  - Be concise. The user reads diffs and tool output, not paragraphs.
+  - PROACTIVE AUTO-FIX: when in doubt, call `org_llm_run("<command>")`
+    with a free-form command string. The CLI runs three layers of
+    recovery (shell-quote repair, LLM intent reconstruction, SRE fix)
+    before failing — so even a mangled intent ("ask why my notes look
+    weird") tends to land on a real result. Don't ask the user to
+    re-quote things manually; throw it at org_llm_run and let the
+    auto-fix chain handle it."""
 
     return common_header + focus + behaviour
 
@@ -7350,6 +7370,254 @@ from . import cli_skills as _cs
 _cs.register(app)
 
 
+_SINGLE_QUERY_VERBS = {
+    "ask", "code", "search", "tutor", "source",
+}
+
+
+# Verbs whose intent the LLM may reconstruct from a mangled argv. Distinct
+# from _LLM_FIXABLE_VERBS (which is for SRE-style infrastructure repairs and
+# specifically excludes user-facing verbs to avoid burning tokens). This list
+# is what the LLM is allowed to ARGUE its way back into when shell quoting
+# breaks the original invocation.
+_INTENT_RECOVERABLE_VERBS = {
+    "ask", "code", "capture", "search", "tutor", "source",
+    "models", "doctor", "report", "discover", "personalize",
+    "code-index", "review-emacs", "tag", "config", "knob",
+}
+
+
+def _llm_intent_repair(broken_argv: list[str], error: str) -> list[str] | None:
+    """Ask the LLM to reconstruct the user's intent from a mangled argv.
+
+    Used as the last-resort recovery for Typer parse errors (typically shell
+    quoting issues). Different from _llm_assisted_fix: that one is for SRE
+    fixes (config, models, doctor); this one re-creates a user-facing
+    invocation in the same verb the user typed.
+
+    Returns the proposed argv (without leading "org-llm") on success, or
+    None if no safe recovery was found.
+    """
+    if not broken_argv:
+        return None
+    verb = next((a for a in broken_argv if not a.startswith("-")), "")
+    if verb not in _INTENT_RECOVERABLE_VERBS:
+        return None
+
+    try:
+        engine = _engine()
+        with get_session(engine) as session:
+            cloud_provider = _cfg(session, "cloud_provider")
+            cloud_endpoint = _cfg(session, "cloud_endpoint_url")
+            cloud_model    = (_cfg(session, "fixer_model")
+                              or _cfg(session, "cloud_model")
+                              or "openai/gpt-oss-20b:free")
+            db_api_key     = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
+    except Exception:
+        return None
+    if not cloud_endpoint:
+        return None
+
+    from . import creds as _creds
+    api_key = (_creds.read_secret(_creds.cloud_slug(cloud_provider))
+               if cloud_provider else None) or db_api_key
+
+    sys_prompt = (
+        "You repair shell-quoting errors for a CLI tool called `org-llm`.\n"
+        "The user typed a command. The shell mangled it (typically because "
+        "of nested quotes), so Typer rejected the argv with 'Got unexpected "
+        "extra arguments'. Your job is to reconstruct what the user meant.\n\n"
+        "Reply with STRICT JSON only. No prose, no markdown:\n"
+        '  {"argv": ["ask", "connect Literate Programming Approach to anything else in my vault"], "reason": "shell unquoted the inner double quotes"}\n'
+        'OR {"argv": null, "reason": "cannot reconstruct intent"}\n\n'
+        f"argv[0] MUST be one of: {', '.join(sorted(_INTENT_RECOVERABLE_VERBS))}.\n"
+        "Glue all stray positional tokens back into the single string the\n"
+        "user clearly intended. Preserve any --flag and its value as separate\n"
+        "argv entries. Do NOT add new flags. Do NOT change the verb."
+    )
+    user_prompt = (
+        f"Verb: {verb}\n"
+        f"Broken argv: {broken_argv}\n"
+        f"Typer error: {error[:600]}\n\n"
+        "Reconstruct the intended argv."
+    )
+
+    try:
+        from .cloud import cloud_chat
+        reply = cloud_chat(user_prompt, model=cloud_model,
+                           endpoint_url=cloud_endpoint,
+                           api_key=api_key, system=sys_prompt)
+    except Exception:
+        return None
+
+    cleaned = _strip_code_fences(reply, "json").strip()
+    import json as _json
+    try:
+        plan = _json.loads(cleaned)
+    except Exception:
+        return None
+    proposed = plan.get("argv")
+    if not isinstance(proposed, list) or not proposed:
+        return None
+    if str(proposed[0]) != verb:
+        # Don't let the LLM silently change verbs.
+        return None
+    if any(not isinstance(x, str) for x in proposed):
+        return None
+    if plan.get("reason"):
+        on_screen(f"  [dim]LLM intent: {plan['reason']}[/dim]")
+    return proposed
+
+
+def _shell_quote_repair(argv: list[str]) -> list[str] | None:
+    """If argv looks like a single-string command got split by bad shell
+    quoting, glue everything from arg index 1 onward back into one string.
+
+    Example: `ask connect "Foo Bar" lately` becomes `ask 'connect Foo Bar lately'`
+    when the user originally meant a single quoted query but the shell
+    eat/recombined the quotes.
+
+    Only applies to commands in _SINGLE_QUERY_VERBS — those take exactly
+    one positional string argument. Returns the repaired argv or None when
+    the heuristic doesn't apply.
+    """
+    if len(argv) < 3:
+        return None
+    # Strip leading global options (none today, but guard for future flags).
+    cmd_idx = 0
+    while cmd_idx < len(argv) and argv[cmd_idx].startswith("-"):
+        cmd_idx += 1
+    if cmd_idx >= len(argv):
+        return None
+    verb = argv[cmd_idx]
+    if verb not in _SINGLE_QUERY_VERBS:
+        return None
+    # Repaired tail: re-join any non-flag positional tokens. Keep flags as-is.
+    head = argv[: cmd_idx + 1]
+    tail = argv[cmd_idx + 1:]
+    flags: list[str] = []
+    words: list[str] = []
+    i = 0
+    while i < len(tail):
+        tok = tail[i]
+        if tok.startswith("-"):
+            flags.append(tok)
+            # Pull the next token as flag's value if it doesn't itself look like a flag
+            if i + 1 < len(tail) and not tail[i + 1].startswith("-"):
+                # Conservative: only treat as a value if it's short (avoid
+                # eating real query words). Real --model values are model tags
+                # like "qwen2.5:3b" — short and contain digits/colons.
+                nxt = tail[i + 1]
+                if len(nxt) <= 32 and any(c in nxt for c in ":/_") or nxt.isdigit():
+                    flags.append(nxt); i += 1
+            i += 1
+            continue
+        words.append(tok)
+        i += 1
+    if len(words) <= 1:
+        return None
+    glued = " ".join(words)
+    return head + flags + [glued]
+
+
 def main():
-    app()
+    """Top-level entry. Three-layer recovery chain for argv parse errors:
+
+      1. Deterministic shell-quote repair — fastest, no LLM call.
+      2. LLM intent repair — reconstruct the user's intended argv from
+         the mangled one, then EXECUTE it (no confirmation).
+      3. SRE-style LLM fix — only if the first two can't recover, falls
+         through to allow-listed infra fixes (config, doctor, models).
+
+    Be proactive: at each layer that produces a runnable argv, try to run
+    it. The user typed a command; our job is to deliver on that intent,
+    not to interrupt them with a quiz about quoting.
+    """
+    import sys
+    from click.exceptions import UsageError as _ClickUsageError
+
+    def _invoke(argv: list[str] | None = None):
+        """Invoke the Typer app with standalone_mode=False so UsageErrors
+        propagate up here instead of being caught + printed by Click."""
+        click_cmd = typer.main.get_command(app)
+        return click_cmd.main(args=argv, prog_name="org-llm",
+                                standalone_mode=False)
+
+    try:
+        _invoke()
+        return
+    except _ClickUsageError as exc:
+        original_error = str(exc)
+        # Be proactive: try recovery for ALL parse errors, not just "extra
+        # arguments". Bad subcommand, bad flag, missing required arg —
+        # the LLM can guess intent for any of them.
+
+    argv = list(sys.argv[1:])
+    from .ui import on_screen as _on
+
+    # ── Layer 0: deterministic fuzzy-match for unknown subcommand ─────────
+    if "no such command" in original_error.lower() and argv:
+        import difflib as _dl
+        first = argv[0]
+        try:
+            known = sorted(typer.main.get_command(app).commands.keys())
+        except Exception:
+            known = []
+        guess = _dl.get_close_matches(first, known, n=1, cutoff=0.6)
+        if guess:
+            _on(f"[yellow]Unknown command [bold]{first!r}[/bold] — "
+                f"did you mean [bold]{guess[0]}[/bold]? Retrying.[/yellow]")
+            argv = [guess[0]] + argv[1:]
+            try:
+                _invoke(argv)
+                return
+            except _ClickUsageError as exc:
+                original_error = str(exc)
+
+    # ── Layer 1: deterministic shell-quote repair ─────────────────────────
+    repaired = _shell_quote_repair(argv)
+    if repaired and repaired != argv:
+        _on(f"[yellow]Auto-repairing shell quoting and retrying:[/yellow]")
+        _on(f"  [dim]→[/dim] [bold]org-llm {' '.join(repaired)}[/bold]")
+        try:
+            _invoke(repaired)
+            return
+        except _ClickUsageError as exc:
+            original_error = str(exc)
+            argv = repaired
+
+    # ── Layer 2: LLM intent reconstruction → execute proactively ──────────
+    intent_argv = _llm_intent_repair(argv, original_error)
+    if intent_argv:
+        _on(f"[yellow]LLM reconstructed intent — executing:[/yellow]")
+        _on(f"  [dim]→[/dim] [bold]org-llm {' '.join(intent_argv)}[/bold]")
+        try:
+            _invoke(intent_argv)
+            return
+        except _ClickUsageError:
+            pass
+
+    # ── Layer 3: SRE-style fix (config / doctor / models repairs) ─────────
+    try:
+        attempted = "org-llm " + " ".join(argv)
+        if _llm_assisted_fix(
+            error=f"Typer parse error: {' '.join(argv)!r} — {original_error}",
+            attempted_command=attempted,
+            context=("Shell quoting likely broke a single-string argument "
+                     "into multiple positional tokens, OR the user typed an "
+                     "unknown subcommand or flag. Pick the closest safe fix."),
+        ):
+            try:
+                _invoke(argv)
+                return
+            except _ClickUsageError:
+                pass
+    except Exception:
+        pass
+
+    # All layers exhausted — print the original Typer error and tip.
+    _on(f"[red]Could not auto-recover: {original_error}[/red]")
+    _on("[dim]Tip: wrap the query in single quotes — "
+        "[bold]org-llm ask 'your full question here'[/bold][/dim]")
+    sys.exit(2)
 # cli.py:1 ends here

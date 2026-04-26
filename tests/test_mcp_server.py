@@ -94,6 +94,7 @@ class TestServerBuilds:
             "set_config", "discover_filesystem", "doctor_health",
             "performance_status", "index_vault", "embed_pending",
             "code_search", "recent_files", "list_models",
+            "org_llm_run",
         }
         assert expected <= names, f"Missing tools: {expected - names}"
 
@@ -431,6 +432,21 @@ class TestIndexVault:
                 s.delete(row); s.commit()
         out = _tool(server, "index_vault")()
         assert "org_dir not configured" in out
+
+
+class TestOrgLlmRun:
+    def test_refuses_dangerous_verbs(self, server):
+        for v in ("mcp", "claude", "launch", "install", "grant"):
+            out = _tool(server, "org_llm_run")(command_string=v)
+            assert "Refused" in out, f"Should refuse {v!r}"
+
+    def test_handles_empty_string(self, server):
+        out = _tool(server, "org_llm_run")(command_string="")
+        assert "Empty" in out
+
+    def test_handles_unparseable_quotes(self, server):
+        out = _tool(server, "org_llm_run")(command_string="ask 'unclosed")
+        assert "Could not parse" in out
 
 
 class TestEmbedPending:
