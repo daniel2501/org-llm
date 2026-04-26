@@ -150,13 +150,39 @@ def _ollama_pull(model: str) -> bool:
     return subprocess.run([ollama, "pull", model]).returncode == 0
 
 
+def _suggest_model_tag(bad_tag: str, base_url: str) -> str | None:
+    """Fuzzy-match a typo'd model tag against pulled-locally + catalog."""
+    import difflib as _dl
+    candidates: set[str] = set()
+    try:
+        from .llm import list_models
+        for m in list_models(base_url) or []:
+            n = m.get("name") if isinstance(m, dict) else getattr(m, "name", None)
+            if n:
+                candidates.add(n)
+                # Also add the stem (without :tag suffix) for closer matching
+                candidates.add(n.split(":")[0])
+    except Exception:
+        pass
+    try:
+        from .models import CATALOG
+        for entry in CATALOG:
+            candidates.add(entry.tag)
+            candidates.add(entry.tag.split(":")[0])
+    except Exception:
+        pass
+    if not candidates:
+        return None
+    matches = _dl.get_close_matches(bad_tag, sorted(candidates), n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+
 def _ensure_model_pulled(model: str, base_url: str, _try_llm_fix: bool = True) -> bool:
     """Idempotent: make sure `model` is locally available, pulling if needed.
 
-    If the pull fails (typically because the user configured a bogus tag),
-    the LLM is asked for a remediation — usually a `models --pull <real-tag>`
-    or `config <role>_model <real-tag>` — which is auto-executed and the
-    check is repeated.
+    Recovery chain when the pull fails:
+      1. Deterministic fuzzy-match against pulled-locally + catalog.
+      2. LLM assisted-fix (the existing SRE pathway).
     """
     if not model:
         return False
@@ -164,14 +190,25 @@ def _ensure_model_pulled(model: str, base_url: str, _try_llm_fix: bool = True) -
         return True
     if _ollama_pull(model) and _ollama_has(model, base_url):
         return True
+
+    # Layer 1: fuzzy-match before reaching for the LLM.
+    guess = _suggest_model_tag(model, base_url)
+    if guess and guess != model:
+        on_screen(f"[yellow]Model tag {model!r} not found; "
+                  f"trying close match {guess!r}.[/yellow]")
+        if _ollama_has(guess, base_url) or (
+                _ollama_pull(guess) and _ollama_has(guess, base_url)):
+            on_screen(f"[dim]Auto-substituted: {model!r} → {guess!r} "
+                      f"(use `org-llm config <role>_model {guess}` to persist)[/dim]")
+            return True
+
     if _try_llm_fix and _llm_assisted_fix(
         error=f"Failed to pull or load Ollama model {model!r}",
         attempted_command=f"_ensure_model_pulled({model!r})",
         context="The user may have configured a non-existent model tag.",
     ):
-        # Re-resolve config in case the LLM swapped chat_model/embed_model
         return _ollama_has(model, base_url) or _ensure_model_pulled(
-            model, base_url, _try_llm_fix=False)  # one retry, no recursion
+            model, base_url, _try_llm_fix=False)
     return False
 
 
@@ -2071,6 +2108,7 @@ def config(
     value: Annotated[str, typer.Argument(help="Value to set")] = "",
 ):
     """Get or set a config value. No args = show all."""
+    import difflib as _dl
     from .db import Config as Cfg
     engine = _engine()
     with get_session(engine) as session:
@@ -2083,16 +2121,38 @@ def config(
             console.print(table)
         elif not value:
             row = session.get(Cfg, key)
-            console.print(row.value if row else "[error]not set[/error]")
+            if row:
+                console.print(row.value)
+            else:
+                # Unknown / unset — fuzzy-match against actual rows + defaults.
+                known = {r.key for r in session.query(Cfg).all()} | set(MODEL_DEFAULTS.keys())
+                guess = _dl.get_close_matches(key, sorted(known), n=3, cutoff=0.55)
+                console.print("[error]not set[/error]")
+                if guess:
+                    on_screen(f"[dim]Did you mean: {', '.join(guess)}?[/dim]")
         else:
             err = _validate_config(key, value)
             if err:
                 red_alert(err)
+                # Suggest a likely correct key on validation failure too.
+                known = {r.key for r in session.query(Cfg).all()} | set(MODEL_DEFAULTS.keys())
+                guess = _dl.get_close_matches(key, sorted(known), n=3, cutoff=0.55)
+                if guess:
+                    on_screen(f"[dim]Did you mean: {', '.join(guess)}?[/dim]")
                 raise typer.Exit(1)
             row = session.get(Cfg, key)
             if row:
                 row.value = value
             else:
+                # Brand-new key — warn if it doesn't fuzzy-match any known key.
+                # We allow unknown keys (extension knobs use them) but the user
+                # should know if they're typing something nobody else reads.
+                known = {r.key for r in session.query(Cfg).all()} | set(MODEL_DEFAULTS.keys())
+                if key not in known:
+                    guess = _dl.get_close_matches(key, sorted(known), n=2, cutoff=0.7)
+                    if guess:
+                        on_screen(f"[yellow]New key {key!r} — "
+                                  f"did you mean {' / '.join(guess)}?[/yellow]")
                 session.add(Cfg(key=key, value=value))
             session.commit()
             hail(f"{key} = {value}")

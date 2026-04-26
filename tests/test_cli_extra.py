@@ -361,6 +361,64 @@ class TestEmbedModelDetection:
             assert q > 50, f"{key}={val!r} → quality {q}: stem doesn't match any catalog entry"
 
 
+class TestConfigFuzzyMatch:
+    def test_unset_key_suggests_close_matches(self, populated_org):
+        # `chat_modle` is a typo for `chat_model`
+        r = runner.invoke(app, ["config", "chat_modle"])
+        assert r.exit_code == 0
+        # Either prints "not set" with suggestions or directly suggests
+        assert ("Did you mean" in r.output or "chat_model" in r.output)
+
+    def test_setting_unknown_key_warns(self, populated_org):
+        r = runner.invoke(app, ["config", "chat_modle", "phi3.5"])
+        assert r.exit_code == 0   # still allowed (might be a custom knob key)
+        assert ("did you mean" in r.output.lower()
+                or "Did you mean" in r.output
+                or "chat_model" in r.output)
+
+
+class TestModelTagFuzzyMatch:
+    def test_helper_finds_close_match(self, monkeypatch):
+        from org_llm.cli import _suggest_model_tag
+        # Stub out list_models so we don't need a live Ollama
+        import org_llm.llm as _llm
+        monkeypatch.setattr(_llm, "list_models",
+                              lambda url: [{"name": "llama3.2:1b"},
+                                           {"name": "phi3.5"}])
+        # Typo of llama3.2 with one extra char
+        assert _suggest_model_tag("llama3.21b", "http://x") in (
+            "llama3.2:1b", "llama3.2", "llama3")
+        # Typo of phi3.5
+        assert _suggest_model_tag("phi3", "http://x") == "phi3.5"
+
+    def test_helper_returns_none_when_no_candidates(self, monkeypatch):
+        from org_llm.cli import _suggest_model_tag
+        import org_llm.llm as _llm
+        monkeypatch.setattr(_llm, "list_models", lambda url: [])
+        # Catalog still adds candidates, but for a totally bogus tag
+        # returns None
+        assert _suggest_model_tag("zzznotacatmodel999", "http://x") is None
+
+
+class TestSkillFuzzyMatch:
+    def test_unknown_skill_suggests_closest(self, populated_org):
+        from pathlib import Path
+        from org_llm.skills import Skill
+        from org_llm.db    import get_session, make_engine
+        import os
+        engine = make_engine(Path(os.environ["ORG_LLM_DB"]))
+        with get_session(engine) as s:
+            s.add(Skill(name="echo_test", lang="python",
+                         model_key="text_model",
+                         source="print('{{input}}')",
+                         file_path="/v/s.org", heading="Echo"))
+            s.commit()
+        # Typo of echo_test; positional "input" is empty
+        r = runner.invoke(app, ["skill", "echo_tst", "--yes"])
+        # Either uses fuzzy-match and runs, OR fails with closest names list
+        assert "echo_test" in r.output
+
+
 class TestShellQuoteRepair:
     def test_glues_extra_args_for_ask(self):
         from org_llm.cli import _shell_quote_repair

@@ -83,8 +83,21 @@ def register(app: typer.Typer) -> None:
         with get_session(engine) as session:
             sk = session.query(Skill).filter_by(name=name).first()
             if not sk:
-                red_alert(f"Skill {name!r} not found. Run `org-llm skills` to list.")
-                raise typer.Exit(1)
+                # Fuzzy-match against existing skills before bailing.
+                import difflib as _dl
+                all_names = [s.name for s in session.query(Skill).all()]
+                guess = _dl.get_close_matches(name, all_names, n=1, cutoff=0.6)
+                if guess:
+                    on_screen(f"[yellow]Skill {name!r} not found — "
+                              f"using closest match {guess[0]!r}.[/yellow]")
+                    sk = session.query(Skill).filter_by(name=guess[0]).first()
+                if not sk:
+                    red_alert(f"Skill {name!r} not found. Run `org-llm skills` to list.")
+                    if all_names:
+                        suggestions = _dl.get_close_matches(name, all_names, n=3, cutoff=0.4)
+                        if suggestions:
+                            on_screen(f"[dim]Closest names: {', '.join(suggestions)}[/dim]")
+                    raise typer.Exit(1)
 
             # Trust-on-first-use: hash the source, compare to stored allow-list
             sig = hashlib.sha256(sk.source.encode()).hexdigest()[:16]
