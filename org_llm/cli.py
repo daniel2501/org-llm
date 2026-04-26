@@ -177,24 +177,38 @@ _TIME_PHRASES = [
 ]
 
 
+_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+    "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+}
+
+
 def _parse_days_window(query: str) -> int | None:
-    """Extract a "last N days" intent from a free-form question.
+    """Extract a "last N days/weeks/months/years" intent from a free-form question.
 
     Returns the number of days to look back, or None if no temporal phrase
-    is present. Numeric phrases like "last 30 days" / "past 60 days" win
+    is present. Numeric phrases like "last 30 days" / "past 6 months" win
     over keyword phrases like "last week".
     """
     if not query:
         return None
     import re
     q = query.lower()
-    # Numeric: "last 30 days", "past 14 days", "in the last 7 days"
-    m = re.search(r"\b(?:last|past|previous)\s+(\d{1,4})\s+days?\b", q)
-    if m:
-        return int(m.group(1))
-    m = re.search(r"\b(\d{1,4})\s+days?\s+ago\b", q)
-    if m:
-        return int(m.group(1))
+
+    # Spelled-out numbers: "last six months" → "last 6 months"
+    for word, n in _NUMBER_WORDS.items():
+        q = re.sub(rf"\b(last|past|previous)\s+{word}\b", rf"\1 {n}", q)
+
+    # Numeric units: "last 30 days", "past 6 months", "previous 2 years", "in the last 4 weeks"
+    units = {"day": 1, "days": 1, "week": 7, "weeks": 7,
+             "month": 30, "months": 30, "year": 365, "years": 365}
+    m = re.search(r"\b(?:last|past|previous)\s+(\d{1,4})\s+(\w+)\b", q)
+    if m and m.group(2) in units:
+        return int(m.group(1)) * units[m.group(2)]
+    m = re.search(r"\b(\d{1,4})\s+(\w+)\s+ago\b", q)
+    if m and m.group(2) in units:
+        return int(m.group(1)) * units[m.group(2)]
+
     # Keyword phrases
     for pattern, days in _TIME_PHRASES:
         if re.search(pattern, q):
@@ -486,9 +500,12 @@ def ask(
                 # Path-anchored augmentation (daily/journal/diary). When the
                 # user explicitly references one of these folders we PREPEND
                 # them rather than append, so they lead in the LLM's prompt.
+                # Pull more files when the time window is large — "last six
+                # months" wants ~24 distinct daily entries, not 6.
+                path_limit = max(top_k, (days_window or 7) // 7)
                 path_aug: list = []
                 for folder in path_hints:
-                    path_aug += recent_in_path(session, folder, limit=top_k)
+                    path_aug += recent_in_path(session, folder, limit=path_limit)
                 fresh_path = []
                 for r in path_aug:
                     key = (r.node_id, r.title, r.file_path)

@@ -150,12 +150,25 @@ def report_top_tags(session, limit: int = 20) -> None:
 
 
 def report_recent(session, days: int = 14) -> None:
-    """Recently modified nodes."""
+    """Recently modified files (one row per file — sub-headings collapsed).
+
+    Without dedup, a single recently-edited file with N sub-headings would
+    fill the table with N identical-mtime rows, drowning out the rest of
+    your activity. This query groups by file and shows the file-level node
+    (lowest id within each file).
+    """
     from sqlalchemy import text
     rows = session.execute(text("""
+        WITH file_level AS (
+            SELECT MIN(id) AS id, file_id
+            FROM nodes
+            GROUP BY file_id
+        )
         SELECT n.title, n.tags, f.path,
                datetime(n.mtime,'unixepoch','localtime') AS modified
-        FROM nodes n JOIN files f ON f.id = n.file_id
+        FROM nodes n
+        JOIN file_level fl ON fl.id = n.id
+        JOIN files f ON f.id = n.file_id
         WHERE n.mtime >= strftime('%s','now','-:days days')
         ORDER BY n.mtime DESC
         LIMIT 20
@@ -169,7 +182,7 @@ def report_recent(session, days: int = 14) -> None:
     for r in rows:
         table.add_row(r.modified, r.title, r.tags or "—", Path(r.path).name)
     console.print(Panel(table,
-                        title=f"[lcars2]{NF['recent']}  Modified in last {days}d[/lcars2]",
+                        title=f"[lcars2]{NF['recent']}  Modified in last {days}d  (one per file)[/lcars2]",
                         border_style="lcars2"))
 
 

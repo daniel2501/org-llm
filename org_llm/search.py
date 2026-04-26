@@ -98,27 +98,81 @@ def recent_in_path(
     session: Session,
     path_substring: str,
     limit: int = 10,
+    one_per_file: bool = True,
 ) -> list[SearchResult]:
     """Most-recently-modified nodes whose file path contains a given substring.
 
     Used to surface daily-journal-style folders (`/daily/`, `/journal/`,
     `/diary/`) when a query references them by topic regardless of when
     the file was last touched.
+
+    one_per_file=True (default): return one row per file (the file-level
+    node, which the indexer always inserts first). For daily notes this
+    means "6 most recent days" rather than "6 sub-headings of one day".
     """
-    rows = session.execute(text("""
-        SELECT
-            n.node_id,
-            n.title,
-            n.body,
-            n.tags,
-            f.path,
-            0.0 AS score
-        FROM nodes n
-        JOIN files f ON f.id = n.file_id
-        WHERE f.path LIKE :pat
-        ORDER BY n.mtime DESC
-        LIMIT :lim
-    """), {"pat": f"%/{path_substring}/%", "lim": limit}).fetchall()
+    if one_per_file:
+        # One row per file — the file-level node (lowest id), with a
+        # synthesized body that includes its own pre-heading text PLUS
+        # sub-heading titles/bodies. Without this concat, daily notes
+        # would arrive with empty bodies because the indexer puts all
+        # content under sub-headings.
+        rows = session.execute(text("""
+            WITH per_file AS (
+                SELECT
+                    f.id              AS file_id,
+                    MIN(n.id)         AS file_node_id,
+                    MAX(n.mtime)      AS mtime,
+                    f.path            AS path
+                FROM nodes n
+                JOIN files f ON f.id = n.file_id
+                WHERE f.path LIKE :pat
+                GROUP BY f.id
+            ),
+            file_level AS (
+                SELECT n.id, n.node_id, n.title, n.body, n.tags
+                FROM nodes n
+                JOIN per_file pf ON pf.file_node_id = n.id
+            ),
+            child_bodies AS (
+                SELECT n.file_id,
+                       GROUP_CONCAT(
+                           '## ' || n.title || char(10) || substr(n.body, 1, 400),
+                           char(10) || char(10)
+                       ) AS combined
+                FROM nodes n
+                JOIN per_file pf ON pf.file_id = n.file_id
+                WHERE n.id != pf.file_node_id
+                GROUP BY n.file_id
+            )
+            SELECT
+                fl.node_id,
+                fl.title,
+                CASE
+                    WHEN coalesce(cb.combined, '') = '' THEN fl.body
+                    WHEN fl.body = '' THEN cb.combined
+                    ELSE fl.body || char(10) || char(10) || cb.combined
+                END AS body,
+                fl.tags,
+                pf.path,
+                0.0 AS score
+            FROM per_file pf
+            JOIN file_level fl ON fl.id = pf.file_node_id
+            LEFT JOIN child_bodies cb ON cb.file_id = pf.file_id
+            ORDER BY pf.mtime DESC
+            LIMIT :lim
+        """), {"pat": f"%/{path_substring}/%", "lim": limit}).fetchall()
+    else:
+        rows = session.execute(text("""
+            SELECT
+                n.node_id, n.title, n.body, n.tags,
+                f.path,
+                0.0 AS score
+            FROM nodes n
+            JOIN files f ON f.id = n.file_id
+            WHERE f.path LIKE :pat
+            ORDER BY n.mtime DESC
+            LIMIT :lim
+        """), {"pat": f"%/{path_substring}/%", "lim": limit}).fetchall()
     return [SearchResult(*r) for r in rows]
 
 

@@ -198,4 +198,101 @@ class TestParseDaysWindow:
         from org_llm.cli import _parse_days_window
         # "last 60 days" should beat the bare "last week"
         assert _parse_days_window("notes from the last 60 days last week") == 60
+
+    def test_months_and_years(self):
+        from org_llm.cli import _parse_days_window
+        assert _parse_days_window("last 6 months") == 180
+        assert _parse_days_window("past 2 years") == 730
+        assert _parse_days_window("previous 3 weeks") == 21
+        assert _parse_days_window("last 1 month") == 30
+
+    def test_spelled_out_numbers(self):
+        from org_llm.cli import _parse_days_window
+        assert _parse_days_window("last six months") == 180
+        assert _parse_days_window("past three weeks") == 21
+        assert _parse_days_window("previous two years") == 730
+
+
+class TestRecentInPathOnePerFile:
+    def test_returns_one_row_per_file(self, session):
+        """Regression: 5 sub-headings of one daily-note file produced 5
+        identical-mtime rows, drowning out other files in the same window."""
+        import time
+        now = time.time()
+        # File with multiple sub-headings
+        from org_llm.db import File, Node
+        f = File(path="/vault/daily/2026-04-12.org", indexed_at="now",
+                 node_count=5, mtime=now)
+        session.add(f); session.flush()
+        # File-level (lowest id, inserted first per indexer convention)
+        session.add(Node(file_id=f.id, title="2026-04-12", body="day intro",
+                         tags="", mtime=now))
+        for sub in ("doom-everywhere", "Android-doom",
+                     "idexx-prep", "dbt-tutorial", "github-actions"):
+            session.add(Node(file_id=f.id, title=sub, body=f"body of {sub}",
+                             tags="", mtime=now))
+        # A second daily file
+        f2 = File(path="/vault/daily/2026-04-11.org", indexed_at="now",
+                  node_count=2, mtime=now - 86400)
+        session.add(f2); session.flush()
+        session.add(Node(file_id=f2.id, title="2026-04-11", body="",
+                         tags="", mtime=now - 86400))
+        session.add(Node(file_id=f2.id, title="meeting", body="meeting body",
+                         tags="", mtime=now - 86400))
+        session.commit()
+
+        from org_llm.search import recent_in_path
+        results = recent_in_path(session, "daily", limit=10)
+        # Exactly one row per file (2 files → 2 rows)
+        assert len(results) == 2
+        titles = [r.title for r in results]
+        assert "2026-04-12" in titles
+        assert "2026-04-11" in titles
+        # Most recent first
+        assert titles[0] == "2026-04-12"
+
+    def test_body_includes_sub_heading_content(self, session):
+        """The synthesized body for the file-level node should fold in
+        sub-heading titles + bodies so the LLM has substance to work with."""
+        import time
+        now = time.time()
+        from org_llm.db import File, Node
+        f = File(path="/vault/daily/2026-04-12.org", indexed_at="now",
+                 node_count=3, mtime=now)
+        session.add(f); session.flush()
+        session.add(Node(file_id=f.id, title="2026-04-12", body="",
+                         tags="", mtime=now))
+        session.add(Node(file_id=f.id, title="dbt tutorial",
+                         body="finished sections 1-3 of postgres+dbt",
+                         tags="", mtime=now))
+        session.add(Node(file_id=f.id, title="doom-everywhere",
+                         body="experimented with portable doom config",
+                         tags="", mtime=now))
+        session.commit()
+
+        from org_llm.search import recent_in_path
+        results = recent_in_path(session, "daily", limit=5)
+        assert len(results) == 1
+        body = results[0].body
+        # Both sub-heading titles + bodies should appear
+        assert "dbt tutorial" in body
+        assert "postgres+dbt" in body
+        assert "doom-everywhere" in body
+        assert "portable doom" in body
+
+    def test_one_per_file_false_returns_all(self, session):
+        """Backward-compat: setting one_per_file=False returns every node."""
+        import time
+        now = time.time()
+        from org_llm.db import File, Node
+        f = File(path="/vault/daily/x.org", indexed_at="now",
+                 node_count=3, mtime=now)
+        session.add(f); session.flush()
+        for t in ("file-level", "sub-1", "sub-2"):
+            session.add(Node(file_id=f.id, title=t, body=t, tags="", mtime=now))
+        session.commit()
+
+        from org_llm.search import recent_in_path
+        results = recent_in_path(session, "daily", limit=10, one_per_file=False)
+        assert len(results) == 3
 # test_search.py:1 ends here
