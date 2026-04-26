@@ -2570,103 +2570,167 @@ org-roam second brain via org-llm MCP tools.
 
 @app.command()
 def cloud(
-    status:    Annotated[bool, typer.Option("--status",    "-s",  help="Show cloud config and connection status")] = False,
-    signup:    Annotated[bool, typer.Option("--signup",          help="Open RunPod signup in browser")] = False,
-    console_:  Annotated[bool, typer.Option("--console",         help="Open RunPod console in browser")] = False,
-    configure: Annotated[bool, typer.Option("--configure", "-c",  help="Set up RunPod API key and endpoint")] = False,
-    test:      Annotated[bool, typer.Option("--test",      "-t",  help="Ping the cloud endpoint")] = False,
+    status:    Annotated[bool, typer.Option("--status",    "-s",  help="Show configured provider status")] = False,
+    providers: Annotated[bool, typer.Option("--providers", "-p",  help="List all supported cloud providers")] = False,
+    signup:    Annotated[str,  typer.Option("--signup",          help="Open signup page (provider slug or 'list')")] = "",
+    console_:  Annotated[str,  typer.Option("--console",         help="Open console for a provider slug")] = "",
+    configure: Annotated[bool, typer.Option("--configure", "-c",  help="Set up provider, endpoint, and API key")] = False,
+    test:      Annotated[bool, typer.Option("--test",      "-t",  help="Ping the configured endpoint")] = False,
     assess:    Annotated[bool, typer.Option("--assess",    "-a",  help="Assess which models need cloud vs local")] = False,
-    cost:      Annotated[bool, typer.Option("--cost",             help="Show cost estimates for configured models")] = False,
+    cost:      Annotated[bool, typer.Option("--cost",             help="Show cost table across providers")] = False,
 ):
-    """Manage RunPod cloud LLM backend — expand beyond local Ollama when needed."""
+    """Manage cloud GPU backends — RunPod, Vast.ai, Lambda, TensorDock, Salad, and more."""
     from rich.panel import Panel
     from rich.table import Table
     from .cloud import (
+        PROVIDERS, PROVIDER_MAP, get_provider,
         assess_local_capability, check_connection, cost_per_1k_tokens,
-        local_vram_gb, local_ram_gb,
-        open_signup, open_console,
-        RUNPOD_GPU_COSTS, RUNPOD_SIGNUP_URL,
+        local_vram_gb, local_ram_gb, open_url,
     )
-    from .ui import TREK_MSGS, stardate, lcars_panel, COMRADE_STAR
+    from .ui import TREK_MSGS, stardate, COMRADE_STAR
+    from .db import Config
 
     engine = _engine()
 
-    # ── default: show status ──────────────────────────────────────────────────
-    if not any([status, signup, console_, configure, test, assess, cost]):
+    # default: show status
+    if not any([status, providers, signup, console_, configure, test, assess, cost]):
         status = True
 
+    # ── Provider list ─────────────────────────────────────────────────────────
+    if providers:
+        console.print()
+        console.rule("[lcars1]Supported Cloud GPU Providers[/lcars1]")
+        tbl = Table(box=None, pad_edge=False)
+        tbl.add_column("Slug",       style="lcars1",  no_wrap=True, width=14)
+        tbl.add_column("Name",       style="lcars2",  no_wrap=True)
+        tbl.add_column("API",        style="dim",     width=8)
+        tbl.add_column("Cheapest GPU",               width=16)
+        tbl.add_column("Description", style="dim")
+        for p in PROVIDERS:
+            cheapest_gpu = min(p.gpu_costs, key=p.gpu_costs.get)
+            cheapest_cost = p.gpu_costs[cheapest_gpu]
+            tbl.add_row(
+                p.slug, p.name, p.api_compat,
+                f"${cheapest_cost:.2f}/hr ({cheapest_gpu})",
+                p.description,
+            )
+        console.print(tbl)
+        console.print()
+        on_screen("Sign up: [bold]org-llm cloud --signup <slug>[/bold]")
+        on_screen("Configure: [bold]org-llm cloud --configure[/bold]")
+        return
+
+    # ── Signup ────────────────────────────────────────────────────────────────
     if signup:
-        hail(f"Opening RunPod signup: {RUNPOD_SIGNUP_URL}")
-        open_signup()
-        on_screen("Create an account, then deploy an Ollama pod from the template gallery.")
-        on_screen("Run [bold]org-llm cloud --configure[/bold] once you have your pod URL.")
+        if signup in ("list", "?", "help"):
+            on_screen("Available providers:")
+            for p in PROVIDERS:
+                console.print(f"  [lcars1]{p.slug:<14}[/lcars1] [lcars2]{p.name}[/lcars2]  — {p.description}")
+            console.print()
+            on_screen("Usage: org-llm cloud --signup <slug>")
+            return
+
+        p = get_provider(signup)
+        if not p:
+            names = [pr.slug for pr in PROVIDERS]
+            red_alert(f"Unknown provider: {signup!r}")
+            on_screen(f"Available: {', '.join(names)}")
+            on_screen("List all:  org-llm cloud --providers")
+            raise typer.Exit(1)
+
+        hail(f"Opening {p.name} signup: {p.signup_url}")
+        open_url(p.signup_url)
+        console.print()
+        console.print(f"[lcars2]{p.name}[/lcars2]  —  {p.description}")
+        console.print()
+        if p.api_compat in ("ollama", "both"):
+            on_screen(f"Deploy an Ollama pod/container. Endpoint format: [bold]{p.endpoint_hint}[/bold]")
+        else:
+            on_screen(f"Endpoint format: [bold]{p.endpoint_hint}[/bold]  (OpenAI-compatible)")
+        on_screen("Then run: [bold]org-llm cloud --configure[/bold]")
         return
 
+    # ── Console ───────────────────────────────────────────────────────────────
     if console_:
-        hail("Opening RunPod console…")
-        open_console()
+        p = get_provider(console_)
+        if not p:
+            # fall back to configured provider
+            with get_session(engine) as session:
+                slug = _cfg(session, "cloud_provider")
+            p = get_provider(slug)
+        if p:
+            hail(f"Opening {p.name} console…")
+            open_url(p.console_url)
+        else:
+            red_alert("No provider configured. Run: org-llm cloud --configure")
         return
 
+    # ── Configure ─────────────────────────────────────────────────────────────
     if configure:
         console.print()
-        console.rule("[lcars1]RunPod Configuration[/lcars1]")
-        endpoint = typer.prompt(
-            "RunPod Ollama endpoint URL (e.g. https://abc123-11434.proxy.runpod.net)",
-            default="",
-        )
+        console.rule("[lcars1]Cloud Configuration[/lcars1]")
+
+        # Provider selection
+        console.print()
+        on_screen("Available providers:")
+        for i, p in enumerate(PROVIDERS, 1):
+            console.print(f"  [lcars1]{i}.[/lcars1] [lcars2]{p.slug:<14}[/lcars2] {p.name}  — {p.description}")
+        console.print()
+        choice = typer.prompt("Provider (number or slug)", default="runpod")
+        if choice.isdigit() and 1 <= int(choice) <= len(PROVIDERS):
+            chosen = PROVIDERS[int(choice) - 1]
+        else:
+            chosen = get_provider(choice) or PROVIDERS[0]
+        hail(f"Selected: {chosen.name}")
+
+        console.print()
+        on_screen(f"Endpoint format: [bold]{chosen.endpoint_hint}[/bold]")
+        on_screen(f"Docs: {chosen.docs_url}")
+        console.print()
+
+        endpoint = typer.prompt(f"{chosen.name} endpoint URL", default="")
+        api_key  = typer.prompt("API key (leave blank if public endpoint)", default="")
+        model    = typer.prompt("Model on cloud endpoint (blank = use chat_model)", default="")
+
         if endpoint:
             with get_session(engine) as session:
-                from .db import Config
                 for key, val in [
-                    ("cloud_provider", "runpod"),
+                    ("cloud_provider",    chosen.slug),
                     ("cloud_endpoint_url", endpoint.rstrip("/")),
+                    ("cloud_api_key",     api_key),
                 ]:
                     row = session.get(Config, key)
                     if row:
                         row.value = val
                     else:
                         session.add(Config(key=key, value=val))
+                if model:
+                    row = session.get(Config, "cloud_model")
+                    if row:
+                        row.value = model
+                    else:
+                        session.add(Config(key="cloud_model", value=model))
                 session.commit()
             hail(f"Cloud endpoint saved: {endpoint}")
-
-        api_key = typer.prompt("RunPod API key (leave blank if endpoint is public)", default="")
-        if api_key:
-            with get_session(engine) as session:
-                from .db import Config
-                row = session.get(Config, "runpod_api_key")
-                if row:
-                    row.value = api_key
-                else:
-                    session.add(Config(key="runpod_api_key", value=api_key))
-                session.commit()
-            hail("API key saved.")
-
-        cloud_model = typer.prompt(
-            "Model name on cloud endpoint (e.g. llama3.2, leave blank = use chat_model)",
-            default="",
-        )
-        if cloud_model:
-            with get_session(engine) as session:
-                from .db import Config
-                row = session.get(Config, "cloud_model")
-                if row:
-                    row.value = cloud_model
-                else:
-                    session.add(Config(key="cloud_model", value=cloud_model))
-                session.commit()
-            hail(f"Cloud model saved: {cloud_model}")
+            if api_key:
+                hail("API key saved.")
+            if model:
+                hail(f"Cloud model: {model}")
 
         make_it_so()
         return
 
     # Load cloud config
     with get_session(engine) as session:
-        provider     = _cfg(session, "cloud_provider")
-        endpoint_url = _cfg(session, "cloud_endpoint_url")
-        api_key      = _cfg(session, "runpod_api_key")
-        cloud_model  = _cfg(session, "cloud_model") or _cfg(session, "chat_model") or "llama3.2"
-        all_models   = [_cfg(session, k) for _, k, _ in _TASK_MODEL_KEYS if _cfg(session, k)]
+        provider_slug = _cfg(session, "cloud_provider")
+        endpoint_url  = _cfg(session, "cloud_endpoint_url")
+        api_key       = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
+        cloud_model   = _cfg(session, "cloud_model") or _cfg(session, "chat_model") or "llama3.2"
+        all_models    = [_cfg(session, k) for _, k, _ in _TASK_MODEL_KEYS if _cfg(session, k)]
 
+    provider_info = get_provider(provider_slug)
+
+    # ── Test connection ───────────────────────────────────────────────────────
     if test:
         if not endpoint_url:
             red_alert("No cloud endpoint configured. Run: org-llm cloud --configure")
@@ -2681,6 +2745,7 @@ def cloud(
             red_alert(f"Cloud endpoint unreachable: {endpoint_url}")
         return
 
+    # ── Hardware assessment ───────────────────────────────────────────────────
     if assess:
         console.print()
         console.rule(f"[lcars1]{TREK_MSGS['assess']}[/lcars1]")
@@ -2692,14 +2757,14 @@ def cloud(
 
         results = assess_local_capability(list(set(all_models)))
         tbl = Table(box=None, pad_edge=False)
-        tbl.add_column("Model",        style="lcars2")
-        tbl.add_column("VRAM needed",  style="lcars3", justify="right")
-        tbl.add_column("Local?",       justify="center")
-        tbl.add_column("Verdict",      style="dim")
+        tbl.add_column("Model",       style="lcars2")
+        tbl.add_column("VRAM needed", style="lcars3", justify="right")
+        tbl.add_column("Local?",      justify="center")
+        tbl.add_column("Verdict",     style="dim")
         needs_cloud = []
         for r in results:
-            status_str = "[bold green]✓[/bold green]" if r["can_local"] else "[bold red]→ cloud[/bold red]"
-            tbl.add_row(r["model"], f"{r['vram_needed']:.0f} GB", status_str, r["reason"])
+            sym = "[bold green]✓[/]" if r["can_local"] else "[bold red]→ cloud[/]"
+            tbl.add_row(r["model"], f"{r['vram_needed']:.0f} GB", sym, r["reason"])
             if not r["can_local"]:
                 needs_cloud.append(r["model"])
         console.print(tbl)
@@ -2710,23 +2775,28 @@ def cloud(
                 on_screen(f"Cloud endpoint ready for: {', '.join(needs_cloud)}")
             else:
                 on_screen(f"[bold]{len(needs_cloud)} model(s) need cloud.[/bold] "
-                          "Run: [bold]org-llm cloud --signup[/bold]  then  "
-                          "[bold]org-llm cloud --configure[/bold]")
+                          "Run: [bold]org-llm cloud --providers[/bold]  then  "
+                          "[bold]org-llm cloud --signup <slug>[/bold]")
         return
 
+    # ── Cost comparison across providers ─────────────────────────────────────
     if cost:
         console.print()
-        console.rule("[lcars1]Cloud Cost Estimates[/lcars1]")
-        tbl = Table(box=None, pad_edge=False)
-        tbl.add_column("GPU",        style="lcars2")
-        tbl.add_column("$/hr",       style="lcars3", justify="right")
-        tbl.add_column("¢/1k tok",   style="lcars1", justify="right")
-        for gpu, hourly in RUNPOD_GPU_COSTS.items():
-            cpp = cost_per_1k_tokens(gpu, tokens_per_sec=25.0)
-            tbl.add_row(gpu, f"${hourly:.2f}", f"{cpp*100:.3f}¢")
-        console.print(tbl)
+        console.rule("[lcars1]Cloud GPU Cost Comparison[/lcars1]")
         console.print()
-        on_screen("Prices are approximate spot rates. Check runpod.io for live pricing.")
+        for p in PROVIDERS:
+            tbl = Table(title=f"[lcars2]{p.name}[/lcars2]  ({p.api_compat})",
+                        box=None, pad_edge=False)
+            tbl.add_column("GPU",       style="lcars1")
+            tbl.add_column("$/hr",      style="lcars3", justify="right")
+            tbl.add_column("¢/1k tok",  style="lcars2", justify="right")
+            for gpu, hourly in p.gpu_costs.items():
+                cpp = cost_per_1k_tokens(gpu, tokens_per_sec=30.0, provider_slug=p.slug)
+                tbl.add_row(gpu, f"${hourly:.2f}", f"{cpp*100:.3f}¢")
+            console.print(tbl)
+            console.print()
+        on_screen("Prices are approximate spot rates. Verify at each provider's site.")
+        on_screen("Sign up: org-llm cloud --signup <slug>   │   List: org-llm cloud --providers")
         return
 
     # ── Status panel ─────────────────────────────────────────────────────────
@@ -2738,38 +2808,40 @@ def cloud(
         with warp(f"{TREK_MSGS['cloud']}: {endpoint_url}"):
             cs = check_connection(endpoint_url, api_key, cloud_model)
 
+    pname = provider_info.name if provider_info else (provider_slug or "not configured")
     tbl = Table(box=None, pad_edge=False, show_header=False)
     tbl.add_column("Key",   style="lcars1", width=22)
     tbl.add_column("Value", style="lcars2")
-    tbl.add_row("Provider",     provider or "not configured")
-    tbl.add_row("Endpoint",     endpoint_url or "—")
-    tbl.add_row("API key",      "set" if api_key else "—")
-    tbl.add_row("Cloud model",  cloud_model)
+    tbl.add_row("Provider",    pname)
+    tbl.add_row("Endpoint",    endpoint_url or "—")
+    tbl.add_row("API key",     "set" if api_key else "—")
+    tbl.add_row("Cloud model", cloud_model)
     if cs:
         if cs.reachable and cs.auth_ok:
-            tbl.add_row("Connection",  f"[bold green]✓ reachable ({cs.latency_ms:.0f}ms)[/bold green]")
+            tbl.add_row("Connection", f"[bold green]✓ reachable ({cs.latency_ms:.0f}ms)[/bold green]")
         elif cs.reachable:
-            tbl.add_row("Connection",  "[bold yellow]⚠ reachable, auth failed[/bold yellow]")
+            tbl.add_row("Connection", "[bold yellow]⚠ reachable, auth failed[/bold yellow]")
         else:
-            tbl.add_row("Connection",  "[bold red]✗ unreachable[/bold red]")
+            tbl.add_row("Connection", "[bold red]✗ unreachable[/bold red]")
 
     vram = local_vram_gb()
     ram  = local_ram_gb()
-    tbl.add_row("Local GPU",    f"{vram:.0f} GB VRAM" if vram else "none detected")
-    tbl.add_row("Local RAM",    f"{ram:.0f} GB")
+    tbl.add_row("Local GPU", f"{vram:.0f} GB VRAM" if vram else "none detected")
+    tbl.add_row("Local RAM", f"{ram:.0f} GB")
 
     console.print(Panel(
         tbl,
-        title=f"[lcars1]{COMRADE_STAR}  RunPod Cloud  {COMRADE_STAR}[/lcars1]",
+        title=f"[lcars1]{COMRADE_STAR}  Cloud GPU  {COMRADE_STAR}[/lcars1]",
         border_style="lcars2", padding=(1, 2),
     ))
 
     if not endpoint_url:
         console.print()
         on_screen("No cloud backend configured. Options:")
-        on_screen("  [bold]org-llm cloud --signup[/bold]     — create RunPod account")
-        on_screen("  [bold]org-llm cloud --configure[/bold]  — enter endpoint URL + API key")
-        on_screen("  [bold]org-llm cloud --assess[/bold]     — see which models need cloud")
+        on_screen("  [bold]org-llm cloud --providers[/bold]   — compare all providers + pricing")
+        on_screen("  [bold]org-llm cloud --signup <slug>[/bold] — open signup for a provider")
+        on_screen("  [bold]org-llm cloud --configure[/bold]   — enter endpoint URL + API key")
+        on_screen("  [bold]org-llm cloud --assess[/bold]      — see which models need cloud")
     console.print()
 
 
