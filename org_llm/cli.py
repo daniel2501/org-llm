@@ -272,14 +272,62 @@ def config(
             make_it_so()
 
 
+def _gh_bin() -> str | None:
+    """Return path to gh CLI, or None if not available."""
+    import shutil
+    return shutil.which("gh") or (
+        str(Path("~/.local/bin/gh").expanduser())
+        if Path("~/.local/bin/gh").expanduser().exists() else None
+    )
+
+
+def _install_gh(bin_dir: Path) -> Path | None:
+    """Download and install gh CLI to bin_dir. Returns path or None on failure."""
+    import platform
+    import urllib.request
+    import json
+
+    arch = platform.machine().lower()
+    arch_slug = "amd64" if arch in ("x86_64", "amd64") else "arm64"
+    try:
+        with urllib.request.urlopen(
+            "https://api.github.com/repos/cli/cli/releases/latest", timeout=10
+        ) as r:
+            release = json.loads(r.read())
+        version = release["tag_name"].lstrip("v")
+        url = (
+            f"https://github.com/cli/cli/releases/download/v{version}/"
+            f"gh_{version}_linux_{arch_slug}.tar.gz"
+        )
+        tmp = Path("/tmp/gh.tar.gz")
+        with warp("Downloading gh CLI"):
+            urllib.request.urlretrieve(url, tmp)
+        import subprocess, tarfile
+        with tarfile.open(tmp) as tf:
+            for member in tf.getmembers():
+                if member.name.endswith("/bin/gh"):
+                    member.name = "gh"
+                    tf.extract(member, path=bin_dir)
+                    break
+        gh = bin_dir / "gh"
+        gh.chmod(0o755)
+        tmp.unlink(missing_ok=True)
+        hail(f"gh CLI v{version} installed at {gh}")
+        return gh
+    except Exception as exc:
+        red_alert(f"gh install failed: {exc}")
+        return None
+
+
 @app.command()
 def install(
     skip_ollama:   Annotated[bool, typer.Option("--skip-ollama")]   = False,
     skip_models:   Annotated[bool, typer.Option("--skip-models")]   = False,
     skip_fonts:    Annotated[bool, typer.Option("--skip-fonts")]    = False,
     skip_opencode: Annotated[bool, typer.Option("--skip-opencode")] = False,
+    skip_gh:       Annotated[bool, typer.Option("--skip-gh")]       = False,
 ):
-    """Install Ollama, pull all configured models, install Nerd Fonts, and opencode."""
+    """Install Ollama, models, Nerd Fonts, opencode, and gh CLI."""
     import platform
     import shutil
     import subprocess
@@ -402,6 +450,14 @@ def install(
                     red_alert(f"opencode install failed: {result.stderr.strip()[:200]}")
             except Exception as exc:
                 red_alert(f"opencode install error: {exc}")
+
+    # ── gh CLI ────────────────────────────────────────────────────────────────
+    if not skip_gh:
+        if _gh_bin():
+            hail(f"gh CLI already installed — skipping. ({_gh_bin()})")
+        else:
+            hail("Installing gh CLI (GitHub CLI)…")
+            _install_gh(bin_dir)
 
     console.print()
     console.print(trans_stripe(52))
@@ -694,6 +750,33 @@ def doctor(
             except Exception as e:
                 fail("  embed model unresponsive", str(e)[:80],
                      f"ollama pull {embed_mdl}")
+
+    # ── gh CLI ─────────────────────────────────────────────────────────────────
+    section("gh CLI")
+    gh = _gh_bin()
+    if gh:
+        ok("gh installed", gh)
+        try:
+            result = subprocess.run(
+                [gh, "auth", "status"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                # Extract logged-in account from output
+                for line in (result.stdout + result.stderr).splitlines():
+                    if "Logged in to" in line or "account" in line.lower():
+                        info("gh auth", line.strip())
+                        break
+                else:
+                    ok("gh auth", "authenticated")
+            else:
+                warn("gh not authenticated",
+                     "run: gh auth login  (or: org-llm install --skip-ollama ...)")
+        except Exception as e:
+            warn("gh auth check failed", str(e))
+    else:
+        warn("gh CLI not installed",
+             "run: org-llm install --skip-ollama --skip-models --skip-fonts --skip-opencode")
 
     # ── Fonts / UI ─────────────────────────────────────────────────────────────
     section("Fonts & UI")
@@ -1060,12 +1143,14 @@ _TUTOR_STEPS = [
         "  [bold]Ollama[/bold]      binary → ~/.local/bin/ollama, starts 'ollama serve'\n"
         "  [bold]Models[/bold]      pulls all configured models via 'ollama pull'\n"
         "  [bold]Nerd Font[/bold]   NotoMono from ryanoasis/nerd-fonts → ~/.local/share/fonts/\n"
-        "  [bold]opencode[/bold]    AI coding agent from opencode.ai → ~/.local/bin/\n\n"
+        "  [bold]opencode[/bold]    AI coding agent from opencode.ai → ~/.local/bin/\n"
+        "  [bold]gh CLI[/bold]      GitHub CLI from cli/cli releases → ~/.local/bin/\n\n"
         "[lcars1]Flags:[/lcars1]\n"
         "  --skip-ollama     skip Ollama binary download\n"
         "  --skip-models     skip model pulls\n"
         "  --skip-fonts      skip font download\n"
-        "  --skip-opencode   skip opencode installation\n\n"
+        "  --skip-opencode   skip opencode installation\n"
+        "  --skip-gh         skip gh CLI installation\n\n"
         "[lcars1]Command:[/lcars1]  [bold]org-llm install[/bold]\n\n"
         "[dim]After install, run: org-llm init → index → embed → doctor[/dim]\n"
         "[dim]Source: org_llm/cli.py → install()  |  org-llm source cli[/dim]",
