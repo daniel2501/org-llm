@@ -1330,7 +1330,7 @@ def doctor(
     fix:      Annotated[bool, typer.Option("--fix",
               help="Auto-apply safe fixes (init DB, start Ollama)")] = False,
     install_tool: Annotated[str, typer.Option("--install",
-              help="Install and theme a FOSS CLI tool by name (e.g. bat, eza, delta)")] = "",
+              help="Install + theme a FOSS CLI tool by name (e.g. bat, eza). Use 'all' to install everything in the registry.")] = "",
     list_tools:   Annotated[bool, typer.Option("--list-tools",
               help="List all installable FOSS tools")] = False,
 ):
@@ -1376,43 +1376,123 @@ def doctor(
             )
         console.print(tbl)
         console.print()
-        on_screen("Install: [bold]org-llm doctor --install <name>[/bold]")
+        on_screen("Install one:  [bold]org-llm doctor --install <name>[/bold]")
+        on_screen("Install all:  [bold]org-llm doctor --install all[/bold]")
         return
 
     # ── FOSS tool installer ───────────────────────────────────────────────────
     if install_tool:
+        bin_dir_str = str(Path("~/.local/bin").expanduser())
+
+        def _install_one(tool, *, quiet: bool = False) -> tuple[str, str]:
+            """Install one FOSS tool. Returns (status, detail).
+
+            status ∈ {'already', 'installed', 'failed', 'no-fn'}.
+            """
+            already = shutil.which(tool.check_cmd.split()[0])
+            if already:
+                if not quiet:
+                    hail(f"{tool.name} already installed at {already}")
+                return ("already", str(already))
+            if not quiet:
+                hail(f"Installing {tool.name} ({tool.license}) — {tool.description}")
+            import importlib
+            models_mod = importlib.import_module("org_llm.models")
+            fn = getattr(models_mod, tool.install_fn, None)
+            if fn is None:
+                if not quiet:
+                    red_alert(f"No install function for {tool.name}")
+                return ("no-fn", "")
+            try:
+                ok_install = fn(bin_dir_str)
+            except Exception as exc:
+                if not quiet:
+                    red_alert(f"Install raised for {tool.name}: {exc}")
+                return ("failed", str(exc)[:100])
+            if not ok_install:
+                if not quiet:
+                    red_alert(f"Install failed for {tool.name} — check internet / GitHub release availability")
+                return ("failed", "")
+            if not quiet:
+                hail(f"{tool.name} installed successfully")
+            return ("installed", "")
+
+        def _theme_one(tool) -> tuple[bool, str]:
+            if not tool.theme_fn:
+                return (False, "no theme template")
+            success, path = apply_theme(tool.name)
+            return (success, path)
+
+        # ── Bulk install: --install all ──────────────────────────────────────
+        if install_tool.lower() == "all":
+            console.rule(f"[lcars1]Installing all {len(TOOL_REGISTRY)} FOSS tools[/lcars1]")
+            console.print()
+            results: dict[str, list[str]] = {
+                "installed": [], "already": [], "failed": [], "no-fn": [],
+            }
+            themed: list[str] = []
+            theme_skipped: list[str] = []
+            with impulse(f"FOSS tool install", total=len(TOOL_REGISTRY)) as (prog, task):
+                for tool in TOOL_REGISTRY:
+                    status, _ = _install_one(tool, quiet=False)
+                    results[status].append(tool.name)
+                    if status in ("installed", "already") and tool.theme_fn:
+                        ok_theme, path = _theme_one(tool)
+                        if ok_theme:
+                            themed.append(f"{tool.name} → {path}")
+                        else:
+                            theme_skipped.append(f"{tool.name} ({path or 'exists'})")
+                    prog.advance(task)
+
+            console.print()
+            console.rule("[lcars1]Summary[/lcars1]")
+            tbl = Table(box=None, pad_edge=False, show_header=False)
+            tbl.add_column("Result", style="lcars1", width=22)
+            tbl.add_column("Count",  style="lcars2", justify="right", width=5)
+            tbl.add_column("Tools",  style="dim")
+            tbl.add_row("[green]✓ newly installed[/green]",
+                        str(len(results["installed"])),
+                        ", ".join(results["installed"]) or "—")
+            tbl.add_row("[cyan]· already installed[/cyan]",
+                        str(len(results["already"])),
+                        ", ".join(results["already"]) or "—")
+            tbl.add_row("[yellow]⚠ no install fn[/yellow]",
+                        str(len(results["no-fn"])),
+                        ", ".join(results["no-fn"]) or "—")
+            tbl.add_row("[red]✗ failed[/red]",
+                        str(len(results["failed"])),
+                        ", ".join(results["failed"]) or "—")
+            tbl.add_row("[bold]themes applied[/bold]",
+                        str(len(themed)), "")
+            console.print(tbl)
+            if themed:
+                console.print()
+                on_screen("Theme files written:")
+                for line in themed:
+                    console.print(f"  [dim]·[/dim] {line}")
+            console.print()
+            if results["failed"]:
+                on_screen("[yellow]Retry the failures with: org-llm doctor --install <name>[/yellow]")
+            make_it_so()
+            return
+
+        # ── Single-tool install ──────────────────────────────────────────────
         tool = get_tool(install_tool)
         if not tool:
             names = [t.name for t in TOOL_REGISTRY]
             red_alert(f"Unknown tool: {install_tool!r}")
             on_screen(f"Available: {', '.join(names)}")
-            on_screen("List all:  org-llm doctor --list-tools")
+            on_screen("All tools:  org-llm doctor --install all")
+            on_screen("List:       org-llm doctor --list-tools")
             raise typer.Exit(1)
 
-        # check already installed
-        already = shutil.which(tool.check_cmd.split()[0])
-        if already:
-            hail(f"{tool.name} already installed at {already}")
-        else:
-            hail(f"Installing {tool.name} ({tool.license}) — {tool.description}")
-            import importlib
-            models_mod = importlib.import_module("org_llm.models")
-            fn = getattr(models_mod, tool.install_fn, None)
-            if fn is None:
-                red_alert(f"No install function for {tool.name}")
-                raise typer.Exit(1)
-            bin_dir = str(Path("~/.local/bin").expanduser())
-            ok_install = fn(bin_dir)
-            if ok_install:
-                hail(f"{tool.name} installed successfully")
-            else:
-                red_alert(f"Install failed for {tool.name} — check your internet connection")
-                raise typer.Exit(1)
+        status, _ = _install_one(tool)
+        if status == "failed" or status == "no-fn":
+            raise typer.Exit(1)
 
-        # apply theme
+        ok_theme, path = _theme_one(tool)
         if tool.theme_fn:
-            success, path = apply_theme(tool.name)
-            if success:
+            if ok_theme:
                 hail(f"Theme applied → {path}")
                 console.print(f"[dim]  Review and source/reload as needed.[/dim]")
             else:
@@ -1818,7 +1898,7 @@ def doctor(
              f"{len(not_installed)} not installed: "
              f"{', '.join(not_installed[:6])}{'…' if len(not_installed) > 6 else ''}")
         info("install any",
-             "org-llm doctor --install <name>  or  --list-tools")
+             "org-llm doctor --install <name>  │  --install all  │  --list-tools")
 
     # ── LLM tuning hint ───────────────────────────────────────────────────────
     from .models import recommendations as model_recs

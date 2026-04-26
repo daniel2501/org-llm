@@ -275,4 +275,59 @@ class TestSafePathEdgeCases:
         org.mkdir()
         target = _safe_org_path(org, "deep/nested/new.org")
         assert str(target).endswith("new.org")
+
+
+# ── doctor --install all (bulk install) ─────────────────────────────────────
+
+class TestInstallAll:
+    def test_help_documents_all_alias(self, cli_db):
+        r = runner.invoke(app, ["doctor", "--help"])
+        assert r.exit_code == 0
+        assert "all" in r.output.lower()
+        assert "--install" in r.output
+
+    def test_unknown_tool_still_errors(self, cli_db):
+        # Regression: --install all should not catch every typo as success
+        r = runner.invoke(app, ["doctor", "--install", "definitely-not-a-tool"])
+        assert r.exit_code == 1
+        assert "Unknown tool" in r.output
+
+    def test_unknown_tool_error_mentions_all(self, cli_db):
+        r = runner.invoke(app, ["doctor", "--install", "bogus"])
+        assert "all" in r.output.lower()
+
+    def test_list_tools_mentions_all(self, cli_db):
+        r = runner.invoke(app, ["doctor", "--list-tools"])
+        assert r.exit_code == 0
+        assert "--install all" in r.output
+
+    def test_install_all_dispatches_per_tool(self, cli_db, monkeypatch):
+        """Without actually downloading anything, verify --install all
+        attempts to install every tool in TOOL_REGISTRY."""
+        from org_llm import models as models_mod
+        attempted: list[str] = []
+
+        # Replace each install_<name> function with a recorder that returns False
+        # so nothing is actually fetched.
+        for tool in models_mod.TOOL_REGISTRY:
+            def make_stub(tname):
+                def stub(_bin_dir):
+                    attempted.append(tname)
+                    return False
+                return stub
+            monkeypatch.setattr(models_mod, tool.install_fn, make_stub(tool.name),
+                                raising=False)
+
+        # Pretend nothing is on PATH so each tool tries to install fresh.
+        import shutil
+        monkeypatch.setattr(shutil, "which", lambda x: None)
+
+        r = runner.invoke(app, ["doctor", "--install", "all"])
+        # Even with all installs failing, the bulk path completes (exit 0)
+        assert r.exit_code == 0
+        # Every tool in the registry was at least attempted
+        registry_names = {t.name for t in models_mod.TOOL_REGISTRY}
+        assert set(attempted) == registry_names
+        assert "Summary" in r.output
+        assert "failed" in r.output.lower()
 # test_safety.py:1 ends here
