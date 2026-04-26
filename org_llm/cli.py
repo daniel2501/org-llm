@@ -192,9 +192,17 @@ def ask(
              help="Show retrieved context nodes")] = False,
     reason:  Annotated[bool, typer.Option("--reason", "-r",
              help="Use reason_model (deepseek-r1) instead of chat_model")] = False,
+    cloud_:  Annotated[bool, typer.Option("--cloud",
+             help="Route the chat through the configured cloud backend instead of local Ollama")] = False,
 ):
-    """Ask a question answered from your org notes (RAG)."""
-    from .llm import chat, embed
+    """Ask a question answered from your org notes (RAG).
+
+    By default the chat model runs on local Ollama. Pass --cloud to route
+    the chat call through the configured cloud provider (set up via
+    `org-llm cloud --quick-start <provider>`). Embeddings still come from
+    local Ollama unless you also override embed_model.
+    """
+    from .llm import chat as local_chat, embed
     from .search import vector_search
 
     engine = _engine()
@@ -205,10 +213,30 @@ def ask(
             _cfg(session, "reason_model") if reason
             else _cfg(session, "chat_model")
         ) or "llama3.3"
+        cloud_provider = _cfg(session, "cloud_provider")
+        cloud_endpoint = _cfg(session, "cloud_endpoint_url")
+        cloud_model    = _cfg(session, "cloud_model")
+        db_api_key     = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
 
-        with warp(TREK_MSGS["ask"] + " — retrieving context"):
-            qvec    = embed(query, model=embed_mdl, base_url=url)
-            results = vector_search(session, qvec, limit=top_k)
+    if cloud_:
+        if not cloud_endpoint:
+            red_alert("--cloud requested but no cloud_endpoint_url configured.")
+            on_screen("Run: [bold]org-llm cloud --quick-start openrouter[/bold]")
+            raise typer.Exit(1)
+        from . import creds as creds_mod
+        api_key = (creds_mod.read_secret(creds_mod.cloud_slug(cloud_provider))
+                   if cloud_provider else None) or db_api_key
+        chat_mdl = model or cloud_model or chat_mdl
+
+    with warp(TREK_MSGS["ask"] + " — retrieving context"):
+        try:
+            with get_session(engine) as session:
+                qvec    = embed(query, model=embed_mdl, base_url=url)
+                results = vector_search(session, qvec, limit=top_k)
+        except Exception as e:
+            red_alert(f"Embed/search failed: {e}")
+            on_screen("If Ollama isn't running locally, run: ollama serve")
+            raise typer.Exit(1)
 
     if not results:
         red_alert("No indexed nodes found. Run `org-llm embed` first.")
@@ -231,11 +259,20 @@ def ask(
     )
     prompt = f"Notes from my org files:\n\n{ctx_text}\n\n---\n\nQuestion: {query}"
 
-    with warp(f"Hailing {chat_mdl}"):
-        answer = chat(prompt, model=chat_mdl, base_url=url, system=system)
+    if cloud_:
+        from .cloud import cloud_chat
+        with warp(f"Hailing cloud {chat_mdl}"):
+            answer = cloud_chat(prompt, model=chat_mdl,
+                                endpoint_url=cloud_endpoint,
+                                api_key=api_key, system=system)
+        label = f"{cloud_provider}:{chat_mdl}"
+    else:
+        with warp(f"Hailing {chat_mdl}"):
+            answer = local_chat(prompt, model=chat_mdl, base_url=url, system=system)
+        label = chat_mdl
 
     console.print()
-    console.rule(f"[lcars2]{chat_mdl}[/lcars2]")
+    console.rule(f"[lcars2]{label}[/lcars2]")
     console.print(answer)
     console.rule()
 
@@ -2982,6 +3019,8 @@ def cloud(
     creds:     Annotated[bool, typer.Option("--creds",            help="Show stored cloud credentials in `pass`")] = False,
     quick_start: Annotated[str, typer.Option("--quick-start", "-q",
                  help="Provider slug for one-shot signup flow (e.g. openrouter, groq)")] = "",
+    key:         Annotated[str, typer.Option("--key", "-K",
+                 help="API key for --quick-start (skips the interactive paste prompt)")] = "",
 ):
     """Manage cloud GPU backends — RunPod, Vast.ai, Lambda, TensorDock, Salad, and more.
 
@@ -3019,9 +3058,9 @@ def cloud(
 
         # Default model + key-prefix hints per provider for the "test" call
         model_for, key_hint = {
-            "openrouter": ("meta-llama/llama-3.1-8b-instruct:free", "sk-or-v1-…"),
-            "groq":       ("llama-3.1-8b-instant",                   "gsk_…"),
-            "huggingface":("meta-llama/Llama-3.1-8B-Instruct",      "hf_…"),
+            "openrouter": ("openai/gpt-oss-20b:free",            "sk-or-v1-…"),
+            "groq":       ("llama-3.1-8b-instant",                "gsk_…"),
+            "huggingface":("meta-llama/Llama-3.1-8B-Instruct",   "hf_…"),
         }.get(slug, (chosen.gpu_costs and list(chosen.gpu_costs)[0] or "", ""))
 
         console.print()
@@ -3037,7 +3076,8 @@ def cloud(
             f"Total manual effort: 1 sign-in (Google/GitHub button) + 1 paste.",
             border_style="lcars2", padding=(1, 2),
         ))
-        if not typer.confirm("Proceed?", default=True):
+        # Skip confirmation when called with --key (non-interactive mode)
+        if not key and not typer.confirm("Proceed?", default=True):
             return
 
         # Step 1: pass installation
@@ -3095,7 +3135,7 @@ def cloud(
         console.print()
 
         # Step 4: paste + store
-        api_key = typer.prompt(f"{chosen.name} API key", hide_input=True)
+        api_key = key or typer.prompt(f"{chosen.name} API key", hide_input=True)
         if not api_key.strip():
             red_alert("No key entered — aborting.")
             raise typer.Exit(1)

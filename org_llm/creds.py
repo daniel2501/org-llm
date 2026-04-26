@@ -49,8 +49,28 @@ def anthropic_slug() -> str:
 
 # ── Status checks ─────────────────────────────────────────────────────────────
 
+_PASS_FALLBACK_PATHS = [
+    Path("~/.guix-profile/bin/pass").expanduser(),
+    Path("~/.guix-home/profile/bin/pass").expanduser(),
+    Path("/usr/bin/pass"),
+    Path("/usr/local/bin/pass"),
+    Path("/opt/homebrew/bin/pass"),
+]
+
+
+def _pass_bin() -> str | None:
+    """Find the pass binary anywhere — PATH, then known profile/system locations."""
+    found = shutil.which("pass")
+    if found:
+        return found
+    for p in _PASS_FALLBACK_PATHS:
+        if p.exists():
+            return str(p)
+    return None
+
+
 def is_installed() -> bool:
-    return shutil.which("pass") is not None
+    return _pass_bin() is not None
 
 
 def is_initialized() -> bool:
@@ -119,12 +139,14 @@ def install() -> bool:
 
 def list_gpg_keys() -> list[tuple[str, str]]:
     """Return [(key_id, uid), …] for available secret keys, or []."""
-    if not shutil.which("gpg"):
+    gbin = _gpg_bin()
+    if not gbin:
         return []
     try:
         r = subprocess.run(
-            ["gpg", "--list-secret-keys", "--with-colons"],
+            [gbin, "--list-secret-keys", "--with-colons"],
             capture_output=True, text=True, timeout=10,
+            env=_augmented_env(),
         )
     except Exception:
         return []
@@ -143,14 +165,9 @@ def list_gpg_keys() -> list[tuple[str, str]]:
 
 
 def bootstrap_gpg_key(name: str, email: str, passphrase: str = "") -> str | None:
-    """Generate a GPG key non-interactively. Returns the new key id, or None.
-
-    Defaults to a passwordless key (passphrase="") because anything else makes
-    `pass show` block on every read with a pinentry prompt. Users who want a
-    protected key should generate it themselves with `gpg --full-generate-key`
-    and run `pass init <KEYID>` manually.
-    """
-    if not shutil.which("gpg"):
+    """Generate a GPG key non-interactively. Returns the new key id, or None."""
+    gbin = _gpg_bin()
+    if not gbin:
         return None
     batch = (
         ("%no-protection\n" if not passphrase else f"Passphrase: {passphrase}\n") +
@@ -163,15 +180,15 @@ def bootstrap_gpg_key(name: str, email: str, passphrase: str = "") -> str | None
     )
     try:
         r = subprocess.run(
-            ["gpg", "--batch", "--gen-key"],
+            [gbin, "--batch", "--gen-key"],
             input=batch, capture_output=True, text=True, timeout=300,
+            env=_augmented_env(),
         )
         if r.returncode != 0:
             return None
     except Exception:
         return None
     keys = list_gpg_keys()
-    # Find the freshly added key by matching email
     for kid, uid in keys:
         if email in uid:
             return kid
@@ -180,11 +197,13 @@ def bootstrap_gpg_key(name: str, email: str, passphrase: str = "") -> str | None
 
 def init_store(key_id: str) -> bool:
     """Run `pass init <key_id>` to bootstrap the password store."""
-    if not is_installed():
+    pbin = _pass_bin()
+    if not pbin:
         return False
     try:
-        r = subprocess.run(["pass", "init", key_id],
-                           capture_output=True, text=True, timeout=30)
+        r = subprocess.run([pbin, "init", key_id],
+                           capture_output=True, text=True, timeout=30,
+                           env=_augmented_env())
         return r.returncode == 0
     except Exception:
         return False
@@ -196,14 +215,56 @@ class _PassError(RuntimeError):
     pass
 
 
+_GPG_FALLBACK_PATHS = [
+    Path("~/.guix-profile/bin/gpg").expanduser(),
+    Path("~/.guix-home/profile/bin/gpg").expanduser(),
+    Path("/usr/bin/gpg"),
+    Path("/usr/local/bin/gpg"),
+    Path("/opt/homebrew/bin/gpg"),
+]
+
+
+def _gpg_bin() -> str | None:
+    found = shutil.which("gpg")
+    if found:
+        return found
+    for p in _GPG_FALLBACK_PATHS:
+        if p.exists():
+            return str(p)
+    return None
+
+
+def _augmented_env() -> dict:
+    """Return os.environ + a PATH that includes Guix profile locations.
+
+    pass shells out to gpg internally, so we must guarantee gpg is on PATH
+    even when the parent process inherited a stripped-down PATH (e.g. uv run).
+    """
+    env = os.environ.copy()
+    extra = [
+        str(Path("~/.guix-profile/bin").expanduser()),
+        str(Path("~/.guix-home/profile/bin").expanduser()),
+        "/usr/local/bin", "/usr/bin", "/bin",
+    ]
+    current = env.get("PATH", "")
+    parts = current.split(":") if current else []
+    for p in extra:
+        if p not in parts and Path(p).is_dir():
+            parts.append(p)
+    env["PATH"] = ":".join(parts)
+    return env
+
+
 def _run_pass(args: list[str], stdin: str | None = None,
               timeout: int = 30) -> subprocess.CompletedProcess:
     """Invoke `pass` with the given args. Raises if binary is missing."""
-    if not is_installed():
+    pbin = _pass_bin()
+    if not pbin:
         raise _PassError("pass not installed")
     return subprocess.run(
-        ["pass", *args],
+        [pbin, *args],
         input=stdin, capture_output=True, text=True, timeout=timeout,
+        env=_augmented_env(),
     )
 
 

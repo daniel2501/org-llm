@@ -283,6 +283,67 @@ def test_cloud_embed_openai_response(monkeypatch):
     assert vec == [0.4, 0.5]
 
 
+def test_candidate_paths_v1_aware():
+    from org_llm.cloud import _candidate_paths
+    # OpenAI-compatible URL with /v1 suffix → don't double up the prefix
+    assert _candidate_paths("https://openrouter.ai/api/v1", "tags")[0] == "/models"
+    assert _candidate_paths("https://openrouter.ai/api/v1", "chat")[0] == "/chat/completions"
+    assert _candidate_paths("https://openrouter.ai/api/v1", "embed")[0] == "/embeddings"
+    # Bare Ollama-style URL → /api/* paths come first
+    assert _candidate_paths("http://localhost:11434", "tags")[0] == "/api/tags"
+    assert _candidate_paths("http://localhost:11434", "chat")[0] == "/api/chat"
+    assert _candidate_paths("http://localhost:11434", "embed")[0] == "/api/embed"
+
+
+def test_ssl_context_returns_workable():
+    """The SSL helper should yield a context (or None) without crashing."""
+    from org_llm.cloud import _ssl_context
+    ctx = _ssl_context()
+    assert ctx is None or hasattr(ctx, "load_default_certs")
+
+
+def test_ssl_context_honors_env_var(monkeypatch):
+    """When SSL_CERT_FILE is set to a valid CA bundle, the helper uses it."""
+    # Find a real CA bundle on this system; skip cleanly if none present
+    from pathlib import Path
+    candidates = [
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/cert.pem",
+    ]
+    real_ca = next((c for c in candidates if Path(c).exists()), None)
+    if not real_ca:
+        pytest.skip("no system CA bundle found")
+    monkeypatch.setenv("SSL_CERT_FILE", real_ca)
+    monkeypatch.delenv("SSL_CERT_DIR", raising=False)
+    import importlib
+    import org_llm.cloud as c
+    importlib.reload(c)
+    assert c._SSL_CONTEXT is not None
+
+
+def test_cloud_chat_v1_endpoint_uses_chat_completions(monkeypatch):
+    """For a /v1-suffixed URL, cloud_chat should hit /chat/completions, not /v1/chat/completions."""
+    captured = {}
+
+    class _Fake:
+        def __init__(self, body): self._body = body
+        def read(self): return self._body
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        return _Fake(json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode())
+
+    import org_llm.cloud as c
+    monkeypatch.setattr(c, "_urlopen", fake_urlopen)
+    out = c.cloud_chat("hi", "model", "https://example.com/api/v1", api_key="k")
+    assert out == "ok"
+    assert captured["url"].endswith("/chat/completions")
+    assert "/v1/v1/" not in captured["url"]
+
+
 def test_cloud_embed_raises_on_failure(monkeypatch):
     import urllib.request
 

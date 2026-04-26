@@ -3,9 +3,51 @@
 from __future__ import annotations
 
 import json
+import os
+import ssl
 import urllib.request
 from pathlib import Path
 from typing import NamedTuple
+
+
+# ── SSL CA bundle resolution ──────────────────────────────────────────────────
+# On Guix and minimal containers Python's compiled-in openssl defaults often
+# point at a /gnu/store path that doesn't contain certs, breaking HTTPS to
+# every cloud provider. Probe the common system locations and build a context
+# that works in any environment.
+
+def _ssl_context() -> ssl.SSLContext | None:
+    """Return an SSL context with a working CA bundle, or None to use the default."""
+    env_file = os.environ.get("SSL_CERT_FILE")
+    env_dir  = os.environ.get("SSL_CERT_DIR")
+    if env_file or env_dir:
+        return ssl.create_default_context(cafile=env_file, capath=env_dir)
+    # Common bundle locations across distros
+    for cafile in (
+        "/etc/ssl/certs/ca-certificates.crt",   # Debian/Ubuntu/Arch/Guix System
+        "/etc/pki/tls/certs/ca-bundle.crt",     # Fedora/RHEL
+        "/etc/ssl/cert.pem",                    # BSD/macOS
+        str(Path.home() / ".guix-profile/etc/ssl/certs/ca-certificates.crt"),
+        str(Path.home() / ".guix-home/profile/etc/ssl/certs/ca-certificates.crt"),
+    ):
+        if Path(cafile).exists():
+            return ssl.create_default_context(cafile=cafile)
+    # Last resort — try certifi if it's importable
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return None
+
+
+_SSL_CONTEXT = _ssl_context()
+
+
+def _urlopen(req, timeout: float = 30):
+    """urlopen wrapper that injects our resolved SSL context."""
+    if _SSL_CONTEXT is not None and req.full_url.startswith("https://"):
+        return urllib.request.urlopen(req, timeout=timeout, context=_SSL_CONTEXT)
+    return urllib.request.urlopen(req, timeout=timeout)
 
 
 # ── Provider registry ──────────────────────────────────────────────────────────
@@ -285,6 +327,26 @@ def assess_local_capability(models: list[str]) -> list[dict]:
 
 # ── Connection check ───────────────────────────────────────────────────────────
 
+def _candidate_paths(endpoint_url: str, kind: str) -> list[str]:
+    """Return the list of probe paths to try for a given URL.
+
+    OpenAI-compatible base URLs frequently already include `/v1` (OpenRouter,
+    Lambda, Groq, …). Naively appending `/v1/...` would yield `/v1/v1/...`
+    which 404s. We probe both `/v1/<thing>` and `/<thing>` so a single helper
+    works for plain Ollama, hosted OpenAI gateways, and bare OpenAI APIs.
+    """
+    url = endpoint_url.rstrip("/")
+    has_v1 = url.endswith("/v1")
+    if kind == "tags":
+        # Listing models — Ollama uses /api/tags, OpenAI uses /models or /v1/models
+        return ["/models", "/api/tags"] if has_v1 else ["/api/tags", "/v1/models"]
+    if kind == "chat":
+        return ["/chat/completions", "/api/chat"] if has_v1 else ["/api/chat", "/v1/chat/completions"]
+    if kind == "embed":
+        return ["/embeddings", "/api/embed"] if has_v1 else ["/api/embed", "/v1/embeddings"]
+    return []
+
+
 def check_connection(endpoint_url: str, api_key: str = "", model: str = "") -> CloudStatus:
     """Ping a cloud Ollama/OpenAI-compatible endpoint and return status."""
     import time
@@ -293,22 +355,25 @@ def check_connection(endpoint_url: str, api_key: str = "", model: str = "") -> C
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    for path in ("/api/tags", "/v1/models"):
+    last_status: CloudStatus | None = None
+    for path in _candidate_paths(endpoint_url, "tags"):
         try:
             req = urllib.request.Request(f"{url}{path}", headers=headers, method="GET")
             t0 = time.monotonic()
-            with urllib.request.urlopen(req, timeout=8) as resp:
+            with _urlopen(req, timeout=8) as resp:
                 latency = (time.monotonic() - t0) * 1000
                 json.loads(resp.read())
                 return CloudStatus("configured", endpoint_url, model, True, True, latency)
         except urllib.error.HTTPError as e:
             if e.code == 401:
-                return CloudStatus("configured", endpoint_url, model, True, False, None)
+                last_status = CloudStatus("configured", endpoint_url, model, True, False, None)
+                continue
+            # Non-401 HTTP error (e.g. 404 because we picked the wrong path) — try next
             continue
         except Exception:
             continue
 
-    return CloudStatus("configured", endpoint_url, model, False, False, None)
+    return last_status or CloudStatus("configured", endpoint_url, model, False, False, None)
 
 
 # ── Chat / embed via cloud ─────────────────────────────────────────────────────
@@ -327,18 +392,20 @@ def cloud_chat(
     messages.append({"role": "user", "content": prompt})
     payload = json.dumps({"model": model, "messages": messages, "stream": False}).encode()
 
-    for path in ("/api/chat", "/v1/chat/completions"):
+    last_err: Exception | None = None
+    for path in _candidate_paths(endpoint_url, "chat"):
         try:
             req = urllib.request.Request(f"{url}{path}", data=payload, headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with _urlopen(req, timeout=120) as resp:
                 data = json.loads(resp.read())
                 if "message" in data:
                     return data["message"]["content"]
                 if "choices" in data:
                     return data["choices"][0]["message"]["content"]
-        except Exception:
+        except Exception as e:
+            last_err = e
             continue
-    raise RuntimeError(f"Cloud chat failed — endpoint {endpoint_url} unreachable")
+    raise RuntimeError(f"Cloud chat failed — endpoint {endpoint_url} unreachable ({last_err!r})")
 
 
 def cloud_embed(text: str, model: str, endpoint_url: str, api_key: str = "") -> list[float]:
@@ -346,22 +413,21 @@ def cloud_embed(text: str, model: str, endpoint_url: str, api_key: str = "") -> 
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    for path, payload_fn in [
-        ("/api/embed",     lambda: {"model": model, "input": text}),
-        ("/v1/embeddings", lambda: {"model": model, "input": text}),
-    ]:
+    last_err: Exception | None = None
+    for path in _candidate_paths(endpoint_url, "embed"):
         try:
-            payload = json.dumps(payload_fn()).encode()
+            payload = json.dumps({"model": model, "input": text}).encode()
             req = urllib.request.Request(f"{url}{path}", data=payload, headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with _urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read())
                 if "embeddings" in data:
                     return data["embeddings"][0]
                 if "data" in data:
                     return data["data"][0]["embedding"]
-        except Exception:
+        except Exception as e:
+            last_err = e
             continue
-    raise RuntimeError(f"Cloud embed failed — endpoint {endpoint_url}")
+    raise RuntimeError(f"Cloud embed failed — endpoint {endpoint_url} ({last_err!r})")
 
 
 def cost_per_1k_tokens(
