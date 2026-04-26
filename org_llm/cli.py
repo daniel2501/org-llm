@@ -271,7 +271,12 @@ def _llm_assisted_fix(error: str, attempted_command: str,
         with get_session(engine) as session:
             cloud_provider = _cfg(session, "cloud_provider")
             cloud_endpoint = _cfg(session, "cloud_endpoint_url")
-            cloud_model    = _cfg(session, "cloud_model") or "openai/gpt-oss-20b:free"
+            # Prefer fixer_model (benchmarked best at remediation) over the
+            # generic cloud_model (which the user likely picked for chat
+            # quality, not JSON-following).
+            cloud_model    = (_cfg(session, "fixer_model")
+                              or _cfg(session, "cloud_model")
+                              or "openai/gpt-oss-20b:free")
             db_api_key     = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
     except Exception:
         return False
@@ -2309,6 +2314,73 @@ def _doctor_walkthrough(report_to: str = "") -> None:
                       border_style="lcars2", padding=(1, 2)))
     console.print()
 
+    # ── Second LLM call: get structured executable fixes ─────────────────────
+    fix_sys = (
+        "Based on the probe results below, output STRICT JSON: a list of fixes "
+        "for any issues you found. Return [] if everything looked fine. "
+        "Each fix is {\"argv\": [\"<verb>\", ...], \"reason\": \"...\"}. "
+        "argv[0] MUST be one of: " + ", ".join(_LLM_FIXABLE_VERBS) + ". "
+        "Do NOT include fixes for problems that need user input "
+        "(missing API keys, --config-dir typos, OOM). Only include "
+        "fixes you're confident are safe and idempotent. NO MARKDOWN, "
+        "NO PROSE, just the JSON array."
+    )
+    fix_user = "Probe results (mechanical):\n" + "\n".join(
+        f"- {r['label']}: {'PASS' if r['mech']=='pass' else 'FAIL ('+', '.join(r['missing'] or ['nonzero exit'])+')'}"
+        for r in probe_results
+    )
+    applied_fixes = []
+    skipped_fixes = []
+    try:
+        with warp("Asking LLM for executable fixes"):
+            fix_reply = cloud_chat(fix_user, model=cloud_model,
+                                    endpoint_url=cloud_endpoint,
+                                    api_key=api_key, system=fix_sys)
+        cleaned = _strip_code_fences(fix_reply, "json").strip()
+        import json as _json
+        plan = _json.loads(cleaned)
+        if not isinstance(plan, list):
+            plan = []
+    except Exception:
+        plan = []
+
+    if plan:
+        console.print()
+        console.rule("[lcars1]Auto-applying LLM-suggested fixes[/lcars1]")
+        import subprocess as _sp
+        invoke = [sys.argv[0]] if sys.argv and os.path.isabs(sys.argv[0]) \
+                 else ["uv", "run", "org-llm"]
+        for fix in plan:
+            argv = fix.get("argv") if isinstance(fix, dict) else None
+            reason = fix.get("reason", "") if isinstance(fix, dict) else ""
+            if not (isinstance(argv, list) and argv):
+                continue
+            verb = str(argv[0])
+            if verb not in _LLM_FIXABLE_VERBS:
+                skipped_fixes.append((argv, f"unsafe verb {verb!r}"))
+                continue
+            cmd_str = "org-llm " + " ".join(str(x) for x in argv)
+            on_screen(f"[lcars2]→[/lcars2] {cmd_str}")
+            if reason:
+                on_screen(f"  [dim]{reason}[/dim]")
+            try:
+                r = _sp.run(invoke + [str(x) for x in argv],
+                             capture_output=True, text=True, timeout=120)
+                if r.returncode == 0:
+                    applied_fixes.append((argv, reason))
+                    on_screen(f"  [green]✓[/green] applied")
+                else:
+                    skipped_fixes.append((argv, f"exit={r.returncode}"))
+                    on_screen(f"  [red]✗ failed (exit={r.returncode})[/red]")
+            except Exception as exc:
+                skipped_fixes.append((argv, f"exception: {exc}"))
+                on_screen(f"  [red]✗ {exc}[/red]")
+        console.print()
+        on_screen(f"Applied {len(applied_fixes)}; skipped {len(skipped_fixes)}.")
+    else:
+        on_screen("[dim]LLM proposed no executable fixes.[/dim]")
+    console.print()
+
     # Optional org-mode report
     if report_to:
         path = Path(report_to).expanduser()
@@ -2331,6 +2403,15 @@ def _doctor_walkthrough(report_to: str = "") -> None:
             mech = "PASS" if r["mech"] == "pass" else "FAIL"
             lines.append(f"| {r['label']} | ={r['command']}= | {r['rc']} | {mech} | {note} |")
         lines += ["", "** LLM assessment", "", "#+begin_quote", assessment, "#+end_quote", ""]
+        if applied_fixes or skipped_fixes:
+            lines += ["", "** Auto-applied fixes", ""]
+            for argv, reason in applied_fixes:
+                cmd = "org-llm " + " ".join(str(x) for x in argv)
+                lines.append(f"- ✓ ={cmd}=  — {reason}")
+            for argv, reason in skipped_fixes:
+                cmd = "org-llm " + " ".join(str(x) for x in argv)
+                lines.append(f"- ✗ ={cmd}=  — skipped: {reason}")
+            lines.append("")
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a") as fh:
             fh.write("\n".join(lines))
@@ -2340,6 +2421,137 @@ def _doctor_walkthrough(report_to: str = "") -> None:
     if failures:
         red_alert(f"{len(failures)} probe(s) failed mechanically. See above.")
         raise typer.Exit(1)
+    make_it_so()
+
+
+def _doctor_benchmark_fixers(report_to: str = "", apply_fixer: bool = False) -> None:
+    """Score candidate cloud LLMs on canonical org-llm fix scenarios.
+
+    For each candidate model, send a fixed set of error-recovery prompts
+    and grade the JSON response. Reports per-model accuracy + per-scenario
+    pass/fail. With --apply-fixer, persists the top-scoring model as the
+    `fixer_model` config row, which the auto-fix layer prefers when set.
+    """
+    from rich.panel import Panel as _P
+    from rich.table import Table as _T
+    from . import fixer_bench as _bench
+    from . import creds as _creds
+
+    engine = _engine()
+    try:
+        with get_session(engine) as session:
+            cloud_provider = _cfg(session, "cloud_provider")
+            cloud_endpoint = _cfg(session, "cloud_endpoint_url")
+            db_api_key     = _cfg(session, "cloud_api_key") or _cfg(session, "runpod_api_key")
+            cur_fixer      = _cfg(session, "fixer_model")
+    except Exception as exc:
+        red_alert(f"Could not read config: {exc}")
+        raise typer.Exit(1)
+    if not cloud_endpoint:
+        red_alert("--benchmark-fixers needs a configured cloud backend.")
+        on_screen("Run: [bold]org-llm cloud --quick-start openrouter[/bold]")
+        raise typer.Exit(1)
+    api_key = (_creds.read_secret(_creds.cloud_slug(cloud_provider))
+               if cloud_provider else None) or db_api_key
+
+    candidates = list(_bench.DEFAULT_CANDIDATES)
+    console.print()
+    console.rule("[lcars1]LLM-fixer benchmark[/lcars1]")
+    on_screen(f"Probing {len(candidates)} candidate models against "
+              f"{len(_bench.SCENARIOS)} canonical scenarios.")
+    on_screen(f"Endpoint: {cloud_endpoint}   ({len(candidates)} × "
+              f"{len(_bench.SCENARIOS)} = {len(candidates)*len(_bench.SCENARIOS)} calls)")
+    console.print()
+
+    results: list[_bench.ModelResult] = []
+    with impulse("Benchmarking", total=len(candidates)) as (prog, task):
+        for model in candidates:
+            r = _bench.benchmark_model(model, cloud_endpoint, api_key)
+            results.append(r)
+            prog.advance(task)
+
+    # Leaderboard
+    results.sort(key=lambda m: (m.passed, -m.error_count), reverse=True)
+    tbl = _T(box=None, pad_edge=False)
+    tbl.add_column("Rank",     style="lcars1", width=4,  justify="right")
+    tbl.add_column("Model",    style="lcars2", no_wrap=True, max_width=40, overflow="ellipsis")
+    tbl.add_column("Passed",   style="lcars3", justify="right", width=8)
+    tbl.add_column("Accuracy", style="lcars3", justify="right", width=10)
+    tbl.add_column("Errors",   style="dim",   justify="right", width=7)
+    tbl.add_column("Failed scenarios", style="dim")
+    for i, r in enumerate(results, 1):
+        failed = ", ".join(s.scenario for s in r.scenarios if not s.overall_pass)
+        tbl.add_row(str(i), r.model, f"{r.passed}/{r.total}",
+                    f"{r.accuracy*100:.0f}%", str(r.error_count),
+                    failed[:60] + ("…" if len(failed) > 60 else ""))
+    console.print(_P(tbl, title="[lcars1]LLM-fixer leaderboard[/lcars1]",
+                      border_style="lcars2"))
+    console.print()
+
+    winner = results[0] if results else None
+    if winner:
+        on_screen(f"[bold green]Winner: {winner.model}[/bold green]  "
+                  f"({winner.accuracy*100:.0f}% accuracy)")
+        if cur_fixer:
+            on_screen(f"Currently configured fixer_model: [dim]{cur_fixer}[/dim]")
+        else:
+            on_screen(f"Currently configured fixer_model: [dim](unset — auto-fix uses cloud_model)[/dim]")
+
+    # Persist winner if requested
+    if apply_fixer and winner:
+        from .db import Config as _Cfg
+        with get_session(engine) as session:
+            row = session.get(_Cfg, "fixer_model")
+            if row: row.value = winner.model
+            else:   session.add(_Cfg(key="fixer_model", value=winner.model))
+            session.commit()
+        hail(f"Persisted fixer_model → {winner.model}")
+    elif winner and not apply_fixer:
+        on_screen(f"Adopt the winner: [bold]org-llm doctor -BA[/bold]  "
+                  "(or set manually: [bold]org-llm config fixer_model "
+                  f"{winner.model}[/bold])")
+
+    # Optional org-mode report
+    if report_to:
+        from datetime import datetime as _dt
+        path = Path(report_to).expanduser()
+        ts = _dt.now().strftime("%Y-%m-%d %H:%M:%S")
+        lines = [
+            f"\n* org-llm fixer-model benchmark — {ts}",
+            f":PROPERTIES:",
+            f":CREATED: [{ts}]",
+            f":CMD:     org-llm doctor --benchmark-fixers",
+            f":WINNER:  {winner.model if winner else '(none)'}",
+            f":SCENARIOS: {len(_bench.SCENARIOS)}",
+            f":CANDIDATES: {len(candidates)}",
+            f":END:",
+            "",
+            "** Leaderboard",
+            "",
+            "| Rank | Model | Passed | Accuracy | Errors |",
+            "|---|---|---|---|---|",
+        ]
+        for i, r in enumerate(results, 1):
+            lines.append(f"| {i} | ={r.model}= | {r.passed}/{r.total} "
+                          f"| {r.accuracy*100:.0f}% | {r.error_count} |")
+        lines += ["", "** Per-scenario detail", ""]
+        # Per-scenario × per-model matrix
+        scenario_names = [s.name for s in _bench.SCENARIOS]
+        header = "| Scenario | " + " | ".join(r.model.split("/")[-1].split(":")[0] for r in results) + " |"
+        lines.append(header)
+        lines.append("|---" * (len(results) + 1) + "|")
+        for sn in scenario_names:
+            row_cells = [f"={sn}="]
+            for r in results:
+                hit = next((s for s in r.scenarios if s.scenario == sn), None)
+                row_cells.append("✓" if hit and hit.overall_pass else "✗")
+            lines.append("| " + " | ".join(row_cells) + " |")
+        lines.append("")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a") as fh:
+            fh.write("\n".join(lines))
+        hail(f"Appended fixer-bench report → {path}")
+
     make_it_so()
 
 
@@ -2357,6 +2569,10 @@ def doctor(
               help="LLM-driven self-test: generate a tour, run each command, assess output, suggest fixes")] = False,
     report_to:    Annotated[str,  typer.Option("--report-to",   "-r",
               help="Append a structured report of this run to PATH (an .org file)")] = "",
+    benchmark_fixers: Annotated[bool, typer.Option("--benchmark-fixers", "-B",
+              help="Score multiple cloud LLMs on canonical fix scenarios; persist the winner as fixer_model")] = False,
+    apply_fixer:  Annotated[bool, typer.Option("--apply-fixer", "-A",
+              help="With --benchmark-fixers, write the top-scoring model to config:fixer_model")] = False,
 ):
     """Deep health check, LLM tuning advisor, and FOSS tool installer.
 
@@ -2369,6 +2585,8 @@ def doctor(
     """
     if walkthrough:
         return _doctor_walkthrough(report_to=report_to)
+    if benchmark_fixers:
+        return _doctor_benchmark_fixers(report_to=report_to, apply_fixer=apply_fixer)
     import os
     import shutil
     import subprocess

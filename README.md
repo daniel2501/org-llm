@@ -199,6 +199,156 @@ Code (`.claude/settings.json` + `.claude/CLAUDE.md`).
 
 ---
 
+## Smart RAG retrieval
+
+`org-llm ask` does more than pure vector search. It auto-detects three
+intents in your query and adjusts retrieval accordingly:
+
+- **Temporal phrases** — `"last week"`, `"past 6 months"`, `"yesterday"`,
+  spelled-out numbers (`"last six months"`) — apply an `mtime` filter
+- **Path keywords** — `"daily"`, `"journal"`, `"diary"` — surface the
+  actual files in `~/org/<folder>/` regardless of similarity score
+- **Tag references** — `"my politics tag"`, `tagged X`, `:foo:` — pull
+  notes with that tag; if the tag doesn't exist you see *"closest
+  existing: …"* up front rather than letting the LLM hallucinate
+
+```sh
+org-llm ask --cloud "summarize my last six months of daily notes in 6 bullets"
+org-llm ask --cloud "what's in my :queer: tag?"
+org-llm ask --cloud --days 30 "biggest themes recently"
+```
+
+A retrieval line prints before every answer so you can sanity-check what
+the LLM actually saw:
+
+```
+▶ Retrieved 17 note(s) from the last 7 days + daily folder: 2026-04-12, …
+```
+
+---
+
+## Code analysis (cross-corpus)
+
+`org-llm code-index` walks `~/repos` (or any tree) and indexes source
+files into the same DB so `ask` can answer about notes AND code in one
+query. Skips `.git` / `node_modules` / `.venv` / `target` / `dist` etc.;
+truncates per-file body at 24 KB; tags every code node `code:<lang>`.
+
+```sh
+org-llm code-index                          # default: ~/repos
+org-llm code-index ~/dotfiles ~/work        # extra paths
+org-llm config code_dirs ~/repos,~/dotfiles # persistent default
+org-llm ask --cloud "how does cli.py wire up MCP?"
+```
+
+After indexing it auto-embeds new nodes so they're searchable
+immediately. Pass `--no-embed` to skip.
+
+---
+
+## Performance tuning
+
+`org-llm models --tune` uses the catalog's static VRAM × `0.55 × total_RAM`
+heuristic. That passes models which OOM in practice — it can't see what
+else your laptop is running. **`org-llm performance` reads free RAM at
+runtime** and (with `--benchmark`) measures actual tokens-per-second per
+pulled model.
+
+```sh
+org-llm performance              # read-only report
+org-llm performance --benchmark  # measure tok/s per model (1-3 min)
+org-llm performance --apply      # write recommended assignments to config
+```
+
+Severity icons in the recommendation table:
+
+- ↓ **downgrade** — current model needs more RAM than you have
+- ↑ **upgrade** — a higher-quality model fits
+- + **missing** — role unassigned
+- = **fit** — already optimal
+
+---
+
+## Self-healing
+
+Every `red_alert + Exit` path first attempts a deterministic safe fix.
+If the deterministic fix doesn't apply, the configured cloud LLM is
+asked for a structured remediation, parsed against an allow-list of
+safe `org-llm` subcommands, and executed.
+
+What self-heals automatically:
+
+| Failure | What we do |
+|---|---|
+| `no such table: config` | Run `init_db()` and continue |
+| Ollama not reachable | Background `ollama serve`, wait, retry |
+| Empty index but `~/org/` has `.org` files | Run `index` automatically |
+| `ask` returns 0 hits and unembedded nodes exist | Run `embed` and retry the search |
+| Model 404 at runtime (e.g. `llama3.2:latest` not pulled) | Pull and retry |
+| Configured model is bogus (`llama99-doesnt-exist`) | LLM picks a safe alternative, swaps `chat_model`, retries |
+| Out of memory | **Doesn't auto-fix** — RAM can't be conjured. Suggests `--cloud` / `performance --apply` |
+| Path-traversal / sensitive-path requests | **Doesn't auto-fix** — security boundary |
+| Missing API key for `--cloud` | **Doesn't auto-fix** — needs user paste |
+
+Pick the best LLM for fix duty by benchmarking:
+
+```sh
+org-llm doctor --benchmark-fixers          # score 6 candidate models
+org-llm doctor --benchmark-fixers --apply  # persist the winner as fixer_model
+```
+
+Then `_llm_assisted_fix` prefers `fixer_model` over `cloud_model` for
+any fix call. Current measured leaderboard on 10 canonical scenarios:
+
+| Rank | Model | Accuracy |
+|---|---|---|
+| 1 | `openai/gpt-oss-120b:free` | 80% |
+| 2 | `openai/gpt-oss-20b:free` | 70% |
+| 3 | `nvidia/nemotron-nano-9b-v2:free` | 60% |
+
+---
+
+## Doctor self-test
+
+```sh
+org-llm doctor -w                     # 13 read-only probes + LLM judgement
+org-llm doctor -wr ~/org/dev-log.org  # also append a structured org report
+```
+
+Two LLM passes per run: one for qualitative assessment (✓ PASS / ⚠ NIT /
+✗ ISSUE per probe + top-3 recommendations), one for a structured list
+of executable fixes which the runner applies to allow-listed verbs only.
+
+CI-friendly — wire it into a git pre-push hook to get a second pair of
+eyes on every change without leaving your terminal.
+
+---
+
+## MCP file + browser grants
+
+The MCP server exposes `read_file`, `list_directory`, `request_access`,
+`open_url`, and `browser_command` to opencode/Claude — but only with
+your explicit authorization. Three layers:
+
+```sh
+# Direct grants:
+org-llm grant ~/projects/work
+org-llm grants                       # see everything currently authorised
+
+# Auto-grant roots (LLM may self-extend within these via request_access):
+org-llm grant-root ~
+
+# Browser:
+org-llm grant-browser
+org-llm doctor --install qutebrowser
+```
+
+Always-denied paths (sensitive deny-list, even with grants):
+`~/.ssh`, `~/.gnupg`, `~/.password-store`, `~/.aws/credentials`,
+`~/.kube/config`, `~/.netrc`, `/etc/shadow`, `/root/`, etc.
+
+---
+
 ## Reports
 
 ```sh
@@ -228,6 +378,41 @@ org-llm review-emacs --diff-only -o p.md   # emit patch hunks
 
 Past reviews are written to the `history` table so you can find them later
 with `org-llm db -q "SELECT timestamp, query FROM history WHERE command='review-emacs'"`.
+
+---
+
+## Theme knobs
+
+`trek` / `commie` / `queer` are built-in dials (0–3) that shape the
+completion-message pool. Levels are weights, not booleans:
+
+```
+0 = silent  |  1 = sparse (½×)  |  2 = normal  |  3 = max (2×)
+```
+
+Multi-tagged messages (e.g. `trek+commie`) use the MIN level — silence
+any tag and dependent messages disappear. Persist via the config DB:
+
+```sh
+org-llm config queer_level 1     # half pride
+org-llm config commie_level 3    # 2× solidarity
+org-llm config trek_level 0      # silence Trek
+```
+
+Or per-command via `ORG_LLM_<NAME>_LEVEL`. Define your own dials:
+
+```sh
+org-llm knob add dinosaur \
+  -m '◀ ROAR.|info' \
+  -m '◀ Dino-mite work, comrade.|lcars1'
+
+org-llm config dinosaur_level 2
+org-llm knob list
+```
+
+User knobs live in the SQLite `user_theme_knobs` row; their levels
+follow the same `<name>_level` pattern. Built-in knobs can't be removed
+but can be set to 0.
 
 ---
 
