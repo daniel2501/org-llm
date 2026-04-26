@@ -41,18 +41,56 @@ def _detect_nerd_fonts() -> bool:
 
 NERD_FONTS = _detect_nerd_fonts()
 
-# ── Trek / communist intensity levels (0–3, env-overridable) ─────────────────
-def _theme_level(env_var: str, default: int = 2) -> int:
+# ── Theme intensity levels (0–3) ─────────────────────────────────────────────
+# Resolution order: env var → SQLite config row → default. Each call is live,
+# so `org-llm config queer_level 1` takes effect on the next command without
+# any re-import or restart.
+
+def _theme_level_from_config(db_key: str) -> int | None:
+    """Read a theme-level config row, returning None if missing/invalid/no DB."""
+    try:
+        from .db import DB_PATH, Config, make_engine
+        from sqlalchemy.orm import Session
+        from pathlib import Path as _P
+        path = _P(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if not path.exists():
+            return None
+        engine = make_engine(path)
+        with Session(engine) as s:
+            row = s.get(Config, db_key)
+            if row and row.value.strip().isdigit():
+                return max(0, min(3, int(row.value.strip())))
+    except Exception:
+        pass
+    return None
+
+
+def _theme_level(env_var: str, default: int = 2, db_key: str | None = None) -> int:
     raw = os.environ.get(env_var, "").strip()
     if raw.isdigit():
         return max(0, min(3, int(raw)))
-    if raw.lower() in ("off", "0", "false"): return 0
-    if raw.lower() in ("max", "3", "full"):  return 3
+    if raw.lower() in ("off", "false"):  return 0
+    if raw.lower() in ("max", "full"):   return 3
+    if db_key:
+        cfg_val = _theme_level_from_config(db_key)
+        if cfg_val is not None:
+            return cfg_val
     return default
 
-TREK_LEVEL      = _theme_level("ORG_LLM_TREK_LEVEL",      2)
-COMMIE_LEVEL    = _theme_level("ORG_LLM_COMMIE_LEVEL",     2)
-QUEER_LEVEL     = _theme_level("ORG_LLM_QUEER_LEVEL",      2)
+
+def trek_level()   -> int: return _theme_level("ORG_LLM_TREK_LEVEL",   2, "trek_level")
+def commie_level() -> int: return _theme_level("ORG_LLM_COMMIE_LEVEL", 2, "commie_level")
+def queer_level()  -> int: return _theme_level("ORG_LLM_QUEER_LEVEL",  2, "queer_level")
+
+
+# Back-compat: callers (and a few tests) reference these as module constants.
+# Module-level __getattr__ makes the read live, so config-DB changes apply
+# without a restart.
+def __getattr__(name: str):
+    if name == "TREK_LEVEL":   return trek_level()
+    if name == "COMMIE_LEVEL": return commie_level()
+    if name == "QUEER_LEVEL":  return queer_level()
+    raise AttributeError(name)
 
 
 # ── Dark/light palette switching ──────────────────────────────────────────────
@@ -410,11 +448,18 @@ _msg_idx = 0
 
 
 def _theme_levels() -> dict[str, int]:
-    """Map theme name → level. Built-ins plus any user-registered knobs."""
-    levels = {"trek": TREK_LEVEL, "commie": COMMIE_LEVEL, "queer": QUEER_LEVEL}
+    """Map theme name → level (live; reads env + config DB on every call)."""
+    levels = {
+        "trek":   trek_level(),
+        "commie": commie_level(),
+        "queer":  queer_level(),
+    }
     for knob in _user_knobs():
         env = f"ORG_LLM_{knob['name'].upper()}_LEVEL"
-        levels[knob["name"]] = _theme_level(env, int(knob.get("default_level", 2)))
+        levels[knob["name"]] = _theme_level(
+            env, int(knob.get("default_level", 2)),
+            db_key=f"{knob['name']}_level",
+        )
     return levels
 
 
@@ -447,26 +492,45 @@ def _user_knobs() -> list[dict]:
     return []
 
 
-def _enabled_msgs() -> list[tuple[str, str]]:
-    """A message renders iff every theme tag is at level ≥ 1.
+_LEVEL_WEIGHT = {0: 0, 1: 1, 2: 2, 3: 4}
 
-    Untagged messages are neutral and always render. User-registered knobs
-    contribute their own messages on top of the built-in pool, filtered by
-    their own ORG_LLM_<NAME>_LEVEL.
+
+def _enabled_msgs() -> list[tuple[str, str]]:
+    """Build the make_it_so message pool, respecting per-theme levels.
+
+    Levels behave as relative weights, not just on/off:
+        0 = silent
+        1 = sparse  (half as often as 2)
+        2 = normal  (default)
+        3 = max     (twice as often as 2)
+
+    For multi-tag messages we use the MIN level across tags — a tag that's
+    silenced silences the whole message. Untagged ("neutral") entries always
+    render at full weight. User knobs contribute on top of the built-in pool.
     """
     levels = _theme_levels()
     keep: list[tuple[str, str]] = []
     for msg, style, tags in _DONE_MSGS_TAGGED:
-        if all(levels.get(t, 0) >= 1 for t in tags):
-            keep.append((msg, style))
+        if not tags:
+            keep.extend([(msg, style)] * _LEVEL_WEIGHT[2])  # neutral, normal
+            continue
+        min_lvl = min(levels.get(t, 0) for t in tags)
+        weight  = _LEVEL_WEIGHT.get(min_lvl, 0)
+        keep.extend([(msg, style)] * weight)
     # User knobs add their own messages when their level is on
     for knob in _user_knobs():
-        if levels.get(knob["name"], 0) >= 1:
-            for entry in knob.get("messages", []) or []:
-                if isinstance(entry, (list, tuple)) and len(entry) >= 2:
-                    keep.append((str(entry[0]), str(entry[1])))
-                elif isinstance(entry, str):
-                    keep.append((entry, "info"))
+        lvl = levels.get(knob["name"], 0)
+        weight = _LEVEL_WEIGHT.get(lvl, 0)
+        if not weight:
+            continue
+        for entry in knob.get("messages", []) or []:
+            if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                pair = (str(entry[0]), str(entry[1]))
+            elif isinstance(entry, str):
+                pair = (entry, "info")
+            else:
+                continue
+            keep.extend([pair] * weight)
     return keep
 
 
@@ -480,9 +544,9 @@ def make_it_so() -> None:
 
 def solidarity() -> None:
     """Render the opening banners. Each section respects its theme dial."""
-    if COMMIE_LEVEL >= 1:
+    if commie_level() >= 1:
         console.print(SOLIDARITY_BANNER)
-    if QUEER_LEVEL >= 1:
+    if queer_level() >= 1:
         console.print(PRIDE_BANNER)
         console.print(trans_stripe())
 

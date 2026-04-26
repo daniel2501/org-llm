@@ -1078,6 +1078,10 @@ _CONFIG_VALIDATORS = {
     "embed_dim":          "int",
     "theme":              ("dark", "light"),
     "db_version":         "int",
+    # Theme intensity dials — accept 0..3 only
+    "trek_level":         ("0", "1", "2", "3"),
+    "commie_level":       ("0", "1", "2", "3"),
+    "queer_level":        ("0", "1", "2", "3"),
 }
 
 
@@ -2731,9 +2735,9 @@ _TUTOR_STEPS = [
         "Navigate with: [bold]org-llm tutor <step>[/bold]\n"
         "All steps:     [bold]org-llm tutor --all[/bold]\n"
         "Steps: welcome → init → index → embed → code-index → search → ask → capture\n"
-        "       → tag → code → config → skills → report → doctor → install → db → dbt\n"
-        "       → opencode → source → performance → grants → knob → theme → env\n"
-        "       → review-emacs → creds → cloud → launch → emacs → claude → done",
+        "       → tag → code → config → skills → report → doctor → doctor-walkthrough\n"
+        "       → install → db → dbt → opencode → source → performance → grants → knob\n"
+        "       → theme → env → review-emacs → creds → cloud → launch → emacs → claude → done",
     ),
     (
         "init",
@@ -3236,30 +3240,64 @@ _TUTOR_STEPS = [
     (
         "knob",
         "[lcars2]org-llm knob[/lcars2] — define your own theme dials\n\n"
-        "Built-in theme knobs control the personality of completion messages:\n"
-        "  • [bold]ORG_LLM_TREK_LEVEL[/bold]   0..3 — Trek references\n"
-        "  • [bold]ORG_LLM_COMMIE_LEVEL[/bold] 0..3 — solidarity messaging\n"
-        "  • [bold]ORG_LLM_QUEER_LEVEL[/bold]  0..3 — pride/trans messaging\n\n"
-        "You can register your own knobs to extend or replace the pool.\n\n"
-        "[lcars1]Add a knob:[/lcars1]\n"
+        "Built-in theme knobs (each 0..3) shape the make_it_so message pool:\n"
+        "  • [bold]trek[/bold]    — Trek references\n"
+        "  • [bold]commie[/bold]  — solidarity / labor / property messaging\n"
+        "  • [bold]queer[/bold]   — pride / trans messaging\n\n"
+        "[lcars1]Levels are weights, not booleans:[/lcars1]\n"
+        "  0 = silent | 1 = sparse (½×) | 2 = normal (1×) | 3 = max (2×)\n"
+        "  Multi-tagged messages (e.g. trek+commie) use the MIN level. Setting\n"
+        "  any tag to 0 silences messages that depend on it.\n\n"
+        "[lcars1]Set persistently (writes to SQLite config):[/lcars1]\n"
+        "  [bold]org-llm config queer_level 1[/bold]      — half as much pride\n"
+        "  [bold]org-llm config commie_level 3[/bold]     — twice as much solidarity\n"
+        "  [bold]org-llm config trek_level 0[/bold]       — silence Trek entirely\n\n"
+        "[lcars1]Override per command (env wins over config):[/lcars1]\n"
+        "  [bold]ORG_LLM_QUEER_LEVEL=0 org-llm report all[/bold]\n\n"
+        "[lcars1]Add your own knob:[/lcars1]\n"
         "  [bold]org-llm knob add dinosaur \\[/bold]\n"
         "    [bold]-m '◀ ROAR.|info' \\[/bold]\n"
-        "    [bold]-m '◀ Dino-mite work, comrade.|lcars1' \\[/bold]\n"
-        "    [bold]-m '◀ Extinction is for capitalism, not progress.|pride.green'[/bold]\n\n"
-        "Activate (env var name = ORG_LLM_<UPPER>_LEVEL):\n"
-        "  [bold]ORG_LLM_DINOSAUR_LEVEL=2 org-llm doctor[/bold]\n"
-        "  ◀ ROAR.\n\n"
-        "[lcars1]Other commands:[/lcars1]\n"
-        "  [bold]org-llm knob list[/bold]                — show all knobs (built-in + user)\n"
-        "  [bold]org-llm knob remove dinosaur[/bold]     — remove a user knob\n\n"
+        "    [bold]-m '◀ Dino-mite work, comrade.|lcars1'[/bold]\n"
+        "  Activate:  [bold]org-llm config dinosaur_level 2[/bold]   (or =ORG_LLM_DINOSAUR_LEVEL=2=)\n\n"
+        "[lcars1]Inspect:[/lcars1]\n"
+        "  [bold]org-llm knob list[/bold]   — built-in + user knobs with active level + source\n"
+        "  Active-level column shows [dim](env)[/dim] / [dim](config)[/dim] / [dim](default)[/dim]\n\n"
         "[lcars1]Storage:[/lcars1]\n"
-        "  User knobs live in the SQLite Config row [lcars3]user_theme_knobs[/lcars3]\n"
-        "  as JSON: name, messages (text + style), default_level. Built-in knobs\n"
-        "  cannot be removed but their level can be set to 0 to silence them.\n\n"
+        "  Built-in levels:  Config rows =trek_level=, =commie_level=, =queer_level=\n"
+        "  User knobs:       Config row =user_theme_knobs= (JSON list)\n"
+        "  Built-in knobs cannot be removed; set their level to 0 to silence.\n\n"
         "[lcars1]Quiet-everything mode:[/lcars1]\n"
-        "  [bold]ORG_LLM_TREK_LEVEL=0 ORG_LLM_COMMIE_LEVEL=0 ORG_LLM_QUEER_LEVEL=0[/bold]\n"
-        "  reduces every completion to a single neutral \"◀ Done.\".\n\n"
+        "  [bold]org-llm config trek_level 0; and config commie_level 0; and config queer_level 0[/bold]\n"
+        "  → every completion becomes a single neutral \"◀ Done.\"\n\n"
         "[dim]Source: org_llm/ui.py → _enabled_msgs()  |  org-llm source ui[/dim]",
+    ),
+    (
+        "doctor-walkthrough",
+        "[lcars2]org-llm doctor --walkthrough[/lcars2] — LLM-driven self-test\n\n"
+        "Doctor in self-tester mode. Runs a curated set of read-only commands,\n"
+        "captures stdout, asks the configured cloud LLM to judge each output,\n"
+        "and ends with a top-3 recommendation list ranked by impact:effort.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm doctor -w[/bold]                          — run the walkthrough\n"
+        "  [bold]org-llm doctor -wr ~/org/dev-log.org[/bold]       — append a structured report\n"
+        "  [bold]org-llm doctor --walkthrough --report-to PATH[/bold]   — long form\n\n"
+        "[lcars1]What it probes (13 read-only commands):[/lcars1]\n"
+        "  tutor welcome | doctor | cloud --status | cloud --providers |\n"
+        "  cloud --cost  | models --discover | performance --quick |\n"
+        "  theme show    | knob list | grants | db -q '...' |\n"
+        "  report tags   | --help\n\n"
+        "[lcars1]Two layers of judgement:[/lcars1]\n"
+        "  Mechanical — exit code + expected substrings present?\n"
+        "  Qualitative — cloud LLM marks each probe ✓ PASS / ⚠ NIT / ✗ ISSUE\n"
+        "                with specific suggestions when it sees friction.\n\n"
+        "[lcars1]Why this exists:[/lcars1]\n"
+        "  CI-friendly self-test you can wire into a pre-push hook:\n"
+        "    [bold]org-llm doctor -wr dev-log/run-$(git rev-parse --short HEAD).org[/bold]\n"
+        "  Plus: a second pair of eyes on every change, courtesy of the LLM.\n\n"
+        "[lcars1]Requirements:[/lcars1]\n"
+        "  Cloud backend configured (the local llama3.3 won't fit on most\n"
+        "  laptops). Run [bold]org-llm cloud --quick-start openrouter[/bold] first.\n\n"
+        "[dim]Source: org_llm/cli.py → _doctor_walkthrough()  |  org-llm source cli[/dim]",
     ),
     (
         "theme",
@@ -3300,12 +3338,14 @@ _TUTOR_STEPS = [
         "  [bold]ORG_LLM_OLLAMA_URL[/bold]    Ollama base URL  (default: ollama_url config, fallback http://localhost:11434)\n"
         "  [bold]ANTHROPIC_API_KEY[/bold]     Used by [bold]org-llm claude[/bold]; falls back to pass slug org-llm/anthropic/api-key\n\n"
         "[lcars1]UI / theme:[/lcars1]\n"
-        "  [bold]ORG_LLM_THEME[/bold]            dark | light  (default: dark; persisted via [bold]org-llm theme[/bold])\n"
+        "  [bold]ORG_LLM_THEME[/bold]            dark | light  (default: dark; also: [bold]org-llm theme[/bold])\n"
         "  [bold]ORG_LLM_NERD_FONTS[/bold]       1/yes/true | 0/no/false — force icon mode\n"
-        "  [bold]ORG_LLM_TREK_LEVEL[/bold]       0..3 — Trek messaging intensity (default: 2)\n"
-        "  [bold]ORG_LLM_COMMIE_LEVEL[/bold]     0..3 — solidarity messaging intensity (default: 2)\n"
-        "  [bold]ORG_LLM_QUEER_LEVEL[/bold]      0..3 — pride/trans messaging intensity (default: 2)\n"
-        "  [bold]ORG_LLM_<KNOB>_LEVEL[/bold]     0..3 — any user-registered knob (see [bold]org-llm knob[/bold])\n\n"
+        "  [bold]ORG_LLM_TREK_LEVEL[/bold]       0..3 — weight, not on/off (also: [bold]config trek_level N[/bold])\n"
+        "  [bold]ORG_LLM_COMMIE_LEVEL[/bold]     0..3 — solidarity weight (also: [bold]config commie_level N[/bold])\n"
+        "  [bold]ORG_LLM_QUEER_LEVEL[/bold]      0..3 — pride/trans weight (also: [bold]config queer_level N[/bold])\n"
+        "  [bold]ORG_LLM_<KNOB>_LEVEL[/bold]     0..3 — any user-registered knob (see [bold]org-llm knob[/bold])\n"
+        "                            Resolution: env → SQLite config row → default.\n"
+        "                            Levels behave as weights (0=silent, 1=½×, 2=1×, 3=2×).\n\n"
         "[lcars1]Examples:[/lcars1]\n"
         "  [bold]ORG_LLM_DB=/tmp/test.db org-llm init[/bold]                  — sandbox a throwaway DB\n"
         "  [bold]ORG_LLM_ORG_DIR=~/work-notes org-llm index[/bold]            — index a side-vault\n"
@@ -5228,10 +5268,15 @@ def knob_list():
     tbl.add_column("Messages",   style="dim")
 
     def _active(name: str, default: int) -> str:
+        from . import ui as _ui
         env = os.environ.get(f"ORG_LLM_{name.upper()}_LEVEL", "").strip()
         if env.isdigit():
             return f"{env} (env)"
-        return str(default)
+        # Consult the SQLite config row (e.g. queer_level = 1)
+        cfg_val = _ui._theme_level_from_config(f"{name}_level")
+        if cfg_val is not None:
+            return f"{cfg_val} (config)"
+        return f"{default} (default)"
 
     for k in builtins:
         tbl.add_row(k["name"], "built-in", str(k["default_level"]),

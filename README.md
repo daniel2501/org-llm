@@ -99,6 +99,8 @@ candidates.
 | `org-llm launch` | Open opencode in your vault with MCP wired up |
 | `org-llm claude` | Same, but Claude Code (`ANTHROPIC_API_KEY` from `pass`) |
 | `org-llm doctor` | Deep health check + LLM diagnosis; `--install all` bulk-installs FOSS tools |
+| `org-llm doctor -w` | LLM-driven self-test: 13 read-only probes + cloud-LLM judgement |
+| `org-llm doctor -r PATH` | Append a structured org-mode report of any doctor run to PATH |
 | `org-llm report` | Rich text reports — overview / tags / recent / orphans / daily |
 | `org-llm tutor` | 31-step interactive tutorial — start with `tutor welcome` |
 | `org-llm db` | Inspect schema, run SELECT queries, full data dictionary |
@@ -274,10 +276,10 @@ org-llm theme toggle   # flip whatever is set
 | `ORG_LLM_OLLAMA_URL` | Override the Ollama endpoint (default: `ollama_url` config key, fallback `http://localhost:11434`) |
 | `ORG_LLM_THEME` | `dark` or `light` (default: `dark`). Persistent: `org-llm theme {dark,light,toggle}`. |
 | `ORG_LLM_NERD_FONTS` | Force-enable (`1`/`yes`) or disable (`0`/`no`) Nerd Font icons |
-| `ORG_LLM_TREK_LEVEL` | Star Trek messaging intensity, `0` (off) – `3` (max). Default: `2` |
-| `ORG_LLM_COMMIE_LEVEL` | Solidarity messaging intensity, `0`–`3`. Default: `2` |
-| `ORG_LLM_QUEER_LEVEL` | Pride/trans messaging intensity, `0`–`3`. Default: `2` |
-| `ORG_LLM_<KNOB>_LEVEL` | Any user-defined knob from `org-llm knob add`, `0`–`3` |
+| `ORG_LLM_TREK_LEVEL` | Star Trek messaging weight, `0` (silent) / `1` (½×) / `2` (1×) / `3` (2×). Default `2`. Persistent via `org-llm config trek_level N`. |
+| `ORG_LLM_COMMIE_LEVEL` | Solidarity messaging weight, `0`–`3`. Persistent via `config commie_level N`. |
+| `ORG_LLM_QUEER_LEVEL` | Pride/trans messaging weight, `0`–`3`. Persistent via `config queer_level N`. |
+| `ORG_LLM_<KNOB>_LEVEL` | Any user-defined knob from `org-llm knob add`, `0`–`3`. Persistent via `config <name>_level N`. |
 | `PASSWORD_STORE_DIR` | Override the `pass` store location (default: `~/.password-store`) |
 | `ANTHROPIC_API_KEY` | Used by `org-llm claude`. If unset, falls back to `pass` slug `org-llm/anthropic/api-key`. |
 
