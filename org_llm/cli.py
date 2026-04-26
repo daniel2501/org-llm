@@ -852,30 +852,41 @@ def models(
         console.print()
 
         fits = {m.tag for m in fitting_hardware(vram_gb, ram_gb)}
+        # Drop License + Description columns on narrow terminals so the
+        # critical Model / Params / VRAM / Roles columns render cleanly.
+        narrow = console.width < 110
         tbl = Table(box=None, pad_edge=False, show_header=True)
-        tbl.add_column("Fits", width=4)
-        tbl.add_column("Pulled", width=6)
-        tbl.add_column("Model",        style="lcars2",   no_wrap=True)
-        tbl.add_column("Params", width=6, style="dim")
-        tbl.add_column("VRAM",   width=6, style="lcars3")
-        tbl.add_column("License",       style="dim",     no_wrap=True)
-        tbl.add_column("Roles",         style="lcars1",  no_wrap=True)
-        tbl.add_column("Description")
+        tbl.add_column("Fits",   width=4,  no_wrap=True)
+        tbl.add_column("Pulled", width=6,  no_wrap=True)
+        tbl.add_column("Model",  style="lcars2", no_wrap=True, max_width=22, overflow="ellipsis")
+        tbl.add_column("Params", width=6, style="dim",   no_wrap=True)
+        tbl.add_column("VRAM",   width=6, style="lcars3",no_wrap=True)
+        if not narrow:
+            tbl.add_column("License", style="dim",   no_wrap=True, max_width=18, overflow="ellipsis")
+        tbl.add_column("Roles",  style="lcars1", no_wrap=True, max_width=22, overflow="ellipsis")
+        if not narrow:
+            tbl.add_column("Description", style="dim", overflow="fold", min_width=20)
 
         prev_role_group = ""
         for m in CATALOG:
             role_group = m.roles[0]
             if role_group != prev_role_group:
-                tbl.add_row("", "", "", "", "", "", "", "", style="dim")
+                blanks = (8 if not narrow else 6)
+                tbl.add_row(*([""] * blanks), style="dim")
                 prev_role_group = role_group
             fit_sym  = "[bold green]✓[/]" if m.tag in fits else "[dim]→cloud[/]"
             pull_sym = "[bold cyan]✓[/]"  if _is_pulled(m.tag, pulled) else ""
-            tbl.add_row(
-                fit_sym, pull_sym,
-                m.tag, m.params, f"{m.vram_gb:.1f}G",
-                m.license, " ".join(m.roles), m.description,
-            )
+            row = [fit_sym, pull_sym, m.tag, m.params, f"{m.vram_gb:.1f}G"]
+            if not narrow:
+                row.append(m.license)
+            row.append(" ".join(m.roles))
+            if not narrow:
+                row.append(m.description)
+            tbl.add_row(*row)
         console.print(tbl)
+        if narrow:
+            on_screen("[dim]Narrow terminal — License + Description columns hidden. "
+                      "Widen >= 110 cols to see them.[/dim]")
         console.print()
         on_screen(f"Pull any model: [bold]org-llm models --pull <tag>[/bold]")
         on_screen(f"Tune assignments: [bold]org-llm models --tune[/bold]")
@@ -1059,9 +1070,12 @@ def performance(
         hw = perf.probe_hardware()
 
     hw_tbl = _T(box=None, pad_edge=False, show_header=False)
-    hw_tbl.add_column("Key",   style="lcars1", width=18)
-    hw_tbl.add_column("Value", style="lcars2")
-    hw_tbl.add_row("CPU",        f"{hw.cpu_model}  ({hw.cpu_count} cores)")
+    hw_tbl.add_column("Key",   style="lcars1", width=18, no_wrap=True)
+    hw_tbl.add_column("Value", style="lcars2", overflow="fold")
+    # Trim the obvious noise from CPU model strings so the panel stays tight
+    cpu_clean = (hw.cpu_model.replace("(R)", "").replace("(TM)", "")
+                            .replace("11th Gen ", "11th-Gen ").strip())
+    hw_tbl.add_row("CPU",        f"{cpu_clean}  ({hw.cpu_count} cores)")
     hw_tbl.add_row("RAM total",  f"{hw.ram_total_gb:.1f} GB")
     hw_tbl.add_row("RAM free",   f"[bold]{hw.ram_free_gb:.1f} GB[/bold]"
                                   + ("  [yellow](used as budget)[/yellow]"
@@ -1143,11 +1157,11 @@ def performance(
         cloud_configured=bool(cloud_endpoint),
     )
     rec_tbl = _T(box=None, pad_edge=False)
-    rec_tbl.add_column("Role",      style="lcars1", width=10)
-    rec_tbl.add_column("Current",   style="dim",    no_wrap=True)
+    rec_tbl.add_column("Role",      style="lcars1", width=10,   no_wrap=True)
+    rec_tbl.add_column("Current",   style="dim",                no_wrap=True, max_width=20, overflow="ellipsis")
     rec_tbl.add_column("→",         width=2)
-    rec_tbl.add_column("Suggested", style="lcars2", no_wrap=True)
-    rec_tbl.add_column("Why",       style="dim")
+    rec_tbl.add_column("Suggested", style="lcars2",             no_wrap=True, max_width=24, overflow="ellipsis")
+    rec_tbl.add_column("Why",       style="dim",                overflow="fold", min_width=24)
     rec_tbl.add_column("tok/s",     style="lcars3", justify="right", width=7)
 
     severity_arrow = {
@@ -2371,9 +2385,10 @@ _TUTOR_STEPS = [
         "  ✦ Doom Emacs integration gives you SPC l bindings for everything.\n\n"
         "Navigate with: [bold]org-llm tutor <step>[/bold]\n"
         "All steps:     [bold]org-llm tutor --all[/bold]\n"
-        "Steps: welcome → init → index → embed → search → ask → capture → tag → code\n"
-        "       → config → skills → report → doctor → install → db → dbt → opencode\n"
-        "       → source → theme → env → review-emacs → creds → cloud → launch → emacs → claude → done",
+        "Steps: welcome → init → index → embed → code-index → search → ask → capture\n"
+        "       → tag → code → config → skills → report → doctor → install → db → dbt\n"
+        "       → opencode → source → performance → grants → knob → theme → env\n"
+        "       → review-emacs → creds → cloud → launch → emacs → claude → done",
     ),
     (
         "init",
@@ -2440,21 +2455,34 @@ _TUTOR_STEPS = [
     ),
     (
         "ask",
-        "[lcars2]org-llm ask <question>[/lcars2] — RAG over your org notes\n\n"
+        "[lcars2]org-llm ask <question>[/lcars2] — RAG over your org notes (and code)\n\n"
         "[lcars1]How it works (RAG = Retrieval-Augmented Generation):[/lcars1]\n"
         "  1. Your question is embedded into a vector\n"
         "  2. The top-K nearest nodes are retrieved from the DB\n"
-        "  3. Their titles + bodies are injected into a prompt\n"
-        "  4. The chat_model answers using your notes as context\n\n"
+        "  3. Smart augmentation kicks in:\n"
+        "     • Temporal phrases (\"last week\", \"past 3 months\") → mtime filter\n"
+        "     • Path keywords (\"daily\", \"journal\", \"diary\") → folder boost\n"
+        "     • Tag refs (\"my politics tag\", \":queer:\") → tag-anchored retrieval\n"
+        "  4. A retrieval line shows what was found before the LLM answers\n"
+        "  5. The chat_model answers using your notes as context\n\n"
         "[lcars1]Commands:[/lcars1]\n"
         "  [bold]org-llm ask 'What did I write about Emacs?'[/bold]\n"
-        "  [bold]org-llm ask 'Summarise my notes on Python' --top-k 10[/bold]\n"
-        "  [bold]org-llm ask 'Plan my week' --reason[/bold]   ← uses deepseek-r1\n"
-        "  [bold]org-llm ask 'X' --context[/bold]             ← shows which nodes were used\n\n"
-        "[lcars1]Models used:[/lcars1]\n"
-        "  embed_model   → query embedding (nomic-embed-text)\n"
-        "  chat_model    → answer generation (llama3.3)\n"
-        "  reason_model  → used with --reason (deepseek-r1)\n\n"
+        "  [bold]org-llm ask --cloud 'X'[/bold]                 ← route via OpenRouter\n"
+        "  [bold]org-llm ask --top-k 10 'X'[/bold]              ← wider retrieval\n"
+        "  [bold]org-llm ask --reason 'Plan my week'[/bold]     ← uses reason_model\n"
+        "  [bold]org-llm ask --context 'X'[/bold]               ← show retrieved nodes\n"
+        "  [bold]org-llm ask --days 30 'X'[/bold]               ← restrict to last 30 days\n\n"
+        "[lcars1]Auto-detected temporal phrases:[/lcars1]\n"
+        "  yesterday | today | this/last week | this/last month |\n"
+        "  this/last quarter | this/last year | last 6 months | past 30 days |\n"
+        "  recent(ly) | lately | spelled-out numbers (\"last six months\")\n\n"
+        "[lcars1]Tag-aware retrieval:[/lcars1]\n"
+        "  When you mention a tag (\"my X tag\", \"tagged X\", \":X:\"), org-llm checks\n"
+        "  whether it actually exists. If yes, those notes lead the prompt. If no,\n"
+        "  you see \"tag X not found. Closest existing: ...\" up front.\n\n"
+        "[lcars1]Cross-corpus (notes + code):[/lcars1]\n"
+        "  After [bold]org-llm code-index[/bold], your repos are in the same DB —\n"
+        "  ask questions like \"how does cli.py wire MCP?\" and get real answers.\n\n"
         "[dim]Source: org_llm/cli.py → ask()  |  org-llm source cli[/dim]",
     ),
     (
@@ -2780,6 +2808,115 @@ _TUTOR_STEPS = [
         "[dim]Source: doom/org-llm.el  |  org-llm source cli[/dim]",
     ),
     (
+        "code-index",
+        "[lcars2]org-llm code-index[/lcars2] — index source repos for cross-corpus retrieval\n\n"
+        "Walks any directory tree (default: =~/repos= via the [bold]code_dirs[/bold]\n"
+        "config row) and indexes source-shaped files (.py .el .rs .ts .md .org .yaml\n"
+        ".toml etc) into the same SQLite DB as your notes. After this, [bold]ask[/bold]\n"
+        "can answer across notes AND code in one shot.\n\n"
+        "[lcars1]What gets indexed:[/lcars1]\n"
+        "  • One File + one Node per file (whole-file body, capped at 24 KB)\n"
+        "  • Tagged [lcars3]code code:<lang>[/lcars3] so retrieval can scope\n"
+        "  • Skips: .git, node_modules, .venv, target, dist, build, hidden dirs\n"
+        "  • Per-file isolation: a binary or symlink loop rolls back only that row\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm code-index[/bold]                           — index ~/repos\n"
+        "  [bold]org-llm code-index ~/proj1 ~/proj2[/bold]           — explicit paths\n"
+        "  [bold]org-llm code-index --force[/bold]                   — wipe and reindex\n"
+        "  [bold]org-llm code-index --no-embed[/bold]                — skip auto-embed\n\n"
+        "[lcars1]Set the default search root:[/lcars1]\n"
+        "  [bold]org-llm config code_dirs ~/repos,~/dotfiles[/bold]\n\n"
+        "[lcars1]Try it:[/lcars1]\n"
+        "  [bold]org-llm ask --cloud 'how does cli.py wire MCP?'[/bold]\n"
+        "  [bold]org-llm ask --cloud 'where do we filter sensitive paths?'[/bold]\n\n"
+        "[dim]Source: org_llm/code_index.py  |  org-llm source code_index[/dim]",
+    ),
+    (
+        "performance",
+        "[lcars2]org-llm performance[/lcars2] — tune model assignments to your hardware\n\n"
+        "Probes free RAM/VRAM (not total — you have other apps open!), CPU info,\n"
+        "and disk free. Optionally benchmarks each pulled chat/embed model for\n"
+        "real tokens-per-second. Then recommends role assignments that fit your\n"
+        "actual budget, with explicit DOWNGRADE for oversized current models.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm performance[/bold]              — read-only report\n"
+        "  [bold]org-llm performance --quick[/bold]      — hardware probe only (skip Ollama)\n"
+        "  [bold]org-llm performance --benchmark[/bold]  — measure tokens/s per model (1-3 min)\n"
+        "  [bold]org-llm performance --apply[/bold]      — write recommended assignments to config\n\n"
+        "[lcars1]Severity icons in the recommendation table:[/lcars1]\n"
+        "  [bold red]↓[/]  [red]downgrade[/]  — current model needs more RAM than you have\n"
+        "  [bold yellow]↑[/]  [yellow]upgrade[/]    — a higher-quality fitting model exists\n"
+        "  [bold cyan]+[/]  [cyan]missing[/]    — role unassigned\n"
+        "  [bold green]=[/]  [green]fit[/]        — already optimal\n\n"
+        "[lcars1]Why this exists:[/lcars1]\n"
+        "  [bold]models --tune[/bold] uses catalog VRAM × 0.55 × total RAM. That math\n"
+        "  passes models that OOM in practice (everything else on your laptop\n"
+        "  competes for RAM). [bold]performance[/bold] uses free RAM (read at runtime)\n"
+        "  AND the actual benchmark error (with --benchmark) so it catches\n"
+        "  real-world failures the catalog can't predict.\n\n"
+        "[dim]Source: org_llm/performance.py  |  org-llm source performance[/dim]",
+    ),
+    (
+        "grants",
+        "[lcars2]org-llm grant / revoke / grants[/lcars2] — let the LLM read files (carefully)\n\n"
+        "Three-tier authorization for the [bold]read_file[/bold], [bold]list_directory[/bold],\n"
+        "[bold]request_access[/bold], [bold]open_url[/bold], and [bold]browser_command[/bold] MCP tools:\n\n"
+        "  [lcars1]1. ALWAYS denied (deny-list):[/lcars1]\n"
+        "     ~/.ssh, ~/.gnupg, ~/.password-store, ~/.aws/credentials,\n"
+        "     ~/.kube/config, ~/.netrc, /etc/shadow, /root/, …\n"
+        "     [dim]Even with grants. Even with auto-roots. Always.[/dim]\n\n"
+        "  [lcars1]2. Direct grants (allow-list):[/lcars1]\n"
+        "     [bold]org-llm grant <path>[/bold]    — LLM can read this + descendants\n"
+        "     [bold]org-llm revoke <path>[/bold]   — remove\n\n"
+        "  [lcars1]3. Auto-grant roots (LLM self-extends):[/lcars1]\n"
+        "     [bold]org-llm grant-root ~[/bold]    — LLM may self-grant under ~ (except deny-list)\n"
+        "     [bold]org-llm revoke-root <path>[/bold]\n"
+        "     The MCP tool [lcars3]request_access(path, reason)[/lcars3] checks if path is\n"
+        "     under a trusted root, then auto-grants and proceeds.\n\n"
+        "[lcars1]Browser:[/lcars1]\n"
+        "  [bold]org-llm grant-browser[/bold]      — enable open_url + browser_command\n"
+        "  [bold]org-llm revoke-browser[/bold]\n"
+        "  Uses qutebrowser if installed ([bold]doctor --install qutebrowser[/bold]),\n"
+        "  else xdg-open. Refuses non-http(s) URLs always.\n\n"
+        "[lcars1]Inspect what the LLM sees:[/lcars1]\n"
+        "  [bold]org-llm grants[/bold] — show all current grants + auto-roots + browser flag\n\n"
+        "[lcars1]Why three tiers?[/lcars1]\n"
+        "  Direct grants are auditable. Auto-roots let you say \"trust the LLM\n"
+        "  inside this folder\" without preauthorising every file. The deny-list\n"
+        "  catches the obvious dangers regardless. The MCP server runs over\n"
+        "  stdio with no TTY — it can't pop a permission dialog at request\n"
+        "  time, so explicit grants are the contract.\n\n"
+        "[dim]Source: org_llm/access.py  |  org-llm source access[/dim]",
+    ),
+    (
+        "knob",
+        "[lcars2]org-llm knob[/lcars2] — define your own theme dials\n\n"
+        "Built-in theme knobs control the personality of completion messages:\n"
+        "  • [bold]ORG_LLM_TREK_LEVEL[/bold]   0..3 — Trek references\n"
+        "  • [bold]ORG_LLM_COMMIE_LEVEL[/bold] 0..3 — solidarity messaging\n"
+        "  • [bold]ORG_LLM_QUEER_LEVEL[/bold]  0..3 — pride/trans messaging\n\n"
+        "You can register your own knobs to extend or replace the pool.\n\n"
+        "[lcars1]Add a knob:[/lcars1]\n"
+        "  [bold]org-llm knob add dinosaur \\[/bold]\n"
+        "    [bold]-m '◀ ROAR.|info' \\[/bold]\n"
+        "    [bold]-m '◀ Dino-mite work, comrade.|lcars1' \\[/bold]\n"
+        "    [bold]-m '◀ Extinction is for capitalism, not progress.|pride.green'[/bold]\n\n"
+        "Activate (env var name = ORG_LLM_<UPPER>_LEVEL):\n"
+        "  [bold]ORG_LLM_DINOSAUR_LEVEL=2 org-llm doctor[/bold]\n"
+        "  ◀ ROAR.\n\n"
+        "[lcars1]Other commands:[/lcars1]\n"
+        "  [bold]org-llm knob list[/bold]                — show all knobs (built-in + user)\n"
+        "  [bold]org-llm knob remove dinosaur[/bold]     — remove a user knob\n\n"
+        "[lcars1]Storage:[/lcars1]\n"
+        "  User knobs live in the SQLite Config row [lcars3]user_theme_knobs[/lcars3]\n"
+        "  as JSON: name, messages (text + style), default_level. Built-in knobs\n"
+        "  cannot be removed but their level can be set to 0 to silence them.\n\n"
+        "[lcars1]Quiet-everything mode:[/lcars1]\n"
+        "  [bold]ORG_LLM_TREK_LEVEL=0 ORG_LLM_COMMIE_LEVEL=0 ORG_LLM_QUEER_LEVEL=0[/bold]\n"
+        "  reduces every completion to a single neutral \"◀ Done.\".\n\n"
+        "[dim]Source: org_llm/ui.py → _enabled_msgs()  |  org-llm source ui[/dim]",
+    ),
+    (
         "theme",
         "[lcars2]org-llm theme[/lcars2] — dark (default) or light UI\n\n"
         "Every colour the app emits — Rich text, banners, panels, progress bars,\n"
@@ -2818,10 +2955,12 @@ _TUTOR_STEPS = [
         "  [bold]ORG_LLM_OLLAMA_URL[/bold]    Ollama base URL  (default: ollama_url config, fallback http://localhost:11434)\n"
         "  [bold]ANTHROPIC_API_KEY[/bold]     Used by [bold]org-llm claude[/bold]; falls back to pass slug org-llm/anthropic/api-key\n\n"
         "[lcars1]UI / theme:[/lcars1]\n"
-        "  [bold]ORG_LLM_THEME[/bold]         dark | light  (default: dark; persisted via [bold]org-llm theme[/bold])\n"
-        "  [bold]ORG_LLM_NERD_FONTS[/bold]    1/yes/true | 0/no/false — force icon mode\n"
-        "  [bold]ORG_LLM_TREK_LEVEL[/bold]    0..3 — Trek messaging intensity (default: 2)\n"
-        "  [bold]ORG_LLM_COMMIE_LEVEL[/bold]  0..3 — solidarity messaging intensity (default: 2)\n\n"
+        "  [bold]ORG_LLM_THEME[/bold]            dark | light  (default: dark; persisted via [bold]org-llm theme[/bold])\n"
+        "  [bold]ORG_LLM_NERD_FONTS[/bold]       1/yes/true | 0/no/false — force icon mode\n"
+        "  [bold]ORG_LLM_TREK_LEVEL[/bold]       0..3 — Trek messaging intensity (default: 2)\n"
+        "  [bold]ORG_LLM_COMMIE_LEVEL[/bold]     0..3 — solidarity messaging intensity (default: 2)\n"
+        "  [bold]ORG_LLM_QUEER_LEVEL[/bold]      0..3 — pride/trans messaging intensity (default: 2)\n"
+        "  [bold]ORG_LLM_<KNOB>_LEVEL[/bold]     0..3 — any user-registered knob (see [bold]org-llm knob[/bold])\n\n"
         "[lcars1]Examples:[/lcars1]\n"
         "  [bold]ORG_LLM_DB=/tmp/test.db org-llm init[/bold]                  — sandbox a throwaway DB\n"
         "  [bold]ORG_LLM_ORG_DIR=~/work-notes org-llm index[/bold]            — index a side-vault\n"
@@ -4178,21 +4317,33 @@ def cloud(
     if providers:
         console.print()
         console.rule("[lcars1]Supported Cloud GPU Providers[/lcars1]")
+        # On narrow terminals, drop the description column entirely and emit
+        # one-line "<slug>: <description>" rows underneath the table instead.
+        # Rich would otherwise wrap the description to 4-char strips.
+        narrow = console.width < 110
         tbl = Table(box=None, pad_edge=False)
         tbl.add_column("Slug",       style="lcars1",  no_wrap=True, width=14)
-        tbl.add_column("Name",       style="lcars2",  no_wrap=True)
+        tbl.add_column("Name",       style="lcars2",  no_wrap=True, max_width=22, overflow="ellipsis")
         tbl.add_column("API",        style="dim",     width=8)
-        tbl.add_column("Cheapest GPU",               width=16)
-        tbl.add_column("Description", style="dim")
+        tbl.add_column("Cheapest GPU",                width=22, no_wrap=True, overflow="ellipsis")
+        if not narrow:
+            tbl.add_column("Description", style="dim", overflow="fold", min_width=24)
         for p in PROVIDERS:
             cheapest_gpu = min(p.gpu_costs, key=p.gpu_costs.get)
             cheapest_cost = p.gpu_costs[cheapest_gpu]
-            tbl.add_row(
-                p.slug, p.name, p.api_compat,
-                f"${cheapest_cost:.2f}/hr ({cheapest_gpu})",
-                p.description,
+            cheapest_label = (
+                f"FREE — {cheapest_gpu}" if cheapest_cost == 0
+                else f"${cheapest_cost:.2f}/hr ({cheapest_gpu})"
             )
+            row = [p.slug, p.name, p.api_compat, cheapest_label]
+            if not narrow:
+                row.append(p.description)
+            tbl.add_row(*row)
         console.print(tbl)
+        if narrow:
+            console.print()
+            for p in PROVIDERS:
+                console.print(f"  [lcars1]{p.slug:<14}[/lcars1] [dim]{p.description}[/dim]")
         console.print()
         on_screen("Sign up: [bold]org-llm cloud --signup <slug>[/bold]")
         on_screen("Configure: [bold]org-llm cloud --configure[/bold]")
@@ -4593,6 +4744,165 @@ def grants_list():
     console.print()
     on_screen("[dim]Sensitive paths (SSH/GPG/cloud creds) are ALWAYS denied, "
               "even with grants.[/dim]")
+
+
+# ── User-defined theme knobs ────────────────────────────────────────────────
+
+knob_app = typer.Typer(help="Define custom theme knobs (dinosaur, coffee, …) to "
+                            "extend the trek/commie/queer dials.",
+                       cls=PrefixGroup)
+app.add_typer(knob_app, name="knob")
+
+
+def _read_user_knobs() -> list[dict]:
+    """Load user-registered knobs from the config DB. Resilient to missing DB."""
+    import json as _json
+    from .db import Config as _Cfg
+    engine = _engine()
+    try:
+        with get_session(engine) as session:
+            row = session.get(_Cfg, "user_theme_knobs")
+            if row and row.value:
+                data = _json.loads(row.value)
+                if isinstance(data, list):
+                    return data
+    except Exception:
+        pass
+    return []
+
+
+def _write_user_knobs(knobs: list[dict]) -> None:
+    import json as _json
+    from .db import Config as _Cfg
+    engine = _engine()
+    with get_session(engine) as session:
+        row = session.get(_Cfg, "user_theme_knobs")
+        payload = _json.dumps(knobs)
+        if row:
+            row.value = payload
+        else:
+            session.add(_Cfg(key="user_theme_knobs", value=payload))
+        session.commit()
+
+
+@knob_app.command("add")
+def knob_add(
+    name:    Annotated[str,  typer.Argument(help="Knob name (e.g. 'dinosaur'). Lowercased; ASCII letters/digits/_- only.")],
+    message: Annotated[list[str], typer.Option("--message", "-m",
+             help="Add a done-message. Repeatable. Format: 'text|style' or just 'text' (style defaults to lcars1).")] = None,
+    default_level: Annotated[int, typer.Option("--default-level", "-l",
+                   help="Level 0..3 used when ORG_LLM_<NAME>_LEVEL is unset.")] = 2,
+):
+    """Register a new theme knob.
+
+    A knob is a named bundle of completion messages controlled by the
+    matching ORG_LLM_<NAME>_LEVEL env var (0=off, 1+=on). After registering,
+    the messages roll into `make_it_so`'s pool whenever the level is ≥ 1.
+
+    Example:
+      org-llm knob add dinosaur \\
+        -m '◀ ROAR.|info' \\
+        -m '◀ Dino-mite work, comrade.|lcars1' \\
+        -m '◀ Extinction is for capitalism, not progress.|pride.green'
+
+    Then:
+      ORG_LLM_DINOSAUR_LEVEL=2 org-llm doctor
+    """
+    import re
+    norm = name.strip().lower()
+    if not re.fullmatch(r"[a-z][a-z0-9_-]*", norm):
+        red_alert(f"Invalid knob name {name!r}. Use lowercase letters, digits, _ or -.")
+        raise typer.Exit(1)
+    if norm in ("trek", "commie", "queer"):
+        red_alert(f"{norm!r} is built-in; you can already control it via "
+                  f"ORG_LLM_{norm.upper()}_LEVEL.")
+        raise typer.Exit(1)
+
+    msgs: list[list[str]] = []
+    for m in (message or []):
+        if "|" in m:
+            text, style = m.split("|", 1)
+            msgs.append([text.strip(), style.strip() or "lcars1"])
+        else:
+            msgs.append([m.strip(), "lcars1"])
+    if not msgs:
+        on_screen("[yellow]No --message entries given. Add at least one with -m later via `knob edit`,[/yellow]")
+        on_screen("[yellow]or pass several -m flags now to seed the knob.[/yellow]")
+        if not typer.confirm("Register an empty knob anyway?", default=False):
+            raise typer.Exit(1)
+
+    knobs = _read_user_knobs()
+    knobs = [k for k in knobs if k.get("name") != norm]
+    knobs.append({
+        "name": norm,
+        "messages": msgs,
+        "default_level": int(default_level),
+    })
+    _write_user_knobs(knobs)
+    hail(f"Registered theme knob [bold]{norm}[/bold] with {len(msgs)} message(s).")
+    on_screen(f"Activate:  [bold]ORG_LLM_{norm.upper()}_LEVEL=2 org-llm doctor[/bold]")
+    on_screen(f"Inspect:   [bold]org-llm knob list[/bold]")
+    make_it_so()
+
+
+@knob_app.command("remove")
+def knob_remove(
+    name: Annotated[str, typer.Argument(help="Knob name to remove")],
+):
+    """Remove a user-registered theme knob."""
+    norm = name.strip().lower()
+    knobs = _read_user_knobs()
+    kept = [k for k in knobs if k.get("name") != norm]
+    if len(kept) == len(knobs):
+        red_alert(f"No user knob named {norm!r}. Built-in knobs (trek/commie/queer) "
+                  "are not removable.")
+        raise typer.Exit(1)
+    _write_user_knobs(kept)
+    hail(f"Removed knob: {norm}")
+    make_it_so()
+
+
+@knob_app.command("list")
+def knob_list():
+    """Show all theme knobs (built-in + user-defined) and their current levels."""
+    from rich.table import Table as _T
+    knobs = _read_user_knobs()
+    builtins = [
+        {"name": "trek",   "messages": "(built-in Trek refs)",  "default_level": 2},
+        {"name": "commie", "messages": "(built-in solidarity)", "default_level": 2},
+        {"name": "queer",  "messages": "(built-in pride)",      "default_level": 2},
+    ]
+    tbl = _T(box=None, pad_edge=False)
+    tbl.add_column("Knob",       style="lcars1", no_wrap=True)
+    tbl.add_column("Type",       style="dim",    width=8)
+    tbl.add_column("Default",    style="lcars3", justify="right", width=8)
+    tbl.add_column("Active level", style="lcars2", justify="right", width=12)
+    tbl.add_column("Messages",   style="dim")
+
+    def _active(name: str, default: int) -> str:
+        env = os.environ.get(f"ORG_LLM_{name.upper()}_LEVEL", "").strip()
+        if env.isdigit():
+            return f"{env} (env)"
+        return str(default)
+
+    for k in builtins:
+        tbl.add_row(k["name"], "built-in", str(k["default_level"]),
+                    _active(k["name"], k["default_level"]),
+                    k["messages"])
+    for k in knobs:
+        msgs = k.get("messages", []) or []
+        sample = msgs[0][0] if msgs else "(no messages)"
+        tbl.add_row(k["name"], "user",
+                     str(k.get("default_level", 2)),
+                     _active(k["name"], k.get("default_level", 2)),
+                     f"{len(msgs)} msg(s) — e.g. {sample[:50]}")
+    console.print()
+    console.rule("[lcars1]Theme knobs[/lcars1]")
+    console.print(tbl)
+    console.print()
+    on_screen("Add a knob:    [bold]org-llm knob add <name> -m 'msg|style' …[/bold]")
+    on_screen("Remove a knob: [bold]org-llm knob remove <name>[/bold]")
+    on_screen("Override:      [bold]ORG_LLM_<NAME>_LEVEL=0..3[/bold]")
 
 
 @app.command(name="grant-root")

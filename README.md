@@ -86,22 +86,27 @@ candidates.
 | `org-llm init` | Create the SQLite DB and seed default config |
 | `org-llm index` | Parse all `.org` files into the database (incremental by mtime) |
 | `org-llm embed` | Generate embeddings for unembedded nodes (`embed_model`) |
+| `org-llm code-index [PATHS]` | Index `~/repos` (or any tree) so `ask` answers across notes + code |
 | `org-llm search "query"` | Semantic or keyword search (`-k` for keyword) |
-| `org-llm ask "question"` | RAG Q&A grounded in your notes |
-| `org-llm capture` | Add a new note (LLM-polished by default) |
-| `org-llm tag` | Auto-tag untagged nodes (`fast_model`) |
-| `org-llm code "task"` | Generate code with retrieved org context (`code_model`) |
-| `org-llm review-emacs` | LLM review of your Doom or vanilla Emacs config |
-| `org-llm models` | Discover, tune, assign, or pull FOSS LLMs |
-| `org-llm cloud` | Multi-provider GPU cloud — signup, configure, status, cost |
+| `org-llm ask "q"` | RAG Q&A; auto-detects time windows, path hints, and tag references |
+| `org-llm capture` | Add a new note (LLM-polished by default; `--no-polish` to skip) |
+| `org-llm tag` | Auto-tag untagged nodes (default dry-run; `--apply` to write) |
+| `org-llm code "task"` | Generate code with retrieved org context (`--cloud` to route via OpenRouter) |
+| `org-llm review-emacs` | LLM review of your Doom/vanilla Emacs config (`--cloud` for low-RAM hosts) |
+| `org-llm models` | Discover, tune (catalog-based), assign, or pull FOSS LLMs |
+| `org-llm performance` | Hardware-aware tuner — uses *free* RAM + measured tok/s (`--benchmark`) |
+| `org-llm cloud` | Multi-provider GPU cloud — signup, configure, status, cost, `--quick-start` |
 | `org-llm launch` | Open opencode in your vault with MCP wired up |
 | `org-llm claude` | Same, but Claude Code (`ANTHROPIC_API_KEY` from `pass`) |
-| `org-llm doctor` | Deep health check + LLM-powered fix suggestions (`--diagnose`) |
+| `org-llm doctor` | Deep health check + LLM diagnosis; `--install all` bulk-installs FOSS tools |
 | `org-llm report` | Rich text reports — overview / tags / recent / orphans / daily |
-| `org-llm tutor` | 24-step interactive tutorial — start with `tutor welcome` |
+| `org-llm tutor` | 31-step interactive tutorial — start with `tutor welcome` |
 | `org-llm db` | Inspect schema, run SELECT queries, full data dictionary |
 | `org-llm source <module>` | Print any module's source (with `--explain`) |
 | `org-llm mcp` | Start the MCP stdio server (used by opencode and claude) |
+| `org-llm grant <path>` / `revoke` / `grants` | Allow LLM file reads via MCP (with deny-list + auto-roots) |
+| `org-llm grant-browser` / `revoke-browser` | Toggle LLM browser tools (`open_url`, `browser_command`) |
+| `org-llm knob add <name>` | Define your own theme knob (e.g. `dinosaur`, `coffee`) |
 | `org-llm completion fish --install` | Install shell completions |
 | `org-llm install` | One-shot install Ollama, models, fonts, opencode, gh, claude, pass |
 
@@ -267,10 +272,12 @@ org-llm theme toggle   # flip whatever is set
 | `ORG_LLM_DB` | Override the SQLite database path (default: `~/.local/share/org-llm/org-llm.db`) |
 | `ORG_LLM_ORG_DIR` | Override the org-roam directory (default: `org_dir` config key, fallback `~/org`) |
 | `ORG_LLM_OLLAMA_URL` | Override the Ollama endpoint (default: `ollama_url` config key, fallback `http://localhost:11434`) |
-| `ORG_LLM_THEME` | `dark` or `light` (default: `dark`). Persistent setting: `org-llm theme {dark,light,toggle}`. |
+| `ORG_LLM_THEME` | `dark` or `light` (default: `dark`). Persistent: `org-llm theme {dark,light,toggle}`. |
 | `ORG_LLM_NERD_FONTS` | Force-enable (`1`/`yes`) or disable (`0`/`no`) Nerd Font icons |
 | `ORG_LLM_TREK_LEVEL` | Star Trek messaging intensity, `0` (off) – `3` (max). Default: `2` |
 | `ORG_LLM_COMMIE_LEVEL` | Solidarity messaging intensity, `0`–`3`. Default: `2` |
+| `ORG_LLM_QUEER_LEVEL` | Pride/trans messaging intensity, `0`–`3`. Default: `2` |
+| `ORG_LLM_<KNOB>_LEVEL` | Any user-defined knob from `org-llm knob add`, `0`–`3` |
 | `PASSWORD_STORE_DIR` | Override the `pass` store location (default: `~/.password-store`) |
 | `ANTHROPIC_API_KEY` | Used by `org-llm claude`. If unset, falls back to `pass` slug `org-llm/anthropic/api-key`. |
 

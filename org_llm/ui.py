@@ -52,6 +52,7 @@ def _theme_level(env_var: str, default: int = 2) -> int:
 
 TREK_LEVEL      = _theme_level("ORG_LLM_TREK_LEVEL",      2)
 COMMIE_LEVEL    = _theme_level("ORG_LLM_COMMIE_LEVEL",     2)
+QUEER_LEVEL     = _theme_level("ORG_LLM_QUEER_LEVEL",      2)
 
 
 # ── Dark/light palette switching ──────────────────────────────────────────────
@@ -367,64 +368,123 @@ def _pride_banner() -> str:
 PRIDE_BANNER = _pride_banner()
 
 
-_DONE_MSGS = [
-    ("◀ Make it so.",                                                         "success"),
-    ("◀ Engage.",                                                             "lcars2"),
-    ("◀ From each according to ability, to each according to need.",          "pride.green"),
-    ("◀ The needs of the many outweigh the needs of the few.",                "pride.blue"),
-    ("◀ Live long and organize.",                                             "trans.blue"),
-    ("◀ Solidarity achieved. ✊",                                             "pride.violet"),
-    ("◀ No one left behind — not on this ship.",                             "trans.pink"),
-    ("◀ Trans rights are non-negotiable, even in the delta quadrant.",        "trans.blue"),
-    ("◀ Queer, collective, free.",                                            "pride.red"),
-    ("◀ To boldly go where no comrade has gone before.",                      "lcars1"),
-    ("◀ The revolution will be federated.",                                   "pride.green"),
-    ("◀ All power to the workers of the federation.",                         "lcars2"),
-    ("◀ Doom Emacs: the editor of the liberated.",                           "lcars3"),
-    ("◀ Warp speed toward a classless society.",                              "pride.orange"),
-    ("◀ We are the Borg — jk, we have unions.",                              "success"),
-    ("◀ On the holodeck of history, we are not NPCs.",                        "lcars1"),
-    ("◀ Property is theft. Knowledge is free.",                               "pride.violet"),
-    ("◀ Beam me up — there is no intelligent life in capitalism.",            "trans.blue"),
-    ("◀ The dialectic is irreversible. So is git push.",                     "lcars2"),
-    ("◀ Each node a comrade. Each link a bond of solidarity.",               "pride.green"),
+# ── Themed completion messages ───────────────────────────────────────────────
+#
+# Each message is explicitly tagged with the themes it draws on. Several
+# messages straddle two flags (Trek + commie, Trek + trans, etc.) so the
+# tag is a frozenset. A message renders iff EVERY tag in its set has a
+# level >= 1. Untagged ("neutral") messages always render.
+#
+# Built-in themes: trek, commie, queer. Users can register custom themes
+# (with their own keywords, messages, and ORG_LLM_<NAME>_LEVEL env var)
+# via `org-llm knob add` — see `theme_knobs.py` and the `_load_user_knobs`
+# call below.
+
+_DONE_MSGS_TAGGED: list[tuple[str, str, frozenset[str]]] = [
+    ("◀ Make it so.",                                                          "success",     frozenset({"trek"})),
+    ("◀ Engage.",                                                              "lcars2",      frozenset({"trek"})),
+    ("◀ From each according to ability, to each according to need.",           "pride.green", frozenset({"commie"})),
+    ("◀ The needs of the many outweigh the needs of the few.",                 "pride.blue",  frozenset({"trek", "commie"})),
+    ("◀ Live long and organize.",                                              "trans.blue",  frozenset({"trek", "commie"})),
+    ("◀ Solidarity achieved. ✊",                                              "pride.violet",frozenset({"commie"})),
+    ("◀ No one left behind — not on this ship.",                              "trans.pink",  frozenset({"trek", "queer"})),
+    ("◀ Trans rights are non-negotiable, even in the delta quadrant.",         "trans.blue",  frozenset({"queer", "trek"})),
+    ("◀ Queer, collective, free.",                                             "pride.red",   frozenset({"queer", "commie"})),
+    ("◀ To boldly go where no comrade has gone before.",                       "lcars1",      frozenset({"trek", "commie"})),
+    ("◀ The revolution will be federated.",                                    "pride.green", frozenset({"trek", "commie"})),
+    ("◀ All power to the workers of the federation.",                          "lcars2",      frozenset({"trek", "commie"})),
+    ("◀ Doom Emacs: the editor of the liberated.",                            "lcars3",      frozenset({"commie"})),
+    ("◀ Warp speed toward a classless society.",                               "pride.orange",frozenset({"trek", "commie"})),
+    ("◀ We are the Borg — jk, we have unions.",                               "success",     frozenset({"trek", "commie"})),
+    ("◀ On the holodeck of history, we are not NPCs.",                         "lcars1",      frozenset({"trek", "commie"})),
+    ("◀ Property is theft. Knowledge is free.",                                "pride.violet",frozenset({"commie"})),
+    ("◀ Beam me up — there is no intelligent life in capitalism.",             "trans.blue",  frozenset({"trek", "commie"})),
+    ("◀ The dialectic is irreversible. So is git push.",                      "lcars2",      frozenset({"commie"})),
+    ("◀ Each node a comrade. Each link a bond of solidarity.",                "pride.green", frozenset({"commie"})),
+    ("◀ Done.",                                                                "success",     frozenset()),  # neutral
 ]
 
+# Back-compat: legacy attribute used by test_theme.py and external code.
+_DONE_MSGS = [(m, s) for (m, s, _) in _DONE_MSGS_TAGGED]
 _msg_idx = 0
 
-_TREK_ONLY_MSGS = [m for m in _DONE_MSGS if any(
-    kw in m[0] for kw in ("Make it so", "Engage", "Borg", "holodeck",
-                           "Beam", "Warp", "warp", "federation", "delta quadrant",
-                           "starfleet", "ship")
-)]
-_COMMIE_ONLY_MSGS = [m for m in _DONE_MSGS if any(
-    kw in m[0] for kw in ("comrade", "solidarity", "workers", "property",
-                           "dialectic", "revolution", "communism", "class",
-                           "from each", "collective")
-)]
+
+def _theme_levels() -> dict[str, int]:
+    """Map theme name → level. Built-ins plus any user-registered knobs."""
+    levels = {"trek": TREK_LEVEL, "commie": COMMIE_LEVEL, "queer": QUEER_LEVEL}
+    for knob in _user_knobs():
+        env = f"ORG_LLM_{knob['name'].upper()}_LEVEL"
+        levels[knob["name"]] = _theme_level(env, int(knob.get("default_level", 2)))
+    return levels
+
+
+def _user_knobs() -> list[dict]:
+    """Load user-defined theme knobs from the SQLite config row.
+
+    Stored as JSON under the key `user_theme_knobs`. Each knob has:
+        name (str), keywords (list[str]), messages (list[[text, style]]),
+        default_level (int).
+    Resilient to a missing/uninitialised DB.
+    """
+    try:
+        from .db import DB_PATH, Config, make_engine
+        from sqlalchemy.orm import Session
+        path = os.environ.get("ORG_LLM_DB") or str(DB_PATH)
+        from pathlib import Path as _P
+        if not _P(path).exists():
+            return []
+        engine = make_engine(_P(path))
+        import json as _json
+        with Session(engine) as s:
+            row = s.get(Config, "user_theme_knobs")
+            if not row or not row.value:
+                return []
+            data = _json.loads(row.value)
+            if isinstance(data, list):
+                return data
+    except Exception:
+        pass
+    return []
+
+
+def _enabled_msgs() -> list[tuple[str, str]]:
+    """A message renders iff every theme tag is at level ≥ 1.
+
+    Untagged messages are neutral and always render. User-registered knobs
+    contribute their own messages on top of the built-in pool, filtered by
+    their own ORG_LLM_<NAME>_LEVEL.
+    """
+    levels = _theme_levels()
+    keep: list[tuple[str, str]] = []
+    for msg, style, tags in _DONE_MSGS_TAGGED:
+        if all(levels.get(t, 0) >= 1 for t in tags):
+            keep.append((msg, style))
+    # User knobs add their own messages when their level is on
+    for knob in _user_knobs():
+        if levels.get(knob["name"], 0) >= 1:
+            for entry in knob.get("messages", []) or []:
+                if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                    keep.append((str(entry[0]), str(entry[1])))
+                elif isinstance(entry, str):
+                    keep.append((entry, "info"))
+    return keep
 
 
 def make_it_so() -> None:
     global _msg_idx
-    if TREK_LEVEL >= 2 and COMMIE_LEVEL >= 2:
-        pool = _DONE_MSGS
-    elif TREK_LEVEL >= 1 and COMMIE_LEVEL == 0:
-        pool = _TREK_ONLY_MSGS or _DONE_MSGS[:2]
-    elif COMMIE_LEVEL >= 1 and TREK_LEVEL == 0:
-        pool = _COMMIE_ONLY_MSGS or _DONE_MSGS[2:5]
-    elif TREK_LEVEL == 0 and COMMIE_LEVEL == 0:
-        pool = [("◀ Done.", "success")]
-    else:
-        pool = _DONE_MSGS
+    pool = _enabled_msgs() or [("◀ Done.", "success")]
     msg, style = pool[_msg_idx % len(pool)]
     _msg_idx += 1
     console.print(f"[{style}]{msg}[/{style}]")
 
 
 def solidarity() -> None:
-    console.print(SOLIDARITY_BANNER)
-    console.print(PRIDE_BANNER)
-    console.print(trans_stripe())
+    """Render the opening banners. Each section respects its theme dial."""
+    if COMMIE_LEVEL >= 1:
+        console.print(SOLIDARITY_BANNER)
+    if QUEER_LEVEL >= 1:
+        console.print(PRIDE_BANNER)
+        console.print(trans_stripe())
 
 
 def stardate() -> str:
