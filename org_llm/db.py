@@ -84,13 +84,15 @@ def make_engine(path: Path = DB_PATH):
 MODEL_DEFAULTS = {
     "org_dir":        "~/org",
     "ollama_url":     "http://localhost:11434",
-    "embed_model":    "nomic-embed-text",   # semantic search
-    "chat_model":     "llama3.3",           # ask / Q&A
-    "code_model":     "qwen2.5-coder",      # code generation
-    "reason_model":   "deepseek-r1",        # planning, complex reasoning
-    "fast_model":     "phi4",               # tagging, classification
-    "instruct_model": "mistral-nemo",       # capture, instruction following
-    "text_model":     "gemma3",             # summarization, text analysis
+    # Defaults are tuned to fit a laptop CPU/16 GB RAM out of the box. Use
+    # `org-llm models --tune` once you've got real hardware to scale up.
+    "embed_model":    "nomic-embed-text",   # 137 MB — semantic search
+    "chat_model":     "llama3.2",           # 2.0 GB — ask / Q&A (first-flight friendly)
+    "code_model":     "qwen2.5-coder",      # 4.7 GB — code generation
+    "reason_model":   "deepseek-r1:7b",     # 4.7 GB — planning (full deepseek-r1 is 40 GB)
+    "fast_model":     "phi3",               # 2.2 GB — tagging, classification
+    "instruct_model": "mistral-nemo",       # 7.1 GB — capture, instruction following
+    "text_model":     "gemma3",             # 5.4 GB — summarization, text analysis
     "embed_dim":      "768",
     "theme":          "dark",               # dark | light  (UI color mode)
     "db_version":     "1",

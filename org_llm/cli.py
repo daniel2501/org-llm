@@ -66,6 +66,42 @@ def _ollama_url(session) -> str:
             or "http://localhost:11434")
 
 
+def _ollama_has(model: str, base_url: str) -> bool:
+    """Return True if Ollama already has the given model tag pulled."""
+    try:
+        from .llm import list_models
+        pulled = list_models(base_url)
+    except Exception:
+        return False
+    # Match either exact tag or with the implicit ":latest" suffix
+    return any(model in m for m in pulled)
+
+
+def _ollama_pull(model: str) -> bool:
+    """Pull a model via the local ollama binary, streaming progress.
+
+    Returns True on success. Streaming output goes straight to the user's
+    terminal so they see Ollama's own progress bars (these are nicer than
+    anything we can render via Rich without a streaming HTTP client).
+    """
+    import shutil, subprocess
+    ollama = shutil.which("ollama") or str(Path("~/.local/bin/ollama").expanduser())
+    if not Path(ollama).exists():
+        red_alert("ollama binary not found — run: org-llm install --skip-models --skip-fonts")
+        return False
+    hail(f"Pulling [bold]{model}[/bold] via Ollama…")
+    return subprocess.run([ollama, "pull", model]).returncode == 0
+
+
+def _ensure_model_pulled(model: str, base_url: str) -> bool:
+    """Idempotent: make sure `model` is locally available, pulling if needed."""
+    if not model:
+        return False
+    if _ollama_has(model, base_url):
+        return True
+    return _ollama_pull(model) and _ollama_has(model, base_url)
+
+
 def _org_dir(session) -> Path:
     return Path(os.environ.get("ORG_LLM_ORG_DIR")
                 or _cfg(session, "org_dir") or "~/org").expanduser()
@@ -115,7 +151,7 @@ def index(
 def embed(
     force: Annotated[bool, typer.Option("--force", help="Re-embed all nodes")] = False,
 ):
-    """Generate embeddings for indexed nodes (requires Ollama)."""
+    """Generate embeddings for indexed nodes (requires Ollama; pulls the embed model if missing)."""
     from .indexer import embed_nodes
 
     from .db import Node
@@ -127,6 +163,10 @@ def embed(
             total = session.query(Node).count()
         else:
             total = session.query(Node).filter(Node.embedding.is_(None)).count()
+
+    if not _ensure_model_pulled(model, url):
+        red_alert(f"Could not pull embed model {model!r}. Is Ollama running?")
+        raise typer.Exit(1)
 
     hail(f"Embedding {total} nodes with [bold]{model}[/bold]")
 
@@ -227,6 +267,17 @@ def ask(
         api_key = (creds_mod.read_secret(creds_mod.cloud_slug(cloud_provider))
                    if cloud_provider else None) or db_api_key
         chat_mdl = model or cloud_model or chat_mdl
+    else:
+        # Local path: ensure the chat model is pulled before asking.
+        if not _ensure_model_pulled(chat_mdl, url):
+            red_alert(f"Could not pull local model {chat_mdl!r}.")
+            on_screen("Either run with --cloud, or: org-llm doctor --fix")
+            raise typer.Exit(1)
+
+    # Embeddings always come from local Ollama — make sure the embed model is here too
+    if not _ensure_model_pulled(embed_mdl, url):
+        red_alert(f"Could not pull embedding model {embed_mdl!r}.")
+        raise typer.Exit(1)
 
     with warp(TREK_MSGS["ask"] + " — retrieving context"):
         try:
@@ -1262,6 +1313,20 @@ def doctor(
                     fail(f"  {key} not pulled", model,
                          f"ollama pull {model}")
                     missing_models.append(model)
+
+        # --fix: auto-pull every missing configured model
+        if fix and missing_models:
+            console.print()
+            hail(f"--fix: pulling {len(missing_models)} missing model(s)…")
+            for m in missing_models:
+                if _ollama_pull(m):
+                    ok(f"  pulled {m}", "")
+                else:
+                    fail(f"  failed to pull {m}", "")
+            try:
+                pulled_models = list_models(url)
+            except Exception:
+                pass
 
         # Ping embed model to verify it actually responds
         with get_session(engine) as session:
