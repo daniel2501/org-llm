@@ -378,6 +378,60 @@ def create_mcp_server():
         return msg
 
     @server.tool()
+    def add_context(fact: str, topic: str = "") -> str:
+        """Add a current-truth fact to the user's context file.
+
+        Use this PROACTIVELY whenever the user states they've changed
+        something durable about their world — a new job, a move, a
+        finished project, a renamed person. The fact is appended to
+        the org-llm context file, tangled to plain text, and prepended
+        to every future system prompt under "USER CONTEXT". Older
+        notes that mention the prior fact remain in the index but the
+        new fact takes precedence.
+
+        Topic should be a short word like "employment", "address",
+        "project-status" — used for the secondary tag when stale-
+        marking related notes.
+
+        Returns the path the fact was written to.
+        """
+        from . import context as _ctx
+        if not fact or not fact.strip():
+            return "Empty fact — nothing to add."
+        try:
+            p = _ctx.add_fact(fact.strip(), source=f"mcp:{topic or 'general'}")
+            return f"Added to {p}. Re-tangled. The next ask/code call will see this fact."
+        except Exception as e:
+            return f"add_context failed: {e}"
+
+    @server.tool()
+    def get_context() -> str:
+        """Read the current LLM context — what the user has marked as
+        current truth. Use this BEFORE answering any question that
+        depends on facts about the user's life/work/projects, so you
+        cite current rather than stale info."""
+        from . import context as _ctx
+        body = _ctx.read_context_for_prompt(max_chars=8000)
+        return body or "(no context registered yet)"
+
+    @server.tool()
+    def find_stale_notes(keywords: list[str], limit: int = 20) -> str:
+        """Find notes whose title or body contains any of `keywords`.
+
+        Useful right after add_context: surface notes likely contradicted
+        by the new fact so you can offer to tag them stale.
+        """
+        from . import context as _ctx
+        with get_session(engine) as session:
+            cands = _ctx.find_stale_candidates(session, keywords, limit=limit)
+        if not cands:
+            return f"No notes found containing: {keywords}"
+        lines = [f"Found {len(cands)} candidate(s):"]
+        for n, kw in cands:
+            lines.append(f"  - [{kw}] {n.title or '(untitled)'}  (id={n.node_id})")
+        return "\n".join(lines)
+
+    @server.tool()
     def org_llm_run(command_string: str, timeout: int = 60) -> str:
         """Run an arbitrary `org-llm` subcommand from natural-language intent.
 

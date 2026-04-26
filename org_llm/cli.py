@@ -320,7 +320,7 @@ def _auto_start_ollama_if_needed(base_url: str, silent: bool = False) -> bool:
 _LLM_FIXABLE_VERBS = (
     "config", "models", "doctor", "embed", "index", "code-index",
     "knob", "grant", "grant-root", "grant-browser",
-    "performance", "theme", "discover",
+    "performance", "theme", "discover", "context", "stale",
 )
 
 
@@ -1767,6 +1767,29 @@ def ask(
         "name the dates you found. Be concise. Cite note titles in backticks. "
         "When asked for bullets, output bullets, not paragraphs of caveats."
     )
+    # Prepend the user's current-truth context so the LLM knows which
+    # facts override stale info in older notes. Also include the LLM-
+    # generated history narrative under HISTORICAL CONTEXT — stale notes
+    # are still valuable as background, just not as current truth.
+    try:
+        from . import context as _ctx
+        context_block = _ctx.render_context_block()
+        history_block = _ctx.render_history_block()
+        if context_block:
+            system = system + context_block + (
+                "\nIf any retrieved note contradicts USER CONTEXT, prefer "
+                "USER CONTEXT and call out the contradiction. Notes tagged "
+                ":stale: should be cited only when the user asks for "
+                "history."
+            )
+        if history_block:
+            system = system + history_block + (
+                "\nUse HISTORICAL CONTEXT to add temporal background, but "
+                "anchor present-tense answers in USER CONTEXT and the "
+                "retrieved notes."
+            )
+    except Exception:
+        pass
     window_note = ""
     if days_window and not filter_relaxed:
         window_note = (f"\n\nThe user asked about the last {days_window} days. "
@@ -3609,6 +3632,40 @@ def doctor(
     else:
         fail("org_dir missing", str(org_dir),
              f"mkdir -p {org_dir}  or  org-llm config org_dir /path/to/your/org")
+
+    # ── User context (current truth) ───────────────────────────────────────────
+    section("User Context")
+    try:
+        from . import context as _ctx
+        ctx_org    = _ctx.context_org_path()
+        ctx_tangle = _ctx.context_tangle_path()
+        if not ctx_org.exists():
+            info("No context file",
+                 f"create one with: org-llm context add 'I work at <X> now'")
+        else:
+            tangle_body = _ctx.read_context_for_prompt(max_chars=20000)
+            n_facts = sum(1 for ln in tangle_body.splitlines()
+                            if ln.strip().startswith("-"))
+            ok("Context file", f"{ctx_org} ({n_facts} fact line(s))")
+            # Tangle staleness
+            if ctx_tangle.exists() and ctx_org.stat().st_mtime > ctx_tangle.stat().st_mtime + 5:
+                warn("Tangle stale",
+                     "context.org is newer than tangle output; "
+                     "run: org-llm context tangle")
+            elif ctx_tangle.exists():
+                ok("Tangle current", str(ctx_tangle))
+            # Unswept stale candidates
+            if db_ok:
+                with get_session(engine) as session:
+                    n_pending = _ctx.count_unreviewed_stale_candidates(session)
+                if n_pending > 0:
+                    warn("Unreviewed stale candidates",
+                         f"{n_pending} note(s) reference context keywords; "
+                         "run: org-llm stale --apply")
+                else:
+                    ok("No unreviewed stale notes")
+    except Exception as e:
+        warn("Context check failed", str(e)[:80])
 
     # ── Ollama ─────────────────────────────────────────────────────────────────
     section("Ollama")
@@ -5656,6 +5713,24 @@ def review_emacs(
 OPENCODE_WORKSPACES = ("all", "researcher", "scribe", "engineer")
 
 
+def _render_context_for_opencode() -> str:
+    """Pull tangled USER CONTEXT + HISTORICAL CONTEXT into the opencode prompt."""
+    parts: list[str] = []
+    try:
+        from . import context as _ctx
+        body = _ctx.read_context_for_prompt(max_chars=2000)
+        if body:
+            parts.append(f"\n{_ctx.CONTEXT_HEADER}\n{body}\n"
+                         "(prefer this over older note content; surface contradictions.)\n")
+        hist = _ctx.read_history_for_prompt(max_chars=2000)
+        if hist:
+            parts.append(f"\n{_ctx.HISTORY_HEADER}\n{hist}\n"
+                         "(temporal background; anchor present-tense answers in USER CONTEXT.)\n")
+    except Exception:
+        pass
+    return "".join(parts)
+
+
 def _opencode_workspace_prompt(workspace: str, n_files: int, n_nodes: int,
                                 n_embedded: int, pct_e: int, org_dir: str,
                                 skill_str: str, recent_str: str,
@@ -5693,7 +5768,7 @@ HARDWARE
 
 FILESYSTEM
 {discover_str}
-{('USER PROJECTS' + chr(10) + projects_str + chr(10)) if projects_str else ''}{knobs_str}{('TODAY OPENING PROMPT' + chr(10) + '  ' + todays_prompt + chr(10) + '  (offer this if the user opens with no question)' + chr(10)) if todays_prompt else ''}"""
+{('USER PROJECTS' + chr(10) + projects_str + chr(10)) if projects_str else ''}{knobs_str}{('TODAY OPENING PROMPT' + chr(10) + '  ' + todays_prompt + chr(10) + '  (offer this if the user opens with no question)' + chr(10)) if todays_prompt else ''}{_render_context_for_opencode()}"""
 
     if workspace == "researcher":
         focus = """
@@ -7231,6 +7306,443 @@ knob_app = typer.Typer(help="Define custom theme knobs (dinosaur, coffee, …) t
 app.add_typer(knob_app, name="knob")
 
 
+# ── context (LLM-readable current-truth file) ─────────────────────────────
+
+context_app = typer.Typer(
+    help="Manage org-llm's user-context file — facts that override "
+         "stale info in your vault. Tangled to plain-text and "
+         "prepended to every system prompt.",
+    cls=PrefixGroup,
+)
+app.add_typer(context_app, name="context")
+
+
+@context_app.command("show")
+def context_show():
+    """Print the current tangled context (what the LLM actually sees)."""
+    from . import context as _ctx
+    body = _ctx.read_context_for_prompt(max_chars=20000)
+    if not body:
+        on_screen("[dim]No context registered yet.[/dim]")
+        on_screen("Add one:  [bold]org-llm context add 'I work at Idexx now'[/bold]")
+        on_screen("Or:       [bold]org-llm context from-prompt 'natural language'[/bold]")
+        return
+    console.print()
+    console.rule(f"[lcars1]{_ctx.CONTEXT_HEADER}[/lcars1]")
+    console.print(body)
+    console.rule(f"[dim]source: {_ctx.context_org_path()} · "
+                 f"tangled: {_ctx.context_tangle_path()}[/dim]")
+
+
+@context_app.command("add")
+def context_add(
+    fact: Annotated[str, typer.Argument(help="A short crisp fact to record")],
+    topic: Annotated[str, typer.Option("--topic", "-t",
+            help="Topic tag (employment, address, project-status, …)")] = "",
+    sweep: Annotated[bool, typer.Option("--sweep/--no-sweep",
+            help="After adding, scan vault for related stale notes")] = True,
+    apply: Annotated[bool, typer.Option("--apply", "-a",
+            help="Auto-apply stale tags to detected matches (skips confirm)")] = False,
+):
+    """Append a fact to the active context.
+
+    The fact is written to the context org file's `active-facts` block,
+    a one-line history entry is logged, and the file is re-tangled so
+    the LLM sees the new fact immediately. With --sweep (default), the
+    vault is then scanned for nodes whose content references words in
+    the new fact — those are proposed for `:stale:` tagging.
+    """
+    from . import context as _ctx
+    p = _ctx.add_fact(fact, source="cli")
+    hail(f"Added to {p}")
+    on_screen(f"  fact: {fact.strip()}")
+
+    if not sweep:
+        make_it_so()
+        return
+
+    # Quick keyword sweep (deterministic) — pull capitalised tokens.
+    import re as _re
+    keywords = list(set(_re.findall(r"\b[A-Z][a-zA-Z]{2,}\b", fact)))
+    if not keywords:
+        on_screen("[dim]No proper-noun keywords in fact — skipping sweep.[/dim]")
+        make_it_so()
+        return
+
+    engine = _engine()
+    with get_session(engine) as session:
+        candidates = _ctx.find_stale_candidates(session, keywords)
+    if not candidates:
+        on_screen(f"[dim]No notes match keywords {keywords}.[/dim]")
+        make_it_so()
+        return
+
+    on_screen(f"[yellow]Found {len(candidates)} note(s) referencing "
+              f"{', '.join(keywords)}:[/yellow]")
+    for n, kw in candidates[:10]:
+        on_screen(f"  [{kw}] {n.title or '(untitled)'}")
+    if len(candidates) > 10:
+        on_screen(f"  … and {len(candidates) - 10} more")
+
+    if not apply:
+        if not typer.confirm(f"Tag these {len(candidates)} node(s) as :stale:?",
+                              default=False):
+            on_screen("Skipped. Re-run with --apply to tag automatically.")
+            return
+
+    with get_session(engine) as session:
+        # Re-fetch under the new session for safe writes
+        kws = keywords
+        cands = _ctx.find_stale_candidates(session, kws)
+        n_updated = _ctx.apply_stale_tags(session, cands, topic=topic)
+    hail(f"Tagged {n_updated} node(s) as :stale: "
+         + (f"+ :re:{topic}:" if topic else ""))
+    make_it_so()
+
+
+@context_app.command("from-prompt")
+def context_from_prompt(
+    prompt: Annotated[str, typer.Argument(help="Freeform statement (LLM parses to a fact)")],
+    apply:  Annotated[bool, typer.Option("--apply", "-a",
+            help="Skip confirmation; apply stale tags directly")] = False,
+):
+    """Parse a freeform statement into a structured fact via the LLM.
+
+    Example:
+      org-llm context from-prompt "I no longer work at Unum, now at Idexx as of April"
+        → fact:    "Works at Idexx as of 2026-04 (formerly Unum, 2018-2026)."
+        → keywords: ["Unum"]
+        → topic:   "employment"
+    The vault is then scanned for nodes mentioning the keywords and
+    proposed for stale-tagging.
+    """
+    from . import context as _ctx
+    engine = _engine()
+    with get_session(engine) as session:
+        url = _ollama_url(session)
+        mdl = (_cfg(session, "fast_model")
+               or _cfg(session, "chat_model")
+               or "llama3.2")
+        # Prefer smallest fitting chat-capable model for parse
+        try:
+            from .llm import list_models as _lm
+            pulled = {(m.get("name") if isinstance(m, dict) else m.name)
+                       for m in _lm(url) or []}
+            for cand in ("llama3.2:1b", "llama3.2:3b", "llama3.2"):
+                if any(p == cand or p.startswith(cand + ":") for p in pulled):
+                    mdl = cand
+                    break
+        except Exception:
+            pass
+    plan = _ctx.parse_user_request(prompt, model=mdl, base_url=url)
+    if not plan or not plan.get("fact"):
+        red_alert("LLM couldn't extract a fact from that statement.")
+        on_screen(f"  Try: [bold]org-llm context add '{prompt[:50]}…'[/bold]")
+        raise typer.Exit(1)
+    fact     = plan["fact"]
+    keywords = plan.get("supersedes_keywords") or []
+    topic    = plan.get("topic") or ""
+    on_screen(f"[lcars3]Parsed:[/lcars3] {fact}")
+    if keywords:
+        on_screen(f"  [dim]Supersedes keywords:[/dim] {', '.join(keywords)}")
+    if topic:
+        on_screen(f"  [dim]Topic:[/dim] {topic}")
+    p = _ctx.add_fact(fact, source="from-prompt")
+    hail(f"Added to {p}")
+
+    if not keywords:
+        make_it_so()
+        return
+
+    with get_session(engine) as session:
+        candidates = _ctx.find_stale_candidates(session, keywords)
+    if not candidates:
+        on_screen(f"[dim]No notes match keywords.[/dim]")
+        make_it_so()
+        return
+    on_screen(f"[yellow]Found {len(candidates)} note(s) likely affected:[/yellow]")
+    for n, kw in candidates[:10]:
+        on_screen(f"  [{kw}] {n.title or '(untitled)'}")
+    if not apply:
+        if not typer.confirm(f"Tag these as :stale: + :re:{topic}: ?", default=False):
+            on_screen("Skipped. Re-run with --apply to tag automatically.")
+            return
+    with get_session(engine) as session:
+        cands = _ctx.find_stale_candidates(session, keywords)
+        n_updated = _ctx.apply_stale_tags(session, cands, topic=topic)
+    hail(f"Tagged {n_updated} node(s) as :stale:"
+         + (f" + :re:{topic}:" if topic else ""))
+    make_it_so()
+
+
+@context_app.command("tangle")
+def context_tangle():
+    """Re-tangle the context org file → plain-text targets the LLM reads."""
+    from . import context as _ctx
+    org = _ctx.context_org_path()
+    if not org.exists():
+        on_screen(f"[dim]No context file yet at {org}.[/dim]")
+        on_screen("Create one with: [bold]org-llm context add '<fact>'[/bold]")
+        return
+    written = _ctx.tangle()
+    if not written:
+        on_screen("[dim]Nothing to tangle (no :tangle blocks and no "
+                  ":LLM_CONTEXT: sections).[/dim]")
+        return
+    for tgt, body in written.items():
+        hail(f"Tangled → {tgt}  ({len(body)} chars)")
+    make_it_so()
+
+
+@context_app.command("edit")
+def context_edit():
+    """Open the context file in $EDITOR."""
+    from . import context as _ctx
+    p = _ctx.ensure_context_file_exists()
+    editor = os.environ.get("EDITOR", "")
+    if not editor:
+        red_alert("$EDITOR not set; printing path instead.")
+        on_screen(f"  {p}")
+        return
+    import subprocess
+    subprocess.call([editor, str(p)])
+    # Re-tangle on close in case the user edited tangle blocks.
+    _ctx.tangle()
+
+
+@context_app.command("clear")
+def context_clear(
+    yes: Annotated[bool, typer.Option("--yes", "-y",
+          help="Skip confirmation")] = False,
+):
+    """Wipe the context file (with confirmation)."""
+    from . import context as _ctx
+    p = _ctx.context_org_path()
+    if not p.exists():
+        on_screen("[dim]No context file to clear.[/dim]")
+        return
+    if not yes and not typer.confirm(f"Delete {p}?", default=False):
+        return
+    p.unlink()
+    tangle_p = _ctx.context_tangle_path()
+    if tangle_p.exists():
+        tangle_p.unlink()
+    hail("Context cleared.")
+
+
+history_app = typer.Typer(
+    help="Build and manage the LLM-generated history narrative — a "
+         "tangled summary of older/stale notes prepended to every "
+         "system prompt as background context.",
+    cls=PrefixGroup,
+)
+app.add_typer(history_app, name="history")
+
+
+@history_app.command("build")
+def history_build(
+    sample_limit: Annotated[int, typer.Option("--limit", "-n",
+                  help="Max notes to feed the model")] = 60,
+    age_days:     Annotated[int, typer.Option("--age-days", "-d",
+                  help="Notes older than N days qualify (in addition to :stale: tagged)")] = 180,
+    interactive:  Annotated[bool, typer.Option("--interactive", "-i",
+                  help="Short interactive interview before generation")] = False,
+):
+    """Scan stale + old notes; LLM writes a narrative summary to llm-history.org.
+
+    The narrative is tangled to a plain-text file org-llm prepends to
+    every system prompt as HISTORICAL CONTEXT — so even after notes get
+    tagged :stale: their gist still informs answers.
+
+    Pass --interactive for a 3-question interview (emphasise / skip /
+    tone) that shapes the narrative.
+    """
+    from . import context as _ctx
+    _auto_init_db_if_needed()
+
+    user_guidance = ""
+    if interactive:
+        console.print()
+        console.rule("[lcars1]History narrative — interview[/lcars1]")
+        on_screen("[dim]Three short questions. Press Enter to skip any.[/dim]")
+        emphasise = typer.prompt(
+            "Topics to emphasise (e.g. employment, projects, places)",
+            default="", show_default=False,
+        ).strip()
+        skip_topics = typer.prompt(
+            "Topics to skip (e.g. work, todos, daily)",
+            default="", show_default=False,
+        ).strip()
+        tone = typer.prompt(
+            "Tone — 'factual', 'impressionistic', 'terse'",
+            default="factual", show_default=True,
+        ).strip()
+        bits = []
+        if emphasise:
+            bits.append(f"  Emphasise topics: {emphasise}")
+        if skip_topics:
+            bits.append(f"  Skip topics: {skip_topics}")
+        if tone and tone != "factual":
+            bits.append(f"  Tone: {tone}")
+        if bits:
+            user_guidance = "\n\nUser guidance:\n" + "\n".join(bits)
+            on_screen(f"[dim]Guidance captured. Generating…[/dim]")
+        console.print()
+
+    engine = _engine()
+    with get_session(engine) as session:
+        url = _ollama_url(session)
+        mdl = (_cfg(session, "fast_model")
+               or _cfg(session, "chat_model")
+               or "llama3.2")
+        try:
+            from .llm import list_models as _lm
+            pulled = {(m.get("name") if isinstance(m, dict) else m.name)
+                       for m in _lm(url) or []}
+            for cand in ("llama3.2:1b", "llama3.2:3b", "llama3.2"):
+                if any(p == cand or p.startswith(cand + ":") for p in pulled):
+                    mdl = cand; break
+        except Exception:
+            pass
+    with get_session(engine) as session:
+        narrative = _ctx.build_history(session, model=mdl, base_url=url,
+                                         sample_limit=sample_limit,
+                                         age_days=age_days,
+                                         user_guidance=user_guidance)
+    if not narrative:
+        red_alert("Couldn't build history. Either no qualifying notes "
+                  "(stale-tagged or >180 days), or the LLM didn't reply.")
+        on_screen("[dim]Tag some notes stale first or lower --age-days.[/dim]")
+        raise typer.Exit(1)
+    p = _ctx.history_org_path()
+    hail(f"History written to {p}")
+    on_screen(f"  [dim]Tangled to: {_ctx.history_tangle_path()}[/dim]")
+    console.print()
+    on_screen("[lcars3]Preview:[/lcars3]")
+    for line in narrative.splitlines()[:20]:
+        console.print(f"  {line}")
+    if len(narrative.splitlines()) > 20:
+        on_screen(f"  [dim]…and {len(narrative.splitlines()) - 20} more lines[/dim]")
+    make_it_so()
+
+
+@history_app.command("show")
+def history_show():
+    """Print the current tangled history narrative."""
+    from . import context as _ctx
+    body = _ctx.read_history_for_prompt(max_chars=20000)
+    if not body:
+        on_screen("[dim]No history narrative yet.[/dim]")
+        on_screen("Build one: [bold]org-llm history build[/bold]")
+        return
+    console.print()
+    console.rule(f"[lcars1]{_ctx.HISTORY_HEADER}[/lcars1]")
+    console.print(body)
+    console.rule(f"[dim]source: {_ctx.history_org_path()} · "
+                 f"tangled: {_ctx.history_tangle_path()}[/dim]")
+
+
+@history_app.command("tangle")
+def history_tangle():
+    """Re-tangle llm-history.org → plain-text tangle target."""
+    from . import context as _ctx
+    p = _ctx.history_org_path()
+    if not p.exists():
+        on_screen(f"[dim]No history file at {p}.[/dim]")
+        on_screen("Build one: [bold]org-llm history build[/bold]")
+        return
+    written = _ctx.tangle(p, _ctx.history_tangle_path())
+    for tgt, body in written.items():
+        hail(f"Tangled → {tgt}  ({len(body)} chars)")
+    make_it_so()
+
+
+@app.command()
+def stale(
+    apply:    Annotated[bool, typer.Option("--apply", "-a",
+              help="Auto-apply suggested tags without confirmation")] = False,
+    limit:    Annotated[int,  typer.Option("--limit", "-n",
+              help="Max nodes to judge per sweep")] = 20,
+    since_days: Annotated[int, typer.Option("--since-days", "-d",
+                help="Only consider nodes older than N days (0 = all)")] = 0,
+):
+    """LLM-driven stale-content sweep.
+
+    Samples nodes the LLM hasn't yet flagged, gives them to the model
+    along with your active context file, asks for verdicts. Nodes that
+    contradict your current truth are tagged :stale: (or :re:<topic>:);
+    nodes that merely drift get a softer :drift: tag.
+
+    Run periodically — after a `context add`, after a job change, or
+    via `doctor` (it nudges you when there's unswept context).
+    """
+    from . import context as _ctx
+    engine = _engine()
+    with get_session(engine) as session:
+        url = _ollama_url(session)
+        mdl = (_cfg(session, "fast_model")
+               or _cfg(session, "chat_model")
+               or "llama3.2")
+        try:
+            from .llm import list_models as _lm
+            pulled = {(m.get("name") if isinstance(m, dict) else m.name)
+                       for m in _lm(url) or []}
+            for cand in ("llama3.2:1b", "llama3.2:3b", "llama3.2"):
+                if any(p == cand or p.startswith(cand + ":") for p in pulled):
+                    mdl = cand; break
+        except Exception:
+            pass
+
+    if not _ctx.read_context_for_prompt():
+        red_alert("No context registered — staleness is judged against "
+                  "current truth.")
+        on_screen("Start with: [bold]org-llm context add '<fact>'[/bold]")
+        on_screen("Or:         [bold]org-llm context from-prompt '<sentence>'[/bold]")
+        raise typer.Exit(1)
+
+    with get_session(engine) as session:
+        verdicts = _ctx.llm_stale_sweep(session, model=mdl, base_url=url,
+                                          limit=limit, since_days=since_days)
+    if not verdicts:
+        on_screen("[green]No stale candidates surfaced this sweep.[/green]")
+        on_screen("[dim]LLM either found everything fresh, or didn't return "
+                  "valid JSON. Try `--limit 30` or rephrase your context.[/dim]")
+        return
+
+    on_screen(f"[yellow]LLM proposes {len(verdicts)} action(s):[/yellow]")
+    for v in verdicts[:25]:
+        on_screen(f"  [{v['verdict']}/{v['tag']}] {v['node_id'][:20]} "
+                  f"— {v['reason']}")
+
+    if not apply:
+        if not typer.confirm(f"Apply tags to {len(verdicts)} node(s)?",
+                              default=False):
+            on_screen("Skipped. Re-run with --apply to tag automatically.")
+            return
+
+    from .db import Node
+    n_updated = 0
+    with get_session(engine) as session:
+        for v in verdicts:
+            db_n = (session.query(Node)
+                    .filter_by(node_id=v["node_id"]).first())
+            if not db_n:
+                continue
+            existing = (db_n.tags or "").split()
+            tag = v["tag"]
+            if tag in existing:
+                continue
+            db_n.tags = " ".join(existing + [tag])
+            n_updated += 1
+        session.commit()
+    hail(f"Tagged {n_updated} node(s).")
+    make_it_so()
+
+
+# context + stale are added to _LLM_FIXABLE_VERBS / _INTENT_RECOVERABLE_VERBS
+# at their definition sites (much later in the file).
+
+
 def _read_user_knobs() -> list[dict]:
     """Load user-registered knobs from the config DB. Resilient to missing DB."""
     import json as _json
@@ -7698,6 +8210,7 @@ _INTENT_RECOVERABLE_VERBS = {
     "ask", "code", "capture", "search", "tutor", "source",
     "models", "doctor", "report", "discover", "personalize",
     "code-index", "review-emacs", "tag", "config", "knob",
+    "context", "stale",
 }
 
 

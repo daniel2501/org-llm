@@ -113,6 +113,9 @@ candidates.
 | `org-llm grant-browser` / `revoke-browser` | Toggle LLM browser tools (`open_url`, `browser_command`) |
 | `org-llm knob add <name>` | Define your own theme knob (e.g. `dinosaur`, `coffee`) |
 | `org-llm personalize [--apply]` | Auto-create theme knobs from your top tags + projects |
+| `org-llm context add 'fact'` / `from-prompt` | Record current truth that overrides stale info |
+| `org-llm history build [-i]` | LLM scans old + archived notes; writes narrative summary |
+| `org-llm stale [--apply]` | LLM-driven staleness sweep over uncategorised notes |
 | `org-llm completion fish --install` | Install shell completions |
 | `org-llm install` | One-shot install Ollama, models, fonts, opencode, gh, claude, pass |
 
@@ -573,6 +576,84 @@ How it works:
 
 Inspect with `org-llm knob list`; tune levels with
 `org-llm config <name>_level 0..3` or `ORG_LLM_<NAME>_LEVEL=0..3`.
+
+---
+
+## Context, history, and stale-tagging
+
+The vault records what was true *when written*. Without overrides, the
+LLM keeps citing stale facts. Three tangle-driven files solve this:
+
+| File | Role | Tangles to |
+|---|---|---|
+| `~/org/llm-context.org` | Current truth — overrides stale info | `~/.local/share/org-llm/llm-context.txt` |
+| `~/org/llm-history.org` | LLM-generated narrative of older / archived notes | `~/.local/share/org-llm/llm-history.txt` |
+| Existing notes | Some get tagged `:stale:` over time | (in the SQLite index) |
+
+Both `*.org` files are normal org files — human-editable, version-
+controllable, with literate `#+begin_src ... :tangle <path> ... #+end_src`
+blocks. The tangled plain-text outputs get prepended to every system
+prompt as `USER CONTEXT` and `HISTORICAL CONTEXT` headers.
+
+**Recording current truth:**
+
+```sh
+# Direct one-liner
+org-llm context add 'Works at Idexx since 2026-04 (formerly Unum).' \
+                    --topic employment
+
+# LLM-parsed freeform → structured
+org-llm context from-prompt \
+  "I no longer work at Unum, now at Idexx as of April 2026."
+```
+
+Both flows offer to scan the vault for nodes mentioning superseded
+keywords and tag them `:stale: :re:employment:` so retrieval reweights.
+
+**Inside opencode**, the LLM calls `add_context()` itself — say "I no
+longer work at X, now Y" and it'll register the fact + propose stale
+tags.
+
+**LLM-driven staleness sweep:**
+
+```sh
+org-llm stale                   # LLM judges 20 oldest non-stale nodes
+org-llm stale --apply           # skip confirm; auto-tag
+org-llm stale --limit 50 --since-days 365
+```
+
+For each node the LLM emits `stale` (contradicts current truth),
+`drift` (framing assumes older facts), or `fresh` (skipped). Doctor
+flags unreviewed candidates so this stays on your radar.
+
+**History narrative** — stale ≠ worthless:
+
+```sh
+org-llm history build              # scans stale-tagged + 180+ day notes
+org-llm history build --interactive # 3-question interview first
+org-llm history show               # what's prepended as HISTORICAL CONTEXT
+```
+
+The build scans:
+- All nodes tagged `:stale:` (any age)
+- Plus all non-code nodes older than `--age-days` (default 180)
+- **Plus the archive walk** — `~/org/archive/**/*.org`,
+  `~/org/**/archive/**/*.org`, `*.org_archive`. Those usually aren't
+  indexed but they're prime narrative material.
+
+The LLM organises bullets under appropriate headings (Employment,
+Project, Address, Relationship history) and writes them into
+`~/org/llm-history.org`'s tangle block.
+
+**System-prompt injection.** Every `ask`, `code`, `review-emacs`,
+`launch` prepends both files (when present) so the LLM always has
+current truth + temporal background before deciding what to cite.
+
+**The tangle parser** is a tight ~30-line subset of `org-babel-tangle`
+in `org_llm.context`. Handles `:tangle PATH`, `:tangle no`, default
+target, tilde expansion, multiple blocks per target, indented bodies,
+header args interleaved. No `emacsclient` required. 11 unit tests
+cover the edge cases.
 
 ---
 
