@@ -156,6 +156,52 @@ def _ensure_model_pulled(model: str, base_url: str) -> bool:
     return _ollama_pull(model) and _ollama_has(model, base_url)
 
 
+# ── Temporal-phrase auto-detection for `ask` ────────────────────────────────
+
+_TIME_PHRASES = [
+    # (regex, days)
+    (r"\byesterday\b",                              1),
+    (r"\btoday\b",                                  1),
+    (r"\bthis week\b",                              7),
+    (r"\blast week\b",                              7),
+    (r"\bpast week\b",                              7),
+    (r"\bthis month\b",                            30),
+    (r"\blast month\b",                            30),
+    (r"\bpast month\b",                            30),
+    (r"\bthis quarter\b",                          90),
+    (r"\blast quarter\b",                          90),
+    (r"\bthis year\b",                            365),
+    (r"\blast year\b",                            365),
+    (r"\brecent(ly)?\b",                           14),
+    (r"\blately\b",                                14),
+]
+
+
+def _parse_days_window(query: str) -> int | None:
+    """Extract a "last N days" intent from a free-form question.
+
+    Returns the number of days to look back, or None if no temporal phrase
+    is present. Numeric phrases like "last 30 days" / "past 60 days" win
+    over keyword phrases like "last week".
+    """
+    if not query:
+        return None
+    import re
+    q = query.lower()
+    # Numeric: "last 30 days", "past 14 days", "in the last 7 days"
+    m = re.search(r"\b(?:last|past|previous)\s+(\d{1,4})\s+days?\b", q)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"\b(\d{1,4})\s+days?\s+ago\b", q)
+    if m:
+        return int(m.group(1))
+    # Keyword phrases
+    for pattern, days in _TIME_PHRASES:
+        if re.search(pattern, q):
+            return days
+    return None
+
+
 def _org_dir(session) -> Path:
     return Path(os.environ.get("ORG_LLM_ORG_DIR")
                 or _cfg(session, "org_dir") or "~/org").expanduser()
@@ -337,11 +383,13 @@ def ask(
     model:   Annotated[str,  typer.Option("--model", "-m",
              help="Override chat model")] = "",
     context: Annotated[bool, typer.Option("--context", "-c",
-             help="Show retrieved context nodes")] = False,
+             help="Show retrieved context nodes with similarity scores")] = False,
     reason:  Annotated[bool, typer.Option("--reason", "-r",
              help="Use reason_model (deepseek-r1) instead of chat_model")] = False,
     cloud_:  Annotated[bool, typer.Option("--cloud",
              help="Route the chat through the configured cloud backend instead of local Ollama")] = False,
+    days:    Annotated[int,  typer.Option("--days",
+             help="Restrict retrieval to nodes modified in the last N days (0 = no filter; auto-detected from query phrases like 'last week')")] = 0,
 ):
     """Ask a question answered from your org notes (RAG).
 
@@ -349,9 +397,13 @@ def ask(
     the chat call through the configured cloud provider (set up via
     `org-llm cloud --quick-start <provider>`). Embeddings still come from
     local Ollama unless you also override embed_model.
+
+    Temporal queries: phrases like "last week", "last month", "yesterday",
+    "last N days" auto-set --days. Override explicitly with --days N (or
+    --days 0 to disable the filter).
     """
     from .llm import chat as local_chat, embed
-    from .search import vector_search
+    from .search import recent_in_path, recent_nodes, vector_search
 
     engine = _engine()
     try:
@@ -394,36 +446,124 @@ def ask(
         red_alert(f"Could not pull embedding model {embed_mdl!r}.")
         raise typer.Exit(1)
 
+    # Time-window resolution: explicit --days wins; otherwise auto-detect.
+    days_window = days if days > 0 else _parse_days_window(query)
+    since_mtime = None
+    if days_window:
+        from datetime import datetime, timedelta
+        since_mtime = (datetime.now() - timedelta(days=days_window)).timestamp()
+
+    # Detect path-anchored query intents (daily / journal / diary). When the
+    # query references one of these subfolders, we augment retrieval with the
+    # most-recent files from that path REGARDLESS of the mtime window — so
+    # "summarize my daily notes" surfaces the actual journal even if the user
+    # hasn't written one this week.
+    path_hints: list[str] = []
+    q_lower = query.lower()
+    for keyword, folder in [("daily note", "daily"), ("daily", "daily"),
+                              ("journal", "journal"), ("diary", "diary")]:
+        if keyword in q_lower and folder not in path_hints:
+            path_hints.append(folder)
+
     with warp(TREK_MSGS["ask"] + " — retrieving context"):
         try:
             with get_session(engine) as session:
                 qvec    = embed(query, model=embed_mdl, base_url=url)
-                results = vector_search(session, qvec, limit=top_k)
+                results = list(vector_search(session, qvec, limit=top_k,
+                                              since_mtime=since_mtime))
+                seen = {(r.node_id, r.title, r.file_path) for r in results}
+
+                # When a time window is active, augment with mtime-DESC nodes
+                # so date-titled files don't get filtered out by weak semantic
+                # similarity to phrases like "daily notes".
+                if since_mtime is not None:
+                    recent = recent_nodes(session, limit=top_k, since_mtime=since_mtime)
+                    for r in recent:
+                        key = (r.node_id, r.title, r.file_path)
+                        if key not in seen:
+                            results.append(r); seen.add(key)
+
+                # Path-anchored augmentation (daily/journal/diary). When the
+                # user explicitly references one of these folders we PREPEND
+                # them rather than append, so they lead in the LLM's prompt.
+                path_aug: list = []
+                for folder in path_hints:
+                    path_aug += recent_in_path(session, folder, limit=top_k)
+                fresh_path = []
+                for r in path_aug:
+                    key = (r.node_id, r.title, r.file_path)
+                    if key not in seen:
+                        fresh_path.append(r); seen.add(key)
+                if fresh_path:
+                    results = fresh_path + results
         except Exception as e:
             red_alert(f"Embed/search failed: {e}")
             on_screen("If Ollama isn't running locally, run: ollama serve")
             raise typer.Exit(1)
 
+    # If a time filter wiped out all matches, retry without it and warn.
+    filter_relaxed = False
+    if not results and since_mtime is not None:
+        filter_relaxed = True
+        with get_session(engine) as session:
+            results = vector_search(session, qvec, limit=top_k, since_mtime=None)
+
     if not results:
         red_alert("No indexed nodes found. Run `org-llm embed` first.")
         raise typer.Exit(1)
 
+    # Always show a one-line retrieval summary so the user can sanity-check
+    # whether retrieval was on-topic before the LLM responds.
+    titles = ", ".join(r.title[:40] for r in results[:3])
+    path_note = (f" + {'/'.join(path_hints)} folder" if path_hints else "")
+    if days_window:
+        if filter_relaxed:
+            on_screen(f"[yellow]No notes in the last {days_window} days; "
+                      f"falling back to all-time top {len(results)}{path_note}: {titles}…[/yellow]")
+        else:
+            on_screen(f"Retrieved {len(results)} note(s) from the last "
+                      f"{days_window} days{path_note}: [dim]{titles}…[/dim]")
+    else:
+        on_screen(f"Retrieved {len(results)} note(s){path_note}: [dim]{titles}…[/dim]")
+
     if context:
-        hail("Context nodes retrieved:")
         for r in results:
             on_screen(f"  [{r.score:.3f}] {r.title} ({Path(r.file_path).name})")
-        console.print()
+    console.print()
 
     ctx_text = "\n\n---\n\n".join(
         f"# {r.title}\n{r.body[:800]}" for r in results
     )
 
     system = (
-        "You are an assistant with access to a personal org-mode knowledge base. "
-        "Answer using only the provided notes. Be concise. "
-        "Cite note titles when relevant."
+        "You are answering using ONLY the org-roam notes the user has "
+        "retrieved and pasted below. The notes ARE the user's data — they "
+        "are giving them to you directly in this prompt. You DO have access "
+        "to them. NEVER reply with 'I don't have access', 'please share', "
+        "'the actual files are not present', or any variant. If a note is "
+        "named like a date (e.g. `2026-04-12`) and is in a `daily/` folder, "
+        "treat it as a daily journal entry — its sub-headings ARE the day's "
+        "content. If the user asked about a time window but the retrieved "
+        "notes are from outside it, summarise what you HAVE and explicitly "
+        "name the dates you found. Be concise. Cite note titles in backticks. "
+        "When asked for bullets, output bullets, not paragraphs of caveats."
     )
-    prompt = f"Notes from my org files:\n\n{ctx_text}\n\n---\n\nQuestion: {query}"
+    window_note = ""
+    if days_window and not filter_relaxed:
+        window_note = (f"\n\nThe user asked about the last {days_window} days. "
+                       f"Some retrieved notes are from that window; some are "
+                       f"recent files from a {'/'.join(path_hints) or 'matched'} folder "
+                       "regardless of mtime so you have content to work with."
+                       if path_hints else
+                       f"\n\nThese notes are filtered to mtime within the last {days_window} days.")
+    if filter_relaxed:
+        window_note = (f"\n\nNote: the user asked about the last {days_window} days, "
+                       f"but no notes match that window — these {len(results)} are "
+                       "the closest matches available. Use them; mention the dates "
+                       "they're actually from.")
+    prompt = (f"Question: {query}\n\n"
+              f"Retrieved notes ({len(results)}):{window_note}\n\n"
+              f"{ctx_text}")
 
     if cloud_:
         from .cloud import cloud_chat
