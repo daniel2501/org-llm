@@ -5072,6 +5072,10 @@ def cloud(
                  help="Provider slug for one-shot signup flow (e.g. openrouter, groq)")] = "",
     key:         Annotated[str, typer.Option("--key", "-K",
                  help="API key for --quick-start (skips the interactive paste prompt)")] = "",
+    recommend_upgrade: Annotated[bool, typer.Option("--recommend-upgrade", "-u",
+                 help="Analyse recent cloud usage; suggest a paid tier if free is choking")] = False,
+    upgrade:     Annotated[str, typer.Option("--upgrade",      "-U",
+                 help="Open a provider's billing/upgrade page (slug; default: configured provider)")] = "",
 ):
     """Manage cloud GPU backends — RunPod, Vast.ai, Lambda, TensorDock, Salad, and more.
 
@@ -5095,8 +5099,98 @@ def cloud(
     engine = _engine()
 
     # default: show status
-    if not any([status, providers, signup, console_, configure, test, assess, cost, creds, quick_start]):
+    if not any([status, providers, signup, console_, configure, test, assess,
+                cost, creds, quick_start, recommend_upgrade, upgrade]):
         status = True
+
+    # ── Recommend a paid upgrade based on recent usage telemetry ─────────────
+    if recommend_upgrade:
+        from rich.panel import Panel as _P
+        from rich.table import Table as _T
+        from .cloud import recommend_upgrade as _ru, PROVIDER_MAP as _PM
+        # Read top fixer accuracy from cloud_usage if available
+        # (we don't keep a structured score, so use last benchmark winner as proxy)
+        with get_session(engine) as session:
+            best = _cfg(session, "fixer_model")
+        rec = _ru()
+        console.print()
+        console.rule("[lcars1]Upgrade recommendation[/lcars1]")
+        m = rec.metrics
+        info = _T(box=None, pad_edge=False, show_header=False)
+        info.add_column("Key",   style="lcars1", width=22, no_wrap=True)
+        info.add_column("Value", style="lcars2", overflow="fold")
+        info.add_row("Recent calls (7d)", str(m["events"]))
+        info.add_row("✓ successes",       str(m["successes"]))
+        info.add_row("⚠ rate-limits",     f"{m['rate_limits']}"
+                      + (f"  ([yellow]{m['rate_limits']/m['events']*100:.0f}% of calls[/yellow])"
+                         if m['events'] else ""))
+        info.add_row("⚠ server errors",   str(m["server_errors"]))
+        info.add_row("⚠ timeouts",        str(m["timeouts"]))
+        if m["median_latency_ms"]:
+            info.add_row("median latency", f"{m['median_latency_ms']:.0f} ms")
+        info.add_row("severity score",    f"{m['score']}  ({rec.severity})")
+        if best:
+            info.add_row("benched fixer",  best)
+        console.print(_P(info, title="[lcars1]Cloud usage (last 7d)[/lcars1]",
+                          border_style="lcars2"))
+        console.print()
+
+        if not rec.should_upgrade:
+            on_screen("[bold green]No upgrade signal yet.[/bold green]  "
+                      f"Free tier is serving you fine ({m['successes']}/{m['events']} ok).")
+            on_screen("[dim]Re-run after a heavy day of asks to surface throttling.[/dim]")
+            return
+
+        verdict_style = {"strongly": "red", "recommend": "yellow",
+                          "consider": "cyan", "ok": "green"}.get(rec.severity, "yellow")
+        console.print(f"[bold {verdict_style}]Verdict: {rec.severity.upper()} an upgrade.[/]")
+        console.print()
+        for r in rec.reasons:
+            on_screen(f"  • {r}")
+        console.print()
+
+        prov = _PM.get(rec.suggested_provider)
+        if prov:
+            on_screen(f"Suggested: stay on [bold]{prov.name}[/bold] but switch to a paid model.")
+            on_screen("[dim]Order: FOSS / self-hostable first; closed APIs last.[/dim]")
+            if prov.paid_examples:
+                # Heuristic: assume the first 4 are the FOSS picks based on our
+                # ordering convention in cloud.py
+                on_screen("  Open-weights picks (run locally if you want, "
+                          "with the same tag in Ollama):")
+                for m in prov.paid_examples[:4]:
+                    on_screen(f"    • [bold]{m}[/bold]")
+                if len(prov.paid_examples) > 4:
+                    on_screen("  Closed API (last resort):")
+                    for m in prov.paid_examples[4:]:
+                        on_screen(f"    • [dim]{m}[/dim]")
+            on_screen(f"  Pricing:       [bold]{prov.pricing_url or prov.docs_url}[/bold]")
+            on_screen(f"  Open billing:  [bold]org-llm cloud --upgrade "
+                      f"{rec.suggested_provider}[/bold]")
+        return
+
+    # ── Open a provider's billing / upgrade page ─────────────────────────────
+    if upgrade:
+        from .cloud import PROVIDER_MAP as _PM
+        slug = upgrade.strip().lower()
+        if slug in ("", "self", "default"):
+            with get_session(engine) as session:
+                slug = _cfg(session, "cloud_provider") or "openrouter"
+        prov = _PM.get(slug)
+        if not prov:
+            red_alert(f"Unknown provider: {slug!r}")
+            on_screen("List slugs: org-llm cloud --providers")
+            raise typer.Exit(1)
+        url = prov.pricing_url or prov.console_url or prov.signup_url
+        hail(f"Opening {prov.name} pricing/upgrade: {url}")
+        from .cloud import open_url as _open
+        _open(url)
+        if prov.paid_examples:
+            console.print()
+            on_screen("Once you've upgraded, swap to a paid model:")
+            for m in prov.paid_examples[:4]:
+                on_screen(f"  [bold]org-llm config cloud_model {m}[/bold]")
+        return
 
     # ── Quick-start: one-shot onboarding for free-tier providers ─────────────
     if quick_start:

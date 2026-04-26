@@ -62,6 +62,8 @@ class ProviderInfo(NamedTuple):
     endpoint_hint:  str          # template for endpoint URL
     gpu_costs:      dict         # GPU name → $/hr approximate spot
     description:    str          # one-line summary
+    pricing_url:    str = ""     # billing / paid-tier upgrade page
+    paid_examples:  tuple = ()   # representative paid models for upgrade pitch
 
 
 PROVIDERS: list[ProviderInfo] = [
@@ -188,15 +190,21 @@ PROVIDERS: list[ProviderInfo] = [
         api_compat  = "openai",
         endpoint_hint = "https://openrouter.ai/api/v1",
         gpu_costs   = {
-            # OpenRouter is per-token, not per-GPU-hour. We list approximate
-            # per-1M-token rates (input) under GPU-named keys so the cost
-            # comparison table renders consistently. Use --cost flag carefully.
             "free tier (Llama 3.1 8B)":    0.00,
             "Llama 3.3 70B":               0.40,
             "DeepSeek R1":                 0.55,
             "Claude Sonnet 4.6":           3.00,
         },
         description = "Hosted multi-model gateway; FREE tier (Llama 3.1 8B); per-token billing",
+        pricing_url = "https://openrouter.ai/credits",
+        # FOSS / open-weights first; closed APIs last. All are fully self-hostable
+        # except the trailing two.
+        paid_examples = ("deepseek/deepseek-r1",                   # MIT, open weights
+                          "meta-llama/llama-3.3-70b-instruct",       # Meta Llama community, open weights
+                          "qwen/qwen-2.5-72b-instruct",              # Apache 2.0, open weights
+                          "openai/gpt-oss-120b",                     # Apache 2.0 (OpenAI's open release)
+                          "anthropic/claude-sonnet-4.6",             # closed API; long-context tool use
+                          "openai/gpt-5.5"),                         # closed API; structured-JSON specialist
     ),
     ProviderInfo(
         slug        = "groq",
@@ -212,6 +220,12 @@ PROVIDERS: list[ProviderInfo] = [
             "Llama 3.1 8B paid":         0.05,
         },
         description = "Ultra-fast LPU inference; FREE tier with rate limits; very low latency",
+        pricing_url = "https://groq.com/pricing/",
+        # All Groq paid models happen to be FOSS-friendly (Meta Llama, Qwen,
+        # DeepSeek) — that's part of why we ship them.
+        paid_examples = ("llama-3.3-70b-versatile",
+                          "deepseek-r1-distill-llama-70b",
+                          "qwen-2.5-32b"),
     ),
     ProviderInfo(
         slug        = "huggingface",
@@ -226,6 +240,8 @@ PROVIDERS: list[ProviderInfo] = [
             "Llama 3.3 70B":             0.50,
         },
         description = "Hosted inference for any HF model; FREE tier with rate limits",
+        pricing_url = "https://huggingface.co/pricing",
+        paid_examples = ("meta-llama/Llama-3.3-70B-Instruct", "deepseek-ai/DeepSeek-R1"),
     ),
 ]
 
@@ -392,18 +408,34 @@ def cloud_chat(
     messages.append({"role": "user", "content": prompt})
     payload = json.dumps({"model": model, "messages": messages, "stream": False}).encode()
 
+    import time as _time
     last_err: Exception | None = None
+    # Detect provider slug from endpoint for telemetry
+    provider_slug = ""
+    for p in PROVIDERS:
+        if p.endpoint_hint == endpoint_url or endpoint_url.startswith(
+                p.endpoint_hint.split("{")[0] if "{" in p.endpoint_hint else p.endpoint_hint):
+            provider_slug = p.slug
+            break
+
     for path in _candidate_paths(endpoint_url, "chat"):
+        t0 = _time.monotonic()
         try:
             req = urllib.request.Request(f"{url}{path}", data=payload, headers=headers, method="POST")
             with _urlopen(req, timeout=120) as resp:
                 data = json.loads(resp.read())
+                latency_ms = (_time.monotonic() - t0) * 1000
                 if "message" in data:
+                    record_event(provider_slug, model, "ok", latency_ms=latency_ms)
                     return data["message"]["content"]
                 if "choices" in data:
+                    record_event(provider_slug, model, "ok", latency_ms=latency_ms)
                     return data["choices"][0]["message"]["content"]
         except Exception as e:
             last_err = e
+            outcome, code = _classify_error(e)
+            record_event(provider_slug, model, outcome, status_code=code,
+                          detail=str(e)[:160])
             continue
     raise RuntimeError(f"Cloud chat failed — endpoint {endpoint_url} unreachable ({last_err!r})")
 
@@ -446,5 +478,217 @@ def cost_per_1k_tokens(
 def open_url(url: str) -> None:
     import webbrowser
     webbrowser.open(url)
+
+
+# ── Usage telemetry: detect when a paid upgrade is justified ──────────────────
+#
+# We log per-call outcomes (success / rate_limit / error / latency_ms) into a
+# `cloud_usage` config row as a JSON list, capped at 200 entries. The
+# `recommend_upgrade()` helper reasons over that history to decide whether
+# the user would benefit from a paid tier — and which model to upgrade to.
+
+_USAGE_KEY = "cloud_usage"
+_USAGE_CAP = 200
+
+
+def _read_usage() -> list[dict]:
+    try:
+        from .db import DB_PATH, Config, make_engine
+        from sqlalchemy.orm import Session
+        path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if not path.exists():
+            return []
+        engine = make_engine(path)
+        with Session(engine) as s:
+            row = s.get(Config, _USAGE_KEY)
+            if not row or not row.value:
+                return []
+            data = json.loads(row.value)
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _write_usage(events: list[dict]) -> None:
+    try:
+        from .db import DB_PATH, Config, make_engine
+        from sqlalchemy.orm import Session
+        path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        engine = make_engine(path)
+        with Session(engine) as s:
+            row = s.get(Config, _USAGE_KEY)
+            payload = json.dumps(events[-_USAGE_CAP:])
+            if row:
+                row.value = payload
+            else:
+                s.add(Config(key=_USAGE_KEY, value=payload))
+            s.commit()
+    except Exception:
+        pass
+
+
+def record_event(provider: str, model: str, outcome: str,
+                  latency_ms: float | None = None,
+                  status_code: int | None = None,
+                  detail: str = "") -> None:
+    """Append a usage event. outcome ∈ {ok, rate_limit, auth_error, server_error,
+    timeout, network, other}. Bounded; oldest events drop off."""
+    import time
+    events = _read_usage()
+    events.append({
+        "ts":       time.time(),
+        "provider": provider, "model": model, "outcome": outcome,
+        "latency_ms": float(latency_ms) if latency_ms is not None else None,
+        "status_code": status_code,
+        "detail":   detail[:160],
+    })
+    _write_usage(events)
+
+
+def _classify_error(exc: Exception) -> tuple[str, int | None]:
+    """Map a cloud-call exception to (outcome, status_code)."""
+    import urllib.error
+    if isinstance(exc, urllib.error.HTTPError):
+        code = exc.code
+        if code == 401 or code == 403:
+            return ("auth_error", code)
+        if code == 429:
+            return ("rate_limit", code)
+        if 500 <= code < 600:
+            return ("server_error", code)
+        return ("other", code)
+    msg = str(exc).lower()
+    if "timeout" in msg or "timed out" in msg:
+        return ("timeout", None)
+    if "connect" in msg or "refused" in msg or "name or service not known" in msg:
+        return ("network", None)
+    return ("other", None)
+
+
+# ── Recommendation engine ────────────────────────────────────────────────────
+
+class UpgradeRecommendation(NamedTuple):
+    should_upgrade: bool
+    severity:       str          # "ok" | "consider" | "recommend" | "strongly"
+    reasons:        list[str]
+    suggested_provider: str       # slug of provider whose paid tier to use
+    suggested_models:   list[str] # paid_examples from that provider
+    metrics:        dict         # raw stats for the report
+
+
+def recommend_upgrade(
+    fixer_top_accuracy: float | None = None,
+    window_seconds: float = 7 * 24 * 3600,
+) -> UpgradeRecommendation:
+    """Decide if the user should upgrade to a paid cloud tier.
+
+    Considers:
+      • Recent rate-limit / server-error frequency in cloud_usage events
+        (within window_seconds; default 7 days)
+      • Median cloud latency (slow tiers might justify a faster paid plan)
+      • Best fixer benchmark accuracy across free models (if known)
+
+    Returns an UpgradeRecommendation with reasons + a suggested provider
+    (defaults to whichever the user already configured) + that provider's
+    paid_examples for use in `cloud --upgrade`.
+    """
+    import time
+    now = time.time()
+    events = [e for e in _read_usage()
+              if now - float(e.get("ts", 0)) <= window_seconds]
+
+    n = len(events)
+    rate_limits  = [e for e in events if e.get("outcome") == "rate_limit"]
+    server_errs  = [e for e in events if e.get("outcome") == "server_error"]
+    timeouts     = [e for e in events if e.get("outcome") == "timeout"]
+    successes    = [e for e in events if e.get("outcome") == "ok"]
+    latencies    = [e["latency_ms"] for e in successes
+                    if isinstance(e.get("latency_ms"), (int, float))]
+    latencies.sort()
+    median_latency = latencies[len(latencies)//2] if latencies else None
+
+    # Read configured provider for the suggestion default
+    suggested_provider = ""
+    try:
+        from .db import DB_PATH, Config, make_engine
+        from sqlalchemy.orm import Session
+        path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if path.exists():
+            engine = make_engine(path)
+            with Session(engine) as s:
+                row = s.get(Config, "cloud_provider")
+                if row: suggested_provider = row.value or ""
+    except Exception:
+        pass
+
+    if not suggested_provider:
+        suggested_provider = "openrouter"   # most flexible default
+
+    suggested_models: list[str] = []
+    p = PROVIDER_MAP.get(suggested_provider)
+    if p:
+        suggested_models = list(p.paid_examples)
+
+    reasons: list[str] = []
+    score = 0   # higher = more urgent
+
+    # Rate-limit pressure: any non-trivial ratio is worth flagging
+    if n >= 5 and rate_limits:
+        rl_ratio = len(rate_limits) / n
+        if rl_ratio >= 0.20:
+            reasons.append(f"Rate-limited on {len(rate_limits)}/{n} cloud calls "
+                            f"in the last {int(window_seconds/86400)}d "
+                            f"({rl_ratio*100:.0f}%) — paid tier removes the cap.")
+            score += 3
+        elif rl_ratio >= 0.05:
+            reasons.append(f"Some rate limits ({len(rate_limits)}/{n}, "
+                            f"{rl_ratio*100:.0f}%) — borderline; paid would be faster.")
+            score += 1
+
+    # Server / availability noise
+    avail_failures = len(server_errs) + len(timeouts)
+    if n >= 5 and avail_failures / n >= 0.10:
+        reasons.append(f"{avail_failures}/{n} cloud calls hit server errors or "
+                        "timeouts — free tiers de-prioritise during congestion.")
+        score += 2
+
+    # Latency
+    if median_latency is not None and median_latency > 4000:
+        reasons.append(f"Median cloud latency is {median_latency:.0f} ms — paid "
+                        "endpoints (Groq, Anthropic Sonnet) typically <1 s.")
+        score += 1
+
+    # Fixer benchmark
+    if fixer_top_accuracy is not None and fixer_top_accuracy < 0.70:
+        reasons.append(f"Best free-tier fixer model scores only "
+                        f"{fixer_top_accuracy*100:.0f}% on canonical fix scenarios — "
+                        "paid models (Claude / GPT-5) would clear 90%+.")
+        score += 3
+
+    if score >= 5:
+        severity = "strongly"
+    elif score >= 3:
+        severity = "recommend"
+    elif score >= 1:
+        severity = "consider"
+    else:
+        severity = "ok"
+
+    return UpgradeRecommendation(
+        should_upgrade=(score >= 1),
+        severity=severity,
+        reasons=reasons,
+        suggested_provider=suggested_provider,
+        suggested_models=suggested_models,
+        metrics={
+            "events":        n,
+            "rate_limits":   len(rate_limits),
+            "server_errors": len(server_errs),
+            "timeouts":      len(timeouts),
+            "successes":     len(successes),
+            "median_latency_ms": median_latency,
+            "score":         score,
+        },
+    )
 
 # cloud.py:1 ends here
