@@ -904,7 +904,8 @@ _TUTOR_STEPS = [
         "Navigate with: [bold]org-llm tutor <step>[/bold]\n"
         "All steps:     [bold]org-llm tutor --all[/bold]\n"
         "Steps: welcome → init → index → embed → search → ask → capture → tag → code\n"
-        "       → config → skills → report → doctor → install → source → emacs → done",
+        "       → config → skills → report → doctor → install → dbt → opencode\n"
+        "       → source → launch → emacs → done",
     ),
     (
         "init",
@@ -1183,23 +1184,36 @@ _TUTOR_STEPS = [
     ),
     (
         "opencode",
-        "[lcars2]opencode integration[/lcars2] — AI coding agent\n\n"
-        "opencode (opencode.ai) is an open-source terminal AI coding agent.\n"
-        "org-llm installs it and complements it in several ways:\n\n"
-        "[lcars1]How they work together:[/lcars1]\n"
-        "  org-llm code   → generates code from your org notes as context\n"
-        "  opencode       → interactive agent that edits files, runs tests\n\n"
-        "  Typical flow:\n"
-        "  1. [bold]org-llm code 'parse org files into JSON' --output task.py[/bold]\n"
-        "     org-llm uses your notes as context and generates a starting point\n"
-        "  2. [bold]opencode[/bold]\n"
-        "     opencode picks up task.py, you describe refinements interactively\n\n"
-        "[lcars1]Install opencode:[/lcars1]  [bold]org-llm install --skip-ollama --skip-models --skip-fonts[/bold]\n\n"
-        "[lcars1]Use opencode with your org vault context:[/lcars1]\n"
-        "  org-llm's DB knows your entire note history. You can generate\n"
-        "  relevant context snippets: [bold]org-llm search 'X' --keyword[/bold]\n"
-        "  and paste them into an opencode session for richer coding help.\n\n"
-        "[dim]opencode is installed to ~/.local/bin/opencode — no sudo needed.[/dim]",
+        "[lcars2]org-llm launch[/lcars2] — opencode workspace with full vault context\n\n"
+        "opencode (opencode.ai) is an interactive terminal AI coding agent.\n"
+        "[bold]org-llm launch[/bold] transforms it into a fully-configured second brain workspace:\n\n"
+        "[lcars1]What launch does:[/lcars1]\n"
+        "  1. Writes [bold]{org_dir}/.opencode.json[/bold] with:\n"
+        "       • Ollama provider (uses your configured chat_model)\n"
+        "       • A rich system prompt injecting vault stats, recent nodes, skills\n"
+        "       • MCP server: org-llm mcp (stdio) — all org-llm tools available natively\n"
+        "  2. Prints a themed launch panel (LCARS)\n"
+        "  3. exec-replaces itself with opencode in org_dir\n\n"
+        "[lcars1]From Doom Emacs:[/lcars1]\n"
+        "  [lcars2]SPC l o[/lcars2]  → opens a vterm buffer running [bold]org-llm launch[/bold]\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm launch[/bold]              — full vault context + opencode\n"
+        "  [bold]org-llm launch --no-context[/bold] — minimal system prompt\n"
+        "  [bold]org-llm launch --dry-run[/bold]    — preview .opencode.json without launching\n"
+        "  [bold]org-llm launch --model phi4[/bold] — override model\n\n"
+        "[lcars1]MCP tools available inside opencode:[/lcars1]\n"
+        "  search_notes   ask_notes    capture_note   get_node\n"
+        "  list_skills    run_skill    tangle_file    get_vault_stats\n"
+        "  list_recent_nodes  list_nodes_by_tag  get_config\n"
+        "  get_tutor_step  list_tutor_steps\n\n"
+        "[lcars1]Use cases inside opencode:[/lcars1]\n"
+        "  • 'What did I write about Python last month?'  → search_notes\n"
+        "  • 'Summarise my project notes'                → ask_notes\n"
+        "  • 'Save this idea to inbox.org'               → capture_note\n"
+        "  • 'Run my summarise skill on this text'       → run_skill\n"
+        "  • 'Tangle my config.org'                      → tangle_file\n"
+        "  • 'Show me how embeddings work'               → get_tutor_step\n\n"
+        "[dim]org-llm mcp   starts the MCP server standalone (for other clients too).[/dim]",
     ),
     (
         "source",
@@ -1227,19 +1241,50 @@ _TUTOR_STEPS = [
         "[lcars2]Doom Emacs integration[/lcars2]\n\n"
         "Load from config.el:  [bold](load! \"~/repos/org-llm/doom/org-llm\")[/bold]\n\n"
         "[lcars1]Keybindings (all under SPC l):[/lcars1]\n\n"
+        "  [lcars2]SPC l o[/lcars2]   org-llm-launch       — open opencode workspace in full vterm\n"
         "  [lcars2]SPC l a[/lcars2]   org-llm-ask          — ask a question, answer in side window\n"
         "  [lcars2]SPC l A[/lcars2]   ask (reason model)   — use deepseek-r1 for hard questions\n"
         "  [lcars2]SPC l s[/lcars2]   org-llm-search       — semantic search, results in side window\n"
         "  [lcars2]SPC l S[/lcars2]   keyword search       — fast SQL-based search\n"
+        "  [lcars2]SPC l c[/lcars2]   org-llm-capture      — capture note (prompts title + body)\n"
         "  [lcars2]SPC l r[/lcars2]   org-llm-report       — open report in vterm\n"
         "  [lcars2]SPC l i[/lcars2]   org-llm-index        — re-index org files\n"
         "  [lcars2]SPC l e[/lcars2]   org-llm-embed        — generate embeddings\n"
         "  [lcars2]SPC l m[/lcars2]   org-llm-models       — list models in side window\n"
+        "  [lcars2]SPC l d[/lcars2]   org-llm-doctor       — health check in vterm\n"
         "  [lcars2]SPC l .[/lcars2]   org-llm-ask-dwim     — ask about region or sentence at point\n\n"
         "[lcars1]How results appear:[/lcars1]\n"
+        "  SPC l o  → full window vterm (opencode takes over — q to quit)\n"
         "  ask / search / models → side window (right, 45% width), ANSI-coloured\n"
-        "  index / embed / report → dedicated vterm buffer (bottom, 35% height)\n\n"
-        "[dim]Source: doom/org-llm.el  |  org-llm source cli (org-llm-ask etc.)[/dim]",
+        "  index / embed / report / doctor → vterm side window (bottom, 35% height)\n\n"
+        "[dim]Source: doom/org-llm.el  |  org-llm source cli[/dim]",
+    ),
+    (
+        "launch",
+        "[lcars2]org-llm launch[/lcars2] — opencode workspace with full vault context\n\n"
+        "Transforms opencode into a second brain interface by:\n\n"
+        "  1. Writing [bold]{org_dir}/.opencode.json[/bold] — Ollama provider, MCP server,\n"
+        "     and a rich system prompt injected with vault stats + recent activity\n"
+        "  2. Launching opencode (installs if missing) in org_dir\n\n"
+        "[lcars1]The MCP server (org-llm mcp):[/lcars1]\n"
+        "  org-llm starts an MCP server over stdio that opencode connects to.\n"
+        "  Every org-llm capability is a native tool opencode can call:\n\n"
+        "    search_notes    ask_notes     capture_note\n"
+        "    get_node        list_skills   run_skill\n"
+        "    tangle_file     get_config    get_vault_stats\n"
+        "    list_recent_nodes  list_nodes_by_tag\n"
+        "    get_tutor_step  list_tutor_steps\n\n"
+        "[lcars1]From Doom Emacs:[/lcars1]  [lcars2]SPC l o[/lcars2] — opens vterm + launches workspace\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm launch[/bold]              — full context workspace\n"
+        "  [bold]org-llm launch --no-context[/bold] — minimal prompt\n"
+        "  [bold]org-llm launch --dry-run[/bold]    — preview .opencode.json\n"
+        "  [bold]org-llm launch --model phi4[/bold] — use a different model\n"
+        "  [bold]org-llm mcp[/bold]                 — start MCP server standalone\n\n"
+        "[lcars1]Tutor in opencode:[/lcars1]\n"
+        "  Inside opencode, ask: 'show me the tutor step for embeddings'\n"
+        "  opencode calls [bold]get_tutor_step('embed')[/bold] and presents the content.\n\n"
+        "[dim]Source: org_llm/mcp_server.py + cli.py → launch()  |  org-llm source mcp_server[/dim]",
     ),
     (
         "done",
@@ -1252,10 +1297,11 @@ _TUTOR_STEPS = [
         "  5. [bold]org-llm doctor[/bold]           — verify everything is green\n"
         "  6. [bold]org-llm ask 'What did I write about X?'[/bold]\n\n"
         "[lcars1]Explore further:[/lcars1]\n"
+        "  [bold]org-llm launch[/bold]              — opencode workspace (SPC l o in Emacs)\n"
         "  [bold]org-llm report all[/bold]          — analytics on your vault\n"
         "  [bold]org-llm skill-new my_skill[/bold]  — create your first skill\n"
         "  [bold]org-llm tag[/bold]                 — auto-tag untagged nodes\n"
-        "  [bold]org-llm source indexer --explain[/bold] — understand how it works\n"
+        "  [bold]org-llm source mcp_server[/bold]   — see all MCP tools\n"
         "  [bold]org-llm tutor --all[/bold]          — read the whole manual\n\n"
         "Engage. ☭ ✊ 🏳️‍🌈 — Queer, collective, free.",
     ),
@@ -1266,7 +1312,7 @@ _TUTOR_STEPS = [
 def tutor(
     step: Annotated[str, typer.Argument(
         help="Step name to jump to (welcome/init/index/embed/search/ask/capture/"
-             "tag/code/config/skills/report/doctor/install/source/emacs/done)"
+             "tag/code/config/skills/report/doctor/install/dbt/opencode/source/launch/emacs/done)"
     )] = "welcome",
     all_steps: Annotated[bool, typer.Option("--all", "-a",
                help="Print all steps at once")] = False,
@@ -1334,6 +1380,7 @@ _MODULE_MAP = {
     "cli_skills": "org_llm.cli_skills",
     "report":     "org_llm.report",
     "ui":         "org_llm.ui",
+    "mcp_server": "org_llm.mcp_server",
 }
 
 
@@ -1559,6 +1606,185 @@ def code(
         hail(f"Written to {output}")
 
     make_it_so()
+
+
+@app.command()
+def launch(
+    model:      Annotated[str,  typer.Option("--model", "-m",
+                help="Override chat model (default: chat_model from config)")] = "",
+    no_context: Annotated[bool, typer.Option("--no-context",
+                help="Skip vault context injection into system prompt")] = False,
+    dry_run:    Annotated[bool, typer.Option("--dry-run",
+                help="Print opencode config only, do not launch")] = False,
+):
+    """Launch opencode as an interactive org-roam workspace with vault context and MCP tools."""
+    import json
+    import os
+    import shutil
+    import subprocess
+    from rich.panel  import Panel
+    from rich.table  import Table
+    from rich.syntax import Syntax
+    from .ui         import trans_stripe, PRIDE_BANNER, solidarity
+    from .db         import Node, File
+    from .skills     import Skill
+
+    # ── Locate or install opencode ────────────────────────────────────────────
+    oc_bin = shutil.which("opencode") or str(Path("~/.local/bin/opencode").expanduser())
+    if not dry_run and not Path(oc_bin).exists():
+        hail("opencode not found — installing…")
+        bin_dir = Path("~/.local/bin").expanduser()
+        import urllib.request
+        install_sh = bin_dir / "_opencode_install.sh"
+        try:
+            urllib.request.urlretrieve("https://opencode.ai/install", install_sh)
+            install_sh.chmod(0o755)
+            result = subprocess.run(
+                ["sh", str(install_sh)], capture_output=True, text=True,
+                env={**os.environ, "OPENCODE_INSTALL": str(bin_dir)},
+            )
+            install_sh.unlink(missing_ok=True)
+            if result.returncode != 0:
+                red_alert(f"opencode install failed: {result.stderr.strip()[:200]}")
+                raise typer.Exit(1)
+            oc_bin = str(bin_dir / "opencode")
+            hail(f"opencode installed at {oc_bin}")
+        except Exception as exc:
+            red_alert(f"Could not install opencode: {exc}")
+            raise typer.Exit(1)
+
+    # ── Gather vault context ──────────────────────────────────────────────────
+    engine = _engine()
+    with get_session(engine) as session:
+        org_dir    = Path(_cfg(session, "org_dir") or "~/org").expanduser()
+        ollama_url = _ollama_url(session)
+        chat_mdl   = model or _cfg(session, "chat_model") or "llama3.2"
+        n_files    = session.query(File).count()
+        n_nodes    = session.query(Node).count()
+        n_embedded = session.query(Node).filter(Node.embedding.isnot(None)).count()
+        pct_e      = int(n_embedded / n_nodes * 100) if n_nodes else 0
+        skill_names = [s.name for s in session.query(Skill).all()]
+        from datetime import datetime, timedelta
+        since  = (datetime.now() - timedelta(days=7)).isoformat()
+        recent = (
+            session.query(Node)
+            .filter(Node.mtime >= since)
+            .order_by(Node.mtime.desc())
+            .limit(8).all()
+        )
+
+    org_llm_dir = Path(__file__).parent.parent.resolve()
+
+    # ── Build system prompt ───────────────────────────────────────────────────
+    recent_str = "\n".join(
+        f"  - {n.title} ({n.mtime[:10] if n.mtime else '?'})" for n in recent
+    ) or "  (no recent activity)"
+    skill_str = ", ".join(skill_names) if skill_names else "none — run org-llm skill-index"
+
+    if no_context:
+        instructions = (
+            "You are an intelligent assistant connected to an org-roam knowledge base "
+            "via org-llm MCP tools. Use the tools to help with note management, Q&A, "
+            "and org-babel automation workflows."
+        )
+    else:
+        instructions = f"""You are an intelligent personal assistant and knowledge worker with full access to the user's org-roam second brain via org-llm MCP tools.
+
+VAULT SUMMARY
+  Location: {org_dir}
+  Files:    {n_files}  |  Nodes: {n_nodes}  |  Embedded: {n_embedded}/{n_nodes} ({pct_e}%)
+  Skills:   {skill_str}
+
+RECENT ACTIVITY (last 7 days)
+{recent_str}
+
+AVAILABLE MCP TOOLS
+  search_notes(query, limit, keyword)  — semantic or keyword search over all notes
+  ask_notes(question, top_k)           — RAG Q&A grounded in org notes
+  capture_note(title, body, file)      — add a new note to the vault
+  get_node(title)                      — fetch full note content by title
+  list_nodes_by_tag(tag, limit)        — browse notes by tag
+  list_recent_nodes(days)              — see recent activity
+  get_vault_stats()                    — vault statistics
+  list_skills()                        — available org-babel skill workflows
+  run_skill(name, input)               — execute a skill workflow
+  tangle_file(file_path)               — org-babel-tangle via emacsclient
+  get_config()                         — current model/config assignments
+
+BEHAVIOUR
+  - Always call search_notes or ask_notes before answering questions about the user's notes
+  - When saving something, use capture_note and confirm file path and ID
+  - When discussing automation, check list_skills first
+  - Cite note titles when drawing from the knowledge base
+  - Use tangle_file to materialise org-babel workflows after editing"""
+
+    # ── Write .opencode.json ──────────────────────────────────────────────────
+    oc_config: dict = {
+        "model": f"ollama/{chat_mdl}",
+        "provider": {
+            "ollama": {
+                "name": "Ollama",
+                "options": {"baseURL": f"{ollama_url.rstrip('/')}/v1"},
+            }
+        },
+        "instructions": instructions,
+        "mcp": {
+            "org-llm": {
+                "type": "local",
+                "command": [
+                    "uv", "--directory", str(org_llm_dir),
+                    "run", "org-llm", "mcp",
+                ],
+                "env": {"ORG_LLM_DB": str(DB_PATH)},
+            }
+        },
+    }
+
+    config_path = org_dir / ".opencode.json"
+
+    if dry_run:
+        console.print()
+        console.rule("[lcars1]opencode config (dry-run)[/lcars1]")
+        console.print(Syntax(json.dumps(oc_config, indent=2), "json", theme="monokai"))
+        console.rule()
+        on_screen(f"Would write to: {config_path}")
+        return
+
+    config_path.write_text(json.dumps(oc_config, indent=2))
+
+    # ── Launch banner ─────────────────────────────────────────────────────────
+    solidarity()
+    console.print()
+
+    tbl = Table(box=None, pad_edge=False, show_header=False)
+    tbl.add_column("Key",   style="lcars1", width=20)
+    tbl.add_column("Value", style="lcars2")
+    tbl.add_row("Model",       f"{chat_mdl}  (Ollama)")
+    tbl.add_row("Vault",       str(org_dir))
+    tbl.add_row("Nodes",       f"{n_nodes}  ({pct_e}% embedded)")
+    tbl.add_row("Skills",      f"{len(skill_names)} registered")
+    tbl.add_row("MCP server",  "org-llm mcp  (stdio)")
+    tbl.add_row("Config",      str(config_path))
+    console.print(Panel(
+        tbl,
+        title="[lcars1]org-llm  ×  opencode  workspace[/lcars1]",
+        border_style="lcars2",
+        padding=(1, 2),
+    ))
+    console.print()
+    hail("Engaging opencode… (q to quit, Ctrl-C to abort)")
+    console.print()
+
+    # ── Hand off to opencode ──────────────────────────────────────────────────
+    os.chdir(org_dir)
+    os.execvp(oc_bin, [oc_bin])
+
+
+@app.command()
+def mcp():
+    """Start the org-llm MCP server over stdio (for opencode and other MCP clients)."""
+    from .mcp_server import main as _mcp_main
+    _mcp_main()
 
 
 # Register skill commands at import time so they appear in --help

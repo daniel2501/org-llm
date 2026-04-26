@@ -3,9 +3,10 @@
 (defvar org-llm-binary (expand-file-name "~/.local/bin/org-llm")
   "Path to the org-llm CLI binary.")
 
-(defvar org-llm-ask-buffer   "*org-llm: ask*")
-(defvar org-llm-search-buffer "*org-llm: search*")
-(defvar org-llm-report-buffer "*org-llm: report*")
+(defvar org-llm-ask-buffer      "*org-llm: ask*")
+(defvar org-llm-search-buffer   "*org-llm: search*")
+(defvar org-llm-report-buffer   "*org-llm: report*")
+(defvar org-llm-launch-buffer   "*org-llm: opencode*")
 
 
 ;;; ── internal helpers ─────────────────────────────────────────────────────────
@@ -35,7 +36,7 @@
                       (window-width . 0.45)))))
 
 (defun org-llm--vterm (cmd)
-  "Send CMD to a dedicated org-llm vterm buffer."
+  "Send CMD to a dedicated org-llm vterm buffer (bottom side window)."
   (require 'vterm)
   (let ((buf (get-buffer-create "*org-llm: vterm*")))
     (with-current-buffer buf
@@ -45,6 +46,17 @@
                     '((display-buffer-in-side-window)
                       (side . bottom)
                       (window-height . 0.35)))
+    (with-current-buffer buf
+      (vterm-send-string (concat cmd "\n")))))
+
+(defun org-llm--vterm-fullscreen (cmd buf-name)
+  "Open BUF-NAME as a full vterm window running CMD (for interactive sessions)."
+  (require 'vterm)
+  (let ((buf (get-buffer-create buf-name)))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'vterm-mode)
+        (vterm-mode)))
+    (switch-to-buffer buf)
     (with-current-buffer buf
       (vterm-send-string (concat cmd "\n")))))
 
@@ -108,20 +120,53 @@ With prefix arg, use the reason model (deepseek-r1)."
     (when text
       (org-llm-ask (string-trim text)))))
 
+;;;###autoload
+(defun org-llm-launch (&optional model)
+  "Launch opencode as the org-llm workspace in a full vterm buffer.
+With prefix arg, prompt for model override."
+  (interactive (list (when current-prefix-arg
+                       (read-string "Model override (empty = default): "))))
+  (let* ((flag (if (and model (not (string-empty-p model)))
+                   (format " --model %s" (shell-quote-argument model))
+                 ""))
+         (cmd  (format "%s launch%s" org-llm-binary flag)))
+    (org-llm--vterm-fullscreen cmd org-llm-launch-buffer)))
+
+;;;###autoload
+(defun org-llm-doctor ()
+  "Run org-llm doctor health check in vterm."
+  (interactive)
+  (org-llm--vterm (format "%s doctor" org-llm-binary)))
+
+;;;###autoload
+(defun org-llm-capture (title body)
+  "Capture a new note into the org vault."
+  (interactive (list (read-string "Note title: ")
+                     (read-string "Content: ")))
+  (org-llm--run-display
+   (format "%s capture --title %s --body %s --no-polish"
+           org-llm-binary
+           (shell-quote-argument title)
+           (shell-quote-argument body))
+   "*org-llm: capture*"))
+
 
 ;;; ── Doom keybindings ─────────────────────────────────────────────────────────
 
 (map! :leader
       (:prefix ("l" . "org-llm")
-       :desc "Ask notes"          "a" #'org-llm-ask
-       :desc "Ask (reason model)" "A" (cmd! (org-llm-ask (read-string "Ask (reason): ") t))
-       :desc "Search notes"       "s" #'org-llm-search
-       :desc "Keyword search"     "S" (cmd! (org-llm-search (read-string "Keyword: ") t))
-       :desc "Report"             "r" #'org-llm-report
-       :desc "Index"              "i" #'org-llm-index
-       :desc "Embed"              "e" #'org-llm-embed
-       :desc "Models"             "m" #'org-llm-models
-       :desc "Ask dwim"           "." #'org-llm-ask-dwim))
+       :desc "Launch opencode workspace" "o" #'org-llm-launch
+       :desc "Ask notes"                 "a" #'org-llm-ask
+       :desc "Ask (reason model)"        "A" (cmd! (org-llm-ask (read-string "Ask (reason): ") t))
+       :desc "Search notes"              "s" #'org-llm-search
+       :desc "Keyword search"            "S" (cmd! (org-llm-search (read-string "Keyword: ") t))
+       :desc "Capture note"              "c" #'org-llm-capture
+       :desc "Report"                    "r" #'org-llm-report
+       :desc "Index"                     "i" #'org-llm-index
+       :desc "Embed"                     "e" #'org-llm-embed
+       :desc "Models"                    "m" #'org-llm-models
+       :desc "Doctor"                    "d" #'org-llm-doctor
+       :desc "Ask dwim"                  "." #'org-llm-ask-dwim))
 
 (provide 'org-llm)
 ;;; org-llm.el ends here
