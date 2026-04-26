@@ -1,24 +1,55 @@
 # [[file:../../../org/20260425230731-org_llm.org::*cli.py][cli.py:1]]
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.table import Table
+from typer.core import TyperGroup
 
 from .db import DB_PATH, get_session, init_db, make_engine
 from .indexer import index_directory
 from .ui import TREK_MSGS, console, hail, impulse, make_it_so, on_screen, red_alert, warp
 
+
+# ── Shortest-unique-prefix command resolution ────────────────────────────────
+# `org-llm do` → `doctor`, `org-llm rev` → `review-emacs`, etc.
+# Ambiguous prefixes (e.g. `s` matching search/skill/skills/skill-new/…) fail
+# with an explicit list of candidates instead of "No such command".
+
+class PrefixGroup(TyperGroup):
+    def get_command(self, ctx, cmd_name):
+        rv = super().get_command(ctx, cmd_name)
+        if rv is not None:
+            return rv
+        matches = sorted(n for n in self.list_commands(ctx) if n.startswith(cmd_name))
+        if len(matches) == 1:
+            return super().get_command(ctx, matches[0])
+        if len(matches) > 1:
+            ctx.fail(
+                f"Ambiguous prefix {cmd_name!r}: matches {matches}. "
+                "Add more characters to disambiguate."
+            )
+        return None
+
+
 app = typer.Typer(
     help="org-llm: LLM-powered org-roam CLI",
     rich_markup_mode="rich",
+    cls=PrefixGroup,
 )
 
 
+# ── Env var taps ──────────────────────────────────────────────────────────────
+# Documented in the `env` tutor step. Order: env > config table > built-in default.
+
+def _env_or_cfg(session, env_var: str, key: str, default: str = "") -> str:
+    return os.environ.get(env_var) or _cfg(session, key) or default
+
+
 def _engine():
-    import os
     path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
     return make_engine(path)
 
@@ -30,7 +61,14 @@ def _cfg(session, key: str) -> str:
 
 
 def _ollama_url(session) -> str:
-    return _cfg(session, "ollama_url") or "http://localhost:11434"
+    return (os.environ.get("ORG_LLM_OLLAMA_URL")
+            or _cfg(session, "ollama_url")
+            or "http://localhost:11434")
+
+
+def _org_dir(session) -> Path:
+    return Path(os.environ.get("ORG_LLM_ORG_DIR")
+                or _cfg(session, "org_dir") or "~/org").expanduser()
 
 
 @app.command()
@@ -52,7 +90,7 @@ def index(
     """Scan org files and populate the index."""
     engine = _engine()
     with get_session(engine) as session:
-        org_dir = Path(_cfg(session, "org_dir") or "~/org").expanduser()
+        org_dir = _org_dir(session)
         if not org_dir.exists():
             red_alert(f"org_dir not found: {org_dir}")
             raise typer.Exit(1)
@@ -1122,7 +1160,7 @@ def doctor(
     # ── Org Files ──────────────────────────────────────────────────────────────
     section("Org Files")
     with get_session(engine) as session:
-        org_dir = Path(_cfg(session, "org_dir") or "~/org").expanduser()
+        org_dir = _org_dir(session)
     if org_dir.exists():
         org_files = list(org_dir.rglob("*.org"))
         ok("org_dir", str(org_dir))
@@ -1475,7 +1513,7 @@ _TUTOR_STEPS = [
         "All steps:     [bold]org-llm tutor --all[/bold]\n"
         "Steps: welcome → init → index → embed → search → ask → capture → tag → code\n"
         "       → config → skills → report → doctor → install → db → dbt → opencode\n"
-        "       → source → creds → cloud → launch → emacs → claude → done",
+        "       → source → env → review-emacs → creds → cloud → launch → emacs → claude → done",
     ),
     (
         "init",
@@ -1882,6 +1920,55 @@ _TUTOR_STEPS = [
         "[dim]Source: doom/org-llm.el  |  org-llm source cli[/dim]",
     ),
     (
+        "env",
+        "[lcars2]Environment variables[/lcars2] — override config without touching the DB\n\n"
+        "Resolution order: [bold]env var → SQLite config → built-in default[/bold].\n"
+        "Set any of these to override a single command run.\n\n"
+        "[lcars1]Storage / paths:[/lcars1]\n"
+        "  [bold]ORG_LLM_DB[/bold]            SQLite DB path  (default: ~/.local/share/org-llm/org-llm.db)\n"
+        "  [bold]ORG_LLM_ORG_DIR[/bold]       Org-roam directory  (default: org_dir config, fallback ~/org)\n"
+        "  [bold]PASSWORD_STORE_DIR[/bold]    `pass` store location  (default: ~/.password-store)\n\n"
+        "[lcars1]Models / endpoints:[/lcars1]\n"
+        "  [bold]ORG_LLM_OLLAMA_URL[/bold]    Ollama base URL  (default: ollama_url config, fallback http://localhost:11434)\n"
+        "  [bold]ANTHROPIC_API_KEY[/bold]     Used by [bold]org-llm claude[/bold]; falls back to pass slug org-llm/anthropic/api-key\n\n"
+        "[lcars1]UI / theme:[/lcars1]\n"
+        "  [bold]ORG_LLM_NERD_FONTS[/bold]    1/yes/true | 0/no/false — force icon mode\n"
+        "  [bold]ORG_LLM_TREK_LEVEL[/bold]    0..3 — Trek messaging intensity (default: 2)\n"
+        "  [bold]ORG_LLM_COMMIE_LEVEL[/bold]  0..3 — solidarity messaging intensity (default: 2)\n\n"
+        "[lcars1]Examples:[/lcars1]\n"
+        "  [bold]ORG_LLM_DB=/tmp/test.db org-llm init[/bold]                  — sandbox a throwaway DB\n"
+        "  [bold]ORG_LLM_ORG_DIR=~/work-notes org-llm index[/bold]            — index a side-vault\n"
+        "  [bold]ORG_LLM_OLLAMA_URL=https://ollama.lan:11434 org-llm ask 'q'[/bold]  — point at remote Ollama\n"
+        "  [bold]ORG_LLM_TREK_LEVEL=0 ORG_LLM_COMMIE_LEVEL=0 org-llm doctor[/bold]  — quiet mode\n\n"
+        "[dim]Source: cli.py → _engine() / _ollama_url() / _org_dir()  |  ui.py for theme vars[/dim]",
+    ),
+    (
+        "review-emacs",
+        "[lcars2]org-llm review-emacs[/lcars2] — LLM-driven Emacs config review\n\n"
+        "Auto-detects your Doom (~/.config/doom or ~/.doom.d) or vanilla\n"
+        "(~/.config/emacs or ~/.emacs.d) config, reads the canonical files,\n"
+        "and asks the [bold]reason_model[/bold] for structured advice.\n\n"
+        "[lcars1]Sections in the report:[/lcars1]\n"
+        "  Summary  •  Strengths  •  Issues  •  Improvements  •  Optional polish\n"
+        "  Each item cites filename:line so you can jump straight to it.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm review-emacs[/bold]                       — full review\n"
+        "  [bold]org-llm review-emacs --focus performance[/bold]   — narrow scope\n"
+        "  [bold]org-llm review-emacs --focus theming[/bold]       — visual coherence only\n"
+        "  [bold]org-llm review-emacs --diff-only -o p.md[/bold]   — emit patch hunks\n"
+        "  [bold]org-llm review-emacs -d ~/dotfiles/doom[/bold]    — explicit path\n\n"
+        "[lcars1]Focus areas:[/lcars1]  all | theming | performance | packages | keybindings | cleanup\n\n"
+        "[lcars1]How it works:[/lcars1]\n"
+        "  1. Detects flavor (doom vs vanilla) by directory name\n"
+        "  2. Reads init.el / config.el / packages.el (or lisp/*.el for vanilla)\n"
+        "  3. Truncates each file to 8 KB so the prompt stays bounded\n"
+        "  4. Logs the review into the [bold]history[/bold] table for later search\n\n"
+        "[lcars1]Why reason_model?[/lcars1]\n"
+        "  Config review benefits from a deliberation-style model (deepseek-r1).\n"
+        "  Override with --model phi4 if you want fast/cheap instead.\n\n"
+        "[dim]Source: cli.py → review_emacs()  |  history table holds past reviews[/dim]",
+    ),
+    (
         "creds",
         "[lcars2]org-llm credentials[/lcars2] — encrypted secrets via [bold]pass[/bold]\n\n"
         "API keys for cloud providers and Claude Code are stored in the standard\n"
@@ -2170,7 +2257,7 @@ def capture(
 
     engine = _engine()
     with get_session(engine) as session:
-        org_dir   = Path(_cfg(session, "org_dir") or "~/org").expanduser()
+        org_dir   = _org_dir(session)
         url       = _ollama_url(session)
         model     = _cfg(session, "instruct_model") or "mistral-nemo"
 
@@ -2326,6 +2413,195 @@ def code(
     make_it_so()
 
 
+# ── emacs config review ──────────────────────────────────────────────────────
+
+_EMACS_CONFIG_FILES = {
+    "doom": [
+        "config.el", "init.el", "packages.el", "custom.el",
+    ],
+    "vanilla": [
+        "init.el", "early-init.el",
+    ],
+}
+
+
+def _detect_emacs_config_dir(override: str = "") -> tuple[Path, str] | None:
+    """Return (path, flavor) for the user's Emacs config, or None.
+
+    Tries: explicit override → ~/.config/doom → ~/.doom.d → ~/.emacs.d.
+    Flavor is "doom" or "vanilla" — used to pick which files to review.
+    """
+    candidates: list[tuple[Path, str]] = []
+    if override:
+        candidates.append((Path(override).expanduser(), "doom"))
+    candidates += [
+        (Path("~/.config/doom").expanduser(), "doom"),
+        (Path("~/.doom.d").expanduser(),       "doom"),
+        (Path("~/.config/emacs").expanduser(), "vanilla"),
+        (Path("~/.emacs.d").expanduser(),      "vanilla"),
+    ]
+    for path, flavor in candidates:
+        if path.exists() and path.is_dir():
+            return path, flavor
+    return None
+
+
+def _gather_emacs_config(config_dir: Path, flavor: str,
+                         max_bytes_per_file: int = 8000) -> list[tuple[str, str]]:
+    """Read the canonical config files for the given flavor.
+
+    Returns [(relative_path, contents), …]. Each file is truncated to
+    max_bytes_per_file so the LLM prompt stays bounded.
+    """
+    out: list[tuple[str, str]] = []
+    names = _EMACS_CONFIG_FILES.get(flavor, _EMACS_CONFIG_FILES["vanilla"])
+    for name in names:
+        p = config_dir / name
+        if not p.exists():
+            continue
+        try:
+            text = p.read_text(errors="replace")
+        except Exception:
+            continue
+        if len(text) > max_bytes_per_file:
+            text = text[:max_bytes_per_file] + f"\n;; … truncated, file is {len(text)} chars total"
+        out.append((str(p.relative_to(config_dir)), text))
+    # Also pull lisp/*.el for vanilla (custom modules)
+    if flavor == "vanilla":
+        lisp_dir = config_dir / "lisp"
+        if lisp_dir.is_dir():
+            for p in sorted(lisp_dir.glob("*.el")):
+                try:
+                    text = p.read_text(errors="replace")
+                except Exception:
+                    continue
+                if len(text) > max_bytes_per_file:
+                    text = text[:max_bytes_per_file] + "\n;; … truncated"
+                out.append((str(p.relative_to(config_dir)), text))
+    return out
+
+
+@app.command(name="review-emacs")
+def review_emacs(
+    config_dir: Annotated[str,  typer.Option("--config-dir", "-d",
+                help="Override config directory (default: auto-detect Doom or vanilla)")] = "",
+    focus:      Annotated[str,  typer.Option("--focus", "-f",
+                help="Specific area: theming | performance | packages | keybindings | cleanup | all")] = "all",
+    model:      Annotated[str,  typer.Option("--model", "-m",
+                help="Override review model (default: reason_model)")] = "",
+    output:     Annotated[str,  typer.Option("--output", "-o",
+                help="Write the review to this file (markdown)")] = "",
+    diff_only:  Annotated[bool, typer.Option("--diff-only",
+                help="Suggest concrete edits as patches, not prose advice")] = False,
+):
+    """Have an LLM review your Doom/vanilla Emacs config and suggest improvements.
+
+    Reads init.el / config.el / packages.el (Doom) or init.el + lisp/*.el (vanilla),
+    feeds them to the configured reasoning model, and prints structured advice on
+    cleanup, theming, performance, keybindings, and package hygiene.
+
+    Examples:
+      org-llm review-emacs                       # full review of detected config
+      org-llm review-emacs --focus performance   # narrow scope
+      org-llm review-emacs --diff-only -o /tmp/patch.md
+    """
+    from rich.panel import Panel
+
+    detected = _detect_emacs_config_dir(config_dir)
+    if not detected:
+        red_alert("Could not find an Emacs config directory.")
+        on_screen("Tried: ~/.config/doom, ~/.doom.d, ~/.config/emacs, ~/.emacs.d")
+        on_screen("Pass --config-dir <path> to override.")
+        raise typer.Exit(1)
+    cfg_dir, flavor = detected
+
+    files = _gather_emacs_config(cfg_dir, flavor)
+    if not files:
+        red_alert(f"No reviewable .el files in {cfg_dir}")
+        raise typer.Exit(1)
+
+    hail(f"Reviewing {flavor} config at [bold]{cfg_dir}[/bold]")
+    on_screen(f"  files: {', '.join(name for name, _ in files)}")
+
+    engine = _engine()
+    with get_session(engine) as session:
+        url       = _ollama_url(session)
+        chat_mdl  = (model
+                     or _cfg(session, "reason_model")
+                     or _cfg(session, "chat_model")
+                     or "llama3.3")
+
+    bundle = "\n\n".join(
+        f";; ── {name} ─────────────────────────────────────────\n{content}"
+        for name, content in files
+    )
+
+    focus_guidance = {
+        "theming":     "concentrate on doom-themes, font config, modeline, palette, and visual coherence",
+        "performance": "concentrate on startup time, lazy loading (use-package :defer, :hook), gc-cons-threshold, and native-compilation hints",
+        "packages":    "concentrate on package selection — duplicates, unmaintained packages, missing modern alternatives, and Doom modules vs. raw use-package usage",
+        "keybindings": "concentrate on keybindings — conflicts, leader-key conventions, missing :map specifiers, ergonomics",
+        "cleanup":     "concentrate on cruft, dead code, commented-out blocks, and config that no longer matches the installed packages",
+        "all":         "cover theming, performance, packages, keybindings, and cleanup",
+    }.get(focus, "cover theming, performance, packages, keybindings, and cleanup")
+
+    if diff_only:
+        system = (
+            "You are an Emacs Lisp expert who has read every Doom Emacs module. "
+            f"Review the user's {flavor} Emacs config and produce ONLY a list of concrete edits as "
+            "unified-diff hunks the user can apply with `patch`. Each hunk MUST start with "
+            "`--- a/<filename>` and `+++ b/<filename>` lines. No prose between hunks. "
+            f"Focus: {focus_guidance}."
+        )
+    else:
+        system = (
+            "You are an Emacs Lisp expert who has read every Doom Emacs module and tracks "
+            "the modern (post-29) Emacs ecosystem. Review the user's "
+            f"{flavor} Emacs config carefully and produce a structured report.\n\n"
+            "Report sections (use `## ` markdown headings):\n"
+            "  1. Summary — one paragraph on the overall shape of the config\n"
+            "  2. Strengths — what's well-done (be specific, cite filename:line)\n"
+            "  3. Issues — bugs, deprecated APIs, conflicts, redundancies\n"
+            "  4. Improvements — concrete suggestions ordered by impact\n"
+            "  5. Optional polish — theming, ergonomics, nice-to-haves\n\n"
+            "Always cite specific lines or symbols. Prefer concrete code snippets over prose. "
+            f"Focus: {focus_guidance}."
+        )
+
+    prompt = (
+        f"My Emacs config flavor: {flavor}\n"
+        f"Config directory: {cfg_dir}\n\n"
+        f"Files (truncated where noted):\n\n{bundle}"
+    )
+
+    from .llm import chat
+    with warp(f"Reviewing {flavor} config with {chat_mdl}"):
+        review = chat(prompt, model=chat_mdl, base_url=url, system=system)
+
+    console.print()
+    console.rule(f"[lcars1]Emacs config review  ·  {chat_mdl}  ·  focus: {focus}[/lcars1]")
+    console.print(Panel(review, border_style="lcars2", padding=(1, 2)))
+    console.rule()
+
+    if output:
+        Path(output).write_text(review)
+        hail(f"Written to {output}")
+
+    # Log into history for searchability
+    from .db import History
+    from datetime import datetime
+    with get_session(engine) as session:
+        session.add(History(
+            timestamp=datetime.now().isoformat(),
+            command="review-emacs",
+            query=f"{flavor}:{focus}:{cfg_dir}",
+            response=review,
+        ))
+        session.commit()
+
+    make_it_so()
+
+
 @app.command()
 def launch(
     model:      Annotated[str,  typer.Option("--model", "-m",
@@ -2359,7 +2635,7 @@ def launch(
     # ── Gather vault context ──────────────────────────────────────────────────
     engine = _engine()
     with get_session(engine) as session:
-        org_dir    = Path(_cfg(session, "org_dir") or "~/org").expanduser()
+        org_dir    = _org_dir(session)
         ollama_url = _ollama_url(session)
         chat_mdl   = model or _cfg(session, "chat_model") or "llama3.2"
         n_files    = session.query(File).count()
@@ -2515,7 +2791,7 @@ def claude_frontend(
     # ── Gather vault context (same as launch) ─────────────────────────────────
     engine = _engine()
     with get_session(engine) as session:
-        org_dir     = Path(_cfg(session, "org_dir") or "~/org").expanduser()
+        org_dir     = _org_dir(session)
         n_files     = session.query(File).count()
         n_nodes     = session.query(Node).count()
         n_embedded  = session.query(Node).filter(Node.embedding.isnot(None)).count()
@@ -3055,6 +3331,66 @@ def mcp():
     """Start the org-llm MCP server over stdio (for opencode and other MCP clients)."""
     from .mcp_server import main as _mcp_main
     _mcp_main()
+
+
+@app.command()
+def completion(
+    shell:   Annotated[str,  typer.Argument(help="Shell: fish | bash | zsh | powershell | pwsh")] = "fish",
+    install: Annotated[bool, typer.Option("--install", "-i",
+             help="Write the completion to the standard location for that shell")] = False,
+):
+    """Print or install shell completions. Always works regardless of $SHELL.
+
+    Default locations on --install:
+      fish        ~/.config/fish/completions/org-llm.fish
+      bash        ~/.local/share/bash-completion/completions/org-llm
+      zsh         ~/.zfunc/_org-llm  (add ~/.zfunc to fpath in .zshrc)
+      powershell  $PROFILE  (appended)
+    """
+    from typer.completion import get_completion_script
+
+    valid = {"fish", "bash", "zsh", "powershell", "pwsh"}
+    if shell not in valid:
+        red_alert(f"Unknown shell {shell!r}. Use one of: {', '.join(sorted(valid))}")
+        raise typer.Exit(1)
+
+    script = get_completion_script(
+        prog_name="org-llm",
+        complete_var="_ORG_LLM_COMPLETE",
+        shell=shell,
+    )
+
+    if not install:
+        print(script)
+        return
+
+    targets = {
+        "fish":       Path("~/.config/fish/completions/org-llm.fish").expanduser(),
+        "bash":       Path("~/.local/share/bash-completion/completions/org-llm").expanduser(),
+        "zsh":        Path("~/.zfunc/_org-llm").expanduser(),
+        "powershell": Path("~/.config/powershell/Microsoft.PowerShell_profile.ps1").expanduser(),
+        "pwsh":       Path("~/.config/powershell/Microsoft.PowerShell_profile.ps1").expanduser(),
+    }
+    target = targets[shell]
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if shell in ("powershell", "pwsh"):
+        # Append rather than overwrite the profile
+        existing = target.read_text() if target.exists() else ""
+        if "_ORG_LLM_COMPLETE" not in existing:
+            with open(target, "a") as f:
+                f.write("\n\n# org-llm completion\n" + script + "\n")
+            hail(f"Appended completion to {target}")
+        else:
+            hail(f"Completion already present in {target}")
+    else:
+        target.write_text(script)
+        hail(f"Wrote {shell} completion → {target}")
+        if shell == "zsh":
+            on_screen("Add to ~/.zshrc:  fpath+=~/.zfunc; autoload -Uz compinit && compinit")
+        elif shell == "fish":
+            on_screen("Reload:  source ~/.config/fish/completions/org-llm.fish")
+    make_it_so()
 
 
 # Register skill commands at import time so they appear in --help

@@ -136,6 +136,55 @@ PROVIDERS: list[ProviderInfo] = [
         },
         description = "Enterprise-grade GPU cloud; Kubernetes-native; highest uptime SLA",
     ),
+    # ── Free-tier hosted inference (no GPU rental, just a metered API) ───────
+    ProviderInfo(
+        slug        = "openrouter",
+        name        = "OpenRouter",
+        signup_url  = "https://openrouter.ai/",
+        console_url = "https://openrouter.ai/keys",
+        docs_url    = "https://openrouter.ai/docs",
+        api_compat  = "openai",
+        endpoint_hint = "https://openrouter.ai/api/v1",
+        gpu_costs   = {
+            # OpenRouter is per-token, not per-GPU-hour. We list approximate
+            # per-1M-token rates (input) under GPU-named keys so the cost
+            # comparison table renders consistently. Use --cost flag carefully.
+            "free tier (Llama 3.1 8B)":    0.00,
+            "Llama 3.3 70B":               0.40,
+            "DeepSeek R1":                 0.55,
+            "Claude Sonnet 4.6":           3.00,
+        },
+        description = "Hosted multi-model gateway; FREE tier (Llama 3.1 8B); per-token billing",
+    ),
+    ProviderInfo(
+        slug        = "groq",
+        name        = "Groq",
+        signup_url  = "https://console.groq.com/",
+        console_url = "https://console.groq.com/keys",
+        docs_url    = "https://console.groq.com/docs",
+        api_compat  = "openai",
+        endpoint_hint = "https://api.groq.com/openai/v1",
+        gpu_costs   = {
+            "free tier (Llama 3.1 8B)":  0.00,
+            "Llama 3.3 70B":             0.79,
+            "Llama 3.1 8B paid":         0.05,
+        },
+        description = "Ultra-fast LPU inference; FREE tier with rate limits; very low latency",
+    ),
+    ProviderInfo(
+        slug        = "huggingface",
+        name        = "Hugging Face Inference",
+        signup_url  = "https://huggingface.co/join",
+        console_url = "https://huggingface.co/settings/tokens",
+        docs_url    = "https://huggingface.co/docs/api-inference",
+        api_compat  = "openai",
+        endpoint_hint = "https://router.huggingface.co/v1",
+        gpu_costs   = {
+            "free tier (rate-limited)":  0.00,
+            "Llama 3.3 70B":             0.50,
+        },
+        description = "Hosted inference for any HF model; FREE tier with rate limits",
+    ),
 ]
 
 PROVIDER_MAP: dict[str, ProviderInfo] = {p.slug: p for p in PROVIDERS}

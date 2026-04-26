@@ -1,0 +1,326 @@
+<div align="center">
+
+<img src="docs/img/01-banner.svg" alt="org-llm — queer, collective, free" />
+
+# org-llm
+
+**Your org-roam vault, augmented by FOSS LLMs.**
+
+A self-hosted second brain that indexes your `~/org/` notes, embeds them with
+[Ollama](https://ollama.com), exposes everything as MCP tools to
+[opencode](https://opencode.ai) and [Claude Code](https://claude.com/code), and
+falls back to multi-provider GPU clouds when your laptop runs out of VRAM.
+
+</div>
+
+---
+
+## What you get
+
+| | |
+|---|---|
+| 🔍 **Semantic search** over your full org-roam graph (`sqlite-vec`, no vector DB) | 💬 **RAG Q&A** grounded in your own notes (`org-llm ask "…"`) |
+| 🧠 **Hardware-aware FOSS model catalog** — auto-pick the best fit for your VRAM | ☁️ **7+ cloud providers** when you outgrow local — RunPod, Vast, Lambda, Salad, OpenRouter, Groq, HF |
+| 🛡️ **Encrypted credentials** via the standard Unix `pass` manager — never in plaintext | 🤖 **MCP server** — every capability exposed as a tool to opencode and Claude Code |
+| 📓 **Org-babel skills** — define LLM workflows as `:skill:`-tagged source blocks | 🔬 **`doctor`** — deep health check + LLM-powered diagnosis of failures |
+| 🚀 **`launch` / `claude`** — one-shot interactive workspaces with full vault context | 🎨 **FOSS tool installer** — `bat`, `eza`, `delta`, `zellij`, … with LCARS/Doom themes |
+| 📊 **dbt analytics** — `stg_nodes`, `nodes_by_tag`, `recent_nodes`, `orphan_nodes` views | ⚡ **Fish/bash/zsh completions** + shortest-prefix command matching (`do` → `doctor`) |
+
+---
+
+## Quickstart
+
+```sh
+# Bootstrap everything: ollama, models, fonts, opencode, gh, claude, pass
+org-llm install
+
+# Initialize DB, index your vault, embed every node
+org-llm init
+org-llm index
+org-llm embed
+
+# Confirm the world is healthy
+org-llm doctor
+
+# Ask a question grounded in your notes
+org-llm ask "what did I write about cooperative governance last month?"
+```
+
+<div align="center"><img src="docs/img/02-doctor.svg" alt="org-llm doctor" width="780" /></div>
+
+---
+
+## Architecture
+
+```
+                                ┌─────────────────────┐
+   ~/org/*.org  ──── index ───▶ │  SQLite             │
+                                │  + sqlite-vec       │ ◀── dbt views
+                                │  + skills + history │     (analytics)
+                                │  + config + pass    │
+                                └──────────┬──────────┘
+                                           │
+        ┌──────────────────┬───────────────┼────────────────┬──────────────────┐
+        ▼                  ▼               ▼                ▼                  ▼
+   ┌─────────┐       ┌──────────┐    ┌──────────┐     ┌──────────┐      ┌────────────┐
+   │ Ollama  │       │ MCP      │    │ opencode │     │ Claude   │      │ Cloud GPU  │
+   │ (local) │       │ stdio    │ ─▶ │ workspace│     │ Code     │      │ (RunPod /  │
+   │ chat    │ ◀──── │ 13 tools │    │          │     │ workspace│      │  Vast / …) │
+   │ embed   │       └──────────┘    └──────────┘     └──────────┘      └────────────┘
+   └─────────┘
+```
+
+The org file at `~/org/20260425230731-org_llm.org` is the literate-programming
+source of truth — every Python/SQL/elisp file in this repo is tangled from it.
+
+---
+
+## Commands at a glance
+
+Top-level commands accept the **shortest unique prefix** — `org-llm do` runs
+`doctor`, `org-llm rev` runs `review-emacs`, ambiguous prefixes error with
+candidates.
+
+| Command | What it does |
+|---|---|
+| `org-llm init` | Create the SQLite DB and seed default config |
+| `org-llm index` | Parse all `.org` files into the database (incremental by mtime) |
+| `org-llm embed` | Generate embeddings for unembedded nodes (`embed_model`) |
+| `org-llm search "query"` | Semantic or keyword search (`-k` for keyword) |
+| `org-llm ask "question"` | RAG Q&A grounded in your notes |
+| `org-llm capture` | Add a new note (LLM-polished by default) |
+| `org-llm tag` | Auto-tag untagged nodes (`fast_model`) |
+| `org-llm code "task"` | Generate code with retrieved org context (`code_model`) |
+| `org-llm review-emacs` | LLM review of your Doom or vanilla Emacs config |
+| `org-llm models` | Discover, tune, assign, or pull FOSS LLMs |
+| `org-llm cloud` | Multi-provider GPU cloud — signup, configure, status, cost |
+| `org-llm launch` | Open opencode in your vault with MCP wired up |
+| `org-llm claude` | Same, but Claude Code (`ANTHROPIC_API_KEY` from `pass`) |
+| `org-llm doctor` | Deep health check + LLM-powered fix suggestions (`--diagnose`) |
+| `org-llm report` | Rich text reports — overview / tags / recent / orphans / daily |
+| `org-llm tutor` | 24-step interactive tutorial — start with `tutor welcome` |
+| `org-llm db` | Inspect schema, run SELECT queries, full data dictionary |
+| `org-llm source <module>` | Print any module's source (with `--explain`) |
+| `org-llm mcp` | Start the MCP stdio server (used by opencode and claude) |
+| `org-llm completion fish --install` | Install shell completions |
+| `org-llm install` | One-shot install Ollama, models, fonts, opencode, gh, claude, pass |
+
+Every command has `--help`. The full setup walkthrough lives in `org-llm tutor`.
+
+---
+
+## FOSS model catalog
+
+`org-llm models --discover` shows the entire FOSS catalog filtered by what
+fits your hardware. `--tune` analyzes your current assignments and recommends
+upgrades. Every catalog entry is FOSS-licensed (MIT / Apache 2.0 / BigCode
+OpenRAIL / Meta Llama Community).
+
+<div align="center"><img src="docs/img/05-models-discover.svg" alt="org-llm models --discover" width="780" /></div>
+
+---
+
+## Cloud GPUs
+
+When `org-llm cloud --assess` says a model needs more VRAM than you have, pick
+a provider and sign up — the CLI walks you through the rest:
+
+```sh
+org-llm cloud --providers          # compare prices and APIs
+org-llm cloud --signup vast        # opens browser, prompts for API key
+org-llm cloud --configure          # set endpoint URL + key (stored in pass)
+org-llm cloud --test               # ping the configured endpoint
+```
+
+<div align="center">
+  <img src="docs/img/03-cloud-providers.svg" alt="org-llm cloud --providers" width="780" />
+  <img src="docs/img/04-cloud-cost.svg" alt="org-llm cloud --cost" width="600" />
+</div>
+
+Supported: **RunPod**, **Vast.ai**, **Lambda Labs**, **TensorDock**,
+**Salad Cloud**, **Paperspace**, **CoreWeave**, plus per-token APIs
+**OpenRouter** (free Llama 3.1 8B), **Groq** (free LPU tier), and
+**Hugging Face Inference**.
+
+---
+
+## Credentials via `pass`
+
+API keys are stored in the standard Unix
+[password-store](https://www.passwordstore.org), GPG-encrypted at rest under
+`~/.password-store/org-llm/`. Slug layout:
+
+```
+org-llm/
+├── anthropic/api-key            # for `org-llm claude`
+└── cloud/
+    ├── runpod/api-key
+    ├── vast/api-key
+    └── openrouter/api-key
+```
+
+`org-llm cloud --configure` will offer to install `pass` if missing and will
+**migrate** any existing SQLite-stored keys into pass and clear the plaintext
+copy. See `org-llm tutor creds` for the full setup.
+
+<div align="center"><img src="docs/img/08-creds.svg" alt="org-llm cloud --creds" width="640" /></div>
+
+---
+
+## MCP integration
+
+`org-llm mcp` runs an MCP stdio server that exposes 13 tools to any MCP-aware
+client (opencode, Claude Code, …):
+
+| Tool | Purpose |
+|---|---|
+| `search_notes` | Semantic or keyword search |
+| `ask_notes` | RAG Q&A grounded in the vault |
+| `capture_note` | Add a new note to the vault |
+| `get_node` | Fetch full content of a note by title |
+| `list_nodes_by_tag` | Browse notes by tag |
+| `list_recent_nodes` | Recent activity (configurable window) |
+| `get_vault_stats` | Vault stats (files, nodes, embedded%) |
+| `list_skills` / `run_skill` | Org-babel skill workflows |
+| `tangle_file` | `org-babel-tangle` via `emacsclient` |
+| `get_config` | Current model/config assignments |
+| `list_tutor_steps` / `get_tutor_step` | Interactive tutorial content |
+
+`org-llm launch` wires this up automatically for opencode (writing
+`.opencode.json` in your `org_dir`); `org-llm claude` does the same for Claude
+Code (`.claude/settings.json` + `.claude/CLAUDE.md`).
+
+---
+
+## Reports
+
+```sh
+org-llm report all     # everything below in one shot
+org-llm report tags    # tag frequency leaderboard
+org-llm report recent  # last 14 days of edits
+org-llm report orphans # notes with no outgoing links
+org-llm report daily   # daily/journal notes preview
+```
+
+<div align="center"><img src="docs/img/06-report-all.svg" alt="org-llm report all" width="700" /></div>
+
+---
+
+## Emacs config review
+
+Auto-detects your Doom or vanilla config and asks `reason_model` for structured
+advice — strengths, issues, prioritized improvements, optional polish.
+
+```sh
+org-llm review-emacs                       # full review
+org-llm review-emacs --focus performance   # narrow scope
+org-llm review-emacs --diff-only -o p.md   # emit patch hunks
+```
+
+<div align="center"><img src="docs/img/09-review-emacs.svg" alt="org-llm review-emacs" width="780" /></div>
+
+Past reviews are written to the `history` table so you can find them later
+with `org-llm db -q "SELECT timestamp, query FROM history WHERE command='review-emacs'"`.
+
+---
+
+## Environment variables
+
+| Variable | Effect |
+|---|---|
+| `ORG_LLM_DB` | Override the SQLite database path (default: `~/.local/share/org-llm/org-llm.db`) |
+| `ORG_LLM_ORG_DIR` | Override the org-roam directory (default: `org_dir` config key, fallback `~/org`) |
+| `ORG_LLM_OLLAMA_URL` | Override the Ollama endpoint (default: `ollama_url` config key, fallback `http://localhost:11434`) |
+| `ORG_LLM_NERD_FONTS` | Force-enable (`1`/`yes`) or disable (`0`/`no`) Nerd Font icons |
+| `ORG_LLM_TREK_LEVEL` | Star Trek messaging intensity, `0` (off) – `3` (max). Default: `2` |
+| `ORG_LLM_COMMIE_LEVEL` | Solidarity messaging intensity, `0`–`3`. Default: `2` |
+| `PASSWORD_STORE_DIR` | Override the `pass` store location (default: `~/.password-store`) |
+| `ANTHROPIC_API_KEY` | Used by `org-llm claude`. If unset, falls back to `pass` slug `org-llm/anthropic/api-key`. |
+
+Resolution order is always: **env var → SQLite config → built-in default**, so
+you can override any setting for a single command without touching the DB.
+
+---
+
+## Tutor
+
+```sh
+org-llm tutor          # show the welcome step
+org-llm tutor <step>   # jump to one of the 24 steps
+org-llm tutor --all    # read everything start-to-finish
+```
+
+<div align="center"><img src="docs/img/07-tutor-welcome.svg" alt="org-llm tutor welcome" width="640" /></div>
+
+Steps:
+`welcome → init → index → embed → search → ask → capture → tag → code →
+config → skills → report → doctor → install → db → dbt → opencode →
+source → review-emacs → creds → cloud → launch → emacs → claude → done`
+
+---
+
+## Recording GIFs (optional)
+
+The static SVGs above are generated by `tools/gallery.py` (run from the repo
+root with `uv run python tools/gallery.py`). For animated demos, install
+[`vhs`](https://github.com/charmbracelet/vhs) plus its dependency `ttyd`:
+
+```sh
+# vhs binary
+curl -sL https://github.com/charmbracelet/vhs/releases/latest/download/vhs_Linux_x86_64.tar.gz \
+  | tar xz -C /tmp && mv /tmp/vhs_*_Linux_x86_64/vhs ~/.local/bin/
+
+# ttyd (ubuntu/debian)
+sudo apt install ttyd
+```
+
+Then write a `.tape` script under `docs/tape/` and run `vhs <script>.tape`.
+
+---
+
+## Development
+
+```sh
+git clone git@github.com:daniel2501/org-llm.git
+cd org-llm
+uv sync                 # install deps + dev tools
+uv run pytest -q        # run the test suite (225+ tests)
+uv run python tools/gallery.py   # regenerate README screenshots
+```
+
+The Python source is **tangled from the org file** at
+`~/org/20260425230731-org_llm.org`. Edit there, `, b t` (`org-babel-tangle`),
+commit both repos.
+
+Project layout:
+
+```
+org_llm/
+  cli.py          # the Typer app — every CLI command
+  cli_skills.py   # skill / skills / skill-index / skill-new commands
+  cloud.py        # multi-provider GPU registry + chat/embed/check
+  creds.py        # `pass` wrapper for API keys
+  db.py           # SQLAlchemy models + sqlite-vec extension load
+  indexer.py      # parse org → files/nodes
+  llm.py          # thin Ollama wrapper
+  mcp_server.py   # FastMCP server with 13 tools
+  models.py       # FOSS model catalog + tool registry + theming
+  report.py       # rich text reports
+  search.py       # vector_search + keyword_search
+  skills.py       # :skill: org-babel block extractor + runner
+  ui.py           # console, themes, banners, intensity levels
+tests/            # 225 tests across 11 test files
+dbt/              # analytics views (stg_nodes, recent_nodes, …)
+doom/             # Doom Emacs integration (org-llm.el)
+tools/            # gallery.py screenshot generator
+```
+
+---
+
+## License
+
+GPL-3.0 — same energy as the rest of the FOSS LLM stack this builds on.
+The org-llm idea, like solidarity, is freely shared.
+
+> *"From each according to ability, to each according to need."*
+> — and `chmod +x` the revolution.

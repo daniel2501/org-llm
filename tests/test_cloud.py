@@ -58,10 +58,12 @@ def test_provider_info_fields_non_empty():
         assert p.description
 
 
-def test_provider_gpu_costs_positive():
+def test_provider_gpu_costs_non_negative():
     for p in PROVIDERS:
         for gpu, cost in p.gpu_costs.items():
-            assert cost > 0, f"{p.slug}/{gpu} cost must be positive"
+            assert cost >= 0, f"{p.slug}/{gpu} cost must be non-negative"
+        # Every provider must have at least one paid OR free entry that exists
+        assert p.gpu_costs, f"{p.slug} has empty gpu_costs"
 
 
 def test_provider_endpoint_hints_non_empty():
