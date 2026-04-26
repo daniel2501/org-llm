@@ -8,39 +8,71 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .ui import console
+from .ui import console, NERD_FONTS
 
-# Nerd Font + unicode glyphs
-NF = {
-    "org":        "󱓧",   # org-mode icon
-    "node":       "󰆮",   # node / brain
-    "tag":        "󰓹",   # tag
-    "file":       "󰈔",   # file
-    "daily":      "󰃭",   # calendar
-    "orphan":     "󰚌",   # unlinked
-    "recent":     "󱑂",   # clock
-    "embed":      "󱙉",   # vector / waveform
-    "search":     "󰍉",   # search
-    "star":       "󰓎",   # star / highlight
-    "warp":       "󱓞",   # warp / speed
-    "brain":      "󰋮",   # knowledge
-    "code":       "󰒋",   # code
-    "link":       "󰌹",   # link
-    "trophy":     "󰓖",   # trophy / top
-    "alert":      "󱗓",   # alert
-    "check":      "󰄬",   # checkmark
+# Nerd Font glyphs with ASCII fallbacks
+_NF_ICONS = {
+    "org":        "󱓧",
+    "node":       "󰆮",
+    "tag":        "󰓹",
+    "file":       "󰈔",
+    "daily":      "󰃭",
+    "orphan":     "󰚌",
+    "recent":     "󱑂",
+    "embed":      "󱙉",
+    "search":     "󰍉",
+    "star":       "󰓎",
+    "warp":       "󱓞",
+    "brain":      "󰋮",
+    "code":       "󰒋",
+    "link":       "󰌹",
+    "trophy":     "󰓖",
+    "alert":      "󱗓",
+    "check":      "󰄬",
     "dot":        "●",
-    "fist":       "✊",   # solidarity fist
-    "hammer":     "🔨",  # workers
-    "sickle":     "☭",   # hammer & sickle
-    "star_red":   "★",   # red star
-    "people":     "󰀫",   # group / collective
-    "solidarity": "󰤙",   # network / union
-    "pride":      "🏳️‍🌈", # pride flag
-    "trans":      "🏳️‍⚧️", # trans flag
-    "heart":      "󰣐",   # heart
-    "nonbinary":  "⚧",   # gender symbol
+    "fist":       "✊",
+    "hammer":     "🔨",
+    "sickle":     "☭",
+    "star_red":   "★",
+    "people":     "󰀫",
+    "solidarity": "󰤙",
+    "pride":      "🏳️‍🌈",
+    "trans":      "🏳️‍⚧️",
+    "heart":      "󰣐",
+    "nonbinary":  "⚧",
 }
+_ASCII_ICONS = {
+    "org":        "[O]",
+    "node":       "[*]",
+    "tag":        "[#]",
+    "file":       "[F]",
+    "daily":      "[D]",
+    "orphan":     "[?]",
+    "recent":     "[T]",
+    "embed":      "[~]",
+    "search":     "[/]",
+    "star":       "[S]",
+    "warp":       "[>]",
+    "brain":      "[B]",
+    "code":       "[C]",
+    "link":       "[L]",
+    "trophy":     "[1]",
+    "alert":      "[!]",
+    "check":      "[v]",
+    "dot":        "·",
+    "fist":       "(*)",
+    "hammer":     "[H]",
+    "sickle":     "[s]",
+    "star_red":   "*",
+    "people":     "[G]",
+    "solidarity": "[U]",
+    "pride":      "[P]",
+    "trans":      "[T]",
+    "heart":      "<3",
+    "nonbinary":  "[N]",
+}
+
+NF = _NF_ICONS if NERD_FONTS else _ASCII_ICONS
 
 REPORT_HEADER = (
     "[pride.red]█[/pride.red][pride.orange]█[/pride.orange]"

@@ -1,12 +1,48 @@
 # [[file:../../../org/20260425230731-org_llm.org::*ui.py][ui.py:1]]
 from __future__ import annotations
 
+import os
+import subprocess
 from contextlib import contextmanager
 
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.text import Text
 from rich.theme import Theme
+
+
+def _detect_nerd_fonts() -> bool:
+    """Return True if a Nerd Font appears to be installed and usable."""
+    # Explicit override via env or config file
+    env = os.environ.get("ORG_LLM_NERD_FONTS", "").lower()
+    if env in ("1", "true", "yes"):
+        return True
+    if env in ("0", "false", "no"):
+        return False
+    # Check fc-list for any Nerd Font family
+    try:
+        out = subprocess.check_output(
+            ["fc-list", ":spacing=mono"],
+            stderr=subprocess.DEVNULL, timeout=2,
+        ).decode(errors="ignore")
+        if "Nerd" in out or "NFM" in out or "NF " in out:
+            return True
+    except Exception:
+        pass
+    # Fallback: check common font directories
+    from pathlib import Path
+    font_dirs = [
+        Path.home() / ".local/share/fonts",
+        Path("/usr/share/fonts"),
+        Path("/usr/local/share/fonts"),
+    ]
+    for d in font_dirs:
+        if d.exists() and any(d.rglob("*Nerd*")):
+            return True
+    return False
+
+
+NERD_FONTS = _detect_nerd_fonts()
 
 # ── colour palette ────────────────────────────────────────────────────────────
 # LCARS (Star Trek)

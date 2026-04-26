@@ -522,11 +522,23 @@ def doctor():
             row(False, "Ollama reachable", f"{url} — {e}")
             warn_row("Models not checked", "Ollama must be running")
 
-    # Nerd Font
-    font_dir = Path("~/.local/share/fonts/NerdFonts").expanduser()
-    fonts = list(font_dir.glob("*.ttf")) + list(font_dir.glob("*.otf")) if font_dir.exists() else []
-    row(bool(fonts), "Nerd Font installed",
-        f"{len(fonts)} font(s) in {font_dir}" if fonts else str(font_dir))
+    # Nerd Font — check multiple locations
+    from .ui import NERD_FONTS
+    font_dirs = [
+        Path("~/.local/share/fonts/NerdFonts").expanduser(),
+        Path("/usr/share/fonts"),
+        Path("/usr/local/share/fonts"),
+    ]
+    nf_files: list = []
+    for fd in font_dirs:
+        if fd.exists():
+            nf_files += list(fd.rglob("*Nerd*")) + list(fd.rglob("*NFM*"))
+    if nf_files:
+        row(True,  "Nerd Font installed", f"{len(nf_files)} file(s) found")
+    else:
+        row(False, "Nerd Font installed", "run: org-llm install --skip-ollama --skip-models")
+    if not NERD_FONTS:
+        warn_row("Nerd Font detection", "icons may show as □ — set ORG_LLM_NERD_FONTS=1 to override")
 
     console.print()
     console.print(trans_stripe(52))
@@ -541,148 +553,370 @@ def doctor():
 _TUTOR_STEPS = [
     (
         "welcome",
-        "Welcome aboard, officer. [lcars1]org-llm[/lcars1] is your personal "
-        "LLM-powered second brain, built on your org-roam notes.\n\n"
-        "It runs entirely on your machine using open-source models via Ollama. "
-        "No cloud. No surveillance. Queer, collective, free.\n\n"
-        "This tutor will walk you through the key commands one at a time.",
+        "[bold lcars1]Welcome aboard, officer.[/bold lcars1]\n\n"
+        "[lcars1]org-llm[/lcars1] is your personal LLM-powered second brain, "
+        "built entirely on your org-roam notes.\n\n"
+        "  ✦ Runs 100% locally — Ollama serves all models, nothing leaves your machine.\n"
+        "  ✦ SQLite stores the index and config — one file, zero infra.\n"
+        "  ✦ sqlite-vec provides vector search inside that same file.\n"
+        "  ✦ Skills let you define LLM workflows as org-babel blocks.\n"
+        "  ✦ dbt transforms raw indexed data into analytics-ready views.\n"
+        "  ✦ Doom Emacs integration gives you SPC l bindings for everything.\n\n"
+        "Navigate with: [bold]org-llm tutor <step>[/bold]\n"
+        "All steps:     [bold]org-llm tutor --all[/bold]\n"
+        "Steps: welcome → init → index → embed → search → ask → capture → tag → code\n"
+        "       → config → skills → report → doctor → install → source → emacs → done",
     ),
     (
         "init",
-        "Step 1: [lcars2]org-llm init[/lcars2]\n\n"
-        "Initializes the SQLite database at ~/.local/share/org-llm/org-llm.db.\n"
-        "Writes default config (model assignments, org_dir, etc.).\n"
-        "Safe to run multiple times — idempotent.\n\n"
-        "[dim]Try it:[/dim]  [bold]org-llm init[/bold]",
+        "[lcars2]org-llm init[/lcars2] — bootstrap your installation\n\n"
+        "Creates the SQLite database at [bold]~/.local/share/org-llm/org-llm.db[/bold]\n"
+        "and writes default config values into it. Safe to re-run (idempotent).\n\n"
+        "[lcars1]What gets created:[/lcars1]\n"
+        "  tables: files, nodes, history, config, skills\n"
+        "  config defaults: org_dir=~/org, ollama_url, all model assignments\n\n"
+        "[lcars1]Try it:[/lcars1]  [bold]org-llm init[/bold]\n\n"
+        "[lcars1]Override DB path:[/lcars1]\n"
+        "  [bold]ORG_LLM_DB=/tmp/test.db org-llm init[/bold]\n"
+        "  (useful for testing without touching your real DB)\n\n"
+        "[dim]Source: org_llm/db.py → init_db()  |  org-llm source db[/dim]",
     ),
     (
         "index",
-        "Step 2: [lcars2]org-llm index[/lcars2]\n\n"
-        "Scans your org_dir (default: ~/org) for all .org files.\n"
-        "Extracts headings, body text, tags, and org-roam IDs into the DB.\n"
-        "Skips files that haven't changed (mtime check).\n\n"
-        "[dim]Force full re-index:[/dim]  [bold]org-llm index --force[/bold]",
+        "[lcars2]org-llm index[/lcars2] — parse org files into the database\n\n"
+        "Walks every .org file under org_dir, extracts:\n"
+        "  • file-level #+TITLE and body\n"
+        "  • each heading: title, body text, :ID: property, tags\n"
+        "  • file mtime (used to skip unchanged files on re-runs)\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm index[/bold]          — incremental (skip unchanged files)\n"
+        "  [bold]org-llm index --force[/bold]  — wipe and re-index everything\n\n"
+        "[lcars1]What goes in the DB:[/lcars1]\n"
+        "  files table  → one row per .org file (path, mtime, node_count)\n"
+        "  nodes table  → one row per heading/file (title, body, tags, mtime)\n\n"
+        "[lcars1]Check result:[/lcars1]  [bold]org-llm report overview[/bold]\n\n"
+        "[dim]Source: org_llm/indexer.py  |  org-llm source indexer[/dim]",
     ),
     (
         "embed",
-        "Step 3: [lcars2]org-llm embed[/lcars2]\n\n"
-        "Generates vector embeddings for every indexed node using the embed_model "
-        "(default: nomic-embed-text via Ollama).\n"
-        "Required before semantic search and ask work.\n\n"
-        "[dim]This may take a while for large vaults.[/dim]\n"
-        "[dim]Check progress:[/dim]  [bold]org-llm doctor[/bold]",
+        "[lcars2]org-llm embed[/lcars2] — generate vector embeddings\n\n"
+        "For every node in the DB, calls the embed_model (default: nomic-embed-text)\n"
+        "and stores a 768-dimensional float32 vector in the nodes.embedding column.\n\n"
+        "[lcars1]Why embeddings?[/lcars1]\n"
+        "  An embedding turns text into a point in high-dimensional space.\n"
+        "  Semantically similar text lands near each other. This is what powers\n"
+        "  'search' and 'ask' — instead of matching words, we match meaning.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm embed[/bold]          — embed only new/unembedded nodes\n"
+        "  [bold]org-llm embed --force[/bold]  — re-embed everything\n\n"
+        "[lcars1]Check progress:[/lcars1]  [bold]org-llm doctor[/bold]\n\n"
+        "[dim]Large vaults (10k+ nodes) take 10-30 min on first run.[/dim]\n"
+        "[dim]Source: org_llm/indexer.py → embed_nodes()  |  org-llm source indexer[/dim]",
     ),
     (
         "search",
-        "Step 4: [lcars2]org-llm search <query>[/lcars2]\n\n"
-        "Semantic search (default): embeds your query, finds the nearest nodes.\n"
-        "Keyword search:  [bold]org-llm search --keyword <term>[/bold]\n\n"
-        "Results show score, title, tags, and filename.",
+        "[lcars2]org-llm search <query>[/lcars2] — find relevant notes\n\n"
+        "[lcars1]Semantic search (default):[/lcars1]\n"
+        "  Embeds your query → finds nearest nodes by cosine distance.\n"
+        "  Works even if no words overlap — it matches meaning.\n\n"
+        "[lcars1]Keyword search:[/lcars1]\n"
+        "  SQL LIKE match on title, body, and tags. Fast, exact.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm search 'Emacs configuration'[/bold]          — semantic\n"
+        "  [bold]org-llm search --keyword python[/bold]               — keyword\n"
+        "  [bold]org-llm search 'machine learning' --limit 20[/bold]  — top 20\n\n"
+        "[lcars1]Output columns:[/lcars1]  Score | Title | Tags | File\n"
+        "  Score = cosine distance (lower = more similar, 0.0 = identical)\n\n"
+        "[dim]Requires embeddings. Run 'org-llm embed' first for semantic search.[/dim]\n"
+        "[dim]Source: org_llm/search.py  |  org-llm source search[/dim]",
     ),
     (
         "ask",
-        "Step 5: [lcars2]org-llm ask <question>[/lcars2]\n\n"
-        "RAG pipeline: embed query → retrieve top-K nodes → feed to chat_model.\n"
-        "Uses your notes as context; cites them in the answer.\n\n"
-        "[dim]Options:[/dim]\n"
-        "  --top-k N     how many context nodes to retrieve (default 6)\n"
-        "  --context     show which nodes were used\n"
-        "  --reason      use reason_model (deepseek-r1) for harder questions",
+        "[lcars2]org-llm ask <question>[/lcars2] — RAG over your org notes\n\n"
+        "[lcars1]How it works (RAG = Retrieval-Augmented Generation):[/lcars1]\n"
+        "  1. Your question is embedded into a vector\n"
+        "  2. The top-K nearest nodes are retrieved from the DB\n"
+        "  3. Their titles + bodies are injected into a prompt\n"
+        "  4. The chat_model answers using your notes as context\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm ask 'What did I write about Emacs?'[/bold]\n"
+        "  [bold]org-llm ask 'Summarise my notes on Python' --top-k 10[/bold]\n"
+        "  [bold]org-llm ask 'Plan my week' --reason[/bold]   ← uses deepseek-r1\n"
+        "  [bold]org-llm ask 'X' --context[/bold]             ← shows which nodes were used\n\n"
+        "[lcars1]Models used:[/lcars1]\n"
+        "  embed_model   → query embedding (nomic-embed-text)\n"
+        "  chat_model    → answer generation (llama3.3)\n"
+        "  reason_model  → used with --reason (deepseek-r1)\n\n"
+        "[dim]Source: org_llm/cli.py → ask()  |  org-llm source cli[/dim]",
+    ),
+    (
+        "capture",
+        "[lcars2]org-llm capture[/lcars2] — add a new note to your vault\n\n"
+        "Prompts for a title and body, optionally polishes the content with an LLM\n"
+        "(instruct_model), then appends a properly-formatted org heading with a\n"
+        "UUID :ID: property to a target file.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm capture[/bold]                           — interactive prompts\n"
+        "  [bold]org-llm capture --title 'Meeting notes' --body 'Discussed X'[/bold]\n"
+        "  [bold]org-llm capture --no-polish[/bold]               — skip LLM formatting\n"
+        "  [bold]org-llm capture --file 'projects/work.org'[/bold] — custom target file\n\n"
+        "[lcars1]Output format (appended to inbox.org):[/lcars1]\n"
+        "  * Your Title\n"
+        "  :PROPERTIES:\n"
+        "  :ID: <uuid4>\n"
+        "  :CREATED: [20260426120000]\n"
+        "  :END:\n\n"
+        "  <polished org-mode content>\n\n"
+        "[dim]Run 'org-llm index' after capturing to add the new node to the DB.[/dim]\n"
+        "[dim]Source: org_llm/cli.py → capture()  |  org-llm source cli[/dim]",
+    ),
+    (
+        "tag",
+        "[lcars2]org-llm tag[/lcars2] — auto-tag nodes with the fast_model\n\n"
+        "Finds untagged nodes (or all nodes with --force), sends each node's\n"
+        "title + body to the fast_model, and stores the suggested tags in the DB.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm tag[/bold]              — tag up to 50 untagged nodes\n"
+        "  [bold]org-llm tag --limit 200[/bold]  — process more at once\n"
+        "  [bold]org-llm tag --force[/bold]      — re-tag even already-tagged nodes\n\n"
+        "[lcars1]How it works:[/lcars1]\n"
+        "  The model is asked to output ONLY space-separated lowercase tags.\n"
+        "  Tags are stored in nodes.tags in the DB.\n"
+        "  Use 'org-llm tag --apply' (planned) to write them back to .org files.\n\n"
+        "[lcars1]Check results:[/lcars1]  [bold]org-llm report tags[/bold]\n\n"
+        "[dim]Model used: fast_model (phi4 by default) — fast, low memory.[/dim]\n"
+        "[dim]Source: org_llm/cli.py → tag()  |  org-llm source cli[/dim]",
+    ),
+    (
+        "code",
+        "[lcars2]org-llm code <task>[/lcars2] — generate code from org context\n\n"
+        "Describes a coding task, optionally retrieves relevant org notes as context,\n"
+        "then generates code using the code_model. Output is syntax-highlighted.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm code 'parse an org file and list all headings'[/bold]\n"
+        "  [bold]org-llm code 'backup my org dir' --lang sh[/bold]\n"
+        "  [bold]org-llm code 'roam node query' --lang elisp[/bold]\n"
+        "  [bold]org-llm code 'X' --output my_script.py[/bold]   ← write to file\n"
+        "  [bold]org-llm code 'X' --no-context[/bold]            ← no org retrieval\n\n"
+        "[lcars1]Supported languages:[/lcars1]  python | sh | elisp | sql | rust\n\n"
+        "[lcars1]How context works:[/lcars1]\n"
+        "  Your task description is embedded → top-4 nearest nodes are fetched\n"
+        "  and prepended as context for the code_model.\n\n"
+        "[dim]Model: code_model (qwen2.5-coder by default).[/dim]\n"
+        "[dim]Source: org_llm/cli.py → code()  |  org-llm source cli[/dim]",
     ),
     (
         "config",
-        "Step 6: [lcars2]org-llm config[/lcars2]\n\n"
-        "Show or change configuration values stored in the DB.\n\n"
-        "  [bold]org-llm config[/bold]               — show all\n"
-        "  [bold]org-llm config chat_model[/bold]    — show one value\n"
-        "  [bold]org-llm config chat_model phi4[/bold] — set a value\n\n"
-        "[dim]Key config keys:[/dim] org_dir, ollama_url, chat_model, embed_model, "
-        "code_model, reason_model, text_model, fast_model, instruct_model",
+        "[lcars2]org-llm config[/lcars2] — view and change settings\n\n"
+        "All config is stored in the SQLite DB. No config files to edit.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm config[/bold]                         — show all keys\n"
+        "  [bold]org-llm config chat_model[/bold]              — show one value\n"
+        "  [bold]org-llm config chat_model llama3.2[/bold]     — set a value\n\n"
+        "[lcars1]All config keys:[/lcars1]\n"
+        "  org_dir         path to scan for .org files  (default: ~/org)\n"
+        "  ollama_url      Ollama API endpoint           (default: localhost:11434)\n"
+        "  embed_model     embedding model               (nomic-embed-text)\n"
+        "  chat_model      ask / general Q&A             (llama3.3)\n"
+        "  code_model      code generation               (qwen2.5-coder)\n"
+        "  reason_model    planning, complex reasoning   (deepseek-r1)\n"
+        "  fast_model      tagging, classification       (phi4)\n"
+        "  instruct_model  capture, instruction follow   (mistral-nemo)\n"
+        "  text_model      summarisation, analysis       (gemma3)\n"
+        "  embed_dim       embedding dimensions          (768)\n\n"
+        "[dim]Source: org_llm/db.py → MODEL_DEFAULTS  |  org-llm source db[/dim]",
     ),
     (
         "skills",
-        "Step 7: [lcars2]Skills[/lcars2] — define LLM workflows in org-mode\n\n"
-        "Skills are org-babel blocks tagged [bold]:skill:[/bold] in any org file.\n"
-        "They let you define reusable LLM-powered workflows alongside your notes.\n\n"
+        "[lcars2]Skills[/lcars2] — define reusable LLM workflows in org-mode\n\n"
+        "Skills are org-babel source blocks tagged [bold]:skill:[/bold].\n"
+        "You write them in your org notes, and org-llm discovers and runs them.\n\n"
         "[lcars1]Anatomy of a skill:[/lcars1]\n\n"
         "  * Summarise a note                        :skill:\n"
         "  :PROPERTIES:\n"
         "  :SKILL_NAME:  summarise\n"
         "  :SKILL_LANG:  python       ← python or sh\n"
-        "  :SKILL_MODEL: text_model   ← config key for the model to use\n"
+        "  :SKILL_MODEL: text_model   ← which model config key to use\n"
         "  :END:\n\n"
         "  #+begin_src python\n"
-        "  # {{input}} → text passed at runtime\n"
-        "  # llm.chat(prompt) → calls the configured model\n"
-        "  # cfg → dict of all config values\n"
+        "  # {{input}} → replaced with your CLI argument at runtime\n"
+        "  # llm.chat(prompt) → calls the configured model, returns a string\n"
+        "  # cfg → dict of all config values (keys from 'org-llm config')\n"
         "  prompt = f'Summarise in 2 sentences:\\n\\n{{input}}'\n"
         "  print(llm.chat(prompt))\n"
         "  #+end_src\n\n"
-        "[lcars1]Scaffold a new skill:[/lcars1]\n\n"
-        "  [bold]org-llm skill-new my_skill --lang python[/bold]\n"
-        "  → appends a template to ~/org/skills.org and prints next steps\n\n"
-        "[lcars1]Register & run:[/lcars1]\n\n"
-        "  [bold]org-llm skill-index[/bold]              — scan org files, register skills in DB\n"
-        "  [bold]org-llm skills[/bold]                   — list registered skills\n"
-        "  [bold]org-llm skill summarise 'my note'[/bold] — run with literal input\n"
-        "  [bold]org-llm skill summarise --node 'Emacs'[/bold] — use a node body as input\n\n"
-        "[dim]Shell skills work the same way — just use SKILL_LANG: sh and write bash.[/dim]",
+        "[lcars1]Scaffold → register → run:[/lcars1]\n"
+        "  [bold]org-llm skill-new my_skill[/bold]              — create template in skills.org\n"
+        "  [bold]org-llm skill-new my_skill --lang sh[/bold]    — shell skill template\n"
+        "  [bold]org-llm skill-index[/bold]                     — scan files, register in DB\n"
+        "  [bold]org-llm skills[/bold]                          — list all registered skills\n"
+        "  [bold]org-llm skill my_skill 'input text'[/bold]     — run with literal input\n"
+        "  [bold]org-llm skill my_skill --node 'Emacs'[/bold]   — use a node body as input\n\n"
+        "[lcars1]Shell skill example:[/lcars1]\n\n"
+        "  :SKILL_LANG: sh\n"
+        "  #+begin_src sh\n"
+        "  echo 'Input was: {{input}}'\n"
+        "  #+end_src\n\n"
+        "[dim]Skills live in your org vault — version-control them with your notes.[/dim]\n"
+        "[dim]Source: org_llm/skills.py  |  org-llm source skills[/dim]",
     ),
     (
         "report",
-        "Step 8: [lcars2]org-llm report[/lcars2]\n\n"
-        "Rich text reports on your knowledge base:\n\n"
-        "  [bold]org-llm report overview[/bold]  — file/node/embedding counts\n"
-        "  [bold]org-llm report tags[/bold]      — tag frequency leaderboard\n"
-        "  [bold]org-llm report recent[/bold]    — recently modified nodes\n"
-        "  [bold]org-llm report orphans[/bold]   — nodes with no outgoing links\n"
-        "  [bold]org-llm report daily[/bold]     — recent daily notes\n"
-        "  [bold]org-llm report all[/bold]       — all of the above",
+        "[lcars2]org-llm report[/lcars2] — rich text analytics on your vault\n\n"
+        "[lcars1]Sections:[/lcars1]\n"
+        "  [bold]overview[/bold]  files indexed, node count, embedding %, tag sets\n"
+        "  [bold]tags[/bold]      tag frequency leaderboard with bar chart\n"
+        "  [bold]recent[/bold]    nodes modified in the last N days (--days 14)\n"
+        "  [bold]orphans[/bold]   nodes with org-roam IDs but no outgoing links\n"
+        "  [bold]daily[/bold]     recent daily notes with preview\n"
+        "  [bold]all[/bold]       all of the above in sequence\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm report[/bold]                 — all sections\n"
+        "  [bold]org-llm report overview[/bold]        — just the stat panels\n"
+        "  [bold]org-llm report recent --days 30[/bold] — 30-day window\n\n"
+        "[lcars1]dbt integration:[/lcars1]\n"
+        "  The raw tables are also transformed by dbt into mart views:\n"
+        "  nodes_by_tag, recent_nodes, orphan_nodes, daily_notes.\n"
+        "  Run [bold]dbt run[/bold] from ~/repos/org-llm/dbt/ after indexing.\n\n"
+        "[dim]Source: org_llm/report.py  |  org-llm source report[/dim]",
     ),
     (
         "doctor",
-        "Step 9: [lcars2]org-llm doctor[/lcars2]\n\n"
-        "Health check for your installation:\n"
-        "  ✓/✗ DB reachable, sqlite-vec, org_dir, index counts, "
-        "embedding coverage, Ollama + all models, Nerd Font.\n\n"
-        "Run this if something seems wrong.",
+        "[lcars2]org-llm doctor[/lcars2] — health check\n\n"
+        "Runs a battery of checks and displays ✓ / ✗ for each:\n\n"
+        "  [bold]Database reachable[/bold]   — SQLite file exists and is readable\n"
+        "  [bold]sqlite-vec loaded[/bold]    — vector extension imported OK\n"
+        "  [bold]org_dir exists[/bold]       — your org directory is found\n"
+        "  [bold]org files found[/bold]      — .org files present in org_dir\n"
+        "  [bold]Index populated[/bold]      — files + nodes in DB\n"
+        "  [bold]Embeddings present[/bold]   — % of nodes with embeddings\n"
+        "  [bold]Ollama reachable[/bold]     — API responding at ollama_url\n"
+        "  [bold]model: <key>[/bold]         — each configured model is pulled\n"
+        "  [bold]Nerd Font installed[/bold]  — fonts in ~/.local/share/fonts/\n\n"
+        "[lcars1]Command:[/lcars1]  [bold]org-llm doctor[/bold]\n\n"
+        "Run this first when something seems wrong. Every ✗ has a fix.\n\n"
+        "[dim]Source: org_llm/cli.py → doctor()  |  org-llm source cli[/dim]",
     ),
     (
         "install",
-        "Step 10: [lcars2]org-llm install[/lcars2]\n\n"
-        "One-shot bootstrap: downloads Ollama, pulls all configured models, "
-        "and installs NotoMono Nerd Font — all to ~/.local, no sudo needed.\n\n"
-        "[dim]Flags:[/dim]\n"
-        "  --skip-ollama   skip Ollama download/start\n"
-        "  --skip-models   skip model pulls\n"
-        "  --skip-fonts    skip font download",
+        "[lcars2]org-llm install[/lcars2] — one-shot bootstrap\n\n"
+        "Downloads and installs everything you need to ~/.local (no sudo):\n\n"
+        "  [bold]Ollama[/bold]      binary → ~/.local/bin/ollama, starts 'ollama serve'\n"
+        "  [bold]Models[/bold]      pulls all configured models via 'ollama pull'\n"
+        "  [bold]Nerd Font[/bold]   NotoMono from ryanoasis/nerd-fonts → ~/.local/share/fonts/\n"
+        "  [bold]opencode[/bold]    AI coding agent from opencode.ai → ~/.local/bin/\n\n"
+        "[lcars1]Flags:[/lcars1]\n"
+        "  --skip-ollama     skip Ollama binary download\n"
+        "  --skip-models     skip model pulls\n"
+        "  --skip-fonts      skip font download\n"
+        "  --skip-opencode   skip opencode installation\n\n"
+        "[lcars1]Command:[/lcars1]  [bold]org-llm install[/bold]\n\n"
+        "[dim]After install, run: org-llm init → index → embed → doctor[/dim]\n"
+        "[dim]Source: org_llm/cli.py → install()  |  org-llm source cli[/dim]",
+    ),
+    (
+        "dbt",
+        "[lcars2]dbt layer[/lcars2] — SQL transformations on your org index\n\n"
+        "org-llm uses dbt (data build tool) to transform the raw indexed tables\n"
+        "into analytics-ready views and tables in the same SQLite database.\n\n"
+        "[lcars1]Architecture:[/lcars1]\n"
+        "  Python indexer writes raw data into: files, nodes, history, config\n"
+        "  dbt reads those raw tables and produces:\n\n"
+        "  [bold]staging/[/bold]\n"
+        "    stg_nodes    — clean nodes: relative paths, formatted dates, has_embedding flag\n"
+        "    stg_files    — files with days_since_modified, formatted indexed_at\n\n"
+        "  [bold]marts/[/bold]\n"
+        "    nodes_by_tag   — tag → node count + titles (powers report tags)\n"
+        "    recent_nodes   — nodes modified in last 30 days\n"
+        "    orphan_nodes   — nodes with IDs but no incoming links\n"
+        "    daily_notes    — files under /daily/ path\n\n"
+        "[lcars1]How to run dbt:[/lcars1]\n"
+        "  [bold]cd ~/repos/org-llm/dbt[/bold]\n"
+        "  [bold]dbt run[/bold]            — build all models\n"
+        "  [bold]dbt run --select staging[/bold]  — only staging models\n"
+        "  [bold]dbt test[/bold]           — run data tests\n\n"
+        "[lcars1]Configuration:[/lcars1]\n"
+        "  dbt/profiles.yml points at ORG_LLM_DB (default: ~/.local/share/org-llm/org-llm.db)\n"
+        "  Override with: ORG_LLM_DB=/path/to/other.db dbt run\n\n"
+        "[dim]dbt is installed as a dependency — 'uv run dbt run' also works.[/dim]",
+    ),
+    (
+        "opencode",
+        "[lcars2]opencode integration[/lcars2] — AI coding agent\n\n"
+        "opencode (opencode.ai) is an open-source terminal AI coding agent.\n"
+        "org-llm installs it and complements it in several ways:\n\n"
+        "[lcars1]How they work together:[/lcars1]\n"
+        "  org-llm code   → generates code from your org notes as context\n"
+        "  opencode       → interactive agent that edits files, runs tests\n\n"
+        "  Typical flow:\n"
+        "  1. [bold]org-llm code 'parse org files into JSON' --output task.py[/bold]\n"
+        "     org-llm uses your notes as context and generates a starting point\n"
+        "  2. [bold]opencode[/bold]\n"
+        "     opencode picks up task.py, you describe refinements interactively\n\n"
+        "[lcars1]Install opencode:[/lcars1]  [bold]org-llm install --skip-ollama --skip-models --skip-fonts[/bold]\n\n"
+        "[lcars1]Use opencode with your org vault context:[/lcars1]\n"
+        "  org-llm's DB knows your entire note history. You can generate\n"
+        "  relevant context snippets: [bold]org-llm search 'X' --keyword[/bold]\n"
+        "  and paste them into an opencode session for richer coding help.\n\n"
+        "[dim]opencode is installed to ~/.local/bin/opencode — no sudo needed.[/dim]",
+    ),
+    (
+        "source",
+        "[lcars2]org-llm source <module>[/lcars2] — inspect org-llm's own code\n\n"
+        "Shows the source of any org-llm module with syntax highlighting.\n"
+        "With --explain, the LLM explains what the code does.\n\n"
+        "[lcars1]Available modules:[/lcars1]\n"
+        "  cli        — all CLI commands (Typer app)\n"
+        "  db         — SQLAlchemy models + init_db\n"
+        "  indexer    — org file parser + embed_nodes\n"
+        "  llm        — Ollama client wrapper\n"
+        "  search     — vector_search + keyword_search\n"
+        "  skills     — skill discovery + execution engine\n"
+        "  cli_skills — skill CLI commands\n"
+        "  report     — report_overview, report_tags, etc.\n"
+        "  ui         — Rich theming + progress bars\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm source db[/bold]               — show db.py with line numbers\n"
+        "  [bold]org-llm source indexer --explain[/bold] — show + LLM explanation\n"
+        "  [bold]org-llm source llm[/bold]               — the Ollama wrapper (it's tiny!)\n\n"
+        "[dim]This command uses Python's inspect module — always shows live code.[/dim]",
     ),
     (
         "emacs",
-        "Doom Emacs integration\n\n"
-        "All commands are available via [lcars1]SPC l[/lcars1]:\n\n"
-        "  SPC l a   ask\n"
-        "  SPC l A   ask with reason model\n"
-        "  SPC l s   semantic search\n"
-        "  SPC l S   keyword search\n"
-        "  SPC l r   report\n"
-        "  SPC l i   index\n"
-        "  SPC l e   embed\n"
-        "  SPC l m   models\n"
-        "  SPC l .   ask-dwim (uses region or line at point)\n\n"
-        "Results appear in a side window (ANSI-rendered) or vterm.",
+        "[lcars2]Doom Emacs integration[/lcars2]\n\n"
+        "Load from config.el:  [bold](load! \"~/repos/org-llm/doom/org-llm\")[/bold]\n\n"
+        "[lcars1]Keybindings (all under SPC l):[/lcars1]\n\n"
+        "  [lcars2]SPC l a[/lcars2]   org-llm-ask          — ask a question, answer in side window\n"
+        "  [lcars2]SPC l A[/lcars2]   ask (reason model)   — use deepseek-r1 for hard questions\n"
+        "  [lcars2]SPC l s[/lcars2]   org-llm-search       — semantic search, results in side window\n"
+        "  [lcars2]SPC l S[/lcars2]   keyword search       — fast SQL-based search\n"
+        "  [lcars2]SPC l r[/lcars2]   org-llm-report       — open report in vterm\n"
+        "  [lcars2]SPC l i[/lcars2]   org-llm-index        — re-index org files\n"
+        "  [lcars2]SPC l e[/lcars2]   org-llm-embed        — generate embeddings\n"
+        "  [lcars2]SPC l m[/lcars2]   org-llm-models       — list models in side window\n"
+        "  [lcars2]SPC l .[/lcars2]   org-llm-ask-dwim     — ask about region or sentence at point\n\n"
+        "[lcars1]How results appear:[/lcars1]\n"
+        "  ask / search / models → side window (right, 45% width), ANSI-coloured\n"
+        "  index / embed / report → dedicated vterm buffer (bottom, 35% height)\n\n"
+        "[dim]Source: doom/org-llm.el  |  org-llm source cli (org-llm-ask etc.)[/dim]",
     ),
     (
         "done",
         "[bold lcars1]You're ready to explore your second brain.[/bold lcars1]\n\n"
-        "Recommended first flight:\n\n"
-        "  1. [bold]org-llm init[/bold]\n"
-        "  2. [bold]org-llm install[/bold]   (if Ollama not yet running)\n"
-        "  3. [bold]org-llm index[/bold]\n"
-        "  4. [bold]org-llm embed[/bold]\n"
-        "  5. [bold]org-llm doctor[/bold]    (verify everything green)\n"
+        "[lcars1]Recommended first flight:[/lcars1]\n\n"
+        "  1. [bold]org-llm install[/bold]         — Ollama + models + fonts + opencode\n"
+        "  2. [bold]org-llm init[/bold]             — create DB + default config\n"
+        "  3. [bold]org-llm index[/bold]            — parse all org files into DB\n"
+        "  4. [bold]org-llm embed[/bold]            — generate embeddings (takes a while)\n"
+        "  5. [bold]org-llm doctor[/bold]           — verify everything is green\n"
         "  6. [bold]org-llm ask 'What did I write about X?'[/bold]\n\n"
-        "Engage. ☭ ✊ 🏳️‍🌈",
+        "[lcars1]Explore further:[/lcars1]\n"
+        "  [bold]org-llm report all[/bold]          — analytics on your vault\n"
+        "  [bold]org-llm skill-new my_skill[/bold]  — create your first skill\n"
+        "  [bold]org-llm tag[/bold]                 — auto-tag untagged nodes\n"
+        "  [bold]org-llm source indexer --explain[/bold] — understand how it works\n"
+        "  [bold]org-llm tutor --all[/bold]          — read the whole manual\n\n"
+        "Engage. ☭ ✊ 🏳️‍🌈 — Queer, collective, free.",
     ),
 ]
 
@@ -690,8 +924,8 @@ _TUTOR_STEPS = [
 @app.command()
 def tutor(
     step: Annotated[str, typer.Argument(
-        help="Step name to jump to (welcome/init/index/embed/search/ask/"
-             "config/skills/report/doctor/install/emacs/done)"
+        help="Step name to jump to (welcome/init/index/embed/search/ask/capture/"
+             "tag/code/config/skills/report/doctor/install/source/emacs/done)"
     )] = "welcome",
     all_steps: Annotated[bool, typer.Option("--all", "-a",
                help="Print all steps at once")] = False,
@@ -747,6 +981,74 @@ def tutor(
     if nav:
         console.print("  " + "    ".join(nav))
     console.print()
+
+
+_MODULE_MAP = {
+    "cli":        "org_llm.cli",
+    "db":         "org_llm.db",
+    "indexer":    "org_llm.indexer",
+    "llm":        "org_llm.llm",
+    "search":     "org_llm.search",
+    "skills":     "org_llm.skills",
+    "cli_skills": "org_llm.cli_skills",
+    "report":     "org_llm.report",
+    "ui":         "org_llm.ui",
+}
+
+
+@app.command()
+def source(
+    module:  Annotated[str,  typer.Argument(
+             help="Module to show: cli | db | indexer | llm | search | skills | report | ui"
+    )],
+    explain: Annotated[bool, typer.Option("--explain", "-e",
+             help="Use LLM to explain the source")] = False,
+    model:   Annotated[str,  typer.Option("--model", "-m",
+             help="Override model for --explain")] = "",
+):
+    """Show org-llm's own source code with syntax highlighting, optionally explained by LLM."""
+    import importlib
+    import inspect
+    from rich.syntax import Syntax
+    from rich.panel import Panel
+
+    if module not in _MODULE_MAP:
+        red_alert(
+            f"Unknown module {module!r}. "
+            f"Available: {', '.join(_MODULE_MAP)}"
+        )
+        raise typer.Exit(1)
+
+    mod = importlib.import_module(_MODULE_MAP[module])
+    src = inspect.getsource(mod)
+    path = inspect.getfile(mod)
+
+    console.print()
+    console.rule(f"[lcars2]{path}[/lcars2]")
+    console.print(Syntax(src, "python", theme="monokai", line_numbers=True))
+    console.rule(f"[dim]{len(src.splitlines())} lines[/dim]")
+
+    if explain:
+        engine = _engine()
+        with get_session(engine) as session:
+            url      = _ollama_url(session)
+            chat_mdl = model or _cfg(session, "chat_model") or "llama3.3"
+
+        from .llm import chat
+        system = (
+            "You are an expert Python developer and Emacs/org-mode enthusiast. "
+            "Explain the following Python module from the org-llm codebase. "
+            "Cover: what it does, its key functions/classes, design decisions, "
+            "and how it fits into the overall system. Be clear and concrete."
+        )
+        prompt = f"Module: {module}\n\n```python\n{src[:6000]}\n```"
+        with warp(f"Explaining {module} with {chat_mdl}"):
+            explanation = chat(prompt, model=chat_mdl, base_url=url, system=system)
+
+        console.print()
+        console.rule(f"[lcars1]{chat_mdl} explains {module}[/lcars1]")
+        console.print(explanation)
+        console.rule()
 
 
 @app.command()
