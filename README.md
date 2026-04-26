@@ -87,6 +87,7 @@ candidates.
 | `org-llm index` | Parse all `.org` files into the database (incremental by mtime) |
 | `org-llm embed` | Generate embeddings for unembedded nodes (`embed_model`) |
 | `org-llm code-index [PATHS]` | Index `~/repos` (or any tree) so `ask` answers across notes + code |
+| `org-llm discover [DIRS]` | Probe filesystem for org/repo/dotfiles/Emacs roots; powers code-index auto-heal |
 | `org-llm search "query"` | Semantic or keyword search (`-k` for keyword) |
 | `org-llm ask "q"` | RAG Q&A; auto-detects time windows, path hints, and tag references |
 | `org-llm capture` | Add a new note (LLM-polished by default; `--no-polish` to skip) |
@@ -235,14 +236,46 @@ query. Skips `.git` / `node_modules` / `.venv` / `target` / `dist` etc.;
 truncates per-file body at 24 KB; tags every code node `code:<lang>`.
 
 ```sh
-org-llm code-index                          # default: ~/repos
-org-llm code-index ~/dotfiles ~/work        # extra paths
-org-llm config code_dirs ~/repos,~/dotfiles # persistent default
+org-llm code-index                                  # default: ~/repos
+org-llm code-index ~/repos/dotfiles ~/.config/doom  # explicit paths
+org-llm config code_dirs ~/repos,~/.config/doom     # persistent default
 org-llm ask --cloud "how does cli.py wire up MCP?"
 ```
 
 After indexing it auto-embeds new nodes so they're searchable
 immediately. Pass `--no-embed` to skip.
+
+If *every* path you pass is missing, the command no longer red-alerts
+— it runs filesystem discovery and offers found code roots instead.
+See [Filesystem discovery](#filesystem-discovery) below.
+
+---
+
+## Filesystem discovery
+
+`org-llm discover` probes a small set of standard locations (`~/org`,
+`~/repos`, `~/code`, `~/projects`, `~/work`, `~/dotfiles`,
+`~/.config/doom`, `~/.doom.d`, `~/.config/emacs`, `~/.emacs.d`,
+`~/.password-store`, `~/.local/share/ollama`) and reports what
+actually exists with file counts and the most-frequent code language
+per root.
+
+```sh
+org-llm discover                # standard probe
+org-llm discover ~/extra/dir    # plus an extra dir
+```
+
+The same module powers two auto-heal flows:
+
+- **`code-index <bad-paths>`** — if none of the paths exist, runs
+  discovery and offers found code roots with `Index these? [Y/n]`
+  instead of red-alerting.
+- **`grants` empty-state** — surfaces concrete `grant-root`
+  candidates pulled from disk instead of just printing "no grants".
+
+The throughline: the LLM has access to the cloud and the local DB;
+the *app* should also have access to the actual filesystem and feed
+discoveries back into command flows.
 
 ---
 

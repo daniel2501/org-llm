@@ -3844,6 +3844,29 @@ _TUTOR_STEPS = [
         "[dim]Source: org_llm/code_index.py  |  org-llm source code_index[/dim]",
     ),
     (
+        "discover",
+        "[lcars2]org-llm discover[/lcars2] — probe the filesystem for what org-llm can use\n\n"
+        "Walks a small set of standard locations (=~/org=, =~/repos=, =~/code=,\n"
+        "=~/projects=, =~/.config/doom=, =~/.emacs.d=, =~/.password-store=, …)\n"
+        "and reports what actually exists, with file counts and the most-frequent\n"
+        "code language per root.\n\n"
+        "[lcars1]What you get back:[/lcars1]\n"
+        "  • A table of vault / repos-root / dotfiles / doom-config / pass-store rows\n"
+        "  • Suggested [bold]code-index[/bold] roots based on which dirs hold real code\n"
+        "  • Suggested [bold]grant-root[/bold] candidates for MCP self-grant access\n"
+        "  • Detected preferred language (used by [bold]code[/bold] for default lang)\n\n"
+        "[lcars1]Auto-heal: where this kicks in implicitly:[/lcars1]\n"
+        "  • [bold]code-index <bad-paths>[/bold] — if NONE of the given paths exist,\n"
+        "    [bold]discover[/bold] runs automatically and offers found code roots\n"
+        "    instead of red-alerting.\n"
+        "  • [bold]grants[/bold] — empty-state shows discovered grant-root candidates\n"
+        "    with ready-to-paste commands.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm discover[/bold]                  — standard probe\n"
+        "  [bold]org-llm discover ~/extra/dir[/bold]      — also probe an extra dir\n\n"
+        "[dim]Source: org_llm/discover.py  |  org-llm source discover[/dim]",
+    ),
+    (
         "performance",
         "[lcars2]org-llm performance[/lcars2] — tune model assignments to your hardware\n\n"
         "Probes free RAM/VRAM (not total — you have other apps open!), CPU info,\n"
