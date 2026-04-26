@@ -3895,10 +3895,11 @@ _TUTOR_STEPS = [
         "  ✦ Doom Emacs integration gives you SPC l bindings for everything.\n\n"
         "Navigate with: [bold]org-llm tutor <step>[/bold]\n"
         "All steps:     [bold]org-llm tutor --all[/bold]\n"
-        "Steps: welcome → init → index → embed → code-index → search → ask → capture\n"
-        "       → tag → code → config → skills → report → doctor → doctor-walkthrough\n"
-        "       → install → db → dbt → opencode → source → performance → grants → knob\n"
-        "       → theme → env → review-emacs → creds → cloud → launch → emacs → claude → done",
+        "Steps: welcome → init → index → embed → code-index → discover → search → ask\n"
+        "       → capture → tag → code → config → skills → report → doctor →\n"
+        "       doctor-walkthrough → install → db → dbt → opencode → source →\n"
+        "       performance → grants → knob → personalize → theme → env →\n"
+        "       review-emacs → creds → cloud → launch → emacs → claude → done",
     ),
     (
         "init",
