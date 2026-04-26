@@ -4502,6 +4502,169 @@ def mcp():
 
 
 @app.command()
+def grant(
+    path: Annotated[str, typer.Argument(help="Filesystem path to authorise the LLM to read")],
+):
+    """Authorise the MCP server (and any LLM connected to it) to read files
+    under PATH. Adds an entry to the `mcp_file_allowlist` config row.
+
+    The LLM can then use the `read_file` and `list_directory` MCP tools on
+    any descendant. Revoke with `org-llm revoke <path>`. Inspect with
+    `org-llm grants`.
+    """
+    from . import access
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        red_alert(f"Path does not exist: {p}")
+        on_screen("Grant the path anyway? It must exist when the LLM tries to read it.")
+        if not typer.confirm("Add to allow-list anyway?", default=False):
+            raise typer.Exit(1)
+    if access.grant(str(p)):
+        hail(f"Granted: {p}")
+        if p.is_dir():
+            on_screen("LLM can now read any file under this directory.")
+        on_screen("Inspect with: [bold]org-llm grants[/bold]")
+        make_it_so()
+    else:
+        red_alert("Failed to write allow-list. Is the DB initialised?")
+        raise typer.Exit(1)
+
+
+@app.command()
+def revoke(
+    path: Annotated[str, typer.Argument(help="Path to remove from the allow-list")],
+):
+    """Remove a previously-granted path from the MCP allow-list."""
+    from . import access
+    p = Path(path).expanduser().resolve()
+    if access.revoke(str(p)):
+        hail(f"Revoked: {p}")
+        make_it_so()
+    else:
+        red_alert("Failed to update allow-list.")
+        raise typer.Exit(1)
+
+
+@app.command(name="grants")
+def grants_list():
+    """List paths the LLM (via MCP) is currently authorised to read."""
+    from rich.table import Table as _T
+    from . import access
+    grants = access.allowlist()
+    roots  = access.auto_grant_roots()
+    console.print()
+    console.rule("[lcars1]MCP file-access grants[/lcars1]")
+    if grants:
+        tbl = _T(title="[lcars2]Direct grants[/lcars2]", box=None, pad_edge=False)
+        tbl.add_column("Path",   style="lcars2", no_wrap=True)
+        tbl.add_column("Exists", style="dim", width=8)
+        tbl.add_column("Type",   style="dim", width=8)
+        for g in grants:
+            exists = "[green]yes[/green]" if g.exists() else "[red]no[/red]"
+            kind   = ("dir" if g.is_dir() else
+                      "file" if g.is_file() else "—")
+            tbl.add_row(str(g), exists, kind)
+        console.print(tbl)
+    else:
+        on_screen("[dim]No direct grants. The LLM cannot read any file (yet).[/dim]")
+    console.print()
+    if roots:
+        rtbl = _T(title="[lcars3]Auto-grant roots (LLM may self-extend under these)[/lcars3]",
+                  box=None, pad_edge=False)
+        rtbl.add_column("Root", style="lcars3", no_wrap=True)
+        rtbl.add_column("Exists", style="dim", width=8)
+        for r in roots:
+            rtbl.add_row(str(r),
+                          "[green]yes[/green]" if r.exists() else "[red]no[/red]")
+        console.print(rtbl)
+    else:
+        on_screen("[dim]No auto-grant roots. LLM cannot self-grant; "
+                  "every path needs an explicit `org-llm grant`.[/dim]")
+    console.print()
+    on_screen(f"Browser access: "
+              f"{'[green]enabled[/green]' if access.browser_enabled() else '[dim]disabled[/dim]'}")
+    console.print()
+    on_screen("Add a path:        [bold]org-llm grant <path>[/bold]")
+    on_screen("Remove a path:     [bold]org-llm revoke <path>[/bold]")
+    on_screen("Trust a root:      [bold]org-llm grant-root <path>[/bold]")
+    on_screen("Untrust a root:    [bold]org-llm revoke-root <path>[/bold]")
+    on_screen("Enable browser:    [bold]org-llm grant-browser[/bold]")
+    on_screen("Disable browser:   [bold]org-llm revoke-browser[/bold]")
+    console.print()
+    on_screen("[dim]Sensitive paths (SSH/GPG/cloud creds) are ALWAYS denied, "
+              "even with grants.[/dim]")
+
+
+@app.command(name="grant-root")
+def grant_root(
+    path: Annotated[str, typer.Argument(help="Trusted prefix the LLM may self-grant within")],
+):
+    """Trust a directory as a self-grant root for the LLM.
+
+    Once trusted, the LLM can call its `request_access` MCP tool with any
+    path under this root and it gets auto-granted (added to the regular
+    allow-list). Sensitive paths (~/.ssh, ~/.gnupg, ~/.password-store,
+    cloud creds, /etc/shadow, etc.) remain denied even with a trusted root.
+
+    Example:
+      org-llm grant-root ~/repos    # LLM can self-grant any file under ~/repos
+      org-llm grant-root ~/org      # ditto for the vault
+    """
+    from . import access
+    p = Path(path).expanduser().resolve()
+    if not p.exists():
+        red_alert(f"Path does not exist: {p}")
+        raise typer.Exit(1)
+    if not p.is_dir():
+        red_alert(f"--root must be a directory: {p}")
+        raise typer.Exit(1)
+    if access.add_auto_root(str(p)):
+        hail(f"Trusted as auto-grant root: {p}")
+        on_screen("LLM can now self-grant any non-sensitive path under this dir.")
+        on_screen("Inspect: [bold]org-llm grants[/bold]")
+        make_it_so()
+    else:
+        red_alert("Failed to write auto-grant roots.")
+        raise typer.Exit(1)
+
+
+@app.command(name="revoke-root")
+def revoke_root(
+    path: Annotated[str, typer.Argument(help="Auto-grant root to remove")],
+):
+    """Remove an auto-grant root. Existing direct grants under it remain."""
+    from . import access
+    p = Path(path).expanduser().resolve()
+    if access.remove_auto_root(str(p)):
+        hail(f"Untrusted: {p}")
+        make_it_so()
+    else:
+        red_alert("Failed to update auto-grant roots.")
+        raise typer.Exit(1)
+
+
+@app.command(name="grant-browser")
+def grant_browser():
+    """Allow the LLM to open URLs and drive qutebrowser via MCP."""
+    from . import access
+    access.set_browser_enabled(True)
+    hail("Browser access enabled.")
+    on_screen("LLM tools available:  [bold]open_url[/bold], [bold]browser_command[/bold]")
+    if not access._qute_bin():
+        on_screen("[yellow]qutebrowser not on PATH — open_url falls back to xdg-open.[/yellow]")
+    make_it_so()
+
+
+@app.command(name="revoke-browser")
+def revoke_browser():
+    """Disallow LLM browser access."""
+    from . import access
+    access.set_browser_enabled(False)
+    hail("Browser access disabled.")
+    make_it_so()
+
+
+@app.command()
 def theme(
     mode: Annotated[str, typer.Argument(help="dark | light | toggle | show")] = "show",
 ):

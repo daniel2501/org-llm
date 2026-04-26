@@ -260,6 +260,96 @@ def create_mcp_server():
             return f"Tangle error: {e}"
 
     # ── get_config ────────────────────────────────────────────────────────────
+    # ── access: read_file, list_directory, open_url, qute_command ───────────
+    @server.tool()
+    def read_file(path: str) -> str:
+        """Read a file from anywhere on the user's filesystem.
+
+        Only paths the user has explicitly authorised via `org-llm grant`
+        are reachable. If the request is denied, the response names the
+        exact `org-llm grant` command the user must run to allow it.
+        """
+        from .access import read_file as _read
+        result = _read(path)
+        if not result.ok:
+            return result.error
+        return result.content
+
+    @server.tool()
+    def list_directory(path: str) -> str:
+        """List entries in a directory. Same allow-list gating as read_file."""
+        from .access import list_directory as _list
+        result = _list(path)
+        if not result.ok:
+            return result.error
+        return result.content
+
+    @server.tool()
+    def list_grants() -> str:
+        """Show the user's currently-authorised file-access prefixes."""
+        from .access import allowlist, auto_grant_roots, browser_enabled
+        grants = allowlist()
+        roots  = auto_grant_roots()
+        lines = ["Currently authorised file prefixes (read_file/list_directory):"]
+        if grants:
+            lines += [f"  - {g}" for g in grants]
+        else:
+            lines.append("  (none)")
+        lines.append("")
+        lines.append("Auto-grant roots (LLM may self-grant under these via request_access):")
+        if roots:
+            lines += [f"  - {r}" for r in roots]
+        else:
+            lines.append("  (none — request_access will refuse all paths)")
+        lines.append("")
+        lines.append(f"Browser access: {'enabled' if browser_enabled() else 'disabled'}")
+        lines.append("")
+        lines.append("To grant a path manually: org-llm grant <path>")
+        lines.append("To trust an auto-root:    org-llm grant-root <path>")
+        lines.append("To enable browser:        org-llm grant-browser")
+        return "\n".join(lines)
+
+    @server.tool()
+    def request_access(path: str, reason: str = "") -> str:
+        """Request to read files under PATH. Auto-granted IFF:
+
+           • PATH lies under one of the user's auto-grant roots
+             (`org-llm grant-root <root>`), AND
+           • PATH is not on the sensitive deny-list (SSH, GPG, cloud creds).
+
+        On success, PATH is added to the regular allow-list — subsequent
+        `read_file` calls succeed without going through this tool. On
+        refusal, the message tells you exactly which `org-llm grant` or
+        `grant-root` command the user must run for you to proceed.
+
+        Use this when you need a file outside your current grants. Always
+        give a brief `reason` so the user can audit why later.
+        """
+        from .access import request_self_grant
+        result = request_self_grant(path, reason)
+        return result.message
+
+    @server.tool()
+    def open_url(url: str) -> str:
+        """Open a URL in qutebrowser (or the user's default browser).
+
+        Disabled by default; the user enables it with `org-llm grant-browser`.
+        Only http(s) and file:// URLs are accepted; javascript:/data: refused.
+        """
+        from .access import open_url as _open
+        ok, msg = _open(url)
+        return msg
+
+    @server.tool()
+    def browser_command(command: str) -> str:
+        """Send a colon-command (e.g. ':open URL', ':tab-next') to qutebrowser.
+
+        Requires `org-llm grant-browser` AND qutebrowser already installed.
+        """
+        from .access import qute_command
+        ok, msg = qute_command(command)
+        return msg
+
     @server.tool()
     def get_config() -> str:
         """Return current org-llm configuration (model assignments, org_dir, etc.)."""

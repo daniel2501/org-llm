@@ -236,6 +236,8 @@ TOOL_REGISTRY: list[ToolInfo] = [
     ToolInfo("yazi",     "terminal file manager",            "MIT",         "yazi --version",     "install_yazi",     "theme_yazi",     "cli"),
     ToolInfo("helix",    "post-modern modal editor",         "MPL-2.0",     "hx --version",       "install_helix",    "theme_helix",    "editor"),
     ToolInfo("zoxide",   "smarter cd command",               "MIT",         "zoxide --version",   "install_zoxide",   None,             "shell"),
+    ToolInfo("qutebrowser","keyboard-driven browser (LLM open_url target)", "GPL-3.0",
+                          "qutebrowser --version", "install_qutebrowser", None,             "browser"),
 ]
 
 # ── LCARS / Doom Emacs colour palette for theme templates ─────────────────────
@@ -443,6 +445,35 @@ def install_fzf(bin_dir: str = "~/.local/bin") -> bool:
             dest.symlink_to(fzf_bin)
         return True
     return r.returncode == 0
+
+
+def install_qutebrowser(bin_dir: str = "~/.local/bin") -> bool:
+    """Install qutebrowser via the system package manager.
+
+    qutebrowser is a Qt application — there's no static-binary release for
+    Linux. Try Guix → apt → pacman → brew → dnf in order; whichever the
+    user has on PATH.
+    """
+    import shutil, subprocess
+    candidates: list[list[str]] = []
+    if shutil.which("guix"):
+        candidates.append(["guix", "install", "qutebrowser"])
+    if shutil.which("apt-get"):
+        candidates.append(["sudo", "apt-get", "install", "-y", "qutebrowser"])
+    if shutil.which("pacman"):
+        candidates.append(["sudo", "pacman", "-S", "--noconfirm", "qutebrowser"])
+    if shutil.which("brew"):
+        candidates.append(["brew", "install", "--cask", "qutebrowser"])
+    if shutil.which("dnf"):
+        candidates.append(["sudo", "dnf", "install", "-y", "qutebrowser"])
+    for cmd in candidates:
+        try:
+            r = subprocess.run(cmd, timeout=300)
+            if r.returncode == 0 and shutil.which("qutebrowser"):
+                return True
+        except Exception:
+            continue
+    return shutil.which("qutebrowser") is not None
 
 
 def install_zoxide(bin_dir: str = "~/.local/bin") -> bool:
