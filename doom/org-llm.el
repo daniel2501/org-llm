@@ -7,6 +7,7 @@
 (defvar org-llm-search-buffer   "*org-llm: search*")
 (defvar org-llm-report-buffer   "*org-llm: report*")
 (defvar org-llm-launch-buffer   "*org-llm: opencode*")
+(defvar org-llm-claude-buffer   "*org-llm: claude*")
 
 
 ;;; ── internal helpers ─────────────────────────────────────────────────────────
@@ -133,6 +134,14 @@ With prefix arg, prompt for model override."
     (org-llm--vterm-fullscreen cmd org-llm-launch-buffer)))
 
 ;;;###autoload
+(defun org-llm-claude ()
+  "Launch Claude Code as the org-llm workspace in a full vterm buffer."
+  (interactive)
+  (org-llm--vterm-fullscreen
+   (format "%s claude" org-llm-binary)
+   org-llm-claude-buffer))
+
+;;;###autoload
 (defun org-llm-doctor ()
   "Run org-llm doctor health check in vterm."
   (interactive)
@@ -156,6 +165,7 @@ With prefix arg, prompt for model override."
 (map! :leader
       (:prefix ("l" . "org-llm")
        :desc "Launch opencode workspace" "o" #'org-llm-launch
+       :desc "Launch Claude Code"        "C" #'org-llm-claude
        :desc "Ask notes"                 "a" #'org-llm-ask
        :desc "Ask (reason model)"        "A" (cmd! (org-llm-ask (read-string "Ask (reason): ") t))
        :desc "Search notes"              "s" #'org-llm-search

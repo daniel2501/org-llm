@@ -330,6 +330,42 @@ def _gh_bin() -> str | None:
     )
 
 
+def _claude_bin() -> Path | None:
+    """Return path to claude CLI if installed anywhere."""
+    import shutil
+    found = shutil.which("claude")
+    if found:
+        return Path(found)
+    for candidate in [
+        Path("~/.claude/bin/claude").expanduser(),
+        Path("~/.local/bin/claude").expanduser(),
+        Path("~/.npm-global/bin/claude").expanduser(),
+        Path("~/.local/share/npm/bin/claude").expanduser(),
+        Path("/usr/local/bin/claude"),
+    ]:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _install_claude_bin() -> Path | None:
+    """Install claude CLI via npm. Returns path or None."""
+    import subprocess, shutil
+    npm = shutil.which("npm")
+    if not npm:
+        red_alert("npm not found — install Node.js to get Claude Code  (nodejs.org)")
+        return None
+    hail("Installing @anthropic-ai/claude-code via npm…")
+    result = subprocess.run(
+        [npm, "install", "-g", "@anthropic-ai/claude-code"],
+        timeout=120,
+    )
+    if result.returncode != 0:
+        red_alert("claude install failed — check npm output above")
+        return None
+    return _claude_bin()
+
+
 def _install_gh(bin_dir: Path) -> Path | None:
     """Download and install gh CLI to bin_dir. Returns path or None on failure."""
     import platform
@@ -375,8 +411,9 @@ def install(
     skip_fonts:    Annotated[bool, typer.Option("--skip-fonts")]    = False,
     skip_opencode: Annotated[bool, typer.Option("--skip-opencode")] = False,
     skip_gh:       Annotated[bool, typer.Option("--skip-gh")]       = False,
+    skip_claude:   Annotated[bool, typer.Option("--skip-claude")]   = False,
 ):
-    """Install Ollama, models, Nerd Fonts, opencode, and gh CLI."""
+    """Install Ollama, models, Nerd Fonts, opencode, gh CLI, and Claude Code."""
     import platform
     import shutil
     import subprocess
@@ -490,6 +527,15 @@ def install(
             hail("Installing gh CLI (GitHub CLI)…")
             _install_gh(bin_dir)
 
+    # ── Claude Code CLI ───────────────────────────────────────────────────────
+    if not skip_claude:
+        existing = _claude_bin()
+        if existing:
+            hail(f"Claude Code already installed — skipping. ({existing})")
+        else:
+            hail("Installing Claude Code CLI…")
+            _install_claude_bin()
+
     console.print()
     console.print(trans_stripe(52))
     make_it_so()
@@ -540,6 +586,7 @@ def doctor(
               help="Auto-apply safe fixes (init DB, start Ollama)")] = False,
 ):
     """Deep health check: system, DB, index, Ollama, fonts — with LLM diagnosis."""
+    import os
     import shutil
     import subprocess
     import sys
@@ -851,6 +898,21 @@ def doctor(
         warn("gh CLI not installed",
              "run: org-llm install --skip-ollama --skip-models --skip-fonts --skip-opencode")
 
+    # ── Claude Code ────────────────────────────────────────────────────────────
+    section("Claude Code")
+    claude = _claude_bin()
+    if claude:
+        ok("claude installed", str(claude))
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if api_key:
+            ok("ANTHROPIC_API_KEY", f"set ({len(api_key)} chars)")
+        else:
+            warn("ANTHROPIC_API_KEY not set",
+                 "needed for claude CLI — set in shell or ~/.profile")
+    else:
+        warn("Claude Code not installed",
+             "run: org-llm install --skip-ollama --skip-models --skip-fonts --skip-opencode --skip-gh")
+
     # ── Fonts / UI ─────────────────────────────────────────────────────────────
     section("Fonts & UI")
     font_dirs = [
@@ -978,7 +1040,7 @@ _TUTOR_STEPS = [
         "All steps:     [bold]org-llm tutor --all[/bold]\n"
         "Steps: welcome → init → index → embed → search → ask → capture → tag → code\n"
         "       → config → skills → report → doctor → install → dbt → opencode\n"
-        "       → source → cloud → launch → emacs → done",
+        "       → source → cloud → launch → emacs → claude → done",
     ),
     (
         "init",
@@ -1387,10 +1449,35 @@ _TUTOR_STEPS = [
         "[dim]Source: org_llm/mcp_server.py + cli.py → launch()  |  org-llm source mcp_server[/dim]",
     ),
     (
+        "claude",
+        "[lcars2]org-llm claude[/lcars2] — Claude Code as interactive org-roam workspace\n\n"
+        "Connects the Anthropic Claude CLI to your vault via MCP tools.\n"
+        "Unlike opencode (Ollama-backed), Claude Code uses the Anthropic API\n"
+        "or a claude.ai Pro subscription — state-of-the-art models, no local GPU needed.\n\n"
+        "[lcars1]What it does:[/lcars1]\n"
+        "  1. Installs [bold]claude[/bold] CLI via npm if missing\n"
+        "  2. Writes [bold]{org_dir}/.claude/settings.json[/bold] — MCP server entry\n"
+        "  3. Writes [bold]{org_dir}/.claude/CLAUDE.md[/bold] — vault context instructions\n"
+        "  4. exec-replaces itself with [bold]claude[/bold] in org_dir\n\n"
+        "[lcars1]Requirements:[/lcars1]\n"
+        "  ANTHROPIC_API_KEY  — get one at console.anthropic.com\n"
+        "  OR claude.ai Pro subscription (claude.ai/login)\n"
+        "  Node.js / npm       — for installing the claude package\n\n"
+        "[lcars1]From Doom Emacs:[/lcars1]  [lcars2]SPC l C[/lcars2] — opens vterm + launches Claude Code\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm claude[/bold]              — full context workspace\n"
+        "  [bold]org-llm claude --no-context[/bold] — minimal .claude/CLAUDE.md\n"
+        "  [bold]org-llm claude --dry-run[/bold]    — preview config without launching\n\n"
+        "[lcars1]vs opencode:[/lcars1]\n"
+        "  opencode → Ollama models (local, private, free after hardware)\n"
+        "  claude   → Anthropic API (cloud, frontier models, per-token cost)\n\n"
+        "[dim]Source: cli.py → claude_frontend()  |  config: .claude/settings.json[/dim]",
+    ),
+    (
         "done",
         "[bold lcars1]You're ready to explore your second brain.[/bold lcars1]\n\n"
         "[lcars1]Recommended first flight:[/lcars1]\n\n"
-        "  1. [bold]org-llm install[/bold]         — Ollama + models + fonts + opencode\n"
+        "  1. [bold]org-llm install[/bold]         — Ollama + models + fonts + opencode + claude\n"
         "  2. [bold]org-llm init[/bold]             — create DB + default config\n"
         "  3. [bold]org-llm index[/bold]            — parse all org files into DB\n"
         "  4. [bold]org-llm embed[/bold]            — generate embeddings (takes a while)\n"
@@ -1398,6 +1485,8 @@ _TUTOR_STEPS = [
         "  6. [bold]org-llm ask 'What did I write about X?'[/bold]\n\n"
         "[lcars1]Explore further:[/lcars1]\n"
         "  [bold]org-llm launch[/bold]              — opencode workspace (SPC l o in Emacs)\n"
+        "  [bold]org-llm claude[/bold]              — Claude Code workspace (SPC l C in Emacs)\n"
+        "  [bold]org-llm cloud --assess[/bold]      — check which models need RunPod cloud\n"
         "  [bold]org-llm report all[/bold]          — analytics on your vault\n"
         "  [bold]org-llm skill-new my_skill[/bold]  — create your first skill\n"
         "  [bold]org-llm tag[/bold]                 — auto-tag untagged nodes\n"
@@ -1412,7 +1501,7 @@ _TUTOR_STEPS = [
 def tutor(
     step: Annotated[str, typer.Argument(
         help="Step name to jump to (welcome/init/index/embed/search/ask/capture/"
-             "tag/code/config/skills/report/doctor/install/dbt/opencode/source/cloud/launch/emacs/done)"
+             "tag/code/config/skills/report/doctor/install/dbt/opencode/source/cloud/launch/emacs/claude/done)"
     )] = "welcome",
     all_steps: Annotated[bool, typer.Option("--all", "-a",
                help="Print all steps at once")] = False,
@@ -1864,6 +1953,177 @@ BEHAVIOUR
     # ── Hand off to opencode ──────────────────────────────────────────────────
     os.chdir(org_dir)
     os.execvp(oc_bin, [oc_bin])
+
+
+@app.command(name="claude")
+def claude_frontend(
+    no_context: Annotated[bool, typer.Option("--no-context",
+                help="Skip vault context in CLAUDE.md instructions")] = False,
+    dry_run:    Annotated[bool, typer.Option("--dry-run",
+                help="Print config only, do not launch")] = False,
+):
+    """Launch Claude Code as an interactive org-roam workspace with vault context and MCP tools."""
+    import json
+    import os
+    import shutil
+    from rich.panel  import Panel
+    from rich.syntax import Syntax
+    from rich.table  import Table
+    from .db    import Node, File
+    from .skills import Skill
+    from .ui    import solidarity, trans_stripe
+
+    # ── Locate or install claude ──────────────────────────────────────────────
+    claude_path = _claude_bin()
+    if not dry_run and claude_path is None:
+        hail("Claude Code not found — installing via npm…")
+        claude_path = _install_claude_bin()
+        if not claude_path:
+            raise typer.Exit(1)
+    claude_bin = str(claude_path) if claude_path else "claude"
+
+    # ── Gather vault context (same as launch) ─────────────────────────────────
+    engine = _engine()
+    with get_session(engine) as session:
+        org_dir     = Path(_cfg(session, "org_dir") or "~/org").expanduser()
+        n_files     = session.query(File).count()
+        n_nodes     = session.query(Node).count()
+        n_embedded  = session.query(Node).filter(Node.embedding.isnot(None)).count()
+        pct_e       = int(n_embedded / n_nodes * 100) if n_nodes else 0
+        skill_names = [s.name for s in session.query(Skill).all()]
+        from datetime import datetime, timedelta
+        since  = (datetime.now() - timedelta(days=7)).isoformat()
+        recent = (
+            session.query(Node)
+            .filter(Node.mtime >= since)
+            .order_by(Node.mtime.desc())
+            .limit(8).all()
+        )
+
+    org_llm_dir = Path(__file__).parent.parent.resolve()
+
+    recent_str = "\n".join(
+        f"  - {n.title} ({n.mtime[:10] if n.mtime else '?'})" for n in recent
+    ) or "  (no recent activity)"
+    skill_str = ", ".join(skill_names) if skill_names else "none — run org-llm skill-index"
+
+    # ── MCP server config → .claude/settings.json ────────────────────────────
+    claude_dir = org_dir / ".claude"
+    settings_path = claude_dir / "settings.json"
+
+    # Merge with existing settings if present (preserve user's own config)
+    existing_settings: dict = {}
+    if settings_path.exists():
+        try:
+            existing_settings = json.loads(settings_path.read_text())
+        except Exception:
+            pass
+
+    mcp_entry = {
+        "command": "uv",
+        "args": ["--directory", str(org_llm_dir), "run", "org-llm", "mcp"],
+        "env": {"ORG_LLM_DB": str(DB_PATH)},
+    }
+    existing_settings.setdefault("mcpServers", {})["org-llm"] = mcp_entry
+
+    # ── Vault instructions → .claude/CLAUDE.md ───────────────────────────────
+    if no_context:
+        claude_md = (
+            "# org-llm Vault Assistant\n\n"
+            "You have access to the org-roam knowledge base via MCP tools.\n"
+            "Use `search_notes`, `ask_notes`, `capture_note` and other tools to "
+            "assist with note management, Q&A, and automation workflows.\n"
+        )
+    else:
+        claude_md = f"""# org-llm Vault Assistant
+
+You are an intelligent personal assistant with full access to the user's
+org-roam second brain via org-llm MCP tools.
+
+## Vault Summary
+- Location: {org_dir}
+- Files: {n_files}  |  Nodes: {n_nodes}  |  Embedded: {n_embedded}/{n_nodes} ({pct_e}%)
+- Skills: {skill_str}
+
+## Recent Activity (last 7 days)
+{recent_str}
+
+## Available MCP Tools
+- `search_notes(query, limit, keyword)` — semantic or keyword search
+- `ask_notes(question, top_k)` — RAG Q&A grounded in org notes
+- `capture_note(title, body, file)` — add a new note to the vault
+- `get_node(title)` — fetch full note content by title
+- `list_nodes_by_tag(tag, limit)` — browse notes by tag
+- `list_recent_nodes(days)` — see recent activity
+- `get_vault_stats()` — vault statistics
+- `list_skills()` — available org-babel skill workflows
+- `run_skill(name, input)` — execute a skill workflow
+- `tangle_file(file_path)` — org-babel-tangle via emacsclient
+- `get_config()` — current model/config assignments
+- `list_tutor_steps()` / `get_tutor_step(step)` — interactive tutorial
+
+## Behaviour
+- Always call `search_notes` or `ask_notes` before answering questions about notes
+- When saving something, use `capture_note` and confirm file path
+- When discussing automation, check `list_skills` first
+- Cite note titles when drawing from the knowledge base
+- Use `tangle_file` to materialise org-babel workflows after editing
+"""
+
+    if dry_run:
+        console.print()
+        console.rule("[lcars1].claude/settings.json (dry-run)[/lcars1]")
+        console.print(Syntax(json.dumps(existing_settings, indent=2), "json", theme="monokai"))
+        console.rule()
+        console.print()
+        console.rule("[lcars1].claude/CLAUDE.md (dry-run)[/lcars1]")
+        console.print(claude_md)
+        console.rule()
+        on_screen(f"Would write to: {settings_path}")
+        on_screen(f"Would write to: {claude_dir / 'CLAUDE.md'}")
+        return
+
+    # ── Write config files ────────────────────────────────────────────────────
+    claude_dir.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(existing_settings, indent=2))
+    (claude_dir / "CLAUDE.md").write_text(claude_md)
+
+    # ── Check for API key ─────────────────────────────────────────────────────
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        console.print()
+        console.print("[bold yellow]⚠  ANTHROPIC_API_KEY not set[/bold yellow]")
+        console.print(
+            "  Claude Code needs an API key (or claude.ai Pro subscription).\n"
+            "  Get one at [bold]console.anthropic.com[/bold] and set:\n"
+            "    export ANTHROPIC_API_KEY=sk-ant-...\n"
+        )
+
+    # ── Launch banner ─────────────────────────────────────────────────────────
+    solidarity()
+    console.print()
+
+    tbl = Table(box=None, pad_edge=False, show_header=False)
+    tbl.add_column("Key",   style="lcars1", width=20)
+    tbl.add_column("Value", style="lcars2")
+    tbl.add_row("Model",       "claude (Anthropic API / claude.ai Pro)")
+    tbl.add_row("Vault",       str(org_dir))
+    tbl.add_row("Nodes",       f"{n_nodes}  ({pct_e}% embedded)")
+    tbl.add_row("Skills",      f"{len(skill_names)} registered")
+    tbl.add_row("MCP server",  "org-llm mcp  (stdio)")
+    tbl.add_row("Settings",    str(settings_path))
+    console.print(Panel(
+        tbl,
+        title="[lcars1]org-llm  ×  Claude Code  workspace[/lcars1]",
+        border_style="lcars2",
+        padding=(1, 2),
+    ))
+    console.print()
+    hail("Engaging Claude Code… (Ctrl-C to abort)")
+    console.print()
+
+    # ── Hand off to claude ────────────────────────────────────────────────────
+    os.chdir(org_dir)
+    os.execvp(claude_bin, [claude_bin])
 
 
 @app.command()
