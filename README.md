@@ -25,6 +25,8 @@ falls back to multi-provider GPU clouds when your laptop runs out of VRAM.
 | 📓 **Org-babel skills** — define LLM workflows as `:skill:`-tagged source blocks | 🔬 **`doctor`** — deep health check + LLM-powered diagnosis of failures |
 | 🚀 **`launch` / `claude`** — one-shot interactive workspaces with full vault context | 🎨 **FOSS tool installer** — `bat`, `eza`, `delta`, `zellij`, … with LCARS/Doom themes |
 | 📊 **dbt analytics** — `stg_nodes`, `nodes_by_tag`, `recent_nodes`, `orphan_nodes` views | ⚡ **Fish/bash/zsh completions** + shortest-prefix command matching (`do` → `doctor`) |
+| 🪄 **`personalize`** — LLM reads your real content and proposes evocative theme knobs (`brainwave`, `workbench`, `laboratory`, …) | 🛟 **Layered auto-recovery** — every error tries fuzzy-match → LLM intent repair → SRE fix before bailing |
+| 🤖 **LLM copywriting throughout** — Try-it lines, models nudge, doctor closing, tutor recommendation all generated from real state | 🌐 **Cloud→local fallback** — rate-limit / auth fail / `--cloud` without setup all auto-degrade with a yellow warning |
 
 ---
 
@@ -517,60 +519,94 @@ but can be set to 0.
 
 ## Auto-personalize: themes from your content
 
-`org-llm personalize` reads your **actual content** — top non-boring
-tags, recent note titles, project names under your code roots,
-detected preferred language — and proposes theme knobs that match
-your real interests.
+`org-llm personalize` is **LLM-driven theme synthesis**, not string
+matching. It feeds your actual recent note titles, body excerpts, top
+tags, and project READMEs to a local model and asks it to propose
+**evocative theme names** — the kind you'd see on a moodboard.
 
 ```sh
-org-llm personalize                 # dry-run preview
+org-llm personalize                 # dry-run preview (LLM-driven)
 org-llm personalize --apply         # register the proposed knobs
-org-llm personalize -a --no-llm     # apply with template messages only
+org-llm personalize -a --no-llm     # apply with deterministic fallback
 org-llm personalize -a --overwrite  # replace existing user knobs
 ```
 
+Real output from a working data-engineer's vault:
+
+```
+Knob        Source            Level  Sample message
+brainwave   llm-synthesized       2  ◀ Neural pathways aligned, response generated.
+workbench   llm-synthesized       2  ◀ Chisel marks on worn wood welcome hands.
+laboratory  llm-synthesized       2  ◀ Pipette tips aligned, liquid drawn.
+schema      llm-synthesized       2  ◀ Primary keys aligned. Structure is now in place.
+workshop    llm-synthesized       2  ◀ Workbench cleared, steel scraps aligned.
+```
+
+The themes match the actual *vibe* of the content — not literal project
+names like `bh-gh-spcs` or exam codes like
+`tableau_associate_architect_partner_exam`. An identifier-shape filter
+(snake_case, multi-segment hyphens, digits, length>20) keeps those out
+of the LLM's input entirely. Each theme's completion messages reference
+**concrete imagery from that world**, not the theme name as a noun.
+
 How it works:
 
-- **Detection is deterministic** (no LLM required): scan `Node.tags` for
-  recurring non-boring tags (≥3 occurrences), walk repos-roots from
-  `discover()` for project names, infer the user's preferred language.
-- **Message generation can use the local LLM** for richer, theme-flavoured
-  completion lines — falls back to a per-theme template pool (`◀ Engaging
-  {theme} systems.`) when offline.
-- **Each proposal becomes a knob**: a name, a default level (1–2), and 4–8
-  styled messages spread across LCARS / pride colours. The LLM in opencode
-  also sees these knobs in its system prompt under "USER THEME KNOBS" and
-  is asked to match the energy.
+- **Evidence gathering** is deterministic: scan `Node.tags` for non-boring
+  non-identifier tags (≥2 occurrences), pull recent titles + 240-char
+  body excerpts (last 60 nodes), walk repos-roots from `discover()` for
+  README first paragraphs, infer the preferred language.
+- **Theme synthesis** sends that evidence to the local model
+  (preferring `llama3.2:1b` for speed) with a strict prompt: "evocative
+  theme names — synthwave / homelab / espresso, NOT project names or
+  exam codes". Returns JSON with `name`, `reason`, `imagery`. 90s
+  thread-timeout so a slow model can't hang the user.
+- **Message generation** runs once per theme: same model, prompt
+  includes the imagery the synthesizer named, asks for 6 messages
+  with concrete sensory details (8-15 words, ≤1 metaphor per line).
+- **Deterministic fallback** (`--no-llm` or LLM unreachable) is
+  intentionally minimal — picks ONLY single-word non-identifier tags
+  with ≥5 occurrences. Better to propose nothing than dumb things.
+- **Each proposal becomes a knob**: a name, default level (1–2),
+  styled messages spread across LCARS / pride colours. The LLM in
+  opencode sees these knobs in its system prompt and is asked to
+  match the energy.
 
 Inspect with `org-llm knob list`; tune levels with
 `org-llm config <name>_level 0..3` or `ORG_LLM_<NAME>_LEVEL=0..3`.
 
 ---
 
-## Context-aware suggestions everywhere
+## LLM copywriting throughout
 
-The app reads its own state to make every suggestion concrete and
-relevant — no static "Try it: how does X work?" lines that assume
-files you don't have.
+Most user-facing prompts that used to be string templates now go
+through `_llm_one_liner()` — feeding real state to a small fast model
+and asking for a single concrete line of copy. The result varies
+across runs, references your actual content, and falls back to
+deterministic templates only when the LLM is unreachable.
 
-| Command | What it personalises from |
+| Command | What the LLM writes for you (with real-state grounding) |
 |---|---|
-| `org-llm init` | counts `.org` files in `org_dir`, recommends index/personalize |
-| `org-llm index` / `embed` | top tags + recent note titles → "Try it" line |
-| `org-llm capture` | suggests a follow-up `ask` from the freshly-popular tag |
-| `org-llm tag --apply` | same — "Try it" anchored to the tagged set |
-| `org-llm code-index` | samples a real file + extracts symbols (`def`/`class`/`defun`/`fn`/...) → varied per-language Try-it |
-| `org-llm models` | recommends one concrete next step (assign / pull / install / benchmark) |
-| `org-llm doctor` | closing line cites the worst real finding instead of a generic Tip |
-| `org-llm ask` zero-results | suggests 2-3 alternative queries from your top tags + recent titles |
-| `org-llm code` | injects detected language + recent code files into the system prompt |
-| `org-llm review-emacs` | closes with a "single most impactful change" follow-up call |
-| `org-llm tutor welcome` | recommends the *next* tutor step based on whether your vault is empty/indexed/embedded |
-| `org-llm launch` | system prompt includes top tags, models, hardware, projects with READMEs, today's LLM-generated starter prompt, active knobs/dials |
+| `org-llm init` | next-step nudge, counts of real `.org` files in `org_dir` |
+| `org-llm index` / `embed` | a fitting follow-up question generated from your top tags + recent titles |
+| `org-llm capture` | a follow-up `ask` line about the freshly-saved note's neighbours |
+| `org-llm tag --apply` | Try-it line anchored to the just-tagged set |
+| `org-llm code-index` | per-file question generated from extracted symbols (`def`/`class`/`defun`/`fn`/`pub fn`/...) |
+| `org-llm models` | "Next: <plain reason> — `org-llm <command>`" picked by the LLM from current role/pulled state |
+| `org-llm doctor` | closing line summarises the worst real finding into one actionable sentence |
+| `org-llm ask` zero-results | 2-3 alternative queries from top tags + recent titles instead of empty exit |
+| `org-llm code` | system prompt carries detected language + last-touched code files |
+| `org-llm review-emacs` | closes with one extra LLM call → "single most impactful change" |
+| `org-llm tutor welcome` | recommends the *next* tutor step for your vault's actual state (empty / indexed / embedded / searchable) |
+| `org-llm launch` | system prompt has TODAY OPENING PROMPT generated from last 7 days, plus top tags, models, hardware, project READMEs, knobs/dials |
+| `org-llm personalize` | full LLM theme synthesis from real titles + body excerpts + READMEs (see [previous section](#auto-personalize-themes-from-your-content)) |
 
 `ask` also expands retrieval with a project's README when the query
 mentions a real repo under your code roots — so "what does bh-gh-spcs
 do?" reads `~/repos/bh-gh-spcs/README.md` even if no notes match.
+
+The shell-paste-safety rule applies everywhere: every Try-it line is
+single-quoted with apostrophes stripped from interpolated content,
+so pasted commands round-trip cleanly through any shell.
 
 ---
 

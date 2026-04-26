@@ -806,20 +806,76 @@ def index(
     make_it_so()
 
 
-def _suggest_note_ask(session, prefix: str = "Try it: ") -> str:
-    """Build a context-aware `org-llm ask` suggestion from real vault state.
+def _llm_one_liner(prompt: str, *, system: str = "",
+                    timeout: float = 8.0,
+                    fallback: str = "") -> str:
+    """Ask the configured LLM for ONE short line of text.
 
-    Samples top tags + recent note titles, picks one at random, renders a
-    template from a small pool. Falls back to a generic prompt when the
-    vault has no content yet. Used by index/embed/capture/tag completion
-    hints — anything that lands the user back at the `ask` prompt.
+    Uses fast_model (or chat_model) on local Ollama by default. Always
+    returns a string — `fallback` if the call fails, times out, or the
+    model returns nothing usable. Never raises.
+
+    The whole point: stop emitting template strings everywhere when we
+    have a perfectly good LLM that can write better copy from real
+    context. Use this anywhere we'd otherwise hardcode a suggestion.
+    """
+    if not prompt:
+        return fallback
+    try:
+        engine = _engine()
+        with get_session(engine) as session:
+            url = _ollama_url(session)
+            mdl = (_cfg(session, "fast_model")
+                   or _cfg(session, "chat_model")
+                   or MODEL_DEFAULTS["chat_model"])
+    except Exception:
+        return fallback
+
+    sys_default = (
+        "You write ONE short line of helpful CLI copy. Output the line "
+        "only — no preamble, no quotes, no markdown, no numbering. "
+        "Aim for 8-22 words. Concrete, specific, no hype words."
+    )
+    try:
+        from .llm import chat as _chat
+        import threading
+        result: dict = {"text": ""}
+        def _run():
+            try:
+                result["text"] = _chat(prompt, model=mdl, base_url=url,
+                                       system=system or sys_default) or ""
+            except Exception:
+                pass
+        t = threading.Thread(target=_run, daemon=True)
+        t.start(); t.join(timeout=timeout)
+        if t.is_alive():
+            return fallback
+    except Exception:
+        return fallback
+    text = (result["text"] or "").strip()
+    if not text:
+        return fallback
+    # Take the first non-empty line, strip quotes/list-markers/numbering.
+    for line in text.splitlines():
+        l = line.strip(" -–—•\"'1234567890.").strip()
+        if 6 <= len(l) <= 240:
+            return l
+    return fallback
+
+
+def _suggest_note_ask(session, prefix: str = "Try it: ") -> str:
+    """Build a context-aware `org-llm ask` suggestion.
+
+    LLM-driven by default: feeds top tags + recent titles to fast_model
+    and asks for one fitting follow-up question. Falls back to a string
+    template when the LLM is unreachable.
     """
     import random
     from collections import Counter
     from datetime import datetime, timedelta
     from .db import Node
 
-    # Top tags (excluding code-index tags). Tags are stored space-separated.
+    # Gather evidence
     tag_counts: Counter = Counter()
     for (tags,) in session.query(Node.tags).filter(Node.tags.isnot(None)).all():
         for t in (tags or "").split():
@@ -828,7 +884,6 @@ def _suggest_note_ask(session, prefix: str = "Try it: ") -> str:
                 tag_counts[t] += 1
     top_tags = [t for t, _ in tag_counts.most_common(15)]
 
-    # Recent note titles (last 30 days)
     since = (datetime.now() - timedelta(days=30)).timestamp()
     recents = (
         session.query(Node.title)
@@ -840,11 +895,39 @@ def _suggest_note_ask(session, prefix: str = "Try it: ") -> str:
     )
     recent_titles = [t[0] for t in recents if t[0]]
 
-    # Sanitize titles for shell-paste safety: strip single quotes so we can
-    # safely wrap the whole suggestion in single quotes for the user to copy.
+    if not (top_tags or recent_titles):
+        return (f"{prefix}[bold]org-llm ask "
+                f"'what do I have in this vault?'[/bold]")
+
     def _safe(s: str) -> str:
         return s.replace("'", "")
 
+    # LLM-driven path: ask fast_model for one specific question grounded in
+    # the user's actual content.
+    titles_block = "\n".join(f"  - {_safe(t)[:70]}" for t in recent_titles[:10])
+    tags_block   = ", ".join(_safe(t) for t in top_tags[:10])
+    sys_msg = (
+        "You suggest ONE concrete question a person could ask their "
+        "personal note vault. Output the question only — no preamble, "
+        "no quotes, no command syntax. 6-18 words. Use the user's actual "
+        "tags and titles as anchors. Vary across runs: don't always "
+        "default to 'summarise X'. Keep it specific and curious."
+    )
+    user_msg = (
+        f"Top tags: {tags_block or '(none)'}\n"
+        f"Recent titles:\n{titles_block or '  (none)'}\n\n"
+        "One question they might ask their notes."
+    )
+    question = _llm_one_liner(user_msg, system=sys_msg, fallback="").strip("?")
+    if question:
+        # Strip stray quotes, ensure trailing question mark
+        question = _safe(question.strip())
+        if not question.endswith("?"):
+            question += "?"
+        cloud_flag = " --cloud" if random.random() < 0.4 else ""
+        return f"{prefix}[bold]org-llm ask{cloud_flag} '{question}'[/bold]"
+
+    # Fallback template pool when the LLM is unreachable.
     pool: list[str] = []
     for tag in top_tags:
         t = _safe(tag)
@@ -854,19 +937,15 @@ def _suggest_note_ask(session, prefix: str = "Try it: ") -> str:
             f'find the most-linked note tagged {t}',
         ])
     for title in recent_titles:
-        # Trim very long titles to keep the suggestion readable
         short = title if len(title) <= 60 else title[:57] + "…"
         s = _safe(short)
         pool.extend([
             f'what does {s} say?',
             f'connect {s} to anything else in my vault',
         ])
-
     if not pool:
-        # Empty / brand-new vault.
         return (f"{prefix}[bold]org-llm ask "
                 f"'what do I have in this vault?'[/bold]")
-
     cloud_flag = " --cloud" if random.random() < 0.4 else ""
     return f"{prefix}[bold]org-llm ask{cloud_flag} '{random.choice(pool)}'[/bold]"
 
@@ -1023,6 +1102,29 @@ def _suggest_code_ask(session, roots: list[Path]) -> str:
             f"find every callsite of {sym}",
         ])
 
+    # LLM-driven: feed the actual sample's identity to fast_model and ask
+    # for one specific, concrete question.
+    sym_str = (", ".join(symbols[:5]) if symbols else "")
+    sys_msg = (
+        "You suggest ONE concrete question a developer could ask about a "
+        "code file. Output the question only — no preamble, no quotes. "
+        "6-16 words. Reference the file/symbol concretely; never say "
+        "'this code'."
+    )
+    user_msg = (
+        f"File: {file_name}  (project: {project}, language: {lang or 'unknown'})\n"
+        + (f"Public symbols in the file: {sym_str}\n" if sym_str else "")
+        + "\nOne question someone might ask about this file."
+    )
+    llm_q = _llm_one_liner(user_msg, system=sys_msg, fallback="").strip("?")
+    if llm_q:
+        llm_q = _safe(llm_q.strip())
+        if not llm_q.endswith("?"):
+            llm_q += "?"
+        cloud_flag = " --cloud" if random.random() < 0.5 else ""
+        return f"Try it: [bold]org-llm ask{cloud_flag} '{llm_q}'[/bold]"
+
+    # Fallback to the deterministic template pool.
     template = random.choice(pool)
     question = template.format(file=file_name, dir=parent_dir, project=project)
     cloud_flag = " --cloud" if random.random() < 0.5 else ""
@@ -1943,13 +2045,39 @@ def models(
         console.print("[dim]Ollama not reachable or no models pulled.[/dim]")
 
     console.print()
-    # Context-aware recommendation: highlight first concrete gap, not generic Tip.
+    # LLM-driven recommendation: feed the model state to fast_model and ask
+    # for one concrete next step. Falls back to deterministic template if
+    # the LLM is unavailable.
     unassigned = [role for role, _, _ in _TASK_MODEL_KEYS
                   if not (current.get(role) or "").strip() or current.get(role) == "—"]
     not_pulled = [(role, current[role]) for role, _, _ in _TASK_MODEL_KEYS
                   if current.get(role) and current[role] != "—"
                   and not _is_pulled(current[role], pulled)]
-    if unassigned:
+    state_lines = []
+    for role, _, purpose in _TASK_MODEL_KEYS:
+        m = current.get(role) or "—"
+        status = ("✓ pulled" if _is_pulled(m, pulled) else
+                  "—" if m == "—" else "not pulled")
+        state_lines.append(f"  {role}={m}  [{status}]  ({purpose})")
+    state = "\n".join(state_lines)
+    sys_msg = (
+        "You recommend ONE concrete next command for an org-llm user "
+        "given their FOSS model assignment state. Output the command "
+        "wrapped in [bold]…[/bold] markup with one short reason "
+        "before it. Format: 'Next: <reason> — [bold]org-llm <cmd>[/bold]'. "
+        "≤ 22 words. Pick from: models --tune --apply, models --pull "
+        "<tag>, performance --apply, performance --benchmark, install. "
+        "Choose the most pressing single gap."
+    )
+    user_msg = (
+        f"Model role assignments:\n{state}\n\n"
+        f"Pulled in Ollama: {sorted(pulled) if pulled else '(none)'}\n\n"
+        "What's the single most useful next command?"
+    )
+    llm_rec = _llm_one_liner(user_msg, system=sys_msg, fallback="")
+    if llm_rec:
+        on_screen(llm_rec)
+    elif unassigned:
         role = unassigned[0]
         on_screen(f"[dim]Next:[/dim] {role} is unassigned — "
                   f"[bold]org-llm models --tune --apply[/bold] picks one for your hardware")
@@ -3851,16 +3979,30 @@ def doctor(
         hail(f"Appended doctor report → {path}")
 
     # ── Finding-aware closing suggestion ─────────────────────────────────────
-    # Anchor the next-step prompt to the worst real finding rather than a
-    # generic "see the docs". If everything is clean, surface the next
-    # discovery the user could try.
-    if issues:
-        first = issues[0]
-        on_screen(f"[dim]Worst finding:[/dim] {first}")
-        on_screen("[dim]Auto-fix:[/dim]      [bold]org-llm doctor --fix[/bold]")
-    elif warnings:
-        first = warnings[0]
-        on_screen(f"[dim]Top warning:[/dim] {first}")
+    # LLM-summarises the worst finding into one actionable line; falls back
+    # to raw issue text when the LLM is unreachable.
+    if issues or warnings:
+        all_findings = [("FAIL", i) for i in issues] + \
+                        [("WARN", w) for w in warnings]
+        bullet_block = "\n".join(f"  [{sev}] {msg}" for sev, msg in all_findings[:8])
+        sys_msg = (
+            "Summarise the worst finding from a CLI health check into ONE "
+            "line: a one-clause description of the problem, then a concrete "
+            "command. Format: 'Worst: <plain-language problem> — "
+            "[bold]org-llm <fix command>[/bold]'. ≤ 28 words."
+        )
+        user_msg = (
+            f"Findings (FAIL=blocking, WARN=advisory):\n{bullet_block}\n\n"
+            "Pick the worst, summarise + give one fix command."
+        )
+        llm_summary = _llm_one_liner(user_msg, system=sys_msg, fallback="")
+        if llm_summary:
+            on_screen(llm_summary)
+        elif issues:
+            on_screen(f"[dim]Worst finding:[/dim] {issues[0]}")
+            on_screen("[dim]Auto-fix:[/dim]      [bold]org-llm doctor --fix[/bold]")
+        else:
+            on_screen(f"[dim]Top warning:[/dim] {warnings[0]}")
     else:
         try:
             from .discover import discover, suggest_grant_roots
@@ -7283,8 +7425,32 @@ def personalize(
     engine = _engine()
     with get_session(engine) as session:
         url       = _ollama_url(session)
-        chat_mdl  = _cfg(session, "fast_model") or _cfg(session, "chat_model") or "llama3.2"
-        proposals = _p.detect_themes(session, max_themes=max_themes)
+        # Prefer the smallest pulled chat-capable model for synthesis: this
+        # is bg copy-writing, not a primary chat. llama3.2:1b is fastest;
+        # then llama3.2; only then fall back to chat_model / fast_model.
+        try:
+            from .llm import list_models as _lm
+            pulled = {m.get("name","") if isinstance(m, dict)
+                       else getattr(m, "name", "") for m in _lm(url) or []}
+        except Exception:
+            pulled = set()
+        preferred_for_synthesis = [
+            "llama3.2:1b", "llama3.2:3b", "llama3.2",
+            "phi3.5", "phi3.5:mini",
+        ]
+        chat_mdl = ""
+        for cand in preferred_for_synthesis:
+            if any(p == cand or p.startswith(cand + ":") for p in pulled):
+                chat_mdl = cand
+                break
+        if not chat_mdl:
+            chat_mdl = (_cfg(session, "chat_model")
+                         or _cfg(session, "fast_model")
+                         or "llama3.2")
+        proposals = _p.detect_themes(session,
+                                       model=chat_mdl, base_url=url,
+                                       use_llm=not no_llm,
+                                       max_themes=max_themes)
 
     if not proposals:
         on_screen("No themes detected yet. Index more notes first:")

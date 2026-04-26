@@ -21,15 +21,16 @@ def seeded_db(tmp_path):
     with get_session(engine) as s:
         f = File(path="/v/n.org", indexed_at="now", node_count=10, mtime=now)
         s.add(f); s.flush()
-        # 5 nodes tagged "synthwave" → above the threshold
-        for i in range(5):
+        # 6 nodes tagged "synthwave" → above the (strict) deterministic
+        # threshold of 5 single-word tag occurrences
+        for i in range(6):
             s.add(Node(file_id=f.id, node_id=f"sw-{i}",
                         title=f"Synth riff {i}",
                         body="content",
                         tags="synthwave music",
                         mtime=now))
-        # 4 nodes tagged "homelab"
-        for i in range(4):
+        # 5 nodes tagged "homelab" — also above threshold
+        for i in range(5):
             s.add(Node(file_id=f.id, node_id=f"hl-{i}",
                         title=f"Homelab note {i}",
                         body="content",
@@ -62,10 +63,12 @@ class TestNormalize:
 
 
 class TestDetectThemes:
+    """Tests run against the deterministic fallback (use_llm=False)."""
+
     def test_picks_up_real_tags(self, seeded_db):
         engine = make_engine(seeded_db)
         with get_session(engine) as s:
-            proposals = detect_themes(s)
+            proposals = detect_themes(s, use_llm=False)
         names = [p.name for p in proposals]
         assert "synthwave" in names
         assert "homelab" in names
@@ -73,7 +76,7 @@ class TestDetectThemes:
     def test_skips_boring_tags(self, seeded_db):
         engine = make_engine(seeded_db)
         with get_session(engine) as s:
-            proposals = detect_themes(s)
+            proposals = detect_themes(s, use_llm=False)
         names = [p.name for p in proposals]
         for boring in ("todo", "done", "draft"):
             assert boring not in names
@@ -81,28 +84,31 @@ class TestDetectThemes:
     def test_skips_code_prefix_tags(self, seeded_db):
         engine = make_engine(seeded_db)
         with get_session(engine) as s:
-            proposals = detect_themes(s)
+            proposals = detect_themes(s, use_llm=False)
         names = [p.name for p in proposals]
-        # "code" itself, "code:python" stripped — neither should appear
-        for c in ("code", "code:python", "python"):
-            # python may legitimately appear as fs-lang detection, but never
-            # via a code: tag (we explicitly filter those)
-            if c == "python":
-                pass
-            else:
-                assert c not in names
+        for c in ("code", "code:python"):
+            assert c not in names
 
-    def test_score_ordering(self, seeded_db):
+    def test_skips_identifier_shaped_tags(self, seeded_db):
+        # Add an identifier-y tag and confirm it's filtered
+        from org_llm.db import File, Node
         engine = make_engine(seeded_db)
         with get_session(engine) as s:
-            proposals = detect_themes(s)
-        scores = [p.score for p in proposals]
-        assert scores == sorted(scores, reverse=True)
+            f = s.query(File).first()
+            for i in range(8):
+                s.add(Node(file_id=f.id, node_id=f"id-{i}",
+                            title=f"identifier note {i}", body="x",
+                            tags="bh-gh-spcs-internal-thing",
+                            mtime=time.time()))
+            s.commit()
+            proposals = detect_themes(s, use_llm=False)
+        names = [p.name for p in proposals]
+        assert "bh-gh-spcs-internal-thing" not in names
 
     def test_max_themes_caps(self, seeded_db):
         engine = make_engine(seeded_db)
         with get_session(engine) as s:
-            proposals = detect_themes(s, max_themes=1)
+            proposals = detect_themes(s, max_themes=1, use_llm=False)
         assert len(proposals) <= 1
 
 
@@ -152,6 +158,26 @@ class TestProposalsToKnobs:
             assert k["messages"]
             for entry in k["messages"]:
                 assert isinstance(entry, list) and len(entry) == 2
+
+
+class TestIdentifierFilter:
+    """Spot-check `_looks_like_identifier`."""
+    def test_rejects_long_underscored(self):
+        from org_llm.personalize import _looks_like_identifier
+        assert _looks_like_identifier("tableau_associate_architect_partner_exam")
+        assert _looks_like_identifier("beanhub-sync-to-github")
+        assert _looks_like_identifier("bh-gh-spcs")
+
+    def test_accepts_evocative_themes(self):
+        from org_llm.personalize import _looks_like_identifier
+        for ok in ("synthwave", "homelab", "espresso", "dark-academia",
+                    "solarpunk", "cottage-witch"):
+            assert not _looks_like_identifier(ok), f"{ok!r} should pass"
+
+    def test_rejects_versions_and_codes(self):
+        from org_llm.personalize import _looks_like_identifier
+        assert _looks_like_identifier("v1.5")
+        assert _looks_like_identifier("python3")
 
 
 class TestPersonalizeCommand:
