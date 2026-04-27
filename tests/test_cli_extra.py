@@ -637,6 +637,117 @@ class TestContextStaleAlias:
         assert "stale" in r.output.lower()
 
 
+class TestSelfMod:
+    """`org-llm self snapshot/snapshots/rollback/log` — read + revise + rollback."""
+
+    def test_snapshot_creates_directory_and_tarball(self, tmp_path, monkeypatch):
+        """create_snapshot bundles the running package source and DB."""
+        monkeypatch.setenv("ORG_LLM_SNAPSHOT_DIR", str(tmp_path / "snapshots"))
+        monkeypatch.setenv("ORG_LLM_DB", str(tmp_path / "test.db"))
+        monkeypatch.setenv("ORG_LLM_ORG_DIR", str(tmp_path / "org"))
+        # Ensure DB exists so the snapshot picks it up
+        from org_llm.db import init_db, make_engine
+        init_db(make_engine(tmp_path / "test.db"))
+        from org_llm import self_mod as _sm
+        snap = _sm.create_snapshot(label="test-label")
+        assert snap.path.exists()
+        assert snap.tarball.exists()
+        assert snap.label == "test-label"
+        # Manifest captures the right metadata
+        assert (snap.path / "manifest.json").exists()
+        assert (snap.path / "rollback.sh").exists()
+        # rollback.sh is executable
+        import stat as _stat
+        mode = (snap.path / "rollback.sh").stat().st_mode
+        assert mode & _stat.S_IXUSR
+        # Source files copied
+        assert (snap.path / "org_llm" / "cli.py").exists()
+        # DB copied
+        assert (snap.path / "org-llm.db.snapshot").exists()
+
+    def test_list_snapshots_returns_newest_first(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ORG_LLM_SNAPSHOT_DIR", str(tmp_path / "snaps"))
+        monkeypatch.setenv("ORG_LLM_DB", str(tmp_path / "test.db"))
+        monkeypatch.setenv("ORG_LLM_ORG_DIR", str(tmp_path / "org"))
+        from org_llm.db       import init_db, make_engine
+        from org_llm          import self_mod as _sm
+        init_db(make_engine(tmp_path / "test.db"))
+        import time as _t
+        snap_a = _sm.create_snapshot(label="first")
+        _t.sleep(1.1)   # ensure unique timestamp
+        snap_b = _sm.create_snapshot(label="second")
+        snaps = _sm.list_snapshots()
+        assert len(snaps) == 2
+        assert snaps[0].id == snap_b.id   # newest first
+        assert snaps[1].id == snap_a.id
+
+    def test_find_snapshot_by_label_and_prefix(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ORG_LLM_SNAPSHOT_DIR", str(tmp_path / "snaps"))
+        monkeypatch.setenv("ORG_LLM_DB", str(tmp_path / "test.db"))
+        monkeypatch.setenv("ORG_LLM_ORG_DIR", str(tmp_path / "org"))
+        from org_llm.db       import init_db, make_engine
+        from org_llm          import self_mod as _sm
+        init_db(make_engine(tmp_path / "test.db"))
+        snap = _sm.create_snapshot(label="my-feature")
+        # Find by label
+        assert _sm.find_snapshot("my-feature").id == snap.id
+        # Find by exact id
+        assert _sm.find_snapshot(snap.id).id == snap.id
+        # Find by prefix
+        assert _sm.find_snapshot(snap.id[:8]).id == snap.id
+        # Empty → newest
+        assert _sm.find_snapshot("").id == snap.id
+        # Non-match
+        assert _sm.find_snapshot("zzz-nothing") is None
+
+    def test_log_appends_to_org_file(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ORG_LLM_SNAPSHOT_DIR", str(tmp_path / "snaps"))
+        monkeypatch.setenv("ORG_LLM_DB", str(tmp_path / "test.db"))
+        monkeypatch.setenv("ORG_LLM_ORG_DIR", str(tmp_path / "org"))
+        monkeypatch.setenv("ORG_LLM_SELFMOD_LOG",
+                            str(tmp_path / "selfmod.org"))
+        from org_llm.db       import init_db, make_engine
+        from org_llm          import self_mod as _sm
+        init_db(make_engine(tmp_path / "test.db"))
+        snap = _sm.create_snapshot(label="logtest")
+        _sm.log_snapshot(snap)
+        log = (tmp_path / "selfmod.org").read_text()
+        assert "snapshot " + snap.id in log
+        assert ":SELFMOD_KIND:   snapshot" in log
+        # Rollback script captured as a tangle block
+        assert ":tangle " in log
+
+    def test_apply_plan_rejects_ambiguous_old(self, tmp_path):
+        from org_llm import self_mod as _sm
+        f = tmp_path / "x.py"
+        f.write_text("x = 1\nx = 1\n")    # 'x = 1' appears twice
+        ok, msg = _sm.apply_plan(f, {"ops": [
+            {"type": "replace", "old": "x = 1", "new": "x = 2"}
+        ]})
+        assert not ok
+        assert "matches >1" in msg
+
+    def test_apply_plan_rejects_unfound_old(self, tmp_path):
+        from org_llm import self_mod as _sm
+        f = tmp_path / "y.py"
+        f.write_text("def foo(): pass\n")
+        ok, msg = _sm.apply_plan(f, {"ops": [
+            {"type": "replace", "old": "bar", "new": "baz"}
+        ]})
+        assert not ok
+        assert "not found" in msg
+
+    def test_apply_plan_succeeds_with_unique_old(self, tmp_path):
+        from org_llm import self_mod as _sm
+        f = tmp_path / "z.py"
+        f.write_text("def foo(): return 1\n")
+        ok, msg = _sm.apply_plan(f, {"ops": [
+            {"type": "replace", "old": "return 1", "new": "return 2"}
+        ]})
+        assert ok
+        assert f.read_text() == "def foo(): return 2\n"
+
+
 class TestRichHelpPanels:
     """`--help` groups commands into named panels."""
 

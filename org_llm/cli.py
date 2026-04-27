@@ -8440,6 +8440,269 @@ history_app = typer.Typer(
 app.add_typer(history_app, name="history", rich_help_panel="Context & Vault")
 
 
+# ── self: read / revise / snapshot / rollback the running app ─────────────
+
+self_app = typer.Typer(
+    help="Read, revise, snapshot, and roll back org-llm's own code + DB. "
+         "Every action is logged to ~/org/org-llm-self-mod.org with a "
+         "tangle-able rollback script.",
+    cls=PrefixGroup,
+)
+app.add_typer(self_app, name="self", rich_help_panel="Maintenance")
+
+
+@self_app.command("show")
+def self_show(
+    module: Annotated[str, typer.Argument(
+        help="Module to show (cli / db / search / context / personalize / …)")],
+):
+    """Print the source of one of the running app's modules.
+
+    Shortcut for `org-llm source <module>`. Useful to inspect what's
+    actually running before deciding to revise it.
+    """
+    source(module=module, explain=False, model="")
+
+
+@self_app.command("edit")
+def self_edit(
+    module: Annotated[str, typer.Argument(help="Module name (e.g. `cli`, `context`)")],
+):
+    """Open one of the running app's modules in $EDITOR.
+
+    No safety net — your edits take effect on the next run. Take a
+    snapshot first (`org-llm self snapshot`) if you're not sure.
+    """
+    from . import self_mod as _sm
+    pkg = _sm.package_dir()
+    candidates = [
+        pkg / f"{module}.py",
+        pkg / module / "__init__.py",
+        pkg / module,
+    ]
+    target = next((p for p in candidates if p.exists()), None)
+    if not target:
+        red_alert(f"Module {module!r} not found in {pkg}")
+        on_screen(f"[dim]Available:[/dim] "
+                  + ", ".join(p.stem for p in pkg.glob("*.py")))
+        raise typer.Exit(1)
+    editor = os.environ.get("EDITOR", "")
+    if not editor:
+        on_screen(f"[dim]$EDITOR not set; module path:[/dim] {target}")
+        return
+    import subprocess as _sub
+    _sub.call(editor.split() + [str(target)])
+    _sm.log_action("edit", f"Edited {target.name}",
+                   {"target": str(target), "editor": editor})
+
+
+@self_app.command("snapshot")
+def self_snapshot(
+    label: Annotated[str, typer.Option("--label", "-l",
+            help="Short human label for this snapshot (e.g. 'before-refactor')")] = "",
+):
+    """Bundle the running package source + DB into a versioned snapshot.
+
+    Creates: ~/.local/share/org-llm/snapshots/<ts>/
+             ~/.local/share/org-llm/snapshots/<ts>.tar.gz
+    Each snapshot includes a rollback.sh that runs WITHOUT Python,
+    so you can recover even when the in-process app is broken.
+    The action is appended to ~/org/org-llm-self-mod.org.
+    """
+    from . import self_mod as _sm
+    snap = _sm.create_snapshot(label=label)
+    _sm.log_snapshot(snap)
+    hail(f"Snapshot {snap.id} captured.")
+    on_screen(f"  Directory:  {snap.path}")
+    on_screen(f"  Tarball:    {snap.tarball}")
+    on_screen(f"  Rollback:   bash {snap.path}/rollback.sh")
+    on_screen(f"  Logged to:  {_sm.snapshot_log_path()}")
+    make_it_so()
+
+
+@self_app.command("snapshots")
+def self_snapshots():
+    """List available snapshots, newest first."""
+    from rich.table import Table as _T
+    from . import self_mod as _sm
+    snaps = _sm.list_snapshots()
+    if not snaps:
+        on_screen("[dim]No snapshots yet.[/dim]")
+        on_screen("Take one: [bold]org-llm self snapshot --label 'before-foo'[/bold]")
+        return
+    tbl = _T(box=None, pad_edge=False)
+    tbl.add_column("ID",       style="lcars1", no_wrap=True)
+    tbl.add_column("Label",    style="lcars2", width=24)
+    tbl.add_column("Created",  style="dim")
+    tbl.add_column("Files",    style="dim", justify="right", width=6)
+    tbl.add_column("DB",       style="dim", width=4)
+    tbl.add_column("Git",      style="dim", width=10)
+    for s in snaps:
+        tbl.add_row(
+            s.id, s.label or "-",
+            s.manifest.get("created_at", "?")[:19],
+            str(s.manifest.get("n_files", "?")),
+            "y" if s.manifest.get("db_present") else "n",
+            s.manifest.get("git_hash") or "-",
+        )
+    console.print()
+    console.rule("[lcars1]org-llm snapshots[/lcars1]")
+    console.print(tbl)
+
+
+@self_app.command("rollback")
+def self_rollback(
+    snapshot_id: Annotated[str, typer.Argument(
+        help="Snapshot ID, label, or ID prefix (default: newest)")] = "",
+    no_db: Annotated[bool, typer.Option("--no-db",
+           help="Restore package source only; leave the DB alone")] = False,
+    yes:   Annotated[bool, typer.Option("--yes", "-y",
+           help="Skip confirmation")] = False,
+):
+    """Restore the package source (and optionally DB) from a snapshot.
+
+    A pre-rollback backup of your current state is written to
+    /tmp/org-llm-pre-rollback-<ts>/ so you can un-rollback. The
+    rollback shell script in the snapshot does the same thing —
+    use that when the in-process app is broken.
+    """
+    from . import self_mod as _sm
+    snap = _sm.find_snapshot(snapshot_id)
+    if not snap:
+        red_alert(f"No snapshot matches {snapshot_id!r}")
+        on_screen("List: [bold]org-llm self snapshots[/bold]")
+        raise typer.Exit(1)
+    on_screen(f"Will restore from [lcars2]{snap.id}[/lcars2] "
+              f"({snap.label or 'unlabeled'}) created "
+              f"{snap.manifest.get('created_at', '?')}")
+    on_screen(f"  package → {snap.manifest.get('package_dir')}")
+    if not no_db:
+        on_screen(f"  db      → {snap.manifest.get('db_path')}")
+    if not yes and not typer.confirm("Proceed?", default=False):
+        on_screen("Aborted.")
+        return
+    summary = _sm.rollback(snap, also_db=not no_db)
+    _sm.log_action(
+        "rollback",
+        f"Rolled back to snapshot {snap.id}",
+        {
+            "snapshot_id": snap.id,
+            "label":       snap.label,
+            "restored_pkg": summary["package"],
+            "restored_db":  summary["db"],
+            "backup":       summary["backup"],
+        },
+    )
+    hail("Rollback complete.")
+    on_screen(f"  Pre-rollback backup at: {summary['backup']}")
+    on_screen(f"  Verify:               [bold]org-llm doctor[/bold]")
+    make_it_so()
+
+
+@self_app.command("llm-revise")
+def self_llm_revise(
+    module: Annotated[str, typer.Argument(help="Module to revise (e.g. 'cli', 'context')")],
+    intent: Annotated[str, typer.Argument(help="What the change should accomplish")],
+    apply:  Annotated[bool, typer.Option("--apply", "-a",
+            help="Apply the proposed patch immediately (skips review prompt)")] = False,
+    no_snapshot: Annotated[bool, typer.Option("--no-snapshot",
+                 help="Don't take a pre-revise snapshot (NOT recommended)")] = False,
+):
+    """Ask the LLM to revise one of the running app's modules.
+
+    The LLM produces a JSON patch (list of replace operations). By
+    default we ALWAYS take a snapshot first, then preview the patch,
+    then ask before applying.
+
+    Refuses changes that bypass security boundaries (deny-list,
+    traversal, credential exfil, eval-arbitrary-input) — see the
+    refusal logic in self_mod._REVISE_SYSTEM.
+    """
+    from . import self_mod as _sm
+    pkg = _sm.package_dir()
+    candidates = [pkg / f"{module}.py", pkg / module / "__init__.py"]
+    target = next((p for p in candidates if p.exists()), None)
+    if not target:
+        red_alert(f"Module {module!r} not found in {pkg}")
+        raise typer.Exit(1)
+
+    # Pre-revise snapshot (mandatory unless --no-snapshot).
+    if not no_snapshot:
+        snap = _sm.create_snapshot(label=f"pre-llm-revise-{module}")
+        _sm.log_snapshot(snap)
+        on_screen(f"[dim]Pre-revise snapshot: {snap.id}[/dim]")
+
+    engine = _engine()
+    with get_session(engine) as session:
+        url = _ollama_url(session)
+        mdl = (_cfg(session, "chat_model")
+               or _cfg(session, "fast_model")
+               or "llama3.2")
+    plan = _sm.llm_revise(target, intent, model=mdl, base_url=url)
+    if not plan:
+        red_alert("LLM didn't return a usable patch plan.")
+        on_screen("[dim]Try a more specific intent, or edit by hand: "
+                  f"[bold]org-llm self edit {module}[/bold][/dim]")
+        raise typer.Exit(1)
+
+    # Show the proposed patch
+    summary = plan.get("summary", "(no summary)")
+    risk    = plan.get("risk", "?")
+    ops     = plan.get("ops") or []
+    on_screen(f"[lcars3]Proposed change:[/lcars3] {summary}")
+    on_screen(f"  [dim]Risk: {risk}  ·  ops: {len(ops)}[/dim]")
+    if not ops:
+        on_screen("[yellow]Plan has no ops — likely a refusal. "
+                  f"reason: {summary}[/yellow]")
+        raise typer.Exit(1)
+    for i, op in enumerate(ops, 1):
+        on_screen(f"  [bold]Op {i}:[/bold] replace "
+                  f"[dim]{(op.get('old') or '')[:60]}…[/dim] "
+                  f"→ [dim]{(op.get('new') or '')[:60]}…[/dim]")
+
+    if not apply and not typer.confirm("Apply this patch?", default=False):
+        on_screen("Aborted. Snapshot preserved.")
+        return
+
+    ok, msg = _sm.apply_plan(target, plan)
+    _sm.log_action(
+        "llm-revise",
+        f"{module}: {summary}",
+        {
+            "module":   module,
+            "intent":   intent,
+            "risk":     risk,
+            "n_ops":    len(ops),
+            "applied":  ok,
+            "message":  msg,
+            "model":    mdl,
+        },
+    )
+    if not ok:
+        red_alert(f"Apply failed: {msg}")
+        on_screen(f"[dim]Restore: org-llm self rollback {snap.id}[/dim]"
+                  if not no_snapshot else
+                  "[dim]No pre-revise snapshot was taken; manual restore needed.[/dim]")
+        raise typer.Exit(1)
+    hail(f"Applied: {msg}")
+    if plan.get("test_hint"):
+        on_screen(f"[dim]Verify: {plan['test_hint']}[/dim]")
+    make_it_so()
+
+
+@self_app.command("log")
+def self_log():
+    """Print the contents of the self-mod org log."""
+    from . import self_mod as _sm
+    p = _sm.snapshot_log_path()
+    if not p.exists():
+        on_screen("[dim]No self-mod log yet.[/dim]")
+        return
+    console.print()
+    console.rule(f"[lcars1]{p}[/lcars1]")
+    console.print(p.read_text())
+
+
 @history_app.command("build")
 def history_build(
     sample_limit: Annotated[int, typer.Option("--limit", "-n",
