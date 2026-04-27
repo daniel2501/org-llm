@@ -1032,17 +1032,94 @@ def setup(
     """
     import importlib
 
+    # Broad y/n vocabulary — accepts what typer.confirm rejects (yep, sure,
+    # nope, skip, …). We *don't* use typer.confirm here because it errors
+    # ("Error: invalid input") on anything outside its tiny y/n vocabulary
+    # AND because we want LLM-fallback for genuinely-novel phrasings.
+    _YES_WORDS = {
+        "y", "yes", "yeah", "yep", "yup", "yea", "ya", "yea-ya",
+        "sure", "ok", "okay", "k", "kk", "fine", "alright", "do it",
+        "go", "go ahead", "please", "absolutely", "definitely",
+        "of course", "1", "true", "t", "on", "✓", "+", "yas",
+    }
+    _NO_WORDS = {
+        "n", "no", "nope", "nah", "naw", "negative", "skip", "pass",
+        "later", "abort", "cancel", "stop", "0", "false", "f", "off",
+        "✗", "x", "-", "nay",
+    }
+
+    def _classify_yes_no(raw: str, default: bool) -> bool | None:
+        """Map a user's freeform reply to True / False / None (=ambiguous).
+        Empty input → default. Tries the broad vocabulary first; on miss
+        the caller may delegate to the LLM via _llm_classify_yes_no."""
+        s = raw.strip().lower()
+        if not s:
+            return default
+        if s in _YES_WORDS:
+            return True
+        if s in _NO_WORDS:
+            return False
+        # Reject obvious gotchas before LLM (saves a network call)
+        if any(s.startswith(w + " ") or s.endswith(" " + w) for w in _YES_WORDS):
+            return True
+        if any(s.startswith(w + " ") or s.endswith(" " + w) for w in _NO_WORDS):
+            return False
+        return None
+
+    def _llm_classify_yes_no(prompt: str, raw: str) -> bool | None:
+        """Last-ditch: ask the LLM whether the user meant yes or no.
+        Returns None if the LLM is unreachable or also can't decide.
+        Best-effort, time-boxed at 5s — never blocks the prompt."""
+        try:
+            sys_msg = (
+                "You classify a user's reply to a yes/no question. "
+                "Output EXACTLY one of: YES, NO, UNSURE. No prose."
+            )
+            user_msg = f"Question: {prompt}\nUser reply: {raw!r}\nAnswer:"
+            ans = _llm_one_liner(user_msg, system=sys_msg, timeout=5.0,
+                                   fallback="UNSURE").strip().upper()
+            if ans.startswith("YES"): return True
+            if ans.startswith("NO"):  return False
+        except Exception:
+            pass
+        return None
+
     def _confirm(prompt: str, default: bool = True) -> bool:
+        """LLM-aware y/n prompt — accepts the broad human-vocabulary set
+        (yes/yeah/sure/ok/nope/skip/…), defers to the LLM for genuinely
+        novel phrasings, and never errors out on a typo. Default is
+        applied on empty input or after 2 unparseable retries."""
         if yes:
             return True
-        try:
-            return typer.confirm(prompt, default=default)
-        except (KeyboardInterrupt, EOFError):
-            console.print()
-            on_screen("[yellow]Setup interrupted. "
-                      "Re-run [bold]org-llm setup[/bold] to resume "
-                      "(every step is idempotent).[/yellow]")
-            raise typer.Exit(130)   # 128 + SIGINT
+        suffix = " [Y/n] " if default else " [y/N] "
+        attempts = 0
+        while True:
+            try:
+                # Use raw input so we don't inherit click's strict validator.
+                console.print(f"[lcars2]{prompt}[/lcars2]{suffix}", end="")
+                raw = input()
+            except (KeyboardInterrupt, EOFError):
+                console.print()
+                on_screen("[yellow]Setup interrupted. "
+                          "Re-run [bold]org-llm setup[/bold] to resume "
+                          "(every step is idempotent).[/yellow]")
+                raise typer.Exit(130)
+            verdict = _classify_yes_no(raw, default)
+            if verdict is not None:
+                return verdict
+            attempts += 1
+            # Try the LLM before re-prompting
+            llm_verdict = _llm_classify_yes_no(prompt, raw)
+            if llm_verdict is not None:
+                on_screen(f"[dim]LLM read {raw!r} as "
+                          f"{'yes' if llm_verdict else 'no'}.[/dim]")
+                return llm_verdict
+            if attempts >= 2:
+                on_screen(f"[dim]Couldn't parse {raw!r} after 2 tries — "
+                          f"using default ({'yes' if default else 'no'}).[/dim]")
+                return default
+            on_screen(f"[dim]Didn't recognise {raw!r}. "
+                      f"Try y/n (or anything close — yeah, nope, skip…).[/dim]")
 
     def _ask(prompt: str, default: str = "") -> str:
         """Ctrl-C-safe replacement for typer.prompt."""
