@@ -249,6 +249,16 @@ MODEL_DEFAULTS = {
     # to the user. 0 = disabled. Reflection runs in-band but is time-
     # boxed; failures are silent.
     "log_auto_reflect_every":  "50",
+    # ── Background auto-embedder (org_llm/auto_embedder.py) ───────────────
+    # `auto_embed_enabled` — daemon thread polls org_dir mtimes and
+    # runs incremental index + embed when changes appear. Off by
+    # default — opt-in either via this config row or by passing
+    # --auto-embed to `org-llm launch`.
+    "auto_embed_enabled":      "false",
+    # Poll interval (clamped to ≥15s in code).
+    "auto_embed_interval_secs": "60",
+    # Suppress per-batch terminal output (Captain's Log still records).
+    "auto_embed_quiet":        "true",
 }
 
 

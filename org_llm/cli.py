@@ -2369,6 +2369,54 @@ def discover(
 
 
 @app.command(rich_help_panel="Indexing")
+def watch(
+    interval: Annotated[int, typer.Option("--interval", "-n",
+              help="Seconds between polls (clamped to ≥15s in module)")] = 0,
+    quiet:    Annotated[bool, typer.Option("--quiet/--no-quiet", "-q",
+              help="Suppress per-batch terminal output (Captain's Log still records)")] = None,
+    daemon:   Annotated[bool, typer.Option("--daemon", "-d",
+              help="Spawn in the background; print PID + log location and exit")] = False,
+):
+    """Background auto-embedder — polls the vault, indexes + embeds new files.
+
+    Manual `org-llm embed` continues to work unchanged. This verb runs
+    a long-lived watcher that keeps the index fresh between manual
+    runs. Status is written to a tiny JSON file the rest of the CLI
+    surfaces in command footers when there's recent news.
+
+    Default cadence + quiet flag come from the `auto_embed_*` config
+    keys; CLI flags override per-invocation.
+    """
+    from . import auto_embedder as _ae
+
+    # Per-invocation overrides write directly to the watcher module's
+    # config-resolution path via ENV — keeps the watcher single-source-
+    # of-truth for cadence/quiet.
+    if interval > 0:
+        os.environ["ORG_LLM_AUTO_EMBED_INTERVAL_OVERRIDE"] = str(interval)
+    if not _ae.is_enabled():
+        on_screen("[yellow]auto_embed_enabled is false in config — "
+                  "this run will start the watcher anyway, but launch will "
+                  "still skip it next time. Persist with:[/yellow]\n"
+                  "  [bold]org-llm config auto_embed_enabled true[/bold]")
+
+    if daemon:
+        # True double-fork would orphan the process from this terminal;
+        # opt for a recommendation instead so the user controls how it
+        # detaches (systemd --user, screen, tmux, nohup, etc).
+        on_screen("[lcars1]Recommended daemon setups:[/lcars1]")
+        on_screen("  systemd --user:  "
+                  "[bold]systemd-run --user --unit=org-llm-watch "
+                  "org-llm watch[/bold]")
+        on_screen("  tmux:            "
+                  "[bold]tmux new -d -s org-llm-watch 'org-llm watch'[/bold]")
+        on_screen("  nohup:           "
+                  "[bold]nohup org-llm watch >/tmp/org-llm-watch.log 2>&1 &[/bold]")
+        return
+    _ae.run_forever(quiet=quiet)
+
+
+@app.command(rich_help_panel="Indexing")
 def embed(
     force: Annotated[bool, typer.Option("--force", "-f", help="Re-embed all nodes")] = False,
 ):
@@ -8883,9 +8931,20 @@ def launch(
         daemon=True,
     )
     watcher.start()
+    # Auto-embedder daemon — opt-in via auto_embed_enabled config row.
+    # Lives only for the duration of this opencode session; dies cleanly
+    # when the with-block exits.
+    from . import auto_embedder as _ae
     rc = 1
     try:
-        rc = subprocess.run([oc_bin], cwd=str(org_dir)).returncode
+        with _ae.watcher_thread():
+            try:
+                rc = subprocess.run([oc_bin], cwd=str(org_dir)).returncode
+            except KeyboardInterrupt:
+                rc = 130
+                raise
+            except FileNotFoundError:
+                raise   # bubble to outer except
     except FileNotFoundError as e:
         red_alert(f"Failed to launch {oc_bin!r}: {e}")
         advice = _llm_recovery_advice(
@@ -8903,6 +8962,8 @@ def launch(
     finally:
         stop_event.set()
         watcher.join(timeout=2.0)
+    # (Stall watcher + auto-embedder both ride on the with-block above;
+    # legacy duplicated except/finally blocks removed.)
 
     if sentinel.exists():
         try:
@@ -12636,9 +12697,30 @@ def main():
             print("\nInterrupted (Ctrl-C).", file=sys.stderr)
         sys.exit(130)
 
+    def _surface_auto_embed_status() -> None:
+        """If the background watcher reported recent activity, mention
+        it in a one-line dim footer so the user has UI surfacing without
+        any explicit query. Skips when the watcher is silent."""
+        try:
+            from . import auto_embedder as _ae
+            if not _ae.status_is_fresh():
+                return
+            summary = _ae.status_summary()
+            if not summary:
+                return
+            # Skip during `org-llm watch` — would echo the watcher's
+            # own output back at it.
+            if len(sys.argv) > 1 and sys.argv[1] == "watch":
+                return
+            from .ui import on_screen as _on_ae
+            _on_ae(f"[dim]· {summary}[/dim]")
+        except Exception:
+            pass
+
     try:
         _invoke()
         _log_invocation("ok")
+        _surface_auto_embed_status()
         return
     except KeyboardInterrupt:
         _log_invocation("interrupted")

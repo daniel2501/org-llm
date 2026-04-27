@@ -708,6 +708,75 @@ class TestProactiveDoctor:
         assert "proactive_doctor" in server._tool_manager._tools
 
 
+class TestAutoEmbedder:
+    """Background watcher that polls the vault, indexes + embeds new
+    files. Stays disabled by default; opt-in via auto_embed_enabled."""
+
+    def test_status_path_under_xdg_data(self):
+        from org_llm.auto_embedder import status_path
+        p = status_path()
+        assert "org-llm" in str(p) and p.name.endswith(".json")
+
+    def test_status_round_trip(self, tmp_path, monkeypatch):
+        from org_llm import auto_embedder as _ae
+        monkeypatch.setenv("ORG_LLM_AUTO_EMBEDDER_STATUS",
+                            str(tmp_path / "ae.json"))
+        _ae.write_status({"last_check_at": 12345, "files_indexed": 2})
+        s = _ae.read_status()
+        assert s["files_indexed"] == 2
+
+    def test_disabled_by_default(self, cli_db):
+        """Fresh DB → auto_embed_enabled is 'false' from MODEL_DEFAULTS.
+        is_enabled() must return False so no daemon thread spawns."""
+        from org_llm.auto_embedder import is_enabled
+        assert is_enabled() is False
+
+    def test_enable_via_config(self, cli_db):
+        from org_llm.db import make_engine, get_session, Config
+        from org_llm.auto_embedder import is_enabled
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            row = s.get(Config, "auto_embed_enabled")
+            if row: row.value = "true"
+            else:   s.add(Config(key="auto_embed_enabled", value="true"))
+            s.commit()
+        assert is_enabled() is True
+
+    def test_status_summary_renders_recent_activity(self, tmp_path, monkeypatch):
+        from org_llm import auto_embedder as _ae
+        import time as _t
+        monkeypatch.setenv("ORG_LLM_AUTO_EMBEDDER_STATUS",
+                            str(tmp_path / "ae.json"))
+        _ae.write_status({"last_check_at": _t.time(),
+                            "files_indexed": 3, "nodes_added": 5,
+                            "nodes_embedded": 5, "duration_ms": 800})
+        out = _ae.status_summary()
+        assert "+3f" in out and "+5n" in out and "+5e" in out
+
+    def test_status_summary_silent_when_idle(self, tmp_path, monkeypatch):
+        from org_llm import auto_embedder as _ae
+        import time as _t
+        monkeypatch.setenv("ORG_LLM_AUTO_EMBEDDER_STATUS",
+                            str(tmp_path / "ae.json"))
+        _ae.write_status({"last_check_at": _t.time(),
+                            "files_indexed": 0, "nodes_added": 0,
+                            "nodes_embedded": 0, "duration_ms": 50})
+        out = _ae.status_summary()
+        # idle status reports "idle ..." (not the +Xf format)
+        assert "idle" in out.lower() or out == ""
+
+    def test_watch_help_advertises_flags(self, cli_db):
+        r = runner.invoke(app, ["watch", "--help"])
+        assert r.exit_code == 0
+        for flag in ("--interval", "--quiet", "--daemon"):
+            assert flag in r.output
+
+    def test_watch_daemon_flag_prints_setup_options(self, cli_db):
+        r = runner.invoke(app, ["watch", "--daemon"])
+        assert r.exit_code == 0
+        assert "systemd" in r.output and "tmux" in r.output and "nohup" in r.output
+
+
 class TestModelsDashboard:
     """`org-llm models` (no flags) renders the dashboard: role/model/
     fits/pulled, with auto-shown suggestions when any opportunity exists.
