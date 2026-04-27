@@ -698,12 +698,19 @@ def create_mcp_server():
 
         Allow-listed keys: chat_model, embed_model, code_model, tag_model,
         review_model, ollama_url, temperature, top_p, context_window,
-        code_dirs, fixer_model, trek_level, commie_level, queer_level.
+        code_dirs, fixer_model, trek_level, commie_level, queer_level,
+        plus the doctor_* knobs.
 
         Refuses keys outside this list — credentials, grants, telemetry, and
-        secrets are NEVER writeable from MCP.
+        secrets are NEVER writeable from MCP. Every accepted change is
+        recorded to the logbook (kind=config) so dbt + the user have an
+        audit trail.
         """
+        from .logbook import write_event as _log_event
         if key not in _SETTABLE_KEYS:
+            _log_event("config", "set_config",
+                        args=f"key={key}", outcome="refused",
+                        response="not in allow-list")
             return (f"Refused: '{key}' is not in the MCP allow-list.\n"
                     f"Allow-listed keys: {', '.join(sorted(_SETTABLE_KEYS))}")
         from .db import Config
@@ -715,6 +722,9 @@ def create_mcp_server():
             else:
                 session.add(Config(key=key, value=value))
             session.commit()
+        _log_event("config", "set_config",
+                    args=f"key={key}",
+                    response=f"{old!r} → {value!r}", outcome="ok")
         return f"Updated {key}: {old!r} → {value!r}"
 
     # ── discover_filesystem ───────────────────────────────────────────────────

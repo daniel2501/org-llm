@@ -3471,6 +3471,94 @@ def config(
             make_it_so()
 
 
+@app.command(name="log", rich_help_panel="Maintenance")
+def log_show(
+    kind:    Annotated[str, typer.Option("--kind", "-k",
+              help="Filter by event kind: cli|llm|mcp|config|doctor|dbt")] = "",
+    grep:    Annotated[str, typer.Option("--grep", "-g",
+              help="Substring filter on command/args/response")] = "",
+    limit:   Annotated[int, typer.Option("--limit", "-n",
+              help="Max rows to display")] = 50,
+    tangle:  Annotated[bool, typer.Option("--tangle", "-t",
+              help="Tangle Captain's Log to plaintext mirrors and exit")] = False,
+    path:    Annotated[bool, typer.Option("--path", "-p",
+              help="Print Captain's Log path and exit")] = False,
+):
+    """Captain's Log — CLI invocations, LLM calls, MCP tools, config changes.
+
+    Every notable event is written to BOTH the SQLite `history` table AND
+    ~/org/captains-log.org so dbt analytics + the user's vault have
+    parity. Stardate optional.
+    """
+    from . import logbook as _lb
+    from .db import History
+    from rich.panel import Panel
+    from rich.table import Table
+
+    p = _lb.org_log_path()
+    if path:
+        on_screen(str(p))
+        return
+    if tangle:
+        # `org-babel-tangle` via emacsclient produces the per-kind .log
+        # mirrors. We don't shell out to emacs ourselves; surface the
+        # canonical command + path so the user can wire it to a script.
+        on_screen(f"[lcars1]Captain's Log:[/lcars1]    {p}")
+        on_screen(f"[lcars1]Tangle target:[/lcars1]    {_lb.tangle_dir()}/<kind>.log")
+        on_screen("[dim]From emacs:[/dim]  "
+                  f"[bold]C-c C-v t[/bold] in {p.name}")
+        on_screen("[dim]Shell:[/dim]       "
+                  f"[bold]emacsclient -e \"(progn (find-file \\\"{p}\\\") "
+                  "(org-babel-tangle))\"[/bold]")
+        return
+
+    engine = _engine()
+    with get_session(engine) as session:
+        q = session.query(History).order_by(History.id.desc())
+        if kind:
+            q = q.filter(History.kind == kind)
+        rows = q.limit(limit * 4 if grep else limit).all()  # over-fetch for grep
+    if grep:
+        gl = grep.lower()
+        rows = [r for r in rows
+                if gl in (r.command or "").lower()
+                or gl in (r.query   or "").lower()
+                or gl in (r.response or "").lower()][:limit]
+
+    if not rows:
+        on_screen("[dim]Captain's Log shows no entries matching that filter.[/dim]")
+        on_screen(f"[dim]Org file:[/dim] {p}  "
+                  f"[dim](may not exist yet — run any command to seed it)[/dim]")
+        return
+
+    tbl = Table(box=None, pad_edge=False)
+    tbl.add_column("When",     style="lcars1", no_wrap=True, width=19)
+    tbl.add_column("Kind",     style="lcars3", width=8)
+    tbl.add_column("Command",  style="lcars2")
+    tbl.add_column("Outcome",  width=8)
+    tbl.add_column("Duration", style="dim", width=8, justify="right")
+    for r in rows:
+        oc = r.outcome or ""
+        oc_style = "[green]" if oc == "ok" else (
+            "[red]" if oc.startswith("error") or oc.startswith("crash")
+            else "[yellow]")
+        dur = f"{r.duration_ms}ms" if r.duration_ms is not None else ""
+        tbl.add_row(r.timestamp[:19] if r.timestamp else "?",
+                     r.kind or "?",
+                     r.command or "?",
+                     f"{oc_style}{oc}[/{oc_style[1:-1]}]" if oc else "",
+                     dur)
+    console.print()
+    console.print(Panel(tbl,
+                          title=f"[lcars1]Captain's Log[/lcars1]  "
+                                f"[dim]({len(rows)} of last {limit})[/dim]",
+                          border_style="lcars2", padding=(1, 1)))
+    console.print()
+    on_screen(f"[dim]Org file:[/dim] {p}  "
+              f"[dim]·[/dim] [bold]org-llm log -t[/bold] for tangle instructions"
+              f"  [dim]·[/dim] [bold]org-llm dbt build[/bold] for analytics views")
+
+
 @app.command(name="db", rich_help_panel="Maintenance")
 def db_info(
     schema: Annotated[bool, typer.Option("--schema", "-s", help="Show CREATE TABLE statements")] = False,
@@ -12286,6 +12374,8 @@ def main():
     """
     import sys
     from click.exceptions import UsageError as _ClickUsageError
+    from .logbook import write_event as _log_event
+    invocation_started = time.monotonic()
 
     def _invoke(argv: list[str] | None = None):
         """Invoke the Typer app with standalone_mode=False so UsageErrors
@@ -12293,6 +12383,18 @@ def main():
         click_cmd = typer.main.get_command(app)
         return click_cmd.main(args=argv, prog_name="org-llm",
                                 standalone_mode=False)
+
+    def _log_invocation(outcome: str, response: str = "") -> None:
+        """Best-effort: record this CLI invocation to the logbook so dbt
+        analytics + the user's vault have a primary-source record. Never
+        raises into the caller (logbook swallows internally)."""
+        argv_str = " ".join(sys.argv[1:]) or "(no args)"
+        verb = (sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-")
+                 else "")
+        _log_event("cli", verb or "(root)",
+                    args=argv_str, outcome=outcome,
+                    response=response[:1500] if response else "",
+                    duration_ms=int((time.monotonic() - invocation_started) * 1000))
 
     def _abort_on_ctrl_c():
         """Print a clean one-liner and exit 130 (128 + SIGINT)."""
@@ -12307,18 +12409,29 @@ def main():
 
     try:
         _invoke()
+        _log_invocation("ok")
         return
     except KeyboardInterrupt:
+        _log_invocation("interrupted")
         _abort_on_ctrl_c()
     except _ClickUsageError as exc:
         original_error = str(exc)
-    except SystemExit:
-        # Clean exit (typer.Exit(0) / sys.exit(0)) — pass through unchanged.
+        # Don't log here — falls through to recovery layers; we'll log
+        # the FINAL outcome at the bottom of main().
+    except SystemExit as se:
+        # Clean exit (typer.Exit(0) / sys.exit(0)) — pass through unchanged
+        # but log the exit code first so the org log shows "ok" vs nonzero.
+        try:
+            code = int(se.code) if se.code is not None else 0
+        except (TypeError, ValueError):
+            code = 1
+        _log_invocation("ok" if code == 0 else f"exit:{code}")
         raise
     except Exception as runtime_exc:
         # Anything else uncaught — LLM rescue. We deliberately don't catch
         # this earlier (each command can still raise typer.Exit cleanly);
         # this is the "Python crashed in a command body" path.
+        _log_invocation("crash", response=f"{type(runtime_exc).__name__}: {runtime_exc}")
         _llm_diagnose_uncaught(runtime_exc, list(sys.argv[1:]))
         sys.exit(1)
         # Be proactive: try recovery for ALL parse errors, not just "extra
@@ -12402,5 +12515,6 @@ def main():
     _on(f"[red]Could not auto-recover: {original_error}[/red]")
     _on("[dim]Tip: wrap the query in single quotes — "
         "[bold]org-llm ask 'your full question here'[/bold][/dim]")
+    _log_invocation("unrecovered_parse_error", response=original_error)
     sys.exit(2)
 # cli.py:1 ends here

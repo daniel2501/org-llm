@@ -63,13 +63,31 @@ class Node(Base):
 
 
 class History(Base):
+    """Event log mirrored to ~/org/org-llm-log.org via the logbook module.
+
+    Every CLI invocation, LLM round-trip, MCP tool call, set_config write,
+    and doctor verdict that we choose to log writes ONE row here AND ONE
+    org heading to the log file. Two surfaces, one source of truth — see
+    org_llm/logbook.py.
+
+    Original schema was just (timestamp, command, query, response). The
+    new fields (kind, model, args, duration_ms, outcome) are additive
+    so existing rows keep working; the migration in _migrate_in_place
+    backfills them on existing DBs.
+    """
     __tablename__ = "history"
 
-    id        = Column(Integer, primary_key=True)
-    timestamp = Column(Text, nullable=False)
-    command   = Column(Text, nullable=False)
-    query     = Column(Text, nullable=False)
-    response  = Column(Text, nullable=False)
+    id          = Column(Integer, primary_key=True)
+    timestamp   = Column(Text, nullable=False)
+    command     = Column(Text, nullable=False)
+    query       = Column(Text, nullable=False)
+    response    = Column(Text, nullable=False)
+    # Additive fields — present after the logbook migration.
+    kind        = Column(Text)         # cli | llm | mcp | config | doctor
+    model       = Column(Text)         # for llm/mcp events; "" otherwise
+    args        = Column(Text)         # JSON-encoded args dict
+    duration_ms = Column(Integer)
+    outcome     = Column(Text)         # ok | error | refused | timeout
 
 
 class Config(Base):
@@ -116,6 +134,19 @@ def _migrate_in_place(engine) -> None:
         additions.append("ALTER TABLE nodes ADD COLUMN auto_tagged_at REAL")
     if "auto_tagger_model" not in cols:
         additions.append("ALTER TABLE nodes ADD COLUMN auto_tagger_model TEXT")
+    # ── History table — logbook columns (kind/model/args/duration/outcome).
+    # Additive so old rows keep working; new writes via logbook fill them in.
+    if insp.has_table("history"):
+        h_cols = {c["name"] for c in insp.get_columns("history")}
+        for col, decl in (
+            ("kind",        "ALTER TABLE history ADD COLUMN kind TEXT"),
+            ("model",       "ALTER TABLE history ADD COLUMN model TEXT"),
+            ("args",        "ALTER TABLE history ADD COLUMN args TEXT"),
+            ("duration_ms", "ALTER TABLE history ADD COLUMN duration_ms INTEGER"),
+            ("outcome",     "ALTER TABLE history ADD COLUMN outcome TEXT"),
+        ):
+            if col not in h_cols:
+                additions.append(decl)
     if not additions:
         return
     with engine.begin() as conn:
@@ -199,6 +230,20 @@ MODEL_DEFAULTS = {
     # the proactive_doctor recommendations apply changes WITHOUT a
     # separate --apply flag. Off by default for safety.
     "doctor_auto_apply":       "false",
+    # ── Logbook (org_llm/logbook.py) ──────────────────────────────────────
+    # `log_level` — overall verbosity gate.
+    #   off:     disable all event logging.
+    #   minimal: log CLI invocations + doctor verdicts only.
+    #   normal:  + LLM calls metadata + MCP tool calls (no full responses).
+    #   verbose: + full LLM/MCP request + response bodies.
+    "log_level":               "normal",
+    # `log_kinds` — comma-sep filter on event kinds. Empty = no kinds.
+    # Recognised: cli, llm, mcp, config, doctor, dbt.
+    "log_kinds":               "cli,llm,mcp,config,doctor,dbt",
+    # `log_max_rows_per_kind` — keep at most N rows per kind in the
+    # History table; older entries get pruned at write time. Org file
+    # is also rotated when it crosses 5MB.
+    "log_max_rows_per_kind":   "1000",
 }
 
 

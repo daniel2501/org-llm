@@ -463,6 +463,129 @@ class TestDbt:
         assert "ambiguous" not in sql.lower()  # comment-only, not the bug
 
 
+class TestLogbook:
+    """The logbook writes every notable event to BOTH the History table
+    AND ~/org/org-llm-log.org so dbt + the user's vault stay in sync."""
+
+    def test_write_event_inserts_history_row(self, cli_db, monkeypatch, tmp_path):
+        from org_llm import logbook as _lb
+        from org_llm.db import History, get_session, make_engine
+        # Pin the org log path to a tmp file so we don't pollute ~/org.
+        monkeypatch.setenv("ORG_LLM_LOG_PATH", str(tmp_path / "log.org"))
+        _lb.write_event("cli", "demo-verb", args="--flag", outcome="ok",
+                          response="hello")
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            rows = s.query(History).filter(History.kind == "cli").all()
+        assert any(r.command == "demo-verb" for r in rows)
+
+    def test_write_event_appends_org_entry(self, cli_db, monkeypatch, tmp_path):
+        from org_llm import logbook as _lb
+        log_path = tmp_path / "log.org"
+        monkeypatch.setenv("ORG_LLM_LOG_PATH", str(log_path))
+        _lb.write_event("llm", "chat", model="gemma3",
+                          args="prompt_chars=42",
+                          response="The answer is 42.",
+                          duration_ms=123, outcome="ok")
+        assert log_path.exists()
+        text = log_path.read_text()
+        assert ":KIND:        llm" in text
+        assert ":MODEL:       gemma3" in text
+        assert "The answer is 42" in text
+
+    def test_log_level_off_suppresses_writes(self, cli_db, monkeypatch, tmp_path):
+        """`log_level = off` must short-circuit BOTH the DB write and
+        the org append. Caller should never see a side-effect."""
+        from org_llm import logbook as _lb
+        from org_llm.db import History, Config, get_session, make_engine
+        monkeypatch.setenv("ORG_LLM_LOG_PATH", str(tmp_path / "log.org"))
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            row = s.get(Config, "log_level")
+            if row: row.value = "off"
+            else:   s.add(Config(key="log_level", value="off"))
+            s.commit()
+        _lb.write_event("cli", "should-not-be-logged")
+        with get_session(engine) as s:
+            rows = s.query(History).filter(
+                History.command == "should-not-be-logged").all()
+        assert rows == []
+        assert not (tmp_path / "log.org").exists()
+
+    def test_track_event_captures_duration_and_exception(self,
+                                                            cli_db, monkeypatch, tmp_path):
+        from org_llm import logbook as _lb
+        from org_llm.db import History, get_session, make_engine
+        monkeypatch.setenv("ORG_LLM_LOG_PATH", str(tmp_path / "log.org"))
+        try:
+            with _lb.track_event("llm", "chat", model="gemma3"):
+                raise ValueError("synthetic")
+        except ValueError:
+            pass
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            row = (s.query(History)
+                       .filter(History.kind == "llm",
+                                History.command == "chat")
+                       .order_by(History.id.desc())
+                       .first())
+        assert row is not None
+        assert row.outcome == "error"
+        assert "ValueError" in (row.response or "")
+        assert (row.duration_ms or 0) >= 0
+
+    def test_logbook_failure_does_not_raise(self, monkeypatch, tmp_path):
+        """The whole logbook contract is: never raise into the caller.
+        Even if the DB is broken or the org file is unwriteable."""
+        from org_llm import logbook as _lb
+        # Point at a bogus DB and an unwriteable org path
+        monkeypatch.setenv("ORG_LLM_DB", "/dev/null/nope.db")
+        monkeypatch.setenv("ORG_LLM_LOG_PATH", "/dev/null/cant-write.org")
+        # Should NOT raise
+        _lb.write_event("cli", "verb", outcome="ok")
+
+    def test_history_migration_added_columns(self, cli_db):
+        """Existing DBs (pre-logbook) get the new columns via the
+        additive migration in db._migrate_in_place."""
+        from sqlalchemy import inspect
+        from org_llm.db import make_engine
+        engine = make_engine(cli_db)
+        cols = {c["name"] for c in inspect(engine).get_columns("history")}
+        for needed in ("kind", "model", "args", "duration_ms", "outcome"):
+            assert needed in cols, f"missing migrated column: {needed}"
+
+    def test_log_cli_verb_lists_recent_entries(self, cli_db, monkeypatch, tmp_path):
+        """End-to-end: write a few events, then `org-llm log` shows them."""
+        from org_llm import logbook as _lb
+        monkeypatch.setenv("ORG_LLM_LOG_PATH", str(tmp_path / "log.org"))
+        _lb.write_event("cli", "demo-1", outcome="ok")
+        _lb.write_event("llm", "chat", model="gemma3", outcome="ok")
+        r = runner.invoke(app, ["log", "--limit", "10"])
+        assert r.exit_code == 0
+        assert "demo-1" in r.output or "chat" in r.output
+        assert "captain's log" in r.output.lower() or "event log" in r.output.lower()
+
+    def test_log_grep_filters(self, cli_db, monkeypatch, tmp_path):
+        from org_llm import logbook as _lb
+        monkeypatch.setenv("ORG_LLM_LOG_PATH", str(tmp_path / "log.org"))
+        _lb.write_event("cli", "needle-find-me", outcome="ok")
+        _lb.write_event("cli", "haystack-1", outcome="ok")
+        r = runner.invoke(app, ["log", "--grep", "needle"])
+        assert r.exit_code == 0
+        assert "needle" in r.output
+        assert "haystack" not in r.output
+
+    def test_log_kind_filter(self, cli_db, monkeypatch, tmp_path):
+        from org_llm import logbook as _lb
+        monkeypatch.setenv("ORG_LLM_LOG_PATH", str(tmp_path / "log.org"))
+        _lb.write_event("cli", "cli-event", outcome="ok")
+        _lb.write_event("llm", "llm-event", model="x", outcome="ok")
+        r = runner.invoke(app, ["log", "--kind", "llm"])
+        assert r.exit_code == 0
+        assert "llm-event" in r.output
+        assert "cli-event" not in r.output
+
+
 class TestProactiveDoctor:
     """Detect when local chat_model can't fit in available RAM (the most
     common cause of stuck-feeling opencode sessions) and suggest
