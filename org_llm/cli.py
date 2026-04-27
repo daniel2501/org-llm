@@ -788,13 +788,36 @@ def setup(
     Pass --yes to run all steps non-interactively with reasonable
     defaults. Each step is idempotent and safe to skip / re-run later
     via the corresponding subcommand.
+
+    Ctrl-C exits cleanly at any prompt — partial progress is preserved
+    (the DB is created, any embeddings written stay written, etc).
     """
     import importlib
 
     def _confirm(prompt: str, default: bool = True) -> bool:
         if yes:
             return True
-        return typer.confirm(prompt, default=default)
+        try:
+            return typer.confirm(prompt, default=default)
+        except (KeyboardInterrupt, EOFError):
+            console.print()
+            on_screen("[yellow]Setup interrupted. "
+                      "Re-run [bold]org-llm setup[/bold] to resume "
+                      "(every step is idempotent).[/yellow]")
+            raise typer.Exit(130)   # 128 + SIGINT
+
+    def _ask(prompt: str, default: str = "") -> str:
+        """Ctrl-C-safe replacement for typer.prompt."""
+        if yes:
+            return default
+        try:
+            return typer.prompt(prompt, default=default,
+                                  show_default=bool(default))
+        except (KeyboardInterrupt, EOFError):
+            console.print()
+            on_screen("[yellow]Setup interrupted. "
+                      "Re-run [bold]org-llm setup[/bold] to resume.[/yellow]")
+            raise typer.Exit(130)
 
     console.print()
     console.rule("[lcars1]org-llm setup — first-run walkthrough[/lcars1]")
@@ -841,9 +864,13 @@ def setup(
     except Exception:
         missing = None
     install_q = "Install missing FOSS tools"
-    if missing is not None:
-        install_q += f" ({len(missing)} missing — eza, ripgrep, bat, …)?"
-    else:
+    if missing is not None and missing:
+        # Use actual missing names (first 3) — not a hardcoded list that
+        # may overlap with what's already installed.
+        examples = ", ".join(t.name for t in missing[:3])
+        more     = "" if len(missing) <= 3 else ", …"
+        install_q += f" ({len(missing)} missing — {examples}{more})?"
+    elif missing is None:
         install_q += " (eza, ripgrep, bat, …)?"
     if missing == [] :
         on_screen("[dim]All FOSS tools already installed — skipping step 4.[/dim]")
@@ -859,21 +886,54 @@ def setup(
             on_screen(f"[dim]install failed: {e}[/dim]")
         console.print()
 
-    # 5. models --tune
-    if not skip_models and _confirm("Pick hardware-fitting Ollama models?", default=True):
-        on_screen("[lcars2]Step 5/13[/lcars2] models --tune --apply "
-                  "[dim](may pull models — multiple minutes)[/dim]")
+    # 5. models --tune  — data-driven prompt
+    if not skip_models:
         try:
-            import subprocess as _sub
-            with warp("Tuning models for your hardware"):
-                _sub.run(["org-llm", "models", "--tune", "--apply"])
-        except Exception as e:
-            on_screen(f"[dim]models --tune failed: {e}[/dim]")
-        console.print()
+            from .cloud import local_ram_gb, local_vram_gb
+            ram  = local_ram_gb()
+            vram = local_vram_gb()
+            hw_str = f"{ram:.1f} GB free RAM" + (f" + {vram:.1f} GB VRAM"
+                                                  if vram else "")
+        except Exception:
+            hw_str = "(hardware probe failed)"
+        engine_now = _engine()
+        with get_session(engine_now) as session:
+            assigned = sum(1 for _, k, _ in _TASK_MODEL_KEYS
+                            if (_cfg(session, k) or "").strip())
+        models_q = (f"Pick hardware-fitting Ollama models? "
+                    f"({assigned}/{len(_TASK_MODEL_KEYS)} role(s) assigned · "
+                    f"hardware: {hw_str})")
+        if _confirm(models_q, default=True):
+            on_screen("[lcars2]Step 5/13[/lcars2] models --tune --apply "
+                      "[dim](may pull models — multiple minutes)[/dim]")
+            try:
+                import subprocess as _sub
+                with warp("Tuning models for your hardware"):
+                    _sub.run(["org-llm", "models", "--tune", "--apply"])
+            except Exception as e:
+                on_screen(f"[dim]models --tune failed: {e}[/dim]")
+            console.print()
 
-    # 6+7+8. index → tag → embed
-    if not skip_index and _confirm(
-            "Index, auto-tag, and embed your org notes now?", default=True):
+    # 6+7. index → tag — data-driven prompt
+    try:
+        from .db import File as _F, Node as _N
+        engine_now = _engine()
+        with get_session(engine_now) as session:
+            org_dir_now = _org_dir(session)
+            n_org_disk = (sum(1 for _ in org_dir_now.rglob("*.org"))
+                          if org_dir_now.exists() else 0)
+            db_paths = {f.path for f in session.query(_F).all()}
+            n_unindexed = sum(1 for p in (org_dir_now.rglob("*.org")
+                                            if org_dir_now.exists() else [])
+                              if str(p) not in db_paths)
+            n_untagged = (session.query(_N).filter(
+                (_N.tags == "") | (_N.tags.is_(None))).count())
+        idx_q = (f"Index and auto-tag your org notes now? "
+                 f"({n_unindexed} unindexed of {n_org_disk} on disk · "
+                 f"{n_untagged} untagged node(s))")
+    except Exception:
+        idx_q = "Index and auto-tag your org notes now?"
+    if not skip_index and _confirm(idx_q, default=True):
         on_screen("[lcars2]Step 6/13[/lcars2] index")
         try:
             index()    # has its own warp spinner
@@ -889,18 +949,34 @@ def setup(
             pass
         except Exception as e:
             on_screen(f"[dim]tag failed: {e}[/dim]")
+        console.print()
 
-        on_screen("[lcars2]Step 8/13[/lcars2] embed")
+    # 8. embed — UNCONDITIONAL. Idempotent: only embeds nodes that don't
+    # have a vector yet. If everything's embedded already, the inner check
+    # short-circuits cheap. We're not asking — silent partial-embeddings
+    # ("96% embedded; run: org-llm embed") are exactly the friction setup
+    # is meant to prevent.
+    if not skip_index:
+        on_screen("[lcars2]Step 8/13[/lcars2] embed (auto — fills any gaps)")
         try:
             embed()    # has its own impulse progress bar
         except SystemExit:
             pass
+        except Exception as e:
+            on_screen(f"[dim]embed failed: {e}[/dim]")
         console.print()
 
-    # 9. personalize — call the function directly so its themed `thinking`
-    # spinner appears (CliRunner swallows it).
-    if not skip_personalize and _confirm(
-            "Auto-create theme knobs from your content?", default=True):
+    # 9. personalize — data-driven prompt
+    try:
+        from .db import Node as _N2
+        engine_now = _engine()
+        with get_session(engine_now) as session:
+            n_nodes_now = session.query(_N2).count()
+        pz_q = (f"Auto-create theme knobs from your content? "
+                f"({n_nodes_now} note(s) for the LLM to draw inspiration from)")
+    except Exception:
+        pz_q = "Auto-create theme knobs from your content?"
+    if not skip_personalize and _confirm(pz_q, default=True):
         on_screen("[lcars2]Step 9/13[/lcars2] personalize --apply "
                   "[dim](LLM synthesises themes — may take 30-90s)[/dim]")
         try:
@@ -973,19 +1049,34 @@ def setup(
         console.print()
         # Also offer a manual fact line
         if not yes:
-            extra = typer.prompt(
-                "Optional: add another fact in your own words "
-                "(blank to skip)",
-                default="", show_default=False).strip()
+            extra = _ask("Optional: add another fact in your own words "
+                          "(blank to skip)", default="").strip()
             if extra:
                 from . import context as _ctx
                 _ctx.add_fact(extra, source="setup")
                 hail("Added.")
 
-    # 11. history narrative — LLM scans old + archived notes
-    if _confirm("Build the historical-context narrative now? "
-                 "(LLM scans old + archived notes — 1-3 minutes)",
-                 default=True):
+    # 11. history narrative — data-driven prompt
+    try:
+        from .db        import Node as _N3
+        from . import context as _ctx
+        import time as _time
+        cutoff = _time.time() - 180 * 86400
+        engine_now = _engine()
+        with get_session(engine_now) as session:
+            n_stale = session.query(_N3).filter(
+                _N3.tags.like("%stale%")).count()
+            n_old   = session.query(_N3).filter(
+                _N3.mtime < cutoff,
+                ~_N3.tags.like("%code%")).count()
+        n_archive = len(_ctx._scan_archive_files())
+        hist_q = (f"Build the historical-context narrative now? "
+                  f"({n_stale} stale-tagged · {n_old} >180-day · "
+                  f"{n_archive} archive file(s) — 1-3 minutes)")
+    except Exception:
+        hist_q = ("Build the historical-context narrative now? "
+                   "(LLM scans old + archived notes — 1-3 minutes)")
+    if _confirm(hist_q, default=True):
         on_screen("[lcars2]Step 11/12[/lcars2] history build")
         try:
             from . import context as _ctx
@@ -3923,13 +4014,34 @@ def doctor(
 
         if node_count > 0:
             pct = int(embed_count / node_count * 100)
+            pending = node_count - embed_count
             if pct == 100:
                 ok("Embeddings", f"{embed_count}/{node_count} (100%)")
-            elif pct >= 80:
-                warn("Embeddings partial", f"{embed_count}/{node_count} ({pct}%) — run: org-llm embed")
             else:
-                fail("Embeddings low", f"{embed_count}/{node_count} ({pct}%)",
-                     "org-llm embed")
+                # Partial / low embeddings: with --fix, auto-run embed for
+                # any pending nodes (idempotent + cheap). The previous
+                # behaviour just nagged the user to run a separate command.
+                level = "partial" if pct >= 80 else "low"
+                summary = f"{embed_count}/{node_count} ({pct}%)"
+                if fix and pending > 0:
+                    on_screen(f"[yellow]Embeddings {level} ({summary}) — "
+                              f"auto-running embed for {pending} node(s)…[/yellow]")
+                    try:
+                        embed()
+                        ok("Embeddings", f"{node_count}/{node_count} "
+                                          f"(100% after auto-fix)")
+                    except SystemExit:
+                        warn(f"Embeddings {level}", f"{summary} — auto-fix bailed")
+                    except Exception as e:
+                        warn(f"Embeddings {level}", f"{summary} — auto-fix failed: {e}")
+                else:
+                    if level == "partial":
+                        warn("Embeddings partial",
+                             f"{summary} — run: org-llm embed  "
+                             "(or: org-llm doctor --fix)")
+                    else:
+                        fail("Embeddings low", summary,
+                             "org-llm embed  (or: org-llm doctor --fix)")
 
     # ── Org Files ──────────────────────────────────────────────────────────────
     section("Org Files")
@@ -8751,9 +8863,22 @@ def main():
         return click_cmd.main(args=argv, prog_name="org-llm",
                                 standalone_mode=False)
 
+    def _abort_on_ctrl_c():
+        """Print a clean one-liner and exit 130 (128 + SIGINT)."""
+        try:
+            from .ui import on_screen as _on_int
+            console.print()
+            _on_int("[yellow]Interrupted (Ctrl-C). "
+                    "Partial work is preserved — re-run when ready.[/yellow]")
+        except Exception:
+            print("\nInterrupted (Ctrl-C).", file=sys.stderr)
+        sys.exit(130)
+
     try:
         _invoke()
         return
+    except KeyboardInterrupt:
+        _abort_on_ctrl_c()
     except _ClickUsageError as exc:
         original_error = str(exc)
         # Be proactive: try recovery for ALL parse errors, not just "extra
@@ -8779,6 +8904,8 @@ def main():
             try:
                 _invoke(argv)
                 return
+            except KeyboardInterrupt:
+                _abort_on_ctrl_c()
             except _ClickUsageError as exc:
                 original_error = str(exc)
 
@@ -8790,6 +8917,8 @@ def main():
         try:
             _invoke(repaired)
             return
+        except KeyboardInterrupt:
+            _abort_on_ctrl_c()
         except _ClickUsageError as exc:
             original_error = str(exc)
             argv = repaired
@@ -8802,6 +8931,8 @@ def main():
         try:
             _invoke(intent_argv)
             return
+        except KeyboardInterrupt:
+            _abort_on_ctrl_c()
         except _ClickUsageError:
             pass
 
@@ -8818,8 +8949,12 @@ def main():
             try:
                 _invoke(argv)
                 return
+            except KeyboardInterrupt:
+                _abort_on_ctrl_c()
             except _ClickUsageError:
                 pass
+    except KeyboardInterrupt:
+        _abort_on_ctrl_c()
     except Exception:
         pass
 
