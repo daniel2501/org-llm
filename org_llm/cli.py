@@ -3213,6 +3213,132 @@ def _opencode_bin() -> Path | None:
     return None
 
 
+def _opencode_log_dir() -> Path:
+    """Where opencode writes per-launch log files (one per session)."""
+    return Path("~/.local/share/opencode/log").expanduser()
+
+
+def _latest_opencode_log(log_dir: Path) -> Path | None:
+    """Newest *.log under log_dir, or None if the dir is empty/missing."""
+    if not log_dir.is_dir():
+        return None
+    logs = [p for p in log_dir.glob("*.log") if p.is_file()]
+    if not logs:
+        return None
+    return max(logs, key=lambda p: p.stat().st_mtime)
+
+
+def _ollama_alive(url: str, timeout: float = 3.0) -> tuple[bool, str]:
+    """Quick health check against Ollama. Returns (alive, reason).
+
+    "Alive" requires both reachable AND at least one model listed —
+    a running server with no models can't service generate requests.
+    """
+    import urllib.request, urllib.error, json
+    try:
+        with urllib.request.urlopen(
+            f"{url.rstrip('/')}/api/tags", timeout=timeout,
+        ) as r:
+            data = json.loads(r.read())
+        n = len(data.get("models") or [])
+        if n == 0:
+            return False, f"Ollama is reachable at {url} but reports no models"
+        return True, f"Ollama OK ({n} model{'s' if n != 1 else ''} registered)"
+    except urllib.error.URLError as e:
+        reason = getattr(e, "reason", e)
+        return False, f"Ollama unreachable at {url}: {reason}"
+    except Exception as e:
+        return False, f"Ollama health probe failed: {type(e).__name__}: {e}"
+
+
+def _watch_opencode_for_stalls(
+    log_dir: Path,
+    ollama_url: str,
+    stall_secs: float,
+    stop_event,
+    sentinel_path: Path,
+    poll_secs: float = 5.0,
+    startup_grace: float = 30.0,
+) -> None:
+    """Daemon-thread loop: watch opencode's log file mtime and flag a stall
+    only when BOTH the log has been quiet ≥stall_secs AND Ollama is sick.
+
+    Why both gates: a quiet log alone could just mean the user is reading
+    the screen — TUIs don't redraw the on-disk log every keystroke. We
+    only want to fire when there's an actual external cause (Ollama
+    unreachable / no models) the user can act on.
+
+    Writes a JSON one-shot diagnosis to sentinel_path on first detection,
+    then keeps watching but won't double-notify until the log moves.
+    """
+    import time, json
+    last_seen_mtime: float | None = None
+    last_change_at = time.monotonic()
+    notified = False
+    log_file: Path | None = None
+
+    deadline = time.monotonic() + startup_grace
+    while not stop_event.is_set() and time.monotonic() < deadline:
+        log_file = _latest_opencode_log(log_dir)
+        if log_file:
+            try:
+                last_seen_mtime = log_file.stat().st_mtime
+            except OSError:
+                log_file = None
+            else:
+                last_change_at = time.monotonic()
+                break
+        if stop_event.wait(poll_secs):
+            return
+    if not log_file:
+        return  # No log appeared during the grace window — give up silently.
+
+    while not stop_event.is_set():
+        if stop_event.wait(poll_secs):
+            return
+        # opencode may rotate logs across runs; keep our pointer fresh.
+        latest = _latest_opencode_log(log_dir)
+        if latest and latest != log_file:
+            log_file = latest
+            try:
+                last_seen_mtime = log_file.stat().st_mtime
+            except OSError:
+                continue
+            last_change_at = time.monotonic()
+            notified = False
+            continue
+        try:
+            cur_mtime = log_file.stat().st_mtime
+        except OSError:
+            continue
+        if last_seen_mtime is None or cur_mtime > last_seen_mtime:
+            last_seen_mtime = cur_mtime
+            last_change_at = time.monotonic()
+            notified = False
+            continue
+        idle = time.monotonic() - last_change_at
+        if idle < stall_secs or notified:
+            continue
+        alive, reason = _ollama_alive(ollama_url)
+        if alive:
+            continue  # Quiet log + healthy Ollama = probably just reading.
+        try:
+            sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+            sentinel_path.write_text(json.dumps({
+                "detected_at": time.time(),
+                "idle_secs":   round(idle, 1),
+                "log_file":    str(log_file),
+                "ollama_url":  ollama_url,
+                "ollama_alive": alive,
+                "reason":      reason,
+            }, indent=2))
+            notified = True
+        except OSError:
+            # Sentinel write failed (full disk, permissions) — keep
+            # watching; the user will at least see Ollama errors live.
+            return
+
+
 def _install_opencode_bin(bin_dir: Path) -> Path | None:
     """Download and install opencode using its official installer. Returns path or None."""
     import subprocess
@@ -5709,15 +5835,31 @@ _TUTOR_STEPS = [
         "[lcars1]What gets written:[/lcars1]\n"
         "  • [bold].opencode.json[/bold]                       — model, MCP server, instructions, theme ref\n"
         "  • [bold].opencode/themes/org-llm-lcars.json[/bold]  — LCARS palette matching CLI (light + dark)\n"
-        "  • [bold].opencode/command/<name>.md[/bold]          — slash-commands (see below)\n\n"
+        "  • [bold].opencode/command/<name>.md[/bold]          — 31 slash-commands (see below)\n\n"
+        "[lcars1]Cloud vs local (--cloud / --local):[/lcars1]\n"
+        "  default → auto: cloud when [bold]cloud[/bold] is configured + key in pass, else local\n"
+        "  [bold]--cloud[/bold]   — route chat through your configured provider (e.g. OpenRouter)\n"
+        "  [bold]--local[/bold]   — force Ollama; useful for privacy-first sessions\n"
+        "  When cloud, [bold].opencode.json[/bold] embeds the API key and is chmod'd 0600.\n\n"
+        "[lcars1]Stall watcher:[/lcars1]\n"
+        "  After spawn, a daemon thread watches the opencode log mtime. If it\n"
+        "  goes quiet ≥120s [italic]and[/italic] Ollama is unreachable, you'll see a one-line\n"
+        "  diagnosis after opencode exits — no false positives while you read.\n\n"
         "[lcars1]Workspaces (--workspace / -w):[/lcars1]\n"
         "  [bold]all[/bold]         — full toolbox (default)\n"
         "  [bold]researcher[/bold]  — read-heavy: search/ask/get_node, no captures\n"
         "  [bold]scribe[/bold]      — capture-heavy: capture_note + skill workflows\n"
         "  [bold]engineer[/bold]    — code-corpus + repo focus, code_search emphasis\n\n"
-        "[lcars1]Slash-commands (default):[/lcars1]\n"
-        "  [lcars3]/discover[/lcars3]  /recent  /health  /stats  /tags  /tutor  /code\n"
-        "  Plus per-workspace: [lcars3]/explore[/lcars3] (researcher), [lcars3]/capture[/lcars3] (scribe), [lcars3]/repo[/lcars3] (engineer)\n\n"
+        "[lcars1]Slash-commands (31 default — CLI parity):[/lcars1]\n"
+        "  [lcars3]Querying:[/lcars3]   /search /ask /capture /context /stale\n"
+        "  [lcars3]Code:[/lcars3]       /code /code-gen /code-index\n"
+        "  [lcars3]Indexing:[/lcars3]   /index /embed /tag /report\n"
+        "  [lcars3]Models:[/lcars3]     /models /cloud /config /performance\n"
+        "  [lcars3]Skills:[/lcars3]     /skills /skill /skill-new\n"
+        "  [lcars3]Health:[/lcars3]     /discover /recent /health /doctor /stats /tags /grants\n"
+        "  [lcars3]Other:[/lcars3]      /tutor /source /history /personalize /run\n"
+        "  Plus per-workspace: [lcars3]/explore[/lcars3] (researcher), [lcars3]/repo[/lcars3] (engineer)\n"
+        "  [lcars3]/run[/lcars3] is the universal escape hatch — runs any allow-listed CLI verb.\n\n"
         "[lcars1]System prompt is pre-loaded with:[/lcars1]\n"
         "  vault stats · recent activity · top-10 tags · model assignments ·\n"
         "  free RAM/VRAM · filesystem inventory · active theme dials/knobs\n\n"
@@ -5731,19 +5873,22 @@ _TUTOR_STEPS = [
         "              list_models read_file list_directory list_grants request_access\n"
         "  Browser:    open_url browser_command (when granted)\n"
         "  Skills:     list_skills list_tutor_steps get_tutor_step\n"
-        "  Config:     get_config set_config\n\n"
+        "  Config:     get_config set_config\n"
+        "  Universal:  org_llm_run (free-form CLI escape hatch)\n\n"
         "[lcars1]Theme integration:[/lcars1]\n"
         "  The TUI uses LCARS colors matching the CLI. The system prompt also\n"
         "  surfaces your active dials ([bold]trek/commie/queer[/bold]) and any user-\n"
         "  defined [bold]knob[/bold]s, so the in-opencode model matches your CLI vibe.\n\n"
         "[lcars1]From Doom Emacs:[/lcars1]  [lcars2]SPC l o[/lcars2] — opens vterm + launches workspace\n\n"
         "[lcars1]Commands:[/lcars1]\n"
-        "  [bold]org-llm launch[/bold]                       — default (all) workspace\n"
+        "  [bold]org-llm launch[/bold]                       — auto cloud-or-local + (all) workspace\n"
+        "  [bold]org-llm launch --cloud[/bold]               — force cloud routing (OpenRouter etc.)\n"
+        "  [bold]org-llm launch --local[/bold]               — force local Ollama\n"
         "  [bold]org-llm launch -w researcher[/bold]         — researcher flavor\n"
         "  [bold]org-llm launch --no-theme[/bold]            — skip writing theme file\n"
         "  [bold]org-llm launch --no-commands[/bold]         — skip slash-commands\n"
         "  [bold]org-llm launch --no-context[/bold]          — minimal prompt\n"
-        "  [bold]org-llm launch --dry-run[/bold]             — preview without launching\n"
+        "  [bold]org-llm launch --dry-run[/bold]             — preview without launching (key redacted)\n"
         "  [bold]org-llm launch --model phi4[/bold]          — override chat model\n"
         "  [bold]org-llm mcp[/bold]                          — run MCP server standalone\n\n"
         "[dim]Source: org_llm/mcp_server.py + cli.py → launch()  |  org-llm source mcp_server[/dim]",
@@ -6927,9 +7072,35 @@ def _opencode_lcars_theme() -> dict:
 def _opencode_slash_commands(workspace: str) -> dict:
     """Return {name: markdown-body} for slash commands written to
     .opencode/command/<name>.md. opencode treats these as stored prompts
-    the user can invoke with /<name>."""
+    the user can invoke with /<name>.
+
+    Coverage goal: parity with the org-llm CLI surface. Every major user-
+    facing verb has a slash command pointing at the right MCP tool (or
+    `org_llm_run` as the typed-shell escape hatch). Verbs that are TUI-
+    /terminal-only (launch, claude, mcp, install-tools, setup) and those
+    that touch security boundaries (grant/revoke/self/cloud --configure)
+    are deliberately omitted — those require a real terminal.
+    """
+
+    def _shell(verb: str, *, desc: str, hint: str = "") -> str:
+        """Helper for verbs without a dedicated MCP tool — uses the typed
+        escape hatch `org_llm_run`. Keeps the prompts uniform and short."""
+        body = (
+            "---\n"
+            f"description: {desc}\n"
+            "---\n"
+            f"Call `org_llm_run` with command_string=\"{verb}\". "
+        )
+        if hint:
+            body += hint + " "
+        body += (
+            "Surface the result; if it errored, read the [LLM recovery "
+            "advice] section and offer the user the next step.\n"
+        )
+        return body
 
     cmds = {
+        # ── Discover & overview ──────────────────────────────────────────
         "discover": (
             "---\n"
             "description: Probe the filesystem and report what org-llm can use\n"
@@ -6956,6 +7127,12 @@ def _opencode_slash_commands(workspace: str) -> dict:
             "concerning (downgrade markers, OOM risk, unreachable Ollama,\n"
             "missing models). If everything is healthy, say so in one line.\n"
         ),
+        "doctor": _shell(
+            "doctor",
+            desc="Full org-llm doctor report (deeper than /health)",
+            hint="The report is long — summarise it under three headings: "
+                 "WORKING / WARNINGS / NEXT-STEPS.",
+        ),
         "stats": (
             "---\n"
             "description: Vault + corpus statistics\n"
@@ -6971,6 +7148,151 @@ def _opencode_slash_commands(workspace: str) -> dict:
             "tags. Show the top 15 tags with counts. Note any clusters\n"
             "or themes. Suggest one tag that could be split or merged.\n"
         ),
+
+        # ── Querying notes ────────────────────────────────────────────────
+        "search": (
+            "---\n"
+            "description: Semantic search over my org notes\n"
+            "---\n"
+            "Ask me for the query if I haven't given one. Call `search_notes`\n"
+            "(keyword=False unless I asked for an exact match). Show top 8\n"
+            "results: title, file, one-line snippet. Offer to expand any\n"
+            "with `get_node`.\n"
+        ),
+        "ask": (
+            "---\n"
+            "description: Answer a question grounded in my org notes (RAG)\n"
+            "---\n"
+            "Call `ask_notes` with my question. If `ask_notes` reports it\n"
+            "found nothing, fall back to `search_notes` (keyword=True) and\n"
+            "summarise what's adjacent. Always cite note titles.\n"
+        ),
+        "capture": (
+            "---\n"
+            "description: Capture an idea into my vault with sane tags\n"
+            "---\n"
+            "Ask me the gist if I haven't written it out. Propose a title\n"
+            "and 2-3 tags drawn from my existing top tags (use\n"
+            "`list_nodes_by_tag` if uncertain). After I confirm, call\n"
+            "`capture_note` and report the new node ID.\n"
+        ),
+        "context": (
+            "---\n"
+            "description: Show or update org-llm's user-context (current truth)\n"
+            "---\n"
+            "Call `get_context` and show me the current context.\n"
+            "If I provide a new fact (job change, location, project status),\n"
+            "call `add_context(fact, topic)`. After updating, run\n"
+            "`find_stale_notes` for keywords from the new fact and surface\n"
+            "candidates for stale-marking.\n"
+        ),
+        "stale": (
+            "---\n"
+            "description: Sweep for stale notes contradicted by current context\n"
+            "---\n"
+            "Read `get_context` first, then call `find_stale_notes` with\n"
+            "keywords drawn from each context fact. Group by likely-stale\n"
+            "topic. Suggest at most 5 notes to review; do NOT modify.\n"
+        ),
+
+        # ── Code ──────────────────────────────────────────────────────────
+        "code": (
+            "---\n"
+            "description: Search my code corpus for a topic\n"
+            "---\n"
+            "Ask me what I'm looking for, then call `code_search` with\n"
+            "the query. If I mention a language, pass it as the `lang`\n"
+            "argument. Show top 5 hits with file path and one-line summary\n"
+            "drawn from `read_file` of the most relevant match.\n"
+        ),
+        "code-gen": _shell(
+            "code <task>",
+            desc="Generate code for an org-roam task using the code model",
+            hint="Ask me which org node or task to expand. Replace <task> "
+                 "with that node ID or a brief description.",
+        ),
+        "code-index": _shell(
+            "code-index",
+            desc="Re-index source-code repos so /code and ask see them",
+            hint="This may take a minute — stream progress as it comes back.",
+        ),
+
+        # ── Indexing & maintenance ───────────────────────────────────────
+        "index": _shell(
+            "index",
+            desc="Re-scan the vault and update the index (incremental)",
+        ),
+        "embed": (
+            "---\n"
+            "description: Generate embeddings for any pending nodes\n"
+            "---\n"
+            "Call `embed_pending`. Report how many nodes were embedded\n"
+            "and how many remain. If Ollama is unreachable, surface the\n"
+            "error and suggest [bold]ollama serve[/bold].\n"
+        ),
+        "tag": _shell(
+            "tag",
+            desc="Auto-tag untagged nodes with the fast model",
+        ),
+        "report": _shell(
+            "report",
+            desc="Render the rich-text dashboard for my vault",
+        ),
+
+        # ── Models, cloud, config ────────────────────────────────────────
+        "models": (
+            "---\n"
+            "description: Show installed models + role assignments\n"
+            "---\n"
+            "Call `list_models`. Pair each pulled model with the role(s)\n"
+            "it serves (chat, embed, code, fast, etc) by reading\n"
+            "`get_config` for the *_model keys. Flag any role pointing\n"
+            "at a model that isn't installed.\n"
+        ),
+        "cloud": _shell(
+            "cloud --status",
+            desc="Show cloud provider config + reachability (read-only)",
+        ),
+        "config": (
+            "---\n"
+            "description: Show or update an allow-listed config key\n"
+            "---\n"
+            "Call `get_config` to show all settings. If I ask to change one,\n"
+            "call `set_config(key, value)`. Refuse changes to anything\n"
+            "outside the allow-list and explain why.\n"
+        ),
+        "performance": (
+            "---\n"
+            "description: Tune org-llm to my hardware\n"
+            "---\n"
+            "Call `performance_status` and present what's healthy vs\n"
+            "concerning. If anything is downgraded due to RAM/GPU limits,\n"
+            "explain the trade-off. Do NOT auto-apply changes.\n"
+        ),
+
+        # ── Skills ────────────────────────────────────────────────────────
+        "skills": (
+            "---\n"
+            "description: List available org-babel skills\n"
+            "---\n"
+            "Call `list_skills`. Show name, description, and the file each\n"
+            "lives in. Group by tag if there's a clear cluster.\n"
+        ),
+        "skill": (
+            "---\n"
+            "description: Run a registered skill by name\n"
+            "---\n"
+            "If I haven't named one, call `list_skills` and ask. Then\n"
+            "`run_skill(name, ...)` with whatever inputs I provided. Show\n"
+            "the captured output; if it errored, surface the traceback tail.\n"
+        ),
+        "skill-new": _shell(
+            "skill-new <name>",
+            desc="Scaffold a new skill block into an org file",
+            hint="Ask me for a name and a one-line description first.",
+        ),
+
+        # ── Tutor & source ───────────────────────────────────────────────
         "tutor": (
             "---\n"
             "description: Walk me through an org-llm tutor step\n"
@@ -6980,14 +7302,42 @@ def _opencode_slash_commands(workspace: str) -> dict:
             "conversationally — not as a copy-paste of the original.\n"
             "Cite specific commands I should try.\n"
         ),
-        "code": (
+        "source": _shell(
+            "source",
+            desc="Show org-llm's own source with syntax highlighting",
+            hint="If I ask about a specific module, pass it as the second "
+                 "word (e.g. \"source mcp_server\").",
+        ),
+        "history": _shell(
+            "history",
+            desc="Build/inspect the LLM-generated history narrative",
+        ),
+        "personalize": _shell(
+            "personalize",
+            desc="Auto-create theme knobs from vault + filesystem content",
+        ),
+
+        # ── Auth & access (read-only) ────────────────────────────────────
+        "grants": (
             "---\n"
-            "description: Search my code corpus for a topic\n"
+            "description: List paths the LLM can read via MCP\n"
             "---\n"
-            "Ask me what I'm looking for, then call `code_search` with\n"
-            "the query. If I mention a language, pass it as the `lang`\n"
-            "argument. Show top 5 hits with file path and one-line summary\n"
-            "drawn from `read_file` of the most relevant match.\n"
+            "Call `list_grants`. Show each path with the date it was\n"
+            "granted. If I want to add a new grant, tell me to run\n"
+            "[bold]org-llm grant <path>[/bold] in a real terminal —\n"
+            "MCP cannot self-grant.\n"
+        ),
+
+        # ── Universal escape hatch ───────────────────────────────────────
+        "run": (
+            "---\n"
+            "description: Run any allow-listed org-llm CLI verb\n"
+            "---\n"
+            "Take whatever I asked for after /run as a free-form intent.\n"
+            "Call `org_llm_run` with that as command_string. The MCP layer\n"
+            "will repair common shell-quoting mistakes and reconstruct\n"
+            "argv from intent. Refused verbs (mcp, claude, launch, install,\n"
+            "setup, grant*, revoke*) need a real terminal — say so.\n"
         ),
     }
 
@@ -6999,15 +7349,6 @@ def _opencode_slash_commands(workspace: str) -> dict:
             "Pick a tag from my top-10, call `list_nodes_by_tag` for it,\n"
             "skim 3 notes via `get_node`, and surface a connection or\n"
             "open question I hadn't named explicitly.\n"
-        )
-    elif workspace == "scribe":
-        cmds["capture"] = (
-            "---\n"
-            "description: Capture an idea with consistent tagging\n"
-            "---\n"
-            "Ask me what I want to capture. Propose a title and 2-3 tags\n"
-            "drawn from my existing TOP TAGS. After I confirm, call\n"
-            "`capture_note` and report the new node ID.\n"
         )
     elif workspace == "engineer":
         cmds["repo"] = (
@@ -7035,6 +7376,9 @@ def launch(
                 help="Skip writing LCARS theme to .opencode/themes/")] = False,
     no_commands:Annotated[bool, typer.Option("--no-commands","-C",
                 help="Skip writing slash-commands to .opencode/command/")] = False,
+    cloud:      Annotated[bool, typer.Option("--cloud/--local",
+                help="Route chat through cloud provider (default: auto — cloud "
+                     "when configured + API key available, local otherwise)")] = None,
     dry_run:    Annotated[bool, typer.Option("--dry-run",    "-n",
                 help="Print opencode config only, do not launch")] = False,
 ):
@@ -7056,6 +7400,7 @@ def launch(
     import os
     import shutil
     import subprocess
+    import tempfile
     from rich.panel  import Panel
     from rich.table  import Table
     from rich.syntax import Syntax
@@ -7082,10 +7427,38 @@ def launch(
     with get_session(engine) as session:
         ctx = _opencode_pre_flight_context(session)
         chat_mdl = model or _cfg(session, "chat_model") or MODEL_DEFAULTS["chat_model"]
+        cloud_provider = _cfg(session, "cloud_provider")
+        cloud_model    = _cfg(session, "cloud_model")
+        cloud_endpoint = _cfg(session, "cloud_endpoint_url")
 
     org_dir     = Path(ctx["org_dir"]).expanduser()
     ollama_url  = ctx["ollama_url"]
     org_llm_dir = Path(__file__).parent.parent.resolve()
+
+    # ── Decide cloud vs local ─────────────────────────────────────────────────
+    # `--cloud/--local` overrides; absent (None) → auto-detect on cloud config
+    # presence + an API key in `pass`. Why: a hung opencode is almost always a
+    # weak local model timing out — when the user has cloud already wired up
+    # we should default to using it, since that's "increase LLM power" with
+    # zero extra setup. `--local` keeps the privacy-first path one flag away.
+    from . import creds as _creds
+    cloud_key = ""
+    if cloud_provider:
+        try:
+            cloud_key = _creds.read_secret(_creds.cloud_slug(cloud_provider)) or ""
+        except Exception:
+            cloud_key = ""
+    cloud_ready = bool(cloud_provider and cloud_model and cloud_endpoint and cloud_key)
+    if cloud is None:
+        use_cloud = cloud_ready
+    elif cloud:
+        if not cloud_ready:
+            red_alert("--cloud requested but cloud isn't configured. "
+                      "Run [bold]org-llm cloud --configure[/bold] first.")
+            raise typer.Exit(1)
+        use_cloud = True
+    else:
+        use_cloud = False
 
     # ── Build system prompt ───────────────────────────────────────────────────
     if no_context:
@@ -7110,14 +7483,38 @@ def launch(
         )
 
     # ── Build .opencode.json ──────────────────────────────────────────────────
-    oc_config: dict = {
-        "model": f"ollama/{chat_mdl}",
-        "provider": {
+    if use_cloud:
+        # opencode model strings are "<provider-slug>/<model-name>". The
+        # cloud_model already includes the upstream model slug (e.g.
+        # "openai/gpt-oss-20b:free"), so we get nested slashes — opencode
+        # treats anything after the first slash as the model id, so this
+        # works fine.
+        active_model_str   = f"{cloud_provider}/{cloud_model}"
+        active_provider_id = cloud_provider
+        active_provider_block = {
+            cloud_provider: {
+                "name": cloud_provider.title(),
+                "options": {
+                    "baseURL": cloud_endpoint,
+                    "apiKey":  cloud_key,
+                },
+            }
+        }
+        active_model_label = f"{cloud_model}  ({cloud_provider} cloud)"
+    else:
+        active_model_str   = f"ollama/{chat_mdl}"
+        active_provider_id = "ollama"
+        active_provider_block = {
             "ollama": {
                 "name": "Ollama",
                 "options": {"baseURL": f"{ollama_url.rstrip('/')}/v1"},
             }
-        },
+        }
+        active_model_label = f"{chat_mdl}  (Ollama, local)"
+
+    oc_config: dict = {
+        "model":        active_model_str,
+        "provider":     active_provider_block,
         "instructions": instructions,
         "mcp": {
             "org-llm": {
@@ -7142,7 +7539,15 @@ def launch(
     if dry_run:
         console.print()
         console.rule("[lcars1]opencode config (dry-run)[/lcars1]")
-        console.print(Syntax(json.dumps(oc_config, indent=2), "json", theme="monokai"))
+        # Redact any apiKey before rendering — dry-run output may end up in
+        # bug reports, screenshots, or transcripts.
+        redacted = json.loads(json.dumps(oc_config))
+        for prov in redacted.get("provider", {}).values():
+            opts = prov.get("options") or {}
+            if opts.get("apiKey"):
+                k = opts["apiKey"]
+                opts["apiKey"] = (k[:6] + "…" + k[-4:]) if len(k) > 14 else "…redacted…"
+        console.print(Syntax(json.dumps(redacted, indent=2), "json", theme="monokai"))
         console.rule(f"[lcars2]Workspace: {workspace}[/lcars2]")
         on_screen(f"Would write config:   {config_path}")
         if not no_theme:
@@ -7154,6 +7559,13 @@ def launch(
 
     # ── Write all files ───────────────────────────────────────────────────────
     config_path.write_text(json.dumps(oc_config, indent=2))
+    if use_cloud:
+        # The provider block embeds the API key. Restrict to owner so a
+        # casually-curious tool or shared-vault sync doesn't surface it.
+        try:
+            os.chmod(config_path, 0o600)
+        except OSError:
+            pass
     if not no_theme:
         theme_path.parent.mkdir(parents=True, exist_ok=True)
         theme_path.write_text(json.dumps(_opencode_lcars_theme(), indent=2))
@@ -7170,7 +7582,7 @@ def launch(
     tbl.add_column("Key",   style="lcars1", width=20)
     tbl.add_column("Value", style="lcars2")
     tbl.add_row("Workspace",   workspace)
-    tbl.add_row("Model",       f"{chat_mdl}  (Ollama)")
+    tbl.add_row("Model",       active_model_label)
     tbl.add_row("Vault",       str(org_dir))
     tbl.add_row("Nodes",       f"{ctx['n_nodes']}  ({ctx['pct_e']}% embedded)")
     tbl.add_row("Skills",      f"{len(ctx['skills'])} registered")
@@ -7191,14 +7603,29 @@ def launch(
     hail("Engaging opencode… (q to quit, Ctrl-C to abort)")
     console.print()
 
-    # ── Hand off to opencode ──────────────────────────────────────────────────
-    os.chdir(org_dir)
+    # ── Hand off to opencode (with a stall watcher) ───────────────────────────
+    # We deliberately do NOT use os.execvp: we want this Python process to
+    # remain alive so a daemon thread can watch opencode's log for stalls
+    # (e.g. Ollama hung mid-generation). Stdin/stdout/stderr are inherited,
+    # so the TUI experience is unchanged for the user.
+    import threading
+    import json as _json
+    sentinel = Path(tempfile.gettempdir()) / f"org-llm-stall-{os.getpid()}.json"
+    sentinel.unlink(missing_ok=True)
+    stop_event = threading.Event()
+    watcher = threading.Thread(
+        target=_watch_opencode_for_stalls,
+        args=(_opencode_log_dir(), ollama_url, 120.0, stop_event, sentinel),
+        daemon=True,
+    )
+    watcher.start()
+    rc = 1
     try:
-        os.execvp(oc_bin, [oc_bin])
-    except Exception as e:
+        rc = subprocess.run([oc_bin], cwd=str(org_dir)).returncode
+    except FileNotFoundError as e:
         red_alert(f"Failed to launch {oc_bin!r}: {e}")
         advice = _llm_recovery_advice(
-            f"os.execvp({oc_bin!r}) failed: {type(e).__name__}: {e}",
+            f"subprocess.run({oc_bin!r}) failed: {type(e).__name__}: {e}",
             context=(f"workspace={workspace}, org_dir={org_dir}, "
                      f"chat_mdl={chat_mdl}, ollama_url={ollama_url}"),
         )
@@ -7207,6 +7634,29 @@ def launch(
             for line in advice.splitlines():
                 on_screen(f"  {line}")
         raise typer.Exit(1)
+    except KeyboardInterrupt:
+        rc = 130
+    finally:
+        stop_event.set()
+        watcher.join(timeout=2.0)
+
+    if sentinel.exists():
+        try:
+            diag = _json.loads(sentinel.read_text())
+            console.print()
+            on_screen("[lcars3]Stall detected during this opencode session:[/lcars3]")
+            on_screen(f"  • Log idle for {diag['idle_secs']:.0f}s")
+            on_screen(f"  • {diag['reason']}")
+            on_screen("[dim]Try:[/dim] [bold]ollama serve[/bold]  "
+                      "(or [bold]systemctl --user restart ollama[/bold]), "
+                      "then re-run [bold]org-llm launch[/bold].")
+        except Exception:
+            pass
+        finally:
+            sentinel.unlink(missing_ok=True)
+
+    if rc != 0:
+        raise typer.Exit(rc)
 
 
 @app.command(name="claude", rich_help_panel="Workspaces")

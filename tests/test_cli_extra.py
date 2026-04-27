@@ -258,6 +258,44 @@ class TestLaunchWorkspaces:
         r = runner.invoke(app, ["launch", "-n", "-w", "scribe"])
         assert r.exit_code == 0
 
+    def test_local_flag_uses_ollama(self, populated_org):
+        r = runner.invoke(app, ["launch", "--dry-run", "--local"])
+        assert r.exit_code == 0, r.output
+        flat = " ".join(r.output.split())
+        assert "ollama/" in flat
+        assert "openrouter" not in flat.lower()
+
+    def test_cloud_flag_errors_when_unconfigured(self, populated_org):
+        # cli_db fixture creates a fresh DB with no cloud config — --cloud
+        # should refuse rather than silently fall back to local.
+        r = runner.invoke(app, ["launch", "--dry-run", "--cloud"])
+        assert r.exit_code == 1
+        assert "cloud isn't configured" in r.output.lower() or "configure" in r.output.lower()
+
+    def test_cloud_dry_run_redacts_api_key(self, populated_org, monkeypatch):
+        from org_llm.db import Config, get_session, make_engine
+        engine = make_engine(populated_org.parent / ".." / "cli.db")
+        # Wire a fake cloud config + fake API key in pass-style storage.
+        monkeypatch.setattr("org_llm.creds.read_secret",
+                            lambda slug: "sk-test-1234567890ABCDEFGHIJ")
+        # Set cloud config keys directly in the test DB.
+        from org_llm.cli import _engine
+        with get_session(_engine()) as s:
+            for k, v in [
+                ("cloud_provider", "openrouter"),
+                ("cloud_model",    "openai/gpt-oss-20b:free"),
+                ("cloud_endpoint_url", "https://openrouter.ai/api/v1"),
+            ]:
+                row = s.get(Config, k)
+                if row: row.value = v
+                else:   s.add(Config(key=k, value=v))
+            s.commit()
+        r = runner.invoke(app, ["launch", "--dry-run", "--cloud"])
+        assert r.exit_code == 0, r.output
+        # The full key must NOT appear; the redacted prefix+suffix may.
+        assert "sk-test-1234567890ABCDEFGHIJ" not in r.output
+        assert "openrouter" in r.output.lower()
+
 
 class TestOpenCodeHelpers:
     """Theme + slash-command generators are pure — test directly."""
@@ -282,13 +320,146 @@ class TestOpenCodeHelpers:
     def test_workspace_specific_commands(self):
         from org_llm.cli import _opencode_slash_commands
         assert "explore" in _opencode_slash_commands("researcher")
-        assert "capture" in _opencode_slash_commands("scribe")
         assert "repo"    in _opencode_slash_commands("engineer")
-        # 'all' workspace gets none of the workspace-specific extras.
+        # 'all' workspace gets none of the workspace-only extras.
         all_cmds = _opencode_slash_commands("all")
         assert "explore" not in all_cmds
-        assert "capture" not in all_cmds
         assert "repo"    not in all_cmds
+        # capture is now a default command (every workspace gets it)
+        # since capture_note is one of the most-used MCP tools.
+        assert "capture" in all_cmds
+        assert "capture" in _opencode_slash_commands("scribe")
+
+    def test_cli_parity_slash_commands(self):
+        """Sweep guard: every major CLI verb should have a slash command
+        (or be intentionally omitted as terminal-only / security-gated)."""
+        from org_llm.cli import _opencode_slash_commands
+        all_cmds = _opencode_slash_commands("all")
+        must_have = {
+            "search", "ask", "capture", "code", "code-gen", "code-index",
+            "index", "embed", "tag", "report", "models", "cloud", "config",
+            "performance", "skills", "skill", "skill-new", "tutor",
+            "source", "history", "personalize", "context", "stale",
+            "discover", "recent", "health", "doctor", "stats", "tags",
+            "grants", "run",
+        }
+        missing = must_have - set(all_cmds.keys())
+        assert not missing, f"slash-command parity gap: {sorted(missing)}"
+
+
+class TestOpencodeStallWatcher:
+    """The opencode-launch stall watcher should fire ONLY when the opencode
+    log has been quiet AND Ollama is sick — quiet log alone could just be
+    the user reading the screen, so we don't pester them about that."""
+
+    def test_latest_log_picks_newest(self, tmp_path):
+        from org_llm.cli import _latest_opencode_log
+        assert _latest_opencode_log(tmp_path) is None
+        old = tmp_path / "2026-04-26T000000.log"; old.write_text("x")
+        new = tmp_path / "2026-04-27T000000.log"; new.write_text("y")
+        os.utime(old, (1000, 1000))
+        os.utime(new, (2000, 2000))
+        assert _latest_opencode_log(tmp_path) == new
+
+    def test_latest_log_missing_dir(self, tmp_path):
+        from org_llm.cli import _latest_opencode_log
+        assert _latest_opencode_log(tmp_path / "nope") is None
+
+    def test_ollama_alive_unreachable(self):
+        from org_llm.cli import _ollama_alive
+        # Port 1 is reserved-ish; refuses fast.
+        alive, reason = _ollama_alive("http://127.0.0.1:1", timeout=1.0)
+        assert alive is False
+        assert "Ollama unreachable" in reason or "failed" in reason
+
+    def test_watcher_fires_when_log_quiet_and_ollama_dead(self, tmp_path, monkeypatch):
+        """End-to-end: a stale log + dead Ollama writes a sentinel."""
+        import threading, json as _json
+        from org_llm.cli import _watch_opencode_for_stalls
+
+        log_dir = tmp_path / "log"; log_dir.mkdir()
+        log_file = log_dir / "session.log"
+        log_file.write_text("hello\n")
+        # Pin the log mtime well in the past so any poll registers as stale.
+        os.utime(log_file, (1.0, 1.0))
+
+        sentinel = tmp_path / "stall.json"
+        stop_event = threading.Event()
+
+        # Force the Ollama probe to report dead without doing real I/O.
+        monkeypatch.setattr(
+            "org_llm.cli._ollama_alive",
+            lambda url, timeout=3.0: (False, "Ollama unreachable (test)"),
+        )
+        t = threading.Thread(
+            target=_watch_opencode_for_stalls,
+            args=(log_dir, "http://127.0.0.1:11434", 0.0, stop_event, sentinel),
+            kwargs={"poll_secs": 0.05, "startup_grace": 1.0},
+            daemon=True,
+        )
+        t.start()
+        try:
+            for _ in range(40):
+                if sentinel.exists():
+                    break
+                time.sleep(0.1)
+        finally:
+            stop_event.set()
+            t.join(timeout=2.0)
+
+        assert sentinel.exists(), "watcher should have written a stall sentinel"
+        diag = _json.loads(sentinel.read_text())
+        assert diag["ollama_alive"] is False
+        assert "unreachable" in diag["reason"].lower()
+        assert diag["log_file"] == str(log_file)
+
+    def test_watcher_silent_when_ollama_healthy(self, tmp_path, monkeypatch):
+        """Quiet log alone is NOT a stall — user might just be reading."""
+        import threading
+        from org_llm.cli import _watch_opencode_for_stalls
+
+        log_dir = tmp_path / "log"; log_dir.mkdir()
+        log_file = log_dir / "session.log"
+        log_file.write_text("hi\n")
+        os.utime(log_file, (1.0, 1.0))
+        sentinel = tmp_path / "stall.json"
+        stop_event = threading.Event()
+
+        monkeypatch.setattr(
+            "org_llm.cli._ollama_alive",
+            lambda url, timeout=3.0: (True, "Ollama OK (4 models registered)"),
+        )
+        t = threading.Thread(
+            target=_watch_opencode_for_stalls,
+            args=(log_dir, "http://127.0.0.1:11434", 0.0, stop_event, sentinel),
+            kwargs={"poll_secs": 0.05, "startup_grace": 1.0},
+            daemon=True,
+        )
+        t.start()
+        time.sleep(0.6)
+        stop_event.set()
+        t.join(timeout=2.0)
+        assert not sentinel.exists(), "healthy Ollama should suppress notification"
+
+    def test_watcher_gives_up_if_no_log_appears(self, tmp_path):
+        """If opencode never writes a log within startup_grace, watcher exits."""
+        import threading
+        from org_llm.cli import _watch_opencode_for_stalls
+
+        log_dir = tmp_path / "log"; log_dir.mkdir()  # empty
+        sentinel = tmp_path / "stall.json"
+        stop_event = threading.Event()
+
+        t = threading.Thread(
+            target=_watch_opencode_for_stalls,
+            args=(log_dir, "http://127.0.0.1:11434", 0.0, stop_event, sentinel),
+            kwargs={"poll_secs": 0.05, "startup_grace": 0.3},
+            daemon=True,
+        )
+        t.start()
+        t.join(timeout=2.0)
+        assert not t.is_alive()
+        assert not sentinel.exists()
 
 
 class TestClaudeDryRun:

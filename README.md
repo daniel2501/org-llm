@@ -172,7 +172,7 @@ candidates.
 | `org-llm models` | Discover, tune (catalog-based), assign, or pull FOSS LLMs |
 | `org-llm performance` | Hardware-aware tuner — uses *free* RAM + measured tok/s (`--benchmark`) |
 | `org-llm cloud` | Multi-provider GPU cloud — signup, configure, status, cost, `--quick-start` |
-| `org-llm launch [-w WORKSPACE]` | Open themed opencode TUI: 32 MCP tools, LCARS theme, slash-commands |
+| `org-llm launch [-w WORKSPACE] [--cloud/--local]` | Open themed opencode TUI: 32 MCP tools, LCARS theme, 31 slash-commands, auto cloud-or-local routing, stall watcher |
 | `org-llm claude` | Same, but Claude Code (`ANTHROPIC_API_KEY` from `pass`) |
 | `org-llm doctor` | Deep health check + LLM diagnosis; `--install all` bulk-installs FOSS tools |
 | `org-llm doctor -w` | LLM-driven self-test: 13 read-only probes + cloud-LLM judgement |
@@ -302,29 +302,56 @@ from the LLM.
 ## opencode workspace
 
 `org-llm launch` is the *other face* of org-llm — a fully themed
-opencode TUI with the full MCP toolbox, slash-command starter pack,
-and a system prompt pre-loaded with vault stats, top tags, models,
-hardware, filesystem inventory, and any active theme dials/knobs.
+opencode TUI with the full MCP toolbox, **CLI-parity slash commands
+(31 by default)**, and a system prompt pre-loaded with vault stats,
+top tags, models, hardware, filesystem inventory, and any active
+theme dials/knobs.
 
 ```sh
-org-llm launch                       # default workspace: all
+org-llm launch                       # auto: cloud when configured, else local
+org-llm launch --cloud               # force cloud (e.g. OpenRouter free tier)
+org-llm launch --local               # force local Ollama
 org-llm launch -w researcher         # read-heavy: search/ask/explore
 org-llm launch -w scribe             # capture-heavy + skill workflows
 org-llm launch -w engineer           # code-corpus + repo focus
 org-llm launch --no-theme            # skip writing .opencode/themes/
 org-llm launch --no-commands         # skip writing slash-commands
-org-llm launch -n                    # dry-run: print config, don't launch
+org-llm launch -n                    # dry-run: print config (key redacted), don't launch
 ```
+
+**Cloud-or-local routing (default: auto):** when a cloud provider is
+configured (`org-llm cloud --configure`) and an API key is in `pass`,
+`launch` writes `.opencode.json` against that provider so chat skips
+slow CPU inference. The config file is chmod'd `0600` because the API
+key is embedded; `--dry-run` redacts it. Pass `--local` to force
+Ollama for privacy-first sessions.
+
+**Stall watcher:** instead of `os.execvp`'ing into opencode, `launch`
+spawns it as a subprocess so a daemon thread can watch
+`~/.local/share/opencode/log/*.log`. If the log goes quiet ≥120s
+**and** Ollama becomes unreachable, you'll see a one-line diagnosis
+after opencode exits — designed to never false-positive while you're
+just reading.
 
 What gets written into your vault:
 
-- `.opencode.json` — model, MCP server, instructions, theme reference.
+- `.opencode.json` — model, provider, MCP server, instructions, theme reference.
 - `.opencode/themes/org-llm-lcars.json` — LCARS palette (orange /
   purple / blue) matching the CLI, both light and dark variants.
-- `.opencode/command/<name>.md` — slash-commands for instant action:
-  `/discover`, `/recent`, `/health`, `/stats`, `/tags`, `/tutor`,
-  `/code`, plus workspace-specific extras (`/explore` for researcher,
-  `/capture` for scribe, `/repo` for engineer).
+- `.opencode/command/<name>.md` — **31 slash-commands** that mirror
+  the CLI surface, grouped by intent:
+  - *Querying* — `/search`, `/ask`, `/capture`, `/context`, `/stale`
+  - *Code* — `/code` (search), `/code-gen`, `/code-index`
+  - *Indexing* — `/index`, `/embed`, `/tag`, `/report`
+  - *Models* — `/models`, `/cloud`, `/config`, `/performance`
+  - *Skills* — `/skills`, `/skill`, `/skill-new`
+  - *Health* — `/discover`, `/recent`, `/health`, `/doctor`, `/stats`,
+    `/tags`, `/grants`
+  - *Other* — `/tutor`, `/source`, `/history`, `/personalize`, `/run`
+  - Plus workspace extras: `/explore` (researcher), `/repo` (engineer).
+  - `/run` is the **universal escape hatch** — invoke any allow-listed
+    CLI verb via `org_llm_run`, with the same shell-quote-repair and
+    intent-reconstruction the CLI itself uses.
 
 The system prompt also surfaces your **active theme knobs**
 (`trek_level`, `commie_level`, `queer_level`, plus user-defined knobs
