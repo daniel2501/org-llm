@@ -318,6 +318,52 @@ class TestDbt:
         assert r.exit_code == 0
         assert "Database" in r.output
 
+    def test_design_refuses_to_write_into_bundled_templates(
+            self, monkeypatch, tmp_path):
+        """The bundled templates dir is package-data — read-only. design
+        must refuse rather than mutate it."""
+        from org_llm.cli import _dbt_template_dir
+        # Force ORG_LLM_DBT_DIR to a path that doesn't exist, so _dbt_dir()
+        # falls back to the bundled templates.
+        monkeypatch.setenv("ORG_LLM_DBT_DIR", str(tmp_path / "no-such"))
+        # Also pin DB so _engine() doesn't go hunting elsewhere.
+        monkeypatch.setenv("ORG_LLM_DB", str(tmp_path / "noop.db"))
+        r = runner.invoke(app, ["dbt", "design", "anything"])
+        assert r.exit_code == 1, r.output
+        assert "Refusing" in r.output or "init" in r.output.lower()
+
+    def test_lessons_curriculum_listing(self, cli_db):
+        """Calling lessons with no topic should print the curriculum
+        without invoking the LLM."""
+        r = runner.invoke(app, ["dbt", "lessons", "--level", "intro"])
+        assert r.exit_code == 0
+        # Curriculum slugs visible
+        for slug in ("models", "ref", "materializations", "the-three-layers"):
+            assert slug in r.output, f"missing {slug!r} in curriculum: {r.output}"
+
+    def test_lessons_unknown_level_errors(self, cli_db):
+        r = runner.invoke(app, ["dbt", "lessons", "--level", "zen"])
+        assert r.exit_code == 1
+        assert "Unknown level" in r.output or "intro" in r.output
+
+    def test_lessons_unknown_topic_errors(self, cli_db):
+        r = runner.invoke(app, ["dbt", "lessons", "--level", "intro",
+                                  "not-a-topic"])
+        assert r.exit_code == 1
+        assert "not in" in r.output or "curriculum" in r.output.lower()
+
+    def test_walkthrough_unknown_model_errors(self, monkeypatch, tmp_path):
+        # Use a user dir we control — copy templates so models exist.
+        import shutil
+        from org_llm.cli import _dbt_template_dir
+        user = tmp_path / "user-dbt"
+        shutil.copytree(_dbt_template_dir(), user)
+        monkeypatch.setenv("ORG_LLM_DBT_DIR", str(user))
+        monkeypatch.setenv("ORG_LLM_DB", str(tmp_path / "noop.db"))
+        r = runner.invoke(app, ["dbt", "walkthrough", "no_such_model"])
+        assert r.exit_code == 1
+        assert "Unknown model" in r.output
+
     def test_dbt_models_in_template_compile(self):
         """Sanity: every shipped template model must compile-parse cleanly.
         Catches the bug class we just fixed (ambiguous columns, missing

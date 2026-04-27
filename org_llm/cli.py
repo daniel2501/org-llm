@@ -7664,6 +7664,33 @@ def _opencode_slash_commands(workspace: str) -> dict:
             "Call `dbt_compile`. If errors are reported, point at the model\n"
             "file path so I can edit it.\n"
         ),
+        "dbt-design": (
+            "---\n"
+            "description: LLM-driven dbt model designer (proposals or SQL gen)\n"
+            "---\n"
+            "Call `dbt_design`. If I described what I want after /dbt-design,\n"
+            "pass it as `intent`. With no intent, the tool returns 3 grounded\n"
+            "proposals — present them to me and ask which to expand. If I\n"
+            "say 'build it', re-call with apply=True so it materialises.\n"
+        ),
+        "dbt-walkthrough": (
+            "---\n"
+            "description: LLM walks through MY dbt models, one by one\n"
+            "---\n"
+            "Call `dbt_walkthrough`. If I named a specific model after\n"
+            "/dbt-walkthrough, pass it as `model`. Each output is the SQL\n"
+            "plus a tight LLM explanation — render it verbatim so I see\n"
+            "the source alongside the commentary.\n"
+        ),
+        "dbt-lessons": (
+            "---\n"
+            "description: LLM-instructed dbt lessons (intro/intermediate/advanced)\n"
+            "---\n"
+            "Call `dbt_lessons`. Default level is intro. If I named a topic\n"
+            "after /dbt-lessons, pass it as `topic`. With no topic, the\n"
+            "tool returns the curriculum — present it to me and ask which\n"
+            "lesson I want.\n"
+        ),
 
         # ── Indexing & maintenance ───────────────────────────────────────
         "index": _shell(
@@ -9918,6 +9945,404 @@ def dbt_status():
         console.print()
         on_screen(f"[dim]{len(model_files) - n_built} model(s) not yet "
                   f"materialized. Run [bold]org-llm dbt build[/bold].[/dim]")
+
+
+def _dbt_vault_context(session) -> str:
+    """Snapshot of the vault for grounding LLM dbt design + lessons.
+
+    Pulls counts, top tags, recent file-name patterns, and a peek at
+    raw schemas — enough for an LLM to propose models tailored to
+    THIS user's data. Capped at ~3 KB."""
+    from .db import File, Node, merged_tags
+    lines = []
+    try:
+        n_files    = session.query(File).count()
+        n_nodes    = session.query(Node).count()
+        n_embedded = session.query(Node).filter(
+            Node.embedding.isnot(None)).count()
+        lines.append(f"Vault: {n_files} files, {n_nodes} nodes, "
+                     f"{n_embedded} embedded.")
+    except Exception:
+        pass
+    # Top tags (merged)
+    try:
+        from collections import Counter
+        c = Counter()
+        for tags, auto in session.query(Node.tags, Node.auto_tags).all():
+            for t in ((tags or "") + " " + (auto or "")).split():
+                t = t.strip().lower()
+                if t and t not in {"todo", "done", "next", "drill"}:
+                    c[t] += 1
+        tops = c.most_common(15)
+        if tops:
+            lines.append("Top tags: " +
+                         ", ".join(f"{t}({n})" for t, n in tops))
+    except Exception:
+        pass
+    # Path patterns (daily, projects/, etc.)
+    try:
+        paths = [r[0] for r in
+                  session.execute(
+                      __import__("sqlalchemy").text(
+                          "SELECT path FROM files LIMIT 200")
+                  ).fetchall()]
+        prefixes: dict = {}
+        for p in paths:
+            for seg in Path(p).parts:
+                if seg.startswith(".") or seg in ("/", "home"):
+                    continue
+                prefixes[seg] = prefixes.get(seg, 0) + 1
+        common = sorted(prefixes.items(), key=lambda kv: -kv[1])[:10]
+        if common:
+            lines.append("Path segments: " +
+                         ", ".join(f"{n}/{c}" for n, c in common))
+    except Exception:
+        pass
+    return "\n".join(lines)
+
+
+def _dbt_existing_models(project: Path) -> list[tuple[str, str, str]]:
+    """Walk the user's models dir, return [(folder, name, sql), …]."""
+    models_dir = project / "models"
+    rows: list[tuple[str, str, str]] = []
+    if not models_dir.exists():
+        return rows
+    for sql_file in sorted(models_dir.rglob("*.sql")):
+        rows.append((sql_file.parent.name, sql_file.stem,
+                      sql_file.read_text()))
+    return rows
+
+
+@dbt_app.command("design")
+def dbt_design(
+    intent: Annotated[str, typer.Argument(
+        help="Free-form description of the model you want — leave blank "
+             "to get LLM proposals grounded in your vault")] = "",
+    apply:  Annotated[bool, typer.Option("--apply", "-a",
+            help="After successful compile, run dbt build to materialise it")] = False,
+):
+    """LLM-driven dbt model designer.
+
+    Two modes:
+      - Bare: LLM proposes 3-5 model ideas grounded in your vault's
+        actual content (top tags, path patterns, what's already there).
+      - With INTENT: LLM generates SQL for the model you described,
+        validated by [bold]dbt compile[/bold] before writing.
+
+    Writes to your user dbt dir (after [bold]dbt init[/bold]). Refuses
+    to write into the read-only bundled templates.
+    """
+    project = _dbt_dir()
+    if project == _dbt_template_dir():
+        red_alert("Refusing to write into the bundled templates. "
+                  "Run [bold]org-llm dbt init[/bold] first.")
+        raise typer.Exit(1)
+    engine = _engine()
+    with get_session(engine) as session:
+        url   = _ollama_url(session)
+        model = (_cfg(session, "code_model")
+                 or _cfg(session, "chat_model")
+                 or "llama3.2")
+        ctx_blob = _dbt_vault_context(session)
+    existing = _dbt_existing_models(project)
+    existing_summary = "\n".join(
+        f"  - {folder}/{name}: {sql.splitlines()[0][:60] if sql.strip() else ''}"
+        for folder, name, sql in existing
+    ) or "  (none yet)"
+
+    from .llm import chat as _chat
+
+    if not intent:
+        sys_msg = (
+            "You design dbt models for an org-roam knowledge base "
+            "indexed in SQLite. Raw tables: files(id, path, mtime, "
+            "indexed_at, node_count), nodes(id, file_id, node_id, "
+            "title, body, tags, auto_tags, mtime, embedding). Existing "
+            "models are listed below.\n\n"
+            "Propose EXACTLY 3 NEW dbt models specific to this user's "
+            "data — read their top tags + path segments to find an "
+            "angle no one else would. Output as numbered markdown:\n\n"
+            "  1. <name>\n"
+            "     Why: <one sentence grounded in their data>\n"
+            "     SQL sketch: <2-3 line template>\n"
+            "\n"
+            "Refuse to propose duplicates of existing models."
+        )
+        user_msg = (
+            f"USER VAULT:\n{ctx_blob}\n\n"
+            f"EXISTING MODELS:\n{existing_summary}\n\n"
+            f"Propose 3 new models."
+        )
+        try:
+            with warp("Asking LLM for grounded model proposals…"):
+                proposals = _chat(user_msg, model=model, base_url=url,
+                                   system=sys_msg, timeout=60.0)
+        except Exception as e:
+            red_alert(f"LLM call failed: {e}")
+            raise typer.Exit(1)
+        console.print()
+        on_screen("[lcars1]LLM proposals (grounded in your data):[/lcars1]")
+        console.print(proposals)
+        console.print()
+        on_screen("[dim]Run [bold]org-llm dbt design \"<intent>\"[/bold] "
+                  "to have one of these synthesised into a working "
+                  "model.[/dim]")
+        return
+
+    # Intent supplied — generate SQL
+    sys_msg = (
+        "You write dbt-sqlite SQL models for an org-roam knowledge base. "
+        "Raw tables: files(id, path, mtime, indexed_at, node_count), "
+        "nodes(id, file_id, node_id, title, body, tags, auto_tags, mtime, "
+        "embedding).  Existing models you can ref: stg_nodes, stg_files. "
+        "Always reference upstream models with {{ ref('name') }}. Output "
+        "ONE complete dbt model SQL file in a fenced code block. Pick a "
+        "snake_case model name. NO commentary outside the code block. "
+        "First non-comment line of the SQL must be a single-line comment "
+        "naming the model: `-- <model_name> — <one-sentence purpose>`."
+    )
+    user_msg = (
+        f"USER VAULT:\n{ctx_blob}\n\n"
+        f"EXISTING MODELS (don't duplicate):\n{existing_summary}\n\n"
+        f"INTENT:\n{intent}\n\n"
+        f"Write the dbt model SQL."
+    )
+    try:
+        with warp(f"Generating dbt SQL for: {intent[:60]}…"):
+            response = _chat(user_msg, model=model, base_url=url,
+                              system=sys_msg, timeout=120.0)
+    except Exception as e:
+        red_alert(f"LLM call failed: {e}")
+        raise typer.Exit(1)
+    sql = _strip_code_fences(response, lang="sql").strip()
+    if not sql:
+        red_alert("LLM returned empty SQL.")
+        raise typer.Exit(1)
+    # Extract model name from the first comment line, else slugify intent
+    import re as _re
+    m = _re.search(r"^\s*--\s*([a-zA-Z0-9_]+)", sql)
+    if m:
+        name = m.group(1)
+    else:
+        name = _re.sub(r"[^a-zA-Z0-9_]+", "_", intent.lower()).strip("_")[:40]
+    if not name:
+        red_alert("Couldn't derive a model name.")
+        raise typer.Exit(1)
+    target = project / "models" / "marts" / f"{name}.sql"
+    if target.exists():
+        red_alert(f"Refusing to overwrite existing model {target}.")
+        raise typer.Exit(1)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(sql)
+    hail(f"Wrote model: {target}")
+    console.print()
+    from rich.syntax import Syntax
+    console.print(Syntax(sql, "sql", theme="monokai", line_numbers=False))
+    console.print()
+    # Validate by compile
+    on_screen("[dim]Validating with `dbt compile`…[/dim]")
+    rc, output = _run_dbt("compile", "--select", name, capture=True,
+                            timeout=60)
+    if rc != 0:
+        red_alert(f"dbt compile failed (exit {rc}). Model file kept; "
+                  f"edit it or re-run [bold]org-llm dbt design[/bold].")
+        for line in output.splitlines()[-15:]:
+            on_screen(f"  {line}")
+        raise typer.Exit(rc)
+    hail(f"Model {name} compiles cleanly.")
+    if apply:
+        on_screen("[dim]Building…[/dim]")
+        rc, _ = _run_dbt("build", "--select", name, timeout=120)
+        if rc == 0:
+            hail(f"{name} materialized — check [bold]org-llm dbt status[/bold].")
+        raise typer.Exit(rc)
+    on_screen(f"[dim]Run [bold]org-llm dbt build -s {name}[/bold] to "
+              f"materialise.[/dim]")
+
+
+@dbt_app.command("walkthrough")
+def dbt_walkthrough(
+    model: Annotated[str, typer.Argument(
+        help="Specific model to walk through (default: every model)")] = "",
+):
+    """Walk through THIS user's dbt models with LLM commentary.
+
+    For each model: prints the SQL, then asks the LLM to explain what
+    it computes, why it's structured this way, and which raw tables /
+    upstream models it reads. Goes in dependency order (staging → marts)
+    by default, or just one model if specified.
+    """
+    project = _dbt_dir()
+    rows = _dbt_existing_models(project)
+    if model:
+        rows = [r for r in rows if r[1] == model]
+        if not rows:
+            red_alert(f"Unknown model {model!r}. Available: " +
+                       ", ".join(n for _, n, _ in
+                                  _dbt_existing_models(project)))
+            raise typer.Exit(1)
+    if not rows:
+        on_screen("[yellow]No models found. Run "
+                  "[bold]org-llm dbt init[/bold] first.[/yellow]")
+        raise typer.Exit(1)
+    # Order: staging first, then marts
+    rows.sort(key=lambda r: (0 if r[0] == "staging" else 1, r[1]))
+
+    engine = _engine()
+    with get_session(engine) as session:
+        url       = _ollama_url(session)
+        chat_mdl  = (_cfg(session, "chat_model")
+                     or _cfg(session, "fast_model") or "llama3.2")
+        ctx_blob  = _dbt_vault_context(session)
+    from .llm import chat as _chat
+    from rich.syntax import Syntax
+    from rich.panel  import Panel
+
+    sys_msg = (
+        "You are an expert dbt instructor walking a user through their "
+        "own dbt models. For each model, explain in 4-6 sentences:\n"
+        "  - What it computes (one specific sentence)\n"
+        "  - Which raw tables / upstream refs it reads\n"
+        "  - Why it's structured this way (the dbt rationale)\n"
+        "  - One specific way the user might extend it.\n"
+        "Avoid generic dbt theory; tie the explanation to THIS user's "
+        "data — their vault stats and tags are below for grounding."
+    )
+    for folder, name, sql in rows:
+        console.print()
+        console.rule(f"[lcars1]{folder}/{name}[/lcars1]")
+        console.print(Syntax(sql, "sql", theme="monokai",
+                              line_numbers=False))
+        console.print()
+        user_msg = (
+            f"USER VAULT:\n{ctx_blob}\n\n"
+            f"MODEL: {folder}/{name}.sql\n"
+            f"```sql\n{sql}\n```\n\n"
+            f"Explain it for this user."
+        )
+        try:
+            with warp(f"LLM explanation: {name}"):
+                explanation = _chat(user_msg, model=chat_mdl,
+                                     base_url=url, system=sys_msg,
+                                     timeout=60.0)
+        except Exception as e:
+            on_screen(f"[dim]LLM unavailable ({e}); printing SQL only.[/dim]")
+            continue
+        console.print(Panel(explanation, title="[lcars2]LLM commentary[/lcars2]",
+                             border_style="lcars2", padding=(1, 2)))
+
+
+_DBT_LESSONS = {
+    "intro": [
+        ("models",        "What is a dbt model? SELECT-only mental model"),
+        ("ref",           "{{ ref() }} and the dependency DAG"),
+        ("materializations", "view vs table — when to pick which"),
+        ("the-three-layers", "sources → staging → marts: why the split"),
+    ],
+    "intermediate": [
+        ("tests",         "Schema tests (unique, not_null, accepted_values)"),
+        ("data-tests",    "Custom data tests in tests/ vs schema.yml"),
+        ("sources",       "Declaring sources.yml; freshness checks"),
+        ("incremental",   "Incremental materialization + is_incremental()"),
+        ("seeds-snapshots", "Seeds and snapshots — when each fits"),
+    ],
+    "advanced": [
+        ("macros",        "Jinja macros and packages.yml"),
+        ("hooks",         "on_run_start / on_run_end / pre/post hooks"),
+        ("exposures",     "Documenting downstream consumers"),
+        ("semantic-layer", "MetricFlow / semantic models"),
+        ("performance",   "Threading, batching, partition pruning"),
+    ],
+}
+
+
+@dbt_app.command("lessons")
+def dbt_lessons(
+    level: Annotated[str, typer.Option("--level", "-l",
+            help="intro | intermediate | advanced")] = "intro",
+    topic: Annotated[str, typer.Argument(
+        help="Specific topic — blank lists the curriculum")] = "",
+):
+    """LLM-instructed dbt lessons at intro / intermediate / advanced level.
+
+    Each lesson is grounded in THIS user's actual dbt project, so
+    examples reference their real models rather than generic dbt boilerplate.
+    """
+    if level not in _DBT_LESSONS:
+        red_alert(f"Unknown level {level!r}. Pick one of: "
+                  f"{', '.join(_DBT_LESSONS)}")
+        raise typer.Exit(1)
+    curriculum = _DBT_LESSONS[level]
+    if not topic:
+        console.print()
+        console.rule(f"[lcars1]dbt lessons — {level} curriculum[/lcars1]")
+        for slug, desc in curriculum:
+            on_screen(f"  [lcars2]{slug:<20}[/lcars2] {desc}")
+        console.print()
+        on_screen("[dim]Pick one:[/dim] "
+                  "[bold]org-llm dbt lessons --level "
+                  f"{level} <topic>[/bold]")
+        return
+    match = next((c for c in curriculum if c[0] == topic), None)
+    if not match:
+        red_alert(f"Topic {topic!r} not in {level} curriculum. "
+                  f"Run with no topic to see options.")
+        raise typer.Exit(1)
+    slug, desc = match
+
+    engine = _engine()
+    with get_session(engine) as session:
+        url      = _ollama_url(session)
+        chat_mdl = (_cfg(session, "chat_model")
+                    or _cfg(session, "fast_model") or "llama3.2")
+        ctx_blob = _dbt_vault_context(session)
+    project = _dbt_dir()
+    existing = _dbt_existing_models(project)
+    existing_summary = "\n".join(
+        f"  - {folder}/{name}.sql ({len(sql.splitlines())} lines)"
+        for folder, name, sql in existing
+    ) or "  (none — user hasn't run dbt init)"
+
+    sys_msg = (
+        f"You are a {level}-level dbt instructor. Teach ONE concept "
+        f"({slug} — {desc}) in this format:\n"
+        "  1. The idea in 2-3 sentences.\n"
+        "  2. A minimal SQL example (3-8 lines).\n"
+        "  3. ONE concrete example pulled from THIS user's actual dbt "
+        "models (listed below). If the user has no model relevant, "
+        "explicitly say so and show what such a model might look like.\n"
+        "  4. ONE follow-up exercise the user can try right now.\n"
+        "Be tight — under 350 words. No fluff."
+    )
+    user_msg = (
+        f"USER VAULT:\n{ctx_blob}\n\n"
+        f"USER'S EXISTING DBT MODELS:\n{existing_summary}\n\n"
+        f"Topic: {slug}"
+    )
+    from .llm import chat as _chat
+    try:
+        with warp(f"Teaching {slug}…"):
+            lesson = _chat(user_msg, model=chat_mdl, base_url=url,
+                            system=sys_msg, timeout=120.0)
+    except Exception as e:
+        red_alert(f"LLM call failed: {e}")
+        raise typer.Exit(1)
+    from rich.panel import Panel
+    console.print()
+    console.print(Panel(lesson,
+                          title=f"[lcars1]{level} · {slug}[/lcars1]  "
+                                f"[dim]{desc}[/dim]",
+                          border_style="lcars2", padding=(1, 2)))
+    # Suggest the next lesson in the curriculum
+    idx = next((i for i, c in enumerate(curriculum) if c[0] == slug), -1)
+    if 0 <= idx < len(curriculum) - 1:
+        nxt = curriculum[idx + 1][0]
+        on_screen(f"[dim]Next:[/dim] [bold]org-llm dbt lessons "
+                  f"--level {level} {nxt}[/bold]")
+    elif level != "advanced":
+        next_level = "intermediate" if level == "intro" else "advanced"
+        on_screen(f"[dim]Curriculum complete. Try:[/dim] "
+                  f"[bold]org-llm dbt lessons --level {next_level}[/bold]")
 
 
 @dbt_app.command("doctor")

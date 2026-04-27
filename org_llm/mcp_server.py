@@ -1078,6 +1078,53 @@ def create_mcp_server():
         """Compile dbt SQL without executing — surfaces ref typos and schema drift."""
         return _shell_org_llm_dbt("compile", timeout=60)
 
+    @server.tool()
+    async def dbt_design(intent: str = "", apply: bool = False,
+                          ctx: Context | None = None) -> str:
+        """LLM-driven dbt model designer.
+
+        - With empty intent: returns 3 model proposals grounded in
+          the user's actual vault.
+        - With intent: generates SQL, validates with `dbt compile`,
+          writes the model file under user dbt dir. Pass apply=True
+          to also materialize via `dbt build`.
+
+        Useful when the user asks "what dbt models could I add?" or
+        "build me a model that does X" — wraps the same flow as the
+        CLI `org-llm dbt design [intent] [--apply]`."""
+        await _info(ctx, "dbt design: consulting LLM…")
+        args = ["design"]
+        if intent: args.append(intent)
+        if apply:  args.append("--apply")
+        return _shell_org_llm_dbt(*args, timeout=180)
+
+    @server.tool()
+    async def dbt_walkthrough(model: str = "",
+                                ctx: Context | None = None) -> str:
+        """Walk through THIS user's dbt models with LLM commentary.
+
+        For each model: SQL + 4-6 sentence explanation grounded in the
+        user's vault. Pass `model` to focus on one; blank walks all in
+        dependency order (staging → marts)."""
+        await _info(ctx, "dbt walkthrough: explaining each model…")
+        args = ["walkthrough"]
+        if model: args.append(model)
+        return _shell_org_llm_dbt(*args, timeout=300)
+
+    @server.tool()
+    async def dbt_lessons(level: str = "intro", topic: str = "",
+                            ctx: Context | None = None) -> str:
+        """LLM-instructed dbt lessons (intro / intermediate / advanced).
+
+        Each lesson is grounded in the user's actual dbt models — the
+        examples reference their real models rather than generic
+        boilerplate. Pass topic to teach a specific concept; blank
+        lists the curriculum for that level."""
+        await _info(ctx, f"dbt lessons: level={level} topic={topic or '(curriculum)'}")
+        args = ["lessons", "--level", level]
+        if topic: args.append(topic)
+        return _shell_org_llm_dbt(*args, timeout=180)
+
     return server
 
 
