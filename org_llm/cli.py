@@ -11558,18 +11558,228 @@ def _shell_quote_repair(argv: list[str]) -> list[str] | None:
     return head + flags + [glued]
 
 
+def _our_module_in_traceback(exc: BaseException) -> Path | None:
+    """Find the deepest frame inside org_llm/ in an exception's traceback.
+
+    Used by the LLM-rescue layer to decide whether the crash is in code
+    we can repair (returns the file path) or in third-party code where
+    self-rewrite isn't relevant (returns None).
+    """
+    import traceback as _tb
+    pkg_root = Path(__file__).resolve().parent  # org_llm/
+    deepest = None
+    for frame in _tb.extract_tb(exc.__traceback__):
+        try:
+            fp = Path(frame.filename).resolve()
+        except Exception:
+            continue
+        try:
+            fp.relative_to(pkg_root)
+        except ValueError:
+            continue
+        deepest = fp
+    return deepest
+
+
+def _llm_diagnose_uncaught(exc: BaseException, argv: list[str]) -> None:
+    """LLM rescue for uncaught runtime exceptions.
+
+    Anything that bubbles past command bodies — a sqlite OperationalError,
+    a network ConnectionError, a None.attribute crash — gets a tight
+    diagnosis and concrete recovery suggestion instead of a raw Python
+    traceback. If the offending frame is inside org-llm itself, also
+    offers an opt-in LLM self-rewrite (snapshots first; applies on user
+    confirmation only). Best-effort: if the LLM is unreachable, we
+    print the exception's last traceback line and exit cleanly.
+    """
+    import traceback as _tb
+    from .ui import on_screen as _on
+    err_type = type(exc).__name__
+    err_msg  = str(exc)
+    tb_tail  = "".join(_tb.format_exception(type(exc), exc,
+                                              exc.__traceback__))[-1500:]
+    _on(f"[red]✗ {err_type}: {err_msg}[/red]")
+
+    # 1. Diagnosis — what + why + manual fix
+    sys_msg = (
+        "You diagnose Python exceptions from a CLI tool called org-llm. "
+        "Output STRICTLY in this format (no preamble, no markdown):\n"
+        "  WHY: <one sentence — the likely root cause>\n"
+        "  FIX: <one concrete shell command the user should run, or "
+        "       'manual:' followed by a 1-line manual step>\n"
+        "  WHY-IT-WORKS: <one sentence justifying the fix>\n"
+        "Be honest if the fix is uncertain. Never invent flags or "
+        "subcommands that don't exist. Stick to shell-safe commands."
+    )
+    user_msg = (
+        f"User ran: org-llm {' '.join(argv)}\n\n"
+        f"Exception type: {err_type}\n"
+        f"Exception message: {err_msg}\n\n"
+        f"Traceback tail:\n{tb_tail}"
+    )
+    advice = ""
+    try:
+        advice = _llm_one_liner(user_msg, system=sys_msg, timeout=15.0,
+                                  fallback="")
+    except Exception:
+        pass
+    if advice:
+        from rich.panel import Panel
+        console.print()
+        console.print(Panel(advice, title="[lcars1]LLM rescue[/lcars1]",
+                              border_style="lcars2", padding=(1, 2)))
+    else:
+        _on("[dim](LLM unreachable for diagnosis — see traceback below.)[/dim]")
+        _on(tb_tail.splitlines()[-1] if tb_tail.splitlines() else "")
+
+    # 2. Optional self-rewrite — only when crash is in OUR code AND only
+    #    after explicit user opt-in. Snapshots first via the existing
+    #    self_mod machinery, so a bad patch is one `org-llm self rollback`
+    #    away. We never auto-apply; the user reviews the patch summary.
+    target = _our_module_in_traceback(exc)
+    if not target:
+        return
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        # Non-interactive (CI, piped) — don't prompt for self-rewrite.
+        return
+    try:
+        console.print()
+        console.print(f"[lcars3]Crash frame is inside org-llm itself "
+                       f"({target.name}).[/lcars3]")
+        ans = input("Try LLM self-rewrite of this module to fix the bug? "
+                     "[y/N] ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        console.print()
+        return
+    if ans not in {"y", "yes", "yeah", "yep", "sure", "ok"}:
+        return
+
+    # Snapshot before any mutation (matches `org-llm self llm-revise`)
+    try:
+        from . import self_mod as _sm
+    except Exception as e:
+        _on(f"[dim]self-mod module unavailable: {e}[/dim]")
+        return
+    try:
+        snap = _sm.create_snapshot(
+            label=f"pre-llm-rescue-{err_type}")
+        _on(f"[dim]Snapshot saved: {snap.id}[/dim]")
+    except Exception as e:
+        _on(f"[red]Refusing self-rewrite: snapshot failed ({e}).[/red]")
+        return
+
+    # Ask the LLM for a JSON patch via the existing self-mod flow.
+    try:
+        engine_now = _engine()
+        with get_session(engine_now) as session:
+            url   = _ollama_url(session)
+            model = (_cfg(session, "code_model")
+                     or _cfg(session, "chat_model")
+                     or "llama3.2")
+        intent = (
+            f"Runtime exception during `org-llm {' '.join(argv)}`:\n"
+            f"  {err_type}: {err_msg}\n"
+            f"Traceback tail:\n{tb_tail}\n\n"
+            f"Patch this file to fix the root cause. Keep the diff minimal."
+        )
+        with warp(f"LLM proposing patch for {target.name}…"):
+            plan = _sm.llm_revise(target, intent,
+                                   model=model, base_url=url)
+    except Exception as e:
+        _on(f"[red]LLM rewrite failed to propose a patch: {e}[/red]")
+        _on(f"[dim]Roll back the safety snapshot if needed: "
+            f"[bold]org-llm self rollback {snap.id}[/bold][/dim]")
+        return
+    if not plan or not plan.get("ops"):
+        _on("[dim]LLM didn't propose any changes.[/dim]")
+        return
+
+    # Show the plan summary, NOT the raw JSON — keep the user in the loop.
+    summary = plan.get("summary") or "(no summary)"
+    risk    = plan.get("risk")    or "(unknown risk)"
+    test_h  = plan.get("test_hint") or "(no test hint)"
+    n_ops   = len(plan.get("ops") or [])
+    _on(f"[lcars2]Proposed patch ({n_ops} op{'s' if n_ops != 1 else ''}):[/lcars2]")
+    _on(f"  [lcars1]summary:[/lcars1]   {summary}")
+    _on(f"  [lcars1]risk:[/lcars1]      {risk}")
+    _on(f"  [lcars1]test hint:[/lcars1] {test_h}")
+    try:
+        confirm = input("Apply this patch? [y/N] ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        return
+    if confirm not in {"y", "yes", "yeah", "yep", "sure", "ok"}:
+        return
+    ok, msg = _sm.apply_plan(target, plan)
+    if not ok:
+        _on(f"[red]Patch refused: {msg}[/red]")
+        return
+    _on(f"[lcars3]Patch applied to {target.name}.[/lcars3]")
+
+    # Auto-verify by re-running the failing command. If the patch made
+    # things worse (still raises, or now raises something else), roll back
+    # automatically so the user is always returned to a known-good state.
+    try:
+        verify = input("Test the patch now by re-running your command? "
+                        "[Y/n] ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        verify = ""
+    if verify in {"n", "no", "nope", "skip"}:
+        _on(f"[dim]Skipped verification. To roll back: "
+            f"[bold]org-llm self rollback {snap.id}[/bold][/dim]")
+        return
+    import subprocess as _sp
+    _on(f"[dim]→ org-llm {' '.join(argv)}[/dim]")
+    try:
+        proc = _sp.run(["org-llm", *argv], timeout=300)
+    except FileNotFoundError:
+        _on("[red]org-llm binary not on PATH for verification.[/red]")
+        _on(f"[dim]Roll back manually if needed: "
+            f"[bold]org-llm self rollback {snap.id}[/bold][/dim]")
+        return
+    except Exception as e:
+        _on(f"[red]Verification subprocess failed to spawn: {e}[/red]")
+        return
+    if proc.returncode == 0:
+        _on(f"[lcars3]✓ Patch verified — your command now exits cleanly.[/lcars3]")
+        _on(f"[dim]Snapshot kept just in case: {snap.id} "
+            f"(see [bold]org-llm self snapshots[/bold])[/dim]")
+        return
+    # Patch didn't help → automatic rollback (this is the "of course
+    # full rollback if re-written" guarantee).
+    _on(f"[red]✗ Re-run still failed (exit {proc.returncode}). "
+        f"Rolling back automatically…[/red]")
+    try:
+        # rollback() takes a Snapshot object — we still have the one we
+        # created above. also_db=False because the patch only touched
+        # source code, not the DB; restoring the DB would lose any
+        # writes from between snapshot and now (e.g. fresh embeddings).
+        summary = _sm.rollback(snap, also_db=False)
+        n_restored = summary.get("restored_files", 0) if isinstance(
+            summary, dict) else "?"
+        _on(f"[lcars3]Rolled back to snapshot {snap.id} "
+            f"({n_restored} files restored). "
+            f"Your code is back to its pre-patch state.[/lcars3]")
+    except Exception as e:
+        _on(f"[red]Auto-rollback raised: {e}. Manual fallback: "
+            f"[bold]bash ~/.local/share/org-llm/snapshots/"
+            f"{snap.id}/rollback.sh[/bold][/red]")
+
+
 def main():
-    """Top-level entry. Three-layer recovery chain for argv parse errors:
+    """Top-level entry.
 
-      1. Deterministic shell-quote repair — fastest, no LLM call.
-      2. LLM intent repair — reconstruct the user's intended argv from
-         the mangled one, then EXECUTE it (no confirmation).
-      3. SRE-style LLM fix — only if the first two can't recover, falls
-         through to allow-listed infra fixes (config, doctor, models).
+    Recovery chain for ARGV PARSE errors (UsageError):
+      0. Fuzzy-match an unknown subcommand to a close one.
+      1. Deterministic shell-quote repair.
+      2. LLM intent reconstruction → execute.
+      3. SRE-style LLM-assisted infra fix.
 
-    Be proactive: at each layer that produces a runnable argv, try to run
-    it. The user typed a command; our job is to deliver on that intent,
-    not to interrupt them with a quiz about quoting.
+    Recovery for RUNTIME errors (anything else uncaught):
+      • LLM diagnosis with concrete fix suggestion via
+        `_llm_diagnose_uncaught`. Never auto-retries — the failing
+        command may have been state-mutating.
+
+    Be proactive on the parse side; be cautious on the runtime side.
     """
     import sys
     from click.exceptions import UsageError as _ClickUsageError
@@ -11599,6 +11809,15 @@ def main():
         _abort_on_ctrl_c()
     except _ClickUsageError as exc:
         original_error = str(exc)
+    except SystemExit:
+        # Clean exit (typer.Exit(0) / sys.exit(0)) — pass through unchanged.
+        raise
+    except Exception as runtime_exc:
+        # Anything else uncaught — LLM rescue. We deliberately don't catch
+        # this earlier (each command can still raise typer.Exit cleanly);
+        # this is the "Python crashed in a command body" path.
+        _llm_diagnose_uncaught(runtime_exc, list(sys.argv[1:]))
+        sys.exit(1)
         # Be proactive: try recovery for ALL parse errors, not just "extra
         # arguments". Bad subcommand, bad flag, missing required arg —
         # the LLM can guess intent for any of them.

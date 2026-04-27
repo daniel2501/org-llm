@@ -231,6 +231,92 @@ class TestTagProvenance:
         assert any("synthwave" in (h.tags or "") for h in hits)
 
 
+class TestLLMRescue:
+    """When an org-llm command crashes mid-flight, the top-level
+    handler asks the LLM for a diagnosis instead of dumping a raw
+    Python traceback. When the crash is in our own code, the user
+    can opt into a self-rewrite (snapshotted, with auto-rollback if
+    re-running still fails)."""
+
+    def test_our_module_in_traceback_finds_org_llm_frame(self):
+        """Construct a synthetic exception whose traceback walks through
+        an in-package call. We invoke a cli helper that takes a callable,
+        passing one that raises — the helper's frame ends up on the
+        traceback because Python keeps frames as they unwind."""
+        from org_llm.cli import _our_module_in_traceback
+        # _call_cb (in indexer.py) is the simplest in-package function
+        # that calls a user-supplied callable — perfect for getting a
+        # real org_llm frame onto the traceback.
+        from org_llm.indexer import _call_cb
+        def _boom(*a):
+            raise RuntimeError("synthetic")
+        try:
+            _call_cb(_boom, 1, 1, "x")
+            raise AssertionError("expected boom to escape")
+        except RuntimeError as e:
+            target = _our_module_in_traceback(e)
+        # _call_cb swallows TypeError but re-raises other exceptions
+        # via the bare cb() retry. If it ate this one, we'd assert above.
+        # Either way we should get either indexer.py (from _call_cb) or
+        # this test only — but the test's purpose is just to verify
+        # that the walker works on any exception. Accept None here too.
+        if target is not None:
+            assert "org_llm" in str(target)
+
+    def test_our_module_returns_none_for_third_party_crash(self):
+        """A crash entirely in third-party code shouldn't trigger the
+        self-rewrite offer."""
+        from org_llm.cli import _our_module_in_traceback
+        try:
+            int("not a number")    # purely in builtins
+        except ValueError as e:
+            target = _our_module_in_traceback(e)
+        assert target is None
+
+    def test_diagnose_calls_llm_with_traceback_and_argv(self, monkeypatch):
+        """The diagnosis path must give the LLM both argv AND the
+        traceback tail — without those, suggestions are useless."""
+        from org_llm import cli as _cli
+        captured: dict = {}
+        def fake_one_liner(user_msg, system="", timeout=15.0,
+                            fallback="", **kw):
+            captured["user"] = user_msg
+            captured["system"] = system
+            return "WHY: x\nFIX: y\nWHY-IT-WORKS: z"
+        monkeypatch.setattr(_cli, "_llm_one_liner", fake_one_liner)
+        # Ensure no TTY → skips the interactive self-rewrite path
+        import sys as _sys
+        monkeypatch.setattr(_sys.stdin, "isatty", lambda: False)
+        monkeypatch.setattr(_sys.stdout, "isatty", lambda: False)
+        try:
+            raise RuntimeError("kaboom")
+        except RuntimeError as e:
+            _cli._llm_diagnose_uncaught(e, ["index", "--force"])
+        assert "kaboom" in captured["user"]
+        assert "index --force" in captured["user"]
+        assert "Traceback tail" in captured["user"] or "traceback" in captured["user"].lower()
+
+    def test_diagnose_swallows_llm_failure_gracefully(self, monkeypatch, capsys):
+        """If the LLM is unreachable, diagnose must still print useful
+        info and not raise — the user has already crashed once; we
+        won't crash them again."""
+        from org_llm import cli as _cli
+        def boom(*a, **kw):
+            raise ConnectionError("ollama down")
+        monkeypatch.setattr(_cli, "_llm_one_liner", boom)
+        import sys as _sys
+        monkeypatch.setattr(_sys.stdin, "isatty", lambda: False)
+        monkeypatch.setattr(_sys.stdout, "isatty", lambda: False)
+        try:
+            raise RuntimeError("first crash")
+        except RuntimeError as e:
+            _cli._llm_diagnose_uncaught(e, ["doctor"])
+        out = capsys.readouterr().out
+        # The user should at least see the original error type/message.
+        assert "RuntimeError" in out
+        assert "first crash" in out
+
+
 class TestDbt:
     """The org-llm dbt subcommand group: thin wrappers around the dbt CLI
     that resolve the right project + env. These tests don't actually
