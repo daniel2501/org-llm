@@ -291,6 +291,77 @@ class TestApplyStaleTags:
         assert n2 == 0
 
 
+class TestLlmJsonCall:
+    """Shared LLM-JSON helper with retry-on-parse-failure."""
+
+    def test_parses_clean_json(self, monkeypatch):
+        from org_llm import context as _ctx
+        import org_llm.llm as _llm
+        # Stub chat to return clean JSON
+        monkeypatch.setattr(_llm, "chat",
+                              lambda p, model, base_url, system: '{"x": 1}')
+        out = _ctx._llm_json_call("hi", "sys", model="m",
+                                    base_url="http://x", timeout=2.0)
+        assert out == {"x": 1}
+
+    def test_strips_markdown_fences(self, monkeypatch):
+        from org_llm import context as _ctx
+        import org_llm.llm as _llm
+        monkeypatch.setattr(_llm, "chat",
+                              lambda p, model, base_url, system:
+                              '```json\n{"x": 2}\n```')
+        out = _ctx._llm_json_call("hi", "sys", model="m",
+                                    base_url="http://x", timeout=2.0)
+        assert out == {"x": 2}
+
+    def test_retries_on_parse_failure(self, monkeypatch):
+        """First call returns prose; retry returns valid JSON."""
+        from org_llm import context as _ctx
+        import org_llm.llm as _llm
+        responses = iter([
+            "Sure, here's the data: {x: 'unparseable'}",
+            '{"x": "retry-worked"}',
+        ])
+        monkeypatch.setattr(_llm, "chat",
+                              lambda p, model, base_url, system:
+                              next(responses))
+        out = _ctx._llm_json_call("hi", "sys", model="m",
+                                    base_url="http://x", timeout=2.0)
+        assert out == {"x": "retry-worked"}
+
+    def test_returns_none_after_two_failures(self, monkeypatch):
+        from org_llm import context as _ctx
+        import org_llm.llm as _llm
+        monkeypatch.setattr(_llm, "chat",
+                              lambda p, model, base_url, system:
+                              "I refuse to output JSON")
+        assert _ctx._llm_json_call("hi", "sys", model="m",
+                                     base_url="http://x", timeout=2.0) is None
+
+    def test_returns_none_on_chat_exception(self, monkeypatch):
+        from org_llm import context as _ctx
+        import org_llm.llm as _llm
+        def _boom(*a, **kw):
+            raise ConnectionError("ollama is down")
+        monkeypatch.setattr(_llm, "chat", _boom)
+        assert _ctx._llm_json_call("hi", "sys", model="m",
+                                     base_url="http://x", timeout=2.0) is None
+
+    def test_no_retry_when_disabled(self, monkeypatch):
+        """retry=False — first parse failure returns None immediately."""
+        from org_llm import context as _ctx
+        import org_llm.llm as _llm
+        call_count = [0]
+        def _chat(p, model, base_url, system):
+            call_count[0] += 1
+            return "not-json"
+        monkeypatch.setattr(_llm, "chat", _chat)
+        assert _ctx._llm_json_call("hi", "sys", model="m",
+                                     base_url="http://x", timeout=2.0,
+                                     retry=False) is None
+        assert call_count[0] == 1
+
+
 class TestCountUnreviewed:
     def test_zero_when_no_context(self, ctx_env, db_with_unum_notes):
         # No context file exists yet

@@ -930,14 +930,17 @@ def setup(
             on_screen("[lcars2]Step 2/15[/lcars2] install-tools "
                       "[dim](Ollama + models + opencode — output streams below)[/dim]")
             try:
-                import subprocess as _sub
-                # Skip fonts / gh / claude / pass by default — those are
-                # optional and the user can run install-tools later if
-                # they want them.
-                with warp("Installing core binaries (Ollama, models, opencode)"):
-                    _sub.run(["org-llm", "install-tools",
-                              "--skip-fonts", "--skip-gh",
-                              "--skip-claude", "--skip-pass"])
+                # Stall-watching subprocess: streams output as it arrives
+                # AND watches for >120s of silence, at which point the LLM
+                # diagnoses whether it's stuck and offers to kill or keep
+                # waiting. Skip fonts/gh/claude/pass by default.
+                _run_with_stall_watch(
+                    ["org-llm", "install-tools",
+                     "--skip-fonts", "--skip-gh",
+                     "--skip-claude", "--skip-pass"],
+                    stall_secs=120.0,
+                    label="install-tools (Ollama, models, opencode)",
+                )
             except Exception as e:
                 on_screen(f"[dim]install-tools failed: {e}[/dim]")
             console.print()
@@ -993,9 +996,11 @@ def setup(
         on_screen("[lcars2]Step 5/15[/lcars2] install FOSS tools "
                   "[dim](streams output below — may take a few minutes)[/dim]")
         try:
-            import subprocess as _sub
-            with warp("Installing FOSS tools (output streams below)"):
-                _sub.run(["org-llm", "doctor", "--install", "all"])
+            _run_with_stall_watch(
+                ["org-llm", "doctor", "--install", "all"],
+                stall_secs=180.0,    # PM installs can be slow on cold caches
+                label="FOSS tool install (bat / ripgrep / …)",
+            )
         except Exception as e:
             on_screen(f"[dim]install failed: {e}[/dim]")
         console.print()
@@ -1021,9 +1026,11 @@ def setup(
             on_screen("[lcars2]Step 6/15[/lcars2] models --tune --apply "
                       "[dim](may pull models — multiple minutes)[/dim]")
             try:
-                import subprocess as _sub
-                with warp("Tuning models for your hardware"):
-                    _sub.run(["org-llm", "models", "--tune", "--apply"])
+                _run_with_stall_watch(
+                    ["org-llm", "models", "--tune", "--apply"],
+                    stall_secs=180.0,    # ollama pulls can pause briefly
+                    label="models --tune --apply",
+                )
             except Exception as e:
                 on_screen(f"[dim]models --tune failed: {e}[/dim]")
             console.print()
@@ -9142,6 +9149,126 @@ def _llm_intent_repair(broken_argv: list[str], error: str) -> list[str] | None:
     if plan.get("reason"):
         on_screen(f"  [dim]LLM intent: {plan['reason']}[/dim]")
     return proposed
+
+
+def _run_with_stall_watch(argv: list[str], *,
+                            stall_secs: float = 120.0,
+                            label: str = "") -> int:
+    """Run a subprocess streaming its output line-by-line; detect stalls.
+
+    A "stall" is `stall_secs` of no new stdout/stderr bytes from the
+    child. When detected, captures the last 1500 chars of output and
+    asks the LLM to judge whether it's actually stuck and what the
+    user should do. The user is offered three options:
+
+      - kill the subprocess and apply LLM's suggested fix command
+      - keep waiting (resets the stall timer)
+      - exit setup early and run the subprocess manually later
+
+    Returns the subprocess exit code (130 if user killed it).
+
+    This is the more-proactive layer the user asked for: instead of
+    blindly waiting for `ollama pull` or `apt-get install` to finish,
+    the app actively monitors and offers help when nothing's moving.
+    """
+    import subprocess, threading, time, queue, sys
+    if label:
+        on_screen(f"[dim]→ {label} — watching for stalls (>{stall_secs:.0f}s)…[/dim]")
+
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        )
+    except Exception as e:
+        red_alert(f"Could not spawn {argv!r}: {e}")
+        return 127
+
+    last_byte_at = [time.monotonic()]
+    output_tail: list[str] = []
+    output_q: queue.Queue = queue.Queue()
+
+    def _reader():
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                output_q.put(line)
+        finally:
+            output_q.put(None)   # sentinel
+
+    t = threading.Thread(target=_reader, daemon=True)
+    t.start()
+
+    stalled_already = False
+    while True:
+        try:
+            line = output_q.get(timeout=2.0)
+        except queue.Empty:
+            line = ""
+        if line is None:
+            break    # subprocess closed stdout
+        if line:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            output_tail.append(line)
+            if len(output_tail) > 80:
+                output_tail = output_tail[-80:]
+            last_byte_at[0] = time.monotonic()
+            stalled_already = False
+
+        elapsed = time.monotonic() - last_byte_at[0]
+        if elapsed > stall_secs and not stalled_already and proc.poll() is None:
+            stalled_already = True
+            console.print()
+            on_screen(f"[yellow]No output for {elapsed:.0f}s — "
+                      f"checking with the LLM…[/yellow]")
+            tail_blob = "".join(output_tail)[-1500:]
+            sys_msg = (
+                "You are diagnosing a possibly-stalled subprocess for a "
+                "CLI tool. Reply in 2-4 short sentences: (1) is this "
+                "actually stuck or just slow, (2) what should the user "
+                "do — keep waiting, kill and try a specific alternate "
+                "command, or check something. Be concrete; cite specific "
+                "lines from the tail."
+            )
+            user_msg = (
+                f"Command: {' '.join(argv)}\n"
+                f"Last output (tail):\n{tail_blob or '(no output yet)'}\n\n"
+                f"Idle for {elapsed:.0f}s. Diagnosis?"
+            )
+            advice = _llm_one_liner(user_msg, system=sys_msg,
+                                      timeout=20.0, fallback="")
+            if advice:
+                on_screen(f"[lcars3]LLM:[/lcars3] {advice}")
+            choice = ""
+            try:
+                choice = typer.prompt(
+                    "[k]ill / [w]ait / [s]kip the rest of setup",
+                    default="w", show_default=True).strip().lower()[:1]
+            except Exception:
+                choice = "w"
+            if choice == "k":
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except Exception:
+                    proc.kill()
+                on_screen("[yellow]Subprocess killed.[/yellow]")
+                return 130
+            if choice == "s":
+                proc.terminate()
+                raise typer.Exit(0)
+            # 'w' or anything else → reset timer + keep going
+            last_byte_at[0] = time.monotonic()
+            stalled_already = False
+            on_screen(f"[dim]Resuming watch ({stall_secs:.0f}s window).[/dim]")
+
+        if proc.poll() is not None and output_q.empty():
+            break
+
+    proc.wait()
+    return proc.returncode
 
 
 def _shell_quote_repair(argv: list[str]) -> list[str] | None:

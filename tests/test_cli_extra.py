@@ -543,4 +543,107 @@ class TestSuggestNoteAskShellSafety:
         # exactly two single quotes (open + close).
         assert plain.count("'") == 2, (
             f"Unexpected single-quote count in {plain!r}")
+
+
+class TestPMFallback:
+    """Package-manager fallback for FOSS tool installs."""
+
+    def test_no_pm_returns_false(self, monkeypatch):
+        """When no package manager is on PATH, install_via_pm returns False."""
+        from org_llm.models import install_via_pm
+        # Pretend nothing is installed
+        import shutil as _sh
+        monkeypatch.setattr(_sh, "which", lambda _x: None)
+        assert install_via_pm("bat") is False
+
+    def test_uses_apt_alternate_name(self, monkeypatch):
+        """fd is `fd-find` on apt — verify the override map kicks in."""
+        from org_llm.models import _PM_PACKAGE_NAMES
+        assert _PM_PACKAGE_NAMES[("apt-get", "fd")] == "fd-find"
+        assert _PM_PACKAGE_NAMES[("apt-get", "rg")] == "ripgrep"
+        assert _PM_PACKAGE_NAMES[("apt-get", "delta")] == "git-delta"
+
+    def test_pacman_priority_higher_than_apt(self):
+        """guix > pacman > apt > dnf > brew > zypper — verifies expected
+        order for fallback chain."""
+        from org_llm.models import _PM_COMMANDS
+        names = [pm for pm, _ in _PM_COMMANDS]
+        assert names.index("pacman") < names.index("apt-get")
+        assert names.index("guix")   < names.index("pacman")
+        assert names.index("apt-get") < names.index("dnf")
+
+    def test_pm_command_prefixes_use_sudo_where_appropriate(self):
+        from org_llm.models import _PM_COMMANDS
+        d = dict(_PM_COMMANDS)
+        # sudo wrapper for system PMs that need root
+        for pm in ("pacman", "apt-get", "dnf", "zypper"):
+            assert "sudo" in d[pm], f"{pm} install command missing sudo"
+        # User-space PMs don't need sudo
+        for pm in ("guix", "brew"):
+            assert "sudo" not in d[pm], f"{pm} should not require sudo"
+
+
+class TestStallWatcher:
+    """`_run_with_stall_watch` streams subprocess output and detects stalls."""
+
+    def test_returns_exit_code_on_normal_completion(self, tmp_path):
+        from org_llm.cli import _run_with_stall_watch
+        # Quick subprocess that exits cleanly with stdout
+        rc = _run_with_stall_watch(
+            ["python3", "-c", "print('hello'); exit(0)"],
+            stall_secs=10.0, label="quick test",
+        )
+        assert rc == 0
+
+    def test_returns_nonzero_on_failure(self):
+        from org_llm.cli import _run_with_stall_watch
+        rc = _run_with_stall_watch(
+            ["python3", "-c", "exit(7)"],
+            stall_secs=10.0, label="failing test",
+        )
+        assert rc == 7
+
+    def test_returns_127_on_missing_binary(self, capsys):
+        from org_llm.cli import _run_with_stall_watch
+        rc = _run_with_stall_watch(
+            ["this-binary-truly-does-not-exist-12345"],
+            stall_secs=2.0,
+        )
+        assert rc == 127
+
+
+class TestPersonalizeShowClear:
+    """`personalize --show` and `--clear` work without invoking LLM."""
+
+    def test_show_with_no_knobs(self, populated_org):
+        r = runner.invoke(app, ["personalize", "--show"])
+        assert r.exit_code == 0
+        assert ("No user knobs" in r.output
+                or "Registered theme knobs" in r.output)
+
+    def test_clear_when_empty_does_nothing(self, populated_org):
+        r = runner.invoke(app, ["personalize", "--clear"])
+        assert r.exit_code == 0
+        assert "No user knobs" in r.output
+
+
+class TestContextStaleAlias:
+    """`context stale` is an alias for top-level `stale`."""
+
+    def test_context_stale_subcommand_exists(self):
+        # Smoke test: it's registered and shows help
+        r = runner.invoke(app, ["context", "stale", "--help"])
+        assert r.exit_code == 0
+        assert "stale" in r.output.lower()
+
+
+class TestRichHelpPanels:
+    """`--help` groups commands into named panels."""
+
+    def test_top_level_help_shows_panels(self):
+        r = runner.invoke(app, ["--help"])
+        assert r.exit_code == 0
+        for panel in ("Onboarding", "Indexing", "Querying",
+                       "Models & Cloud", "Workspaces", "Maintenance"):
+            assert panel in r.output, f"missing panel: {panel}"
 # test_cli_extra.py:1 ends here
