@@ -72,7 +72,20 @@ def server(mcp_db):
 
 
 def _tool(server, name):
-    return server._tool_manager._tools[name].fn
+    """Return a callable that invokes the named tool synchronously.
+
+    Tool functions are now a mix of sync and async (async ones emit MCP
+    progress notifications via Context). For test ergonomics we want
+    `_tool(server, name)(...)` to always return a string — wrap async
+    callables in asyncio.run() so existing assertions keep working.
+    """
+    import asyncio, inspect
+    fn = server._tool_manager._tools[name].fn
+    if inspect.iscoroutinefunction(fn):
+        def _run(*a, **kw):
+            return asyncio.run(fn(*a, **kw))
+        return _run
+    return fn
 
 
 # ── Server construction ───────────────────────────────────────────────────────
@@ -459,4 +472,85 @@ class TestEmbedPending:
             s.commit()
         out = _tool(server, "embed_pending")()
         assert "Nothing to embed" in out
+
+
+class TestMCPProgressNotifications:
+    """Slow tools call ctx.report_progress / ctx.info when a Context is
+    supplied. We don't need a real MCP transport — a fake Context that
+    captures calls is enough to prove the wiring is alive."""
+
+    def _fake_ctx(self):
+        class FakeCtx:
+            def __init__(self):
+                self.progress_calls: list = []
+                self.info_calls: list = []
+            async def report_progress(self, progress, total=None, message=None):
+                self.progress_calls.append((progress, total, message))
+            async def info(self, message, **extra):
+                self.info_calls.append(message)
+        return FakeCtx()
+
+    def test_ask_notes_emits_phase_progress(self, server, mcp_db, monkeypatch):
+        """ask_notes goes through 3 phases (embed → search → synthesize).
+        We mock embed/chat to deterministic stubs so the test stays
+        offline, then assert all three progress events fired."""
+        import asyncio
+        # Stub the LLM calls so the test is fully offline.
+        monkeypatch.setattr("org_llm.llm.embed",
+                            lambda *a, **kw: [0.1] * 3)
+        monkeypatch.setattr("org_llm.llm.chat",
+                            lambda *a, **kw: "stub answer")
+        # Make vector_search return at least one result so we reach phase 3.
+        from org_llm.search import SearchResult
+        fake = SearchResult(node_id="x", title="t", body="b",
+                              tags="", file_path="/tmp/x.org", score=0.0)
+        monkeypatch.setattr("org_llm.search.vector_search",
+                            lambda *a, **kw: [fake])
+
+        ctx = self._fake_ctx()
+        fn = server._tool_manager._tools["ask_notes"].fn
+        result = asyncio.run(fn(question="hi", ctx=ctx))
+        assert result == "stub answer"
+        # Three phases reported.
+        phases = [m for _, _, m in ctx.progress_calls if m]
+        assert any("embedding query" in p for p in phases), phases
+        assert any("vector search" in p for p in phases), phases
+        assert any("synthesizing" in p for p in phases), phases
+        # info() was used to surface the match count.
+        assert any("matched" in m for m in ctx.info_calls), ctx.info_calls
+
+    def test_progress_swallowed_when_ctx_is_none(self, server, mcp_db, monkeypatch):
+        """ctx=None must never raise — `await None.report_progress(...)`
+        would explode if `_report` didn't guard."""
+        import asyncio
+        monkeypatch.setattr("org_llm.llm.embed",
+                            lambda *a, **kw: [0.1] * 3)
+        monkeypatch.setattr("org_llm.search.vector_search",
+                            lambda *a, **kw: [])
+        fn = server._tool_manager._tools["ask_notes"].fn
+        out = asyncio.run(fn(question="hi"))
+        assert "No relevant notes" in out
+
+    def test_progress_failures_dont_break_tools(self, server, mcp_db, monkeypatch):
+        """A misbehaving client (raising on report_progress) must not take
+        down the tool — `_report` swallows everything."""
+        import asyncio
+        monkeypatch.setattr("org_llm.llm.embed",
+                            lambda *a, **kw: [0.1] * 3)
+        monkeypatch.setattr("org_llm.llm.chat",
+                            lambda *a, **kw: "still works")
+        from org_llm.search import SearchResult
+        fake = SearchResult(node_id="x", title="t", body="b",
+                              tags="", file_path="/tmp/x.org", score=0.0)
+        monkeypatch.setattr("org_llm.search.vector_search",
+                            lambda *a, **kw: [fake])
+
+        class BoomCtx:
+            async def report_progress(self, *a, **kw):
+                raise RuntimeError("client died")
+            async def info(self, *a, **kw):
+                raise RuntimeError("client died")
+        fn = server._tool_manager._tools["ask_notes"].fn
+        out = asyncio.run(fn(question="hi", ctx=BoomCtx()))
+        assert out == "still works"
 # test_mcp_server.py:1 ends here

@@ -3,6 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 import os
 
+# Imported at module top so FastMCP can resolve `Context | None` annotations
+# on tool functions via inspect.get_annotations(eval_str=True). Inner-scope
+# imports inside create_mcp_server() leave the symbol unresolvable from the
+# tool's __globals__.
+from mcp.server.fastmcp import Context
+
 
 def _make_engine():
     from .db import DB_PATH, make_engine
@@ -14,6 +20,46 @@ def _cfg(session, key: str) -> str:
     from .db import Config
     row = session.get(Config, key)
     return row.value if row else ""
+
+
+def _theme_label(op: str) -> str:
+    """Themed phrase for an op key — borrows the same TREK_MSGS table the
+    CLI's spinners use, so MCP progress messages match the on-screen vibe
+    (e.g. embed → "Initializing deflector array"). Falls through to the
+    default phrase when the key isn't in the table."""
+    try:
+        from .ui import TREK_MSGS
+        return TREK_MSGS.get(op) or TREK_MSGS.get("default") or op
+    except Exception:
+        return op
+
+
+async def _report(ctx, progress: float, total: float | None,
+                   message: str | None = None) -> None:
+    """Best-effort MCP progress notification.
+
+    `ctx.report_progress` requires the caller (e.g. Claude Code) to have
+    set a progressToken on the original tool request. When the client
+    didn't ask for progress (e.g. opencode today), the call no-ops or
+    raises — we swallow so instrumentation never breaks tool execution.
+    """
+    if ctx is None:
+        return
+    try:
+        await ctx.report_progress(progress=progress, total=total,
+                                    message=message)
+    except Exception:
+        pass
+
+
+async def _info(ctx, message: str) -> None:
+    """Best-effort MCP log notification — same swallow-everything story."""
+    if ctx is None:
+        return
+    try:
+        await ctx.info(message)
+    except Exception:
+        pass
 
 
 def create_mcp_server():
@@ -61,29 +107,43 @@ def create_mcp_server():
 
     # ── ask_notes ─────────────────────────────────────────────────────────────
     @server.tool()
-    def ask_notes(question: str, top_k: int = 6) -> str:
-        """Answer a question using RAG over org notes. Grounds answer in the vault."""
+    async def ask_notes(question: str, top_k: int = 6,
+                          ctx: Context | None = None) -> str:
+        """Answer a question using RAG over org notes.
+
+        Three-phase progress: 1/3 embedding the query, 2/3 vector
+        search, 3/3 LLM synthesis. Themed via TREK_MSGS["ask"]
+        ("Hailing frequencies open")."""
         from .llm import embed, chat
         from .search import vector_search
+        label = _theme_label("ask")
         with get_session(engine) as session:
             url         = _cfg(session, "ollama_url") or "http://localhost:11434"
             embed_model = _cfg(session, "embed_model") or "nomic-embed-text"
             chat_model  = _cfg(session, "chat_model")  or "llama3.2"
+            await _report(ctx, 1, 3, f"{label} — embedding query")
             try:
                 qvec    = embed(question, model=embed_model, base_url=url)
+            except Exception as e:
+                return f"Search error: {e}"
+            await _report(ctx, 2, 3, f"{label} — vector search (top {top_k})")
+            try:
                 results = vector_search(session, qvec, limit=top_k)
             except Exception as e:
                 return f"Search error: {e}"
             if not results:
+                await _report(ctx, 3, 3, f"{label} — no matches")
                 return "No relevant notes found."
-            ctx = "\n\n---\n\n".join(f"# {r.title}\n{r.body[:800]}" for r in results)
+            await _info(ctx, f"{label}: matched {len(results)} note(s)")
+            rag_ctx = "\n\n---\n\n".join(f"# {r.title}\n{r.body[:800]}" for r in results)
         system = (
             "You are an assistant with access to a personal org-mode knowledge base. "
             "Answer using only the provided notes. Be concise. Cite note titles."
         )
+        await _report(ctx, 3, 3, f"{label} — synthesizing answer with {chat_model}")
         try:
             return chat(
-                f"Notes:\n\n{ctx}\n\n---\n\nQuestion: {question}",
+                f"Notes:\n\n{rag_ctx}\n\n---\n\nQuestion: {question}",
                 model=chat_model, base_url=url, system=system,
             )
         except Exception as e:
@@ -439,7 +499,8 @@ def create_mcp_server():
         return "\n".join(lines)
 
     @server.tool()
-    def org_llm_run(command_string: str, timeout: int = 60) -> str:
+    async def org_llm_run(command_string: str, timeout: int = 60,
+                            ctx: Context | None = None) -> str:
         """Run an arbitrary `org-llm` subcommand from natural-language intent.
 
         Pass a free-form command string (e.g. "ask connect synthwave to my
@@ -455,11 +516,12 @@ def create_mcp_server():
         `install` / `setup` (long interactive flows with binary
         installs), and `grant*` / `revoke*` (security boundary —
         the user must explicitly grant access). Returns combined
-        stdout/stderr from the run, capped at 8000 chars. Use this
-        when the user gives a vague intent and you want the CLI's
-        auto-fix layer to figure out the exact argv.
+        stdout/stderr from the run, capped at 8000 chars.
+
+        While the subprocess runs, emits MCP progress notifications
+        every 2s with elapsed time so clients see something is alive.
         """
-        import shlex, subprocess
+        import shlex, subprocess, asyncio, time as _t
         # Verbs the in-opencode LLM is NEVER allowed to run via org_llm_run:
         #   - mcp     — would recursively start another MCP server
         #   - launch / claude — would try to take over the user's terminal
@@ -482,15 +544,41 @@ def create_mcp_server():
         if verb in DANGEROUS:
             return (f"Refused: '{verb}' is not safe to run from MCP. "
                     f"The user must run it themselves in a terminal.")
+        label = _theme_label(verb if verb in (
+            "embed", "index", "search", "ask", "init", "models",
+            "tag", "capture", "code", "cloud", "assess", "launch") else "default")
+        await _info(ctx, f"{label}: org-llm {' '.join(argv)}")
+        # Run the subprocess in a thread-pool executor so we can interleave
+        # progress heartbeats from the asyncio loop. Without this, a 60s
+        # `org-llm doctor` blocks the loop and no progress notifications
+        # ever reach the wire.
+        loop = asyncio.get_event_loop()
+        started = _t.monotonic()
         try:
-            proc = subprocess.run(
-                ["org-llm", *argv],
-                capture_output=True, text=True, timeout=timeout,
+            fut = loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ["org-llm", *argv],
+                    capture_output=True, text=True, timeout=timeout,
+                ),
             )
+            tick = 0
+            while not fut.done():
+                await asyncio.sleep(2.0)
+                tick += 1
+                elapsed = _t.monotonic() - started
+                # Total is unknown — pass `timeout` so the client can render
+                # an ETA bar against the user's specified budget.
+                await _report(ctx, elapsed, float(timeout),
+                               f"{label} — {elapsed:.0f}s elapsed of "
+                               f"{timeout}s budget")
+            proc = await fut
         except FileNotFoundError:
             return "org-llm binary not on PATH inside the MCP server env."
         except subprocess.TimeoutExpired:
             return f"Command timed out after {timeout}s."
+        await _report(ctx, float(timeout), float(timeout),
+                       f"{label} complete (exit {proc.returncode})")
         out = (proc.stdout or "") + (("\n[stderr]\n" + proc.stderr) if proc.stderr else "")
         if len(out) > 8000:
             out = out[:8000] + "\n…(truncated)"
@@ -655,24 +743,63 @@ def create_mcp_server():
 
     # ── index_vault ───────────────────────────────────────────────────────────
     @server.tool()
-    def index_vault() -> str:
-        """Re-scan the org vault and update the index incrementally."""
+    async def index_vault(ctx: Context | None = None) -> str:
+        """Re-scan the org vault and update the index incrementally.
+
+        Emits MCP progress notifications: one per file with the running
+        count and the path. Clients that don't subscribe (opencode
+        today) get a final string result; clients that do (Claude
+        Code) see a live progress widget."""
+        import asyncio
         from .indexer import index_directory
         with get_session(engine) as session:
             org_dir = _cfg(session, "org_dir")
             if not org_dir:
                 return "org_dir not configured. Run: org-llm config org_dir <path>"
+            label = _theme_label("index")
+            await _info(ctx, f"{label}: walking {org_dir}")
+            # Two-buffer trick — index_directory is sync, but we want async
+            # progress events. Stash progress tuples; flush them between
+            # batches via asyncio.run_coroutine_threadsafe-style awaits.
+            updates: list[tuple[int, int, str]] = []
+            def cb(current: int, total: int, path: str) -> None:
+                updates.append((current, total, path))
             try:
-                files, nodes = index_directory(Path(org_dir).expanduser(), session)
+                # Run the sync indexer in a thread so we can interleave
+                # MCP progress flushes from the asyncio event loop.
+                loop = asyncio.get_event_loop()
+                task = loop.run_in_executor(
+                    None,
+                    lambda: index_directory(Path(org_dir).expanduser(),
+                                              session, progress_cb=cb),
+                )
+                while not task.done():
+                    await asyncio.sleep(0.5)
+                    while updates:
+                        c, t, p = updates.pop(0)
+                        await _report(ctx, c, t,
+                                       f"{label} — {c}/{t}: {Path(p).name}")
+                files, nodes = await task
+                # Drain any trailing updates that arrived after the last sleep.
+                while updates:
+                    c, t, p = updates.pop(0)
+                    await _report(ctx, c, t,
+                                   f"{label} — {c}/{t}: {Path(p).name}")
                 session.commit()
+                await _report(ctx, files, files,
+                               f"{label} complete — {files} files, {nodes} nodes")
                 return f"Indexed: {files} files, {nodes} nodes."
             except Exception as e:
                 return f"Index failed: {e}"
 
     # ── embed_pending ─────────────────────────────────────────────────────────
     @server.tool()
-    def embed_pending() -> str:
-        """Generate embeddings for any unembedded nodes."""
+    async def embed_pending(ctx: Context | None = None) -> str:
+        """Generate embeddings for any unembedded nodes.
+
+        Emits MCP progress notifications: one per node, themed via
+        TREK_MSGS["embed"] ("Initializing deflector array — 12/100…")."""
+        import asyncio
         from .indexer import embed_nodes
         from .db import Node
         with get_session(engine) as session:
@@ -682,9 +809,33 @@ def create_mcp_server():
                 Node.embedding.is_(None)).count()
             if n_pending == 0:
                 return "Nothing to embed — all nodes already embedded."
+            label = _theme_label("embed")
+            await _info(ctx, f"{label}: {n_pending} pending node(s) "
+                              f"with model {model}")
+
+            updates: list[tuple[int, int, str]] = []
+            def cb(current: int, total: int, title: str) -> None:
+                updates.append((current, total, title))
             try:
-                count = embed_nodes(session, model=model, base_url=url,
-                                    force=False)
+                loop = asyncio.get_event_loop()
+                task = loop.run_in_executor(
+                    None,
+                    lambda: embed_nodes(session, model=model, base_url=url,
+                                         force=False, progress_cb=cb),
+                )
+                while not task.done():
+                    await asyncio.sleep(0.5)
+                    while updates:
+                        c, t, title = updates.pop(0)
+                        await _report(ctx, c, t,
+                                       f"{label} — {c}/{t}: {title[:60]}")
+                count = await task
+                while updates:
+                    c, t, title = updates.pop(0)
+                    await _report(ctx, c, t,
+                                   f"{label} — {c}/{t}: {title[:60]}")
+                await _report(ctx, count, count,
+                               f"{label} complete — {count} new embeddings")
                 return f"Embedded {count} new nodes (model: {model})."
             except Exception as e:
                 return f"Embed failed: {e}. Is Ollama up?"

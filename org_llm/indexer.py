@@ -84,10 +84,34 @@ def index_file(path: Path, session: Session) -> int:
     return len(raw_nodes)
 
 
-def index_directory(org_dir: Path, session: Session) -> tuple[int, int]:
-    """Index all .org files under org_dir. Returns (files_indexed, nodes_indexed)."""
+def _call_cb(cb, *args):
+    """Invoke a progress callback, tolerating both no-arg legacy
+    callbacks (`def tick(): ...`) and the new (current, total[, msg])
+    signature. Lets us instrument with rich detail without breaking
+    existing CLI Rich-progress callers that just want to advance a bar.
+    """
+    if cb is None:
+        return
+    try:
+        cb(*args)
+    except TypeError:
+        try:
+            cb()
+        except Exception:
+            pass
+
+
+def index_directory(org_dir: Path, session: Session,
+                     progress_cb=None) -> tuple[int, int]:
+    """Index all .org files under org_dir. Returns (files_indexed, nodes_indexed).
+
+    `progress_cb`, if given, is called with (current_file_index,
+    total_files, current_path_str) after each file. Legacy no-arg
+    callbacks are tolerated via `_call_cb`."""
+    paths = sorted(org_dir.rglob("*.org"))
+    total = len(paths)
     files, nodes = 0, 0
-    for p in sorted(org_dir.rglob("*.org")):
+    for i, p in enumerate(paths, 1):
         try:
             count = index_file(p, session)
             if count:
@@ -95,6 +119,7 @@ def index_directory(org_dir: Path, session: Session) -> tuple[int, int]:
                 nodes += count
         except Exception:
             session.rollback()
+        _call_cb(progress_cb, i, total, str(p))
     return files, nodes
 
 
@@ -105,7 +130,11 @@ def embed_nodes(
     force: bool = False,
     progress_cb=None,
 ) -> int:
-    """Generate embeddings for unembedded nodes. Returns count embedded."""
+    """Generate embeddings for unembedded nodes. Returns count embedded.
+
+    `progress_cb`, if given, is called with (current, total,
+    current_node_title) after each embedding attempt. Old no-arg
+    callbacks are tolerated via `_call_cb`."""
     from .llm import embed
     from .search import to_blob
 
@@ -113,9 +142,10 @@ def embed_nodes(
     if not force:
         q = q.filter(Node.embedding.is_(None))
     nodes = q.all()
+    total = len(nodes)
 
     embedded = 0
-    for node in nodes:
+    for i, node in enumerate(nodes, 1):
         text = f"{node.title}\n{node.body}".strip()[:2048]
         try:
             vec = embed(text, model=model, base_url=base_url)
@@ -124,8 +154,7 @@ def embed_nodes(
             embedded += 1
         except Exception:
             session.rollback()
-        if progress_cb:
-            progress_cb()
+        _call_cb(progress_cb, i, total, node.title or "(untitled)")
 
     return embedded
 # indexer.py:1 ends here
