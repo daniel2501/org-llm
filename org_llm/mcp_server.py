@@ -1290,6 +1290,35 @@ def create_mcp_server():
         return _themed("proactive_doctor",
                         "model + ollama + cloud + vault probe", body)
 
+    # ── Captain's Log reflection ──────────────────────────────────────────────
+    @server.tool()
+    async def reflect_on_log(window: int = 30,
+                              ctx: Context | None = None) -> str:
+        """LLM reflection on the user's recent Captain's Log entries.
+
+        Reads the last `window` events (default 30) from the SQLite
+        `history` table, hands them to the chat model, returns
+        PATTERNS + SUGGESTIONS + a one-line HEADLINE. Use when the
+        user asks 'how am I using this tool', 'is anything off lately',
+        or after a long session to surface what happened.
+        """
+        await _info(ctx, f"reflect_on_log: window={window}")
+        import subprocess
+        try:
+            proc = subprocess.run(
+                ["org-llm", "log", "--reflect",
+                 "--limit", str(max(5, min(200, window)))],
+                capture_output=True, text=True, timeout=120,
+            )
+            out = (proc.stdout or "")
+            if proc.stderr:
+                out += "\n[stderr]\n" + proc.stderr
+            if len(out) > 8000:
+                out = out[:8000] + "\n…(truncated)"
+            return out
+        except Exception as e:
+            return f"reflect_on_log failed: {e}"
+
     # ── Live context refresh ──────────────────────────────────────────────────
     @server.tool()
     def refresh_context() -> str:

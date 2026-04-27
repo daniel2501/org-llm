@@ -244,6 +244,11 @@ MODEL_DEFAULTS = {
     # History table; older entries get pruned at write time. Org file
     # is also rotated when it crosses 5MB.
     "log_max_rows_per_kind":   "1000",
+    # `log_auto_reflect_every` — every Nth CLI invocation, run an
+    # LLM reflection on Captain's Log and surface a one-line HEADLINE
+    # to the user. 0 = disabled. Reflection runs in-band but is time-
+    # boxed; failures are silent.
+    "log_auto_reflect_every":  "50",
 }
 
 

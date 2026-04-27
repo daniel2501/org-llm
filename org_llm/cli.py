@@ -3471,6 +3471,57 @@ def config(
             make_it_so()
 
 
+def _captains_log_reflect(rows: list, model: str, base_url: str) -> str:
+    """LLM reflection on a window of Captain's Log entries.
+
+    Reads up to ~50 recent events, hands them to the configured chat
+    model with a tight "what patterns + suggestions" prompt. Returns
+    the model's reply or "" on any failure (caller decides how to surface).
+    """
+    if not rows:
+        return ""
+    # Compact representation — one line per event, low-token.
+    lines = []
+    for r in rows:
+        ts = (r.timestamp or "")[:19]
+        kind = (r.kind or "?")[:8]
+        cmd = (r.command or "?")[:30]
+        outc = (r.outcome or "ok")[:14]
+        dur = f"{r.duration_ms or 0}ms"
+        mdl = (r.model or "")[:18]
+        args = (r.args or "")[:60].replace("\n", " ")
+        lines.append(f"{ts} {kind:8} {cmd:30} {outc:14} {dur:>7} {mdl:18} {args}")
+    blob = "\n".join(lines)
+    sys_msg = (
+        "You read an event log from a CLI tool called org-llm and "
+        "surface ACTIONABLE observations the user would benefit from. "
+        "Output STRICTLY in this format (no preamble, no markdown):\n\n"
+        "  PATTERNS:\n"
+        "    - <observation 1, 1 sentence>\n"
+        "    - <observation 2>\n"
+        "    - <observation 3>\n"
+        "  SUGGESTIONS:\n"
+        "    - <one concrete shell command or config change>\n"
+        "    - <another>\n"
+        "  HEADLINE: <one-line summary, < 80 chars>\n\n"
+        "Examples of patterns worth surfacing: repeated failures of a "
+        "specific verb, slow LLM model that has a fitting alternative, "
+        "config keys flipped back and forth, expensive cloud calls in "
+        "a tight loop, an indexing op never completed. Skip patterns "
+        "that are just normal usage. Be honest if there's nothing notable."
+    )
+    user_msg = (
+        f"Last {len(rows)} events from Captain's Log:\n\n{blob}\n\n"
+        f"Reflect: what should the user know?"
+    )
+    try:
+        from .llm import chat as _chat
+        return _chat(user_msg, model=model, base_url=base_url,
+                       system=sys_msg, timeout=60.0)
+    except Exception:
+        return ""
+
+
 @app.command(name="log", rich_help_panel="Maintenance")
 def log_show(
     kind:    Annotated[str, typer.Option("--kind", "-k",
@@ -3483,12 +3534,18 @@ def log_show(
               help="Tangle Captain's Log to plaintext mirrors and exit")] = False,
     path:    Annotated[bool, typer.Option("--path", "-p",
               help="Print Captain's Log path and exit")] = False,
+    reflect: Annotated[bool, typer.Option("--reflect", "-R",
+              help="LLM reflects on recent log: surfaces patterns + suggestions")] = False,
 ):
     """Captain's Log — CLI invocations, LLM calls, MCP tools, config changes.
 
     Every notable event is written to BOTH the SQLite `history` table AND
     ~/org/captains-log.org so dbt analytics + the user's vault have
     parity. Stardate optional.
+
+    [bold]--reflect[/bold] hands the recent window to the chat model
+    for pattern-spotting + concrete suggestions (e.g. "you've called
+    `embed` 5 times this hour with errors — Ollama may be down").
     """
     from . import logbook as _lb
     from .db import History
@@ -3524,6 +3581,33 @@ def log_show(
                 if gl in (r.command or "").lower()
                 or gl in (r.query   or "").lower()
                 or gl in (r.response or "").lower()][:limit]
+
+    if reflect:
+        from rich.panel import Panel
+        with get_session(engine) as session:
+            url = _ollama_url(session)
+            mdl = (_cfg(session, "chat_model")
+                   or _cfg(session, "fast_model") or "llama3.2")
+        if not rows:
+            on_screen("[dim]Nothing to reflect on yet.[/dim]")
+            return
+        with warp(f"LLM reflecting on {len(rows)} event(s) with {mdl}…"):
+            reflection = _captains_log_reflect(rows, mdl, url)
+        if not reflection:
+            red_alert("LLM reflection failed (model unreachable?). "
+                      "Run [bold]org-llm doctor --power-boost[/bold] for diagnosis.")
+            raise typer.Exit(1)
+        console.print()
+        console.print(Panel(reflection,
+                              title="[lcars1]Captain's Log — reflection[/lcars1]  "
+                                    f"[dim](window: {len(rows)} events)[/dim]",
+                              border_style="lcars2", padding=(1, 2)))
+        # Log the reflection itself so dbt sees it as a doctor event.
+        from . import logbook as _lb
+        _lb.write_event("doctor", "log-reflect",
+                          args=f"window={len(rows)}",
+                          model=mdl, response=reflection, outcome="ok")
+        return
 
     if not rows:
         on_screen("[dim]Captain's Log shows no entries matching that filter.[/dim]")
@@ -12395,6 +12479,60 @@ def main():
                     args=argv_str, outcome=outcome,
                     response=response[:1500] if response else "",
                     duration_ms=int((time.monotonic() - invocation_started) * 1000))
+        # Auto-reflect cadence: every Nth successful CLI invocation,
+        # run a quick Captain's Log reflection and surface ONE line of
+        # findings. Skip when the verb is itself `log` (avoid recursion)
+        # or `setup` (interrupts the wizard) or when N=0 (disabled).
+        if outcome != "ok" or verb in ("log", "setup", "init", "doctor"):
+            return
+        try:
+            from .db import History, Config
+            from sqlalchemy.orm import Session
+            from .db import DB_PATH, make_engine
+            from pathlib import Path as _P
+            db = _P(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+            if not db.exists():
+                return
+            engine = make_engine(db)
+            with Session(engine) as s:
+                cfg = s.get(Config, "log_auto_reflect_every")
+                try:
+                    cadence = int(cfg.value) if cfg and cfg.value else 0
+                except ValueError:
+                    cadence = 0
+                if cadence <= 0:
+                    return
+                n_cli = s.query(History).filter(
+                    History.kind == "cli", History.outcome == "ok").count()
+                if n_cli % cadence != 0 or n_cli == 0:
+                    return
+                # Pull the last `cadence` events for the LLM's window
+                rows = (s.query(History).order_by(History.id.desc())
+                            .limit(cadence).all())
+                url   = (s.get(Config, "ollama_url").value
+                          if s.get(Config, "ollama_url")
+                          else "http://localhost:11434")
+                model = ((s.get(Config, "fast_model") or
+                           s.get(Config, "chat_model")) or None)
+                model = model.value if model else "llama3.2"
+            reflection = _captains_log_reflect(rows, model, url)
+            if not reflection:
+                return
+            # Surface only the HEADLINE line so we don't take over the
+            # user's terminal. Full reflection is logged to the org file.
+            from .ui import on_screen as _on_r
+            for line in reflection.splitlines():
+                if line.strip().lower().startswith("headline"):
+                    headline = line.split(":", 1)[-1].strip()
+                    if headline:
+                        _on_r(f"[lcars3]Captain's Log:[/lcars3] {headline}  "
+                              f"[dim](full: org-llm log --reflect)[/dim]")
+                    break
+            _log_event("doctor", "log-auto-reflect",
+                        args=f"window={cadence} cadence={cadence}",
+                        model=model, response=reflection, outcome="ok")
+        except Exception:
+            pass
 
     def _abort_on_ctrl_c():
         """Print a clean one-liner and exit 130 (128 + SIGINT)."""

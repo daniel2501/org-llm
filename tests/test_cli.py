@@ -585,6 +585,42 @@ class TestLogbook:
         assert "llm-event" in r.output
         assert "cli-event" not in r.output
 
+    def test_reflect_calls_llm_with_log_window(self, cli_db, monkeypatch, tmp_path):
+        """--reflect hands the LLM a recent window and renders the
+        result. Stub the chat call so the test stays offline."""
+        from org_llm import logbook as _lb
+        monkeypatch.setenv("ORG_LLM_LOG_PATH", str(tmp_path / "log.org"))
+        # Seed a few events
+        _lb.write_event("cli", "ask",   outcome="ok",  duration_ms=1200)
+        _lb.write_event("cli", "embed", outcome="error", response="ollama down")
+        _lb.write_event("llm", "chat",  model="phi4",   outcome="error",
+                          response="timeout")
+        captured = {}
+        def fake_chat(prompt, model, base_url, system="", timeout=None):
+            captured["prompt"] = prompt
+            captured["system"] = system
+            return ("PATTERNS:\n  - Multiple errors on `embed` and chat\n"
+                    "SUGGESTIONS:\n  - org-llm doctor --power-boost\n"
+                    "HEADLINE: Ollama looks unstable; verify it's running")
+        monkeypatch.setattr("org_llm.llm.chat", fake_chat)
+        r = runner.invoke(app, ["log", "--reflect", "--limit", "10"])
+        assert r.exit_code == 0, r.output
+        assert "Ollama looks unstable" in r.output
+        assert "Reflect" in captured["prompt"] or "reflect" in captured["prompt"].lower()
+        # The reflection itself logs back as a doctor event.
+        from org_llm.db import History, get_session, make_engine
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            doc_events = s.query(History).filter(
+                History.command == "log-reflect").all()
+        assert doc_events, "the reflection should be logged back as a doctor event"
+
+    def test_reflect_with_no_rows_is_noop(self, cli_db, monkeypatch, tmp_path):
+        monkeypatch.setenv("ORG_LLM_LOG_PATH", str(tmp_path / "log.org"))
+        r = runner.invoke(app, ["log", "--reflect"])
+        assert r.exit_code == 0
+        assert "nothing to reflect" in r.output.lower()
+
 
 class TestProactiveDoctor:
     """Detect when local chat_model can't fit in available RAM (the most
