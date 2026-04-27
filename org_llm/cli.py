@@ -137,17 +137,72 @@ def _is_pulled(model: str, pulled_norm: set[str]) -> bool:
 def _ollama_pull(model: str) -> bool:
     """Pull a model via the local ollama binary, streaming progress.
 
-    Returns True on success. Streaming output goes straight to the user's
-    terminal so they see Ollama's own progress bars (these are nicer than
-    anything we can render via Rich without a streaming HTTP client).
+    Captures stderr to detect common failure causes (disk full, network
+    timeout) and surface concrete fallback hints instead of letting the
+    raw `ollama` exit code escape into the user's transcript.
     """
-    import shutil, subprocess
+    import shutil, subprocess, shlex as _shlex
     ollama = shutil.which("ollama") or str(Path("~/.local/bin/ollama").expanduser())
     if not Path(ollama).exists():
         red_alert("ollama binary not found — run: org-llm install-tools --skip-models --skip-fonts")
         return False
     hail(f"Pulling [bold]{model}[/bold] via Ollama…")
-    return subprocess.run([ollama, "pull", model]).returncode == 0
+    # Pre-flight disk check: warn before we even start when space is tight.
+    try:
+        du = shutil.disk_usage(Path("~").expanduser())
+        free_gb = du.free / 2**30
+        if free_gb < 4.0:
+            on_screen(f"[yellow]Only {free_gb:.1f} GB free on home — "
+                      f"large models may fail. Free space first or use "
+                      f"--cloud for ad-hoc.[/yellow]")
+    except Exception:
+        pass
+    # Run with stderr captured so we can react to failure modes; stdout
+    # streams to the user's TTY for progress.
+    try:
+        proc = subprocess.run([ollama, "pull", model],
+                               stderr=subprocess.PIPE, text=True)
+    except Exception as e:
+        red_alert(f"ollama pull crashed: {e}")
+        return False
+    if proc.returncode == 0:
+        return True
+    err = (proc.stderr or "")[-1000:].lower()
+    # ── Disk-full detection + concrete fallback ────────────────────────────
+    if any(s in err for s in ("no space left", "disk quota",
+                                "out of space", "enospc")):
+        red_alert(f"Pulling {model!r} failed: disk is full.")
+        on_screen("[dim]Try, in order:[/dim]")
+        on_screen("  [bold]ollama list[/bold]                       — see what's already pulled")
+        on_screen("  [bold]ollama rm <unused-model>[/bold]          — free 2-9 GB per removal")
+        on_screen("  [bold]org-llm db --vacuum[/bold]               — compact the SQLite DB")
+        on_screen("  [bold]org-llm ask --cloud '...'[/bold]         — bypass the local model entirely")
+        return False
+    # ── Network failure → cloud fallback hint ──────────────────────────────
+    if any(s in err for s in ("timeout", "timed out",
+                                "connection refused", "no route to host",
+                                "network is unreachable",
+                                "failed to resolve")):
+        red_alert(f"Pulling {model!r} failed: network unreachable.")
+        on_screen("[dim]Try, in order:[/dim]")
+        on_screen("  Check connectivity: [bold]curl -I https://registry.ollama.ai[/bold]")
+        on_screen("  Bypass the pull:    [bold]org-llm ask --cloud '...'[/bold]")
+        on_screen("  Configure cloud:    [bold]org-llm cloud --quick-start openrouter[/bold]")
+        return False
+    # ── Model-not-found in registry → name fuzzy-match handled upstream ──
+    if any(s in err for s in ("manifest", "not found", "404")):
+        red_alert(f"Pulling {model!r} failed: not in Ollama registry.")
+        on_screen(f"[dim]The configured tag may be a typo. Suggestions:[/dim]")
+        on_screen("  [bold]ollama list[/bold]                       — see pulled tags")
+        on_screen("  [bold]org-llm models --discover[/bold]         — browse the catalog")
+        on_screen("  [bold]org-llm doctor --fix[/bold]              — LLM picks a real fitting tag")
+        return False
+    # Unknown failure — surface stderr verbatim so the user sees it.
+    red_alert(f"Pulling {model!r} failed (exit {proc.returncode}).")
+    if proc.stderr:
+        for line in proc.stderr.strip().splitlines()[-5:]:
+            on_screen(f"  [dim]{line}[/dim]")
+    return False
 
 
 def _cloud_chat_with_local_fallback(
@@ -2980,6 +3035,20 @@ def config(
                 if guess:
                     on_screen(f"[dim]Did you mean: {', '.join(guess)}?[/dim]")
                 raise typer.Exit(1)
+
+            # Value-side fuzzy match for *_model keys: when the user types
+            # `org-llm config chat_model qwn`, surface plausible real model
+            # tags (pulled + catalog) before silently writing nonsense.
+            if key.endswith("_model") and value:
+                url = _ollama_url(session)
+                cand = _suggest_model_tag(value, url)
+                if cand and cand != value:
+                    on_screen(f"[yellow]Model tag {value!r} not pulled and "
+                              f"not in catalog.[/yellow]")
+                    on_screen(f"[dim]Closest:[/dim] [bold]{cand}[/bold]")
+                    if typer.confirm(f"Use {cand!r} instead?", default=True):
+                        value = cand
+
             row = session.get(Cfg, key)
             if row:
                 row.value = value

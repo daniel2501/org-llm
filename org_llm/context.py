@@ -378,6 +378,71 @@ def add_fact(fact: str, source: str = "cli") -> Path:
     return p
 
 
+# ── Shared LLM-JSON helper with retry-on-parse-failure ────────────────────
+
+def _llm_json_call(prompt: str, system: str, *,
+                    model: str, base_url: str,
+                    label: str = "Thinking",
+                    timeout: float = 90.0,
+                    retry: bool = True) -> dict | list | None:
+    """Call the LLM, parse a JSON response, retry once on parse failure.
+
+    Returns the parsed value (typically dict) or None on timeout, empty
+    response, or JSON parse failure after one strict-mode retry. The
+    retry adds an explicit "Output ONLY raw JSON" appendix — this is
+    the most common reason small models fail JSON mode (they wrap in
+    markdown fences or add chatty preambles).
+    """
+    try:
+        from .llm import chat
+        from .ui  import thinking
+    except Exception:
+        return None
+    import json as _json, threading
+
+    def _attempt(extra_sys: str = "") -> str:
+        result: dict = {"resp": ""}
+        def _r():
+            try:
+                result["resp"] = chat(prompt, model=model, base_url=base_url,
+                                       system=system + extra_sys) or ""
+            except Exception:
+                pass
+        try:
+            with thinking(label, model=model):
+                t = threading.Thread(target=_r, daemon=True)
+                t.start(); t.join(timeout=timeout)
+        except Exception:
+            t = threading.Thread(target=_r, daemon=True)
+            t.start(); t.join(timeout=timeout)
+        if t.is_alive():
+            return ""
+        return result["resp"]
+
+    def _parse(raw: str) -> dict | list | None:
+        if not raw:
+            return None
+        s = raw.strip()
+        if s.startswith("```"):
+            s = "\n".join(s.splitlines()[1:])
+            if s.endswith("```"):
+                s = s[:-3]
+        try:
+            return _json.loads(s.strip())
+        except Exception:
+            return None
+
+    parsed = _parse(_attempt())
+    if parsed is not None:
+        return parsed
+    if not retry:
+        return None
+    return _parse(_attempt(
+        "\n\nIMPORTANT: Output ONLY raw JSON. No prose, no markdown, no "
+        "code fences. The previous attempt was unparseable; reply with "
+        "the same JSON shape but as bare text."))
+
+
 # ── LLM-driven helpers ────────────────────────────────────────────────────
 
 _PARSE_SYSTEM = """\
@@ -413,40 +478,10 @@ def parse_user_request(prompt: str, *, model: str, base_url: str) -> dict | None
     """
     if not prompt or not model:
         return None
-    try:
-        from .llm import chat
-    except Exception:
-        return None
-    import json as _json, threading
-    result: dict = {"resp": ""}
-    def _run():
-        try:
-            result["resp"] = chat(prompt, model=model, base_url=base_url,
-                                   system=_PARSE_SYSTEM) or ""
-        except Exception:
-            pass
-    try:
-        from .ui import thinking
-        with thinking("Parsing context", model=model):
-            t = threading.Thread(target=_run, daemon=True)
-            t.start(); t.join(timeout=30.0)
-    except Exception:
-        t = threading.Thread(target=_run, daemon=True)
-        t.start(); t.join(timeout=30.0)
-    if t.is_alive():
-        return None
-    raw = (result["resp"] or "").strip()
-    if raw.startswith("```"):
-        raw = "\n".join(raw.splitlines()[1:])
-        if raw.endswith("```"):
-            raw = raw[:-3]
-    try:
-        plan = _json.loads(raw.strip())
-    except Exception:
-        return None
-    if not isinstance(plan, dict):
-        return None
-    if not plan.get("fact"):
+    plan = _llm_json_call(prompt, _PARSE_SYSTEM,
+                           model=model, base_url=base_url,
+                           label="Parsing context", timeout=30.0)
+    if not isinstance(plan, dict) or not plan.get("fact"):
         return None
     return plan
 
