@@ -72,9 +72,29 @@ def create_mcp_server():
         "org-llm",
         instructions=(
             "You are connected to the user's org-roam knowledge base via org-llm.\n"
-            "Use these tools to search notes, answer questions, capture ideas,\n"
-            "run org-babel skill workflows, and explore the knowledge graph.\n"
-            "Always search before answering questions about the user's notes."
+            "\n"
+            "CRITICAL — FOLLOW BEFORE ANYTHING ELSE:\n"
+            "1. The user has thousands of indexed notes covering their work,\n"
+            "   life, projects, reading, opinions, and history. ANY question\n"
+            "   that could be answered from those notes MUST start with a\n"
+            "   `search_notes` or `ask_notes` call. NO exceptions.\n"
+            "2. NEVER say \"I don't have access to your personal X\", \"I can't\n"
+            "   recall\", \"you'd need to tell me yourself\", or \"I have no\n"
+            "   memory of past conversations\". Those phrases are BUGS in this\n"
+            "   workspace. The user's life IS in the vault. Search FIRST.\n"
+            "3. Question patterns that ALWAYS demand a search call before a\n"
+            "   reply: \"have I X\", \"did I ever Y\", \"what did I write about Z\",\n"
+            "   \"where am I with project W\", \"who is V\", \"remind me about U\",\n"
+            "   even \"how do I feel about T\".\n"
+            "4. When in doubt, search. Try synonyms (\"Marx\" → \"Das Kapital\" →\n"
+            "   \"political economy\") before concluding the vault doesn't cover\n"
+            "   the topic. Searches are cheap; missed answers are expensive.\n"
+            "\n"
+            "Tools beyond search: capture_note (save ideas), run_skill (execute\n"
+            "org-babel workflows), code_search (cross-corpus code), org_llm_run\n"
+            "(any allow-listed CLI verb with auto-fix), and the dbt_* tools for\n"
+            "the analytics layer. Always search before answering questions about\n"
+            "the user's notes."
         ),
     )
 
