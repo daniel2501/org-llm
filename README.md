@@ -189,6 +189,9 @@ candidates.
 | `org-llm context add 'fact'` / `from-prompt` | Record current truth that overrides stale info |
 | `org-llm history build [-i]` | LLM scans old + archived notes; writes narrative summary |
 | `org-llm stale [--apply]` | LLM-driven staleness sweep over uncategorised notes |
+| `org-llm self snapshot [-l label]` | Bundle running package source + DB into rollback-able artifact |
+| `org-llm self rollback [ID]` | Restore from snapshot; pre-rollback backup preserved |
+| `org-llm self llm-revise <mod> <intent>` | LLM proposes a JSON patch to a module under user review |
 | `org-llm completion fish --install` | Install shell completions |
 | `org-llm install-tools` | One-shot install Ollama, models, fonts, opencode, gh, claude, pass |
 
@@ -732,6 +735,64 @@ in `org_llm.context`. Handles `:tangle PATH`, `:tangle no`, default
 target, tilde expansion, multiple blocks per target, indented bodies,
 header args interleaved. No `emacsclient` required. 11 unit tests
 cover the edge cases.
+
+---
+
+## Self-modification + rollback
+
+`org-llm self` lets you read and revise the running app's own Python
+source and config DB, with safe rollback via an artifact bundle (a
+tarball plus a standalone bash script that runs without Python).
+
+```sh
+# Read
+org-llm self show cli              # print module source
+org-llm self edit context          # open in $EDITOR
+
+# Snapshot before risky changes
+org-llm self snapshot -l "before-refactor"
+# → ~/.local/share/org-llm/snapshots/<ts>/
+# → ~/.local/share/org-llm/snapshots/<ts>.tar.gz
+# → also appended to ~/org/org-llm-self-mod.org
+
+org-llm self snapshots             # list with metadata table
+
+# LLM-driven revisions (always snapshots first)
+org-llm self llm-revise cli "make the doctor command emit JSON when --json is set"
+# → LLM proposes a JSON patch (replace ops); preview shown
+# → user confirms; ops applied with uniqueness checks
+
+# Roll back if anything breaks
+org-llm self rollback              # newest snapshot
+org-llm self rollback before-refactor   # by label
+org-llm self rollback 20260426-15  # by id prefix
+# → pre-rollback backup written to /tmp/org-llm-pre-rollback-<ts>/
+
+org-llm self log                   # print the org-mode self-mod log
+```
+
+**The rollback script is standalone bash.** Even when the in-process
+app is broken, you can `bash ~/.local/share/org-llm/snapshots/<ts>/rollback.sh`
+from any shell — no Python needed. It does its own pre-rollback
+backup into `/tmp/` so you can un-rollback.
+
+**Safety guarantees on `llm-revise`:**
+
+- ALWAYS takes a pre-revise snapshot first (override with `--no-snapshot`,
+  not recommended).
+- Each `replace` op's `old` block must match **exactly once** in the
+  file. 0 matches → "LLM hallucinated"; >1 matches → "ambiguous;
+  silent multi-replace = surprise"; both refuse to apply.
+- The system prompt explicitly refuses changes that bypass security
+  boundaries (deny-list, traversal, credential exfil, eval-arbitrary-input).
+
+**Org-mode activity log.** Every `self snapshot / rollback / llm-revise
+/ edit` appends to `~/org/org-llm-self-mod.org` with structured
+properties (`:SELFMOD_KIND:`, `:SNAPSHOT_ID:`, `:GIT_HASH:`) and the
+rollback shell script captured as a `:tangle` block. So you can
+`org-llm ask "what have I changed about org-llm lately?"` and read it
+as plain text — and tangle out a stand-alone recovery script per
+log entry if needed.
 
 ---
 

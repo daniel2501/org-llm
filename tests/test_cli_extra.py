@@ -748,6 +748,288 @@ class TestSelfMod:
         assert f.read_text() == "def foo(): return 2\n"
 
 
+class TestSelfModRollback:
+    """Round-trip: snapshot → mutate code → rollback → verify restored."""
+
+    def test_rollback_restores_package_source(self, tmp_path, monkeypatch):
+        """Mutate a copy of the package source, snapshot the original
+        first, then verify rollback() restores it."""
+        # Set up a fake package dir we can mutate without touching the
+        # real org_llm package.
+        fake_pkg = tmp_path / "fake_org_llm"
+        fake_pkg.mkdir()
+        (fake_pkg / "__init__.py").write_text("# v1\n")
+        (fake_pkg / "module.py").write_text("X = 'original'\n")
+
+        from org_llm import self_mod as _sm
+        # Patch package_dir() and db_path() to point at our test fixtures
+        monkeypatch.setattr(_sm, "package_dir", lambda: fake_pkg)
+        db_file = tmp_path / "test.db"
+        from org_llm.db import init_db, make_engine
+        init_db(make_engine(db_file))
+        monkeypatch.setattr(_sm, "db_path", lambda: db_file)
+        monkeypatch.setenv("ORG_LLM_SNAPSHOT_DIR", str(tmp_path / "snaps"))
+
+        # Take snapshot of original
+        snap = _sm.create_snapshot(label="orig")
+        assert (snap.path / "org_llm" / "module.py").read_text() == "X = 'original'\n"
+
+        # Mutate the live source
+        (fake_pkg / "module.py").write_text("X = 'broken'\n")
+        assert (fake_pkg / "module.py").read_text() == "X = 'broken'\n"
+
+        # Roll back
+        summary = _sm.rollback(snap, also_db=True)
+        assert summary["package"] is True
+        # Verify restored
+        assert (fake_pkg / "module.py").read_text() == "X = 'original'\n"
+        # Pre-rollback backup captured the broken state
+        assert summary["backup"]
+        from pathlib import Path as _P
+        backup_module = _P(summary["backup"]) / "org_llm" / "module.py"
+        assert backup_module.read_text() == "X = 'broken'\n"
+
+    def test_rollback_preserves_db_when_no_db_set(self, tmp_path, monkeypatch):
+        """`also_db=False` only restores package, not the DB."""
+        fake_pkg = tmp_path / "pkg"
+        fake_pkg.mkdir()
+        (fake_pkg / "__init__.py").write_text("v1")
+        from org_llm import self_mod as _sm
+        from org_llm.db import init_db, make_engine
+        monkeypatch.setattr(_sm, "package_dir", lambda: fake_pkg)
+        db_file = tmp_path / "test.db"
+        init_db(make_engine(db_file))
+        monkeypatch.setattr(_sm, "db_path", lambda: db_file)
+        monkeypatch.setenv("ORG_LLM_SNAPSHOT_DIR", str(tmp_path / "s"))
+
+        snap = _sm.create_snapshot()
+        # Mutate the DB after snapshot
+        from sqlalchemy import text
+        engine = make_engine(db_file)
+        with engine.connect() as c:
+            c.execute(text("UPDATE config SET value='mutated' WHERE key='theme'"))
+            c.commit()
+
+        # Roll back package only
+        summary = _sm.rollback(snap, also_db=False)
+        assert summary["package"] is True
+        assert summary["db"] is False
+        # DB still has the mutation
+        with engine.connect() as c:
+            row = c.execute(text(
+                "SELECT value FROM config WHERE key='theme'"
+            )).first()
+        assert row is not None and row[0] == "mutated"
+
+
+class TestSelfModRollbackScript:
+    """rollback.sh is well-formed and points at correct paths."""
+
+    def test_script_references_snapshot_paths(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ORG_LLM_SNAPSHOT_DIR", str(tmp_path / "snaps"))
+        monkeypatch.setenv("ORG_LLM_DB", str(tmp_path / "test.db"))
+        from org_llm.db import init_db, make_engine
+        from org_llm    import self_mod as _sm
+        init_db(make_engine(tmp_path / "test.db"))
+        snap = _sm.create_snapshot(label="rs-test")
+        script = (snap.path / "rollback.sh").read_text()
+        # Sanity: bash shebang + set -euo pipefail
+        assert script.startswith("#!/usr/bin/env bash")
+        assert "set -euo pipefail" in script
+        # References the snapshot's own directory and the actual db path
+        assert str(snap.path) in script
+        assert str(tmp_path / "test.db") in script
+        # Has the "Continue?" prompt — destructive ops should never be silent
+        assert "Continue?" in script
+        # Backs up current state before overwrite
+        assert "BACKUP=" in script and "Pre-rollback state preserved" in script
+
+
+class TestStallWatcherInteractive:
+    """Stall detection: feed a stalling subprocess and verify the
+    LLM-diagnosis path triggers."""
+
+    def test_actual_stall_triggers_kill_path(self, monkeypatch):
+        """Sleep longer than the stall window; auto-answer 'k' to kill."""
+        # Stub the LLM advice so we don't make a real network call
+        from org_llm import cli as _cli
+        monkeypatch.setattr(_cli, "_llm_one_liner",
+                              lambda *a, **kw: "Looks stuck. Kill it.")
+        # Stub typer.prompt to auto-answer 'k'
+        import typer as _t
+        monkeypatch.setattr(_t, "prompt",
+                              lambda *a, **kw: "k")
+
+        from org_llm.cli import _run_with_stall_watch
+        # Sleeps 8s with no output; stall threshold is 2s → kill triggers
+        rc = _run_with_stall_watch(
+            ["python3", "-c", "import time; time.sleep(8)"],
+            stall_secs=2.0, label="stall test",
+        )
+        assert rc == 130    # killed → 128 + SIGINT-like exit code
+
+    def test_wait_choice_resets_timer_and_completes(self, monkeypatch):
+        """User answers 'w' to the stall prompt; subprocess completes."""
+        from org_llm import cli as _cli
+        monkeypatch.setattr(_cli, "_llm_one_liner",
+                              lambda *a, **kw: "Probably fine.")
+        import typer as _t
+        monkeypatch.setattr(_t, "prompt", lambda *a, **kw: "w")
+        from org_llm.cli import _run_with_stall_watch
+        # 3s sleep, 1s threshold → first stall fires, user waits, completes
+        rc = _run_with_stall_watch(
+            ["python3", "-c", "import time; time.sleep(3); print('ok')"],
+            stall_secs=1.0, label="wait test",
+        )
+        assert rc == 0
+
+
+class TestRecoveryAdvice:
+    """`_llm_recovery_advice` formats LLM output into bullet lines."""
+
+    def test_returns_bullet_lines_from_llm(self, monkeypatch):
+        from org_llm import cli as _cli
+        import org_llm.llm as _llm
+        monkeypatch.setattr(_llm, "chat",
+                              lambda p, model, base_url, system:
+                              "Try this\nAlso try that\nMaybe this too")
+        out = _cli._llm_recovery_advice("something failed",
+                                          context="testing",
+                                          max_bullets=3)
+        # Returned as 3 bullets
+        lines = out.splitlines()
+        assert len(lines) == 3
+        assert all(l.startswith("• ") for l in lines)
+        assert "Try this" in out
+
+    def test_returns_empty_on_chat_exception(self, monkeypatch):
+        from org_llm import cli as _cli
+        import org_llm.llm as _llm
+        def _boom(*a, **kw):
+            raise ConnectionError("ollama down")
+        monkeypatch.setattr(_llm, "chat", _boom)
+        # Don't crash — just return ""
+        assert _cli._llm_recovery_advice("x") == ""
+
+    def test_caps_bullet_count(self, monkeypatch):
+        from org_llm import cli as _cli
+        import org_llm.llm as _llm
+        monkeypatch.setattr(_llm, "chat",
+                              lambda p, model, base_url, system:
+                              "\n".join(f"recovery suggestion #{i}" for i in range(20)))
+        out = _cli._llm_recovery_advice("x", max_bullets=2)
+        assert len(out.splitlines()) == 2
+
+
+class TestOllamaPullErrorDetection:
+    """`_ollama_pull` reads stderr and surfaces specific recovery paths."""
+
+    @pytest.fixture
+    def fake_ollama(self, tmp_path, monkeypatch):
+        """Create a fake `ollama` binary on a tmp PATH so the pre-flight
+        existence check passes; return the path so subprocess can mock it."""
+        fake = tmp_path / "ollama"
+        fake.write_text("#!/bin/sh\nexit 1\n")
+        fake.chmod(0o755)
+        import shutil as _sh
+        monkeypatch.setattr(_sh, "which",
+                              lambda x: str(fake) if x == "ollama" else None)
+        return fake
+
+    def test_disk_full_message(self, monkeypatch, capsys, fake_ollama):
+        from org_llm import cli as _cli
+        from collections import namedtuple
+        Result = namedtuple("R", "returncode stdout stderr")
+        import subprocess as _sub
+        monkeypatch.setattr(_sub, "run",
+                              lambda *a, **kw:
+                              Result(1, "", "Error: no space left on device"))
+        ok = _cli._ollama_pull("phi4")
+        assert ok is False
+        captured = capsys.readouterr()
+        assert "ollama rm" in captured.out or "db --vacuum" in captured.out
+
+    def test_network_failure_message(self, monkeypatch, capsys, fake_ollama):
+        from org_llm import cli as _cli
+        from collections import namedtuple
+        Result = namedtuple("R", "returncode stdout stderr")
+        import subprocess as _sub
+        monkeypatch.setattr(_sub, "run",
+                              lambda *a, **kw:
+                              Result(1, "", "Error: connection refused"))
+        ok = _cli._ollama_pull("phi4")
+        assert ok is False
+        captured = capsys.readouterr()
+        assert "network" in captured.out.lower() or "cloud" in captured.out
+
+    def test_404_manifest_message(self, monkeypatch, capsys, fake_ollama):
+        from org_llm import cli as _cli
+        from collections import namedtuple
+        Result = namedtuple("R", "returncode stdout stderr")
+        import subprocess as _sub
+        monkeypatch.setattr(_sub, "run",
+                              lambda *a, **kw:
+                              Result(1, "", "pull model manifest: not found 404"))
+        ok = _cli._ollama_pull("nonsense-model")
+        assert ok is False
+        captured = capsys.readouterr()
+        assert "registry" in captured.out.lower() or "discover" in captured.out
+
+
+class TestPMFallbackExec:
+    """`install_via_pm` actually invokes a PM when one is on PATH."""
+
+    def test_invokes_first_available_pm(self, monkeypatch):
+        from org_llm import models as _m
+        from collections import namedtuple
+        Result = namedtuple("R", "returncode")
+        # Pretend only pacman is on PATH
+        import shutil as _sh
+        def _which(x):
+            return "/usr/bin/pacman" if x == "pacman" else (
+                "/tmp/bat" if x == "bat" else None)
+        monkeypatch.setattr(_sh, "which", _which)
+        # Track which command was invoked
+        seen: list[list[str]] = []
+        def _fake_run(cmd, **kw):
+            seen.append(list(cmd))
+            return Result(0)
+        import subprocess as _sub
+        monkeypatch.setattr(_sub, "run", _fake_run)
+        ok = _m.install_via_pm("bat")
+        assert ok is True   # bat shows up on PATH after install
+        assert any("pacman" in " ".join(c) for c in seen)
+        # The right package name was passed (bat is fine, no override)
+        assert any(c[-1] == "bat" for c in seen)
+
+    def test_returns_false_when_no_pm_available(self, monkeypatch):
+        from org_llm import models as _m
+        import shutil as _sh
+        monkeypatch.setattr(_sh, "which", lambda x: None)
+        assert _m.install_via_pm("bat") is False
+
+    def test_apt_uses_alternate_package_name(self, monkeypatch):
+        """fd → fd-find on apt — verify the override actually fires."""
+        from org_llm import models as _m
+        from collections import namedtuple
+        Result = namedtuple("R", "returncode")
+        import shutil as _sh
+        def _which(x):
+            return "/usr/bin/apt-get" if x == "apt-get" else None
+        monkeypatch.setattr(_sh, "which", _which)
+        seen: list[list[str]] = []
+        def _fake_run(cmd, **kw):
+            seen.append(list(cmd))
+            return Result(0)
+        import subprocess as _sub
+        monkeypatch.setattr(_sub, "run", _fake_run)
+        # which('fd') stays None → the post-install assertion fails →
+        # install_via_pm returns False, BUT the apt-get call should have
+        # used "fd-find" as the package name.
+        _m.install_via_pm("fd")
+        assert any("fd-find" in c for c in seen)
+
+
 class TestRichHelpPanels:
     """`--help` groups commands into named panels."""
 

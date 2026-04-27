@@ -4907,8 +4907,8 @@ _TUTOR_STEPS = [
         "All steps:     [bold]org-llm tutor --all[/bold]\n"
         "Steps: welcome → init → index → embed → code-index → discover → search → ask\n"
         "       → capture → tag → code → config → skills → report → doctor →\n"
-        "       doctor-walkthrough → install → db → dbt → opencode → source →\n"
-        "       performance → grants → knob → personalize → theme → env →\n"
+        "       doctor-walkthrough → install-tools → db → dbt → opencode → source →\n"
+        "       performance → grants → knob → personalize → self → theme → env →\n"
         "       review-emacs → creds → cloud → launch → emacs → claude → done",
     ),
     (
@@ -5491,6 +5491,41 @@ _TUTOR_STEPS = [
         "  [bold]org-llm knob list[/bold]                    — see all dials + active levels\n"
         "  [bold]org-llm config <name>_level 0..3[/bold]     — tune individually\n\n"
         "[dim]Source: org_llm/personalize.py  |  org-llm source personalize[/dim]",
+    ),
+    (
+        "self",
+        "[lcars2]org-llm self[/lcars2] — read, revise, snapshot, roll back the running app\n\n"
+        "The app can read and revise its OWN Python source + config DB,\n"
+        "with safe rollback via an artifact bundle (tarball + standalone\n"
+        "bash script that runs WITHOUT Python).\n\n"
+        "[lcars1]Subcommands:[/lcars1]\n"
+        "  [bold]self show <module>[/bold]            — print module source\n"
+        "  [bold]self edit <module>[/bold]            — open in $EDITOR\n"
+        "  [bold]self snapshot [-l label][/bold]      — bundle source + DB + rollback.sh\n"
+        "  [bold]self snapshots[/bold]                — list with metadata\n"
+        "  [bold]self rollback [ID|label|prefix][/bold] — restore from snapshot\n"
+        "  [bold]self llm-revise <mod> '<intent>'[/bold] — LLM proposes a JSON patch\n"
+        "  [bold]self log[/bold]                     — print the org-mode self-mod log\n\n"
+        "[lcars1]Snapshot bundle:[/lcars1]\n"
+        "  ~/.local/share/org-llm/snapshots/<ts>/\n"
+        "    org_llm/                    full package source\n"
+        "    org-llm.db.snapshot          SQLite DB copy\n"
+        "    manifest.json                ts, git hash, file list\n"
+        "    rollback.sh                  standalone bash recovery\n"
+        "  ~/.local/share/org-llm/snapshots/<ts>.tar.gz   ← off-machine copy\n\n"
+        "[lcars1]Safety on llm-revise:[/lcars1]\n"
+        "  • ALWAYS snapshots first (--no-snapshot to skip; not recommended)\n"
+        "  • Each `replace` op's `old` must match EXACTLY ONCE in the file\n"
+        "    (0 = LLM hallucinated; >1 = ambiguous; both refuse to apply)\n"
+        "  • System prompt refuses security-boundary changes\n\n"
+        "[lcars1]Org-mode log:[/lcars1]\n"
+        "  Every action appends to ~/org/org-llm-self-mod.org with\n"
+        "  :SELFMOD_KIND: properties + the rollback script as a :tangle\n"
+        "  block (so each entry tangles to a stand-alone /tmp/ shell file).\n\n"
+        "[lcars1]When the app is broken:[/lcars1]\n"
+        "  [bold]bash ~/.local/share/org-llm/snapshots/<ts>/rollback.sh[/bold]\n"
+        "  Pure bash; works without Python; pre-rollback backup at /tmp/\n\n"
+        "[dim]Source: org_llm/self_mod.py  |  org-llm source self_mod[/dim]",
     ),
     (
         "doctor-walkthrough",
