@@ -686,6 +686,10 @@ def create_mcp_server():
         "chat_model", "embed_model", "code_model", "tag_model", "review_model",
         "ollama_url", "temperature", "top_p", "context_window",
         "code_dirs", "fixer_model", "trek_level", "commie_level", "queer_level",
+        # Proactive-doctor knobs — letting the in-opencode LLM (or user
+        # via /theme-style slash) tune intervention aggressiveness.
+        "doctor_proactive_mode", "doctor_stuck_threshold",
+        "doctor_intervene_in", "doctor_auto_apply",
     }
 
     @server.tool()
@@ -1226,6 +1230,55 @@ def create_mcp_server():
                         f"{len(names)} command(s) across "
                         f"{len(groups)} group(s)",
                         "\n".join(body_lines))
+
+    # ── Proactive doctor — for use when the in-opencode LLM is stuck ──────────
+    @server.tool()
+    async def proactive_doctor(ctx: Context | None = None) -> str:
+        """Diagnose why the workspace might be slow / stuck and suggest a fix.
+
+        Call this when:
+          - You've made 3+ tool calls without converging on an answer.
+          - The user complains about slowness or hung responses.
+          - Your last reply was a vague hedge ("I'm not sure", "I can't tell")
+            and you're not sure why the search came up empty.
+          - Anything feels wrong and you want a second opinion.
+
+        Probes:
+          1. chat_model fit vs available RAM — is the local model swap-thrashing?
+          2. Ollama reachability — is the daemon up?
+          3. Cloud provider config — can we route around the local issue?
+          4. Vault state — does a search-empty result actually reflect
+             a missing index?
+
+        Returns: a themed diagnosis + EXACT next-step command for the user.
+        Doesn't auto-apply anything — the LLM presents the suggestion and
+        the user decides."""
+        await _info(ctx, "proactive_doctor: probing chat_model + Ollama + cloud")
+        # Run the new --power-boost mode (read-only) for the model-fit signal.
+        import subprocess
+        try:
+            proc = subprocess.run(
+                ["org-llm", "doctor", "--power-boost"],
+                capture_output=True, text=True, timeout=30,
+            )
+            boost_out = (proc.stdout or "") + (proc.stderr or "")
+        except Exception as e:
+            boost_out = f"(power-boost probe failed: {e})"
+        # Run a fast doctor check too — the existing --diagnose default
+        # surfaces concrete issues when something's broken.
+        try:
+            proc = subprocess.run(
+                ["org-llm", "doctor", "--no-diagnose"],
+                capture_output=True, text=True, timeout=30,
+            )
+            doc_out = (proc.stdout or "") + (proc.stderr or "")
+        except Exception as e:
+            doc_out = f"(doctor probe failed: {e})"
+        # Combine — prefer the power-boost panel as the headline since
+        # it directly addresses the most common cause of slowness.
+        body = f"{boost_out.strip()}\n\n--- doctor snapshot ---\n{doc_out.strip()}"
+        return _themed("proactive_doctor",
+                        "model + ollama + cloud + vault probe", body)
 
     # ── Live context refresh ──────────────────────────────────────────────────
     @server.tool()

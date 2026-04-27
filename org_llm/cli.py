@@ -4472,10 +4472,115 @@ def _doctor_benchmark_fixers(report_to: str = "", apply_fixer: bool = False) -> 
     make_it_so()
 
 
+def _power_boost_chat_model() -> tuple[str, str]:
+    """Pick a chat model that actually fits the user's hardware (or cloud).
+
+    Returns (action, detail) where action is one of:
+      "ok"      — current chat_model fits; no change needed.
+      "downsize"— current model too big; recommends/applies a smaller one.
+      "cloud"   — local options are all too big; recommends switching to
+                   the configured cloud provider (if any).
+      "manual"  — couldn't auto-fix; user needs to install + tune.
+
+    Why: the recurring symptom of "opencode took forever / got stuck"
+    is almost always that chat_model can't fit in free RAM, swap-thrashes,
+    times out. Probe RAM, probe pulled-model sizes, pick a fit.
+    """
+    import shutil as _shutil
+    try:
+        import psutil
+        avail_gb = psutil.virtual_memory().available / 2**30
+    except Exception:
+        # Fallback: read /proc/meminfo
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        avail_gb = int(line.split()[1]) / 2**20  # kB → GB
+                        break
+                else:
+                    return ("manual", "couldn't probe RAM")
+        except Exception:
+            return ("manual", "couldn't probe RAM")
+
+    engine = _engine()
+    with get_session(engine) as session:
+        cur = _cfg(session, "chat_model") or ""
+        url = _ollama_url(session)
+        cloud_provider = _cfg(session, "cloud_provider")
+
+    # Pulled-model catalog with sizes (best effort via ollama list).
+    sizes_gb: dict[str, float] = {}
+    try:
+        ollama_bin = _shutil.which("ollama") or str(
+            Path("~/.local/bin/ollama").expanduser())
+        if Path(ollama_bin).exists():
+            import subprocess
+            r = subprocess.run([ollama_bin, "list"],
+                                 capture_output=True, text=True, timeout=10)
+            for line in (r.stdout or "").splitlines()[1:]:
+                cols = line.split()
+                if len(cols) < 3:
+                    continue
+                name, _digest, size, unit = cols[0], cols[1], cols[2], cols[3]
+                try:
+                    n = float(size)
+                except ValueError:
+                    continue
+                sizes_gb[name.split(":")[0]] = n if unit.upper() == "GB" else n / 1024
+    except Exception:
+        pass
+
+    cur_size = sizes_gb.get(cur.split(":")[0])
+    # Heuristic: a model needs roughly its GB-on-disk in available RAM
+    # to load + generate without swap-thrashing. Add 1GB headroom.
+    fits = cur_size is not None and cur_size + 1.0 <= avail_gb
+
+    # Catalog of fitting non-embedding models, biggest first.
+    fitting = [(name, sz) for name, sz in sizes_gb.items()
+                 if sz + 1.0 <= avail_gb
+                 and not name.startswith("nomic")
+                 and not name.startswith("snowflake")
+                 and not name.startswith("all-minilm")]
+    fitting.sort(key=lambda x: -x[1])
+
+    if cur and fits:
+        # Even if it fits, surface an "upsize" opportunity when a
+        # bigger model that ALSO fits is pulled — bigger usually means
+        # smarter, and the user told us "noticing slowness or lack of
+        # optimization" matters too.
+        bigger = [(n, s) for n, s in fitting
+                    if s > (cur_size or 0) + 0.5
+                    and n != cur.split(":")[0]]
+        if bigger:
+            best_name, best_size = bigger[0]
+            return ("upsize",
+                    f"{best_name} ({best_size:.1f} GB) fits AND is larger "
+                    f"than current {cur} ({cur_size:.1f} GB); switching may "
+                    f"improve quality without losing speed")
+        return ("ok",
+                f"{cur} fits ({cur_size:.1f} GB needed, {avail_gb:.1f} GB free)")
+
+    # Doesn't fit (or unset) — recommend the biggest fitter, else cloud.
+    if fitting:
+        new_name, new_size = fitting[0]
+        return ("downsize",
+                f"{new_name} ({new_size:.1f} GB) fits in {avail_gb:.1f} GB free; "
+                f"current {cur or '(unset)'} is too big")
+
+    if cloud_provider:
+        return ("cloud",
+                f"no local model fits in {avail_gb:.1f} GB free; "
+                f"cloud_provider={cloud_provider} is configured")
+    return ("manual",
+            f"only {avail_gb:.1f} GB free; pull a smaller model "
+            f"(e.g. llama3.2:1b) or configure cloud")
+
+
 @app.command(rich_help_panel="Maintenance")
 def doctor(
-    diagnose: Annotated[bool, typer.Option("--diagnose", "-d",
-              help="Use LLM to explain failures and suggest fixes")] = False,
+    diagnose: Annotated[bool, typer.Option("--diagnose/--no-diagnose", "-d",
+              help="LLM explains failures and suggests fixes (default: on when issues found)")] = True,
     fix:      Annotated[bool, typer.Option("--fix",          "-f",
               help="Auto-apply safe fixes (init DB, start Ollama)")] = False,
     install_tool: Annotated[str, typer.Option("--install",   "-i",
@@ -4490,6 +4595,10 @@ def doctor(
               help="Score multiple cloud LLMs on canonical fix scenarios; persist the winner as fixer_model")] = False,
     apply_fixer:  Annotated[bool, typer.Option("--apply-fixer", "-A",
               help="With --benchmark-fixers, write the top-scoring model to config:fixer_model")] = False,
+    power_boost:  Annotated[bool, typer.Option("--power-boost", "-P",
+              help="Diagnose chat_model vs available RAM; suggest (or with --apply, switch to) a model that fits or cloud routing")] = False,
+    apply:        Annotated[bool, typer.Option("--apply", "-a",
+              help="With --power-boost, actually write the suggested change to config")] = False,
 ):
     """Deep health check, LLM tuning advisor, and FOSS tool installer.
 
@@ -4504,6 +4613,45 @@ def doctor(
         return _doctor_walkthrough(report_to=report_to)
     if benchmark_fixers:
         return _doctor_benchmark_fixers(report_to=report_to, apply_fixer=apply_fixer)
+    if power_boost:
+        action, detail = _power_boost_chat_model()
+        from rich.panel import Panel as _Panel
+        title_color = {"ok": "lcars3", "downsize": "lcars1",
+                        "cloud": "lcars1", "manual": "warn"}.get(action, "lcars2")
+        console.print()
+        console.print(_Panel(detail,
+                              title=f"[{title_color}]power-boost: {action}[/{title_color}]",
+                              border_style="lcars2", padding=(1, 2)))
+        if action == "ok":
+            return
+        if action == "downsize":
+            new_name = detail.split()[0]
+            if apply:
+                engine = _engine()
+                with get_session(engine) as session:
+                    from .db import Config
+                    row = session.get(Config, "chat_model")
+                    if row: row.value = new_name
+                    else:   session.add(Config(key="chat_model", value=new_name))
+                    session.commit()
+                hail(f"chat_model → {new_name} (applied)")
+            else:
+                on_screen(f"[dim]Apply with:[/dim] "
+                          f"[bold]org-llm doctor --power-boost --apply[/bold]")
+                on_screen(f"  [dim]or:[/dim] "
+                          f"[bold]org-llm config chat_model {new_name}[/bold]")
+            return
+        if action == "cloud":
+            on_screen("[dim]Switch opencode to cloud:[/dim] "
+                      "[bold]org-llm launch --cloud[/bold]")
+            on_screen("[dim]Or set:[/dim] "
+                      "[bold]org-llm config cloud_provider <slug>[/bold] "
+                      "(see [bold]org-llm cloud --providers[/bold])")
+            return
+        on_screen("[dim]Manual fix:[/dim] "
+                  "[bold]org-llm models --pull llama3.2:1b[/bold]  "
+                  "[dim](smallest viable chat model)[/dim]")
+        return
     import os
     import shutil
     import subprocess
@@ -7385,6 +7533,25 @@ BEHAVIOUR
     weird") tends to land on a real result. Don't ask the user to
     re-quote things manually; throw it at org_llm_run and let the
     auto-fix chain handle it.
+  - SELF-HEAL is FIRST-CLASS, not a fallback. Call `proactive_doctor`
+    in any of these cases (driven by config keys
+    `doctor_proactive_mode` / `doctor_stuck_threshold` /
+    `doctor_intervene_in`, but use these defaults unless the user
+    has told you otherwise):
+      • You've made `doctor_stuck_threshold` (default 3) tool calls
+        without converging on an answer.
+      • A tool returned an error string ("tool-error" intervention).
+      • A search came back empty AND you can't think of an obvious
+        synonym to try ("search-empty" intervention).
+      • A response felt slow ("long-response" intervention).
+      • Even when nothing is "wrong" but the optimization probe at
+        the top of this prompt mentioned an upsize/cloud opportunity
+        ("optimization" intervention) — surface it to the user in
+        1 line so they can opt in. Don't wait for explicit complaint.
+    The most common cause of slowness is the local chat_model not
+    fitting in available RAM. proactive_doctor probes that and
+    suggests a smaller model OR cloud routing OR a bigger fitting
+    model. Surface the verdict; don't paper over with speculation.
 
 WORKED EXAMPLES (reproduce this exact shape)
 
@@ -7640,6 +7807,30 @@ def _opencode_pre_flight_context(session) -> dict:
     except Exception:
         ukn = []
     persona_block = _persona_block(active_dials, ukn)
+
+    # Optimization opportunities — surfaced at launch so the in-opencode
+    # LLM knows from turn 1 if it could be faster/better. Power-boost
+    # probe is read-only so it's safe to include unconditionally; we
+    # then format what it returned for the prompt.
+    opportunities = ""
+    try:
+        action, detail = _power_boost_chat_model()
+        if action in ("upsize", "downsize", "cloud", "manual"):
+            label = {
+                "upsize":   "OPTIMIZATION (faster/better available)",
+                "downsize": "WARNING (current chat_model too big for RAM)",
+                "cloud":    "OPTIMIZATION (route through cloud — no local fit)",
+                "manual":   "WARNING (no fitting local model)",
+            }[action]
+            opportunities = (
+                f"\n\n{label}\n  {detail}\n  "
+                f"Action: when the user asks anything, mention this in 1 line; "
+                f"call /proactive-doctor for the full diagnosis."
+            )
+    except Exception:
+        pass
+    # Stash on persona_block end so it lands in the same prompt position.
+    persona_block = (persona_block or "") + opportunities
 
     return {
         "org_dir": str(org_dir), "ollama_url": ollama_url,
@@ -8088,6 +8279,31 @@ def _opencode_slash_commands(workspace: str) -> dict:
             "opencode (index, embed, config), call this to update the\n"
             "live picture. Render the snapshot, then ONE sentence on what\n"
             "changed since launch (if you can tell).\n"
+        ),
+        "proactive-doctor": (
+            "---\n"
+            "description: Self-diagnose when stuck — model fit, Ollama, cloud, vault\n"
+            "---\n"
+            "Call `proactive_doctor`. Surface the verdict, then act on the\n"
+            "FIRST suggested fix:\n"
+            "  - 'downsize' → tell me the new chat_model name + the apply command\n"
+            "  - 'upsize'   → tell me the bigger fitting model that's available\n"
+            "  - 'cloud'    → tell me to re-launch with --cloud\n"
+            "  - 'ok'       → reassure me everything's fit; the slowness is\n"
+            "                  likely vault-shaped, not infrastructure-shaped.\n"
+            "Do NOT auto-apply changes unless `doctor_auto_apply` config\n"
+            "is true — confirm with me first by default.\n"
+        ),
+        "doctor-mode": (
+            "---\n"
+            "description: Tune how aggressive the proactive doctor is\n"
+            "---\n"
+            "If I named a mode after /doctor-mode (off / passive / active /\n"
+            "aggressive), call `set_config('doctor_proactive_mode', <mode>)`.\n"
+            "If I named one of `stuck_threshold`, `intervene_in`, `auto_apply`\n"
+            "with a value, call set_config with the corresponding key.\n"
+            "With no args, call `get_config` and show the four current\n"
+            "doctor_* settings with a one-line description of each.\n"
         ),
     }
 

@@ -168,6 +168,37 @@ MODEL_DEFAULTS = {
     "theme":          "dark",               # dark | light  (UI color mode)
     "code_dirs":      "~/repos",            # comma-sep paths for `code-index`
     "db_version":     "1",
+    # ── Proactive doctor knobs ─────────────────────────────────────────────
+    # `doctor_proactive_mode` — how aggressive the in-opencode LLM should be
+    #   off:        never auto-call proactive_doctor; user must invoke
+    #               /proactive-doctor explicitly.
+    #   passive:    only when the user asks "what's wrong" or similar.
+    #   active:     after `doctor_stuck_threshold` tool calls without
+    #               convergence, OR on the first hard error. (default)
+    #   aggressive: after the FIRST sub-optimal turn (vague reply, empty
+    #               search, slow response). Cheap when the LLM is fast,
+    #               annoying when it isn't.
+    "doctor_proactive_mode":   "active",
+    # `doctor_stuck_threshold` — N tool calls before the LLM should
+    # consider itself stuck and call proactive_doctor.
+    "doctor_stuck_threshold":  "3",
+    # `doctor_intervene_in` — comma-sep list of operation classes the
+    # LLM should be ready to self-doctor on. Empty list disables every
+    # interception path. Recognised tokens:
+    #   search-empty       — search_notes / ask_notes returned no hits
+    #   tool-error         — any MCP tool returned an error string
+    #   long-response      — chat call took >30s (caller-tracked)
+    #   vague-reply        — about-to-emit a hedge ("I'm not sure", etc)
+    #   optimization       — current setup works but a faster/better one
+    #                         is available (bigger fitting model, cloud
+    #                         configured but unused, etc.)
+    #   stale-index        — vault has files newer than last index run
+    #   stale-embeddings   — indexed nodes without embeddings accumulating
+    "doctor_intervene_in":     "search-empty,tool-error,long-response,optimization",
+    # `doctor_auto_apply` — if true, `org-llm doctor --power-boost` and
+    # the proactive_doctor recommendations apply changes WITHOUT a
+    # separate --apply flag. Off by default for safety.
+    "doctor_auto_apply":       "false",
 }
 
 

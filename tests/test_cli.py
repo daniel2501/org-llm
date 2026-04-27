@@ -463,6 +463,92 @@ class TestDbt:
         assert "ambiguous" not in sql.lower()  # comment-only, not the bug
 
 
+class TestProactiveDoctor:
+    """Detect when local chat_model can't fit in available RAM (the most
+    common cause of stuck-feeling opencode sessions) and suggest
+    downsizing or cloud routing."""
+
+    def test_power_boost_returns_ok_when_model_fits(self, monkeypatch, cli_db):
+        from org_llm import cli as _cli
+        # Pretend we have plenty of RAM and a small pulled model.
+        class _Mem:
+            available = 12 * 2**30  # 12 GB free
+        class _PS:
+            @staticmethod
+            def virtual_memory(): return _Mem()
+        monkeypatch.setitem(__import__("sys").modules, "psutil", _PS)
+
+        # Stub out `ollama list` so we always have a small fitting model.
+        def fake_run(cmd, **kw):
+            class R: returncode = 0
+            R.stdout = "NAME ID SIZE MODIFIED\nllama3.2:1b abc 1.3 GB 1d ago"
+            R.stderr = ""
+            return R
+        import subprocess
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        # Set chat_model to llama3.2 (small enough). cli_db ran `init`
+        # which already inserts a default chat_model row — use update.
+        from org_llm.db import make_engine, get_session, Config
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            row = s.get(Config, "chat_model")
+            if row: row.value = "llama3.2"
+            else:   s.add(Config(key="chat_model", value="llama3.2"))
+            s.commit()
+        action, _ = _cli._power_boost_chat_model()
+        assert action == "ok"
+
+    def test_power_boost_recommends_cloud_when_nothing_fits(
+            self, monkeypatch, cli_db):
+        from org_llm import cli as _cli
+        class _Mem:
+            available = int(0.5 * 2**30)  # 0.5 GB free
+        class _PS:
+            @staticmethod
+            def virtual_memory(): return _Mem()
+        monkeypatch.setitem(__import__("sys").modules, "psutil", _PS)
+        # No pulled models small enough
+        def fake_run(cmd, **kw):
+            class R: returncode = 0
+            R.stdout = "NAME ID SIZE MODIFIED\nphi4:latest abc 9.1 GB 1d ago"
+            R.stderr = ""
+            return R
+        import subprocess
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        # Configure cloud
+        from org_llm.db import make_engine, get_session, Config
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            row = s.get(Config, "chat_model")
+            if row: row.value = "phi4"
+            else:   s.add(Config(key="chat_model", value="phi4"))
+            row2 = s.get(Config, "cloud_provider")
+            if row2: row2.value = "openrouter"
+            else:    s.add(Config(key="cloud_provider", value="openrouter"))
+            s.commit()
+        action, detail = _cli._power_boost_chat_model()
+        assert action == "cloud"
+        assert "openrouter" in detail.lower() or "cloud" in detail.lower()
+
+    def test_doctor_power_boost_flag_runs(self, cli_db):
+        """End-to-end via CliRunner — the flag wires to the helper."""
+        r = runner.invoke(app, ["doctor", "--power-boost"])
+        assert r.exit_code == 0
+        # Some signal in the output regardless of outcome
+        assert "power-boost" in r.output.lower()
+
+    def test_proactive_doctor_slash_command_exists(self):
+        from org_llm.cli import _opencode_slash_commands
+        cmds = _opencode_slash_commands("all")
+        assert "proactive-doctor" in cmds
+
+    def test_proactive_doctor_mcp_tool_registered(self):
+        from org_llm.mcp_server import create_mcp_server
+        server = create_mcp_server()
+        assert "proactive_doctor" in server._tool_manager._tools
+
+
 class TestSetupResume:
     """Setup is long (model pulls, indexing, embeddings). The resume layer
     persists per-step completion so an interrupted run picks up where it
