@@ -6974,6 +6974,11 @@ def _opencode_pre_flight_context(session) -> dict:
     # last 7 days of activity. Cheap LLM call (best-effort) so opencode
     # always opens with something actionable instead of a blank cursor.
     todays_prompt = ""
+    # Time-box the LLM call hard. This is a UI-nicety prompt — under no
+    # circumstance should it block `launch` from spawning opencode. If
+    # Ollama is overloaded, missing the model, or the configured fast_model
+    # is too big to fit in RAM (the original symptom that started this
+    # whole thread), the user gets an empty starter prompt and moves on.
     try:
         if recent and ollama_url:
             from .llm import chat as _chat
@@ -6996,7 +7001,8 @@ def _opencode_pre_flight_context(session) -> dict:
             )
             try:
                 resp = _chat(user_msg, model=chat_mdl,
-                             base_url=ollama_url, system=sys_msg)
+                             base_url=ollama_url, system=sys_msg,
+                             timeout=8.0)
                 # Take first non-empty line, trim quoting/numbering cruft.
                 for line in (resp or "").splitlines():
                     line = line.strip(" -–—•\"'").strip()

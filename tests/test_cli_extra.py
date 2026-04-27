@@ -330,6 +330,35 @@ class TestOpenCodeHelpers:
         assert "capture" in all_cmds
         assert "capture" in _opencode_slash_commands("scribe")
 
+    def test_chat_accepts_timeout(self):
+        """Regression: llm.chat must accept a timeout so launch's pre-flight
+        today's-prompt generator can't block opencode startup when Ollama
+        is overloaded (the original symptom of the launch hang)."""
+        import inspect
+        from org_llm.llm import chat as _chat
+        sig = inspect.signature(_chat)
+        assert "timeout" in sig.parameters
+        assert sig.parameters["timeout"].default is None
+
+    def test_launch_dryrun_does_not_block_on_slow_ollama(self, populated_org, monkeypatch):
+        """Pre-flight today's-prompt generator must time-box itself rather
+        than hanging the whole launch when fast_model is too big to load."""
+        import time
+        def slow_chat(*a, timeout=None, **kw):
+            # Simulate Ollama hanging far longer than any user would tolerate.
+            # If launch wires the timeout through, this raises after `timeout`
+            # seconds and the suggestion is silently dropped.
+            time.sleep((timeout or 60) + 1)
+            return "(should never see this)"
+        monkeypatch.setattr("org_llm.llm.chat", slow_chat)
+        t0 = time.monotonic()
+        r = runner.invoke(app, ["launch", "--dry-run"])
+        elapsed = time.monotonic() - t0
+        assert r.exit_code == 0, r.output
+        # 8s budget for the pre-flight LLM call, plus margin for the rest of
+        # dry-run. If we regress to no-timeout, this would hit the 60s sleep.
+        assert elapsed < 20.0, f"launch dry-run took {elapsed:.1f}s (should be <20s)"
+
     def test_cli_parity_slash_commands(self):
         """Sweep guard: every major CLI verb should have a slash command
         (or be intentionally omitted as terminal-only / security-gated)."""
