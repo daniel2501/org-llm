@@ -824,23 +824,49 @@ def setup(
         on_screen(f"[dim]doctor failed: {e}[/dim]")
     console.print()
 
-    # 4. install FOSS tools — only with --yes (or explicit confirm)
-    if _confirm("Install missing FOSS tools (eza, ripgrep, bat, …)?", default=False):
-        on_screen("[lcars2]Step 4/10[/lcars2] install FOSS tools")
+    # 4. install FOSS tools — show what's already there + what's missing
+    # before deciding, then stream output to the user's terminal during
+    # install. CliRunner.invoke() would have swallowed all of it.
+    try:
+        import shutil as _shutil
+        from .models import TOOL_REGISTRY as _TR
+        tools = list(_TR)
+        installed = [t for t in tools if _shutil.which(t.name)]
+        missing   = [t for t in tools if not _shutil.which(t.name)]
+        if installed or missing:
+            on_screen(f"[dim]FOSS tools — installed:[/dim] "
+                      f"{', '.join(t.name for t in installed) or '(none)'}")
+            on_screen(f"[dim]FOSS tools — missing:[/dim]   "
+                      f"{', '.join(t.name for t in missing) or '(none)'}")
+    except Exception:
+        missing = None
+    install_q = "Install missing FOSS tools"
+    if missing is not None:
+        install_q += f" ({len(missing)} missing — eza, ripgrep, bat, …)?"
+    else:
+        install_q += " (eza, ripgrep, bat, …)?"
+    if missing == [] :
+        on_screen("[dim]All FOSS tools already installed — skipping step 4.[/dim]")
+        console.print()
+    elif _confirm(install_q, default=False):
+        on_screen("[lcars2]Step 4/13[/lcars2] install FOSS tools "
+                  "[dim](streams output below — may take a few minutes)[/dim]")
         try:
-            from typer.testing import CliRunner as _R
-            # Bypass the install command's prompts via --yes flag where supported
-            _R().invoke(app, ["doctor", "--install", "all"], catch_exceptions=True)
-        except Exception:
-            pass
+            import subprocess as _sub
+            with warp("Installing FOSS tools (output streams below)"):
+                _sub.run(["org-llm", "doctor", "--install", "all"])
+        except Exception as e:
+            on_screen(f"[dim]install failed: {e}[/dim]")
         console.print()
 
     # 5. models --tune
     if not skip_models and _confirm("Pick hardware-fitting Ollama models?", default=True):
-        on_screen("[lcars2]Step 5/10[/lcars2] models --tune --apply")
+        on_screen("[lcars2]Step 5/13[/lcars2] models --tune --apply "
+                  "[dim](may pull models — multiple minutes)[/dim]")
         try:
-            from typer.testing import CliRunner as _R
-            _R().invoke(app, ["models", "--tune", "--apply"], catch_exceptions=True)
+            import subprocess as _sub
+            with warp("Tuning models for your hardware"):
+                _sub.run(["org-llm", "models", "--tune", "--apply"])
         except Exception as e:
             on_screen(f"[dim]models --tune failed: {e}[/dim]")
         console.print()
@@ -848,14 +874,15 @@ def setup(
     # 6+7+8. index → tag → embed
     if not skip_index and _confirm(
             "Index, auto-tag, and embed your org notes now?", default=True):
-        on_screen("[lcars2]Step 6/11[/lcars2] index")
+        on_screen("[lcars2]Step 6/13[/lcars2] index")
         try:
-            index()
+            index()    # has its own warp spinner
         except SystemExit:
             pass
 
-        # Auto-tag untagged nodes — uses fast_model. Idempotent.
-        on_screen("[lcars2]Step 7/11[/lcars2] tag --apply (LLM auto-tags untagged notes)")
+        # Auto-tag untagged nodes — uses fast_model. Has its own impulse
+        # progress bar (one tick per node).
+        on_screen("[lcars2]Step 7/13[/lcars2] tag --apply (LLM auto-tags untagged notes)")
         try:
             tag(force=False, limit=200, apply=True, dry_run=False)
         except SystemExit:
@@ -863,20 +890,24 @@ def setup(
         except Exception as e:
             on_screen(f"[dim]tag failed: {e}[/dim]")
 
-        on_screen("[lcars2]Step 8/11[/lcars2] embed")
+        on_screen("[lcars2]Step 8/13[/lcars2] embed")
         try:
-            embed()
+            embed()    # has its own impulse progress bar
         except SystemExit:
             pass
         console.print()
 
-    # 9. personalize
+    # 9. personalize — call the function directly so its themed `thinking`
+    # spinner appears (CliRunner swallows it).
     if not skip_personalize and _confirm(
             "Auto-create theme knobs from your content?", default=True):
-        on_screen("[lcars2]Step 9/11[/lcars2] personalize --apply")
+        on_screen("[lcars2]Step 9/13[/lcars2] personalize --apply "
+                  "[dim](LLM synthesises themes — may take 30-90s)[/dim]")
         try:
-            from typer.testing import CliRunner as _R
-            _R().invoke(app, ["personalize", "--apply"], catch_exceptions=True)
+            personalize(apply=True, no_llm=False, max_themes=5,
+                         overwrite=False)
+        except SystemExit:
+            pass
         except Exception as e:
             on_screen(f"[dim]personalize failed: {e}[/dim]")
         console.print()
