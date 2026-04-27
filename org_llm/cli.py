@@ -5721,7 +5721,7 @@ _TUTOR_STEPS = [
         "[lcars1]System prompt is pre-loaded with:[/lcars1]\n"
         "  vault stats · recent activity · top-10 tags · model assignments ·\n"
         "  free RAM/VRAM · filesystem inventory · active theme dials/knobs\n\n"
-        "[lcars1]30 MCP tools available inside opencode:[/lcars1]\n"
+        "[lcars1]32 MCP tools available inside opencode:[/lcars1]\n"
         "  Reading:    search_notes ask_notes get_node list_nodes_by_tag\n"
         "              list_recent_nodes recent_files get_vault_stats\n"
         "  Writing:    capture_note run_skill tangle_file index_vault\n"

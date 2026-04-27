@@ -172,13 +172,13 @@ candidates.
 | `org-llm models` | Discover, tune (catalog-based), assign, or pull FOSS LLMs |
 | `org-llm performance` | Hardware-aware tuner — uses *free* RAM + measured tok/s (`--benchmark`) |
 | `org-llm cloud` | Multi-provider GPU cloud — signup, configure, status, cost, `--quick-start` |
-| `org-llm launch [-w WORKSPACE]` | Open themed opencode TUI: 30 MCP tools, LCARS theme, slash-commands |
+| `org-llm launch [-w WORKSPACE]` | Open themed opencode TUI: 32 MCP tools, LCARS theme, slash-commands |
 | `org-llm claude` | Same, but Claude Code (`ANTHROPIC_API_KEY` from `pass`) |
 | `org-llm doctor` | Deep health check + LLM diagnosis; `--install all` bulk-installs FOSS tools |
 | `org-llm doctor -w` | LLM-driven self-test: 13 read-only probes + cloud-LLM judgement |
 | `org-llm doctor -r PATH` | Append a structured org-mode report of any doctor run to PATH |
 | `org-llm report` | Rich text reports — overview / tags / recent / orphans / daily |
-| `org-llm tutor` | 31-step interactive tutorial — start with `tutor welcome` |
+| `org-llm tutor` | 35-step interactive tutorial — start with `tutor welcome` |
 | `org-llm db` | Inspect schema, run SELECT queries, full data dictionary |
 | `org-llm source <module>` | Print any module's source (with `--explain`) |
 | `org-llm mcp` | Start the MCP stdio server (used by opencode and claude) |
@@ -259,7 +259,7 @@ copy. See `org-llm tutor creds` for the full setup.
 
 ## MCP integration
 
-`org-llm mcp` runs an MCP stdio server that exposes **30 tools** to any
+`org-llm mcp` runs an MCP stdio server that exposes **32 tools** to any
 MCP-aware client (opencode, Claude Code, …). The toolbox is designed
 to give the LLM in opencode parity with the CLI, not a stripped-down
 subset.
@@ -974,7 +974,7 @@ Then write a `.tape` script under `docs/tape/` and run `vhs <script>.tape`.
 git clone git@github.com:daniel2501/org-llm.git
 cd org-llm
 uv sync                 # install deps + dev tools
-uv run pytest -q        # run the test suite (470+ tests)
+uv run pytest -q        # run the test suite (510+ tests)
 uv run python tools/gallery.py   # regenerate README screenshots
 ```
 
@@ -1006,7 +1006,7 @@ org_llm/
   search.py       # signal-boosted vector + keyword search
   skills.py       # :skill: org-babel block extractor + runner
   ui.py           # console, themes, banners, themed spinners
-tests/            # 470+ tests across 18 test files
+tests/            # 510+ tests across 18 test files
 dbt/              # analytics views (stg_nodes, recent_nodes, …)
 doom/             # Doom Emacs integration (org-llm.el)
 tools/            # gallery.py screenshot generator
