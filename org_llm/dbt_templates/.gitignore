@@ -1,0 +1,6 @@
+# dbt build artifacts — never tracked. The templates ship as source-only;
+# materialized output lives in the user's SQLite DB and the user-space
+# copy at ~/.local/share/org-llm/dbt/.
+target/
+logs/
+.user.yml

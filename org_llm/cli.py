@@ -1346,6 +1346,39 @@ def setup(
             on_screen(f"[dim]embed failed: {e}[/dim]")
         console.print()
 
+    # 9.5. dbt init + build — give the user a working analytics layer right
+    # out of setup. dbt init copies bundled templates to user-space so the
+    # user can edit SQL freely; dbt build materializes staging views and
+    # mart tables. Both are fast (< 1s for a small vault) and idempotent.
+    if "dbt-init" in done_set:
+        on_screen("[dim]✓ Step 9.5/15: dbt init + build (already done — skipping)[/dim]")
+        console.print()
+    elif _confirm("Initialize and build the dbt analytics layer? "
+                   "(creates ~/.local/share/org-llm/dbt + materialises 6 starter views/tables)",
+                   default=True):
+        on_screen("[lcars2]Step 9.5/15[/lcars2] dbt init + build "
+                  "[dim](starter analytics views on top of your indexed notes)[/dim]")
+        try:
+            user_dbt = _user_dbt_dir()
+            if not (user_dbt / "dbt_project.yml").exists():
+                # First-time init — copy templates.
+                import shutil as _shutil
+                _shutil.copytree(_dbt_template_dir(), user_dbt)
+                hail(f"dbt project initialized at {user_dbt}")
+            else:
+                on_screen(f"[dim]Reusing existing dbt project at {user_dbt}[/dim]")
+            rc, _ = _run_dbt("build", capture=False, timeout=300)
+            if rc == 0:
+                _mark_step_done("dbt-init")
+                hail("dbt build succeeded — analytics views ready.")
+                on_screen("[dim]Inspect:[/dim] [bold]org-llm dbt status[/bold]")
+            else:
+                on_screen("[dim]dbt build had errors. "
+                          "Try [bold]org-llm dbt doctor[/bold].[/dim]")
+        except Exception as e:
+            on_screen(f"[dim]dbt init/build failed: {e}[/dim]")
+        console.print()
+
     # 9. personalize — data-driven prompt
     try:
         from .db import Node as _N2
@@ -5629,28 +5662,46 @@ _TUTOR_STEPS = [
     (
         "dbt",
         "[lcars2]dbt layer[/lcars2] — SQL transformations on your org index\n\n"
-        "org-llm uses dbt (data build tool) to transform the raw indexed tables\n"
-        "into analytics-ready views and tables in the same SQLite database.\n\n"
+        "org-llm uses dbt (data build tool) to transform the raw indexed\n"
+        "tables into analytics-ready views + tables in the same SQLite\n"
+        "database. The whole layer is wrapped by [bold]org-llm dbt …[/bold] —\n"
+        "you don't need to leave the org-llm CLI to run, test, or maintain it.\n\n"
         "[lcars1]Architecture:[/lcars1]\n"
         "  Python indexer writes raw data into: files, nodes, history, config\n"
         "  dbt reads those raw tables and produces:\n\n"
         "  [bold]staging/[/bold]\n"
-        "    stg_nodes    — clean nodes: relative paths, formatted dates, has_embedding flag\n"
+        "    stg_nodes    — clean nodes: file_path, relative_path, modified_at,\n"
+        "                   has_embedding flag, plus BOTH tag buckets\n"
+        "                   (file-source tags + LLM auto_tags)\n"
         "    stg_files    — files with days_since_modified, formatted indexed_at\n\n"
         "  [bold]marts/[/bold]\n"
-        "    nodes_by_tag   — tag → node count + titles (powers report tags)\n"
-        "    recent_nodes   — nodes modified in last 30 days\n"
+        "    nodes_by_tag   — merged tag → node count + titles\n"
+        "    recent_nodes   — nodes modified in last 30 days (with days metric)\n"
         "    orphan_nodes   — nodes with IDs but no incoming links\n"
         "    daily_notes    — files under /daily/ path\n\n"
-        "[lcars1]How to run dbt:[/lcars1]\n"
-        "  [bold]cd ~/repos/org-llm/dbt[/bold]\n"
-        "  [bold]dbt run[/bold]            — build all models\n"
-        "  [bold]dbt run --select staging[/bold]  — only staging models\n"
-        "  [bold]dbt test[/bold]           — run data tests\n\n"
+        "[lcars1]Where the dbt project lives:[/lcars1]\n"
+        "  Bundled templates: [dim](inside the package)[/dim]\n"
+        "    org_llm/dbt_templates/ — read-only, shipped with every install\n"
+        "  Your editable copy:\n"
+        "    [bold]~/.local/share/org-llm/dbt/[/bold] — created by\n"
+        "    [bold]org-llm dbt init[/bold] (or auto-created during [bold]org-llm setup[/bold])\n\n"
+        "[lcars1]CLI commands:[/lcars1]\n"
+        "  [bold]org-llm dbt init[/bold]     — copy templates to your editable dir\n"
+        "  [bold]org-llm dbt build[/bold]    — run + test in dependency order (the canonical step)\n"
+        "  [bold]org-llm dbt run[/bold]      — just run, skip tests\n"
+        "  [bold]org-llm dbt test[/bold]     — just tests\n"
+        "  [bold]org-llm dbt compile[/bold]  — check SQL parses without executing\n"
+        "  [bold]org-llm dbt models[/bold]   — list models + materializations\n"
+        "  [bold]org-llm dbt status[/bold]   — model row counts in your DB\n"
+        "  [bold]org-llm dbt doctor[/bold]   — health check (binary, project, DB, compile)\n\n"
+        "[lcars1]Selectors (run subset):[/lcars1]\n"
+        "  [bold]org-llm dbt run -s staging[/bold]      — only the staging views\n"
+        "  [bold]org-llm dbt run -s recent_nodes[/bold] — one specific model\n\n"
         "[lcars1]Configuration:[/lcars1]\n"
-        "  dbt/profiles.yml points at ORG_LLM_DB (default: ~/.local/share/org-llm/org-llm.db)\n"
-        "  Override with: ORG_LLM_DB=/path/to/other.db dbt run\n\n"
-        "[dim]dbt is installed as a dependency — 'uv run dbt run' also works.[/dim]",
+        "  profiles.yml points at [bold]$ORG_LLM_DB[/bold]\n"
+        "  (default: ~/.local/share/org-llm/org-llm.db)\n"
+        "  Project dir override: [bold]$ORG_LLM_DBT_DIR[/bold]\n\n"
+        "[dim]Source: org_llm/cli.py → dbt_app  |  Templates: org_llm/dbt_templates/[/dim]",
     ),
     (
         "opencode",
@@ -7562,6 +7613,56 @@ def _opencode_slash_commands(workspace: str) -> dict:
             "code-index",
             desc="Re-index source-code repos so /code and ask see them",
             hint="This may take a minute — stream progress as it comes back.",
+        ),
+
+        # ── dbt analytics layer ──────────────────────────────────────────
+        "dbt-status": (
+            "---\n"
+            "description: Show dbt project, DB, and model row counts\n"
+            "---\n"
+            "Call `dbt_status` and present what's there. If a model shows '—'\n"
+            "for rows, suggest `/dbt-build` to materialise it.\n"
+        ),
+        "dbt-doctor": (
+            "---\n"
+            "description: dbt health check — binary, project, DB, compile\n"
+            "---\n"
+            "Call `dbt_doctor`. Surface any failed check verbatim and offer\n"
+            "the suggested fix from the report.\n"
+        ),
+        "dbt-models": (
+            "---\n"
+            "description: List dbt models with materialization\n"
+            "---\n"
+            "Call `dbt_models`. Group by folder (staging vs marts).\n"
+        ),
+        "dbt-build": (
+            "---\n"
+            "description: Run dbt run + test in dependency order\n"
+            "---\n"
+            "Call `dbt_build`. If I named a specific model after /dbt-build,\n"
+            "pass it as `select`. After completion, summarise pass/fail counts.\n"
+        ),
+        "dbt-run": (
+            "---\n"
+            "description: Just run dbt models (no tests)\n"
+            "---\n"
+            "Call `dbt_run`. Pass `select` if I named a specific model or folder\n"
+            "(e.g. 'staging', 'recent_nodes').\n"
+        ),
+        "dbt-test": (
+            "---\n"
+            "description: Run dbt data assertions only\n"
+            "---\n"
+            "Call `dbt_test`. Surface any test failures with the model name\n"
+            "and the assertion that failed.\n"
+        ),
+        "dbt-compile": (
+            "---\n"
+            "description: Compile dbt SQL — catches ref typos + schema drift\n"
+            "---\n"
+            "Call `dbt_compile`. If errors are reported, point at the model\n"
+            "file path so I can edit it.\n"
         ),
 
         # ── Indexing & maintenance ───────────────────────────────────────
@@ -9533,6 +9634,386 @@ def self_log():
     console.print()
     console.rule(f"[lcars1]{p}[/lcars1]")
     console.print(p.read_text())
+
+
+# ── dbt: SQL transformations on top of the indexer schema ─────────────────
+#
+# org-llm ships a starter dbt project that materializes analytics-ready
+# views and tables in the same SQLite file the indexer writes. This
+# subcommand group is a thin, themed wrapper around the dbt CLI plus an
+# `init` step that copies templates into the user's data dir, a `doctor`
+# health check, a `status` view that pairs the model list with row counts,
+# and (Phase B) a `design` interactive LLM-driven model creator.
+#
+# Why a wrapper at all (vs `cd dbt && dbt run`):
+#   • Resolves the right project + profiles dir whether the user is on a
+#     uv-tool install or a freshly-initialized copy under
+#     ~/.local/share/org-llm/dbt/.
+#   • Plumbs ORG_LLM_DB into dbt automatically.
+#   • Surfaces non-zero exits as Rich-styled errors with concrete fix
+#     hints instead of a raw dbt traceback.
+
+dbt_app = typer.Typer(
+    help="Run, test, and maintain the dbt SQL layer on top of the index.",
+    cls=PrefixGroup,
+)
+app.add_typer(dbt_app, name="dbt", rich_help_panel="Maintenance")
+
+
+def _dbt_template_dir() -> Path:
+    """Bundled templates inside the package — the source of truth for the
+    starter project. Always shipped with the wheel so a fresh install can
+    `dbt init` immediately."""
+    return Path(__file__).resolve().parent / "dbt_templates"
+
+
+def _user_dbt_dir() -> Path:
+    """User-writable dbt project. Default ~/.local/share/org-llm/dbt/.
+    Override with $ORG_LLM_DBT_DIR. Created by `org-llm dbt init`."""
+    override = os.environ.get("ORG_LLM_DBT_DIR")
+    if override:
+        return Path(override).expanduser()
+    return Path("~/.local/share/org-llm/dbt").expanduser()
+
+
+def _dbt_dir() -> Path:
+    """Resolve which dbt project to operate on.
+
+    Priority:
+      1. $ORG_LLM_DBT_DIR (explicit override, anywhere on disk)
+      2. ~/.local/share/org-llm/dbt/ if the user has run `dbt init`
+      3. The packaged template dir (works out of the box for first runs)
+
+    Read-only commands (status / doctor / list / compile) are safe
+    against the templates; mutating ones (run / test / build) too,
+    since dbt writes to the database, not the project dir.
+    """
+    user = _user_dbt_dir()
+    if user.exists() and (user / "dbt_project.yml").exists():
+        return user
+    return _dbt_template_dir()
+
+
+def _dbt_env() -> dict:
+    """Env vars dbt needs. ORG_LLM_DB lets profiles.yml resolve the SQLite
+    file; DBT_PROFILES_DIR pins the profile location to the project."""
+    env = dict(os.environ)
+    env["DBT_PROFILES_DIR"] = str(_dbt_dir())
+    if "ORG_LLM_DB" not in env:
+        env["ORG_LLM_DB"] = str(DB_PATH)
+    return env
+
+
+def _dbt_bin() -> str:
+    """Locate the dbt executable. Under `uv tool install org-llm` the
+    binary lives in the tool's venv (~/.local/share/uv/tools/org-llm/bin/),
+    NOT on the user's PATH — so `shutil.which("dbt")` would miss it.
+    Falling back to "next to sys.executable" finds it in any venv-style
+    install (uv tool, pipx, source checkout, plain venv)."""
+    import shutil
+    found = shutil.which("dbt")
+    if found:
+        return found
+    sibling = Path(sys.executable).parent / "dbt"
+    if sibling.exists():
+        return str(sibling)
+    return "dbt"   # last resort — let subprocess.run raise FileNotFoundError
+
+
+def _run_dbt(*args: str, capture: bool = False,
+             timeout: int = 600) -> tuple[int, str]:
+    """Spawn dbt with the right cwd + env. Stdout/stderr stream to the
+    user's TTY by default; `capture=True` returns the combined output as
+    a string for post-processing (used by status / doctor / models)."""
+    import subprocess
+    cmd = [_dbt_bin(), *args, "--project-dir", str(_dbt_dir())]
+    try:
+        if capture:
+            proc = subprocess.run(cmd, env=_dbt_env(),
+                                    capture_output=True, text=True,
+                                    timeout=timeout)
+            return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+        proc = subprocess.run(cmd, env=_dbt_env(), timeout=timeout)
+        return proc.returncode, ""
+    except FileNotFoundError:
+        red_alert("dbt binary not found on PATH. Try: "
+                  "[bold]uv tool install --reinstall org-llm[/bold]")
+        return 127, ""
+    except subprocess.TimeoutExpired:
+        red_alert(f"dbt command timed out after {timeout}s.")
+        return 124, ""
+
+
+@dbt_app.command("init")
+def dbt_init(
+    force: Annotated[bool, typer.Option("--force", "-f",
+            help="Overwrite an existing user dbt dir")] = False,
+):
+    """Copy bundled dbt templates to ~/.local/share/org-llm/dbt/.
+
+    Until you run init, all dbt commands operate on the read-only
+    bundled templates. Init gives you a writable copy you can edit
+    freely; subsequent `org-llm dbt run` operates on yours.
+    """
+    src = _dbt_template_dir()
+    dst = _user_dbt_dir()
+    if not src.exists():
+        red_alert(f"Bundled templates missing at {src}. Reinstall org-llm.")
+        raise typer.Exit(1)
+    if dst.exists() and not force:
+        on_screen(f"[dim]User dbt dir already exists: {dst}[/dim]")
+        on_screen("[dim]Use [bold]--force[/bold] to overwrite "
+                  "(your local edits will be lost).[/dim]")
+        raise typer.Exit(0)
+    import shutil as _shutil
+    if dst.exists() and force:
+        _shutil.rmtree(dst)
+    _shutil.copytree(src, dst)
+    hail(f"dbt project initialized at {dst}")
+    on_screen("[dim]Next:[/dim] [bold]org-llm dbt build[/bold]  "
+              "(materialise all models)")
+
+
+@dbt_app.command("run")
+def dbt_run(
+    select: Annotated[str, typer.Option("--select", "-s",
+             help="Run only matching models (e.g. 'staging' or 'recent_nodes')")] = "",
+    full_refresh: Annotated[bool, typer.Option("--full-refresh",
+                   help="Force full re-creation of incremental models")] = False,
+):
+    """Build all dbt models (staging views + mart tables)."""
+    args = ["run"]
+    if select:       args += ["--select", select]
+    if full_refresh: args.append("--full-refresh")
+    rc, _ = _run_dbt(*args)
+    raise typer.Exit(rc)
+
+
+@dbt_app.command("test")
+def dbt_test(
+    select: Annotated[str, typer.Option("--select", "-s")] = "",
+):
+    """Run dbt data tests."""
+    args = ["test"]
+    if select: args += ["--select", select]
+    rc, _ = _run_dbt(*args)
+    raise typer.Exit(rc)
+
+
+@dbt_app.command("build")
+def dbt_build(
+    select: Annotated[str, typer.Option("--select", "-s")] = "",
+):
+    """Run + test models in dependency order — the canonical "do it all"."""
+    args = ["build"]
+    if select: args += ["--select", select]
+    rc, _ = _run_dbt(*args)
+    raise typer.Exit(rc)
+
+
+@dbt_app.command("compile")
+def dbt_compile():
+    """Compile models without executing — surface SQL errors fast."""
+    rc, _ = _run_dbt("compile")
+    raise typer.Exit(rc)
+
+
+@dbt_app.command("models")
+def dbt_models():
+    """List all dbt models with their materialization."""
+    rc, output = _run_dbt("ls", "--output", "json", capture=True)
+    if rc != 0:
+        red_alert(f"dbt ls failed (exit {rc}):")
+        for line in output.splitlines()[-15:]:
+            on_screen(f"  {line}")
+        raise typer.Exit(rc)
+    import json as _json
+    rows = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = _json.loads(line)
+        except Exception:
+            continue
+        if obj.get("resource_type") == "model":
+            rows.append(obj)
+    if not rows:
+        on_screen("[dim]No models registered.[/dim]")
+        return
+    tbl = Table(box=None, pad_edge=False)
+    tbl.add_column("Model",          style="lcars1")
+    tbl.add_column("Materialization", style="lcars2")
+    tbl.add_column("Path",           style="dim")
+    for r in rows:
+        tbl.add_row(r.get("name", "?"),
+                     (r.get("config") or {}).get("materialized", "?"),
+                     r.get("original_file_path", ""))
+    console.print()
+    console.print(tbl)
+
+
+@dbt_app.command("status")
+def dbt_status():
+    """Show models, materialization, and row counts in your DB."""
+    from rich.panel import Panel
+    project = _dbt_dir()
+    py = project / "dbt_project.yml"
+    if not py.exists():
+        red_alert(f"No dbt_project.yml at {project}. "
+                  f"Run [bold]org-llm dbt init[/bold].")
+        raise typer.Exit(1)
+    db_path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+
+    # Header
+    header = Table(box=None, pad_edge=False, show_header=False)
+    header.add_column("Key",   style="lcars1", width=14)
+    header.add_column("Value", style="lcars2")
+    header.add_row("Project dir", str(project))
+    header.add_row("Database",    str(db_path))
+    header.add_row("DB exists",   "✓" if db_path.exists() else "✗ run "
+                                                              "[bold]org-llm init[/bold]")
+    user_dir = _user_dbt_dir()
+    using_templates = project == _dbt_template_dir()
+    header.add_row("Source",
+                    ("[yellow]bundled templates[/yellow] (run "
+                     "[bold]org-llm dbt init[/bold] for a writable copy)")
+                    if using_templates else f"user dir ({user_dir})")
+    console.print()
+    console.print(Panel(header, title="[lcars1]dbt status[/lcars1]",
+                         border_style="lcars2", padding=(1, 2)))
+
+    if not db_path.exists():
+        return
+
+    # Per-model row counts
+    import sqlite3
+    models_dir = project / "models"
+    model_files = sorted(models_dir.rglob("*.sql"))
+    if not model_files:
+        on_screen("[yellow]No model files found.[/yellow]")
+        return
+
+    conn = sqlite3.connect(str(db_path))
+    tbl = Table(box=None, pad_edge=False)
+    tbl.add_column("Model",  style="lcars2")
+    tbl.add_column("Folder", style="dim")
+    tbl.add_column("Rows",   style="lcars1", justify="right")
+    n_built = 0
+    for mf in model_files:
+        name = mf.stem
+        folder = mf.parent.name
+        try:
+            cur = conn.execute(f"SELECT COUNT(*) FROM {name}")
+            count = cur.fetchone()[0]
+            tbl.add_row(name, folder, str(count))
+            n_built += 1
+        except sqlite3.OperationalError:
+            tbl.add_row(name, folder, "[dim]—[/dim]")
+    conn.close()
+    console.print()
+    console.print(tbl)
+    if n_built < len(model_files):
+        console.print()
+        on_screen(f"[dim]{len(model_files) - n_built} model(s) not yet "
+                  f"materialized. Run [bold]org-llm dbt build[/bold].[/dim]")
+
+
+@dbt_app.command("doctor")
+def dbt_doctor():
+    """Health check: dbt installed? project valid? DB reachable? compile clean?"""
+    from rich.panel import Panel
+    rows: list[tuple[str, str, str]] = []
+
+    # 1. dbt binary present?  Look on PATH AND next to sys.executable
+    # so a uv-tool install (which doesn't put `dbt` on PATH) still
+    # passes this check.
+    dbt_bin = _dbt_bin()
+    dbt_bin_ok = Path(dbt_bin).exists() if Path(dbt_bin).is_absolute() \
+                  else (__import__('shutil').which(dbt_bin) is not None)
+    rows.append(("dbt binary",
+                  "✓" if dbt_bin_ok else "✗",
+                  dbt_bin if dbt_bin_ok else "[red]not found[/red]"))
+
+    # 2. dbt-sqlite adapter importable?
+    try:
+        import dbt.adapters.sqlite        # noqa: F401
+        rows.append(("dbt-sqlite", "✓", "installed"))
+    except ImportError:
+        rows.append(("dbt-sqlite", "✗",
+                      "[red]missing — pip install dbt-sqlite[/red]"))
+
+    # 3. project layout
+    project = _dbt_dir()
+    pyml  = project / "dbt_project.yml"
+    profl = project / "profiles.yml"
+    rows.append(("project dir",
+                  "✓" if project.exists() else "✗", str(project)))
+    rows.append(("dbt_project.yml",
+                  "✓" if pyml.exists() else "✗", str(pyml)))
+    rows.append(("profiles.yml",
+                  "✓" if profl.exists() else "✗", str(profl)))
+
+    # 4. database reachable?
+    db_path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+    rows.append(("ORG_LLM_DB",
+                  "✓" if db_path.exists() else "✗", str(db_path)))
+
+    # 5. dbt compile (probe the SQL — catches schema drift, ref typos)
+    if dbt_bin_ok and project.exists() and pyml.exists():
+        rc, output = _run_dbt("compile", capture=True, timeout=60)
+        rows.append(("dbt compile",
+                      "✓" if rc == 0 else "✗",
+                      "no errors" if rc == 0 else
+                      "[red]errors — see [bold]org-llm dbt compile[/bold][/red]"))
+
+    # 6. expected raw sources exist (files, nodes, config)
+    if db_path.exists():
+        import sqlite3
+        try:
+            conn = sqlite3.connect(str(db_path))
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            conn.close()
+            for needed in ("files", "nodes", "config"):
+                rows.append((f"raw.{needed}",
+                              "✓" if needed in tables else "✗",
+                              "present" if needed in tables else
+                              "[red]missing — run [bold]org-llm init[/bold][/red]"))
+        except Exception as e:
+            rows.append(("raw schema", "✗", f"sqlite error: {e}"))
+
+    # Render
+    tbl = Table(box=None, pad_edge=False, show_header=False)
+    tbl.add_column("Check",  style="lcars2", width=18)
+    tbl.add_column("Status", style="lcars1", width=4)
+    tbl.add_column("Detail", style="dim")
+    for c, s, d in rows:
+        tbl.add_row(c, s, d)
+    console.print()
+    console.print(Panel(tbl, title="[lcars1]dbt doctor[/lcars1]",
+                         border_style="lcars2", padding=(1, 2)))
+
+    failed = [c for c, s, _ in rows if s == "✗"]
+    if not failed:
+        on_screen("[lcars3]All checks passed.[/lcars3]")
+        return
+    console.print()
+    on_screen("[lcars3]Suggested next steps:[/lcars3]")
+    if "dbt binary" in failed or "dbt-sqlite" in failed:
+        on_screen("  [bold]uv tool install --reinstall org-llm[/bold]    "
+                  "— re-pull dependencies")
+    if any(f in failed for f in ("project dir", "dbt_project.yml", "profiles.yml")):
+        on_screen("  [bold]org-llm dbt init[/bold]                       "
+                  "— initialize the user-space dbt project")
+    if "ORG_LLM_DB" in failed or any(f.startswith("raw.") for f in failed):
+        on_screen("  [bold]org-llm init && org-llm index[/bold]          "
+                  "— create + populate the DB")
+    if "dbt compile" in failed:
+        on_screen("  [bold]org-llm dbt compile[/bold]                    "
+                  "— see specific SQL errors")
+    raise typer.Exit(1)
 
 
 @history_app.command("build")

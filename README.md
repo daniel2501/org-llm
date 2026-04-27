@@ -24,7 +24,7 @@ falls back to multi-provider GPU clouds when your laptop runs out of VRAM.
 | 🛡️ **Encrypted credentials** via the standard Unix `pass` manager — never in plaintext | 🤖 **MCP server** — every capability exposed as a tool to opencode and Claude Code |
 | 📓 **Org-babel skills** — define LLM workflows as `:skill:`-tagged source blocks | 🔬 **`doctor`** — deep health check + LLM-powered diagnosis of failures |
 | 🚀 **`launch` / `claude`** — one-shot interactive workspaces with full vault context | 🎨 **FOSS tool installer** — `bat`, `eza`, `delta`, `zellij`, … with LCARS/Doom themes |
-| 📊 **dbt analytics** — `stg_nodes`, `nodes_by_tag`, `recent_nodes`, `orphan_nodes` views | ⚡ **Fish/bash/zsh completions** + shortest-prefix command matching (`do` → `doctor`) |
+| 📊 **dbt analytics** wrapped end-to-end (`org-llm dbt build/status/doctor`) — `stg_nodes`, `nodes_by_tag`, `recent_nodes`, `orphan_nodes` views, plus an MCP/slash surface so the in-opencode LLM can run them too | ⚡ **Fish/bash/zsh completions** + shortest-prefix command matching (`do` → `doctor`) |
 | 🪄 **`personalize`** — LLM reads your real content and proposes evocative theme knobs (`brainwave`, `workbench`, `laboratory`, …) | 🛟 **Layered auto-recovery** — every error tries fuzzy-match → LLM intent repair → SRE fix before bailing |
 | 🤖 **LLM copywriting throughout** — Try-it lines, models nudge, doctor closing, tutor recommendation all generated from real state | 🌐 **Cloud→local fallback** — rate-limit / auth fail / `--cloud` without setup all auto-degrade with a yellow warning |
 
@@ -575,6 +575,53 @@ org-llm report daily   # daily/journal notes preview
 
 ---
 
+## dbt analytics layer
+
+org-llm ships a starter [dbt](https://docs.getdbt.com) project that
+materializes analytics-ready views and tables in the *same* SQLite file
+the indexer writes. The whole layer is wrapped by `org-llm dbt …` so
+you don't leave the org-llm CLI to run, test, or maintain it. `setup`
+auto-runs `dbt init` + `dbt build` (Step 9.5), so a fresh user has
+working analytics views immediately after indexing.
+
+```sh
+org-llm dbt init      # copy bundled templates → ~/.local/share/org-llm/dbt/
+org-llm dbt build     # run + test in dependency order (the canonical step)
+org-llm dbt status    # row counts per model in your DB
+org-llm dbt doctor    # binary, project, DB, raw tables, compile-clean
+org-llm dbt models    # list with materialization
+org-llm dbt run -s staging        # only the staging views
+org-llm dbt run -s recent_nodes   # one specific model
+```
+
+What's in the box:
+
+- `stg_nodes` (view) — clean nodes with file_path, relative_path,
+  modified_at, an `has_embedding` flag, and **both** tag buckets
+  (file source-of-truth + LLM `auto_tags`).
+- `stg_files` (view) — files with `days_since_modified`.
+- `nodes_by_tag` (table) — merged tag → node count + titles.
+- `recent_nodes` (table) — modified in last 30 days.
+- `orphan_nodes` (table) — has an ID, no incoming links.
+- `daily_notes` (table) — files under `/daily/`.
+
+Where it lives:
+
+| Location | Purpose |
+|---|---|
+| `org_llm/dbt_templates/` | Read-only bundled starter (in the package) |
+| `~/.local/share/org-llm/dbt/` | Your editable copy after `dbt init` |
+| `$ORG_LLM_DBT_DIR` | Override either default |
+
+**Inside opencode:** the `launch` workspace exposes 7 dbt MCP tools
+(`dbt_status`, `dbt_doctor`, `dbt_models`, `dbt_run`, `dbt_test`,
+`dbt_build`, `dbt_compile`) and 7 slash commands (`/dbt-status`,
+`/dbt-doctor`, `/dbt-models`, `/dbt-build`, `/dbt-run`, `/dbt-test`,
+`/dbt-compile`). The in-opencode LLM can run analytics over your vault
+without you typing a single dbt command.
+
+---
+
 ## Emacs config review
 
 Auto-detects your Doom or vanilla config and asks `reason_model` for structured
@@ -1033,8 +1080,8 @@ org_llm/
   search.py       # signal-boosted vector + keyword search
   skills.py       # :skill: org-babel block extractor + runner
   ui.py           # console, themes, banners, themed spinners
-tests/            # 510+ tests across 18 test files
-dbt/              # analytics views (stg_nodes, recent_nodes, …)
+tests/            # 540+ tests across 18 test files
+org_llm/dbt_templates/  # bundled dbt starter project (copied to user-space on `dbt init`)
 doom/             # Doom Emacs integration (org-llm.el)
 tools/            # gallery.py screenshot generator
 ```

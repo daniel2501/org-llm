@@ -955,6 +955,129 @@ def create_mcp_server():
         plain = re.sub(r"\[/?[^\]]+\]", "", body)
         return f"=== org-llm tutor: {name} ===\n\n{plain}"
 
+    # ── dbt tools — let the in-opencode LLM run + inspect the analytics layer ──
+    #
+    # Maps to the org-llm dbt subcommand group. Each tool is a thin shim
+    # over `org-llm dbt <verb>` (see cli.py → dbt_app) so the in-opencode
+    # LLM can build, test, and report on dbt without the user typing a
+    # single dbt command. `dbt_run` / `dbt_build` are async + emit MCP
+    # progress events; the read-only ones return string snapshots.
+
+    def _shell_org_llm_dbt(*args: str, timeout: int = 600) -> str:
+        """Run `org-llm dbt …` as a subprocess and return combined output."""
+        import subprocess
+        try:
+            proc = subprocess.run(
+                ["org-llm", "dbt", *args],
+                capture_output=True, text=True, timeout=timeout,
+            )
+        except FileNotFoundError:
+            return "org-llm binary not on PATH inside the MCP server env."
+        except subprocess.TimeoutExpired:
+            return f"`org-llm dbt {' '.join(args)}` timed out after {timeout}s."
+        out = (proc.stdout or "")
+        if proc.stderr:
+            out += "\n[stderr]\n" + proc.stderr
+        if len(out) > 8000:
+            out = out[:8000] + "\n…(truncated)"
+        if proc.returncode != 0:
+            out += f"\n[exit {proc.returncode}]"
+        return out or f"(no output, exit {proc.returncode})"
+
+    @server.tool()
+    async def dbt_status(ctx: Context | None = None) -> str:
+        """dbt analytics layer: project paths, DB reachability, model row counts.
+
+        Read-only — safe to call any time. Use this as the first probe
+        when the user asks anything analytics-related."""
+        await _info(ctx, "dbt status: probing project + row counts")
+        return _shell_org_llm_dbt("status", timeout=30)
+
+    @server.tool()
+    async def dbt_doctor(ctx: Context | None = None) -> str:
+        """dbt health check: binary, project, DB, raw tables, compile clean.
+
+        Use this when something is wrong with the analytics layer or
+        before suggesting a non-trivial dbt operation."""
+        await _info(ctx, "dbt doctor: running checks")
+        return _shell_org_llm_dbt("doctor", timeout=60)
+
+    @server.tool()
+    async def dbt_models() -> str:
+        """List all dbt models with materialization (table / view / etc.)."""
+        return _shell_org_llm_dbt("models", timeout=30)
+
+    @server.tool()
+    async def dbt_run(select: str = "",
+                       full_refresh: bool = False,
+                       ctx: Context | None = None) -> str:
+        """Build all (or matching) dbt models — staging views + mart tables.
+
+        `select` filters by model name or folder ('staging', 'recent_nodes').
+        `full_refresh=True` forces re-creation of incremental models.
+        Emits MCP progress events while dbt runs (one tick per ~2s).
+        """
+        import asyncio, time as _t
+        label = _theme_label("default") + " · dbt run"
+        if select:
+            label += f" -s {select}"
+        await _info(ctx, label)
+        args = ["run"]
+        if select:        args += ["-s", select]
+        if full_refresh:  args.append("--full-refresh")
+
+        # Same executor + heartbeat pattern as org_llm_run so progress
+        # actually flows during a multi-second dbt run.
+        loop = asyncio.get_event_loop()
+        started = _t.monotonic()
+        timeout = 600
+        fut = loop.run_in_executor(
+            None, lambda: _shell_org_llm_dbt(*args, timeout=timeout))
+        while not fut.done():
+            await asyncio.sleep(2.0)
+            elapsed = _t.monotonic() - started
+            await _report(ctx, elapsed, float(timeout),
+                           f"{label} — {elapsed:.0f}s elapsed")
+        return await fut
+
+    @server.tool()
+    async def dbt_test(select: str = "",
+                        ctx: Context | None = None) -> str:
+        """Run dbt data tests (schema/data assertions on the materialized layer)."""
+        await _info(ctx, "dbt test: running assertions")
+        args = ["test"]
+        if select: args += ["-s", select]
+        return _shell_org_llm_dbt(*args, timeout=300)
+
+    @server.tool()
+    async def dbt_build(select: str = "",
+                         ctx: Context | None = None) -> str:
+        """dbt run + dbt test in dependency order — the canonical "do it all".
+
+        Use this after the user adds new notes (post `index_vault`) to
+        keep the analytics views fresh."""
+        import asyncio, time as _t
+        label = "dbt build" + (f" -s {select}" if select else "")
+        await _info(ctx, label)
+        args = ["build"]
+        if select: args += ["-s", select]
+        loop = asyncio.get_event_loop()
+        started = _t.monotonic()
+        timeout = 600
+        fut = loop.run_in_executor(
+            None, lambda: _shell_org_llm_dbt(*args, timeout=timeout))
+        while not fut.done():
+            await asyncio.sleep(2.0)
+            elapsed = _t.monotonic() - started
+            await _report(ctx, elapsed, float(timeout),
+                           f"{label} — {elapsed:.0f}s elapsed")
+        return await fut
+
+    @server.tool()
+    async def dbt_compile() -> str:
+        """Compile dbt SQL without executing — surfaces ref typos and schema drift."""
+        return _shell_org_llm_dbt("compile", timeout=60)
+
     return server
 
 

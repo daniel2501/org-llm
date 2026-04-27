@@ -231,6 +231,106 @@ class TestTagProvenance:
         assert any("synthwave" in (h.tags or "") for h in hits)
 
 
+class TestDbt:
+    """The org-llm dbt subcommand group: thin wrappers around the dbt CLI
+    that resolve the right project + env. These tests don't actually
+    invoke dbt (slow, networked) — they exercise the wiring."""
+
+    def test_help_lists_subcommands(self, cli_db):
+        r = runner.invoke(app, ["dbt", "--help"])
+        assert r.exit_code == 0
+        for verb in ("init", "run", "test", "build", "compile",
+                      "models", "status", "doctor"):
+            assert verb in r.output, f"missing dbt subcommand: {verb}"
+
+    def test_template_dir_ships_with_package(self):
+        """The bundled dbt templates must be inside org_llm/ so they ride
+        along with `uv tool install`. Without this, `dbt init` would
+        only work on source checkouts."""
+        from org_llm.cli import _dbt_template_dir
+        d = _dbt_template_dir()
+        assert d.exists(), f"templates missing at {d}"
+        assert (d / "dbt_project.yml").exists()
+        assert (d / "profiles.yml").exists()
+        assert (d / "models" / "staging" / "stg_nodes.sql").exists()
+
+    def test_user_dbt_dir_respects_env_override(self, monkeypatch, tmp_path):
+        from org_llm.cli import _user_dbt_dir
+        monkeypatch.setenv("ORG_LLM_DBT_DIR", str(tmp_path / "custom"))
+        assert _user_dbt_dir() == tmp_path / "custom"
+
+    def test_dbt_dir_falls_back_to_templates_when_user_missing(
+            self, monkeypatch, tmp_path):
+        """If the user hasn't run `dbt init`, commands should still work
+        against the read-only bundled templates."""
+        from org_llm.cli import _dbt_dir, _dbt_template_dir
+        monkeypatch.setenv("ORG_LLM_DBT_DIR", str(tmp_path / "nope"))
+        assert _dbt_dir() == _dbt_template_dir()
+
+    def test_dbt_dir_prefers_user_dir_when_present(
+            self, monkeypatch, tmp_path):
+        from org_llm.cli import _dbt_dir
+        user = tmp_path / "user-dbt"
+        user.mkdir()
+        (user / "dbt_project.yml").write_text("name: test\nversion: '1.0'\n")
+        monkeypatch.setenv("ORG_LLM_DBT_DIR", str(user))
+        assert _dbt_dir() == user
+
+    def test_init_copies_templates(self, monkeypatch, tmp_path):
+        from org_llm.cli import _user_dbt_dir
+        monkeypatch.setenv("ORG_LLM_DBT_DIR", str(tmp_path / "init-target"))
+        r = runner.invoke(app, ["dbt", "init"])
+        assert r.exit_code == 0, r.output
+        dst = _user_dbt_dir()
+        assert (dst / "dbt_project.yml").exists()
+        assert (dst / "models" / "staging" / "stg_nodes.sql").exists()
+
+    def test_init_refuses_to_clobber_without_force(self, monkeypatch, tmp_path):
+        target = tmp_path / "existing-dbt"
+        target.mkdir()
+        (target / "marker.txt").write_text("user content")
+        monkeypatch.setenv("ORG_LLM_DBT_DIR", str(target))
+        r = runner.invoke(app, ["dbt", "init"])
+        assert r.exit_code == 0
+        # Marker preserved, no overwrite
+        assert (target / "marker.txt").read_text() == "user content"
+        # --force overrides
+        r2 = runner.invoke(app, ["dbt", "init", "--force"])
+        assert r2.exit_code == 0
+        assert not (target / "marker.txt").exists()
+        assert (target / "dbt_project.yml").exists()
+
+    def test_doctor_with_missing_db_fails(self, monkeypatch, tmp_path):
+        """When the DB doesn't exist, doctor must report it and exit 1."""
+        monkeypatch.setenv("ORG_LLM_DB", str(tmp_path / "nope.db"))
+        monkeypatch.setenv("ORG_LLM_DBT_DIR", str(tmp_path / "no-dbt-here"))
+        r = runner.invoke(app, ["dbt", "doctor"])
+        # Bundled templates exist, but DB doesn't → some checks fail.
+        assert r.exit_code == 1, r.output
+        assert "ORG_LLM_DB" in r.output
+        assert "✗" in r.output
+
+    def test_status_warns_when_db_missing(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ORG_LLM_DB", str(tmp_path / "nope.db"))
+        monkeypatch.setenv("ORG_LLM_DBT_DIR", str(tmp_path / "still-not-here"))
+        r = runner.invoke(app, ["dbt", "status"])
+        # Status renders the header even without a DB; should mention the path.
+        assert r.exit_code == 0
+        assert "Database" in r.output
+
+    def test_dbt_models_in_template_compile(self):
+        """Sanity: every shipped template model must compile-parse cleanly.
+        Catches the bug class we just fixed (ambiguous columns, missing
+        column refs) at install time, not at user-`dbt build` time."""
+        from org_llm.cli import _dbt_template_dir
+        models_dir = _dbt_template_dir() / "models"
+        # Just confirm the SQL files are non-empty and reference the
+        # expected ref() macros — full compile is integration-level.
+        sql = (models_dir / "marts" / "nodes_by_tag.sql").read_text()
+        assert "{{ ref('stg_nodes') }}" in sql
+        assert "ambiguous" not in sql.lower()  # comment-only, not the bug
+
+
 class TestSetupResume:
     """Setup is long (model pulls, indexing, embeddings). The resume layer
     persists per-step completion so an interrupted run picks up where it

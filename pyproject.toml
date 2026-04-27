@@ -22,6 +22,15 @@ org-llm = "org_llm.cli:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# Ship the bundled dbt templates with the wheel so `uv tool install
+# org-llm` users can `org-llm dbt init` immediately. The starter project
+# lives at org_llm/dbt_templates/ and is copied to ~/.local/share/org-llm/dbt/
+# on init for in-place editing.
+[tool.hatch.build.targets.wheel]
+packages = ["org_llm"]
+include = ["org_llm/dbt_templates/**/*.sql",
+           "org_llm/dbt_templates/**/*.yml"]
+
 [dependency-groups]
 dev = ["pytest>=8", "pytest-cov"]
 

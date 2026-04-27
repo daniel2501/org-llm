@@ -1,10 +1,15 @@
--- [[file:../../../../../org/20260425230731-org_llm.org::*stg_nodes.sql][stg_nodes.sql:1]]
+-- stg_nodes — clean nodes view layered over the raw indexer table.
+--
+-- Exposes both tag buckets so downstream marts can choose: the merged
+-- set (most natural for tag analytics) or just one bucket (e.g. when
+-- reasoning about LLM-vs-human provenance).
 select
     n.id,
     n.node_id,
     n.title,
     n.body,
     n.tags,
+    n.auto_tags,
     n.mtime,
     f.path                                    as file_path,
     trim(replace(f.path, (
@@ -17,4 +22,3 @@ select
     end                                       as has_embedding
 from nodes n
 join files f on f.id = n.file_id
--- stg_nodes.sql:1 ends here
