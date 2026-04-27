@@ -26,20 +26,97 @@ def from_blob(blob: bytes) -> list[float]:
     return list(struct.unpack(f"{n}f", blob))
 
 
+def _extract_title_phrases(query: str) -> list[str]:
+    """Pull candidate phrases from a free-text query that might exactly
+    match a note title.
+
+    Heuristics, in order of specificity:
+      - Quoted runs ('...' or "...")
+      - Capitalised multi-word runs (`Sun Microsystems`)
+      - Stop-word-stripped query — remove leading WH-/auxiliary words
+        AND trailing verb-words like "say", "do", "says". What's left
+        tends to be the noun phrase the user actually means.
+      - Length-2..N substrings of the cleaned query
+
+    The caller checks each phrase as a case-insensitive substring of
+    candidate titles. False positives are cheap (just a small ranking
+    bonus); missing the right phrase costs precision.
+    """
+    import re as _re
+
+    LEADING = (
+        r"what|why|how|where|when|which|who|tell|show|summari[sz]e|"
+        r"explain|find|give|list|describe|can you|please|do(?:es)?|"
+        r"is|are|was|were|the|a|an"
+    )
+    TRAILING = (
+        r"say|says|said|do|does|did|mean|means|is about|are about|"
+        r"contain|contains|cover|covers"
+    )
+
+    phrases: list[str] = []
+    seen: set[str] = set()
+
+    def _push(p: str):
+        p = p.strip(" ?.!,'\"")
+        if not p or len(p) < 4:
+            return
+        key = p.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        phrases.append(p)
+
+    # Quoted strings
+    for m in _re.finditer(r"['\"]([^'\"]{3,80})['\"]", query):
+        _push(m.group(1))
+
+    # Capitalised multi-word runs
+    for m in _re.finditer(r"\b((?:[A-Z][a-zA-Z0-9]+\s+){1,5}[A-Za-z0-9]+)\b",
+                           query):
+        _push(m.group(1).strip())
+
+    # Stop-word-stripped query: drop leading interrogatives + trailing verbs
+    cleaned = _re.sub(rf"^\s*(?:{LEADING})\b\s*", "", query, flags=_re.I)
+    cleaned = _re.sub(rf"\s+(?:{TRAILING})\b\s*[.?!,]?\s*$", "",
+                       cleaned, flags=_re.I)
+    cleaned = cleaned.strip(" ?.!,'\"")
+    if cleaned and 2 <= len(cleaned.split()) <= 8 and len(cleaned) <= 80:
+        _push(cleaned)
+        # Also push contiguous N-grams of length 2..min(5, words) of the
+        # cleaned query so partial matches still surface relevant titles.
+        words = cleaned.split()
+        max_n = min(5, len(words))
+        for n in range(max_n, 1, -1):
+            for i in range(0, len(words) - n + 1):
+                _push(" ".join(words[i:i + n]))
+
+    return phrases
+
+
 def vector_search(
     session: Session,
     query_vec: list[float],
     limit: int = 10,
     since_mtime: float | None = None,
+    query_text: str = "",
 ) -> list[SearchResult]:
-    """Cosine-distance vector search. Optional mtime filter for temporal queries.
+    """Cosine-distance vector search with title-substring boost.
 
-    `since_mtime` is a unix timestamp; rows whose `nodes.mtime` predates it
-    are excluded. Use this to constrain "last week" / "last 30 days" queries.
+    Pulls 4× the requested limit from raw cosine ranking, then if any
+    rows have titles containing a phrase from `query_text`, those move
+    to the front. Truncates to `limit`.
+
+    Without this boost, when the corpus has many short-titled notes
+    sharing a token (e.g. 12 nodes titled "dbt"), exact-phrase matches
+    like "dbt Layer Design" get buried under cosine-similar duplicates.
+
+    `since_mtime` is a unix timestamp; rows whose `nodes.mtime` predates
+    it are excluded. Use this to constrain "last week" queries.
     """
     blob = to_blob(query_vec)
     where = "WHERE n.embedding IS NOT NULL"
-    params: dict = {"qvec": blob, "lim": limit}
+    params: dict = {"qvec": blob, "lim": max(limit * 4, limit + 16)}
     if since_mtime is not None:
         where += " AND n.mtime >= :since"
         params["since"] = float(since_mtime)
@@ -57,7 +134,162 @@ def vector_search(
         ORDER BY score ASC
         LIMIT :lim
     """), params).fetchall()
-    return [SearchResult(*r) for r in rows]
+    results = [SearchResult(*r) for r in rows]
+
+    # Direct title-phrase query — guarantees any title containing a query
+    # phrase is in the candidate pool, even if cosine pushed it past the
+    # limit cap. Without this, "dbt Layer Design" can be invisible behind
+    # 30 cosine-similar nodes titled just "dbt".
+    if query_text:
+        phrases = _extract_title_phrases(query_text)
+        if phrases:
+            seen_ids = {(r.node_id, r.title, r.file_path) for r in results}
+            mtime_clause = ""
+            phrase_params: dict = {}
+            if since_mtime is not None:
+                mtime_clause = "AND n.mtime >= :since"
+                phrase_params["since"] = float(since_mtime)
+            for i, p in enumerate(phrases):
+                phrase_params[f"p{i}"] = f"%{p}%"
+                phrase_rows = session.execute(text(f"""
+                    SELECT n.node_id, n.title, n.body, n.tags, f.path,
+                           1.0 AS score
+                    FROM nodes n
+                    JOIN files f ON f.id = n.file_id
+                    WHERE LOWER(n.title) LIKE LOWER(:p{i})
+                    {mtime_clause}
+                    LIMIT 8
+                """), phrase_params).fetchall()
+                for row in phrase_rows:
+                    sr = SearchResult(*row)
+                    key = (sr.node_id, sr.title, sr.file_path)
+                    if key not in seen_ids:
+                        results.append(sr)
+                        seen_ids.add(key)
+
+        results = _apply_signal_boosts(results, query_text)
+    return results[:limit]
+
+
+# ── Signal boosts: things vector-similarity alone misses ──────────────────
+#
+# Pure cosine on the body+title can drown out specific signals when the
+# corpus has many short-titled notes sharing a frequent token. Each boost
+# is a SUBTRACTION from the raw distance (lower is better in cosine).
+# The user-visible effect: notes whose title/path/tags directly match the
+# query move to the front, stale notes drop unless asked-for, etc.
+
+import re as _re_module
+
+
+def _extract_query_words(query: str) -> set[str]:
+    """Lowercase content-bearing word set from a query, for title overlap."""
+    stop = {"what", "why", "how", "where", "when", "which", "who",
+            "the", "a", "an", "is", "are", "was", "were", "be", "been",
+            "do", "does", "did", "to", "for", "from", "of", "on",
+            "in", "and", "or", "but", "as", "by", "with", "about",
+            "tell", "show", "explain", "find", "summarise", "summarize",
+            "say", "says", "said", "give", "list", "describe", "any",
+            "this", "that", "these", "those", "i", "my", "me", "you", "your",
+            "can", "could", "would", "should", "have", "has", "had", "lately"}
+    words = _re_module.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", (query or "").lower())
+    return {w for w in words if w not in stop}
+
+
+def _extract_path_segments(query: str) -> list[str]:
+    """Pull plausible path segments — daily/journal/inbox/archive/etc.
+
+    Anything the user mentions that resembles a folder or filename gets
+    a soft boost when retrieved nodes' file_path contains it as a segment.
+    """
+    out: list[str] = []
+    for w in _re_module.findall(r"[A-Za-z][A-Za-z0-9_-]{2,}", (query or "").lower()):
+        # Heuristic: keep words ≥ 4 chars to avoid pollution. Common file
+        # names like "daily" / "inbox" / "journal" / "archive" pass.
+        if 4 <= len(w) <= 24:
+            out.append(w)
+    return out
+
+
+def _apply_signal_boosts(results: list[SearchResult],
+                           query_text: str) -> list[SearchResult]:
+    """Rerank vector results using non-semantic signals the embedding misses.
+
+    Boosts (each subtracts from distance — lower is better):
+      - Exact title match           ─ −1.0
+      - Title-substring phrase      ─ −0.5
+      - Title word-bag overlap      ─ −0.04 × (matching words; cap −0.3)
+      - File-path segment match     ─ −0.15 each (cap −0.3)
+      - Body-substring phrase       ─ −0.05
+      - Tag matches a query word    ─ −0.10 each (cap −0.2)
+
+    Penalties (positive — pushes down rank):
+      - Tagged :stale:              ─ +0.6 (unless query mentions history /
+                                      formerly / before / used to)
+      - Tagged :drift:              ─ +0.3 same condition
+      - File path under archive/    ─ +0.4 same condition
+    """
+    if not results or not query_text:
+        return results
+
+    phrases       = [p.lower() for p in _extract_title_phrases(query_text)]
+    query_words   = _extract_query_words(query_text)
+    path_segments = _extract_path_segments(query_text)
+    asks_for_history = bool(_re_module.search(
+        r"\b(history|historic|formerly|previous(?:ly)?|"
+        r"before|used\s+to|in\s+the\s+past|originally|old)\b",
+        query_text, _re_module.I))
+
+    def _score(r: SearchResult) -> float:
+        title  = (r.title or "").lower()
+        body   = (r.body  or "").lower()
+        tags   = (r.tags  or "").lower().split()
+        path   = (r.file_path or "").lower()
+
+        bonus  = 0.0
+
+        # Exact / substring phrase match in title
+        for p in phrases:
+            if title == p:
+                bonus -= 1.0
+            elif p in title:
+                bonus -= 0.5
+            elif p in body:
+                bonus -= 0.05
+
+        # Title word-bag overlap (catches "what's the layer design for dbt?"
+        # when title is "dbt Layer Design")
+        title_words = set(_re_module.findall(r"[a-z][a-z0-9_-]{2,}", title))
+        overlap = query_words & title_words
+        if overlap:
+            bonus -= min(0.3, 0.04 * len(overlap))
+
+        # Path segment match — folders / filenames the user named
+        if path_segments:
+            path_low = path
+            seg_hits = sum(1 for seg in path_segments if seg in path_low)
+            if seg_hits:
+                bonus -= min(0.3, 0.15 * seg_hits)
+
+        # Tag matches any query word
+        if query_words and tags:
+            tag_hits = sum(1 for t in tags
+                            if t in query_words or t.replace("-", "_") in query_words)
+            if tag_hits:
+                bonus -= min(0.2, 0.10 * tag_hits)
+
+        # Stale / drift / archive penalty (skipped when user wants history)
+        if not asks_for_history:
+            if "stale" in tags:
+                bonus += 0.6
+            elif "drift" in tags:
+                bonus += 0.3
+            if "/archive/" in path or path.endswith(".org_archive"):
+                bonus += 0.4
+
+        return r.score + bonus
+
+    return sorted(results, key=_score)
 
 
 def recent_nodes(

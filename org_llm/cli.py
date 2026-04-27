@@ -758,6 +758,293 @@ def init():
 
 
 @app.command()
+def setup(
+    yes:        Annotated[bool, typer.Option("--yes", "-y",
+                help="Skip confirmations; pick reasonable defaults")] = False,
+    skip_models: Annotated[bool, typer.Option("--skip-models",
+                 help="Don't pull or tune Ollama models")] = False,
+    skip_index:  Annotated[bool, typer.Option("--skip-index",
+                 help="Don't run index/embed (do it later)")] = False,
+    skip_personalize: Annotated[bool, typer.Option("--skip-personalize",
+                      help="Don't auto-create theme knobs")] = False,
+):
+    """First-run setup — chains the steps a new user needs in one command.
+
+    Runs in order, asking for confirmation at each step:
+      1. init             — create the SQLite DB
+      2. discover         — scan filesystem for org/repo/dotfiles roots
+      3. doctor           — health check; surface any concrete gaps
+      4. install (FOSS tools) — only on confirm
+      5. models --tune    — pick a hardware-fitting set
+      6. index            — scan org files
+      7. tag --apply      — LLM auto-tags untagged notes
+      8. embed            — vectorise unembedded nodes
+      9. personalize --apply — auto-create theme knobs
+     10. context build (infer durable facts from real content)
+     11. history build   — narrative summary of older + archived notes
+     12. tutor welcome   — print the welcome step
+     13. open the full tour in your editor
+
+    Pass --yes to run all steps non-interactively with reasonable
+    defaults. Each step is idempotent and safe to skip / re-run later
+    via the corresponding subcommand.
+    """
+    import importlib
+
+    def _confirm(prompt: str, default: bool = True) -> bool:
+        if yes:
+            return True
+        return typer.confirm(prompt, default=default)
+
+    console.print()
+    console.rule("[lcars1]org-llm setup — first-run walkthrough[/lcars1]")
+    console.print()
+
+    # 1. init — always safe
+    on_screen("[lcars2]Step 1/10[/lcars2] init the database")
+    init()
+    console.print()
+
+    # 2. discover
+    if _confirm("Probe the filesystem for org/repo/Emacs roots?", default=True):
+        on_screen("[lcars2]Step 2/10[/lcars2] discover")
+        try:
+            discover()
+        except Exception as e:
+            on_screen(f"[dim]discover failed: {e}[/dim]")
+        console.print()
+
+    # 3. doctor (always run — read-only)
+    on_screen("[lcars2]Step 3/10[/lcars2] doctor health check")
+    try:
+        doctor()
+    except SystemExit:
+        pass    # doctor exits even on success; not fatal here
+    except Exception as e:
+        on_screen(f"[dim]doctor failed: {e}[/dim]")
+    console.print()
+
+    # 4. install FOSS tools — only with --yes (or explicit confirm)
+    if _confirm("Install missing FOSS tools (eza, ripgrep, bat, …)?", default=False):
+        on_screen("[lcars2]Step 4/10[/lcars2] install FOSS tools")
+        try:
+            from typer.testing import CliRunner as _R
+            # Bypass the install command's prompts via --yes flag where supported
+            _R().invoke(app, ["doctor", "--install", "all"], catch_exceptions=True)
+        except Exception:
+            pass
+        console.print()
+
+    # 5. models --tune
+    if not skip_models and _confirm("Pick hardware-fitting Ollama models?", default=True):
+        on_screen("[lcars2]Step 5/10[/lcars2] models --tune --apply")
+        try:
+            from typer.testing import CliRunner as _R
+            _R().invoke(app, ["models", "--tune", "--apply"], catch_exceptions=True)
+        except Exception as e:
+            on_screen(f"[dim]models --tune failed: {e}[/dim]")
+        console.print()
+
+    # 6+7+8. index → tag → embed
+    if not skip_index and _confirm(
+            "Index, auto-tag, and embed your org notes now?", default=True):
+        on_screen("[lcars2]Step 6/11[/lcars2] index")
+        try:
+            index()
+        except SystemExit:
+            pass
+
+        # Auto-tag untagged nodes — uses fast_model. Idempotent.
+        on_screen("[lcars2]Step 7/11[/lcars2] tag --apply (LLM auto-tags untagged notes)")
+        try:
+            tag(force=False, limit=200, apply=True, dry_run=False)
+        except SystemExit:
+            pass
+        except Exception as e:
+            on_screen(f"[dim]tag failed: {e}[/dim]")
+
+        on_screen("[lcars2]Step 8/11[/lcars2] embed")
+        try:
+            embed()
+        except SystemExit:
+            pass
+        console.print()
+
+    # 9. personalize
+    if not skip_personalize and _confirm(
+            "Auto-create theme knobs from your content?", default=True):
+        on_screen("[lcars2]Step 9/11[/lcars2] personalize --apply")
+        try:
+            from typer.testing import CliRunner as _R
+            _R().invoke(app, ["personalize", "--apply"], catch_exceptions=True)
+        except Exception as e:
+            on_screen(f"[dim]personalize failed: {e}[/dim]")
+        console.print()
+
+    # Auto-write code_dirs from discover output (if not already set).
+    try:
+        from .discover import discover as _disc, suggest_code_dirs
+        from .db       import Config
+        engine = _engine()
+        with get_session(engine) as session:
+            existing = session.get(Config, "code_dirs")
+        if not existing or not (existing.value or "").strip() \
+                or existing.value == "~/repos":
+            roots = suggest_code_dirs(_disc())
+            if roots:
+                with get_session(engine) as session:
+                    row = session.get(Config, "code_dirs")
+                    new_val = ",".join(str(r) for r in roots[:4])
+                    if row:
+                        row.value = new_val
+                    else:
+                        session.add(Config(key="code_dirs", value=new_val))
+                    session.commit()
+                on_screen(f"[dim]Auto-set code_dirs → {new_val}[/dim]")
+    except Exception:
+        pass
+
+    # 10. learn initial facts from the user's content
+    if _confirm("Let the LLM read your notes and propose initial "
+                 "context facts about you?", default=True):
+        on_screen("[lcars2]Step 10/11[/lcars2] infer durable facts from real content")
+        try:
+            from . import context as _ctx
+            engine = _engine()
+            with get_session(engine) as session:
+                url = _ollama_url(session)
+                mdl = (_cfg(session, "chat_model")
+                       or _cfg(session, "fast_model")
+                       or "llama3.2")
+                try:
+                    from .llm import list_models as _lm
+                    pulled = {(m.get("name") if isinstance(m, dict) else m.name)
+                               for m in _lm(url) or []}
+                    for cand in ("llama3.2:1b", "llama3.2:3b", "llama3.2"):
+                        if any(p == cand or p.startswith(cand + ":") for p in pulled):
+                            mdl = cand; break
+                except Exception:
+                    pass
+                facts = _ctx.infer_initial_facts(session, model=mdl, base_url=url)
+            if not facts:
+                on_screen("[dim]No confident facts inferred from current content.[/dim]")
+            else:
+                on_screen("[lcars3]LLM inferred:[/lcars3]")
+                for f in facts:
+                    on_screen(f"  - {f}")
+                if _confirm(f"Add these {len(facts)} fact(s) to context?",
+                            default=True):
+                    for f in facts:
+                        _ctx.add_fact(f, source="setup-inferred")
+                    hail(f"Added {len(facts)} fact(s).")
+        except Exception as e:
+            on_screen(f"[dim]Fact inference failed: {e}[/dim]")
+        console.print()
+        # Also offer a manual fact line
+        if not yes:
+            extra = typer.prompt(
+                "Optional: add another fact in your own words "
+                "(blank to skip)",
+                default="", show_default=False).strip()
+            if extra:
+                from . import context as _ctx
+                _ctx.add_fact(extra, source="setup")
+                hail("Added.")
+
+    # 11. history narrative — LLM scans old + archived notes
+    if _confirm("Build the historical-context narrative now? "
+                 "(LLM scans old + archived notes — 1-3 minutes)",
+                 default=True):
+        on_screen("[lcars2]Step 11/12[/lcars2] history build")
+        try:
+            from . import context as _ctx
+            engine = _engine()
+            with get_session(engine) as session:
+                url = _ollama_url(session)
+                mdl = (_cfg(session, "chat_model")
+                       or _cfg(session, "fast_model")
+                       or "llama3.2")
+                try:
+                    from .llm import list_models as _lm
+                    pulled = {(m.get("name") if isinstance(m, dict) else m.name)
+                               for m in _lm(url) or []}
+                    for cand in ("llama3.2:1b", "llama3.2:3b", "llama3.2"):
+                        if any(p == cand or p.startswith(cand + ":") for p in pulled):
+                            mdl = cand; break
+                except Exception:
+                    pass
+            with get_session(engine) as session:
+                narrative = _ctx.build_history(session, model=mdl, base_url=url)
+            if narrative:
+                hail(f"History narrative built → {_ctx.history_org_path()}")
+                on_screen(f"[dim]Tangled to: {_ctx.history_tangle_path()}[/dim]")
+            else:
+                on_screen("[dim]No qualifying notes — skip for now. "
+                          "Run later: org-llm history build[/dim]")
+        except Exception as e:
+            on_screen(f"[dim]history build failed: {e}[/dim]")
+        console.print()
+
+    # 12. welcome
+    on_screen("[lcars2]Step 12/13[/lcars2] tutor welcome — your map of the rest")
+    try:
+        tutor("welcome")
+    except SystemExit:
+        pass
+    except Exception:
+        pass
+    console.print()
+
+    # 13. open the full tour. The tour file lives in `org-llm/docs/` or
+    # in the user's vault if they imported it. Try a few canonical
+    # locations and fall back to a clear instruction.
+    if _confirm("Open the full tour now? (a real org-mode tour with "
+                 "missions and exercises)", default=True):
+        on_screen("[lcars2]Step 13/13[/lcars2] open the tour")
+        candidates = [
+            Path("~/org/org-llm-tour.org").expanduser(),
+            Path(__file__).parent.parent / "docs" / "org-llm-tour.org",
+            Path(__file__).parent.parent.parent / "org-llm-tour.org",
+        ]
+        tour_path: Path | None = next(
+            (p for p in candidates if p.exists()), None)
+        if not tour_path:
+            on_screen("[dim]No tour file found in standard locations.[/dim]")
+            on_screen("[dim]Get the latest:[/dim] [bold]https://github.com/daniel2501/org-llm/blob/trunk/docs/org-llm-tour.org[/bold]")
+        else:
+            editor = os.environ.get("EDITOR", "")
+            if not editor:
+                # Try emacsclient (works for Doom users); fall back to xdg-open.
+                import shutil as _shutil
+                if _shutil.which("emacsclient"):
+                    editor = "emacsclient -c"
+                elif _shutil.which("xdg-open"):
+                    editor = "xdg-open"
+            if not editor:
+                on_screen(f"[dim]Tour at:[/dim] {tour_path}")
+                on_screen("[dim]Open it in any editor when ready.[/dim]")
+            else:
+                hail(f"Opening tour: {tour_path}")
+                import subprocess
+                try:
+                    # If editor is a multi-word command, split it
+                    parts = editor.split() + [str(tour_path)]
+                    subprocess.Popen(parts,
+                                     stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL,
+                                     start_new_session=True)
+                except Exception as e:
+                    on_screen(f"[dim]Couldn't open editor: {e}[/dim]")
+                    on_screen(f"[dim]Tour at:[/dim] {tour_path}")
+        console.print()
+
+    console.rule("[lcars1]Setup complete[/lcars1]")
+    on_screen("[dim]Next stop: [/dim][bold]org-llm ask 'your first question'[/bold]")
+    on_screen("[dim]Or:        [/dim][bold]org-llm launch[/bold] (opencode workspace)")
+    make_it_so()
+
+
+@app.command()
 def index(
     force: Annotated[bool, typer.Option("--force", "-f", help="Re-index all files")] = False,
 ):
@@ -1559,7 +1846,8 @@ def ask(
                 qvec    = embed(query, model=embed_mdl, base_url=url)
                 try:
                     results = list(vector_search(session, qvec, limit=top_k,
-                                                  since_mtime=since_mtime))
+                                                  since_mtime=since_mtime,
+                                                  query_text=query))
                 except Exception as ve:
                     # Embed-dimension mismatch: stored vectors don't match the
                     # current embed model. Auto re-embed everything once.
@@ -1580,7 +1868,8 @@ def ask(
                                             force=True, progress_cb=_t)
                             qvec = embed(query, model=embed_mdl, base_url=url)
                             results = list(vector_search(session, qvec, limit=top_k,
-                                                          since_mtime=since_mtime))
+                                                          since_mtime=since_mtime,
+                                                          query_text=query))
                         else:
                             raise
                     else:
@@ -1648,7 +1937,8 @@ def ask(
     if not results and since_mtime is not None:
         filter_relaxed = True
         with get_session(engine) as session:
-            results = vector_search(session, qvec, limit=top_k, since_mtime=None)
+            results = vector_search(session, qvec, limit=top_k, since_mtime=None,
+                                     query_text=query)
 
     if not results:
         # Try one round of auto-fix: maybe nothing has been embedded yet.
@@ -1669,7 +1959,8 @@ def ask(
                     with get_session(engine) as session:
                         qvec = embed(query, model=embed_mdl, base_url=url)
                         results = list(vector_search(session, qvec, limit=top_k,
-                                                      since_mtime=since_mtime))
+                                                      since_mtime=since_mtime,
+                                                      query_text=query))
         if not results:
             red_alert("No indexed nodes found. Tried auto-index + auto-embed; "
                       "your vault may be empty.")
@@ -7472,6 +7763,65 @@ def context_from_prompt(
         n_updated = _ctx.apply_stale_tags(session, cands, topic=topic)
     hail(f"Tagged {n_updated} node(s) as :stale:"
          + (f" + :re:{topic}:" if topic else ""))
+    make_it_so()
+
+
+@context_app.command("build")
+def context_build(
+    apply:       Annotated[bool, typer.Option("--apply", "-a",
+                 help="Append inferred facts to the context file")] = False,
+    interactive: Annotated[bool, typer.Option("--interactive", "-i",
+                 help="Review each inferred fact before adding")] = False,
+    max_facts:   Annotated[int,  typer.Option("--max", "-n",
+                 help="Cap on number of inferred facts")] = 5,
+):
+    """LLM reads your notes + projects, infers durable context facts.
+
+    Use this to bootstrap your context file from real content (run by
+    `org-llm setup` automatically, available standalone for re-building
+    later — e.g. after a major life change reshapes your vault).
+
+    Default mode (no flags) prints the inferred facts as a preview.
+    Pass --apply to register them. Pass --interactive to confirm each
+    one individually.
+    """
+    from . import context as _ctx
+    _auto_init_db_if_needed()
+    engine = _engine()
+    with get_session(engine) as session:
+        url = _ollama_url(session)
+        mdl = (_cfg(session, "chat_model")
+               or _cfg(session, "fast_model") or "llama3.2")
+        try:
+            from .llm import list_models as _lm
+            pulled = {(m.get("name") if isinstance(m, dict) else m.name)
+                       for m in _lm(url) or []}
+            for cand in ("llama3.2:1b", "llama3.2:3b", "llama3.2"):
+                if any(p == cand or p.startswith(cand + ":") for p in pulled):
+                    mdl = cand; break
+        except Exception:
+            pass
+        facts = _ctx.infer_initial_facts(session, model=mdl, base_url=url,
+                                           max_facts=max_facts)
+    if not facts:
+        red_alert("LLM didn't surface any confident durable facts.")
+        on_screen("[dim]Try after indexing more content, or use:[/dim]")
+        on_screen("[bold]org-llm context add 'fact'[/bold]")
+        raise typer.Exit(1)
+    on_screen("[lcars3]Inferred facts:[/lcars3]")
+    for f in facts:
+        on_screen(f"  - {f}")
+    if not apply and not interactive:
+        on_screen(f"\nDry-run only. Apply with: "
+                  "[bold]org-llm context build --apply[/bold]")
+        return
+    added = 0
+    for f in facts:
+        if interactive and not typer.confirm(f"Add: {f!r} ?", default=True):
+            continue
+        _ctx.add_fact(f, source="context-build")
+        added += 1
+    hail(f"Added {added} fact(s).")
     make_it_so()
 
 

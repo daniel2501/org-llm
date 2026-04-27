@@ -655,6 +655,101 @@ def count_unreviewed_stale_candidates(session) -> int:
     return len(candidates)
 
 
+_INFER_FACTS_SYSTEM = """\
+You read excerpts from a person's org-roam notes and infer SHORT,
+durable facts about them — facts that are plausibly STILL true and
+useful as long-term context for an LLM answering questions about
+their notes.
+
+Output STRICT JSON, no prose:
+
+  {"facts": [
+    "Works at Idexx as a data engineer (since 2026).",
+    "Lives in Portland, Maine.",
+    "Uses Doom Emacs and Guix; primary language is Python."
+  ]}
+
+Rules:
+  - Each fact: ONE sentence, ≤ 24 words, present tense, factual.
+  - Must be inferable from MULTIPLE excerpts — single-mention guesses
+    don't make the cut.
+  - Skip transient things (current sprint, today's mood, what they
+    ate). Aim for things that'd still be true 6 months later.
+  - Skip anything you only see hinted at — when in doubt, omit.
+  - Skip name guesses (those will be wrong half the time).
+  - Return ≤ 5 facts; return {"facts": []} when the excerpts don't
+    yield confident facts.
+"""
+
+
+def infer_initial_facts(session, *, model: str, base_url: str,
+                         max_facts: int = 5) -> list[str]:
+    """Read notes + projects, ask the LLM to infer durable facts about the user.
+
+    Used by `org-llm setup` to bootstrap the context file from real
+    content. Returns a list of fact strings; empty when the LLM can't
+    infer anything confident.
+    """
+    try:
+        from .personalize import _gather_content_evidence
+        evidence = _gather_content_evidence(session)
+    except Exception:
+        return []
+    if not evidence.get("has_signal"):
+        return []
+    titles_str = "\n".join(f"  - {t}" for t in evidence["recent_titles"][:25])
+    bodies_str = "\n\n".join(f"  {b}" for b in evidence["body_excerpts"][:12])
+    proj_str   = "\n".join(f"  - {p}" for p in evidence["project_summaries"][:6])
+
+    user_prompt = (
+        f"Recent note titles:\n{titles_str or '  (none)'}\n\n"
+        f"Body excerpts:\n{bodies_str or '  (none)'}\n\n"
+        f"Project READMEs:\n{proj_str or '  (none)'}\n\n"
+        f"Detected language: {evidence.get('preferred_lang') or '(unknown)'}\n\n"
+        f"Infer up to {max_facts} durable facts."
+    )
+
+    try:
+        from .llm import chat
+        from .ui  import thinking
+    except Exception:
+        return []
+    import json as _json, threading
+    result: dict = {"resp": ""}
+    def _run():
+        try:
+            result["resp"] = chat(user_prompt, model=model, base_url=base_url,
+                                   system=_INFER_FACTS_SYSTEM) or ""
+        except Exception:
+            pass
+    try:
+        with thinking("Inferring durable facts", model=model):
+            t = threading.Thread(target=_run, daemon=True)
+            t.start(); t.join(timeout=90.0)
+    except Exception:
+        t = threading.Thread(target=_run, daemon=True)
+        t.start(); t.join(timeout=90.0)
+    if t.is_alive():
+        return []
+    raw = (result["resp"] or "").strip()
+    if raw.startswith("```"):
+        raw = "\n".join(raw.splitlines()[1:])
+        if raw.endswith("```"):
+            raw = raw[:-3]
+    try:
+        plan = _json.loads(raw.strip())
+    except Exception:
+        return []
+    facts = plan.get("facts") if isinstance(plan, dict) else None
+    if not isinstance(facts, list):
+        return []
+    out: list[str] = []
+    for f in facts[:max_facts]:
+        if isinstance(f, str) and 4 <= len(f) <= 240:
+            out.append(f.strip())
+    return out
+
+
 _HISTORY_NARRATIVE_SYSTEM = """\
 You write a SHORT historical narrative summary of a person's older notes
 for use as background context in a knowledge-base RAG system. The notes
