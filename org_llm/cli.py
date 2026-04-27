@@ -943,6 +943,52 @@ def init():
     make_it_so()
 
 
+_SETUP_STATE_PATH = Path("~/.local/share/org-llm/setup.state.json").expanduser()
+
+
+def _load_setup_state() -> dict:
+    """Read the resume-state file or return an empty skeleton.
+
+    Schema is intentionally tiny so future setup-version bumps can
+    invalidate stale state by checking `version` without complicated
+    migration logic.
+    """
+    import json
+    if not _SETUP_STATE_PATH.exists():
+        return {}
+    try:
+        data = json.loads(_SETUP_STATE_PATH.read_text())
+        if not isinstance(data, dict):
+            return {}
+        if data.get("version") != 1:
+            return {}                  # future bump → ignore stale state
+        return data
+    except Exception:
+        return {}
+
+
+def _save_setup_state(state: dict) -> None:
+    """Atomically rewrite the state file. Called after each step so an
+    interrupt mid-step still leaves the previous step's completion durable.
+    Failures are swallowed — instrumentation must never break setup."""
+    import json
+    try:
+        _SETUP_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _SETUP_STATE_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(state, indent=2, sort_keys=True))
+        tmp.replace(_SETUP_STATE_PATH)
+    except Exception:
+        pass
+
+
+def _clear_setup_state() -> None:
+    """Remove the state file — called once setup completes cleanly."""
+    try:
+        _SETUP_STATE_PATH.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 @app.command(rich_help_panel="Onboarding")
 def setup(
     yes:        Annotated[bool, typer.Option("--yes", "-y",
@@ -953,6 +999,9 @@ def setup(
                  help="Don't run index/embed (do it later)")] = False,
     skip_personalize: Annotated[bool, typer.Option("--skip-personalize",
                       help="Don't auto-create theme knobs")] = False,
+    restart:    Annotated[bool, typer.Option("--restart",
+                help="Discard any saved progress and run every step from "
+                     "scratch. Default: resume after the last completed step.")] = False,
 ):
     """First-run setup — chains the steps a new user needs in one command.
 
@@ -1008,6 +1057,51 @@ def setup(
                       "Re-run [bold]org-llm setup[/bold] to resume.[/yellow]")
             raise typer.Exit(130)
 
+    # ── Resume state ──────────────────────────────────────────────────────────
+    # Setup is long (model pulls, indexing, embedding can take many
+    # minutes). After every step finishes we persist a tiny JSON file so
+    # an interrupted run picks up where it left off on the next invocation.
+    # `--restart` discards that and runs everything fresh.
+    state = {} if restart else _load_setup_state()
+    done_set: set[str] = set(state.get("completed_steps", []))
+    if restart:
+        _clear_setup_state()
+    if done_set and not restart:
+        already = ", ".join(done_set) if len(done_set) <= 6 \
+                    else f"{len(done_set)} steps"
+        on_screen(f"[lcars3]Resuming setup — already done:[/lcars3] {already}")
+        if not yes:
+            try:
+                if not typer.confirm("Resume from where you left off?",
+                                       default=True):
+                    done_set.clear()
+                    _clear_setup_state()
+                    on_screen("[dim]Restarting from scratch.[/dim]")
+            except (KeyboardInterrupt, EOFError):
+                console.print()
+                on_screen("[yellow]Setup interrupted — state preserved. "
+                          "Re-run [bold]org-llm setup[/bold] to resume.[/yellow]")
+                raise typer.Exit(130)
+        console.print()
+
+    def _begin_step(step_id: str, banner: str, description: str) -> bool:
+        """Print the step banner if not already done. Returns True when the
+        caller should run the step body, False when it's been completed
+        previously (in which case the caller skips the body)."""
+        if step_id in done_set:
+            on_screen(f"[dim]✓ Step {banner}: {description} "
+                      f"(already done — skipping)[/dim]")
+            return False
+        on_screen(f"[lcars2]Step {banner}[/lcars2] {description}")
+        return True
+
+    def _mark_step_done(step_id: str) -> None:
+        done_set.add(step_id)
+        _save_setup_state({
+            "version": 1,
+            "completed_steps": sorted(done_set),
+        })
+
     console.print()
     console.rule("[lcars1]org-llm setup — first-run walkthrough[/lcars1]")
     console.print()
@@ -1037,62 +1131,72 @@ def setup(
         pass
 
     # 1. init — always safe
-    on_screen("[lcars2]Step 1/15[/lcars2] init the database")
-    init()
+    if _begin_step("init", "1/15", "init the database"):
+        init()
+        _mark_step_done("init")
     console.print()
 
     # 2. install-tools (Ollama + opencode + …) — closing the gap where
     # setup previously assumed Ollama was already installed. Idempotent:
     # the install-tools command itself skips anything already present,
     # but we offer the prompt so a sandboxed user can opt out.
-    import shutil as _shutil
-    have_ollama   = bool(_shutil.which("ollama"))
-    have_opencode = bool(_shutil.which("opencode"))
-    if have_ollama and have_opencode:
-        on_screen("[dim]Ollama + opencode already installed — skipping step 2.[/dim]")
+    if "install-tools" in done_set:
+        on_screen("[dim]✓ Step 2/15: install-tools "
+                  "(already done — skipping)[/dim]")
         console.print()
     else:
-        missing_core = []
-        if not have_ollama:   missing_core.append("Ollama")
-        if not have_opencode: missing_core.append("opencode")
-        prompt2 = (f"Install core binaries ({', '.join(missing_core)})? "
-                   f"[runs `org-llm install-tools` — pulls models, takes minutes]")
-        if _confirm(prompt2, default=True):
-            on_screen("[lcars2]Step 2/15[/lcars2] install-tools "
-                      "[dim](Ollama + models + opencode — output streams below)[/dim]")
-            try:
-                # Stall-watching subprocess: streams output as it arrives
-                # AND watches for >120s of silence, at which point the LLM
-                # diagnoses whether it's stuck and offers to kill or keep
-                # waiting. Skip fonts/gh/claude/pass by default.
-                _run_with_stall_watch(
-                    ["org-llm", "install-tools",
-                     "--skip-fonts", "--skip-gh",
-                     "--skip-claude", "--skip-pass"],
-                    stall_secs=120.0,
-                    label="install-tools (Ollama, models, opencode)",
-                )
-            except Exception as e:
-                on_screen(f"[dim]install-tools failed: {e}[/dim]")
+        import shutil as _shutil
+        have_ollama   = bool(_shutil.which("ollama"))
+        have_opencode = bool(_shutil.which("opencode"))
+        if have_ollama and have_opencode:
+            on_screen("[dim]Ollama + opencode already installed — skipping step 2.[/dim]")
+            _mark_step_done("install-tools")
             console.print()
+        else:
+            missing_core = []
+            if not have_ollama:   missing_core.append("Ollama")
+            if not have_opencode: missing_core.append("opencode")
+            prompt2 = (f"Install core binaries ({', '.join(missing_core)})? "
+                       f"[runs `org-llm install-tools` — pulls models, takes minutes]")
+            if _confirm(prompt2, default=True):
+                on_screen("[lcars2]Step 2/15[/lcars2] install-tools "
+                          "[dim](Ollama + models + opencode — output streams below)[/dim]")
+                try:
+                    _run_with_stall_watch(
+                        ["org-llm", "install-tools",
+                         "--skip-fonts", "--skip-gh",
+                         "--skip-claude", "--skip-pass"],
+                        stall_secs=120.0,
+                        label="install-tools (Ollama, models, opencode)",
+                    )
+                    _mark_step_done("install-tools")
+                except Exception as e:
+                    on_screen(f"[dim]install-tools failed: {e}[/dim]")
+                console.print()
 
     # 3. discover
-    if _confirm("Probe the filesystem for org/repo/Emacs roots?", default=True):
+    if "discover" in done_set:
+        on_screen("[dim]✓ Step 3/15: discover (already done — skipping)[/dim]")
+        console.print()
+    elif _confirm("Probe the filesystem for org/repo/Emacs roots?", default=True):
         on_screen("[lcars2]Step 3/15[/lcars2] discover")
         try:
             discover()
+            _mark_step_done("discover")
         except Exception as e:
             on_screen(f"[dim]discover failed: {e}[/dim]")
         console.print()
 
-    # 4. doctor (always run — read-only)
-    on_screen("[lcars2]Step 4/15[/lcars2] doctor health check")
-    try:
-        doctor()
-    except SystemExit:
-        pass    # doctor exits even on success; not fatal here
-    except Exception as e:
-        on_screen(f"[dim]doctor failed: {e}[/dim]")
+    # 4. doctor — read-only health check; cheap to re-run, but resume still
+    # honors it so transcripts on re-runs stay short.
+    if _begin_step("doctor", "4/15", "doctor health check"):
+        try:
+            doctor()
+        except SystemExit:
+            pass    # doctor exits even on success; not fatal here
+        except Exception as e:
+            on_screen(f"[dim]doctor failed: {e}[/dim]")
+        _mark_step_done("doctor")
     console.print()
 
     # 4. install FOSS tools — show what's already there + what's missing
@@ -1120,8 +1224,13 @@ def setup(
         install_q += f" ({len(missing)} missing — {examples}{more})?"
     elif missing is None:
         install_q += " (eza, ripgrep, bat, …)?"
-    if missing == [] :
-        on_screen("[dim]All FOSS tools already installed — skipping step 4.[/dim]")
+    if "foss-tools" in done_set:
+        on_screen("[dim]✓ Step 5/15: install FOSS tools "
+                  "(already done — skipping)[/dim]")
+        console.print()
+    elif missing == [] :
+        on_screen("[dim]All FOSS tools already installed — skipping step 5.[/dim]")
+        _mark_step_done("foss-tools")
         console.print()
     elif _confirm(install_q, default=False):
         on_screen("[lcars2]Step 5/15[/lcars2] install FOSS tools "
@@ -1132,12 +1241,16 @@ def setup(
                 stall_secs=180.0,    # PM installs can be slow on cold caches
                 label="FOSS tool install (bat / ripgrep / …)",
             )
+            _mark_step_done("foss-tools")
         except Exception as e:
             on_screen(f"[dim]install failed: {e}[/dim]")
         console.print()
 
     # 5. models --tune  — data-driven prompt
-    if not skip_models:
+    if not skip_models and "models-tune" in done_set:
+        on_screen("[dim]✓ Step 6/15: models --tune (already done — skipping)[/dim]")
+        console.print()
+    elif not skip_models:
         try:
             from .cloud import local_ram_gb, local_vram_gb
             ram  = local_ram_gb()
@@ -1162,6 +1275,7 @@ def setup(
                     stall_secs=180.0,    # ollama pulls can pause briefly
                     label="models --tune --apply",
                 )
+                _mark_step_done("models-tune")
             except Exception as e:
                 on_screen(f"[dim]models --tune failed: {e}[/dim]")
             console.print()
@@ -1185,35 +1299,49 @@ def setup(
                  f"{n_untagged} untagged node(s))")
     except Exception:
         idx_q = "Index and auto-tag your org notes now?"
-    if not skip_index and _confirm(idx_q, default=True):
-        on_screen("[lcars2]Step 7/15[/lcars2] index")
-        try:
-            index()    # has its own warp spinner
-        except SystemExit:
-            pass
+    if not skip_index and ("index" in done_set and "tag" in done_set):
+        on_screen("[dim]✓ Steps 7-8/15: index + tag "
+                  "(already done — skipping)[/dim]")
+        console.print()
+    elif not skip_index and _confirm(idx_q, default=True):
+        if "index" in done_set:
+            on_screen("[dim]✓ Step 7/15: index (already done — skipping)[/dim]")
+        else:
+            on_screen("[lcars2]Step 7/15[/lcars2] index")
+            try:
+                index()    # has its own warp spinner
+                _mark_step_done("index")
+            except SystemExit:
+                _mark_step_done("index")  # SystemExit on success path
 
         # Auto-tag untagged nodes — uses fast_model. Has its own impulse
         # progress bar (one tick per node).
-        on_screen("[lcars2]Step 8/15[/lcars2] tag --apply (LLM auto-tags untagged notes)")
-        try:
-            tag(force=False, limit=200, apply=True, dry_run=False)
-        except SystemExit:
-            pass
-        except Exception as e:
-            on_screen(f"[dim]tag failed: {e}[/dim]")
+        if "tag" in done_set:
+            on_screen("[dim]✓ Step 8/15: tag (already done — skipping)[/dim]")
+        else:
+            on_screen("[lcars2]Step 8/15[/lcars2] tag --apply (LLM auto-tags untagged notes)")
+            try:
+                tag(force=False, limit=200, apply=True, dry_run=False)
+                _mark_step_done("tag")
+            except SystemExit:
+                _mark_step_done("tag")
+            except Exception as e:
+                on_screen(f"[dim]tag failed: {e}[/dim]")
         console.print()
 
     # 8. embed — UNCONDITIONAL. Idempotent: only embeds nodes that don't
-    # have a vector yet. If everything's embedded already, the inner check
-    # short-circuits cheap. We're not asking — silent partial-embeddings
-    # ("96% embedded; run: org-llm embed") are exactly the friction setup
-    # is meant to prevent.
-    if not skip_index:
+    # have a vector yet. We don't ask — partial embeddings are exactly the
+    # friction setup is meant to prevent.
+    if not skip_index and "embed" in done_set:
+        on_screen("[dim]✓ Step 9/15: embed (already done — skipping)[/dim]")
+        console.print()
+    elif not skip_index:
         on_screen("[lcars2]Step 9/15[/lcars2] embed (auto — fills any gaps)")
         try:
             embed()    # has its own impulse progress bar
+            _mark_step_done("embed")
         except SystemExit:
-            pass
+            _mark_step_done("embed")
         except Exception as e:
             on_screen(f"[dim]embed failed: {e}[/dim]")
         console.print()
@@ -1228,14 +1356,18 @@ def setup(
                 f"({n_nodes_now} note(s) for the LLM to draw inspiration from)")
     except Exception:
         pz_q = "Auto-create theme knobs from your content?"
-    if not skip_personalize and _confirm(pz_q, default=True):
+    if not skip_personalize and "personalize" in done_set:
+        on_screen("[dim]✓ Step 10/15: personalize (already done — skipping)[/dim]")
+        console.print()
+    elif not skip_personalize and _confirm(pz_q, default=True):
         on_screen("[lcars2]Step 10/15[/lcars2] personalize --apply "
                   "[dim](LLM synthesises themes — may take 30-90s)[/dim]")
         try:
             personalize(apply=True, no_llm=False, max_themes=5,
                          overwrite=False)
+            _mark_step_done("personalize")
         except SystemExit:
-            pass
+            _mark_step_done("personalize")
         except Exception as e:
             on_screen(f"[dim]personalize failed: {e}[/dim]")
         console.print()
@@ -1264,7 +1396,10 @@ def setup(
         pass
 
     # 10. learn initial facts from the user's content
-    if _confirm("Let the LLM read your notes and propose initial "
+    if "infer-facts" in done_set:
+        on_screen("[dim]✓ Step 10/11: infer-facts (already done — skipping)[/dim]")
+        console.print()
+    elif _confirm("Let the LLM read your notes and propose initial "
                  "context facts about you?", default=True):
         on_screen("[lcars2]Step 10/11[/lcars2] infer durable facts from real content")
         try:
@@ -1296,6 +1431,7 @@ def setup(
                     for f in facts:
                         _ctx.add_fact(f, source="setup-inferred")
                     hail(f"Added {len(facts)} fact(s).")
+            _mark_step_done("infer-facts")
         except Exception as e:
             on_screen(f"[dim]Fact inference failed: {e}[/dim]")
         console.print()
@@ -1311,7 +1447,10 @@ def setup(
     # 11.5. Interview the user — LLM reads their notes, picks 3-4
     # ambiguities, asks clarifying questions. Each answer becomes a
     # context fact. Optional but enabled by default — short process.
-    if _confirm("Quick interview? The LLM will look for ambiguities in "
+    if "interview" in done_set:
+        on_screen("[dim]✓ Step 12/15: interview (already done — skipping)[/dim]")
+        console.print()
+    elif _confirm("Quick interview? The LLM will look for ambiguities in "
                  "your notes (job changes, project status, …) and ask "
                  "you 3-4 clarifying questions",
                  default=True):
@@ -1358,6 +1497,7 @@ def setup(
                     added += 1
                 if added:
                     hail(f"Added {added} interview-driven fact(s).")
+            _mark_step_done("interview")
         except Exception as e:
             on_screen(f"[dim]Interview failed: {e}[/dim]")
         console.print()
@@ -1382,7 +1522,10 @@ def setup(
     except Exception:
         hist_q = ("Build the historical-context narrative now? "
                    "(LLM scans old + archived notes — 1-3 minutes)")
-    if _confirm(hist_q, default=True):
+    if "history-build" in done_set:
+        on_screen("[dim]✓ Step 11/12: history build (already done — skipping)[/dim]")
+        console.print()
+    elif _confirm(hist_q, default=True):
         on_screen("[lcars2]Step 11/12[/lcars2] history build")
         try:
             from . import context as _ctx
@@ -1409,25 +1552,30 @@ def setup(
             else:
                 on_screen("[dim]No qualifying notes — skip for now. "
                           "Run later: org-llm history build[/dim]")
+            _mark_step_done("history-build")
         except Exception as e:
             on_screen(f"[dim]history build failed: {e}[/dim]")
         console.print()
 
     # 12. welcome
-    on_screen("[lcars2]Step 13/15[/lcars2] tutor welcome — your map of the rest")
-    try:
-        tutor("welcome")
-    except SystemExit:
-        pass
-    except Exception:
-        pass
+    if _begin_step("tutor-welcome", "13/15", "tutor welcome — your map of the rest"):
+        try:
+            tutor("welcome")
+        except SystemExit:
+            pass
+        except Exception:
+            pass
+        _mark_step_done("tutor-welcome")
     console.print()
 
     # 13. open the full tour. Locate it from canonical paths; if it lives
     # in the package's docs/ but not in the user's vault, COPY it to
     # ~/org/org-llm-tour.org so it's visible to `index` and findable next
     # time without filesystem-walk magic.
-    if _confirm("Open the full tour now? (a real org-mode tour with "
+    if "tour" in done_set:
+        on_screen("[dim]✓ Step 14/15: open the tour (already done — skipping)[/dim]")
+        console.print()
+    elif _confirm("Open the full tour now? (a real org-mode tour with "
                  "missions and exercises)", default=True):
         on_screen("[lcars2]Step 14/15[/lcars2] open the tour")
         engine_now = _engine()
@@ -1480,12 +1628,16 @@ def setup(
                 except Exception as e:
                     on_screen(f"[dim]Couldn't open editor: {e}[/dim]")
                     on_screen(f"[dim]Tour at:[/dim] {tour_path}")
+        _mark_step_done("tour")
         console.print()
 
     # 16. (optional) opencode first-touch — explicitly NOT auto-confirmed
     # under --yes since launching opencode takes over the user's terminal.
     # Setup is headless-friendly: this step is opt-in only, and the rest
     # of setup never depends on opencode being launched.
+    # NOTE: launch is intentionally NOT marked done — it's the only step
+    # that re-running each setup run is expected (the user might want a
+    # fresh opencode session).
     if not yes and _confirm("Spin up the opencode workspace now? "
                               "(takes over the terminal until you /exit)",
                               default=False):
@@ -1500,6 +1652,9 @@ def setup(
             on_screen("[dim]Try later: [/dim][bold]org-llm launch[/bold]")
         console.print()
 
+    # Setup completed cleanly — clear the resume state so a fresh `setup`
+    # invocation doesn't pointlessly offer to "resume" a finished run.
+    _clear_setup_state()
     console.rule("[lcars1]Setup complete[/lcars1]")
 
     # LLM-generated personalized closing recommendations — feed the model

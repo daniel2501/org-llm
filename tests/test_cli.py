@@ -231,6 +231,84 @@ class TestTagProvenance:
         assert any("synthwave" in (h.tags or "") for h in hits)
 
 
+class TestSetupResume:
+    """Setup is long (model pulls, indexing, embeddings). The resume layer
+    persists per-step completion so an interrupted run picks up where it
+    left off. These tests exercise the state-file machinery directly."""
+
+    def test_state_path_under_xdg_data(self):
+        from org_llm.cli import _SETUP_STATE_PATH
+        # Should land somewhere under ~/.local/share/org-llm/.
+        assert "org-llm" in str(_SETUP_STATE_PATH)
+        assert _SETUP_STATE_PATH.suffix == ".json"
+
+    def test_load_returns_empty_when_file_missing(self, tmp_path, monkeypatch):
+        from org_llm import cli as _cli
+        monkeypatch.setattr(_cli, "_SETUP_STATE_PATH",
+                              tmp_path / "missing.json")
+        assert _cli._load_setup_state() == {}
+
+    def test_save_then_load_roundtrip(self, tmp_path, monkeypatch):
+        from org_llm import cli as _cli
+        path = tmp_path / "setup.state.json"
+        monkeypatch.setattr(_cli, "_SETUP_STATE_PATH", path)
+        _cli._save_setup_state({"version": 1,
+                                  "completed_steps": ["init", "embed"]})
+        assert path.exists()
+        state = _cli._load_setup_state()
+        assert state["version"] == 1
+        assert state["completed_steps"] == ["init", "embed"]
+
+    def test_clear_removes_file(self, tmp_path, monkeypatch):
+        from org_llm import cli as _cli
+        path = tmp_path / "setup.state.json"
+        monkeypatch.setattr(_cli, "_SETUP_STATE_PATH", path)
+        path.write_text('{"version": 1, "completed_steps": []}')
+        _cli._clear_setup_state()
+        assert not path.exists()
+
+    def test_load_ignores_unknown_version(self, tmp_path, monkeypatch):
+        """Future setup-version bumps should invalidate stale state files
+        so we never resume against a rearranged step list."""
+        import json
+        from org_llm import cli as _cli
+        path = tmp_path / "setup.state.json"
+        monkeypatch.setattr(_cli, "_SETUP_STATE_PATH", path)
+        path.write_text(json.dumps({"version": 99,
+                                      "completed_steps": ["init"]}))
+        assert _cli._load_setup_state() == {}
+
+    def test_load_ignores_corrupt_json(self, tmp_path, monkeypatch):
+        from org_llm import cli as _cli
+        path = tmp_path / "setup.state.json"
+        monkeypatch.setattr(_cli, "_SETUP_STATE_PATH", path)
+        path.write_text("not valid json {{{")
+        assert _cli._load_setup_state() == {}
+
+    def test_save_atomic_via_tmp(self, tmp_path, monkeypatch):
+        """A crash mid-write must leave the previous good file intact —
+        we write to a .tmp sibling and rename atomically."""
+        from org_llm import cli as _cli
+        path = tmp_path / "setup.state.json"
+        monkeypatch.setattr(_cli, "_SETUP_STATE_PATH", path)
+        # First successful write
+        _cli._save_setup_state({"version": 1, "completed_steps": ["init"]})
+        original = path.read_text()
+        # Now simulate a crash by raising mid-write — the helper swallows
+        # so the existing file should be untouched.
+        def boom(*a, **kw):
+            raise RuntimeError("disk gone")
+        monkeypatch.setattr(Path, "replace", lambda self, *a, **kw: boom())
+        _cli._save_setup_state({"version": 1, "completed_steps": ["bogus"]})
+        # Original content preserved (replace never happened).
+        assert path.read_text() == original
+
+    def test_setup_help_advertises_restart_flag(self, cli_db):
+        r = runner.invoke(app, ["setup", "--help"])
+        assert r.exit_code == 0
+        assert "--restart" in r.output
+
+
 class TestHeartbeat:
     """`heartbeat()` is the on-the-fly progress utility for any blocking
     block of code — spinner ticks, elapsed time updates, slow-warning."""
