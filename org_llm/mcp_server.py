@@ -725,6 +725,12 @@ def create_mcp_server():
         _log_event("config", "set_config",
                     args=f"key={key}",
                     response=f"{old!r} → {value!r}", outcome="ok")
+        # Literate-config autosync, best-effort + silent if disabled.
+        try:
+            from . import literate_config as _lc
+            _lc.maybe_autosync()
+        except Exception:
+            pass
         return f"Updated {key}: {old!r} → {value!r}"
 
     # ── discover_filesystem ───────────────────────────────────────────────────

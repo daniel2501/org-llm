@@ -3543,8 +3543,67 @@ def performance(
 def config(
     key:   Annotated[str, typer.Argument(help="Config key")] = "",
     value: Annotated[str, typer.Argument(help="Value to set")] = "",
+    tangle: Annotated[bool, typer.Option("--tangle", "-T",
+            help="Write ~/org/org-llm-config.org from the current DB state")] = False,
+    apply_from_org: Annotated[bool, typer.Option("--apply-from-org", "-A",
+            help="Read ~/org/org-llm-config.org and apply changes to DB")] = False,
+    diff_org: Annotated[bool, typer.Option("--diff-org", "-D",
+            help="Show what would change if we applied the org file (read-only)")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", "-n",
+            help="With --apply-from-org, preview without writing")] = False,
 ):
-    """Get or set a config value. No args = show all."""
+    """Get or set a config value. No args = show all.
+
+    Literate-config mode (org-file mirror):
+      --tangle          write ~/org/org-llm-config.org from DB
+      --apply-from-org  read it back, write changes to DB
+      --diff-org        show the would-apply diff without writing
+    Round-trips every user-tweakable key. Excludes runtime state
+    (cloud_usage, user_theme_knobs, db_version).
+    """
+    if sum(1 for f in (tangle, apply_from_org, diff_org) if f) > 1:
+        red_alert("--tangle, --apply-from-org, --diff-org are mutually exclusive.")
+        raise typer.Exit(1)
+    if tangle:
+        from . import literate_config as _lc
+        p = _lc.tangle_db_to_org()
+        hail(f"Wrote literate config: {p}")
+        on_screen(f"[dim]Edit it; then:[/dim] "
+                  "[bold]org-llm config --apply-from-org[/bold]")
+        return
+    if diff_org:
+        from . import literate_config as _lc
+        diffs = _lc.diff_db_vs_org()
+        if not diffs:
+            on_screen("[lcars3]✓ DB and literate config are in sync.[/lcars3]")
+            return
+        from rich.panel import Panel as _Panel
+        tbl = Table(box=None, pad_edge=False)
+        tbl.add_column("Key",       style="lcars1")
+        tbl.add_column("Direction", width=10)
+        tbl.add_column("DB value",  style="dim")
+        tbl.add_column("Org value", style="lcars2")
+        for k, db_v, org_v, direction in diffs:
+            tbl.add_row(k, direction, db_v[:60], org_v[:60])
+        console.print()
+        console.print(_Panel(tbl, title="[lcars1]config diff (DB ↔ org)[/lcars1]",
+                              border_style="lcars2", padding=(1, 1)))
+        on_screen("[dim]Apply with:[/dim] [bold]org-llm config --apply-from-org[/bold]")
+        return
+    if apply_from_org:
+        from . import literate_config as _lc
+        n, changes = _lc.apply_org_to_db(dry_run=dry_run)
+        if not changes:
+            on_screen("[dim]No changes — DB already matches org file.[/dim]")
+            return
+        for k, old, new in changes:
+            arrow = "→" if not dry_run else "(would →)"
+            on_screen(f"  [lcars1]{k}[/lcars1]: {old!r} {arrow} {new!r}")
+        if dry_run:
+            on_screen(f"[dim]{n} change(s) — re-run without --dry-run to apply.[/dim]")
+        else:
+            hail(f"Applied {n} change(s) from {_lc.literate_path()}")
+        return
     import difflib as _dl
     from .db import Config as Cfg
     engine = _engine()
@@ -3607,6 +3666,12 @@ def config(
                 session.add(Cfg(key=key, value=value))
             session.commit()
             hail(f"{key} = {value}")
+            # Best-effort literate-config autosync — silent if disabled.
+            try:
+                from . import literate_config as _lc
+                _lc.maybe_autosync()
+            except Exception:
+                pass
             make_it_so()
 
 

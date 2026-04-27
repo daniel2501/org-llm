@@ -259,6 +259,12 @@ MODEL_DEFAULTS = {
     "auto_embed_interval_secs": "60",
     # Suppress per-batch terminal output (Captain's Log still records).
     "auto_embed_quiet":        "true",
+    # ── Literate config (org_llm/literate_config.py) ──────────────────────
+    # Re-tangle ~/org/org-llm-config.org on every set_config write. Off
+    # by default so command-line tweaks don't surprise-touch a file the
+    # user may not have created yet. Run `org-llm config --tangle` once
+    # to seed it; flip this to true to keep it auto-fresh thereafter.
+    "config_org_autosync":     "false",
 }
 
 

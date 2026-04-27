@@ -708,6 +708,132 @@ class TestProactiveDoctor:
         assert "proactive_doctor" in server._tool_manager._tools
 
 
+class TestLiterateConfig:
+    """~/org/org-llm-config.org — DB ↔ org-file round-trip mirror."""
+
+    def test_tangle_writes_file_with_known_keys(
+            self, cli_db, monkeypatch, tmp_path):
+        from org_llm import literate_config as _lc
+        monkeypatch.setenv("ORG_LLM_LITERATE_CONFIG_PATH",
+                            str(tmp_path / "cfg.org"))
+        p = _lc.tangle_db_to_org()
+        assert p.exists()
+        text = p.read_text()
+        # A few canonical keys should be in there. trek/commie/queer
+        # dial keys are absent from MODEL_DEFAULTS by design (they
+        # default-to-2 in code), so they only land in the literate
+        # file if the user has explicitly set them.
+        for key in ("chat_model", "embed_model", "ollama_url",
+                     "log_level", "doctor_proactive_mode",
+                     "auto_embed_enabled"):
+            assert f"* {key}\n" in text, f"missing heading for {key}"
+        # Excluded keys should NOT appear
+        assert "* cloud_usage" not in text
+        assert "* db_version" not in text
+
+    def test_round_trip_preserves_values(self, cli_db, monkeypatch, tmp_path):
+        from org_llm import literate_config as _lc
+        from org_llm.db import make_engine, get_session, Config
+        monkeypatch.setenv("ORG_LLM_LITERATE_CONFIG_PATH",
+                            str(tmp_path / "cfg.org"))
+        # Set a non-default value, tangle, hand-edit the org file,
+        # apply back, and confirm the DB picks up the edit.
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            row = s.get(Config, "chat_model")
+            row.value = "test-baseline"
+            s.commit()
+        _lc.tangle_db_to_org()
+        # Hand-edit the chat_model block to a new value
+        path = tmp_path / "cfg.org"
+        text = path.read_text()
+        text = text.replace(
+            "#+begin_src text :tangle "
+            f"{_lc.tangle_dir()}/chat_model\ntest-baseline\n#+end_src",
+            "#+begin_src text :tangle "
+            f"{_lc.tangle_dir()}/chat_model\nedited-by-hand\n#+end_src")
+        path.write_text(text)
+        n, changes = _lc.apply_org_to_db()
+        assert n >= 1
+        assert any(k == "chat_model" and new == "edited-by-hand"
+                    for k, _, new in changes)
+        with get_session(engine) as s:
+            assert s.get(Config, "chat_model").value == "edited-by-hand"
+
+    def test_diff_db_vs_org_reports_pending_changes(
+            self, cli_db, monkeypatch, tmp_path):
+        from org_llm import literate_config as _lc
+        from org_llm.db import make_engine, get_session, Config
+        monkeypatch.setenv("ORG_LLM_LITERATE_CONFIG_PATH",
+                            str(tmp_path / "cfg.org"))
+        _lc.tangle_db_to_org()
+        # Mutate the DB without re-tangling — diff should show the gap
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            s.get(Config, "chat_model").value = "drift-after-tangle"
+            s.commit()
+        diffs = _lc.diff_db_vs_org()
+        chat_diff = [d for d in diffs if d[0] == "chat_model"]
+        assert chat_diff, "chat_model drift should show up"
+        assert chat_diff[0][1] == "drift-after-tangle"  # db side
+        assert chat_diff[0][3] in ("differ", "db-only")
+
+    def test_dry_run_does_not_write(self, cli_db, monkeypatch, tmp_path):
+        from org_llm import literate_config as _lc
+        from org_llm.db import make_engine, get_session, Config
+        monkeypatch.setenv("ORG_LLM_LITERATE_CONFIG_PATH",
+                            str(tmp_path / "cfg.org"))
+        _lc.tangle_db_to_org()
+        path = tmp_path / "cfg.org"
+        text = path.read_text().replace(
+            "#+begin_src text :tangle "
+            f"{_lc.tangle_dir()}/chat_model\nllama3.2\n#+end_src",
+            "#+begin_src text :tangle "
+            f"{_lc.tangle_dir()}/chat_model\nDRY-RUN-VALUE\n#+end_src")
+        path.write_text(text)
+        n, _ = _lc.apply_org_to_db(dry_run=True)
+        # Diff exists but DB unchanged
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            assert s.get(Config, "chat_model").value != "DRY-RUN-VALUE"
+
+    def test_excluded_keys_skip_round_trip(self, cli_db, monkeypatch, tmp_path):
+        from org_llm import literate_config as _lc
+        from org_llm.db import make_engine, get_session, Config
+        # Seed cloud_usage with some JSON state
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            s.add(Config(key="cloud_usage", value="[{\"x\": 1}]"))
+            s.commit()
+        monkeypatch.setenv("ORG_LLM_LITERATE_CONFIG_PATH",
+                            str(tmp_path / "cfg.org"))
+        _lc.tangle_db_to_org()
+        text = (tmp_path / "cfg.org").read_text()
+        assert "cloud_usage" not in text   # excluded
+
+    def test_autosync_disabled_by_default(self, cli_db):
+        from org_llm.literate_config import autosync_enabled
+        assert autosync_enabled() is False
+
+    def test_config_tangle_cli_flag(self, cli_db, monkeypatch, tmp_path):
+        monkeypatch.setenv("ORG_LLM_LITERATE_CONFIG_PATH",
+                            str(tmp_path / "cfg.org"))
+        r = runner.invoke(app, ["config", "--tangle"])
+        assert r.exit_code == 0
+        assert (tmp_path / "cfg.org").exists()
+
+    def test_config_diff_org_cli_flag(self, cli_db, monkeypatch, tmp_path):
+        from org_llm import literate_config as _lc
+        monkeypatch.setenv("ORG_LLM_LITERATE_CONFIG_PATH",
+                            str(tmp_path / "cfg.org"))
+        # No org file → diff considers all keys org-missing
+        # Empty case: nothing to write → "in sync"
+        _lc.tangle_db_to_org()
+        r = runner.invoke(app, ["config", "--diff-org"])
+        assert r.exit_code == 0
+        assert "in sync" in r.output.lower() or "diff" in r.output.lower()
+
+
 class TestAutoEmbedder:
     """Background watcher that polls the vault, indexes + embeds new
     files. Stays disabled by default; opt-in via auto_embed_enabled."""
