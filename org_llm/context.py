@@ -750,6 +750,108 @@ def infer_initial_facts(session, *, model: str, base_url: str,
     return out
 
 
+_INTERVIEW_SYSTEM = """\
+You read excerpts from a person's notes and generate SHORT QUESTIONS
+that, when answered, would let an LLM disambiguate or update its
+understanding of the user's current situation.
+
+Output STRICT JSON, no prose:
+
+  {"questions": [
+    {"q": "Are you still at Unum, or did you move on?",
+     "why": "notes from 2018-2024 reference Unum heavily; nothing recent."},
+    {"q": "When you say 'the team' in recent notes, which team do you mean?",
+     "why": "team-name ambiguous after job change."},
+    {"q": "Is bh-gh-spcs an active project or archived?",
+     "why": "mentioned 23x but most recent entry is 4 months old."}
+  ]}
+
+Rules:
+  - Each question: ONE sentence, ≤ 18 words, friendly second-person.
+  - Pick AMBIGUITIES the LLM would otherwise mis-read. Things like
+    job changes, location changes, project status, ambiguous people
+    or pronouns.
+  - DO NOT ask about things the user already stated as facts in
+    USER CONTEXT (don't waste their time).
+  - Skip questions the LLM could answer itself by reading the notes
+    (e.g. "what's your favorite editor" — the notes will say).
+  - 3-5 questions total. Return {"questions": []} when nothing's
+    ambiguous enough to warrant asking.
+"""
+
+
+def interview_for_facts(session, *, model: str, base_url: str,
+                          max_questions: int = 4) -> list[dict]:
+    """Generate questions whose answers would clarify USER CONTEXT.
+
+    Returns a list of {q, why} dicts. The CLI prompts the user with each
+    question, then registers their answer as a context fact.
+    """
+    try:
+        from .personalize import _gather_content_evidence
+        evidence = _gather_content_evidence(session)
+    except Exception:
+        return []
+    if not evidence.get("has_signal"):
+        return []
+    existing_context = read_context_for_prompt(max_chars=2000)
+    titles_str = "\n".join(f"  - {t}" for t in evidence["recent_titles"][:25])
+    bodies_str = "\n\n".join(f"  {b}" for b in evidence["body_excerpts"][:10])
+    proj_str   = "\n".join(f"  - {p}" for p in evidence["project_summaries"][:6])
+
+    user_prompt = (
+        f"USER ALREADY-KNOWN CONTEXT:\n{existing_context or '(empty)'}\n\n"
+        f"Recent note titles:\n{titles_str or '  (none)'}\n\n"
+        f"Body excerpts:\n{bodies_str or '  (none)'}\n\n"
+        f"Project READMEs:\n{proj_str or '  (none)'}\n\n"
+        f"Generate up to {max_questions} short questions whose "
+        f"answers would clarify ambiguity for an LLM reading the notes."
+    )
+    try:
+        from .llm import chat
+        from .ui  import thinking
+    except Exception:
+        return []
+    import json as _json, threading
+    result: dict = {"resp": ""}
+    def _run():
+        try:
+            result["resp"] = chat(user_prompt, model=model, base_url=base_url,
+                                   system=_INTERVIEW_SYSTEM) or ""
+        except Exception:
+            pass
+    try:
+        with thinking("Drafting interview questions", model=model):
+            t = threading.Thread(target=_run, daemon=True)
+            t.start(); t.join(timeout=90.0)
+    except Exception:
+        t = threading.Thread(target=_run, daemon=True)
+        t.start(); t.join(timeout=90.0)
+    if t.is_alive():
+        return []
+    raw = (result["resp"] or "").strip()
+    if raw.startswith("```"):
+        raw = "\n".join(raw.splitlines()[1:])
+        if raw.endswith("```"):
+            raw = raw[:-3]
+    try:
+        plan = _json.loads(raw.strip())
+    except Exception:
+        return []
+    qs = plan.get("questions") if isinstance(plan, dict) else None
+    if not isinstance(qs, list):
+        return []
+    out: list[dict] = []
+    for q in qs[:max_questions]:
+        if not isinstance(q, dict):
+            continue
+        text = (q.get("q") or "").strip()
+        why  = (q.get("why") or "").strip()
+        if 4 <= len(text) <= 200:
+            out.append({"q": text, "why": why[:200]})
+    return out
+
+
 _HISTORY_NARRATIVE_SYSTEM = """\
 You write a SHORT historical narrative summary of a person's older notes
 for use as background context in a knowledge-base RAG system. The notes

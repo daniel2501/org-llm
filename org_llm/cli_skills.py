@@ -38,7 +38,7 @@ def _org_dir(session):
 def register(app: typer.Typer) -> None:
     """Attach skill sub-commands to a Typer app."""
 
-    @app.command("skills")
+    @app.command("skills", rich_help_panel="Skills")
     def skills_list():
         """List all discovered skills."""
         from .skills import Skill
@@ -59,7 +59,7 @@ def register(app: typer.Typer) -> None:
             table.add_row(s.name, s.model_key, s.lang, Path(s.file_path).name)
         console.print(table)
 
-    @app.command("skill")
+    @app.command("skill", rich_help_panel="Skills")
     def skill_run(
         name:  Annotated[str, typer.Argument(help="Skill name to run")],
         input: Annotated[str, typer.Argument(help="Input text")] = "",
@@ -153,7 +153,7 @@ def register(app: typer.Typer) -> None:
         console.print(output)
         console.rule()
 
-    @app.command("skill-index")
+    @app.command("skill-index", rich_help_panel="Skills")
     def skill_index():
         """Scan org files and register skills into the database."""
         from pathlib import Path
@@ -166,7 +166,7 @@ def register(app: typer.Typer) -> None:
         hail(f"Registered {count} skills.")
         make_it_so()
 
-    @app.command("skill-new")
+    @app.command("skill-new", rich_help_panel="Skills")
     def skill_new(
         name:      Annotated[str, typer.Argument(help="Skill name (snake_case)")],
         lang:      Annotated[str, typer.Option("--lang", "-l",

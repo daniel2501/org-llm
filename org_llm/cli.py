@@ -144,7 +144,7 @@ def _ollama_pull(model: str) -> bool:
     import shutil, subprocess
     ollama = shutil.which("ollama") or str(Path("~/.local/bin/ollama").expanduser())
     if not Path(ollama).exists():
-        red_alert("ollama binary not found — run: org-llm install --skip-models --skip-fonts")
+        red_alert("ollama binary not found — run: org-llm install-tools --skip-models --skip-fonts")
         return False
     hail(f"Pulling [bold]{model}[/bold] via Ollama…")
     return subprocess.run([ollama, "pull", model]).returncode == 0
@@ -727,7 +727,7 @@ def _safe_org_path(org_dir: Path, user_path: str) -> Path:
     return target
 
 
-@app.command()
+@app.command(rich_help_panel="Onboarding")
 def init():
     """Initialize database and write default config."""
     path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
@@ -757,7 +757,7 @@ def init():
     make_it_so()
 
 
-@app.command()
+@app.command(rich_help_panel="Onboarding")
 def setup(
     yes:        Annotated[bool, typer.Option("--yes", "-y",
                 help="Skip confirmations; pick reasonable defaults")] = False,
@@ -771,19 +771,22 @@ def setup(
     """First-run setup — chains the steps a new user needs in one command.
 
     Runs in order, asking for confirmation at each step:
-      1. init             — create the SQLite DB
-      2. discover         — scan filesystem for org/repo/dotfiles roots
-      3. doctor           — health check; surface any concrete gaps
-      4. install (FOSS tools) — only on confirm
-      5. models --tune    — pick a hardware-fitting set
-      6. index            — scan org files
-      7. tag --apply      — LLM auto-tags untagged notes
-      8. embed            — vectorise unembedded nodes
-      9. personalize --apply — auto-create theme knobs
-     10. context build (infer durable facts from real content)
-     11. history build   — narrative summary of older + archived notes
-     12. tutor welcome   — print the welcome step
-     13. open the full tour in your editor
+      1. init                    — create the SQLite DB
+      2. install-tools           — Ollama + opencode + models (if missing)
+      3. discover                — scan filesystem for org / repo / dotfiles
+      4. doctor                  — health check; surface concrete gaps
+      5. install FOSS tools      — bat / ripgrep / fzf / … (only if missing)
+      6. models --tune           — pick a hardware-fitting set
+      7. index                   — scan your `.org` files
+      8. tag --apply             — LLM auto-tags untagged notes
+      9. embed                   — vectorise unembedded nodes (idempotent)
+     10. personalize --apply     — auto-create theme knobs from real content
+     11. context build           — LLM infers durable facts about you
+     12. interview               — LLM asks 3-4 clarifying questions
+     13. history build           — narrative of older + archived notes
+     14. tutor welcome           — print the welcome step
+     15. open the full tour      — copies it into your vault, then opens it
+     16. (optional) launch opencode for a first-touch with the LLM TUI
 
     Pass --yes to run all steps non-interactively with reasonable
     defaults. Each step is idempotent and safe to skip / re-run later
@@ -823,22 +826,78 @@ def setup(
     console.rule("[lcars1]org-llm setup — first-run walkthrough[/lcars1]")
     console.print()
 
+    # LLM-personalized welcome — reads what's on disk, writes a one-line
+    # greeting grounded in the user's actual environment. Silent fallback
+    # when LLM is unreachable (no Ollama on a fresh box yet, e.g.).
+    try:
+        from .discover import discover as _disc
+        _found = _disc()
+        _inv = "\n".join(f"  - {f.path} [{f.kind}] {f.description}"
+                          for f in _found[:6]) or "  (empty)"
+        _welcome = _llm_one_liner(
+            f"Filesystem inventory:\n{_inv}\n\nWelcome the user and "
+            "name 1-2 specific things setup will configure based on "
+            "what they have.",
+            system=("Write ONE friendly sentence introducing org-llm's "
+                    "first-run setup, grounded in the inventory. Output "
+                    "only the sentence — no preamble, no quotes, no "
+                    "markdown. 12-26 words. Concrete, no hype."),
+            fallback="",
+        ).strip()
+        if _welcome:
+            on_screen(f"[lcars3]{_welcome}[/lcars3]")
+            console.print()
+    except Exception:
+        pass
+
     # 1. init — always safe
-    on_screen("[lcars2]Step 1/10[/lcars2] init the database")
+    on_screen("[lcars2]Step 1/15[/lcars2] init the database")
     init()
     console.print()
 
-    # 2. discover
+    # 2. install-tools (Ollama + opencode + …) — closing the gap where
+    # setup previously assumed Ollama was already installed. Idempotent:
+    # the install-tools command itself skips anything already present,
+    # but we offer the prompt so a sandboxed user can opt out.
+    import shutil as _shutil
+    have_ollama   = bool(_shutil.which("ollama"))
+    have_opencode = bool(_shutil.which("opencode"))
+    if have_ollama and have_opencode:
+        on_screen("[dim]Ollama + opencode already installed — skipping step 2.[/dim]")
+        console.print()
+    else:
+        missing_core = []
+        if not have_ollama:   missing_core.append("Ollama")
+        if not have_opencode: missing_core.append("opencode")
+        prompt2 = (f"Install core binaries ({', '.join(missing_core)})? "
+                   f"[runs `org-llm install-tools` — pulls models, takes minutes]")
+        if _confirm(prompt2, default=True):
+            on_screen("[lcars2]Step 2/15[/lcars2] install-tools "
+                      "[dim](Ollama + models + opencode — output streams below)[/dim]")
+            try:
+                import subprocess as _sub
+                # Skip fonts / gh / claude / pass by default — those are
+                # optional and the user can run install-tools later if
+                # they want them.
+                with warp("Installing core binaries (Ollama, models, opencode)"):
+                    _sub.run(["org-llm", "install-tools",
+                              "--skip-fonts", "--skip-gh",
+                              "--skip-claude", "--skip-pass"])
+            except Exception as e:
+                on_screen(f"[dim]install-tools failed: {e}[/dim]")
+            console.print()
+
+    # 3. discover
     if _confirm("Probe the filesystem for org/repo/Emacs roots?", default=True):
-        on_screen("[lcars2]Step 2/10[/lcars2] discover")
+        on_screen("[lcars2]Step 3/15[/lcars2] discover")
         try:
             discover()
         except Exception as e:
             on_screen(f"[dim]discover failed: {e}[/dim]")
         console.print()
 
-    # 3. doctor (always run — read-only)
-    on_screen("[lcars2]Step 3/10[/lcars2] doctor health check")
+    # 4. doctor (always run — read-only)
+    on_screen("[lcars2]Step 4/15[/lcars2] doctor health check")
     try:
         doctor()
     except SystemExit:
@@ -876,7 +935,7 @@ def setup(
         on_screen("[dim]All FOSS tools already installed — skipping step 4.[/dim]")
         console.print()
     elif _confirm(install_q, default=False):
-        on_screen("[lcars2]Step 4/13[/lcars2] install FOSS tools "
+        on_screen("[lcars2]Step 5/15[/lcars2] install FOSS tools "
                   "[dim](streams output below — may take a few minutes)[/dim]")
         try:
             import subprocess as _sub
@@ -904,7 +963,7 @@ def setup(
                     f"({assigned}/{len(_TASK_MODEL_KEYS)} role(s) assigned · "
                     f"hardware: {hw_str})")
         if _confirm(models_q, default=True):
-            on_screen("[lcars2]Step 5/13[/lcars2] models --tune --apply "
+            on_screen("[lcars2]Step 6/15[/lcars2] models --tune --apply "
                       "[dim](may pull models — multiple minutes)[/dim]")
             try:
                 import subprocess as _sub
@@ -934,7 +993,7 @@ def setup(
     except Exception:
         idx_q = "Index and auto-tag your org notes now?"
     if not skip_index and _confirm(idx_q, default=True):
-        on_screen("[lcars2]Step 6/13[/lcars2] index")
+        on_screen("[lcars2]Step 7/15[/lcars2] index")
         try:
             index()    # has its own warp spinner
         except SystemExit:
@@ -942,7 +1001,7 @@ def setup(
 
         # Auto-tag untagged nodes — uses fast_model. Has its own impulse
         # progress bar (one tick per node).
-        on_screen("[lcars2]Step 7/13[/lcars2] tag --apply (LLM auto-tags untagged notes)")
+        on_screen("[lcars2]Step 8/15[/lcars2] tag --apply (LLM auto-tags untagged notes)")
         try:
             tag(force=False, limit=200, apply=True, dry_run=False)
         except SystemExit:
@@ -957,7 +1016,7 @@ def setup(
     # ("96% embedded; run: org-llm embed") are exactly the friction setup
     # is meant to prevent.
     if not skip_index:
-        on_screen("[lcars2]Step 8/13[/lcars2] embed (auto — fills any gaps)")
+        on_screen("[lcars2]Step 9/15[/lcars2] embed (auto — fills any gaps)")
         try:
             embed()    # has its own impulse progress bar
         except SystemExit:
@@ -977,7 +1036,7 @@ def setup(
     except Exception:
         pz_q = "Auto-create theme knobs from your content?"
     if not skip_personalize and _confirm(pz_q, default=True):
-        on_screen("[lcars2]Step 9/13[/lcars2] personalize --apply "
+        on_screen("[lcars2]Step 10/15[/lcars2] personalize --apply "
                   "[dim](LLM synthesises themes — may take 30-90s)[/dim]")
         try:
             personalize(apply=True, no_llm=False, max_themes=5,
@@ -1056,6 +1115,60 @@ def setup(
                 _ctx.add_fact(extra, source="setup")
                 hail("Added.")
 
+    # 11.5. Interview the user — LLM reads their notes, picks 3-4
+    # ambiguities, asks clarifying questions. Each answer becomes a
+    # context fact. Optional but enabled by default — short process.
+    if _confirm("Quick interview? The LLM will look for ambiguities in "
+                 "your notes (job changes, project status, …) and ask "
+                 "you 3-4 clarifying questions",
+                 default=True):
+        on_screen("[lcars2]Step 12/15[/lcars2] interview "
+                  "[dim](LLM drafts questions from your notes)[/dim]")
+        try:
+            from . import context as _ctx_iv
+            engine_now = _engine()
+            with get_session(engine_now) as session:
+                url = _ollama_url(session)
+                mdl = (_cfg(session, "chat_model")
+                       or _cfg(session, "fast_model")
+                       or "llama3.2")
+                try:
+                    from .llm import list_models as _lm
+                    pulled = {(m.get("name") if isinstance(m, dict) else m.name)
+                               for m in _lm(url) or []}
+                    for cand in ("llama3.2:1b", "llama3.2:3b", "llama3.2"):
+                        if any(p == cand or p.startswith(cand + ":") for p in pulled):
+                            mdl = cand; break
+                except Exception:
+                    pass
+                questions = _ctx_iv.interview_for_facts(
+                    session, model=mdl, base_url=url, max_questions=4)
+            if not questions:
+                on_screen("[dim]LLM didn't find clear ambiguities to ask "
+                          "about — your context is already well-defined "
+                          "or the vault's still small.[/dim]")
+            else:
+                on_screen(f"[lcars3]The LLM has {len(questions)} "
+                          f"question(s):[/lcars3]")
+                console.print()
+                added = 0
+                for q in questions:
+                    on_screen(f"  [dim]({q.get('why', '')})[/dim]")
+                    answer = _ask(q["q"], default="").strip()
+                    if not answer:
+                        on_screen("  [dim]Skipped.[/dim]")
+                        continue
+                    # Compose a fact "Q :: A" — the LLM in future prompts
+                    # will read both halves and infer the user's situation.
+                    fact = f"{q['q']} — {answer}"
+                    _ctx_iv.add_fact(fact, source="setup-interview")
+                    added += 1
+                if added:
+                    hail(f"Added {added} interview-driven fact(s).")
+        except Exception as e:
+            on_screen(f"[dim]Interview failed: {e}[/dim]")
+        console.print()
+
     # 11. history narrative — data-driven prompt
     try:
         from .db        import Node as _N3
@@ -1108,7 +1221,7 @@ def setup(
         console.print()
 
     # 12. welcome
-    on_screen("[lcars2]Step 12/13[/lcars2] tutor welcome — your map of the rest")
+    on_screen("[lcars2]Step 13/15[/lcars2] tutor welcome — your map of the rest")
     try:
         tutor("welcome")
     except SystemExit:
@@ -1117,19 +1230,36 @@ def setup(
         pass
     console.print()
 
-    # 13. open the full tour. The tour file lives in `org-llm/docs/` or
-    # in the user's vault if they imported it. Try a few canonical
-    # locations and fall back to a clear instruction.
+    # 13. open the full tour. Locate it from canonical paths; if it lives
+    # in the package's docs/ but not in the user's vault, COPY it to
+    # ~/org/org-llm-tour.org so it's visible to `index` and findable next
+    # time without filesystem-walk magic.
     if _confirm("Open the full tour now? (a real org-mode tour with "
                  "missions and exercises)", default=True):
-        on_screen("[lcars2]Step 13/13[/lcars2] open the tour")
+        on_screen("[lcars2]Step 14/15[/lcars2] open the tour")
+        engine_now = _engine()
+        with get_session(engine_now) as session:
+            org_dir_now = _org_dir(session)
+        vault_tour = org_dir_now / "org-llm-tour.org"
         candidates = [
+            vault_tour,
             Path("~/org/org-llm-tour.org").expanduser(),
             Path(__file__).parent.parent / "docs" / "org-llm-tour.org",
             Path(__file__).parent.parent.parent / "org-llm-tour.org",
         ]
         tour_path: Path | None = next(
             (p for p in candidates if p.exists()), None)
+        # If the tour exists in the package but NOT the user's vault, copy
+        # it so it's part of their notes graph too.
+        if tour_path and tour_path != vault_tour and not vault_tour.exists():
+            try:
+                vault_tour.parent.mkdir(parents=True, exist_ok=True)
+                vault_tour.write_text(tour_path.read_text(errors="replace"))
+                hail(f"Copied tour into your vault: {vault_tour}")
+                tour_path = vault_tour
+            except Exception:
+                pass    # leave tour_path pointing at the package copy
+
         if not tour_path:
             on_screen("[dim]No tour file found in standard locations.[/dim]")
             on_screen("[dim]Get the latest:[/dim] [bold]https://github.com/daniel2501/org-llm/blob/trunk/docs/org-llm-tour.org[/bold]")
@@ -1149,7 +1279,6 @@ def setup(
                 hail(f"Opening tour: {tour_path}")
                 import subprocess
                 try:
-                    # If editor is a multi-word command, split it
                     parts = editor.split() + [str(tour_path)]
                     subprocess.Popen(parts,
                                      stdout=subprocess.DEVNULL,
@@ -1160,13 +1289,86 @@ def setup(
                     on_screen(f"[dim]Tour at:[/dim] {tour_path}")
         console.print()
 
+    # 16. (optional) opencode first-touch — explicitly NOT auto-confirmed
+    # under --yes since launching opencode takes over the user's terminal.
+    # Setup is headless-friendly: this step is opt-in only, and the rest
+    # of setup never depends on opencode being launched.
+    if not yes and _confirm("Spin up the opencode workspace now? "
+                              "(takes over the terminal until you /exit)",
+                              default=False):
+        on_screen("[lcars2]Step 16/16[/lcars2] launch opencode workspace")
+        try:
+            launch(workspace="all", model="", no_context=False,
+                   no_theme=False, no_commands=False, dry_run=False)
+        except SystemExit:
+            pass
+        except Exception as e:
+            on_screen(f"[dim]opencode launch failed: {e}[/dim]")
+            on_screen("[dim]Try later: [/dim][bold]org-llm launch[/bold]")
+        console.print()
+
     console.rule("[lcars1]Setup complete[/lcars1]")
-    on_screen("[dim]Next stop: [/dim][bold]org-llm ask 'your first question'[/bold]")
-    on_screen("[dim]Or:        [/dim][bold]org-llm launch[/bold] (opencode workspace)")
+
+    # LLM-generated personalized closing recommendations — feed the model
+    # a snapshot of what setup actually accomplished, ask for 3 specific
+    # commands the user might enjoy first.
+    try:
+        from .db        import Node as _N4, Config as _Cfg, File as _F2
+        from . import context as _ctx2
+        engine_now = _engine()
+        with get_session(engine_now) as session:
+            n_files    = session.query(_F2).count()
+            n_nodes    = session.query(_N4).count()
+            n_embedded = session.query(_N4).filter(
+                _N4.embedding.isnot(None)).count()
+            cfg = {r.key: r.value for r in session.query(_Cfg).all()}
+        ctx_chars = len(_ctx2.read_context_for_prompt() or "")
+        hist_chars = len(_ctx2.read_history_for_prompt() or "")
+        chat_mdl = cfg.get("chat_model", "")
+        sys_msg = (
+            "Suggest exactly 3 short concrete `org-llm` commands a "
+            "first-time user should try, given their setup state. Output "
+            "ONE command per line, in this format:\n"
+            "  org-llm <subcommand and args> — <≤ 12-word reason>\n"
+            "No preamble, no markdown, no quotes around commands. Use "
+            "actual user state in the reasons (tag names, project names, "
+            "model names if you have them). Avoid suggesting `setup` "
+            "again or anything destructive."
+        )
+        user_msg = (
+            f"Setup state:\n"
+            f"  files indexed: {n_files}, nodes: {n_nodes}, "
+            f"embedded: {n_embedded}/{n_nodes}\n"
+            f"  chat_model: {chat_mdl or '(not set)'}\n"
+            f"  USER CONTEXT chars: {ctx_chars}\n"
+            f"  HISTORICAL CONTEXT chars: {hist_chars}\n\n"
+            "Three personalised first-run commands."
+        )
+        try:
+            from .llm import chat as _chat_local
+            recs = _chat_local(user_msg, model=chat_mdl or "llama3.2",
+                               base_url=cfg.get("ollama_url",
+                                                "http://localhost:11434"),
+                               system=sys_msg)
+        except Exception:
+            recs = ""
+        recs = (recs or "").strip()
+        if recs:
+            on_screen("[lcars3]Tailored next steps for you:[/lcars3]")
+            for line in recs.splitlines()[:3]:
+                line = line.strip(" -•").strip()
+                if line:
+                    on_screen(f"  • {line}")
+        else:
+            on_screen("[dim]Next stop: [/dim][bold]org-llm ask 'your first question'[/bold]")
+            on_screen("[dim]Or:        [/dim][bold]org-llm launch[/bold] (opencode workspace)")
+    except Exception:
+        on_screen("[dim]Next stop: [/dim][bold]org-llm ask 'your first question'[/bold]")
+        on_screen("[dim]Or:        [/dim][bold]org-llm launch[/bold] (opencode workspace)")
     make_it_so()
 
 
-@app.command()
+@app.command(rich_help_panel="Indexing")
 def index(
     force: Annotated[bool, typer.Option("--force", "-f", help="Re-index all files")] = False,
 ):
@@ -1542,7 +1744,7 @@ def _suggest_code_ask(session, roots: list[Path]) -> str:
     return f"Try it: [bold]org-llm ask{cloud_flag} '{question}'[/bold]"
 
 
-@app.command(name="code-index")
+@app.command(name="code-index", rich_help_panel="Indexing")
 def code_index(
     paths: Annotated[list[str], typer.Argument(
         help="Code directories to index. Defaults to the `code_dirs` config row (~/repos).")] = None,
@@ -1649,7 +1851,7 @@ def code_index(
     make_it_so()
 
 
-@app.command()
+@app.command(rich_help_panel="Onboarding")
 def discover(
     extra: Annotated[list[str], typer.Argument(
         help="Additional directories to probe alongside the standard set.")] = None,
@@ -1708,7 +1910,7 @@ def discover(
                   "(used by `code` for default language)[/dim]")
 
 
-@app.command()
+@app.command(rich_help_panel="Indexing")
 def embed(
     force: Annotated[bool, typer.Option("--force", "-f", help="Re-embed all nodes")] = False,
 ):
@@ -1749,7 +1951,7 @@ def embed(
     make_it_so()
 
 
-@app.command()
+@app.command(rich_help_panel="Querying")
 def search(
     query: Annotated[str, typer.Argument(help="Search query")],
     limit: Annotated[int,  typer.Option("--limit", "-n")] = 10,
@@ -1807,7 +2009,7 @@ def search(
     console.print(table)
 
 
-@app.command()
+@app.command(rich_help_panel="Querying")
 def ask(
     query:   Annotated[str,  typer.Argument(help="Your question")],
     top_k:   Annotated[int,  typer.Option("--top-k", "-k")] = 6,
@@ -2276,7 +2478,7 @@ _TASK_MODEL_KEYS = [
 ]
 
 
-@app.command()
+@app.command(rich_help_panel="Models & Cloud")
 def models(
     discover: Annotated[bool, typer.Option("--discover", "-d",
               help="Show FOSS catalog filtered by hardware")] = False,
@@ -2525,7 +2727,7 @@ def models(
                   f"[bold]org-llm models --pull {model}[/bold]")
     elif not pulled:
         on_screen("[dim]Next:[/dim] no Ollama models pulled — "
-                  "[bold]org-llm install --skip-fonts --skip-opencode --skip-gh --skip-claude[/bold]")
+                  "[bold]org-llm install-tools --skip-fonts --skip-opencode --skip-gh --skip-claude[/bold]")
     else:
         on_screen("[dim]All roles assigned and pulled.[/dim] "
                   "[bold]org-llm performance --benchmark[/bold] "
@@ -2562,7 +2764,7 @@ def _validate_config(key: str, value: str) -> str | None:
     return None
 
 
-@app.command()
+@app.command(rich_help_panel="Models & Cloud")
 def performance(
     apply:     Annotated[bool, typer.Option("--apply", "-a",
                help="Write recommended role assignments to config (default: read-only report)")] = False,
@@ -2740,7 +2942,7 @@ def performance(
     make_it_so()
 
 
-@app.command()
+@app.command(rich_help_panel="Maintenance")
 def config(
     key:   Annotated[str, typer.Argument(help="Config key")] = "",
     value: Annotated[str, typer.Argument(help="Value to set")] = "",
@@ -2797,7 +2999,7 @@ def config(
             make_it_so()
 
 
-@app.command(name="db")
+@app.command(name="db", rich_help_panel="Maintenance")
 def db_info(
     schema: Annotated[bool, typer.Option("--schema", "-s", help="Show CREATE TABLE statements")] = False,
     dict_:  Annotated[bool, typer.Option("--dict",   "-d", help="Print full data dictionary")] = False,
@@ -3041,8 +3243,8 @@ def _install_gh(bin_dir: Path) -> Path | None:
         return None
 
 
-@app.command()
-def install(
+@app.command(name="install-tools", rich_help_panel="Onboarding")
+def install_tools(
     skip_ollama:   Annotated[bool, typer.Option("--skip-ollama",   "-O")] = False,
     skip_models:   Annotated[bool, typer.Option("--skip-models",   "-M")] = False,
     skip_fonts:    Annotated[bool, typer.Option("--skip-fonts",    "-F")] = False,
@@ -3195,7 +3397,7 @@ def install(
     make_it_so()
 
 
-@app.command()
+@app.command(rich_help_panel="Maintenance")
 def report(
     section: Annotated[str, typer.Argument(
         help="Section: overview | tags | recent | orphans | daily | all"
@@ -3672,7 +3874,7 @@ def _doctor_benchmark_fixers(report_to: str = "", apply_fixer: bool = False) -> 
     make_it_so()
 
 
-@app.command()
+@app.command(rich_help_panel="Maintenance")
 def doctor(
     diagnose: Annotated[bool, typer.Option("--diagnose", "-d",
               help="Use LLM to explain failures and suggest fixes")] = False,
@@ -3916,13 +4118,13 @@ def doctor(
     ollama_bin = shutil.which("ollama") or str(Path("~/.local/bin/ollama").expanduser())
     ok("ollama binary", ollama_bin) if Path(ollama_bin).exists() else \
         fail("Ollama not installed", "~/.local/bin/ollama missing",
-             "org-llm install --skip-models --skip-fonts")
+             "org-llm install-tools --skip-models --skip-fonts")
 
     oc_path = _opencode_bin()
     if oc_path:
         ok("opencode", str(oc_path))
     else:
-        warn("opencode not installed", "run: org-llm install --skip-ollama --skip-models --skip-fonts")
+        warn("opencode not installed", "run: org-llm install-tools --skip-ollama --skip-models --skip-fonts")
 
     # Disk space for DB and org_dir
     try:
@@ -4114,7 +4316,7 @@ def doctor(
         ok("Ollama API", url)
     except Exception as e:
         fail("Ollama not reachable", f"{url} — {e}",
-             "ollama serve &  (or: org-llm install --skip-models --skip-fonts)")
+             "ollama serve &  (or: org-llm install-tools --skip-models --skip-fonts)")
         if fix and Path(ollama_bin).exists():
             hail("Starting ollama serve (--fix) …")
             subprocess.Popen(
@@ -4239,12 +4441,12 @@ def doctor(
                     ok("gh auth", "authenticated")
             else:
                 warn("gh not authenticated",
-                     "run: gh auth login  (or: org-llm install --skip-ollama ...)")
+                     "run: gh auth login  (or: org-llm install-tools --skip-ollama ...)")
         except Exception as e:
             warn("gh auth check failed", str(e))
     else:
         warn("gh CLI not installed",
-             "run: org-llm install --skip-ollama --skip-models --skip-fonts --skip-opencode")
+             "run: org-llm install-tools --skip-ollama --skip-models --skip-fonts --skip-opencode")
 
     # ── Credentials (pass) ─────────────────────────────────────────────────────
     section("Credentials (pass)")
@@ -4265,7 +4467,7 @@ def doctor(
                  "run: pass init <gpg-key-id>  (see: org-llm tutor creds)")
     else:
         warn("pass not installed",
-             "run: org-llm install --skip-ollama --skip-models --skip-fonts "
+             "run: org-llm install-tools --skip-ollama --skip-models --skip-fonts "
              "--skip-opencode --skip-gh --skip-claude")
 
     # ── Claude Code ────────────────────────────────────────────────────────────
@@ -4283,7 +4485,7 @@ def doctor(
                  f"set in shell, or: pass insert {_creds.anthropic_slug()}")
     else:
         warn("Claude Code not installed",
-             "run: org-llm install --skip-ollama --skip-models --skip-fonts --skip-opencode --skip-gh")
+             "run: org-llm install-tools --skip-ollama --skip-models --skip-fonts --skip-opencode --skip-gh")
 
     # ── Fonts / UI ─────────────────────────────────────────────────────────────
     section("Fonts & UI")
@@ -4301,7 +4503,7 @@ def doctor(
     else:
         fail("Nerd Font not installed",
              "icons will show as □",
-             "org-llm install --skip-ollama --skip-models")
+             "org-llm install-tools --skip-ollama --skip-models")
     if NERD_FONTS:
         ok("Nerd Font detection", "icons enabled")
     else:
@@ -4781,7 +4983,7 @@ _TUTOR_STEPS = [
     ),
     (
         "install",
-        "[lcars2]org-llm install[/lcars2] — one-shot bootstrap\n\n"
+        "[lcars2]org-llm install-tools[/lcars2] — one-shot bootstrap\n\n"
         "Downloads and installs everything you need to ~/.local (no sudo):\n\n"
         "  [bold]Ollama[/bold]      binary → ~/.local/bin/ollama, starts 'ollama serve'\n"
         "  [bold]Models[/bold]      pulls all configured models via 'ollama pull'\n"
@@ -4794,7 +4996,7 @@ _TUTOR_STEPS = [
         "  --skip-fonts      skip font download\n"
         "  --skip-opencode   skip opencode installation\n"
         "  --skip-gh         skip gh CLI installation\n\n"
-        "[lcars1]Command:[/lcars1]  [bold]org-llm install[/bold]\n\n"
+        "[lcars1]Command:[/lcars1]  [bold]org-llm install-tools[/bold]\n\n"
         "[dim]After install, run: org-llm init → index → embed → doctor[/dim]\n"
         "[dim]Source: org_llm/cli.py → install()  |  org-llm source cli[/dim]",
     ),
@@ -5238,7 +5440,7 @@ _TUTOR_STEPS = [
         "  • Versioned with git if you `pass git init`\n"
         "  • Keys never touch SQLite or any plaintext config\n\n"
         "[lcars1]One-time setup:[/lcars1]\n"
-        "  1. [bold]org-llm install[/bold]                  — installs pass + gnupg\n"
+        "  1. [bold]org-llm install-tools[/bold]                  — installs pass + gnupg\n"
         "  2. [bold]gpg --full-generate-key[/bold]          — pick RSA 4096, no expiry, your name+email\n"
         "  3. [bold]gpg --list-secret-keys[/bold]           — copy the long key id\n"
         "  4. [bold]pass init <KEY-ID>[/bold]               — initializes the store\n\n"
@@ -5367,7 +5569,7 @@ _TUTOR_STEPS = [
         "done",
         "[bold lcars1]You're ready to explore your second brain.[/bold lcars1]\n\n"
         "[lcars1]Recommended first flight:[/lcars1]\n\n"
-        "  1. [bold]org-llm install[/bold]         — Ollama + models + fonts + opencode + claude + pass\n"
+        "  1. [bold]org-llm install-tools[/bold]         — Ollama + models + fonts + opencode + claude + pass\n"
         "  2. [bold]org-llm init[/bold]             — create DB + default config\n"
         "  3. [bold]org-llm index[/bold]            — parse all org files into DB\n"
         "  4. [bold]org-llm embed[/bold]            — generate embeddings (takes a while)\n"
@@ -5388,7 +5590,7 @@ _TUTOR_STEPS = [
 ]
 
 
-@app.command()
+@app.command(rich_help_panel="Maintenance")
 def tutor(
     step: Annotated[str, typer.Argument(
         help="Step name to jump to (welcome/init/index/embed/search/ask/capture/"
@@ -5515,7 +5717,7 @@ _MODULE_MAP = {
 }
 
 
-@app.command()
+@app.command(rich_help_panel="Maintenance")
 def source(
     module:  Annotated[str,  typer.Argument(
              help="Module to show: cli | db | indexer | llm | search | skills | report | ui"
@@ -5570,7 +5772,7 @@ def source(
         console.rule()
 
 
-@app.command()
+@app.command(rich_help_panel="Querying")
 def capture(
     title:  Annotated[str,  typer.Option("--title",  "-t", help="Note title")] = "",
     body:   Annotated[str,  typer.Option("--body",   "-b", help="Raw content / prompt")] = "",
@@ -5627,7 +5829,7 @@ def capture(
     make_it_so()
 
 
-@app.command()
+@app.command(rich_help_panel="Indexing")
 def tag(
     force:   Annotated[bool, typer.Option("--force", "-f", help="Re-tag already-tagged nodes")] = False,
     limit:   Annotated[int,  typer.Option("--limit", "-n", help="Max nodes to tag")] = 50,
@@ -5720,7 +5922,7 @@ def _strip_code_fences(s: str, lang: str = "") -> str:
     return "\n".join(lines).strip()
 
 
-@app.command()
+@app.command(rich_help_panel="Querying")
 def code(
     task:     Annotated[str,  typer.Argument(help="What to generate")],
     lang:     Annotated[str,  typer.Option("--lang", "-l",
@@ -5931,7 +6133,7 @@ def _gather_emacs_config(config_dir: Path, flavor: str,
     return out
 
 
-@app.command(name="review-emacs")
+@app.command(name="review-emacs", rich_help_panel="Querying")
 def review_emacs(
     config_dir: Annotated[str,  typer.Option("--config-dir", "-d",
                 help="Override config directory (default: auto-detect Doom or vanilla)")] = "",
@@ -6613,7 +6815,7 @@ def _opencode_slash_commands(workspace: str) -> dict:
     return cmds
 
 
-@app.command()
+@app.command(rich_help_panel="Workspaces")
 def launch(
     workspace:  Annotated[str,  typer.Option("--workspace",  "-w",
                 help="Workspace flavor: all | researcher | scribe | engineer")] = "all",
@@ -6786,7 +6988,7 @@ def launch(
     os.execvp(oc_bin, [oc_bin])
 
 
-@app.command(name="claude")
+@app.command(name="claude", rich_help_panel="Workspaces")
 def claude_frontend(
     no_context: Annotated[bool, typer.Option("--no-context", "-N",
                 help="Skip vault context in CLAUDE.md instructions")] = False,
@@ -6967,7 +7169,7 @@ org-roam second brain via org-llm MCP tools.
     os.execvp(claude_bin, [claude_bin])
 
 
-@app.command()
+@app.command(rich_help_panel="Models & Cloud")
 def cloud(
     status:    Annotated[bool, typer.Option("--status",    "-s",  help="Show configured provider status")] = False,
     providers: Annotated[bool, typer.Option("--providers", "-p",  help="List all supported cloud providers")] = False,
@@ -7621,14 +7823,14 @@ def cloud(
     console.print()
 
 
-@app.command()
+@app.command(rich_help_panel="Workspaces")
 def mcp():
     """Start the org-llm MCP server over stdio (for opencode and other MCP clients)."""
     from .mcp_server import main as _mcp_main
     _mcp_main()
 
 
-@app.command()
+@app.command(rich_help_panel="LLM Auth (MCP)")
 def grant(
     path: Annotated[str, typer.Argument(help="Filesystem path to authorise the LLM to read")],
 ):
@@ -7657,7 +7859,7 @@ def grant(
         raise typer.Exit(1)
 
 
-@app.command()
+@app.command(rich_help_panel="LLM Auth (MCP)")
 def revoke(
     path: Annotated[str, typer.Argument(help="Path to remove from the allow-list")],
 ):
@@ -7672,7 +7874,7 @@ def revoke(
         raise typer.Exit(1)
 
 
-@app.command(name="grants")
+@app.command(name="grants", rich_help_panel="LLM Auth (MCP)")
 def grants_list():
     """List paths the LLM (via MCP) is currently authorised to read."""
     from rich.table import Table as _T
@@ -7737,7 +7939,7 @@ def grants_list():
 knob_app = typer.Typer(help="Define custom theme knobs (dinosaur, coffee, …) to "
                             "extend the trek/commie/queer dials.",
                        cls=PrefixGroup)
-app.add_typer(knob_app, name="knob")
+app.add_typer(knob_app, name="knob", rich_help_panel="Themes")
 
 
 # ── context (LLM-readable current-truth file) ─────────────────────────────
@@ -7748,7 +7950,7 @@ context_app = typer.Typer(
          "prepended to every system prompt.",
     cls=PrefixGroup,
 )
-app.add_typer(context_app, name="context")
+app.add_typer(context_app, name="context", rich_help_panel="Context & Vault")
 
 
 @context_app.command("show")
@@ -8023,13 +8225,33 @@ def context_clear(
     hail("Context cleared.")
 
 
+@context_app.command("stale")
+def context_stale(
+    apply:    Annotated[bool, typer.Option("--apply", "-a",
+              help="Auto-apply suggested tags without confirmation")] = False,
+    limit:    Annotated[int,  typer.Option("--limit", "-n",
+              help="Max nodes to judge per sweep")] = 20,
+    since_days: Annotated[int, typer.Option("--since-days", "-d",
+                help="Only consider nodes older than N days (0 = all)")] = 0,
+):
+    """Alias for `org-llm stale` — kept under context for discoverability.
+
+    The staleness sweep belongs conceptually to the context layer (it
+    applies USER CONTEXT to the vault by tagging contradicted notes).
+    Both commands invoke the same machinery; use whichever feels more
+    natural in your shell history.
+    """
+    # Direct call to the top-level stale() function — same defaults.
+    stale(apply=apply, limit=limit, since_days=since_days)
+
+
 history_app = typer.Typer(
     help="Build and manage the LLM-generated history narrative — a "
          "tangled summary of older/stale notes prepended to every "
          "system prompt as background context.",
     cls=PrefixGroup,
 )
-app.add_typer(history_app, name="history")
+app.add_typer(history_app, name="history", rich_help_panel="Context & Vault")
 
 
 @history_app.command("build")
@@ -8150,7 +8372,7 @@ def history_tangle():
     make_it_so()
 
 
-@app.command()
+@app.command(rich_help_panel="Context & Vault")
 def stale(
     apply:    Annotated[bool, typer.Option("--apply", "-a",
               help="Auto-apply suggested tags without confirmation")] = False,
@@ -8393,7 +8615,7 @@ def knob_list():
     on_screen("Auto-create:   [bold]org-llm personalize --apply[/bold]")
 
 
-@app.command()
+@app.command(rich_help_panel="Themes")
 def personalize(
     apply:    Annotated[bool, typer.Option("--apply",    "-a",
               help="Write proposed knobs to the config DB")] = False,
@@ -8403,6 +8625,10 @@ def personalize(
               help="Cap on number of proposed knobs")] = 5,
     overwrite: Annotated[bool, typer.Option("--overwrite",
               help="Replace existing user knobs instead of merging")] = False,
+    show:     Annotated[bool, typer.Option("--show",
+              help="Show currently-registered user theme knobs and exit")] = False,
+    clear:    Annotated[bool, typer.Option("--clear",
+              help="Delete all user-registered theme knobs (with confirm)")] = False,
 ):
     """Auto-create theme knobs from your vault + filesystem content.
 
@@ -8419,12 +8645,52 @@ def personalize(
       org-llm personalize --apply          — register all proposals
       org-llm personalize -a --no-llm      — apply with template messages only
       org-llm personalize -a --overwrite   — replace existing user knobs
+      org-llm personalize --show           — print currently-registered knobs
+      org-llm personalize --clear          — delete all user knobs
 
     The personalisation pipeline is read-only by default and *always*
     deterministic in detection. Only message generation can call out to
     the local LLM (chat_model / fast_model). Use --no-llm to keep the
     whole flow offline.
     """
+    # --show: just print existing knobs and bail.
+    if show:
+        knobs = _read_user_knobs()
+        if not knobs:
+            on_screen("[dim]No user knobs registered yet.[/dim]")
+            on_screen("Generate some: [bold]org-llm personalize --apply[/bold]")
+            return
+        from rich.table import Table as _T
+        tbl = _T(box=None, pad_edge=False)
+        tbl.add_column("Knob",     style="lcars1", no_wrap=True)
+        tbl.add_column("Source",   style="dim",    width=14)
+        tbl.add_column("Level",    style="lcars3", justify="right", width=6)
+        tbl.add_column("Sample message", style="lcars2")
+        for k in knobs:
+            msgs = k.get("messages", [])
+            sample = msgs[0][0] if msgs else "(none)"
+            tbl.add_row(k.get("name", "?"),
+                         k.get("_source", "manual"),
+                         str(k.get("default_level", 2)),
+                         sample[:60])
+        console.print()
+        console.rule("[lcars1]Registered theme knobs[/lcars1]")
+        console.print(tbl)
+        return
+
+    # --clear: wipe with confirm.
+    if clear:
+        knobs = _read_user_knobs()
+        if not knobs:
+            on_screen("[dim]No user knobs to clear.[/dim]")
+            return
+        if not typer.confirm(f"Delete all {len(knobs)} user-registered "
+                              f"knob(s)?", default=False):
+            return
+        _write_user_knobs([])
+        hail("Cleared all user-registered knobs.")
+        return
+
     from rich.table import Table as _T
     from . import personalize as _p
 
@@ -8504,7 +8770,7 @@ def personalize(
     make_it_so()
 
 
-@app.command(name="grant-root")
+@app.command(name="grant-root", rich_help_panel="LLM Auth (MCP)")
 def grant_root(
     path: Annotated[str, typer.Argument(help="Trusted prefix the LLM may self-grant within")],
 ):
@@ -8537,7 +8803,7 @@ def grant_root(
         raise typer.Exit(1)
 
 
-@app.command(name="revoke-root")
+@app.command(name="revoke-root", rich_help_panel="LLM Auth (MCP)")
 def revoke_root(
     path: Annotated[str, typer.Argument(help="Auto-grant root to remove")],
 ):
@@ -8552,7 +8818,7 @@ def revoke_root(
         raise typer.Exit(1)
 
 
-@app.command(name="grant-browser")
+@app.command(name="grant-browser", rich_help_panel="LLM Auth (MCP)")
 def grant_browser():
     """Allow the LLM to open URLs and drive qutebrowser via MCP."""
     from . import access
@@ -8564,7 +8830,7 @@ def grant_browser():
     make_it_so()
 
 
-@app.command(name="revoke-browser")
+@app.command(name="revoke-browser", rich_help_panel="LLM Auth (MCP)")
 def revoke_browser():
     """Disallow LLM browser access."""
     from . import access
@@ -8573,7 +8839,7 @@ def revoke_browser():
     make_it_so()
 
 
-@app.command()
+@app.command(rich_help_panel="Themes")
 def theme(
     mode: Annotated[str, typer.Argument(help="dark | light | toggle | show")] = "show",
 ):
@@ -8624,7 +8890,7 @@ def theme(
     make_it_so()
 
 
-@app.command()
+@app.command(rich_help_panel="Maintenance")
 def completion(
     shell:   Annotated[str,  typer.Argument(help="Shell: fish | bash | zsh | powershell | pwsh")] = "fish",
     install: Annotated[bool, typer.Option("--install", "-i",

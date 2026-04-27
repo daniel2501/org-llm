@@ -444,13 +444,25 @@ def create_mcp_server():
           3. SRE-style fix (config / doctor / models repairs).
 
         Refuses dangerous verbs: `mcp` (would recurse), `claude` / `launch`
-        (would try to take over the terminal), `install` and `grant*`
-        (sensitive). Returns combined stdout/stderr from the run, capped
-        at 8000 chars. Use this when the user gives a vague intent and
-        you want the CLI's auto-fix layer to figure out the exact argv.
+        (would try to take over the terminal), `install-tools` /
+        `install` / `setup` (long interactive flows with binary
+        installs), and `grant*` / `revoke*` (security boundary —
+        the user must explicitly grant access). Returns combined
+        stdout/stderr from the run, capped at 8000 chars. Use this
+        when the user gives a vague intent and you want the CLI's
+        auto-fix layer to figure out the exact argv.
         """
         import shlex, subprocess
-        DANGEROUS = {"mcp", "claude", "launch", "install",
+        # Verbs the in-opencode LLM is NEVER allowed to run via org_llm_run:
+        #   - mcp     — would recursively start another MCP server
+        #   - launch / claude — would try to take over the user's terminal
+        #   - install-tools / install (legacy alias) — network installs of
+        #     binaries; needs explicit user consent in a real terminal
+        #   - setup   — long interactive flow with prompts; not for MCP
+        #   - grant*/revoke* — security boundary; only the user can grant
+        DANGEROUS = {"mcp", "claude", "launch",
+                     "install-tools", "install",   # rename + back-compat
+                     "setup",
                      "grant", "grant-root", "grant-browser",
                      "revoke", "revoke-root", "revoke-browser"}
         try:

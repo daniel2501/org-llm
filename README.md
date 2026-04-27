@@ -30,18 +30,84 @@ falls back to multi-provider GPU clouds when your laptop runs out of VRAM.
 
 ---
 
-## Quickstart
+## Install
+
+`org-llm` is a Python tool. The recommended path uses [uv](https://docs.astral.sh/uv/)
+so it lives in its own isolated environment and stays off your system Python:
 
 ```sh
-# Bootstrap everything: ollama, models, fonts, opencode, gh, claude, pass
-org-llm install
+# Install uv if you don't already have it
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Initialize DB, index your vault, embed every node
+# Install org-llm itself (or update an existing copy)
+uv tool install --reinstall git+https://github.com/daniel2501/org-llm
+
+# Verify
+org-llm --help
+```
+
+That puts the `org-llm` binary on your PATH (typically `~/.local/bin/org-llm`).
+
+Alternatives:
+
+```sh
+# From a local clone (editable / contributor workflow)
+git clone https://github.com/daniel2501/org-llm
+uv tool install --reinstall ./org-llm
+
+# pipx (also works, slower than uv)
+pipx install git+https://github.com/daniel2501/org-llm
+```
+
+After install you'll want **Ollama** locally for free chat + embeddings:
+`org-llm install-tools --skip-fonts --skip-opencode --skip-gh --skip-claude` does
+this for you, or grab it directly from [ollama.com](https://ollama.com).
+
+---
+
+## Quickstart
+
+The fast path — one command:
+
+```sh
+org-llm setup
+```
+
+`setup` chains the 13 things a new user needs in order, asking before each
+step and using your real state to make every prompt concrete (e.g.
+*"Index and auto-tag your org notes now? (12 unindexed of 245 on disk · 87
+untagged node(s))"*). Steps:
+
+1. **init** — create the SQLite DB
+2. **discover** — scan filesystem for org / repo / Emacs roots
+3. **doctor** — health check; surface concrete gaps
+4. **install FOSS tools** *(only if missing)* — bat / ripgrep / fzf / …
+5. **models --tune** — pick a hardware-fitting set
+6. **index** — scan your `.org` files
+7. **tag --apply** — LLM auto-tags untagged notes
+8. **embed** — vectorise unembedded nodes *(idempotent, runs unconditionally)*
+9. **personalize --apply** — auto-create theme knobs from real content
+10. **context build** — LLM reads notes; infers durable facts about you
+11. **history build** — narrative summary of older + archived notes
+12. **tutor welcome** — print the welcome step
+13. **open the full tour** in your editor
+
+Pass `--yes` to run non-interactively with reasonable defaults. Ctrl-C
+at any prompt exits cleanly with partial progress preserved (every step
+is idempotent).
+
+The manual path, if you'd rather take steps one at a time:
+
+```sh
+# Bootstrap binaries: Ollama, models, fonts, opencode, gh, claude, pass
+org-llm install-tools
+
+# Initialize DB, index, embed
 org-llm init
 org-llm index
 org-llm embed
 
-# Confirm the world is healthy
+# Confirm health
 org-llm doctor
 
 # Ask a question grounded in your notes
@@ -67,7 +133,7 @@ org-llm ask "what did I write about cooperative governance last month?"
    ┌─────────┐       ┌──────────┐    ┌──────────┐     ┌──────────┐      ┌────────────┐
    │ Ollama  │       │ MCP      │    │ opencode │     │ Claude   │      │ Cloud GPU  │
    │ (local) │       │ stdio    │ ─▶ │ workspace│     │ Code     │      │ (RunPod /  │
-   │ chat    │ ◀──── │ 13 tools │    │          │     │ workspace│      │  Vast / …) │
+   │ chat    │ ◀──── │ 32 tools │    │          │     │ workspace│      │  Vast / …) │
    │ embed   │       └──────────┘    └──────────┘     └──────────┘      └────────────┘
    └─────────┘
 ```
@@ -117,7 +183,7 @@ candidates.
 | `org-llm history build [-i]` | LLM scans old + archived notes; writes narrative summary |
 | `org-llm stale [--apply]` | LLM-driven staleness sweep over uncategorised notes |
 | `org-llm completion fish --install` | Install shell completions |
-| `org-llm install` | One-shot install Ollama, models, fonts, opencode, gh, claude, pass |
+| `org-llm install-tools` | One-shot install Ollama, models, fonts, opencode, gh, claude, pass |
 
 Every command has `--help`. The full setup walkthrough lives in `org-llm tutor`.
 
@@ -835,7 +901,7 @@ Then write a `.tape` script under `docs/tape/` and run `vhs <script>.tape`.
 git clone git@github.com:daniel2501/org-llm.git
 cd org-llm
 uv sync                 # install deps + dev tools
-uv run pytest -q        # run the test suite (225+ tests)
+uv run pytest -q        # run the test suite (470+ tests)
 uv run python tools/gallery.py   # regenerate README screenshots
 ```
 
@@ -847,20 +913,27 @@ Project layout:
 
 ```
 org_llm/
-  cli.py          # the Typer app — every CLI command
+  cli.py          # the Typer app — every CLI command (incl. `setup`)
   cli_skills.py   # skill / skills / skill-index / skill-new commands
   cloud.py        # multi-provider GPU registry + chat/embed/check
+  code_index.py   # cross-corpus indexer for ~/repos
+  context.py      # tangle-driven USER + HISTORICAL context, stale sweep
   creds.py        # `pass` wrapper for API keys
   db.py           # SQLAlchemy models + sqlite-vec extension load
+  discover.py     # filesystem probe (org_dir / repos / dotfiles)
+  fixer_bench.py  # benchmark cloud LLMs on canonical fix scenarios
   indexer.py      # parse org → files/nodes
   llm.py          # thin Ollama wrapper
-  mcp_server.py   # FastMCP server with 13 tools
+  mcp_server.py   # FastMCP server with 32 tools
   models.py       # FOSS model catalog + tool registry + theming
+  performance.py  # hardware-aware tuner (free RAM, measured tok/s)
+  personalize.py  # LLM-driven theme synthesis from real content
+  access.py       # MCP file/browser grants + sensitive-path deny-list
   report.py       # rich text reports
-  search.py       # vector_search + keyword_search
+  search.py       # signal-boosted vector + keyword search
   skills.py       # :skill: org-babel block extractor + runner
-  ui.py           # console, themes, banners, intensity levels
-tests/            # 225 tests across 11 test files
+  ui.py           # console, themes, banners, themed spinners
+tests/            # 470+ tests across 18 test files
 dbt/              # analytics views (stg_nodes, recent_nodes, …)
 doom/             # Doom Emacs integration (org-llm.el)
 tools/            # gallery.py screenshot generator
