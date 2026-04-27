@@ -22,6 +22,27 @@ def _cfg(session, key: str) -> str:
     return row.value if row else ""
 
 
+def _themed(tool: str, summary: str, body: str = "") -> str:
+    """Wrap a tool's return string in the LCARS chat vocabulary so opencode
+    output keeps the same visual rhythm as the CLI.
+
+    Format:
+        ◀ <tool> — <summary>
+        ────────────────────────────────────────────────
+        <body>
+
+    Body is optional — short tool returns (e.g. capture_note returning a
+    node ID) get just the header. Free-text returns from search/ask/etc.
+    get the full sandwich. Clients without rich rendering still see plain
+    text; clients with monospace blocks render the separator cleanly.
+    """
+    head = f"◀ {tool} — {summary}"
+    if not body:
+        return head
+    sep = "─" * 60
+    return f"{head}\n{sep}\n{body.rstrip()}"
+
+
 def _theme_label(op: str) -> str:
     """Themed phrase for an op key — borrows the same TREK_MSGS table the
     CLI's spinners use, so MCP progress messages match the on-screen vibe
@@ -118,12 +139,18 @@ def create_mcp_server():
                     from .search import keyword_search
                     results = keyword_search(session, query, limit=limit)
         if not results:
-            return "No results found."
-        return "\n\n---\n\n".join(
+            return _themed("search_notes",
+                            f"no hits for {query!r}",
+                            "Try a synonym or broader phrase.")
+        body = "\n\n---\n\n".join(
             f"**{r.title}**\nFile: {Path(r.file_path).name}\n"
             f"Tags: {r.tags or 'none'}\n\n{r.body[:600]}"
             for r in results
         )
+        mode = "keyword" if keyword else "semantic"
+        return _themed("search_notes",
+                        f"{len(results)} {mode} hit(s) for {query!r}",
+                        body)
 
     # ── ask_notes ─────────────────────────────────────────────────────────────
     @server.tool()
@@ -153,7 +180,9 @@ def create_mcp_server():
                 return f"Search error: {e}"
             if not results:
                 await _report(ctx, 3, 3, f"{label} — no matches")
-                return "No relevant notes found."
+                return _themed("ask_notes",
+                                f"no relevant notes for {question!r}",
+                                "Try a different phrasing.")
             await _info(ctx, f"{label}: matched {len(results)} note(s)")
             rag_ctx = "\n\n---\n\n".join(f"# {r.title}\n{r.body[:800]}" for r in results)
         system = (
@@ -162,10 +191,13 @@ def create_mcp_server():
         )
         await _report(ctx, 3, 3, f"{label} — synthesizing answer with {chat_model}")
         try:
-            return chat(
+            answer = chat(
                 f"Notes:\n\n{rag_ctx}\n\n---\n\nQuestion: {question}",
                 model=chat_model, base_url=url, system=system,
             )
+            return _themed("ask_notes",
+                            f"{len(results)} note(s) feeding the answer",
+                            answer)
         except Exception as e:
             return f"LLM error: {e}"
 
@@ -197,7 +229,11 @@ def create_mcp_server():
         )
         with open(org_file, "a") as fh:
             fh.write(entry)
-        return f"Captured '{title}' → {org_file}\nID: {node_id}\nRun org-llm index to add to search."
+        return _themed("capture_note",
+                        f"saved '{title}' to {org_file.name}",
+                        f"ID: {node_id}\n"
+                        f"Path: {org_file}\n"
+                        f"Run [bold]org-llm index[/bold] to add to search.")
 
     # ── get_node ──────────────────────────────────────────────────────────────
     @server.tool()
@@ -213,13 +249,15 @@ def create_mcp_server():
                 .first()
             )
             if not node:
-                return f"No node found matching '{title}'. Try search_notes() to explore."
+                return _themed("get_node",
+                                f"no match for {title!r}",
+                                "Try search_notes() with a different phrase.")
             modified = (
                 datetime.fromtimestamp(node.mtime).isoformat(timespec="seconds")
                 if node.mtime else "?"
             )
             from .db import merged_tags as _merged
-            return (
+            body = (
                 f"**{node.title}**\n"
                 f"File:     {node.file.path}\n"
                 f"Tags:     {_merged(node) or 'none'}\n"
@@ -227,6 +265,7 @@ def create_mcp_server():
                 f"Modified: {modified}\n\n"
                 f"{node.body}"
             )
+            return _themed("get_node", node.title, body)
 
     # ── list_nodes_by_tag ─────────────────────────────────────────────────────
     @server.tool()
@@ -244,11 +283,13 @@ def create_mcp_server():
                 .limit(limit).all()
             )
         if not rows:
-            return f"No nodes tagged '{tag}'."
-        return "\n".join(
+            return _themed("list_nodes_by_tag", f"no notes tagged {tag!r}")
+        body = "\n".join(
             f"- {n.title}  [{_merged(n)}]  ({Path(p).name})"
             for n, p in rows
         )
+        return _themed("list_nodes_by_tag",
+                        f"{len(rows)} note(s) tagged {tag!r}", body)
 
     # ── list_recent_nodes ─────────────────────────────────────────────────────
     @server.tool()
@@ -265,11 +306,14 @@ def create_mcp_server():
                 .limit(25).all()
             )
         if not nodes:
-            return f"No nodes modified in the last {days} days."
-        return "\n".join(
+            return _themed("list_recent_nodes",
+                            f"no activity in the last {days} day(s)")
+        body = "\n".join(
             f"- {n.title}  ({datetime.fromtimestamp(n.mtime).date().isoformat() if n.mtime else '?'})"
             for n in nodes
         )
+        return _themed("list_recent_nodes",
+                        f"{len(nodes)} note(s) modified in last {days}d", body)
 
     # ── get_vault_stats ───────────────────────────────────────────────────────
     @server.tool()
@@ -289,12 +333,14 @@ def create_mcp_server():
             org_dir    = _cfg(session, "org_dir") or "~/org"
         pct_e = int(n_embedded / n_nodes * 100) if n_nodes else 0
         pct_t = int(n_tagged   / n_nodes * 100) if n_nodes else 0
-        return (
+        body = (
             f"Vault: {org_dir}\n"
             f"  {n_files} files  |  {n_nodes} nodes\n"
             f"  {n_embedded}/{n_nodes} embedded ({pct_e}%)\n"
             f"  {n_tagged}/{n_nodes} tagged ({pct_t}%)"
         )
+        return _themed("get_vault_stats",
+                        f"{n_nodes} nodes across {n_files} files", body)
 
     # ── list_skills ───────────────────────────────────────────────────────────
     @server.tool()
@@ -304,11 +350,15 @@ def create_mcp_server():
         with get_session(engine) as session:
             skills = session.query(Skill).all()
         if not skills:
-            return "No skills registered. Add :skill: blocks to org files and run org-llm skill-index."
-        return "\n".join(
+            return _themed("list_skills",
+                            "no skills registered",
+                            "Add :skill: blocks to org files and run "
+                            "[bold]org-llm skill-index[/bold].")
+        body = "\n".join(
             f"- {s.name}  (lang: {s.lang}, model: {s.model_key})"
             for s in skills
         )
+        return _themed("list_skills", f"{len(skills)} skill(s)", body)
 
     # ── run_skill ─────────────────────────────────────────────────────────────
     @server.tool()
@@ -1144,6 +1194,80 @@ def create_mcp_server():
         args = ["lessons", "--level", level]
         if topic: args.append(topic)
         return _shell_org_llm_dbt(*args, timeout=180)
+
+    # ── Discovery: list_slash_commands ────────────────────────────────────────
+    @server.tool()
+    def list_slash_commands() -> str:
+        """List slash commands registered in this opencode workspace,
+        grouped by intent prefix. Reads .opencode/command/*.md from the
+        cwd. Use to answer 'what can I do?' without the user having to
+        scroll the slash menu."""
+        cmd_dir = Path(".opencode/command")
+        if not cmd_dir.is_dir():
+            # Fall back to bundled defaults via the cli helper.
+            from .cli import _opencode_slash_commands
+            cmds = _opencode_slash_commands("all")
+            names = sorted(cmds.keys())
+        else:
+            names = sorted(p.stem for p in cmd_dir.glob("*.md"))
+        if not names:
+            return _themed("list_slash_commands", "no commands found")
+        # Group by prefix (everything before the first '-' is the family).
+        groups: dict[str, list[str]] = {}
+        for n in names:
+            family = n.split("-", 1)[0] if "-" in n else "general"
+            groups.setdefault(family, []).append(n)
+        body_lines = []
+        for family in sorted(groups):
+            cmds_in_group = sorted(groups[family])
+            body_lines.append(
+                f"  {family}:  " + "  ".join(f"/{c}" for c in cmds_in_group))
+        return _themed("list_slash_commands",
+                        f"{len(names)} command(s) across "
+                        f"{len(groups)} group(s)",
+                        "\n".join(body_lines))
+
+    # ── Live context refresh ──────────────────────────────────────────────────
+    @server.tool()
+    def refresh_context() -> str:
+        """Re-fetch vault stats, recent activity, top tags, and active
+        config. Use mid-session when the user mentions running a CLI
+        command outside opencode (index, embed, config change) — the
+        system prompt was snapshotted at launch and doesn't auto-refresh.
+
+        Returns a compact summary the LLM should integrate into its
+        mental model for the rest of the session."""
+        from .db import File, Node, Config, merged_tags
+        from datetime import datetime, timedelta
+        from collections import Counter
+        with get_session(engine) as session:
+            n_files    = session.query(File).count()
+            n_nodes    = session.query(Node).count()
+            n_embedded = session.query(Node).filter(
+                Node.embedding.isnot(None)).count()
+            since = (datetime.now() - timedelta(days=7)).timestamp()
+            recent_titles = [n.title for n in session.query(Node)
+                              .filter(Node.mtime >= since)
+                              .order_by(Node.mtime.desc())
+                              .limit(8).all() if n.title]
+            tag_counts: Counter = Counter()
+            for tags, auto in session.query(Node.tags, Node.auto_tags).all():
+                for t in ((tags or "") + " " + (auto or "")).split():
+                    if t and len(t) > 2:
+                        tag_counts[t.lower()] += 1
+            top_tags = tag_counts.most_common(8)
+            cfg_chat = _cfg(session, "chat_model")
+            cfg_provider = _cfg(session, "cloud_provider") or "ollama (local)"
+        body = (
+            f"Vault now: {n_files} files / {n_nodes} nodes / "
+            f"{n_embedded} embedded\n"
+            f"Recent (7d): {', '.join(recent_titles[:6]) or '(none)'}\n"
+            f"Top tags: {', '.join(f'{t}({n})' for t, n in top_tags)}\n"
+            f"Chat model: {cfg_chat}  |  Provider: {cfg_provider}"
+        )
+        return _themed("refresh_context",
+                        f"snapshot at {datetime.now().strftime('%H:%M:%S')}",
+                        body)
 
     return server
 

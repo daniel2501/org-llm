@@ -125,7 +125,8 @@ class TestSearchNotes:
 
     def test_keyword_no_match(self, server):
         out = _tool(server, "search_notes")(query="quantumchromodynamics", keyword=True)
-        assert "No results" in out
+        # Themed wrap: "◀ search_notes — no hits for 'quantumchromodynamics'"
+        assert "no hits" in out.lower() or "no results" in out.lower()
 
     def test_keyword_respects_limit(self, server):
         # Force-add many matches
@@ -195,7 +196,8 @@ class TestListNodesByTag:
 
     def test_unknown_tag(self, server):
         out = _tool(server, "list_nodes_by_tag")(tag="not-a-real-tag")
-        assert "No nodes tagged" in out
+        # Themed wrap: "◀ list_nodes_by_tag — no notes tagged 'not-a-real-tag'"
+        assert "no notes tagged" in out.lower() or "no nodes tagged" in out.lower()
 
     def test_no_session_leaks(self, server):
         # If a session was leaked, the row tuple access would raise DetachedInstanceError
@@ -225,7 +227,8 @@ class TestListRecentNodes:
 
     def test_empty_window(self, server):
         out = _tool(server, "list_recent_nodes")(days=0)
-        assert "No nodes" in out
+        # Themed wrap: "◀ list_recent_nodes — no activity in the last 0 day(s)"
+        assert "no activity" in out.lower() or "no nodes" in out.lower()
 
 
 # ── get_vault_stats ───────────────────────────────────────────────────────────
@@ -256,7 +259,8 @@ class TestCaptureNote:
         out = _tool(server, "capture_note")(title="Manifesto",
                                              body="Property is theft.",
                                              file="inbox.org")
-        assert "Captured" in out
+        # Themed wrap: "◀ capture_note — saved 'Manifesto' to inbox.org"
+        assert "saved" in out.lower() or "captured" in out.lower()
         assert "Manifesto" in out
         target = tmp_path / "inbox.org"
         assert target.exists()
@@ -510,7 +514,10 @@ class TestMCPProgressNotifications:
         ctx = self._fake_ctx()
         fn = server._tool_manager._tools["ask_notes"].fn
         result = asyncio.run(fn(question="hi", ctx=ctx))
-        assert result == "stub answer"
+        # Themed wrap surrounds the stub with a header + separator;
+        # the answer itself is preserved verbatim.
+        assert "stub answer" in result
+        assert "ask_notes" in result   # themed header present
         # Three phases reported.
         phases = [m for _, _, m in ctx.progress_calls if m]
         assert any("embedding query" in p for p in phases), phases
@@ -529,7 +536,8 @@ class TestMCPProgressNotifications:
                             lambda *a, **kw: [])
         fn = server._tool_manager._tools["ask_notes"].fn
         out = asyncio.run(fn(question="hi"))
-        assert "No relevant notes" in out
+        # Themed wrap: "◀ ask_notes — no relevant notes for 'hi'"
+        assert "no relevant notes" in out.lower() or "no matches" in out.lower()
 
     def test_progress_failures_dont_break_tools(self, server, mcp_db, monkeypatch):
         """A misbehaving client (raising on report_progress) must not take
@@ -552,5 +560,6 @@ class TestMCPProgressNotifications:
                 raise RuntimeError("client died")
         fn = server._tool_manager._tools["ask_notes"].fn
         out = asyncio.run(fn(question="hi", ctx=BoomCtx()))
-        assert out == "still works"
+        # Themed wrap doesn't change correctness — body is preserved.
+        assert "still works" in out
 # test_mcp_server.py:1 ends here

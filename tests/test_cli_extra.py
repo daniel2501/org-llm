@@ -359,6 +359,71 @@ class TestOpenCodeHelpers:
         # dry-run. If we regress to no-timeout, this would hit the 60s sleep.
         assert elapsed < 20.0, f"launch dry-run took {elapsed:.1f}s (should be <20s)"
 
+    def test_persona_block_silent_when_no_dials(self):
+        """No active dials/knobs → empty persona block (no noise in prompt)."""
+        from org_llm.cli import _persona_block
+        assert _persona_block([], []) == ""
+
+    def test_persona_block_emits_concrete_rules_per_dial(self):
+        """Each active dial level should map to specific behavioral text,
+        not just a level label."""
+        from org_llm.cli import _persona_block, _DIAL_PERSONAS
+        block = _persona_block([("trek", 2), ("commie", 3)], [])
+        assert "PERSONA" in block
+        assert "trek (level 2)" in block
+        assert "commie (level 3)" in block
+        # Specific vocabulary present (e.g. "Make it so" for trek-2,
+        # "Solidarity" for commie-3 — pulled from _DIAL_PERSONAS).
+        assert "Make it so" in block or "Engaging" in block
+        assert "Solidarity" in block or "struggle" in block.lower()
+
+    def test_persona_block_includes_user_knob_vocabulary(self):
+        from org_llm.cli import _persona_block
+        knobs = [{
+            "name": "synthwave", "default_level": 3,
+            "keywords": ["1980s", "neon"],
+            "messages": [["Boot sequence engaged.", "info"],
+                          ["Carrier wave locked.", "lcars2"]],
+        }]
+        block = _persona_block([], knobs)
+        assert "synthwave" in block
+        # User's own message strings surface as concrete vocabulary
+        assert "Boot sequence" in block or "Carrier wave" in block
+
+    def test_themed_helper_wraps_with_lcars_chrome(self):
+        from org_llm.mcp_server import _themed
+        out = _themed("search_notes", "5 hits", "body line\nanother")
+        assert out.startswith("◀ search_notes — 5 hits")
+        assert "─" * 60 in out  # separator
+        assert "body line" in out
+
+    def test_themed_helper_omits_separator_for_short_returns(self):
+        from org_llm.mcp_server import _themed
+        out = _themed("capture_note", "saved 'X'")
+        assert out == "◀ capture_note — saved 'X'"  # no body, no separator
+
+    def test_auto_generated_slash_for_every_non_blocked_verb(self):
+        """The whole point of the auto-gen layer: never miss a CLI verb."""
+        import typer as _typer
+        from org_llm.cli import app, _opencode_slash_commands
+        cmds = _opencode_slash_commands("all")
+        BLOCKED = {"mcp", "claude", "launch", "install-tools", "install",
+                   "setup", "grant", "grant-root", "grant-browser",
+                   "revoke", "revoke-root", "revoke-browser", "self",
+                   "completion"}
+        registered = set(_typer.main.get_command(app).commands.keys())
+        missing = (registered - BLOCKED) - set(cmds.keys())
+        assert not missing, f"new CLI verbs without slash command: {missing}"
+
+    def test_menu_theme_dial_refresh_slash_commands_exist(self):
+        """The opencode parity pass adds /menu, /theme, /dial,
+        /refresh-context — pin them so future slash-command refactors
+        don't accidentally drop the discovery surface."""
+        from org_llm.cli import _opencode_slash_commands
+        cmds = _opencode_slash_commands("all")
+        for name in ("menu", "theme", "dial", "refresh-context"):
+            assert name in cmds, f"missing /{name}"
+
     def test_cli_parity_slash_commands(self):
         """Sweep guard: every major CLI verb should have a slash command
         (or be intentionally omitted as terminal-only / security-gated)."""

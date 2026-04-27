@@ -7189,6 +7189,89 @@ def _render_context_for_opencode() -> str:
     return "".join(parts)
 
 
+_DIAL_PERSONAS = {
+    # Each tuple of (level → behavioral instruction). Level 0 = silent;
+    # higher levels stack progressively. The LLM gets concrete vocabulary
+    # and rules rather than the soft "match the energy" we used to ship.
+    "trek": {
+        1: "Use one Star Trek metaphor when it lands naturally — but never force it.",
+        2: ("Use Star Trek voice consistently: 'Engaging…' to start a tool "
+            "call, 'On screen.' to surface results, 'Make it so.' to confirm "
+            "an action. One metaphor per response minimum."),
+        3: ("Full LCARS officer voice. Open with 'Captain.' or similar; refer "
+            "to tool calls as 'engaging the deflector array' / 'hailing "
+            "frequencies open' / 'scanning sector'; close with 'Make it so.' "
+            "Treat the user as ranking officer giving orders."),
+    },
+    "commie": {
+        1: "Occasional collective-action framing — 'we' over 'you' when natural.",
+        2: ("Solidarity-in-action framing: name collective effort, surface "
+            "the political dimension when it's there in the notes, end "
+            "answers with a short class-conscious closer when relevant."),
+        3: ("Full solidarity voice. End EVERY response with 'Solidarity.' or "
+            "an equivalent ('Forward together.' / 'In struggle.'). Frame "
+            "individual work in collective terms; surface labor history "
+            "when notes mention work topics."),
+    },
+    "queer": {
+        1: "Gentle warmth and affirmation when the topic invites it.",
+        2: ("Explicit care language. Use 'love' as a term of address "
+            "occasionally ('here's what I found, love'). Treat the vault "
+            "as the user's heart-on-paper and respect it as such."),
+        3: ("Full pride voice. Protective, joyful, 'hon'/'love'/'sweetie' "
+            "as terms of address. Celebrate the user's growth visible in "
+            "the notes. Close warm responses with 💜 or similar."),
+    },
+}
+
+
+def _persona_block(active_dials: list[tuple[str, int]],
+                     user_knobs: list[dict]) -> str:
+    """Build a concrete behavioral persona block for the system prompt.
+
+    Replaces the prior soft "match the energy" instruction with
+    level-specific rules the LLM can actually follow. Empty when the
+    user has no active dials/knobs (silent default).
+    """
+    if not active_dials and not user_knobs:
+        return ""
+    lines = ["", "PERSONA — apply these rules to every response:"]
+    for name, level in active_dials:
+        if level <= 0:
+            continue
+        rule = _DIAL_PERSONAS.get(name, {}).get(level)
+        if rule:
+            lines.append(f"  ✦ {name} (level {level}): {rule}")
+    for k in user_knobs:
+        kname = k.get("name", "?")
+        try:
+            from .ui import _theme_level
+            level = _theme_level(f"ORG_LLM_{kname.upper()}_LEVEL",
+                                  default=int(k.get("default_level", 2)),
+                                  db_key=None)
+        except Exception:
+            level = int(k.get("default_level", 2))
+        if level <= 0:
+            continue
+        # Surface the user's own messages array as concrete vocabulary
+        msgs = k.get("messages") or []
+        sample = ", ".join(
+            f"\"{m[0]}\"" for m in msgs[:3] if isinstance(m, list) and m
+        )
+        kw = ", ".join(k.get("keywords") or [])
+        line = f"  ✦ {kname} (level {level})"
+        if sample:
+            line += f" — vocabulary: {sample}"
+        if kw:
+            line += f" · keywords: {kw}"
+        lines.append(line)
+    if len(lines) <= 2:
+        return ""    # all dials at 0
+    lines.append("  Voice should feel consistent — pick AT LEAST ONE rule "
+                  "per response and don't mix dialects awkwardly.")
+    return "\n".join(lines)
+
+
 def _opencode_workspace_prompt(workspace: str, n_files: int, n_nodes: int,
                                 n_embedded: int, pct_e: int, org_dir: str,
                                 skill_str: str, recent_str: str,
@@ -7196,7 +7279,8 @@ def _opencode_workspace_prompt(workspace: str, n_files: int, n_nodes: int,
                                 discover_str: str, knobs_str: str,
                                 hardware_str: str,
                                 todays_prompt: str = "",
-                                projects_str: str = "") -> str:
+                                projects_str: str = "",
+                                persona_block: str = "") -> str:
     """Return the system prompt for a workspace flavor.
 
     Workspaces:
@@ -7251,7 +7335,7 @@ HARDWARE
 
 FILESYSTEM
 {discover_str}
-{('USER PROJECTS' + chr(10) + projects_str + chr(10)) if projects_str else ''}{knobs_str}{('TODAY OPENING PROMPT' + chr(10) + '  ' + todays_prompt + chr(10) + '  (offer this if the user opens with no question)' + chr(10)) if todays_prompt else ''}{_render_context_for_opencode()}"""
+{('USER PROJECTS' + chr(10) + projects_str + chr(10)) if projects_str else ''}{knobs_str}{persona_block}{('TODAY OPENING PROMPT' + chr(10) + '  ' + todays_prompt + chr(10) + '  (offer this if the user opens with no question)' + chr(10)) if todays_prompt else ''}{_render_context_for_opencode()}"""
 
     if workspace == "researcher":
         focus = """
@@ -7538,6 +7622,25 @@ def _opencode_pre_flight_context(session) -> dict:
     except Exception:
         pass
 
+    # Persona block — concrete behavioral rules for active dials/knobs.
+    # Distinct from `knobs_str` (which just LISTS active dials) — the
+    # persona block tells the LLM what to actually DO with that level.
+    active_dials: list[tuple[str, int]] = []
+    try:
+        from .ui import trek_level, commie_level, queer_level, _user_knobs
+        for n, fn in (("trek", trek_level), ("commie", commie_level),
+                       ("queer", queer_level)):
+            try:
+                lvl = int(fn())
+                if lvl > 0:
+                    active_dials.append((n, lvl))
+            except Exception:
+                pass
+        ukn = _user_knobs() or []
+    except Exception:
+        ukn = []
+    persona_block = _persona_block(active_dials, ukn)
+
     return {
         "org_dir": str(org_dir), "ollama_url": ollama_url,
         "n_files": n_files, "n_nodes": n_nodes, "n_embedded": n_embedded,
@@ -7546,6 +7649,7 @@ def _opencode_pre_flight_context(session) -> dict:
         "recent_str": recent_str, "top_tags_str": top_tags_str,
         "model_status": model_status, "hardware_str": hardware_str,
         "discover_str": discover_str, "knobs_str": knobs_str,
+        "persona_block": persona_block,
         "todays_prompt": todays_prompt,
         "projects_str": projects_str,
     }
@@ -7946,6 +8050,45 @@ def _opencode_slash_commands(workspace: str) -> dict:
             "argv from intent. Refused verbs (mcp, claude, launch, install,\n"
             "setup, grant*, revoke*) need a real terminal — say so.\n"
         ),
+
+        # ── Discovery / theme / refresh (opencode parity pass) ───────────
+        "menu": (
+            "---\n"
+            "description: List every slash command in this workspace, grouped by family\n"
+            "---\n"
+            "Call `list_slash_commands`. Render the result as-is —\n"
+            "it's already grouped by prefix family (dbt-*, code-*, etc.)\n"
+            "and shows the counts. End with one sentence about /run as\n"
+            "the universal escape hatch for anything not on the list.\n"
+        ),
+        "theme": (
+            "---\n"
+            "description: Adjust the workspace theme dials (trek/commie/queer)\n"
+            "---\n"
+            "If I named a dial + level after /theme (e.g. 'trek 3'), call\n"
+            "`set_config(key='trek_level', value='3')`. Otherwise call\n"
+            "`get_config` and show ALL THREE current dial levels (trek_level,\n"
+            "commie_level, queer_level) with a one-line description of each.\n"
+            "Mention that the change applies to the *next* tool call — opencode\n"
+            "may need a `/refresh-context` to surface the new persona.\n"
+        ),
+        "dial": (
+            "---\n"
+            "description: Alias for /theme — adjust trek/commie/queer dial levels\n"
+            "---\n"
+            "Same behaviour as /theme. Set a dial level via set_config or show\n"
+            "all three current levels. Levels are 0-3 (0 = silent).\n"
+        ),
+        "refresh-context": (
+            "---\n"
+            "description: Re-fetch vault stats, recent activity, top tags, config\n"
+            "---\n"
+            "Call `refresh_context`. The system prompt was snapshotted at\n"
+            "launch — if the user mentions running CLI commands outside\n"
+            "opencode (index, embed, config), call this to update the\n"
+            "live picture. Render the snapshot, then ONE sentence on what\n"
+            "changed since launch (if you can tell).\n"
+        ),
     }
 
     if workspace == "researcher":
@@ -7966,6 +8109,40 @@ def _opencode_slash_commands(workspace: str) -> dict:
             "Then `code_search` for entry points (cli, main, init), summarise\n"
             "the architecture in 5-7 bullets, and name one thing that looks\n"
             "interesting or out of place.\n"
+        )
+
+    # ── Auto-cover anything still missing — every non-blocked CLI verb
+    # that doesn't have a curated slash command above gets a thin
+    # generic one routed through `org_llm_run`. Keeps opencode in sync
+    # with the CLI when new verbs ship without manual plumbing.
+    try:
+        registered = list(typer.main.get_command(app).commands.keys())
+    except Exception:
+        registered = []
+    BLOCKED = {
+        "mcp", "claude", "launch",          # take over the terminal
+        "install-tools", "install", "setup", # long interactive flows
+        "grant", "grant-root", "grant-browser",
+        "revoke", "revoke-root", "revoke-browser",
+        "self",                             # source mutation, security-gated
+        "completion",                       # shell-only
+    }
+    for verb in registered:
+        if verb in BLOCKED:
+            continue
+        # Curated wins — don't overwrite anything already defined above.
+        # Slash names use the same case as the verb (tag → /tag, etc.).
+        if verb in cmds:
+            continue
+        cmds[verb] = (
+            "---\n"
+            f"description: {verb} — auto-routed via org_llm_run\n"
+            "---\n"
+            f"Call `org_llm_run` with command_string=\"{verb}\". If I "
+            f"asked for arguments after /{verb}, append them to the "
+            f"command_string. The MCP layer's three-layer recovery "
+            f"chain handles shell-quoting and intent reconstruction "
+            f"if anything's malformed.\n"
         )
 
     return cmds
@@ -8087,6 +8264,7 @@ def launch(
             hardware_str=ctx["hardware_str"],
             todays_prompt=ctx.get("todays_prompt", ""),
             projects_str=ctx.get("projects_str", ""),
+            persona_block=ctx.get("persona_block", ""),
         )
 
     # ── Build .opencode.json ──────────────────────────────────────────────────
