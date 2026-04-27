@@ -1122,18 +1122,32 @@ class TestRecoveryAdvice:
 
 
 class TestOllamaPullErrorDetection:
-    """`_ollama_pull` reads stderr and surfaces specific recovery paths."""
+    """`_ollama_pull` reads stderr and surfaces specific recovery paths.
+
+    The pull function tries the streaming HTTP API first, then falls back
+    to `ollama pull`. These tests cover the legacy-CLI stderr classifier;
+    the API path is forced to raise so the fallback runs and the
+    subprocess mock is reached.
+    """
 
     @pytest.fixture
     def fake_ollama(self, tmp_path, monkeypatch):
         """Create a fake `ollama` binary on a tmp PATH so the pre-flight
-        existence check passes; return the path so subprocess can mock it."""
+        existence check passes; return the path so subprocess can mock it.
+        Also force the API path to fail immediately so we exercise the
+        legacy `ollama pull` fallback the rest of these tests assume."""
         fake = tmp_path / "ollama"
         fake.write_text("#!/bin/sh\nexit 1\n")
         fake.chmod(0o755)
         import shutil as _sh
         monkeypatch.setattr(_sh, "which",
                               lambda x: str(fake) if x == "ollama" else None)
+        # Force the streaming API path to bail so the CLI fallback runs.
+        class _Boom:
+            def __init__(self, *a, **kw):
+                raise RuntimeError("API unreachable in tests")
+        import ollama as _ollama_mod
+        monkeypatch.setattr(_ollama_mod, "Client", _Boom)
         return fake
 
     def test_disk_full_message(self, monkeypatch, capsys, fake_ollama):

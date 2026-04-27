@@ -440,21 +440,28 @@ def nodes_with_tag(
     file-level node and synthesize its body to include sub-heading content,
     matching `recent_in_path`'s behaviour.
     """
+    # Match against the merged file-tags + auto-tags string so an
+    # LLM-applied tag is just as findable as a hand-typed one.
+    from .db import merged_tags_sql
+    merged_n = merged_tags_sql("n")
+    merged_m = merged_tags_sql("m")
+    merged_fl = merged_tags_sql("fl")
     pat = f"%{tag.lower()}%"
     if one_per_file:
-        rows = session.execute(text("""
+        rows = session.execute(text(f"""
             WITH per_file AS (
                 SELECT f.id AS file_id, MIN(n.id) AS file_node_id,
                        MAX(n.mtime) AS mtime, f.path AS path
                 FROM nodes n JOIN files f ON f.id = n.file_id
                 WHERE EXISTS (
                     SELECT 1 FROM nodes m
-                    WHERE m.file_id = f.id AND lower(m.tags) LIKE :pat
+                    WHERE m.file_id = f.id AND lower({merged_m}) LIKE :pat
                 )
                 GROUP BY f.id
             ),
             file_level AS (
-                SELECT n.id, n.node_id, n.title, n.body, n.tags
+                SELECT n.id, n.node_id, n.title, n.body,
+                       {merged_n} AS tags
                 FROM nodes n JOIN per_file pf ON pf.file_node_id = n.id
             ),
             child_bodies AS (
@@ -481,10 +488,11 @@ def nodes_with_tag(
             LIMIT :lim
         """), {"pat": pat, "lim": limit}).fetchall()
     else:
-        rows = session.execute(text("""
-            SELECT n.node_id, n.title, n.body, n.tags, f.path, 0.0 AS score
+        rows = session.execute(text(f"""
+            SELECT n.node_id, n.title, n.body, {merged_n} AS tags,
+                   f.path, 0.0 AS score
             FROM nodes n JOIN files f ON f.id = n.file_id
-            WHERE lower(n.tags) LIKE :pat
+            WHERE lower({merged_n}) LIKE :pat
             ORDER BY n.mtime DESC
             LIMIT :lim
         """), {"pat": pat, "lim": limit}).fetchall()
@@ -496,18 +504,20 @@ def keyword_search(
     query: str,
     limit: int = 10,
 ) -> list[SearchResult]:
+    from .db import merged_tags_sql
+    merged = merged_tags_sql("n")
     like = f"%{query}%"
-    rows = session.execute(text("""
+    rows = session.execute(text(f"""
         SELECT
             n.node_id,
             n.title,
             n.body,
-            n.tags,
+            {merged} AS tags,
             f.path,
             0.0 AS score
         FROM nodes n
         JOIN files f ON f.id = n.file_id
-        WHERE n.title LIKE :q OR n.body LIKE :q OR n.tags LIKE :q
+        WHERE n.title LIKE :q OR n.body LIKE :q OR {merged} LIKE :q
         LIMIT :lim
     """), {"q": like, "lim": limit}).fetchall()
     return [SearchResult(*r) for r in rows]

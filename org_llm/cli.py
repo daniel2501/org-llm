@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Annotated
 
@@ -12,7 +13,7 @@ from typer.core import TyperGroup
 
 from .db import DB_PATH, MODEL_DEFAULTS, get_session, init_db, make_engine
 from .indexer import index_directory
-from .ui import TREK_MSGS, console, hail, impulse, make_it_so, on_screen, red_alert, thinking, warp
+from .ui import TREK_MSGS, console, hail, heartbeat, impulse, make_it_so, on_screen, red_alert, thinking, warp
 
 
 # ── Shortest-unique-prefix command resolution ────────────────────────────────
@@ -134,19 +135,30 @@ def _is_pulled(model: str, pulled_norm: set[str]) -> bool:
     return any(p.split(":")[0] == target_stem for p in pulled_norm)
 
 
-def _ollama_pull(model: str) -> bool:
-    """Pull a model via the local ollama binary, streaming progress.
+def _ollama_pull(model: str, *, stall_secs: float = 60.0,
+                  base_url: str = "") -> bool:
+    """Pull a model via the Ollama HTTP API with a real progress bar.
 
-    Captures stderr to detect common failure causes (disk full, network
-    timeout) and surface concrete fallback hints instead of letting the
-    raw `ollama` exit code escape into the user's transcript.
+    Uses the streaming JSON API instead of `ollama pull` because the CLI's
+    progress only renders to a TTY — when org-llm runs as a child of
+    setup (or anything else that captures stdout) the user just sees the
+    initial "Pulling…" hail and then total silence. Streaming the JSON
+    events lets us drive a Rich progress bar regardless of TTY status.
+
+    Stall detection: if no event arrives for `stall_secs` seconds, we
+    abort and surface a concrete fallback. Ollama doing a bytes-zero
+    "verifying digest" pause for ~30s is normal; >60s without ANY event
+    is a real network/daemon stall.
     """
-    import shutil, subprocess, shlex as _shlex
-    ollama = shutil.which("ollama") or str(Path("~/.local/bin/ollama").expanduser())
-    if not Path(ollama).exists():
+    import shutil, subprocess
+    from rich.progress import (
+        BarColumn, DownloadColumn, Progress, SpinnerColumn,
+        TextColumn, TimeRemainingColumn, TransferSpeedColumn,
+    )
+    ollama_bin = shutil.which("ollama") or str(Path("~/.local/bin/ollama").expanduser())
+    if not Path(ollama_bin).exists():
         red_alert("ollama binary not found — run: org-llm install-tools --skip-models --skip-fonts")
         return False
-    hail(f"Pulling [bold]{model}[/bold] via Ollama…")
     # Pre-flight disk check: warn before we even start when space is tight.
     try:
         du = shutil.disk_usage(Path("~").expanduser())
@@ -157,11 +169,119 @@ def _ollama_pull(model: str) -> bool:
                       f"--cloud for ad-hoc.[/yellow]")
     except Exception:
         pass
-    # Run with stderr captured so we can react to failure modes; stdout
-    # streams to the user's TTY for progress.
+    # Try the streaming HTTP API first. Falls back to `ollama pull`
+    # only if the daemon isn't reachable on this host (the user might
+    # be on a remote setup pointing at a remote ollama).
     try:
-        proc = subprocess.run([ollama, "pull", model],
-                               stderr=subprocess.PIPE, text=True)
+        import ollama as _ollama_mod
+        import threading
+        host = base_url or "http://localhost:11434"
+        # `timeout` is httpx's per-operation timeout — it caps each read
+        # while streaming, NOT the entire download. So a 60s timeout means
+        # "if no chunk arrives for 60s, raise" — exactly the stall semantics
+        # we want. The whole pull is allowed to take as long as it takes
+        # (gigabytes of model weights), as long as something keeps moving.
+        client = _ollama_mod.Client(host=host, timeout=stall_secs)
+        hail(f"Pulling [bold]{model}[/bold] via Ollama API…")
+        last_status = ""
+        # Shared state for the heartbeat thread. The for-loop below blocks
+        # inside httpx waiting for the next event; the heartbeat runs in a
+        # daemon thread so the user always sees the spinner ticking and
+        # gets explicit "slow…" / "very slow…" feedback if a phase takes
+        # longer than usual (e.g. "verifying digest" can pause >30s).
+        last_event_at = [time.monotonic()]
+        stop_evt      = threading.Event()
+        warned_slow   = [False]
+
+        with Progress(
+            SpinnerColumn(spinner_name="arc", style="trans.blue"),
+            TextColumn("[trans.pink]{task.description}[/trans.pink]"),
+            BarColumn(bar_width=28),
+            DownloadColumn(),
+            TransferSpeedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+            transient=False,
+        ) as prog:
+            task = prog.add_task(f"pull {model}", total=None)
+
+            def _heartbeat() -> None:
+                # Tick every 2s — refresh description with elapsed-since-
+                # last-event when the gap grows. Rich's own renderer keeps
+                # the spinner spinning even during blocked I/O; this loop
+                # is what surfaces *meaningful* status during silence.
+                while not stop_evt.is_set():
+                    if stop_evt.wait(2.0):
+                        return
+                    gap = time.monotonic() - last_event_at[0]
+                    if gap < 5.0:
+                        continue
+                    if gap > stall_secs * 0.5 and not warned_slow[0]:
+                        # We're past half the stall budget without a chunk —
+                        # tell the user why they're waiting. Single-shot.
+                        warned_slow[0] = True
+                        on_screen(
+                            f"[yellow]Ollama has been silent for {gap:.0f}s "
+                            f"(stall budget {stall_secs:.0f}s). If this is "
+                            f"a fresh install, the daemon may still be "
+                            f"resolving the manifest.[/yellow]"
+                        )
+                    suffix = (
+                        f" · slow ({gap:.0f}s)" if gap >= 30 else
+                        f" · waiting ({gap:.0f}s)" if gap >= 10 else ""
+                    )
+                    try:
+                        prog.update(task,
+                                    description=f"{model} · {last_status}{suffix}".strip(" ·"))
+                    except Exception:
+                        return  # progress bar closed; we're done
+
+            hb = threading.Thread(target=_heartbeat, daemon=True)
+            hb.start()
+            try:
+                for ev in client.pull(model, stream=True):
+                    last_event_at[0] = time.monotonic()
+                    warned_slow[0]   = False  # arrived → reset slow-warning
+                    status    = getattr(ev, "status", "") or ""
+                    total_b   = getattr(ev, "total", None)
+                    done_b    = getattr(ev, "completed", None)
+                    if status and status != last_status:
+                        last_status = status
+                        prog.update(task, description=f"{model} · {status}")
+                    if total_b:
+                        prog.update(task, total=int(total_b),
+                                    completed=int(done_b or 0))
+                prog.update(task, description=f"{model} · pulled")
+            finally:
+                stop_evt.set()
+                hb.join(timeout=2.0)
+        return True
+    except TimeoutError as e:
+        red_alert(f"Pulling {model!r} stalled: {e}")
+        on_screen("[dim]Try, in order:[/dim]")
+        on_screen("  [bold]curl -fsS http://localhost:11434/api/tags[/bold]"
+                  "  — verify Ollama is alive")
+        on_screen("  [bold]systemctl --user restart ollama[/bold]"
+                  "  — restart the daemon")
+        on_screen(f"  [bold]ollama pull {model}[/bold]"
+                  "  — retry from a real terminal")
+        on_screen("  [bold]org-llm ask --cloud '...'[/bold]"
+                  "  — bypass the local model entirely")
+        return False
+    except Exception as api_exc:
+        # Daemon not reachable on this host, library mismatch, etc — fall
+        # through to the legacy CLI path so the user isn't blocked.
+        on_screen(f"[dim]Ollama API path failed ({type(api_exc).__name__}: "
+                  f"{str(api_exc)[:80]}); falling back to `ollama pull`…[/dim]")
+    # Legacy CLI fallback. Captures stderr for failure-mode classification.
+    hail(f"Pulling [bold]{model}[/bold] via `ollama pull`…")
+    try:
+        proc = subprocess.run([ollama_bin, "pull", model],
+                               stderr=subprocess.PIPE, text=True,
+                               timeout=1800)  # 30 min hard cap
+    except subprocess.TimeoutExpired:
+        red_alert(f"`ollama pull {model}` timed out after 30 min — abandoning.")
+        return False
     except Exception as e:
         red_alert(f"ollama pull crashed: {e}")
         return False
@@ -6182,22 +6302,66 @@ def capture(
     make_it_so()
 
 
+def _auto_tags_look_bad(auto_tags: str) -> bool:
+    """Quality check for `--repair`: flag auto_tags strings that look like a
+    weak/malformed model run (single token, suspiciously short, contain
+    obvious non-tags). Conservative — false negatives are fine, false
+    positives waste a re-tag and are mildly annoying."""
+    s = (auto_tags or "").strip()
+    if not s:
+        return False  # empty isn't "bad" — it's "untagged" (handled by default mode)
+    toks = s.split()
+    if len(toks) < 2:
+        return True  # one tag is almost never enough for a real note
+    # Single-character tokens, dupes, or junk markers from sloppy LLM output.
+    if any(len(t) <= 1 for t in toks):
+        return True
+    if len(set(toks)) < len(toks):
+        return True   # dupes — the LLM repeated itself
+    junk = {"none", "n/a", "no_tags", "no_tags_found", "untitled", "tags",
+            "todo", "hmm", "unknown", "tag", "the", "and"}
+    if any(t in junk for t in toks):
+        return True
+    return False
+
+
 @app.command(rich_help_panel="Indexing")
 def tag(
-    force:   Annotated[bool, typer.Option("--force", "-f", help="Re-tag already-tagged nodes")] = False,
+    redo:    Annotated[bool, typer.Option("--redo", "-r",
+             help="Re-tag nodes that were previously auto-tagged "
+                  "(uses the current fast_model — does NOT touch hand-curated org-file tags)")] = False,
+    repair:  Annotated[bool, typer.Option("--repair",
+             help="Re-tag only nodes whose existing auto-tags look bad "
+                  "(single token, dupes, junk markers from a weak model run)")] = False,
+    force:   Annotated[bool, typer.Option("--force", "-f",
+             help="Tag every node regardless of state. Still only writes to "
+                  "auto_tags — file-source tags are never overwritten.")] = False,
     limit:   Annotated[int,  typer.Option("--limit", "-n", help="Max nodes to tag")] = 50,
     apply:   Annotated[bool, typer.Option("--apply",   "-a",
-             help="Write tags back to org files (default: dry-run preview only)")] = False,
+             help="Write tags back to org files (default: just update DB)")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run", "-d",
              help="Explicit dry-run flag — same as omitting --apply (kept for clarity)")] = False,
 ):
-    """Auto-tag untagged nodes using the fast_model.
+    """Auto-tag nodes using the fast_model — provenance-aware.
 
-    Default mode is a dry-run preview — pass --apply to actually write tags
-    back to the index. --dry-run is accepted as a synonym for "no --apply".
+    Two-bucket tag model:
+      - [bold]tags[/bold]      — source-of-truth from the org file (rewritten on every `index`)
+      - [bold]auto_tags[/bold] — what this command writes; never touched by the indexer
+
+    [lcars1]Modes:[/lcars1]
+      default     tag nodes with no auto_tags yet (file-source tags ignored)
+      --redo      re-tag nodes that already have auto_tags (different/newer model)
+      --repair    re-tag only nodes whose auto_tags look low-quality
+      --force     tag every node regardless of state
+
+    All four modes write only to [bold]auto_tags[/bold]. Hand-curated org-file
+    tags in [bold]tags[/bold] are never modified. Reads merge both buckets.
     """
     if dry_run and apply:
         red_alert("--dry-run and --apply are mutually exclusive.")
+        raise typer.Exit(1)
+    if sum(1 for f in (redo, repair, force) if f) > 1:
+        red_alert("--redo, --repair, --force are mutually exclusive — pick one.")
         raise typer.Exit(1)
     from .db import Node
     from .llm import chat
@@ -6208,15 +6372,27 @@ def tag(
         model = _cfg(session, "fast_model") or "phi4"
 
         q = session.query(Node)
-        if not force:
-            q = q.filter((Node.tags == "") | (Node.tags.is_(None)))
+        if force:
+            mode_label = "every node"
+        elif redo:
+            q = q.filter(Node.auto_tags != "")
+            mode_label = "previously auto-tagged nodes"
+        elif repair:
+            # Pull all auto-tagged nodes; we'll quality-check in Python below.
+            q = q.filter(Node.auto_tags != "")
+            mode_label = "auto-tagged nodes that look bad"
+        else:
+            q = q.filter((Node.auto_tags == "") | (Node.auto_tags.is_(None)))
+            mode_label = "nodes without auto_tags"
         nodes = q.limit(limit).all()
+        if repair:
+            nodes = [n for n in nodes if _auto_tags_look_bad(n.auto_tags)]
 
     if not nodes:
-        on_screen("No untagged nodes found.")
+        on_screen(f"No {mode_label} to tag.")
         return
 
-    hail(f"Auto-tagging {len(nodes)} nodes with [bold]{model}[/bold]")
+    hail(f"Auto-tagging {len(nodes)} {mode_label} with [bold]{model}[/bold]")
     system = (
         "You are an org-mode expert. Given a note title and body, output ONLY a space-separated "
         "list of lowercase org-mode tags (no colons, no explanation). "
@@ -6224,12 +6400,14 @@ def tag(
     )
 
     tagged = 0
+    skipped_unchanged = 0
     with get_session(engine) as session:
         with impulse("Tagging", total=len(nodes)) as (prog, task):
             for node in nodes:
                 text = f"{node.title}\n{node.body[:500]}"
                 try:
-                    result = chat(text, model=model, base_url=url, system=system)
+                    result = chat(text, model=model, base_url=url, system=system,
+                                  timeout=30.0)
                     new_tags = " ".join(
                         t.strip().lower().replace(":", "")
                         for t in result.strip().split()
@@ -6237,18 +6415,26 @@ def tag(
                     )
                     db_node = session.get(Node, node.id)
                     if db_node:
-                        db_node.tags = new_tags
+                        # In repair/redo modes, no-op when the LLM produces the
+                        # same string we already had — saves a write and helps
+                        # the user see real change counts.
+                        if (redo or repair) and (db_node.auto_tags or "") == new_tags:
+                            skipped_unchanged += 1
+                        else:
+                            db_node.auto_tags         = new_tags
+                            db_node.auto_tagged_at    = time.time()
+                            db_node.auto_tagger_model = model
+                            tagged += 1
                         session.commit()
-                    tagged += 1
                 except Exception:
                     session.rollback()
                 prog.advance(task)
 
-    hail(f"Tagged {tagged} nodes.")
+    hail(f"Tagged {tagged} nodes."
+         + (f" {skipped_unchanged} unchanged." if skipped_unchanged else ""))
     if apply:
         on_screen("[warn]--apply (write to org files) not yet implemented.[/warn]")
     if tagged > 0:
-        # Show a Try-it weighted toward the freshly-popular tag.
         try:
             with get_session(engine) as session:
                 on_screen(_suggest_note_ask(session, prefix="Try it: "))

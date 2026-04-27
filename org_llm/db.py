@@ -43,7 +43,19 @@ class Node(Base):
     node_id   = Column(Text, unique=True)
     title     = Column(Text, nullable=False)
     body      = Column(Text, nullable=False, default="")
-    tags      = Column(Text, nullable=False, default="")
+    # Two-bucket tag provenance:
+    #   tags       — source-of-truth tags from the org file. The indexer
+    #                rewrites this column on every `index` run. Never
+    #                written by the auto-tagger; safe to clobber.
+    #   auto_tags  — LLM-generated tags layered on top. The auto-tagger
+    #                writes here; the indexer never touches it. Reads
+    #                that want "all tags" should use merged_tags() below.
+    # This split lets `tag --redo` re-tag previously-auto-tagged nodes
+    # without clobbering hand-curated org-file tags.
+    tags             = Column(Text, nullable=False, default="")
+    auto_tags        = Column(Text, nullable=False, default="")
+    auto_tagged_at   = Column(Float)            # epoch seconds; NULL = never
+    auto_tagger_model = Column(Text)            # model name at time of tagging
     mtime     = Column(Float, nullable=False)
     embedding = Column(LargeBinary)
 
@@ -78,7 +90,66 @@ def make_engine(path: Path = DB_PATH):
     path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{path}", echo=False)
     event.listen(engine, "connect", _load_sqlite_vec)
+    _migrate_in_place(engine)
     return engine
+
+
+def _migrate_in_place(engine) -> None:
+    """Apply additive schema migrations on existing DBs.
+
+    SQLAlchemy's create_all() adds tables but never columns. New columns
+    introduced over time (auto_tags / auto_tagged_at / auto_tagger_model)
+    must be added here so old DBs keep working without a manual reindex.
+    Safe to call on a freshly-created DB — the existence checks no-op.
+    """
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    if not insp.has_table("nodes"):
+        return  # init_db hasn't run yet — create_all will add everything.
+    cols = {c["name"] for c in insp.get_columns("nodes")}
+    additions: list[str] = []
+    if "auto_tags" not in cols:
+        additions.append(
+            "ALTER TABLE nodes ADD COLUMN auto_tags TEXT NOT NULL DEFAULT ''"
+        )
+    if "auto_tagged_at" not in cols:
+        additions.append("ALTER TABLE nodes ADD COLUMN auto_tagged_at REAL")
+    if "auto_tagger_model" not in cols:
+        additions.append("ALTER TABLE nodes ADD COLUMN auto_tagger_model TEXT")
+    if not additions:
+        return
+    with engine.begin() as conn:
+        for stmt in additions:
+            conn.execute(text(stmt))
+
+
+def merged_tags(node) -> str:
+    """Union of file-source tags and LLM auto-tags as a space-joined string.
+
+    Order: file tags first (preserves user's authored order), then any
+    auto-tags not already present. Use this anywhere a "what tags does
+    this node have" question is asked from Python — for SQL filters,
+    use `merged_tags_sql()` so the DB does the union itself.
+    """
+    file_tags = (getattr(node, "tags", "") or "").split()
+    auto      = (getattr(node, "auto_tags", "") or "").split()
+    seen = set()
+    out: list[str] = []
+    for t in file_tags + auto:
+        if t and t not in seen:
+            seen.add(t)
+            out.append(t)
+    return " ".join(out)
+
+
+def merged_tags_sql(alias: str = "n") -> str:
+    """SQL fragment for the merged tag string of a row aliased as `alias`.
+
+    Use in raw SQL: `WHERE lower(<merged>) LIKE :pat`. The COALESCE guards
+    rows from before the auto_tags migration ran (where auto_tags is ''
+    by DEFAULT, but defensive doesn't hurt).
+    """
+    return f"({alias}.tags || ' ' || COALESCE({alias}.auto_tags, ''))"
 
 
 MODEL_DEFAULTS = {

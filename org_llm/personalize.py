@@ -91,11 +91,11 @@ def _gather_content_evidence(session) -> dict:
     READMEs. The LLM then synthesizes themes from this material."""
     from .db import Node
 
-    # Top-N non-boring, non-identifier tags (tags are space-separated).
+    # Top-N non-boring, non-identifier tags from the merged file+auto-tag
+    # set — both buckets contribute equally to "what is this user about?".
     tag_counts: Counter = Counter()
-    for (tags,) in session.query(Node.tags).filter(
-            Node.tags.isnot(None)).all():
-        for raw in (tags or "").split():
+    for tags, auto in session.query(Node.tags, Node.auto_tags).all():
+        for raw in ((tags or "") + " " + (auto or "")).split():
             t = raw.strip().lower()
             if not t or t in _BORING_TAGS:
                 continue
@@ -110,12 +110,12 @@ def _gather_content_evidence(session) -> dict:
     recent_titles: list[str] = []
     body_excerpts: list[str] = []
     rows = (
-        session.query(Node.title, Node.body, Node.tags)
+        session.query(Node.title, Node.body, Node.tags, Node.auto_tags)
         .order_by(Node.mtime.desc())
         .limit(60).all()
     )
-    for title, body, tags in rows:
-        ttags = (tags or "")
+    for title, body, tags, auto_tags in rows:
+        ttags = (tags or "") + " " + (auto_tags or "")
         if "code" in ttags.split():
             continue
         if title:

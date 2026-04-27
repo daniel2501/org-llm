@@ -138,10 +138,11 @@ def create_mcp_server():
                 datetime.fromtimestamp(node.mtime).isoformat(timespec="seconds")
                 if node.mtime else "?"
             )
+            from .db import merged_tags as _merged
             return (
                 f"**{node.title}**\n"
                 f"File:     {node.file.path}\n"
-                f"Tags:     {node.tags or 'none'}\n"
+                f"Tags:     {_merged(node) or 'none'}\n"
                 f"ID:       {node.node_id or 'none'}\n"
                 f"Modified: {modified}\n\n"
                 f"{node.body}"
@@ -150,20 +151,23 @@ def create_mcp_server():
     # ── list_nodes_by_tag ─────────────────────────────────────────────────────
     @server.tool()
     def list_nodes_by_tag(tag: str, limit: int = 30) -> str:
-        """List all notes that contain a given tag."""
-        from .db import File, Node
+        """List notes that contain a given tag (looks at both file-source
+        tags and LLM auto-tags)."""
+        from sqlalchemy import or_
+        from .db import File, Node, merged_tags as _merged
         with get_session(engine) as session:
             rows = (
-                session.query(Node.title, Node.tags, File.path)
+                session.query(Node, File.path)
                 .join(File, File.id == Node.file_id)
-                .filter(Node.tags.ilike(f"%{tag}%"))
+                .filter(or_(Node.tags.ilike(f"%{tag}%"),
+                             Node.auto_tags.ilike(f"%{tag}%")))
                 .limit(limit).all()
             )
         if not rows:
             return f"No nodes tagged '{tag}'."
         return "\n".join(
-            f"- {title}  [{tags}]  ({Path(path).name})"
-            for title, tags, path in rows
+            f"- {n.title}  [{_merged(n)}]  ({Path(p).name})"
+            for n, p in rows
         )
 
     # ── list_recent_nodes ─────────────────────────────────────────────────────
@@ -196,8 +200,11 @@ def create_mcp_server():
             n_files    = session.query(File).count()
             n_nodes    = session.query(Node).count()
             n_embedded = session.query(Node).filter(Node.embedding.isnot(None)).count()
+            from sqlalchemy import or_
+            # "Tagged" = has file-source tags OR LLM auto-tags (either is
+            # enough to be discoverable via tag search).
             n_tagged   = session.query(Node).filter(
-                Node.tags.isnot(None), Node.tags != ""
+                or_(Node.tags != "", Node.auto_tags != "")
             ).count()
             org_dir    = _cfg(session, "org_dir") or "~/org"
         pct_e = int(n_embedded / n_nodes * 100) if n_nodes else 0

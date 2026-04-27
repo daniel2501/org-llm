@@ -158,13 +158,15 @@ def report_recent(session, days: int = 14) -> None:
     (lowest id within each file).
     """
     from sqlalchemy import text
-    rows = session.execute(text("""
+    from .db import merged_tags_sql
+    merged = merged_tags_sql("n")
+    rows = session.execute(text(f"""
         WITH file_level AS (
             SELECT MIN(id) AS id, file_id
             FROM nodes
             GROUP BY file_id
         )
-        SELECT n.title, n.tags, f.path,
+        SELECT n.title, {merged} AS tags, f.path,
                datetime(n.mtime,'unixepoch','localtime') AS modified
         FROM nodes n
         JOIN file_level fl ON fl.id = n.id
@@ -189,8 +191,10 @@ def report_recent(session, days: int = 14) -> None:
 def report_orphans(session, limit: int = 20) -> None:
     """Nodes that have an org-roam ID but no backlinks."""
     from sqlalchemy import text
-    rows = session.execute(text("""
-        SELECT n.title, n.tags, f.path
+    from .db import merged_tags_sql
+    merged = merged_tags_sql("n")
+    rows = session.execute(text(f"""
+        SELECT n.title, {merged} AS tags, f.path
         FROM nodes n JOIN files f ON f.id = n.file_id
         WHERE n.node_id IS NOT NULL
           AND n.body NOT LIKE '%[[id:%'

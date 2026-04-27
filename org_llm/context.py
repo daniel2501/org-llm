@@ -579,9 +579,14 @@ def llm_stale_sweep(session, *, model: str, base_url: str,
     if not context_text:
         return []
 
+    # "stale" / "code" can appear in either bucket — file-source tags or
+    # LLM auto-tags — and either should exclude the row from the sweep.
+    from sqlalchemy import or_
     q = (session.query(Node)
-         .filter(~Node.tags.like("%stale%"),
-                  ~Node.tags.like("%code%")))
+         .filter(~or_(Node.tags.like("%stale%"),
+                       Node.auto_tags.like("%stale%")))
+         .filter(~or_(Node.tags.like("%code%"),
+                       Node.auto_tags.like("%code%"))))
     if since_days > 0:
         cutoff = time.time() - since_days * 86400
         q = q.filter(Node.mtime < cutoff)
@@ -589,6 +594,7 @@ def llm_stale_sweep(session, *, model: str, base_url: str,
     if not rows:
         return []
 
+    from .db import merged_tags as _merged_tags
     samples: list[dict] = []
     for n in rows:
         body = (n.body or "").strip().replace("\n", " ")
@@ -597,7 +603,7 @@ def llm_stale_sweep(session, *, model: str, base_url: str,
         samples.append({
             "node_id": n.node_id or f"#{n.id}",
             "title":   (n.title or "")[:80],
-            "tags":    n.tags or "",
+            "tags":    _merged_tags(n),
             "excerpt": body,
         })
 
@@ -1049,10 +1055,14 @@ def build_history(session, *, model: str, base_url: str,
     they're prime narrative material.
     """
     from .db import Node
+    from sqlalchemy import or_
     cutoff = time.time() - age_days * 86400
     rows = (session.query(Node)
-            .filter(~Node.tags.like("%code%"))
-            .filter((Node.tags.like("%stale%")) | (Node.mtime < cutoff))
+            .filter(~or_(Node.tags.like("%code%"),
+                          Node.auto_tags.like("%code%")))
+            .filter(or_(Node.tags.like("%stale%"),
+                         Node.auto_tags.like("%stale%"),
+                         Node.mtime < cutoff))
             .order_by(Node.mtime.asc())
             .limit(sample_limit)
             .all())

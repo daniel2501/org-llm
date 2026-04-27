@@ -580,6 +580,72 @@ def impulse(msg: str, total: int, transient: bool = False):
         yield progress, task
 
 
+@contextmanager
+def heartbeat(msg: str, *, stall_secs: float = 60.0,
+              warn_at: float = 10.0,
+              poll_secs: float = 2.0):
+    """Live spinner that updates description with elapsed time, and emits
+    a one-shot yellow warning if the wrapped block goes silent past
+    `stall_secs * 0.5`. The block can call the yielded `tick()` callable
+    to reset the elapsed-time counter (e.g. after each unit of work).
+
+    Use for *any* blocking call where the user otherwise sees no UI
+    feedback — DB migrations, slow LLM calls, network ops. Cheaper than
+    a full Progress bar; gives "is it alive?" feedback for free.
+
+    Example:
+        with heartbeat("Embedding nodes…", stall_secs=30.0) as tick:
+            for n in nodes:
+                embed(n)
+                tick()              # mark progress, reset slow-warning
+    """
+    import threading, time as _t
+    last      = [_t.monotonic()]
+    stop_evt  = threading.Event()
+    warned    = [False]
+
+    with Progress(
+        SpinnerColumn(spinner_name="arc", style="trans.blue"),
+        TextColumn("[trans.pink]{task.description}[/trans.pink]"),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task(msg, total=None)
+
+        def _ticker() -> None:
+            while not stop_evt.is_set():
+                if stop_evt.wait(poll_secs):
+                    return
+                gap = _t.monotonic() - last[0]
+                if gap < warn_at:
+                    progress.update(task, description=msg)
+                    continue
+                if gap > stall_secs * 0.5 and not warned[0]:
+                    warned[0] = True
+                    # Emit a real warning above the spinner — escapes the
+                    # Live region so it stays in the transcript even after
+                    # the spinner is torn down.
+                    console.print(
+                        f"[yellow]heartbeat: '{msg}' silent for "
+                        f"{gap:.0f}s (stall budget {stall_secs:.0f}s).[/yellow]"
+                    )
+                progress.update(task,
+                                description=f"{msg}  [dim]({gap:.0f}s)[/dim]")
+
+        t = threading.Thread(target=_ticker, daemon=True)
+        t.start()
+
+        def tick() -> None:
+            last[0]   = _t.monotonic()
+            warned[0] = False
+
+        try:
+            yield tick
+        finally:
+            stop_evt.set()
+            t.join(timeout=2.0)
+
+
 # ── output helpers ────────────────────────────────────────────────────────────
 
 def hail(msg: str) -> None:
