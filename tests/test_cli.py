@@ -708,6 +708,46 @@ class TestProactiveDoctor:
         assert "proactive_doctor" in server._tool_manager._tools
 
 
+class TestModelsDashboard:
+    """`org-llm models` (no flags) renders the dashboard: role/model/
+    fits/pulled, with auto-shown suggestions when any opportunity exists.
+    `--set role=tag` is the one-shot assignment shortcut."""
+
+    def test_default_view_renders_assignments(self, cli_db):
+        r = runner.invoke(app, ["models"])
+        assert r.exit_code == 0
+        # Every role from _TASK_MODEL_KEYS should appear by name.
+        from org_llm.cli import _TASK_MODEL_KEYS
+        for role, _, _ in _TASK_MODEL_KEYS:
+            assert role in r.output, f"missing role row: {role}"
+        assert "Suggestions" in r.output or "optimal" in r.output
+
+    def test_set_assigns_role(self, cli_db):
+        r = runner.invoke(app, ["models", "--set", "chat=llama3.2:1b"])
+        assert r.exit_code == 0, r.output
+        from org_llm.db import make_engine, get_session, Config
+        engine = make_engine(cli_db)
+        with get_session(engine) as s:
+            assert s.get(Config, "chat_model").value == "llama3.2:1b"
+
+    def test_set_unknown_role_errors(self, cli_db):
+        r = runner.invoke(app, ["models", "--set", "wizard=phi4"])
+        assert r.exit_code == 1
+        assert "Unknown role" in r.output
+
+    def test_set_missing_equals_errors(self, cli_db):
+        r = runner.invoke(app, ["models", "--set", "chat-no-equals"])
+        assert r.exit_code == 1
+
+    def test_set_warns_when_model_not_pulled(self, cli_db, monkeypatch):
+        # Pin pulled-list to empty so the warning fires.
+        monkeypatch.setattr("org_llm.cli._pulled_normalized",
+                              lambda _url: set())
+        r = runner.invoke(app, ["models", "--set", "chat=nonexistent-model"])
+        assert r.exit_code == 0
+        assert "isn't pulled" in r.output or "not pulled" in r.output
+
+
 class TestSetupResume:
     """Setup is long (model pulls, indexing, embeddings). The resume layer
     persists per-step completion so an interrupted run picks up where it

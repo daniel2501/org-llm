@@ -2948,8 +2948,15 @@ def models(
               help="Pull a model via Ollama")] = "",
     assign:   Annotated[bool, typer.Option("--assign",   "-a",
               help="Interactively assign models to roles")] = False,
+    set_:     Annotated[str,  typer.Option("--set",      "-s",
+              help="One-shot assignment, format role=tag (e.g. chat=gemma3)")] = "",
 ):
-    """Show, discover, tune, and manage FOSS LLM assignments."""
+    """Show, discover, tune, and manage FOSS LLM assignments.
+
+    Default view is the dashboard: every role with its current model,
+    fit status, and any auto-detected upgrade/downgrade suggestion.
+    No flags needed to see what's where.
+    """
     from rich.panel import Panel
     from .models import (
         CATALOG, ROLE_KEYS, fitting_hardware, recommendations,
@@ -2965,6 +2972,34 @@ def models(
 
     vram_gb = local_vram_gb()
     ram_gb  = local_ram_gb()
+
+    # ── one-shot --set role=tag ───────────────────────────────────────────────
+    if set_:
+        if "=" not in set_:
+            red_alert("--set expects role=tag (e.g. --set chat=gemma3)")
+            raise typer.Exit(1)
+        role, _, new_tag = set_.partition("=")
+        role, new_tag = role.strip(), new_tag.strip()
+        role_to_key = {r: k for r, k, _ in _TASK_MODEL_KEYS}
+        if role not in role_to_key:
+            red_alert(f"Unknown role {role!r}. "
+                      f"Pick one of: {', '.join(role_to_key)}")
+            raise typer.Exit(1)
+        if not new_tag:
+            red_alert("Empty model tag.")
+            raise typer.Exit(1)
+        from .db import Config as Cfg
+        with get_session(engine) as session:
+            row = session.get(Cfg, role_to_key[role])
+            old = row.value if row else "(unset)"
+            if row: row.value = new_tag
+            else:   session.add(Cfg(key=role_to_key[role], value=new_tag))
+            session.commit()
+        hail(f"{role}_model: {old!r} → {new_tag!r}")
+        if not _is_pulled(new_tag, pulled):
+            on_screen(f"[yellow]Heads up:[/yellow] {new_tag} isn't pulled yet. "
+                      f"Run [bold]org-llm models --pull {new_tag}[/bold] first.")
+        return
 
     # ── pull a model ─────────────────────────────────────────────────────────
     if pull:
@@ -3116,20 +3151,40 @@ def models(
         make_it_so()
         return
 
-    # ── default: show current assignments + pulled models ─────────────────────
-    console.rule("[lcars1]Model Assignments[/lcars1]")
+    # ── default: dashboard view ───────────────────────────────────────────────
+    # Single screen: every role with model + purpose + pulled/fits status,
+    # then an auto-detected SUGGESTIONS section so the user sees upgrade
+    # opportunities without having to know about --tune.
+    console.rule("[lcars1]Model Assignments[/lcars1]  "
+                  f"[dim](hardware: "
+                  f"{f'{vram_gb:.0f}GB VRAM' if vram_gb else f'{ram_gb:.0f}GB RAM (CPU)'}"
+                  f")[/dim]")
+    # Build a tag → fits-locally lookup
+    catalog_by_tag = {m.tag: m for m in CATALOG}
+    fitting_tags = {m.tag for m in fitting_hardware(vram_gb, ram_gb)}
+
     assign_tbl = Table(box=None, pad_edge=False)
-    assign_tbl.add_column("Role",    style="lcars1")
-    assign_tbl.add_column("Model",   style="lcars2")
+    assign_tbl.add_column("Role",    style="lcars1",  no_wrap=True)
+    assign_tbl.add_column("Model",   style="lcars2",  no_wrap=True)
     assign_tbl.add_column("Purpose", style="dim")
-    assign_tbl.add_column("Status",  width=12)
+    assign_tbl.add_column("VRAM",    style="lcars3", width=6, no_wrap=True)
+    assign_tbl.add_column("Pulled",  width=8, no_wrap=True)
+    assign_tbl.add_column("Fits",    width=6, no_wrap=True)
     for role, key, purpose in _TASK_MODEL_KEYS:
         m = current.get(role) or "—"
-        status = (
-            "[green]✓ pulled[/green]" if _is_pulled(m, pulled)
-            else ("[dim]—[/dim]" if m == "—" else "[yellow]not pulled[/yellow]")
+        cat = catalog_by_tag.get(m)
+        vram = f"{cat.vram_gb:.1f}G" if cat else "[dim]?[/dim]"
+        pulled_cell = (
+            "[green]✓[/green]" if _is_pulled(m, pulled)
+            else ("[dim]—[/dim]" if m == "—" else "[yellow]✗[/yellow]")
         )
-        assign_tbl.add_row(role, m, purpose, status)
+        if m == "—":
+            fits_cell = "[dim]—[/dim]"
+        elif m in fitting_tags or not cat:
+            fits_cell = "[green]✓[/green]"
+        else:
+            fits_cell = "[red]✗[/red]"
+        assign_tbl.add_row(role, m, purpose, vram, pulled_cell, fits_cell)
     console.print(assign_tbl)
 
     console.print()
@@ -3141,6 +3196,42 @@ def models(
         console.print(pull_tbl)
     else:
         console.print("[dim]Ollama not reachable or no models pulled.[/dim]")
+
+    # Auto-suggestion section — runs the same recommendations() as --tune
+    # but renders inline so the user sees opportunities without a flag.
+    console.print()
+    try:
+        recs = recommendations(current, pulled, vram_gb, ram_gb)
+    except Exception:
+        recs = []
+    if recs:
+        sug_tbl = Table(box=None, pad_edge=False)
+        sug_tbl.add_column("Role",      style="lcars1",  no_wrap=True)
+        sug_tbl.add_column("Current",   style="dim",     no_wrap=True)
+        sug_tbl.add_column("→",         width=2)
+        sug_tbl.add_column("Suggested", style="lcars2",  no_wrap=True)
+        sug_tbl.add_column("VRAM",      style="lcars3",  width=6)
+        sug_tbl.add_column("Why",       style="dim")
+        for rec in recs:
+            arrow = "[bold yellow]↑[/]" if rec.get("upgrade") else "[bold green]+[/]"
+            sug_tbl.add_row(rec["role"], rec["current"], arrow,
+                              rec["suggested"], f"{rec['vram']:.1f}G",
+                              rec["reason"])
+        from rich.panel import Panel
+        console.print(Panel(sug_tbl,
+                              title="[lcars1]Suggestions[/lcars1]",
+                              border_style="lcars2", padding=(1, 1)))
+        console.print()
+        on_screen("Apply one:   "
+                  "[bold]org-llm models --set <role>=<tag>[/bold]")
+        on_screen("Apply all:   "
+                  "[bold]org-llm models --tune --apply[/bold]")
+        on_screen("Pull a tag:  "
+                  "[bold]org-llm models --pull <tag>[/bold]")
+    else:
+        on_screen("[lcars3]✓ All current assignments look optimal for your hardware.[/lcars3]")
+        on_screen("[dim]Tweak anyway: [bold]org-llm models --set <role>=<tag>[/bold] "
+                  "or [bold]org-llm models --discover[/bold] for the catalog.[/dim]")
 
     console.print()
     # LLM-driven recommendation: feed the model state to fast_model and ask
