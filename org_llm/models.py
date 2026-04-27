@@ -349,6 +349,69 @@ def _install_binary_from_github(
         return False
 
 
+# ── Package-manager fallback ──────────────────────────────────────────────
+#
+# When the GitHub-binary install path fails (network, missing dep, arch
+# mismatch), try the system package manager in detection order.
+# Per-PM package-name overrides handle the cases where the tool's binary
+# name and PM package name disagree (`fd` is `fd-find` on apt, etc.).
+
+# Map (pm-binary, tool-binary) → list of [argv prefix, package name].
+# Without an entry, the package name defaults to the tool binary name.
+_PM_PACKAGE_NAMES: dict[tuple[str, str], str] = {
+    ("apt-get", "fd"):       "fd-find",
+    ("apt-get", "rg"):       "ripgrep",
+    ("apt-get", "delta"):    "git-delta",
+    ("apt-get", "yazi"):     "yazi",
+    ("apt-get", "btm"):      "bottom",
+    ("apt-get", "procs"):    "procs",
+    ("dnf", "fd"):           "fd-find",
+    ("dnf", "rg"):            "ripgrep",
+    ("dnf", "delta"):         "git-delta",
+    ("brew", "rg"):           "ripgrep",
+    ("brew", "btm"):          "bottom",
+    ("pacman", "fd"):         "fd",
+    ("pacman", "rg"):         "ripgrep",
+    ("pacman", "delta"):      "git-delta",
+    ("pacman", "btm"):        "bottom",
+    ("pacman", "tokei"):      "tokei",
+    ("guix", "rg"):           "ripgrep",
+    ("guix", "fd"):           "fd",
+}
+
+# Per-PM: (binary, install argv prefix). Order matters — first match wins.
+_PM_COMMANDS: list[tuple[str, list[str]]] = [
+    ("guix",    ["guix", "install"]),
+    ("pacman",  ["sudo", "pacman", "-S", "--noconfirm"]),
+    ("apt-get", ["sudo", "apt-get", "install", "-y"]),
+    ("dnf",     ["sudo", "dnf", "install", "-y"]),
+    ("brew",    ["brew", "install"]),
+    ("zypper",  ["sudo", "zypper", "install", "-y"]),
+]
+
+
+def install_via_pm(tool_binary: str, *, timeout: int = 300) -> bool:
+    """Try every package manager available on PATH to install `tool_binary`.
+
+    Returns True on success (the binary lands on PATH). Returns False if
+    nothing succeeds. Used as a fallback when the GitHub-release path
+    fails — pacman / apt / brew / dnf typically all have these tools
+    packaged, just under varying package names.
+    """
+    import shutil, subprocess
+    for pm_bin, prefix in _PM_COMMANDS:
+        if not shutil.which(pm_bin):
+            continue
+        pkg = _PM_PACKAGE_NAMES.get((pm_bin, tool_binary), tool_binary)
+        try:
+            r = subprocess.run(prefix + [pkg], timeout=timeout)
+        except Exception:
+            continue
+        if r.returncode == 0 and shutil.which(tool_binary):
+            return True
+    return False
+
+
 def install_bat(bin_dir: str = "~/.local/bin") -> bool:
     arch = "x86_64" if _arch_slug() == "x86_64" else "aarch64"
     return _install_binary_from_github(

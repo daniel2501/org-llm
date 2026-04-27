@@ -3977,13 +3977,33 @@ def doctor(
             try:
                 ok_install = fn(bin_dir_str)
             except Exception as exc:
-                if not quiet:
-                    red_alert(f"Install raised for {tool.name}: {exc}")
-                return ("failed", str(exc)[:100])
+                ok_install = False
+                fn_err = str(exc)[:100]
+            else:
+                fn_err = ""
+
+            # Fallback: if the primary install (GitHub binary / curl
+            # script) failed, try the system package manager. This catches
+            # the common cases where GitHub rate-limits, the user's arch
+            # isn't in releases, or the network is restricted but a local
+            # package manager has the tool.
             if not ok_install:
                 if not quiet:
-                    red_alert(f"Install failed for {tool.name} — check internet / GitHub release availability")
-                return ("failed", "")
+                    on_screen(f"[yellow]{tool.name}: primary install failed; "
+                              f"trying system package manager…[/yellow]")
+                from .models import install_via_pm
+                check_bin = tool.check_cmd.split()[0]
+                if install_via_pm(check_bin):
+                    if not quiet:
+                        hail(f"{tool.name} installed via package manager")
+                    return ("installed", "via-pm")
+                if not quiet:
+                    detail = (fn_err or
+                              "no package manager succeeded — check internet "
+                              "/ GitHub release availability")
+                    red_alert(f"Install failed for {tool.name}: {detail}")
+                return ("failed", fn_err or "pm-fallback-failed")
+
             if not quiet:
                 hail(f"{tool.name} installed successfully")
             return ("installed", "")
