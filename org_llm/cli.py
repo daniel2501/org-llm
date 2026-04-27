@@ -215,7 +215,8 @@ def _cloud_chat_with_local_fallback(
     Surfaces a single yellow line ("Cloud {provider} hit {outcome}; falling
     back to local {local_model}.") so the user knows they're getting the
     weaker model. Re-raises any exception class it doesn't know how to
-    classify so users still see real bugs.
+    classify so users still see real bugs — but FIRST surfaces LLM-
+    generated recovery advice so the user has actionable next steps.
     """
     from .cloud import cloud_chat, _classify_error
     from .llm   import chat as _local_chat
@@ -226,6 +227,16 @@ def _cloud_chat_with_local_fallback(
     except Exception as e:
         outcome, _ = _classify_error(e)
         if outcome not in fallback_on:
+            # Unclassified — surface LLM advice before re-raising so the
+            # user knows what to try next.
+            advice = _llm_recovery_advice(
+                f"cloud_chat to {cloud_endpoint} failed: {type(e).__name__}: {e}",
+                context=f"cloud_model={cloud_model}, outcome={outcome}",
+            )
+            if advice:
+                on_screen("[lcars3]Recovery advice:[/lcars3]")
+                for line in advice.splitlines():
+                    on_screen(f"  {line}")
             raise
         on_screen(f"[yellow]Cloud failed ({outcome}); falling back to "
                   f"local {local_model}.[/yellow]")
@@ -4097,19 +4108,27 @@ def doctor(
             results: dict[str, list[str]] = {
                 "installed": [], "already": [], "failed": [], "no-fn": [],
             }
+            install_detail: dict[str, str] = {}    # name → "via-pm" / "" / err
             themed: list[str] = []
             theme_skipped: list[str] = []
-            with impulse(f"FOSS tool install", total=len(TOOL_REGISTRY)) as (prog, task):
-                for tool in TOOL_REGISTRY:
-                    status, _ = _install_one(tool, quiet=False)
-                    results[status].append(tool.name)
-                    if status in ("installed", "already") and tool.theme_fn:
-                        ok_theme, path = _theme_one(tool)
-                        if ok_theme:
-                            themed.append(f"{tool.name} → {path}")
-                        else:
-                            theme_skipped.append(f"{tool.name} ({path or 'exists'})")
-                    prog.advance(task)
+            # No impulse(...) wrapper: install_X functions run subprocesses
+            # that print their own progress; impulse's bar fights with their
+            # output AND with the per-tool yellow "trying PM fallback…"
+            # lines from `_install_one`. Stream cleanly with explicit
+            # progress instead.
+            total = len(TOOL_REGISTRY)
+            for i, tool in enumerate(TOOL_REGISTRY, 1):
+                console.rule(f"[dim]({i}/{total})[/dim] [lcars2]{tool.name}[/lcars2]  "
+                             f"[dim]— {tool.description}[/dim]")
+                status, detail = _install_one(tool, quiet=False)
+                results[status].append(tool.name)
+                install_detail[tool.name] = detail
+                if status in ("installed", "already") and tool.theme_fn:
+                    ok_theme, path = _theme_one(tool)
+                    if ok_theme:
+                        themed.append(f"{tool.name} → {path}")
+                    else:
+                        theme_skipped.append(f"{tool.name} ({path or 'exists'})")
 
             console.print()
             console.rule("[lcars1]Summary[/lcars1]")
@@ -4117,9 +4136,16 @@ def doctor(
             tbl.add_column("Result", style="lcars1", width=22)
             tbl.add_column("Count",  style="lcars2", justify="right", width=5)
             tbl.add_column("Tools",  style="dim")
+            # Annotate "newly installed" with via-pm if the GitHub binary
+            # path failed and a package manager succeeded — so the user
+            # sees that the fallback chain did its job.
+            installed_annotated = [
+                (f"{n} (via PM)" if install_detail.get(n) == "via-pm" else n)
+                for n in results["installed"]
+            ]
             tbl.add_row("[green]✓ newly installed[/green]",
                         str(len(results["installed"])),
-                        ", ".join(results["installed"]) or "—")
+                        ", ".join(installed_annotated) or "—")
             tbl.add_row("[cyan]· already installed[/cyan]",
                         str(len(results["already"])),
                         ", ".join(results["already"]) or "—")
@@ -4138,8 +4164,59 @@ def doctor(
                 for line in themed:
                     console.print(f"  [dim]·[/dim] {line}")
             console.print()
+            # LLM-assisted help for any tools that failed BOTH the
+            # primary GitHub-binary path AND the package-manager fallback.
+            # The user shouldn't have to paste these into a search engine
+            # — we have a model on file with FOSS packaging knowledge.
             if results["failed"]:
-                on_screen("[yellow]Retry the failures with: org-llm doctor --install <name>[/yellow]")
+                console.print()
+                on_screen(f"[yellow]{len(results['failed'])} tool(s) failed: "
+                          f"{', '.join(results['failed'])}[/yellow]")
+                # Survey what's on PATH so the LLM can give OS-aware advice.
+                import shutil as _sh3
+                pms_present = [pm for pm in ("guix", "pacman", "apt-get",
+                                              "dnf", "brew", "zypper")
+                                if _sh3.which(pm)]
+                sys_msg = (
+                    "You give terse install advice for FOSS Linux/macOS "
+                    "CLI tools when the primary GitHub-binary path AND "
+                    "the auto-tried package manager fallback both failed. "
+                    "Output ONE short bullet per tool (≤ 24 words), naming "
+                    "a concrete next-step the user can run themselves. "
+                    "Reference packages by their actual name (some live in "
+                    "AUR, COPR, nixpkgs etc). Be specific."
+                )
+                user_msg = (
+                    f"Tools that failed: {results['failed']}\n"
+                    f"Package managers available on PATH: {pms_present}\n\n"
+                    "Give one bullet per tool with a concrete suggestion."
+                )
+                advice = _llm_one_liner(user_msg, system=sys_msg,
+                                          timeout=20.0, fallback="")
+                # _llm_one_liner returns a single line; for multi-bullet
+                # responses, fall back to a chat call directly.
+                if not advice or "\n" not in advice:
+                    try:
+                        from .llm import chat as _chat3
+                        engine_now = _engine()
+                        with get_session(engine_now) as session:
+                            _url = _ollama_url(session)
+                            _mdl = (_cfg(session, "fast_model")
+                                    or _cfg(session, "chat_model")
+                                    or "llama3.2")
+                        advice = _chat3(user_msg, model=_mdl,
+                                         base_url=_url, system=sys_msg)
+                    except Exception:
+                        advice = ""
+                if advice:
+                    on_screen("[lcars3]LLM-assisted install advice:[/lcars3]")
+                    for line in (advice or "").splitlines():
+                        line = line.strip(" -•").strip()
+                        if line:
+                            on_screen(f"  • {line}")
+                on_screen("")
+                on_screen("[dim]Or try one at a time:[/dim] "
+                          "[bold]org-llm doctor --install <name>[/bold]")
             make_it_so()
             return
 
@@ -7081,7 +7158,20 @@ def launch(
 
     # ── Hand off to opencode ──────────────────────────────────────────────────
     os.chdir(org_dir)
-    os.execvp(oc_bin, [oc_bin])
+    try:
+        os.execvp(oc_bin, [oc_bin])
+    except Exception as e:
+        red_alert(f"Failed to launch {oc_bin!r}: {e}")
+        advice = _llm_recovery_advice(
+            f"os.execvp({oc_bin!r}) failed: {type(e).__name__}: {e}",
+            context=(f"workspace={workspace}, org_dir={org_dir}, "
+                     f"chat_mdl={chat_mdl}, ollama_url={ollama_url}"),
+        )
+        if advice:
+            on_screen("[lcars3]Recovery advice:[/lcars3]")
+            for line in advice.splitlines():
+                on_screen(f"  {line}")
+        raise typer.Exit(1)
 
 
 @app.command(name="claude", rich_help_panel="Workspaces")
@@ -9149,6 +9239,74 @@ def _llm_intent_repair(broken_argv: list[str], error: str) -> list[str] | None:
     if plan.get("reason"):
         on_screen(f"  [dim]LLM intent: {plan['reason']}[/dim]")
     return proposed
+
+
+def _llm_recovery_advice(failure_summary: str, *,
+                          context: str = "",
+                          max_bullets: int = 3) -> str:
+    """Generate concrete recovery bullets for any failure.
+
+    Used as the *final* layer after deterministic fallbacks exhaust.
+    Returns an empty string when the LLM is unreachable or refuses —
+    the caller's existing red_alert + Exit still happens; this just
+    *adds* hopefully-useful next-steps before it.
+
+    The prompt is general-purpose: pass any failure summary + any
+    context. Output is bullet-formatted "• <action>".
+    """
+    sys_msg = (
+        "You give terse, concrete recovery advice for a CLI tool "
+        f"(`org-llm`) failure. Output ≤ {max_bullets} short bullets "
+        "(≤ 22 words each) naming SPECIFIC next-step commands the "
+        "user can run themselves. Reference real org-llm subcommands, "
+        "actual flags, real package names. Be specific. No preamble, "
+        "no markdown headers, no quotes around commands. One bullet "
+        "per line, prefixed with `• `."
+    )
+    user_msg = (
+        f"Failure:\n{failure_summary[:1200]}\n\n"
+        + (f"Context:\n{context[:600]}\n\n" if context else "")
+        + f"Give {max_bullets} concrete recovery bullets."
+    )
+    try:
+        engine = _engine()
+        with get_session(engine) as session:
+            url = _ollama_url(session)
+            mdl = (_cfg(session, "fast_model")
+                   or _cfg(session, "chat_model")
+                   or "llama3.2")
+        from .llm import chat as _chat
+        # 15s timeout — this should be quick or we skip it.
+        import threading
+        result: dict = {"resp": ""}
+        def _r():
+            try:
+                result["resp"] = _chat(user_msg, model=mdl,
+                                         base_url=url, system=sys_msg) or ""
+            except Exception:
+                pass
+        try:
+            from .ui import thinking
+            with thinking("Asking the LLM for recovery advice", model=mdl):
+                t = threading.Thread(target=_r, daemon=True)
+                t.start(); t.join(timeout=15.0)
+        except Exception:
+            t = threading.Thread(target=_r, daemon=True)
+            t.start(); t.join(timeout=15.0)
+        if t.is_alive():
+            return ""
+        out = (result["resp"] or "").strip()
+        # Keep only bullet-shaped lines
+        good = []
+        for line in out.splitlines():
+            ln = line.strip(" -•\"'`").strip()
+            if 8 <= len(ln) <= 200:
+                good.append(f"• {ln}")
+            if len(good) >= max_bullets:
+                break
+        return "\n".join(good)
+    except Exception:
+        return ""
 
 
 def _run_with_stall_watch(argv: list[str], *,

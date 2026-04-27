@@ -487,7 +487,25 @@ def create_mcp_server():
         out = (proc.stdout or "") + (("\n[stderr]\n" + proc.stderr) if proc.stderr else "")
         if len(out) > 8000:
             out = out[:8000] + "\n…(truncated)"
-        suffix = f"\n[exit {proc.returncode}]" if proc.returncode != 0 else ""
+        suffix = ""
+        if proc.returncode != 0:
+            suffix = f"\n[exit {proc.returncode}]"
+            # On non-zero exit, ask the same in-app LLM for recovery
+            # bullets so the in-opencode LLM can act on them. Best-
+            # effort: if the local LLM is unreachable, we just return
+            # the bare exit code and let the caller decide.
+            try:
+                from .cli import _llm_recovery_advice as _adv
+                advice = _adv(
+                    f"`org-llm {' '.join(argv)}` failed (exit "
+                    f"{proc.returncode}). Output tail:\n{out[-1000:]}",
+                    context="invoked via MCP org_llm_run from opencode",
+                    max_bullets=3,
+                )
+                if advice:
+                    suffix += f"\n[LLM recovery advice]\n{advice}"
+            except Exception:
+                pass
         return out + suffix
 
     @server.tool()

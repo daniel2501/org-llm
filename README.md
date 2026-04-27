@@ -73,28 +73,35 @@ The fast path — one command:
 org-llm setup
 ```
 
-`setup` chains the 13 things a new user needs in order, asking before each
-step and using your real state to make every prompt concrete (e.g.
+`setup` chains 16 ordered steps a new user needs, asking before each
+and using real state to make every prompt concrete — e.g.
 *"Index and auto-tag your org notes now? (12 unindexed of 245 on disk · 87
-untagged node(s))"*). Steps:
+untagged node(s))"*. An LLM writes a personalized welcome line at the
+start (grounded in your actual filesystem inventory) and three
+tailored next-step commands at the end. Steps:
 
 1. **init** — create the SQLite DB
-2. **discover** — scan filesystem for org / repo / Emacs roots
-3. **doctor** — health check; surface concrete gaps
-4. **install FOSS tools** *(only if missing)* — bat / ripgrep / fzf / …
-5. **models --tune** — pick a hardware-fitting set
-6. **index** — scan your `.org` files
-7. **tag --apply** — LLM auto-tags untagged notes
-8. **embed** — vectorise unembedded nodes *(idempotent, runs unconditionally)*
-9. **personalize --apply** — auto-create theme knobs from real content
-10. **context build** — LLM reads notes; infers durable facts about you
-11. **history build** — narrative summary of older + archived notes
-12. **tutor welcome** — print the welcome step
-13. **open the full tour** in your editor
+2. **install-tools** — Ollama + opencode + models (skipped if present)
+3. **discover** — scan filesystem for org / repo / Emacs roots
+4. **doctor** — health check; surface concrete gaps
+5. **install FOSS tools** *(only if missing)* — bat / ripgrep / fzf / … with [package-manager fallback](#self-healing) when GitHub releases fail
+6. **models --tune** — pick a hardware-fitting set
+7. **index** — scan your `.org` files
+8. **tag --apply** — LLM auto-tags untagged notes
+9. **embed** — vectorise unembedded nodes *(idempotent, runs unconditionally)*
+10. **personalize --apply** — auto-create theme knobs from real content
+11. **context build** — LLM reads notes; infers durable facts about you
+12. **interview** — LLM asks 3-4 clarifying questions about ambiguities it spots in your notes
+13. **history build** — narrative summary of older + archived notes
+14. **tutor welcome** — print the welcome step
+15. **open the full tour** — copies it into your vault, then opens it in `$EDITOR`
+16. **(optional) launch opencode** — TTY-takeover; opt-in only, never under `--yes`
 
-Pass `--yes` to run non-interactively with reasonable defaults. Ctrl-C
-at any prompt exits cleanly with partial progress preserved (every step
-is idempotent).
+Pass `--yes` to run non-interactively. Ctrl-C exits cleanly at any
+prompt with partial progress preserved (every step is idempotent).
+Long-running subprocesses (Ollama pulls, package-manager installs)
+have an LLM-driven [stall watcher](#self-healing) — at >120s silence
+the LLM diagnoses the situation and offers `[k]ill / [w]ait / [s]kip`.
 
 The manual path, if you'd rather take steps one at a time:
 
@@ -457,6 +464,11 @@ What self-heals automatically:
 | Typer `Got unexpected extra arguments` (shell quoting) | 3-layer recovery: deterministic re-glue → LLM intent reconstruction → SRE fix |
 | Unknown subcommand (typo) | Fuzzy-match top-level verbs and retry |
 | `tangle_file` and Emacs daemon isn't running | Auto-start `emacs --daemon`, retry once |
+| FOSS tool install fails (GitHub release missing / rate-limit / arch mismatch) | Try `guix → pacman → apt-get → dnf → brew → zypper` in PATH order; surface a yellow note when the fallback succeeds |
+| `ollama pull` disk-full / network / 404 | Detect from stderr; surface concrete recovery commands (`ollama rm`, `db --vacuum`, `ask --cloud`, etc.) instead of a raw exit code |
+| `config <role>_model <typo>` | Fuzzy-match value against pulled + catalog; prompt `Use 'qwen2.5-coder' instead? [Y/n]` before writing |
+| LLM JSON parse failure (small models adding prose / fences) | Retry once with `"Output ONLY raw JSON"` appended to the system prompt |
+| Long-running subprocess stalls during `setup` | LLM diagnoses last 1500 chars of output at >120-180s silence; user picks `[k]ill / [w]ait / [s]kip` |
 | Out of memory | Suggest `--cloud` / `performance --apply` (RAM can't be conjured) |
 | Path-traversal / sensitive-path requests | **Doesn't auto-fix** — security boundary |
 
