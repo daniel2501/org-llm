@@ -4614,24 +4614,47 @@ def models(
         f"Pulled in Ollama: {sorted(pulled) if pulled else '(none)'}\n\n"
         "What's the single most useful next command?"
     )
-    llm_rec = _llm_one_liner(user_msg, system=sys_msg, fallback="")
-    if llm_rec:
-        on_screen(llm_rec)
-    elif unassigned:
+    # Deterministic short-circuit: when there's a concrete gap in the
+    # model state, the deterministic fallback IS the right answer and
+    # the LLM just adds noise (real failure: a small model, asked to
+    # recommend on a fully-assigned/-pulled state, emitted
+    # "Next: due to performance issues with fast=llama3.2:1b — install [✓]"
+    # — half-formed, raw markup leaking, no actual command). Pattern
+    # we keep landing on across this session: small models confabulate
+    # on sparse / well-known input; deterministic wins.
+    if unassigned:
         role = unassigned[0]
         on_screen(f"[dim]Next:[/dim] {role} is unassigned — "
                   f"[bold]org-llm models --tune --apply[/bold] picks one for your hardware")
-    elif not_pulled:
+        return
+    if not_pulled:
         role, model = not_pulled[0]
         on_screen(f"[dim]Next:[/dim] {role}={model} is configured but not pulled — "
                   f"[bold]org-llm models --pull {model}[/bold]")
-    elif not pulled:
+        return
+    if not pulled:
         on_screen("[dim]Next:[/dim] no Ollama models pulled — "
                   "[bold]org-llm install-tools --skip-fonts --skip-opencode --skip-gh --skip-claude[/bold]")
-    else:
-        on_screen("[dim]All roles assigned and pulled.[/dim] "
-                  "[bold]org-llm performance --benchmark[/bold] "
-                  "measures real tok/s if you want tuning data.")
+        return
+
+    # Only call the LLM when state is fully OK and there's room for a
+    # subtle "you might want to consider X" suggestion. Validate the
+    # output shape — if it doesn't match the prompted
+    # "Next: <reason> — [bold]org-llm <cmd>[/bold]" template, fall
+    # through to the deterministic catch-all.
+    llm_rec = _llm_one_liner(user_msg, system=sys_msg, fallback="")
+    import re as _re
+    _VALID_REC = _re.compile(
+        r"Next:.*org-llm\s+(models|performance|install-tools|"
+        r"models\s+--\w+|performance\s+--\w+)",
+        _re.IGNORECASE,
+    )
+    if llm_rec and _VALID_REC.search(llm_rec):
+        on_screen(llm_rec)
+        return
+    on_screen("[dim]All roles assigned and pulled.[/dim] "
+              "[bold]org-llm performance --benchmark[/bold] "
+              "measures real tok/s if you want tuning data.")
 
 
 _CONFIG_VALIDATORS = {
