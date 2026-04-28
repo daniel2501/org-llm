@@ -321,6 +321,33 @@ SURFACES: list[Surface] = [
         len_min=20, len_max=120, n_variants=5,
         default="Nothing in the vault on that — want me to try a different phrasing?",
     ),
+    Surface(
+        key="pi_launch_greeting",
+        description=("ONE line shown when `org-llm pi --launch` execs into "
+                      "the Pi TUI. Frames Pi as a third org-llm conversational "
+                      "surface (alongside opencode and Claude). Active dials "
+                      "should be unmistakable — trek = 'Engaging Pi shuttle, "
+                      "bridge online', commie = 'Pi joins the collective', "
+                      "queer = 'Pi at the door, come on in'."),
+        len_min=18, len_max=80, n_variants=5,
+        default="Launching Pi (with org-llm bridge).",
+    ),
+    Surface(
+        key="pi_install_success",
+        description=("Short themed line confirming the Pi bridge was wired "
+                      "into ~/.pi/config.json so plain `pi` auto-loads it. "
+                      "One sentence, present-tense, themed."),
+        len_min=18, len_max=90, n_variants=5,
+        default="Bridge wired — plain pi will auto-load org-llm.",
+    ),
+    Surface(
+        key="pi_status_panel_title",
+        description=("Title shown above the `pi --status` health-check "
+                      "panel. Same style as splash callsigns — terse, "
+                      "themed, ALL CAPS feel."),
+        len_min=8, len_max=36, n_variants=4,
+        default="pi · org-llm bridge",
+    ),
 ]
 
 SURFACE_BY_KEY = {s.key: s for s in SURFACES}

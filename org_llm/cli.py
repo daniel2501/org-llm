@@ -11970,8 +11970,13 @@ def pi(
         tbl.add_column("Detail", style="dim", overflow="fold")
         for r in rows:
             tbl.add_row(*r)
+        try:
+            from . import theme_studio as _ts
+            themed_title = _ts.get_themed("pi_status_panel_title")
+        except Exception:
+            themed_title = "pi --status"
         console.print(_P(tbl,
-                          title="[lcars1]pi --status[/lcars1]  "
+                          title=f"[lcars1]{themed_title}[/lcars1]  "
                                 "[dim]bridge to pi.dev — third "
                                 "conversational interface[/dim]",
                           border_style="lcars2", padding=(1, 2)))
@@ -12031,8 +12036,13 @@ def pi(
 
         # Wire ~/.pi/config.json so plain `pi` loads it.
         if _wire_pi_config(dst):
-            on_screen("[lcars3]Wired into ~/.pi/config.json — "
-                      "plain [bold]pi[/bold] will auto-load the extension.[/lcars3]")
+            try:
+                from . import theme_studio as _ts
+                themed = _ts.get_themed("pi_install_success")
+            except Exception:
+                themed = "Bridge wired — plain pi will auto-load org-llm."
+            on_screen(f"[lcars3]{themed}[/lcars3]  "
+                      f"[dim](~/.pi/config.json updated)[/dim]")
         else:
             on_screen("[yellow]Couldn't auto-wire ~/.pi/config.json. "
                       "Add manually:[/yellow]")
@@ -12049,7 +12059,12 @@ def pi(
         red_alert("Pi not installed. Run [bold]org-llm pi --install[/bold] first.")
         raise typer.Exit(1)
     if launch or not install:
-        hail(f"Launching Pi (with org-llm bridge)…")
+        try:
+            from . import theme_studio as _ts
+            greeting = _ts.get_themed("pi_launch_greeting")
+        except Exception:
+            greeting = "Launching Pi (with org-llm bridge)…"
+        hail(greeting)
         # Make sure the user dir copy exists before exec — important for
         # the case where they `--launch` directly without `--install`.
         dst_dir = _user_pi_extensions_dir()
