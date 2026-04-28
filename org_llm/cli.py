@@ -15936,7 +15936,46 @@ def _llm_diagnose_uncaught(exc: BaseException, argv: list[str]) -> None:
                                               exc.__traceback__))[-1500:]
     _on(f"[red]✗ {err_type}: {err_msg}[/red]")
 
-    # 1. Diagnosis — what + why + manual fix
+    # 1a. Try the structured rescue registry FIRST. Deterministic +
+    # fast — most exceptions a user actually hits in this CLI fit a
+    # known pattern (Ollama not pulled, model OOM, DB locked, etc).
+    # The registry was added because the LLM rescue hallucinated a
+    # "pip install shutil" command for a NameError caused by a missing
+    # local import inside org-llm itself; the registry catches that
+    # class deterministically now.
+    try:
+        from .rescue import match_structured as _ms
+        hint = _ms(exc, tb_tail)
+    except Exception:
+        hint = None
+    crash_in_our_code = _our_module_in_traceback(exc) is not None
+    skip_llm_diagnosis = False
+    if hint is not None:
+        from rich.panel import Panel as _Panel
+        body = (f"[bold]WHY:[/bold] {hint.why}\n"
+                f"[bold]FIX:[/bold] {hint.fix}")
+        title = (f"[lcars1]Recovery hint  · confidence: {hint.confidence}"
+                 f"[/lcars1]")
+        console.print()
+        console.print(_Panel(body, title=title,
+                              border_style="lcars2", padding=(1, 2)))
+        # High-confidence pattern + crash NOT in our code: the user has
+        # a precise next step (e.g. `ollama serve`); skip both the LLM
+        # diagnosis AND the self-rewrite — there's nothing in our
+        # source to fix.
+        if hint.confidence == "high" and not crash_in_our_code:
+            return
+        # High-confidence + crash IS in our code (NameError, ImportError
+        # in our module, etc): skip the LLM diagnosis (the registry
+        # already nailed it) BUT fall through to the self-rewrite
+        # offer below — that's the "fix the app itself" path the user
+        # asked us to preserve.
+        if hint.confidence == "high" and crash_in_our_code:
+            skip_llm_diagnosis = True
+        # Medium-confidence: keep both LLM diagnosis + self-rewrite for
+        # a second opinion.
+
+    # 1b. Diagnosis — what + why + manual fix (LLM fallback)
     sys_msg = (
         "You diagnose Python exceptions from a CLI tool called org-llm. "
         "Output STRICTLY in this format (no preamble, no markdown):\n"
@@ -15955,12 +15994,14 @@ def _llm_diagnose_uncaught(exc: BaseException, argv: list[str]) -> None:
     )
     advice = ""
     rescue_err = ""
-    # The diagnosis prompt asks for THREE lines (WHY / FIX /
-    # WHY-IT-WORKS) — `_llm_one_liner` was the wrong receiver: it
-    # filters to the FIRST line that fits 6..240 chars and discards
-    # the rest. Use chat() directly so the user sees the full
-    # diagnosis. 30s (was 15s) since this fires once per crash.
-    try:
+    # When the structured registry already produced a high-confidence
+    # hint, skip the (slow, less-grounded) LLM diagnosis — but keep
+    # falling through to the self-rewrite offer below for crashes in
+    # our code.
+    if skip_llm_diagnosis:
+        rescue_err = ""  # explicit: nothing failed, we just skipped
+    else:
+      try:
         from .llm import chat as _chat
         from .ui  import thinking as _thinking
         engine_now = _engine()
@@ -16011,13 +16052,33 @@ def _llm_diagnose_uncaught(exc: BaseException, argv: list[str]) -> None:
             advice = (result["text"] or "").strip()
             advice = _re.sub(r"```[a-z]*\n?", "", advice)
             advice = _re.sub(r"\n?```", "", advice).strip()
-    except Exception as e:
+      except Exception as e:
         rescue_err = f"{type(e).__name__}: {e}"
     if advice:
+        # Sanitize before presenting — the LLM has hallucinated bogus
+        # `pip install` commands in this codebase before. We don't
+        # rewrite the text (the user can always read what the model
+        # said), but we DO add a yellow "verify before running" frame
+        # when the advice contains banned shell patterns or commands
+        # outside our small whitelist.
         from rich.panel import Panel
+        try:
+            from .rescue import sanitize_llm_advice as _san
+            checked = _san(advice)
+        except Exception:
+            checked = None
         console.print()
-        console.print(Panel(advice, title="[lcars1]LLM rescue[/lcars1]",
-                              border_style="lcars2", padding=(1, 2)))
+        if checked is not None and not checked.safe:
+            warn = "\n".join(f"  • {f}" for f in checked.flagged)
+            console.print(Panel(
+                f"[yellow]LLM advice flagged — verify before running:"
+                f"[/yellow]\n{warn}\n\n{advice}",
+                title="[warn]LLM rescue (suspect)[/warn]",
+                border_style="warn", padding=(1, 2),
+            ))
+        else:
+            console.print(Panel(advice, title="[lcars1]LLM rescue[/lcars1]",
+                                  border_style="lcars2", padding=(1, 2)))
     else:
         # Honest about what failed — was a generic
         # "(LLM unreachable for diagnosis)" with no clue whether the
