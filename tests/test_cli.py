@@ -580,12 +580,21 @@ class TestLogbook:
 
     def test_reflect_calls_llm_with_log_window(self, cli_db, monkeypatch, tmp_path):
         """--reflect hands the LLM a recent window and renders the
-        result. Stub the chat call so the test stays offline."""
+        result. Stub the chat call so the test stays offline.
+
+        Seeds ≥8 events because that's the floor for LLM reflection —
+        below it the verb falls back to a deterministic listing
+        (small models confabulate "patterns" from sparse input)."""
         from org_llm import logbook as _lb
         monkeypatch.setenv("ORG_LLM_LOG_PATH", str(tmp_path / "log.org"))
-        # Seed a few events
-        _lb.write_event("cli", "ask",   outcome="ok",  duration_ms=1200)
-        _lb.write_event("cli", "embed", outcome="error", response="ollama down")
+        # Seed enough events to clear the LLM-reflection threshold (8).
+        for _ in range(3):
+            _lb.write_event("cli", "ask",   outcome="ok",  duration_ms=1200)
+        for _ in range(3):
+            _lb.write_event("cli", "embed", outcome="error",
+                              response="ollama down")
+        _lb.write_event("llm", "chat",  model="phi4",   outcome="error",
+                          response="timeout")
         _lb.write_event("llm", "chat",  model="phi4",   outcome="error",
                           response="timeout")
         captured = {}

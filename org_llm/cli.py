@@ -5298,6 +5298,41 @@ def log_show(
         if not rows:
             on_screen("[dim]Nothing to reflect on yet.[/dim]")
             return
+        # Below this many events the LLM doesn't have enough signal to
+        # detect real patterns and confabulates ("repeated failure of
+        # X" when X happened once, etc.). Fall back to a clean
+        # deterministic listing instead. Same lesson as
+        # cloud --refresh-catalog: small models on sparse input invent
+        # narrative.
+        _MIN_REFLECT_EVENTS = 8
+        if len(rows) < _MIN_REFLECT_EVENTS:
+            from rich.table import Table as _T
+            t = _T(box=None, pad_edge=False)
+            t.add_column("When",     style="dim", no_wrap=True)
+            t.add_column("Kind",     style="lcars3")
+            t.add_column("Command",  style="lcars2")
+            t.add_column("Outcome",  style="dim")
+            t.add_column("Duration", style="lcars1", justify="right")
+            for r in rows:
+                t.add_row(
+                    (r.timestamp or "")[:19],
+                    (r.kind or "?")[:8],
+                    (r.command or "?")[:30],
+                    (r.outcome or "ok")[:14],
+                    f"{r.duration_ms or 0}ms",
+                )
+            console.print()
+            console.print(Panel(t,
+                                  title=f"[lcars1]Captain's Log — recent {len(rows)} "
+                                          f"event(s)[/lcars1]  [dim](too few "
+                                          f"to reflect — listing instead)[/dim]",
+                                  border_style="lcars2", padding=(1, 2)))
+            on_screen("[dim]Need[/dim] "
+                       f"[bold]≥{_MIN_REFLECT_EVENTS}[/bold] [dim]events for "
+                       "LLM reflection. Use [/dim][bold]--limit[/bold]"
+                       "[dim] to widen the window or wait for activity to "
+                       "accumulate.[/dim]")
+            return
         with warp(f"LLM reflecting on {len(rows)} event(s) with {mdl}…"):
             reflection = _captains_log_reflect(rows, mdl, url)
         if not reflection:
@@ -11810,11 +11845,28 @@ def cloud(
                                             if provider_diff else [])
         full_summary["retired_providers"] = (provider_diff["removed"]
                                                 if provider_diff else [])
-        if (summary["added"] or summary["changed"]
-                or full_summary["dead_providers"]
-                or full_summary["new_providers"]
-                or full_summary["retired_providers"]):
+        # Decide whether to call the LLM for synthesis.
+        #
+        # Small models (gemma3, llama3.2) produce confabulated narrative
+        # when given sparse input — they pad with invented numbers and
+        # fictional models even with strong grounding. The slug-shape
+        # validator catches model-name hallucinations but not
+        # paragraph-level nonsense ("DALL-E Mini generated $25.17 more
+        # per unit", real example from this session).
+        #
+        # Heuristic: only call the LLM when there are at least N
+        # model-level changes worth synthesising. Provider lifecycle
+        # changes (dead URLs, retired roster entries) get a clean
+        # deterministic summary that doesn't need LLM padding.
+        n_model_changes = (len(summary["added"])
+                            + len(summary["changed"]))
+        n_provider_changes = (len(full_summary["dead_providers"])
+                                + len(full_summary["new_providers"])
+                                + len(full_summary["retired_providers"]))
+        if n_model_changes >= 3:
             _llm_analyze_catalog_diff(full_summary, engine)
+        elif n_model_changes + n_provider_changes > 0:
+            _deterministic_refresh_summary(full_summary, engine)
         else:
             on_screen("[dim]Nothing newsworthy — providers + prices "
                        "match the canonical catalog.[/dim]")
@@ -16206,6 +16258,72 @@ def _shell_quote_repair(argv: list[str]) -> list[str] | None:
         return None
     glued = " ".join(words)
     return head + flags + [glued]
+
+
+def _deterministic_refresh_summary(summary: dict, engine) -> None:
+    """Print a clean, factual summary of a small catalog refresh.
+
+    Used when the LLM-driven analysis would just confabulate — gemma3
+    et al. happily produce narrative ("DALL-E Mini generated $25.17
+    more per unit") when given <3 real diffs to summarise. With sparse
+    input the deterministic path is strictly better: faster, no
+    hallucination risk, and the user sees the actual facts.
+    """
+    from rich.panel import Panel
+    bullets: list[str] = []
+
+    cur_model = ""
+    try:
+        with get_session(engine) as session:
+            cur_model = _cfg(session, "cloud_model") or ""
+    except Exception:
+        pass
+
+    added         = summary.get("added") or []
+    changed       = summary.get("changed") or []
+    price_changes = summary.get("price_changes") or []
+    dead          = summary.get("dead_providers") or []
+    new_provs     = summary.get("new_providers") or []
+    retired_provs = summary.get("retired_providers") or []
+
+    if added:
+        sample = ", ".join(added[:5])
+        more = f" (+{len(added)-5} more)" if len(added) > 5 else ""
+        bullets.append(f"{len(added)} new model(s): {sample}{more}")
+    if price_changes:
+        bullets.append(f"{len(price_changes)} model(s) repriced.")
+        for c in price_changes[:5]:
+            mark = "[YOU] " if c["slug"] == cur_model else ""
+            bullets.append(
+                f"{mark}{c['slug']}: "
+                f"${c['old_cost_out']}/Mtok out → "
+                f"${c['new_cost_out']}/Mtok"
+            )
+    if dead:
+        bullets.append(f"Provider URL HEAD-probe failed: "
+                        f"{', '.join(dead)} (might be temporary; could "
+                        f"also indicate a discontinued service).")
+    if new_provs:
+        bullets.append(f"New provider(s) in canonical roster: "
+                        f"{', '.join(new_provs)}")
+    if retired_provs:
+        bullets.append(f"Retired provider(s) in canonical roster: "
+                        f"{', '.join(retired_provs)}")
+    if cur_model and not any(c["slug"] == cur_model for c in price_changes):
+        if cur_model in added:
+            bullets.insert(0, f"[YOU] Your cloud_model {cur_model} is "
+                            f"freshly added to the catalog.")
+
+    if not bullets:
+        bullets.append("No newsworthy changes.")
+
+    body = "\n".join(f"• {b}" for b in bullets)
+    console.print(Panel(body,
+                          title="[lcars1]Catalog refresh — alerts[/lcars1]",
+                          border_style="lcars2", padding=(1, 2)))
+    on_screen("[dim]Re-run[/dim] [bold]org-llm cloud --tune[/bold] "
+               "[dim]to see how this catalog refresh shifts your "
+               "recommendations.[/dim]")
 
 
 def _llm_analyze_catalog_diff(summary: dict, engine) -> None:

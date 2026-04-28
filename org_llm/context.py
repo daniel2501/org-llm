@@ -1093,6 +1093,28 @@ def build_history(session, *, model: str, base_url: str,
     if not samples:
         return ""
 
+    # Deterministic fallback when the input is too sparse for narrative.
+    # On <10 stale notes the LLM invents thematic connections that
+    # don't exist (real failure mode: gemma3 wrote a coherent story
+    # about "user's evolving relationship with X" from 3 unrelated
+    # one-line stale notes). A flat list with date stamps is strictly
+    # more useful than a confabulated narrative below this threshold.
+    _MIN_HISTORY_SAMPLES = 10
+    if len(samples) < _MIN_HISTORY_SAMPLES:
+        from datetime import date as _date
+        header = (f"#+TITLE: org-llm history (deterministic mode — "
+                   f"{len(samples)} stale note(s); need "
+                   f"≥{_MIN_HISTORY_SAMPLES} for LLM narrative)\n"
+                   f"#+UPDATED: {_date.today().isoformat()}\n\n"
+                   f"* Recent stale / archived notes\n\n"
+                   f"Below are the older notes the LLM would normally "
+                   f"weave into a narrative. With only "
+                   f"{len(samples)} sample(s), a flat listing is "
+                   f"safer than synthesised prose — small models "
+                   f"confabulate themes from sparse input.\n\n")
+        body = "\n".join(samples)
+        return header + body + "\n"
+
     user_prompt = (
         "Notes (oldest first; mtime in brackets):\n"
         + "\n".join(samples)
