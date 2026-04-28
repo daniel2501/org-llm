@@ -3221,6 +3221,15 @@ def ask(
     "last N days" auto-set --days. Override explicitly with --days N (or
     --days 0 to disable the filter).
     """
+    # Reject empty / whitespace queries upfront — otherwise the embed
+    # call fails deep in the pipeline with a misleading error that
+    # implicates Ollama. Catch it here so the recovery message points
+    # at the real issue (empty input) instead.
+    if not query or not query.strip():
+        red_alert("Empty question. Pass a non-empty string.")
+        on_screen("[dim]Try:[/dim] [bold]org-llm ask "
+                   "'what did I write about emacs last month?'[/bold]")
+        raise typer.Exit(1)
     from .llm import chat as local_chat, embed
     from .search import (
         existing_tags, nodes_with_tag,
@@ -4623,9 +4632,10 @@ def man(
                       f"[bold]man -l {target}[/bold]")
         return
     # No flags — install (idempotent) + try to open via `man`
+    import shutil as _sh
     target, on_path = _mp.install_manpage()
     on_screen(f"[dim]Man page at:[/dim] {target}")
-    if on_path and shutil.which("man"):
+    if on_path and _sh.which("man"):
         on_screen("[dim]Opening with `man org-llm`…[/dim]")
         import subprocess
         try:
@@ -4685,6 +4695,15 @@ def log_show(
                   f"[bold]emacsclient -e \"(progn (find-file \\\"{p}\\\") "
                   "(org-babel-tangle))\"[/bold]")
         return
+
+    # Validate --kind upfront. Otherwise a typo silently returns
+    # "no entries matching that filter" — looks like the log is empty
+    # when really the kind is wrong.
+    valid_kinds = {"cli", "llm", "mcp", "config", "doctor", "dbt", "embed"}
+    if kind and kind not in valid_kinds:
+        red_alert(f"Unknown log kind '{kind}'. Valid: "
+                   f"{', '.join(sorted(valid_kinds))}.")
+        raise typer.Exit(1)
 
     engine = _engine()
     with get_session(engine) as session:
@@ -12113,6 +12132,15 @@ def revoke(
     """Remove a previously-granted path from the MCP allow-list."""
     from . import access
     p = Path(path).expanduser().resolve()
+    # access.revoke is idempotent — reports success even when the path
+    # wasn't on the allow-list. That's a silent no-op from the user's
+    # perspective, so check membership first and warn if it's missing.
+    current = {str(c) for c in access.allowlist()}
+    if str(p) not in current:
+        red_alert(f"Not on allow-list: {p}")
+        on_screen("[dim]Run[/dim] [bold]org-llm grants[/bold] "
+                   "[dim]to see what is.[/dim]")
+        raise typer.Exit(1)
     if access.revoke(str(p)):
         hail(f"Revoked: {p}")
         make_it_so()
@@ -15817,6 +15845,13 @@ def main():
         else:
             _on("[dim]Run[/dim] [bold]org-llm --help[/bold] "
                 "[dim]to see all verbs.[/dim]")
+    elif "ambiguous prefix" in err_lower:
+        # PrefixGroup already lists the matching verbs in the error
+        # body; don't tack on the shell-quote tip — the user just
+        # needs to add more characters or type the full verb.
+        _on("[dim]Type more of the verb name to disambiguate, or "
+            "use[/dim] [bold]org-llm --help[/bold] [dim]to see all "
+            "verbs.[/dim]")
     elif "got unexpected extra argument" in err_lower:
         # The user passed too many positional args (or a flag-only
         # command got bare text). Pull the actual verb from argv so
