@@ -3841,16 +3841,17 @@ def _benchmark_local_models(
     if n == 0:
         return results
 
-    # Themed progress bar. The benchmark loop spends most of its wall
-    # time inside a single `_chat` call per model with no incremental
-    # output — without a spinner / ETA the user thinks it hung. We
-    # render:
-    #   • themed spinner (knob-driven via _pick_thinking_spinner)
-    #   • "[i/n] benchmarking model:tag" headline that updates per model
-    #   • running elapsed (Rich's TimeElapsedColumn)
-    #   • dynamic ETA from completed-models average × remaining count
-    #     (more accurate than Rich's TaskProgressColumn estimate, which
-    #     assumes uniform per-step time we don't have yet)
+    # Live progress region. Rendered by Rich's auto-refresh thread so
+    # the spinner ticks even while the main thread is blocked inside
+    # a 30s _chat() call. Three details that matter for the spinner
+    # to actually animate:
+    #   1. refresh_per_second=12 (default 10 — bumped slightly so the
+    #      spinner feels responsive on slow CPUs)
+    #   2. auto_refresh=True (default; making it explicit)
+    #   3. per-model `console.print()` calls go through `prog.console`
+    #      so the live region pauses + repaints cleanly. Calling the
+    #      module-level `console` while the Progress is active can
+    #      stall the auto-refresh thread.
     from rich.progress import (Progress, SpinnerColumn, TextColumn,
                                  BarColumn, TimeElapsedColumn,
                                  MofNCompleteColumn)
@@ -3868,14 +3869,18 @@ def _benchmark_local_models(
 
     completed_times: list[float] = []
     with Progress(
-        SpinnerColumn(spinner_name=spin_name, style=spin_style),
+        SpinnerColumn(spinner_name=spin_name, style=spin_style,
+                       finished_text="[green]✓[/green]"),
         TextColumn("[lcars2]{task.description}[/lcars2]"),
         BarColumn(bar_width=None),
         MofNCompleteColumn(),
-        TextColumn("[dim]elapsed[/dim]"),
+        TextColumn("[dim]·[/dim]"),
         TimeElapsedColumn(),
         TextColumn("{task.fields[eta]}"),
-        console=console, transient=False,
+        console=console,
+        transient=False,
+        auto_refresh=True,
+        refresh_per_second=12,
     ) as prog:
         task = prog.add_task("benchmarking", total=n, eta="")
         for i, c in enumerate(candidates, 1):
@@ -3895,19 +3900,19 @@ def _benchmark_local_models(
                     **c, "time": dt, "tok_s": tok_per_s,
                     "qual": qual, "score": score, "ok": True,
                 })
-                # Per-model result line ABOVE the live progress region
-                # so the running tally stays visible after the bar
-                # finishes. console.print escapes the live region.
-                console.print(
+                # Route through the Progress's own console — pauses the
+                # live region, prints, resumes. Safer than the global
+                # `console` while a Live is active.
+                prog.console.print(
                     f"  [green]✓[/green] {c['tag']:<28}  "
                     f"[lcars3]{tok_per_s:5.1f} tok/s[/lcars3]  "
                     f"[dim]({dt:.1f}s, q={qual})[/dim]"
                 )
             except Exception as e:
-                results.append({**c, "ok": False, "err": str(e)[:60]})
-                console.print(
+                results.append({**c, "ok": False, "err": str(e)[:120]})
+                prog.console.print(
                     f"  [red]×[/red] {c['tag']:<28}  "
-                    f"[red]{str(e)[:80]}[/red]"
+                    f"[red]{str(e)[:120]}[/red]"
                 )
             prog.update(task, advance=1,
                          eta=_eta_str(completed_times, n - i))
