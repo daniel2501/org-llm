@@ -8828,23 +8828,15 @@ def code_search(
     with get_session(engine) as session:
         url       = _ollama_url(session)
         embed_mdl = _cfg(session, "embed_model") or "nomic-embed-text"
+        # SQL-level tag filter so cosine ranking happens on the code
+        # corpus alone — post-filtering would crowd code out when
+        # the vault is dominated by org notes.
+        tag_filter = f"code:{lang}" if lang else "code"
         with warp(f"Searching code corpus for {query!r}"):
             qvec = embed(query, model=embed_mdl, base_url=url)
-            # Over-fetch then post-filter on tags (vector_search has no
-            # tag-filter parameter; over-fetching keeps ranking honest).
-            raw = vector_search(session, qvec, limit=max(limit * 4, 40),
-                                  query_text=query)
-        wanted = {"code"}
-        if lang:
-            wanted.add(f"code:{lang}")
-        rows = []
-        for r in raw:
-            tag_set = set((r.tags or "").split())
-            if wanted.issubset(tag_set if not lang else
-                                {t for t in tag_set if t in wanted}):
-                rows.append(r)
-            if len(rows) >= limit:
-                break
+            rows = vector_search(session, qvec, limit=limit,
+                                   query_text=query,
+                                   tag_filter=tag_filter)
 
     if not rows:
         on_screen(f"[dim]No code corpus hits for {query!r}.[/dim]")

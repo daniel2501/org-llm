@@ -100,6 +100,7 @@ def vector_search(
     limit: int = 10,
     since_mtime: float | None = None,
     query_text: str = "",
+    tag_filter: str = "",
 ) -> list[SearchResult]:
     """Cosine-distance vector search with title-substring boost.
 
@@ -113,6 +114,11 @@ def vector_search(
 
     `since_mtime` is a unix timestamp; rows whose `nodes.mtime` predates
     it are excluded. Use this to constrain "last week" queries.
+
+    `tag_filter` (e.g. "code" or "code:python") is a SQL-level filter
+    applied BEFORE cosine ranking. Critical for narrow corpora (e.g.
+    code-only search in a vault dominated by org notes) where post-
+    filtering would crowd out the relevant candidates entirely.
     """
     blob = to_blob(query_vec)
     where = "WHERE n.embedding IS NOT NULL"
@@ -120,6 +126,12 @@ def vector_search(
     if since_mtime is not None:
         where += " AND n.mtime >= :since"
         params["since"] = float(since_mtime)
+    if tag_filter:
+        # Substring match on the space-separated tag column. Using
+        # space-pad both sides catches "code" without false-matching
+        # "decode" or "code:python" without false-matching "barcode".
+        where += " AND (' ' || n.tags || ' ') LIKE :tagpat"
+        params["tagpat"] = f"% {tag_filter} %"
     rows = session.execute(text(f"""
         SELECT
             n.node_id,
@@ -149,6 +161,13 @@ def vector_search(
             if since_mtime is not None:
                 mtime_clause = "AND n.mtime >= :since"
                 phrase_params["since"] = float(since_mtime)
+            # Apply the same tag filter to the title-phrase boost path
+            # so a tag-scoped search (e.g. code-only) doesn't backdoor
+            # generic notes with matching titles.
+            tag_clause = ""
+            if tag_filter:
+                tag_clause = "AND (' ' || n.tags || ' ') LIKE :tagpat_phrase"
+                phrase_params["tagpat_phrase"] = f"% {tag_filter} %"
             for i, p in enumerate(phrases):
                 phrase_params[f"p{i}"] = f"%{p}%"
                 phrase_rows = session.execute(text(f"""
@@ -158,6 +177,7 @@ def vector_search(
                     JOIN files f ON f.id = n.file_id
                     WHERE LOWER(n.title) LIKE LOWER(:p{i})
                     {mtime_clause}
+                    {tag_clause}
                     LIMIT 8
                 """), phrase_params).fetchall()
                 for row in phrase_rows:
