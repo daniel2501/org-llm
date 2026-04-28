@@ -434,6 +434,20 @@ def refresh_from_openrouter(*, timeout: float = 15.0
         # Heuristic role mapping. Names with "coder"/"code" → code role;
         # "r1"/"reasoning" → reason; default → chat+instruct.
         s = slug.lower()
+        # Exclusion: non-chat-compatible model classes (image, vision,
+        # tts, audio, video, embed, moderation). Without this an
+        # image-gen model like `openai/gpt-5-image-mini` got tagged
+        # (chat, instruct, fast) on the "mini" branch and surfaced as
+        # a `fast` role recommendation in --upgrade. Drop those slugs
+        # entirely — we'd rather under-recommend than recommend a
+        # model that returns errors when called as chat.
+        _NON_CHAT_MARKERS = (
+            "image", "vision", "tts", "speech", "audio", "video",
+            "embedding", "embed-", "moderation", "rerank", "diffusion",
+            "whisper", "dall-e", "dalle",
+        )
+        if any(m in s for m in _NON_CHAT_MARKERS):
+            continue
         roles = ["chat", "instruct"]
         if "coder" in s or "code" in s:
             roles = ["code"]

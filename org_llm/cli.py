@@ -3800,10 +3800,40 @@ def _benchmark_local_models(
     roles, time, tok_s, qual, score, ok | err) — same shape used by
     `--benchmark` and `--upgrade`. Prints inline per-model progress
     so the user sees live feedback.
+
+    Suppresses the inline lag-detector while the benchmark itself
+    runs — otherwise every slow model trips the warning ("X ran 12s,
+    Y is faster, Tune: org-llm models --upgrade") DURING the very
+    upgrade run we're inside. Self-referential noise; the per-model
+    table at the end is the authoritative ranking.
     """
     from .models import _quality, CATALOG, fitting_hardware
     from .llm import chat as _chat, list_models as _list_models
     import time as _t
+    import os as _os
+    _prev_lag = _os.environ.get("ORG_LLM_LAG_DETECTOR", None)
+    _os.environ["ORG_LLM_LAG_DETECTOR"] = "off"
+    try:
+        return _benchmark_local_models_impl(
+            _chat=_chat, _list_models=_list_models, _t=_t,
+            _quality=_quality, CATALOG=CATALOG,
+            url=url, vram_gb=vram_gb, ram_gb=ram_gb,
+            role_filter=role_filter,
+        )
+    finally:
+        if _prev_lag is None:
+            _os.environ.pop("ORG_LLM_LAG_DETECTOR", None)
+        else:
+            _os.environ["ORG_LLM_LAG_DETECTOR"] = _prev_lag
+
+
+def _benchmark_local_models_impl(
+    *, _chat, _list_models, _t, _quality, CATALOG,
+    url: str, vram_gb: float | None, ram_gb: float,
+    role_filter: str = "",
+) -> list[dict]:
+    """Body of _benchmark_local_models, separated so the wrapper can
+    own the lag-detector suppression with a clean try/finally."""
 
     pulled_raw = sorted(set(_list_models(url)))
     embed_stems = {"nomic-embed-text", "mxbai-embed-large",
