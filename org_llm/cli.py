@@ -15271,6 +15271,15 @@ def revoke_root(
     """Remove an auto-grant root. Existing direct grants under it remain."""
     from . import access
     p = Path(path).expanduser().resolve()
+    # access.remove_auto_root is idempotent at the storage layer — it
+    # cheerfully reports success for a path that was never a root. Same
+    # silent-pretending-success bug fixed in `revoke`. Check first.
+    current_roots = {str(c) for c in access.auto_grant_roots()}
+    if str(p) not in current_roots:
+        red_alert(f"Not a trusted root: {p}")
+        on_screen("[dim]Run[/dim] [bold]org-llm grants[/bold] "
+                   "[dim]to see current roots.[/dim]")
+        raise typer.Exit(1)
     if access.remove_auto_root(str(p)):
         hail(f"Untrusted: {p}")
         make_it_so()
@@ -16597,9 +16606,22 @@ def main():
         _on("[dim]Run[/dim] [bold]org-llm --help[/bold] "
             "[dim]to see all subcommands, or[/dim] "
             "[bold]org-llm splash[/bold] [dim]for a quick menu.[/dim]")
-    elif "missing argument" in err_lower or "missing option" in err_lower:
-        _on("[dim]Add the missing argument or run[/dim] "
-            "[bold]org-llm <verb> --help[/bold] [dim]to see what's required.[/dim]")
+    elif ("missing argument" in err_lower
+            or "missing option" in err_lower
+            or "missing parameter" in err_lower):
+        # `org-llm self show` produces "Missing parameter: module" —
+        # the third synonym Click/Typer use. Without it, the catch-all
+        # printed the irrelevant ask shell-quoting tip.
+        verb = (sys.argv[1] if len(sys.argv) > 1
+                  and not sys.argv[1].startswith("-") else "")
+        if verb:
+            _on(f"[dim]Add the missing argument or run[/dim] "
+                f"[bold]org-llm {verb} --help[/bold] "
+                f"[dim]to see what's required.[/dim]")
+        else:
+            _on("[dim]Add the missing argument or run[/dim] "
+                "[bold]org-llm <verb> --help[/bold] [dim]to see what's "
+                "required.[/dim]")
     elif "missing command" in err_lower:
         # Typer raises this when a verb group (e.g. `org-llm knob`,
         # `org-llm config` without subverb) was invoked without a
