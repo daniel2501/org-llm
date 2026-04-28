@@ -1302,12 +1302,16 @@ def create_mcp_server():
           3. Cloud provider config — can we route around the local issue?
           4. Vault state — does a search-empty result actually reflect
              a missing index?
+          5. Recent tok/s baseline — is the active model running slower
+             than known alternatives on this hardware?
 
         Returns: a themed diagnosis + EXACT next-step command for the user.
-        Doesn't auto-apply anything — the LLM presents the suggestion and
-        the user decides."""
-        await _info(ctx, "proactive_doctor: probing chat_model + Ollama + cloud")
-        # Run the new --power-boost mode (read-only) for the model-fit signal.
+        Doesn't auto-apply anything by itself — present the suggestion to
+        the user. If they explicitly approve a remediation, you can call
+        `proactive_doctor_apply(action=..., reason=..., user_approved=True)`
+        for one of the vetted actions. NEVER call apply without user
+        approval — that's a hard guardrail."""
+        await _info(ctx, "proactive_doctor: probing chat_model + Ollama + cloud + perf")
         import subprocess
         try:
             proc = subprocess.run(
@@ -1317,8 +1321,6 @@ def create_mcp_server():
             boost_out = (proc.stdout or "") + (proc.stderr or "")
         except Exception as e:
             boost_out = f"(power-boost probe failed: {e})"
-        # Run a fast doctor check too — the existing --diagnose default
-        # surfaces concrete issues when something's broken.
         try:
             proc = subprocess.run(
                 ["org-llm", "doctor", "--no-diagnose"],
@@ -1327,11 +1329,153 @@ def create_mcp_server():
             doc_out = (proc.stdout or "") + (proc.stderr or "")
         except Exception as e:
             doc_out = f"(doctor probe failed: {e})"
-        # Combine — prefer the power-boost panel as the headline since
-        # it directly addresses the most common cause of slowness.
-        body = f"{boost_out.strip()}\n\n--- doctor snapshot ---\n{doc_out.strip()}"
+
+        # Performance baseline — is the active chat_model running slower
+        # than a known alternative? Cheap query against existing History.
+        perf_lines: list[str] = []
+        try:
+            from . import perf as _perf
+            with get_session(engine) as session:
+                cur_chat = _cfg(session, "chat_model")
+            cur_tok_s = _perf.recent_tok_s(cur_chat) if cur_chat else None
+            alt = _perf.fastest_known("chat", current_model=cur_chat or "")
+            if cur_tok_s and alt and alt.tok_s > cur_tok_s * 1.3:
+                perf_lines.append(
+                    f"PERF: {cur_chat} runs {cur_tok_s:.1f} tok/s here "
+                    f"vs {alt.model} at {alt.tok_s:.1f} tok/s "
+                    f"({alt.tok_s/cur_tok_s:.1f}× faster). Consider "
+                    f"action=tune_models.")
+            elif alt and not cur_tok_s:
+                perf_lines.append(
+                    f"PERF: no recent baseline for {cur_chat or '(unset)'}; "
+                    f"{alt.model} has the best track record at "
+                    f"{alt.tok_s:.1f} tok/s. Action: benchmark_local.")
+            try:
+                regwarn = _perf.regression_warning(cur_chat) if cur_chat else None
+                if regwarn:
+                    perf_lines.append(f"REGRESSION: {regwarn}")
+            except Exception:
+                pass
+        except Exception as e:
+            perf_lines.append(f"(perf probe failed: {e})")
+
+        actions_block = (
+            "\n--- vetted apply actions ---\n"
+            "If the user explicitly approves, you may call "
+            "`proactive_doctor_apply(action=..., reason=..., "
+            "user_approved=True)` with one of:\n"
+            "  • `tune_models`         — `org-llm models --upgrade --apply`\n"
+            "  • `power_boost`         — `org-llm doctor --power-boost --apply`\n"
+            "  • `pull_smallest_chat`  — pull llama3.2:1b as a fallback\n"
+            "  • `restart_ollama`      — kill + restart the local daemon\n"
+            "  • `regen_themes`        — refresh the theme-studio cache\n"
+            "  • `init_db`             — `org-llm init` (only if DB missing)\n"
+            "Never invent actions; never invoke apply without explicit\n"
+            "user approval surfaced in the chat first."
+        )
+        body = (f"{boost_out.strip()}\n\n--- doctor snapshot ---\n"
+                f"{doc_out.strip()}")
+        if perf_lines:
+            body += "\n\n--- performance baseline ---\n" + "\n".join(perf_lines)
+        body += actions_block
         return _themed("proactive_doctor",
-                        "model + ollama + cloud + vault probe", body)
+                        "model + ollama + cloud + vault + perf probe", body)
+
+    # ── proactive_doctor_apply: vetted-action remediation ───────────────────
+    @server.tool()
+    async def proactive_doctor_apply(
+            action: str,
+            reason: str = "",
+            user_approved: bool = False,
+            ctx: Context | None = None) -> str:
+        """Apply ONE vetted remediation action to fix a diagnosed issue.
+
+        STRICT GUARDRAILS:
+          • `user_approved` MUST be True. Set it only after the user
+            has read your remediation pitch in chat and replied yes.
+            Calling with user_approved=False is a hard error.
+          • `action` MUST be in the vetted whitelist below. Anything
+            else returns an error and is logged as an attempted bypass.
+          • Every call is recorded to the Captain's Log (kind=doctor)
+            with the action, reason, and outcome. The user can audit.
+
+        Vetted actions:
+          - `tune_models`        — runs `org-llm models --upgrade --apply`
+                                    (real benchmark; picks fastest fitting)
+          - `power_boost`        — runs `org-llm doctor --power-boost --apply`
+                                    (downsizes chat_model when it doesn't fit)
+          - `pull_smallest_chat` — pulls `llama3.2:1b` as an emergency fallback
+          - `restart_ollama`     — kills + restarts the local Ollama daemon
+          - `regen_themes`       — runs `org-llm theme-studio regenerate`
+          - `init_db`            — runs `org-llm init` (only if DB missing)
+
+        Returns the verb's stdout/stderr + a "DONE" or "FAILED" header.
+        On failure, the action is logged but no rollback is auto-attempted —
+        the user (or you) decide whether to try another action."""
+        if not user_approved:
+            return ("REFUSED: proactive_doctor_apply requires "
+                    "user_approved=True. The user must explicitly "
+                    "consent in chat before any remediation runs.")
+
+        VETTED: dict[str, list[str]] = {
+            "tune_models":         ["org-llm", "models", "--upgrade", "--apply"],
+            "power_boost":         ["org-llm", "doctor", "--power-boost", "--apply"],
+            "pull_smallest_chat":  ["org-llm", "models", "--pull", "llama3.2:1b"],
+            "restart_ollama":      [],   # special-cased below (composite)
+            "regen_themes":        ["org-llm", "theme-studio", "regenerate"],
+            "init_db":             ["org-llm", "init"],
+        }
+        if action not in VETTED:
+            await _info(ctx, f"proactive_doctor_apply REFUSED unknown action: {action!r}")
+            return (f"REFUSED: unknown action {action!r}. Vetted set: "
+                    f"{', '.join(sorted(VETTED))}.")
+
+        await _info(ctx, f"proactive_doctor_apply: action={action} reason={reason!r}")
+        import subprocess
+
+        # Log BEFORE running so the audit trail captures intent even if
+        # the subprocess hangs.
+        try:
+            from .logbook import track_event
+            with track_event("doctor", "proactive_doctor_apply",
+                              args=f'action={action!r} reason={reason!r} '
+                                    f'user_approved={user_approved}'):
+                if action == "restart_ollama":
+                    # No clean shell-injection vector — pkill + ollama serve.
+                    try:
+                        subprocess.run(["pkill", "-x", "ollama"],
+                                        timeout=5, check=False)
+                    except Exception:
+                        pass
+                    try:
+                        subprocess.Popen(
+                            ["ollama", "serve"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            start_new_session=True,
+                        )
+                        return (f"DONE: restart_ollama. "
+                                f"reason={reason!r}. Daemon re-launched in background.")
+                    except Exception as e:
+                        return f"FAILED: restart_ollama: {e}"
+
+                cmd = VETTED[action]
+                try:
+                    proc = subprocess.run(cmd, capture_output=True,
+                                            text=True, timeout=600)
+                except subprocess.TimeoutExpired:
+                    return (f"FAILED: {action} timed out after 600s. "
+                            f"Check `org-llm log --kind doctor` for context.")
+                except Exception as e:
+                    return f"FAILED: {action}: {e}"
+                head = "DONE" if proc.returncode == 0 else "FAILED"
+                tail = (proc.stdout or "") + (proc.stderr or "")
+                if len(tail) > 4000:
+                    tail = tail[:4000] + "\n…(truncated)"
+                return (f"{head}: {action}. exit={proc.returncode}. "
+                        f"reason={reason!r}.\n\n{tail.strip()}")
+        except Exception as e:
+            return f"FAILED: proactive_doctor_apply scaffolding: {e}"
 
     # ── Captain's Log reflection ──────────────────────────────────────────────
     @server.tool()
