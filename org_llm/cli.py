@@ -15803,6 +15803,20 @@ def main():
     elif "missing argument" in err_lower or "missing option" in err_lower:
         _on("[dim]Add the missing argument or run[/dim] "
             "[bold]org-llm <verb> --help[/bold] [dim]to see what's required.[/dim]")
+    elif "missing command" in err_lower:
+        # Typer raises this when a verb group (e.g. `org-llm knob`,
+        # `org-llm config` without subverb) was invoked without a
+        # required subcommand. The generic shell-quote tip is wrong
+        # here — point at the subcommand list instead.
+        verb = (sys.argv[1] if len(sys.argv) > 1
+                  and not sys.argv[1].startswith("-") else "")
+        if verb:
+            _on(f"[dim]Run[/dim] [bold]org-llm {verb} --help[/bold] "
+                f"[dim]to see[/dim] [lcars2]{verb}[/lcars2] "
+                f"[dim]subcommands.[/dim]")
+        else:
+            _on("[dim]Run[/dim] [bold]org-llm --help[/bold] "
+                "[dim]to see all verbs.[/dim]")
     elif "got unexpected extra argument" in err_lower:
         # The user passed too many positional args (or a flag-only
         # command got bare text). Pull the actual verb from argv so
