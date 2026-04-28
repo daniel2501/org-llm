@@ -1,0 +1,119 @@
+<svg class="rich-terminal" viewBox="0 0 1238 416.0" xmlns="http://www.w3.org/2000/svg">
+    <!-- Generated with Rich https://www.textualize.io -->
+    <style>
+
+    @font-face {
+        font-family: "Fira Code";
+        src: local("FiraCode-Regular"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff2/FiraCode-Regular.woff2") format("woff2"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff/FiraCode-Regular.woff") format("woff");
+        font-style: normal;
+        font-weight: 400;
+    }
+    @font-face {
+        font-family: "Fira Code";
+        src: local("FiraCode-Bold"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff2/FiraCode-Bold.woff2") format("woff2"),
+                url("https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/woff/FiraCode-Bold.woff") format("woff");
+        font-style: bold;
+        font-weight: 700;
+    }
+
+    .terminal-1283510265-matrix {
+        font-family: Fira Code, monospace;
+        font-size: 20px;
+        line-height: 24.4px;
+        font-variant-east-asian: full-width;
+    }
+
+    .terminal-1283510265-title {
+        font-size: 18px;
+        font-weight: bold;
+        font-family: arial;
+    }
+
+    .terminal-1283510265-r1 { fill: #c5c8c6 }
+.terminal-1283510265-r2 { fill: #cc88ff;font-weight: bold }
+.terminal-1283510265-r3 { fill: #ff9900;font-weight: bold }
+.terminal-1283510265-r4 { fill: #4d4d4d;font-weight: bold }
+.terminal-1283510265-r5 { fill: #4d4d4d }
+.terminal-1283510265-r6 { fill: #c5c8c6;font-weight: bold }
+    </style>
+
+    <defs>
+    <clipPath id="terminal-1283510265-clip-terminal">
+      <rect x="0" y="0" width="1219.0" height="365.0" />
+    </clipPath>
+    <clipPath id="terminal-1283510265-line-0">
+    <rect x="0" y="1.5" width="1220" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-1283510265-line-1">
+    <rect x="0" y="25.9" width="1220" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-1283510265-line-2">
+    <rect x="0" y="50.3" width="1220" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-1283510265-line-3">
+    <rect x="0" y="74.7" width="1220" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-1283510265-line-4">
+    <rect x="0" y="99.1" width="1220" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-1283510265-line-5">
+    <rect x="0" y="123.5" width="1220" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-1283510265-line-6">
+    <rect x="0" y="147.9" width="1220" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-1283510265-line-7">
+    <rect x="0" y="172.3" width="1220" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-1283510265-line-8">
+    <rect x="0" y="196.7" width="1220" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-1283510265-line-9">
+    <rect x="0" y="221.1" width="1220" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-1283510265-line-10">
+    <rect x="0" y="245.5" width="1220" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-1283510265-line-11">
+    <rect x="0" y="269.9" width="1220" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-1283510265-line-12">
+    <rect x="0" y="294.3" width="1220" height="24.65"/>
+            </clipPath>
+<clipPath id="terminal-1283510265-line-13">
+    <rect x="0" y="318.7" width="1220" height="24.65"/>
+            </clipPath>
+    </defs>
+
+    <rect fill="#292929" stroke="rgba(255,255,255,0.35)" stroke-width="1" x="1" y="1" width="1236" height="414" rx="8"/><text class="terminal-1283510265-title" fill="#c5c8c6" text-anchor="middle" x="618" y="27">org-llm&#160;pi&#160;--status</text>
+            <g transform="translate(26,22)">
+            <circle cx="0" cy="0" r="7" fill="#ff5f57"/>
+            <circle cx="22" cy="0" r="7" fill="#febc2e"/>
+            <circle cx="44" cy="0" r="7" fill="#28c840"/>
+            </g>
+        
+    <g transform="translate(9, 41)" clip-path="url(#terminal-1283510265-clip-terminal)">
+    
+    <g class="terminal-1283510265-matrix">
+    <text class="terminal-1283510265-r1" x="1220" y="20" textLength="12.2" clip-path="url(#terminal-1283510265-line-0)">
+</text><text class="terminal-1283510265-r2" x="0" y="44.4" textLength="24.4" clip-path="url(#terminal-1283510265-line-1)">╭─</text><text class="terminal-1283510265-r2" x="24.4" y="44.4" textLength="195.2" clip-path="url(#terminal-1283510265-line-1)">────────────────</text><text class="terminal-1283510265-r3" x="231.8" y="44.4" textLength="134.2" clip-path="url(#terminal-1283510265-line-1)">pi&#160;--status</text><text class="terminal-1283510265-r4" x="390.4" y="44.4" textLength="597.8" clip-path="url(#terminal-1283510265-line-1)">bridge&#160;to&#160;pi.dev&#160;—&#160;third&#160;conversational&#160;interface</text><text class="terminal-1283510265-r2" x="1000.4" y="44.4" textLength="195.2" clip-path="url(#terminal-1283510265-line-1)">────────────────</text><text class="terminal-1283510265-r2" x="1195.6" y="44.4" textLength="24.4" clip-path="url(#terminal-1283510265-line-1)">─╮</text><text class="terminal-1283510265-r1" x="1220" y="44.4" textLength="12.2" clip-path="url(#terminal-1283510265-line-1)">
+</text><text class="terminal-1283510265-r2" x="0" y="68.8" textLength="12.2" clip-path="url(#terminal-1283510265-line-2)">│</text><text class="terminal-1283510265-r2" x="1207.8" y="68.8" textLength="12.2" clip-path="url(#terminal-1283510265-line-2)">│</text><text class="terminal-1283510265-r1" x="1220" y="68.8" textLength="12.2" clip-path="url(#terminal-1283510265-line-2)">
+</text><text class="terminal-1283510265-r2" x="0" y="93.2" textLength="12.2" clip-path="url(#terminal-1283510265-line-3)">│</text><text class="terminal-1283510265-r2" x="36.6" y="93.2" textLength="244" clip-path="url(#terminal-1283510265-line-3)">Pi&#160;binary&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-1283510265-r3" x="305" y="93.2" textLength="48.8" clip-path="url(#terminal-1283510265-line-3)">✓&#160;&#160;&#160;</text><text class="terminal-1283510265-r5" x="378.2" y="93.2" textLength="732" clip-path="url(#terminal-1283510265-line-3)">/home/u/.pi/bin/pi&#160;&#160;v0.18.4&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-1283510265-r2" x="1207.8" y="93.2" textLength="12.2" clip-path="url(#terminal-1283510265-line-3)">│</text><text class="terminal-1283510265-r1" x="1220" y="93.2" textLength="12.2" clip-path="url(#terminal-1283510265-line-3)">
+</text><text class="terminal-1283510265-r2" x="0" y="117.6" textLength="12.2" clip-path="url(#terminal-1283510265-line-4)">│</text><text class="terminal-1283510265-r2" x="36.6" y="117.6" textLength="244" clip-path="url(#terminal-1283510265-line-4)">Bridge&#160;installed&#160;&#160;&#160;&#160;</text><text class="terminal-1283510265-r3" x="305" y="117.6" textLength="48.8" clip-path="url(#terminal-1283510265-line-4)">✓&#160;&#160;&#160;</text><text class="terminal-1283510265-r5" x="378.2" y="117.6" textLength="732" clip-path="url(#terminal-1283510265-line-4)">~/.pi/extensions/pi-org-llm/&#160;&#160;(40+&#160;org_llm_*&#160;tools)&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-1283510265-r2" x="1207.8" y="117.6" textLength="12.2" clip-path="url(#terminal-1283510265-line-4)">│</text><text class="terminal-1283510265-r1" x="1220" y="117.6" textLength="12.2" clip-path="url(#terminal-1283510265-line-4)">
+</text><text class="terminal-1283510265-r2" x="0" y="142" textLength="12.2" clip-path="url(#terminal-1283510265-line-5)">│</text><text class="terminal-1283510265-r2" x="36.6" y="142" textLength="244" clip-path="url(#terminal-1283510265-line-5)">Auto-load&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-1283510265-r3" x="305" y="142" textLength="48.8" clip-path="url(#terminal-1283510265-line-5)">✓&#160;&#160;&#160;</text><text class="terminal-1283510265-r5" x="378.2" y="142" textLength="732" clip-path="url(#terminal-1283510265-line-5)">~/.pi/config.json&#160;registers&#160;org-llm&#160;at&#160;boot&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-1283510265-r2" x="1207.8" y="142" textLength="12.2" clip-path="url(#terminal-1283510265-line-5)">│</text><text class="terminal-1283510265-r1" x="1220" y="142" textLength="12.2" clip-path="url(#terminal-1283510265-line-5)">
+</text><text class="terminal-1283510265-r2" x="0" y="166.4" textLength="12.2" clip-path="url(#terminal-1283510265-line-6)">│</text><text class="terminal-1283510265-r2" x="36.6" y="166.4" textLength="244" clip-path="url(#terminal-1283510265-line-6)">MCP&#160;subprocess&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-1283510265-r3" x="305" y="166.4" textLength="48.8" clip-path="url(#terminal-1283510265-line-6)">✓&#160;&#160;&#160;</text><text class="terminal-1283510265-r5" x="378.2" y="166.4" textLength="732" clip-path="url(#terminal-1283510265-line-6)">spawned&#160;on&#160;session&#160;start,&#160;terminated&#160;cleanly&#160;on&#160;exit&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-1283510265-r2" x="1207.8" y="166.4" textLength="12.2" clip-path="url(#terminal-1283510265-line-6)">│</text><text class="terminal-1283510265-r1" x="1220" y="166.4" textLength="12.2" clip-path="url(#terminal-1283510265-line-6)">
+</text><text class="terminal-1283510265-r2" x="0" y="190.8" textLength="12.2" clip-path="url(#terminal-1283510265-line-7)">│</text><text class="terminal-1283510265-r2" x="36.6" y="190.8" textLength="244" clip-path="url(#terminal-1283510265-line-7)">Tool&#160;registration&#160;&#160;&#160;</text><text class="terminal-1283510265-r3" x="305" y="190.8" textLength="48.8" clip-path="url(#terminal-1283510265-line-7)">✓&#160;&#160;&#160;</text><text class="terminal-1283510265-r5" x="378.2" y="190.8" textLength="732" clip-path="url(#terminal-1283510265-line-7)">40&#160;MCP&#160;tools&#160;→&#160;40&#160;Pi&#160;tools&#160;(org_llm_search_notes,&#160;…)&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-1283510265-r2" x="1207.8" y="190.8" textLength="12.2" clip-path="url(#terminal-1283510265-line-7)">│</text><text class="terminal-1283510265-r1" x="1220" y="190.8" textLength="12.2" clip-path="url(#terminal-1283510265-line-7)">
+</text><text class="terminal-1283510265-r2" x="0" y="215.2" textLength="12.2" clip-path="url(#terminal-1283510265-line-8)">│</text><text class="terminal-1283510265-r2" x="36.6" y="215.2" textLength="244" clip-path="url(#terminal-1283510265-line-8)">Persona&#160;injection&#160;&#160;&#160;</text><text class="terminal-1283510265-r3" x="305" y="215.2" textLength="48.8" clip-path="url(#terminal-1283510265-line-8)">✓&#160;&#160;&#160;</text><text class="terminal-1283510265-r5" x="378.2" y="215.2" textLength="732" clip-path="url(#terminal-1283510265-line-8)">before_agent_start&#160;hook&#160;adds&#160;search-first&#160;system&#160;prompt&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-1283510265-r2" x="1207.8" y="215.2" textLength="12.2" clip-path="url(#terminal-1283510265-line-8)">│</text><text class="terminal-1283510265-r1" x="1220" y="215.2" textLength="12.2" clip-path="url(#terminal-1283510265-line-8)">
+</text><text class="terminal-1283510265-r2" x="0" y="239.6" textLength="12.2" clip-path="url(#terminal-1283510265-line-9)">│</text><text class="terminal-1283510265-r2" x="36.6" y="239.6" textLength="244" clip-path="url(#terminal-1283510265-line-9)">Theme&#160;parity&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-1283510265-r3" x="305" y="239.6" textLength="48.8" clip-path="url(#terminal-1283510265-line-9)">✓&#160;&#160;&#160;</text><text class="terminal-1283510265-r5" x="378.2" y="239.6" textLength="732" clip-path="url(#terminal-1283510265-line-9)">uses&#160;opencode_persona_intro&#160;/&#160;mcp_*_suffix&#160;from&#160;theme_studio</text><text class="terminal-1283510265-r2" x="1207.8" y="239.6" textLength="12.2" clip-path="url(#terminal-1283510265-line-9)">│</text><text class="terminal-1283510265-r1" x="1220" y="239.6" textLength="12.2" clip-path="url(#terminal-1283510265-line-9)">
+</text><text class="terminal-1283510265-r2" x="0" y="264" textLength="12.2" clip-path="url(#terminal-1283510265-line-10)">│</text><text class="terminal-1283510265-r2" x="1207.8" y="264" textLength="12.2" clip-path="url(#terminal-1283510265-line-10)">│</text><text class="terminal-1283510265-r1" x="1220" y="264" textLength="12.2" clip-path="url(#terminal-1283510265-line-10)">
+</text><text class="terminal-1283510265-r2" x="0" y="288.4" textLength="1220" clip-path="url(#terminal-1283510265-line-11)">╰──────────────────────────────────────────────────────────────────────────────────────────────────╯</text><text class="terminal-1283510265-r1" x="1220" y="288.4" textLength="12.2" clip-path="url(#terminal-1283510265-line-11)">
+</text><text class="terminal-1283510265-r1" x="1220" y="312.8" textLength="12.2" clip-path="url(#terminal-1283510265-line-12)">
+</text><text class="terminal-1283510265-r1" x="0" y="337.2" textLength="24.4" clip-path="url(#terminal-1283510265-line-13)">▶&#160;</text><text class="terminal-1283510265-r6" x="24.4" y="337.2" textLength="122" clip-path="url(#terminal-1283510265-line-13)">org-llm&#160;pi</text><text class="terminal-1283510265-r5" x="317.2" y="337.2" textLength="536.8" clip-path="url(#terminal-1283510265-line-13)">start&#160;a&#160;Pi&#160;session&#160;with&#160;org-llm&#160;tools&#160;loaded</text><text class="terminal-1283510265-r1" x="1220" y="337.2" textLength="12.2" clip-path="url(#terminal-1283510265-line-13)">
+</text><text class="terminal-1283510265-r1" x="0" y="361.6" textLength="24.4" clip-path="url(#terminal-1283510265-line-14)">▶&#160;</text><text class="terminal-1283510265-r6" x="24.4" y="361.6" textLength="268.4" clip-path="url(#terminal-1283510265-line-14)">org-llm&#160;pi&#160;--reinstall</text><text class="terminal-1283510265-r5" x="317.2" y="361.6" textLength="561.2" clip-path="url(#terminal-1283510265-line-14)">rebuild&#160;the&#160;bridge&#160;from&#160;the&#160;bundled&#160;TypeScript</text><text class="terminal-1283510265-r1" x="1220" y="361.6" textLength="12.2" clip-path="url(#terminal-1283510265-line-14)">
+</text>
+    </g>
+    </g>
+</svg>

@@ -19,177 +19,177 @@
         font-weight: 700;
     }
 
-    .terminal-619391691-matrix {
+    .terminal-684416773-matrix {
         font-family: Fira Code, monospace;
         font-size: 20px;
         line-height: 24.4px;
         font-variant-east-asian: full-width;
     }
 
-    .terminal-619391691-title {
+    .terminal-684416773-title {
         font-size: 18px;
         font-weight: bold;
         font-family: arial;
     }
 
-    .terminal-619391691-r1 { fill: #00823d }
-.terminal-619391691-r2 { fill: #b36300;font-weight: bold }
-.terminal-619391691-r3 { fill: #c5c8c6 }
-.terminal-619391691-r4 { fill: #c5c8c6;font-weight: bold }
-.terminal-619391691-r5 { fill: #6633cc;font-weight: bold }
-.terminal-619391691-r6 { fill: #4d4d4d }
-.terminal-619391691-r7 { fill: #ff2c7a;font-weight: bold }
+    .terminal-684416773-r1 { fill: #00823d }
+.terminal-684416773-r2 { fill: #ff9900;font-weight: bold }
+.terminal-684416773-r3 { fill: #c5c8c6 }
+.terminal-684416773-r4 { fill: #c5c8c6;font-weight: bold }
+.terminal-684416773-r5 { fill: #cc88ff;font-weight: bold }
+.terminal-684416773-r6 { fill: #4d4d4d }
+.terminal-684416773-r7 { fill: #ff2c7a;font-weight: bold }
     </style>
 
     <defs>
-    <clipPath id="terminal-619391691-clip-terminal">
+    <clipPath id="terminal-684416773-clip-terminal">
       <rect x="0" y="0" width="1341.0" height="828.5999999999999" />
     </clipPath>
-    <clipPath id="terminal-619391691-line-0">
+    <clipPath id="terminal-684416773-line-0">
     <rect x="0" y="1.5" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-1">
+<clipPath id="terminal-684416773-line-1">
     <rect x="0" y="25.9" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-2">
+<clipPath id="terminal-684416773-line-2">
     <rect x="0" y="50.3" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-3">
+<clipPath id="terminal-684416773-line-3">
     <rect x="0" y="74.7" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-4">
+<clipPath id="terminal-684416773-line-4">
     <rect x="0" y="99.1" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-5">
+<clipPath id="terminal-684416773-line-5">
     <rect x="0" y="123.5" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-6">
+<clipPath id="terminal-684416773-line-6">
     <rect x="0" y="147.9" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-7">
+<clipPath id="terminal-684416773-line-7">
     <rect x="0" y="172.3" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-8">
+<clipPath id="terminal-684416773-line-8">
     <rect x="0" y="196.7" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-9">
+<clipPath id="terminal-684416773-line-9">
     <rect x="0" y="221.1" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-10">
+<clipPath id="terminal-684416773-line-10">
     <rect x="0" y="245.5" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-11">
+<clipPath id="terminal-684416773-line-11">
     <rect x="0" y="269.9" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-12">
+<clipPath id="terminal-684416773-line-12">
     <rect x="0" y="294.3" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-13">
+<clipPath id="terminal-684416773-line-13">
     <rect x="0" y="318.7" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-14">
+<clipPath id="terminal-684416773-line-14">
     <rect x="0" y="343.1" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-15">
+<clipPath id="terminal-684416773-line-15">
     <rect x="0" y="367.5" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-16">
+<clipPath id="terminal-684416773-line-16">
     <rect x="0" y="391.9" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-17">
+<clipPath id="terminal-684416773-line-17">
     <rect x="0" y="416.3" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-18">
+<clipPath id="terminal-684416773-line-18">
     <rect x="0" y="440.7" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-19">
+<clipPath id="terminal-684416773-line-19">
     <rect x="0" y="465.1" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-20">
+<clipPath id="terminal-684416773-line-20">
     <rect x="0" y="489.5" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-21">
+<clipPath id="terminal-684416773-line-21">
     <rect x="0" y="513.9" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-22">
+<clipPath id="terminal-684416773-line-22">
     <rect x="0" y="538.3" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-23">
+<clipPath id="terminal-684416773-line-23">
     <rect x="0" y="562.7" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-24">
+<clipPath id="terminal-684416773-line-24">
     <rect x="0" y="587.1" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-25">
+<clipPath id="terminal-684416773-line-25">
     <rect x="0" y="611.5" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-26">
+<clipPath id="terminal-684416773-line-26">
     <rect x="0" y="635.9" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-27">
+<clipPath id="terminal-684416773-line-27">
     <rect x="0" y="660.3" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-28">
+<clipPath id="terminal-684416773-line-28">
     <rect x="0" y="684.7" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-29">
+<clipPath id="terminal-684416773-line-29">
     <rect x="0" y="709.1" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-30">
+<clipPath id="terminal-684416773-line-30">
     <rect x="0" y="733.5" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-31">
+<clipPath id="terminal-684416773-line-31">
     <rect x="0" y="757.9" width="1342" height="24.65"/>
             </clipPath>
-<clipPath id="terminal-619391691-line-32">
+<clipPath id="terminal-684416773-line-32">
     <rect x="0" y="782.3" width="1342" height="24.65"/>
             </clipPath>
     </defs>
 
-    <rect fill="#292929" stroke="rgba(255,255,255,0.35)" stroke-width="1" x="1" y="1" width="1358" height="877.6" rx="8"/><text class="terminal-619391691-title" fill="#c5c8c6" text-anchor="middle" x="679" y="27">org-llm&#160;cloud&#160;--providers</text>
+    <rect fill="#292929" stroke="rgba(255,255,255,0.35)" stroke-width="1" x="1" y="1" width="1358" height="877.6" rx="8"/><text class="terminal-684416773-title" fill="#c5c8c6" text-anchor="middle" x="679" y="27">org-llm&#160;cloud&#160;--providers</text>
             <g transform="translate(26,22)">
             <circle cx="0" cy="0" r="7" fill="#ff5f57"/>
             <circle cx="22" cy="0" r="7" fill="#febc2e"/>
             <circle cx="44" cy="0" r="7" fill="#28c840"/>
             </g>
         
-    <g transform="translate(9, 41)" clip-path="url(#terminal-619391691-clip-terminal)">
+    <g transform="translate(9, 41)" clip-path="url(#terminal-684416773-clip-terminal)">
     
-    <g class="terminal-619391691-matrix">
-    <text class="terminal-619391691-r1" x="0" y="20" textLength="488" clip-path="url(#terminal-619391691-line-0)">───────────────────────────────────────&#160;</text><text class="terminal-619391691-r2" x="488" y="20" textLength="353.8" clip-path="url(#terminal-619391691-line-0)">Supported&#160;Cloud&#160;GPU&#160;Providers</text><text class="terminal-619391691-r1" x="841.8" y="20" textLength="500.2" clip-path="url(#terminal-619391691-line-0)">&#160;────────────────────────────────────────</text><text class="terminal-619391691-r3" x="1342" y="20" textLength="12.2" clip-path="url(#terminal-619391691-line-0)">
-</text><text class="terminal-619391691-r4" x="0" y="44.4" textLength="170.8" clip-path="url(#terminal-619391691-line-1)">Slug&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r4" x="195.2" y="44.4" textLength="353.8" clip-path="url(#terminal-619391691-line-1)">Name&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r4" x="573.4" y="44.4" textLength="97.6" clip-path="url(#terminal-619391691-line-1)">API&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r4" x="695.4" y="44.4" textLength="268.4" clip-path="url(#terminal-619391691-line-1)">Cheapest&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r4" x="988.2" y="44.4" textLength="353.8" clip-path="url(#terminal-619391691-line-1)">Description&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="44.4" textLength="12.2" clip-path="url(#terminal-619391691-line-1)">
-</text><text class="terminal-619391691-r2" x="0" y="68.8" textLength="170.8" clip-path="url(#terminal-619391691-line-2)">runpod&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r5" x="195.2" y="68.8" textLength="353.8" clip-path="url(#terminal-619391691-line-2)">RunPod&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="573.4" y="68.8" textLength="97.6" clip-path="url(#terminal-619391691-line-2)">both&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="695.4" y="68.8" textLength="268.4" clip-path="url(#terminal-619391691-line-2)">$0.37/hr&#160;(RTX&#160;3090)&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="988.2" y="68.8" textLength="353.8" clip-path="url(#terminal-619391691-line-2)">Popular&#160;GPU&#160;cloud;&#160;Ollama&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="68.8" textLength="12.2" clip-path="url(#terminal-619391691-line-2)">
-</text><text class="terminal-619391691-r6" x="988.2" y="93.2" textLength="353.8" clip-path="url(#terminal-619391691-line-3)">templates;&#160;pay-per-second&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="93.2" textLength="12.2" clip-path="url(#terminal-619391691-line-3)">
-</text><text class="terminal-619391691-r6" x="988.2" y="117.6" textLength="353.8" clip-path="url(#terminal-619391691-line-4)">billing&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="117.6" textLength="12.2" clip-path="url(#terminal-619391691-line-4)">
-</text><text class="terminal-619391691-r2" x="0" y="142" textLength="170.8" clip-path="url(#terminal-619391691-line-5)">vast&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r5" x="195.2" y="142" textLength="353.8" clip-path="url(#terminal-619391691-line-5)">Vast.ai&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="573.4" y="142" textLength="97.6" clip-path="url(#terminal-619391691-line-5)">ollama&#160;&#160;</text><text class="terminal-619391691-r3" x="695.4" y="142" textLength="268.4" clip-path="url(#terminal-619391691-line-5)">$0.14/hr&#160;(RTX&#160;3080)&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="988.2" y="142" textLength="353.8" clip-path="url(#terminal-619391691-line-5)">GPU&#160;marketplace&#160;—&#160;bid&#160;on&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="142" textLength="12.2" clip-path="url(#terminal-619391691-line-5)">
-</text><text class="terminal-619391691-r6" x="988.2" y="166.4" textLength="353.8" clip-path="url(#terminal-619391691-line-6)">spot;&#160;often&#160;40–60%&#160;cheaper&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="166.4" textLength="12.2" clip-path="url(#terminal-619391691-line-6)">
-</text><text class="terminal-619391691-r6" x="988.2" y="190.8" textLength="353.8" clip-path="url(#terminal-619391691-line-7)">than&#160;RunPod&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="190.8" textLength="12.2" clip-path="url(#terminal-619391691-line-7)">
-</text><text class="terminal-619391691-r2" x="0" y="215.2" textLength="170.8" clip-path="url(#terminal-619391691-line-8)">lambda&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r5" x="195.2" y="215.2" textLength="353.8" clip-path="url(#terminal-619391691-line-8)">Lambda&#160;Labs&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="573.4" y="215.2" textLength="97.6" clip-path="url(#terminal-619391691-line-8)">openai&#160;&#160;</text><text class="terminal-619391691-r3" x="695.4" y="215.2" textLength="268.4" clip-path="url(#terminal-619391691-line-8)">$0.75/hr&#160;(A10)&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="988.2" y="215.2" textLength="353.8" clip-path="url(#terminal-619391691-line-8)">Reliable&#160;on-demand&#160;GPU&#160;cloud;</text><text class="terminal-619391691-r3" x="1342" y="215.2" textLength="12.2" clip-path="url(#terminal-619391691-line-8)">
-</text><text class="terminal-619391691-r6" x="988.2" y="239.6" textLength="353.8" clip-path="url(#terminal-619391691-line-9)">strong&#160;SLA;&#160;OpenAI-compatible</text><text class="terminal-619391691-r3" x="1342" y="239.6" textLength="12.2" clip-path="url(#terminal-619391691-line-9)">
-</text><text class="terminal-619391691-r6" x="988.2" y="264" textLength="353.8" clip-path="url(#terminal-619391691-line-10)">inference&#160;API&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="264" textLength="12.2" clip-path="url(#terminal-619391691-line-10)">
-</text><text class="terminal-619391691-r2" x="0" y="288.4" textLength="170.8" clip-path="url(#terminal-619391691-line-11)">tensordock&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r5" x="195.2" y="288.4" textLength="353.8" clip-path="url(#terminal-619391691-line-11)">TensorDock&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="573.4" y="288.4" textLength="97.6" clip-path="url(#terminal-619391691-line-11)">ollama&#160;&#160;</text><text class="terminal-619391691-r3" x="695.4" y="288.4" textLength="268.4" clip-path="url(#terminal-619391691-line-11)">$0.22/hr&#160;(RTX&#160;3090)&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="988.2" y="288.4" textLength="353.8" clip-path="url(#terminal-619391691-line-11)">Low-cost&#160;GPU&#160;marketplace;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="288.4" textLength="12.2" clip-path="url(#terminal-619391691-line-11)">
-</text><text class="terminal-619391691-r6" x="988.2" y="312.8" textLength="353.8" clip-path="url(#terminal-619391691-line-12)">deploy&#160;Ollama&#160;containers;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="312.8" textLength="12.2" clip-path="url(#terminal-619391691-line-12)">
-</text><text class="terminal-619391691-r6" x="988.2" y="337.2" textLength="353.8" clip-path="url(#terminal-619391691-line-13)">spot&#160;instances&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="337.2" textLength="12.2" clip-path="url(#terminal-619391691-line-13)">
-</text><text class="terminal-619391691-r2" x="0" y="361.6" textLength="170.8" clip-path="url(#terminal-619391691-line-14)">salad&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r5" x="195.2" y="361.6" textLength="353.8" clip-path="url(#terminal-619391691-line-14)">Salad&#160;Cloud&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="573.4" y="361.6" textLength="97.6" clip-path="url(#terminal-619391691-line-14)">openai&#160;&#160;</text><text class="terminal-619391691-r3" x="695.4" y="361.6" textLength="268.4" clip-path="url(#terminal-619391691-line-14)">$0.08/hr&#160;(RTX&#160;3080)&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="988.2" y="361.6" textLength="353.8" clip-path="url(#terminal-619391691-line-14)">Distributed&#160;consumer&#160;GPU&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="361.6" textLength="12.2" clip-path="url(#terminal-619391691-line-14)">
-</text><text class="terminal-619391691-r6" x="988.2" y="386" textLength="353.8" clip-path="url(#terminal-619391691-line-15)">network&#160;—&#160;lowest&#160;rates;&#160;best&#160;</text><text class="terminal-619391691-r3" x="1342" y="386" textLength="12.2" clip-path="url(#terminal-619391691-line-15)">
-</text><text class="terminal-619391691-r6" x="988.2" y="410.4" textLength="353.8" clip-path="url(#terminal-619391691-line-16)">for&#160;batch&#160;inference&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="410.4" textLength="12.2" clip-path="url(#terminal-619391691-line-16)">
-</text><text class="terminal-619391691-r2" x="0" y="434.8" textLength="170.8" clip-path="url(#terminal-619391691-line-17)">paperspace&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r5" x="195.2" y="434.8" textLength="353.8" clip-path="url(#terminal-619391691-line-17)">Paperspace&#160;(DigitalOcean&#160;GPU)</text><text class="terminal-619391691-r6" x="573.4" y="434.8" textLength="97.6" clip-path="url(#terminal-619391691-line-17)">both&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="695.4" y="434.8" textLength="268.4" clip-path="url(#terminal-619391691-line-17)">$3.09/hr&#160;(A100&#160;80GB)&#160;&#160;</text><text class="terminal-619391691-r6" x="988.2" y="434.8" textLength="353.8" clip-path="url(#terminal-619391691-line-17)">Managed&#160;GPU&#160;cloud;&#160;Gradient&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="434.8" textLength="12.2" clip-path="url(#terminal-619391691-line-17)">
-</text><text class="terminal-619391691-r6" x="988.2" y="459.2" textLength="353.8" clip-path="url(#terminal-619391691-line-18)">notebooks&#160;+&#160;deployments;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="459.2" textLength="12.2" clip-path="url(#terminal-619391691-line-18)">
-</text><text class="terminal-619391691-r6" x="988.2" y="483.6" textLength="353.8" clip-path="url(#terminal-619391691-line-19)">DigitalOcean-backed&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="483.6" textLength="12.2" clip-path="url(#terminal-619391691-line-19)">
-</text><text class="terminal-619391691-r2" x="0" y="508" textLength="170.8" clip-path="url(#terminal-619391691-line-20)">coreweave&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r5" x="195.2" y="508" textLength="353.8" clip-path="url(#terminal-619391691-line-20)">CoreWeave&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="573.4" y="508" textLength="97.6" clip-path="url(#terminal-619391691-line-20)">openai&#160;&#160;</text><text class="terminal-619391691-r3" x="695.4" y="508" textLength="268.4" clip-path="url(#terminal-619391691-line-20)">$0.80/hr&#160;(RTX&#160;A6000)&#160;&#160;</text><text class="terminal-619391691-r6" x="988.2" y="508" textLength="353.8" clip-path="url(#terminal-619391691-line-20)">Enterprise-grade&#160;GPU&#160;cloud;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="508" textLength="12.2" clip-path="url(#terminal-619391691-line-20)">
-</text><text class="terminal-619391691-r6" x="988.2" y="532.4" textLength="353.8" clip-path="url(#terminal-619391691-line-21)">Kubernetes-native;&#160;highest&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="532.4" textLength="12.2" clip-path="url(#terminal-619391691-line-21)">
-</text><text class="terminal-619391691-r6" x="988.2" y="556.8" textLength="353.8" clip-path="url(#terminal-619391691-line-22)">uptime&#160;SLA&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="556.8" textLength="12.2" clip-path="url(#terminal-619391691-line-22)">
-</text><text class="terminal-619391691-r2" x="0" y="581.2" textLength="170.8" clip-path="url(#terminal-619391691-line-23)">openrouter&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r5" x="195.2" y="581.2" textLength="353.8" clip-path="url(#terminal-619391691-line-23)">OpenRouter&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="573.4" y="581.2" textLength="97.6" clip-path="url(#terminal-619391691-line-23)">openai&#160;&#160;</text><text class="terminal-619391691-r3" x="695.4" y="581.2" textLength="268.4" clip-path="url(#terminal-619391691-line-23)">FREE&#160;—&#160;free&#160;tier&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="988.2" y="581.2" textLength="353.8" clip-path="url(#terminal-619391691-line-23)">Hosted&#160;multi-model&#160;gateway;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="581.2" textLength="12.2" clip-path="url(#terminal-619391691-line-23)">
-</text><text class="terminal-619391691-r3" x="695.4" y="605.6" textLength="268.4" clip-path="url(#terminal-619391691-line-24)">(Llama&#160;3.1&#160;8B)&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="988.2" y="605.6" textLength="353.8" clip-path="url(#terminal-619391691-line-24)">FREE&#160;tier&#160;(Llama&#160;3.1&#160;8B);&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="605.6" textLength="12.2" clip-path="url(#terminal-619391691-line-24)">
-</text><text class="terminal-619391691-r6" x="988.2" y="630" textLength="353.8" clip-path="url(#terminal-619391691-line-25)">per-token&#160;billing&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="630" textLength="12.2" clip-path="url(#terminal-619391691-line-25)">
-</text><text class="terminal-619391691-r2" x="0" y="654.4" textLength="170.8" clip-path="url(#terminal-619391691-line-26)">groq&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r5" x="195.2" y="654.4" textLength="353.8" clip-path="url(#terminal-619391691-line-26)">Groq&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="573.4" y="654.4" textLength="97.6" clip-path="url(#terminal-619391691-line-26)">openai&#160;&#160;</text><text class="terminal-619391691-r3" x="695.4" y="654.4" textLength="268.4" clip-path="url(#terminal-619391691-line-26)">FREE&#160;—&#160;free&#160;tier&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="988.2" y="654.4" textLength="353.8" clip-path="url(#terminal-619391691-line-26)">Ultra-fast&#160;LPU&#160;inference;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="654.4" textLength="12.2" clip-path="url(#terminal-619391691-line-26)">
-</text><text class="terminal-619391691-r3" x="695.4" y="678.8" textLength="268.4" clip-path="url(#terminal-619391691-line-27)">(Llama&#160;3.1&#160;8B)&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="988.2" y="678.8" textLength="353.8" clip-path="url(#terminal-619391691-line-27)">FREE&#160;tier&#160;with&#160;rate&#160;limits;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="678.8" textLength="12.2" clip-path="url(#terminal-619391691-line-27)">
-</text><text class="terminal-619391691-r6" x="988.2" y="703.2" textLength="353.8" clip-path="url(#terminal-619391691-line-28)">very&#160;low&#160;latency&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="703.2" textLength="12.2" clip-path="url(#terminal-619391691-line-28)">
-</text><text class="terminal-619391691-r2" x="0" y="727.6" textLength="170.8" clip-path="url(#terminal-619391691-line-29)">huggingface&#160;&#160;&#160;</text><text class="terminal-619391691-r5" x="195.2" y="727.6" textLength="353.8" clip-path="url(#terminal-619391691-line-29)">Hugging&#160;Face&#160;Inference&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="573.4" y="727.6" textLength="97.6" clip-path="url(#terminal-619391691-line-29)">openai&#160;&#160;</text><text class="terminal-619391691-r3" x="695.4" y="727.6" textLength="268.4" clip-path="url(#terminal-619391691-line-29)">FREE&#160;—&#160;free&#160;tier&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="988.2" y="727.6" textLength="353.8" clip-path="url(#terminal-619391691-line-29)">Hosted&#160;inference&#160;for&#160;any&#160;HF&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="727.6" textLength="12.2" clip-path="url(#terminal-619391691-line-29)">
-</text><text class="terminal-619391691-r3" x="695.4" y="752" textLength="268.4" clip-path="url(#terminal-619391691-line-30)">(rate-limited)&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r6" x="988.2" y="752" textLength="353.8" clip-path="url(#terminal-619391691-line-30)">model;&#160;FREE&#160;tier&#160;with&#160;rate&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="752" textLength="12.2" clip-path="url(#terminal-619391691-line-30)">
-</text><text class="terminal-619391691-r6" x="988.2" y="776.4" textLength="353.8" clip-path="url(#terminal-619391691-line-31)">limits&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-619391691-r3" x="1342" y="776.4" textLength="12.2" clip-path="url(#terminal-619391691-line-31)">
-</text><text class="terminal-619391691-r3" x="1342" y="800.8" textLength="12.2" clip-path="url(#terminal-619391691-line-32)">
-</text><text class="terminal-619391691-r5" x="0" y="825.2" textLength="134.2" clip-path="url(#terminal-619391691-line-33)">▶&#160;Sign&#160;up:&#160;</text><text class="terminal-619391691-r5" x="134.2" y="825.2" textLength="280.6" clip-path="url(#terminal-619391691-line-33)">org-llm&#160;cloud&#160;--signup&#160;</text><text class="terminal-619391691-r5" x="414.8" y="825.2" textLength="12.2" clip-path="url(#terminal-619391691-line-33)">&lt;</text><text class="terminal-619391691-r7" x="427" y="825.2" textLength="48.8" clip-path="url(#terminal-619391691-line-33)">slug</text><text class="terminal-619391691-r5" x="475.8" y="825.2" textLength="12.2" clip-path="url(#terminal-619391691-line-33)">&gt;</text><text class="terminal-619391691-r5" x="488" y="825.2" textLength="195.2" clip-path="url(#terminal-619391691-line-33)">&#160;&#160;&#160;│&#160;Configure:&#160;</text><text class="terminal-619391691-r5" x="683.2" y="825.2" textLength="305" clip-path="url(#terminal-619391691-line-33)">org-llm&#160;cloud&#160;--configure</text><text class="terminal-619391691-r3" x="1342" y="825.2" textLength="12.2" clip-path="url(#terminal-619391691-line-33)">
+    <g class="terminal-684416773-matrix">
+    <text class="terminal-684416773-r1" x="0" y="20" textLength="488" clip-path="url(#terminal-684416773-line-0)">───────────────────────────────────────&#160;</text><text class="terminal-684416773-r2" x="488" y="20" textLength="353.8" clip-path="url(#terminal-684416773-line-0)">Supported&#160;Cloud&#160;GPU&#160;Providers</text><text class="terminal-684416773-r1" x="841.8" y="20" textLength="500.2" clip-path="url(#terminal-684416773-line-0)">&#160;────────────────────────────────────────</text><text class="terminal-684416773-r3" x="1342" y="20" textLength="12.2" clip-path="url(#terminal-684416773-line-0)">
+</text><text class="terminal-684416773-r4" x="0" y="44.4" textLength="170.8" clip-path="url(#terminal-684416773-line-1)">Slug&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r4" x="195.2" y="44.4" textLength="353.8" clip-path="url(#terminal-684416773-line-1)">Name&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r4" x="573.4" y="44.4" textLength="97.6" clip-path="url(#terminal-684416773-line-1)">API&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r4" x="695.4" y="44.4" textLength="268.4" clip-path="url(#terminal-684416773-line-1)">Cheapest&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r4" x="988.2" y="44.4" textLength="353.8" clip-path="url(#terminal-684416773-line-1)">Description&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="44.4" textLength="12.2" clip-path="url(#terminal-684416773-line-1)">
+</text><text class="terminal-684416773-r2" x="0" y="68.8" textLength="170.8" clip-path="url(#terminal-684416773-line-2)">runpod&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r5" x="195.2" y="68.8" textLength="353.8" clip-path="url(#terminal-684416773-line-2)">RunPod&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="573.4" y="68.8" textLength="97.6" clip-path="url(#terminal-684416773-line-2)">both&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="695.4" y="68.8" textLength="268.4" clip-path="url(#terminal-684416773-line-2)">$0.37/hr&#160;(RTX&#160;3090)&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="988.2" y="68.8" textLength="353.8" clip-path="url(#terminal-684416773-line-2)">Popular&#160;GPU&#160;cloud;&#160;Ollama&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="68.8" textLength="12.2" clip-path="url(#terminal-684416773-line-2)">
+</text><text class="terminal-684416773-r6" x="988.2" y="93.2" textLength="353.8" clip-path="url(#terminal-684416773-line-3)">templates;&#160;pay-per-second&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="93.2" textLength="12.2" clip-path="url(#terminal-684416773-line-3)">
+</text><text class="terminal-684416773-r6" x="988.2" y="117.6" textLength="353.8" clip-path="url(#terminal-684416773-line-4)">billing&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="117.6" textLength="12.2" clip-path="url(#terminal-684416773-line-4)">
+</text><text class="terminal-684416773-r2" x="0" y="142" textLength="170.8" clip-path="url(#terminal-684416773-line-5)">vast&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r5" x="195.2" y="142" textLength="353.8" clip-path="url(#terminal-684416773-line-5)">Vast.ai&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="573.4" y="142" textLength="97.6" clip-path="url(#terminal-684416773-line-5)">ollama&#160;&#160;</text><text class="terminal-684416773-r3" x="695.4" y="142" textLength="268.4" clip-path="url(#terminal-684416773-line-5)">$0.14/hr&#160;(RTX&#160;3080)&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="988.2" y="142" textLength="353.8" clip-path="url(#terminal-684416773-line-5)">GPU&#160;marketplace&#160;—&#160;bid&#160;on&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="142" textLength="12.2" clip-path="url(#terminal-684416773-line-5)">
+</text><text class="terminal-684416773-r6" x="988.2" y="166.4" textLength="353.8" clip-path="url(#terminal-684416773-line-6)">spot;&#160;often&#160;40–60%&#160;cheaper&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="166.4" textLength="12.2" clip-path="url(#terminal-684416773-line-6)">
+</text><text class="terminal-684416773-r6" x="988.2" y="190.8" textLength="353.8" clip-path="url(#terminal-684416773-line-7)">than&#160;RunPod&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="190.8" textLength="12.2" clip-path="url(#terminal-684416773-line-7)">
+</text><text class="terminal-684416773-r2" x="0" y="215.2" textLength="170.8" clip-path="url(#terminal-684416773-line-8)">lambda&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r5" x="195.2" y="215.2" textLength="353.8" clip-path="url(#terminal-684416773-line-8)">Lambda&#160;Labs&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="573.4" y="215.2" textLength="97.6" clip-path="url(#terminal-684416773-line-8)">openai&#160;&#160;</text><text class="terminal-684416773-r3" x="695.4" y="215.2" textLength="268.4" clip-path="url(#terminal-684416773-line-8)">$0.75/hr&#160;(A10)&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="988.2" y="215.2" textLength="353.8" clip-path="url(#terminal-684416773-line-8)">Reliable&#160;on-demand&#160;GPU&#160;cloud;</text><text class="terminal-684416773-r3" x="1342" y="215.2" textLength="12.2" clip-path="url(#terminal-684416773-line-8)">
+</text><text class="terminal-684416773-r6" x="988.2" y="239.6" textLength="353.8" clip-path="url(#terminal-684416773-line-9)">strong&#160;SLA;&#160;OpenAI-compatible</text><text class="terminal-684416773-r3" x="1342" y="239.6" textLength="12.2" clip-path="url(#terminal-684416773-line-9)">
+</text><text class="terminal-684416773-r6" x="988.2" y="264" textLength="353.8" clip-path="url(#terminal-684416773-line-10)">inference&#160;API&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="264" textLength="12.2" clip-path="url(#terminal-684416773-line-10)">
+</text><text class="terminal-684416773-r2" x="0" y="288.4" textLength="170.8" clip-path="url(#terminal-684416773-line-11)">tensordock&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r5" x="195.2" y="288.4" textLength="353.8" clip-path="url(#terminal-684416773-line-11)">TensorDock&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="573.4" y="288.4" textLength="97.6" clip-path="url(#terminal-684416773-line-11)">ollama&#160;&#160;</text><text class="terminal-684416773-r3" x="695.4" y="288.4" textLength="268.4" clip-path="url(#terminal-684416773-line-11)">$0.22/hr&#160;(RTX&#160;3090)&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="988.2" y="288.4" textLength="353.8" clip-path="url(#terminal-684416773-line-11)">Low-cost&#160;GPU&#160;marketplace;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="288.4" textLength="12.2" clip-path="url(#terminal-684416773-line-11)">
+</text><text class="terminal-684416773-r6" x="988.2" y="312.8" textLength="353.8" clip-path="url(#terminal-684416773-line-12)">deploy&#160;Ollama&#160;containers;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="312.8" textLength="12.2" clip-path="url(#terminal-684416773-line-12)">
+</text><text class="terminal-684416773-r6" x="988.2" y="337.2" textLength="353.8" clip-path="url(#terminal-684416773-line-13)">spot&#160;instances&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="337.2" textLength="12.2" clip-path="url(#terminal-684416773-line-13)">
+</text><text class="terminal-684416773-r2" x="0" y="361.6" textLength="170.8" clip-path="url(#terminal-684416773-line-14)">salad&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r5" x="195.2" y="361.6" textLength="353.8" clip-path="url(#terminal-684416773-line-14)">Salad&#160;Cloud&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="573.4" y="361.6" textLength="97.6" clip-path="url(#terminal-684416773-line-14)">openai&#160;&#160;</text><text class="terminal-684416773-r3" x="695.4" y="361.6" textLength="268.4" clip-path="url(#terminal-684416773-line-14)">$0.08/hr&#160;(RTX&#160;3080)&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="988.2" y="361.6" textLength="353.8" clip-path="url(#terminal-684416773-line-14)">Distributed&#160;consumer&#160;GPU&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="361.6" textLength="12.2" clip-path="url(#terminal-684416773-line-14)">
+</text><text class="terminal-684416773-r6" x="988.2" y="386" textLength="353.8" clip-path="url(#terminal-684416773-line-15)">network&#160;—&#160;lowest&#160;rates;&#160;best&#160;</text><text class="terminal-684416773-r3" x="1342" y="386" textLength="12.2" clip-path="url(#terminal-684416773-line-15)">
+</text><text class="terminal-684416773-r6" x="988.2" y="410.4" textLength="353.8" clip-path="url(#terminal-684416773-line-16)">for&#160;batch&#160;inference&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="410.4" textLength="12.2" clip-path="url(#terminal-684416773-line-16)">
+</text><text class="terminal-684416773-r2" x="0" y="434.8" textLength="170.8" clip-path="url(#terminal-684416773-line-17)">paperspace&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r5" x="195.2" y="434.8" textLength="353.8" clip-path="url(#terminal-684416773-line-17)">Paperspace&#160;(DigitalOcean&#160;GPU)</text><text class="terminal-684416773-r6" x="573.4" y="434.8" textLength="97.6" clip-path="url(#terminal-684416773-line-17)">both&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="695.4" y="434.8" textLength="268.4" clip-path="url(#terminal-684416773-line-17)">$3.09/hr&#160;(A100&#160;80GB)&#160;&#160;</text><text class="terminal-684416773-r6" x="988.2" y="434.8" textLength="353.8" clip-path="url(#terminal-684416773-line-17)">Managed&#160;GPU&#160;cloud;&#160;Gradient&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="434.8" textLength="12.2" clip-path="url(#terminal-684416773-line-17)">
+</text><text class="terminal-684416773-r6" x="988.2" y="459.2" textLength="353.8" clip-path="url(#terminal-684416773-line-18)">notebooks&#160;+&#160;deployments;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="459.2" textLength="12.2" clip-path="url(#terminal-684416773-line-18)">
+</text><text class="terminal-684416773-r6" x="988.2" y="483.6" textLength="353.8" clip-path="url(#terminal-684416773-line-19)">DigitalOcean-backed&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="483.6" textLength="12.2" clip-path="url(#terminal-684416773-line-19)">
+</text><text class="terminal-684416773-r2" x="0" y="508" textLength="170.8" clip-path="url(#terminal-684416773-line-20)">coreweave&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r5" x="195.2" y="508" textLength="353.8" clip-path="url(#terminal-684416773-line-20)">CoreWeave&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="573.4" y="508" textLength="97.6" clip-path="url(#terminal-684416773-line-20)">openai&#160;&#160;</text><text class="terminal-684416773-r3" x="695.4" y="508" textLength="268.4" clip-path="url(#terminal-684416773-line-20)">$0.80/hr&#160;(RTX&#160;A6000)&#160;&#160;</text><text class="terminal-684416773-r6" x="988.2" y="508" textLength="353.8" clip-path="url(#terminal-684416773-line-20)">Enterprise-grade&#160;GPU&#160;cloud;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="508" textLength="12.2" clip-path="url(#terminal-684416773-line-20)">
+</text><text class="terminal-684416773-r6" x="988.2" y="532.4" textLength="353.8" clip-path="url(#terminal-684416773-line-21)">Kubernetes-native;&#160;highest&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="532.4" textLength="12.2" clip-path="url(#terminal-684416773-line-21)">
+</text><text class="terminal-684416773-r6" x="988.2" y="556.8" textLength="353.8" clip-path="url(#terminal-684416773-line-22)">uptime&#160;SLA&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="556.8" textLength="12.2" clip-path="url(#terminal-684416773-line-22)">
+</text><text class="terminal-684416773-r2" x="0" y="581.2" textLength="170.8" clip-path="url(#terminal-684416773-line-23)">openrouter&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r5" x="195.2" y="581.2" textLength="353.8" clip-path="url(#terminal-684416773-line-23)">OpenRouter&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="573.4" y="581.2" textLength="97.6" clip-path="url(#terminal-684416773-line-23)">openai&#160;&#160;</text><text class="terminal-684416773-r3" x="695.4" y="581.2" textLength="268.4" clip-path="url(#terminal-684416773-line-23)">FREE&#160;—&#160;free&#160;tier&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="988.2" y="581.2" textLength="353.8" clip-path="url(#terminal-684416773-line-23)">Hosted&#160;multi-model&#160;gateway;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="581.2" textLength="12.2" clip-path="url(#terminal-684416773-line-23)">
+</text><text class="terminal-684416773-r3" x="695.4" y="605.6" textLength="268.4" clip-path="url(#terminal-684416773-line-24)">(Llama&#160;3.1&#160;8B)&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="988.2" y="605.6" textLength="353.8" clip-path="url(#terminal-684416773-line-24)">FREE&#160;tier&#160;(Llama&#160;3.1&#160;8B);&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="605.6" textLength="12.2" clip-path="url(#terminal-684416773-line-24)">
+</text><text class="terminal-684416773-r6" x="988.2" y="630" textLength="353.8" clip-path="url(#terminal-684416773-line-25)">per-token&#160;billing&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="630" textLength="12.2" clip-path="url(#terminal-684416773-line-25)">
+</text><text class="terminal-684416773-r2" x="0" y="654.4" textLength="170.8" clip-path="url(#terminal-684416773-line-26)">groq&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r5" x="195.2" y="654.4" textLength="353.8" clip-path="url(#terminal-684416773-line-26)">Groq&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="573.4" y="654.4" textLength="97.6" clip-path="url(#terminal-684416773-line-26)">openai&#160;&#160;</text><text class="terminal-684416773-r3" x="695.4" y="654.4" textLength="268.4" clip-path="url(#terminal-684416773-line-26)">FREE&#160;—&#160;free&#160;tier&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="988.2" y="654.4" textLength="353.8" clip-path="url(#terminal-684416773-line-26)">Ultra-fast&#160;LPU&#160;inference;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="654.4" textLength="12.2" clip-path="url(#terminal-684416773-line-26)">
+</text><text class="terminal-684416773-r3" x="695.4" y="678.8" textLength="268.4" clip-path="url(#terminal-684416773-line-27)">(Llama&#160;3.1&#160;8B)&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="988.2" y="678.8" textLength="353.8" clip-path="url(#terminal-684416773-line-27)">FREE&#160;tier&#160;with&#160;rate&#160;limits;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="678.8" textLength="12.2" clip-path="url(#terminal-684416773-line-27)">
+</text><text class="terminal-684416773-r6" x="988.2" y="703.2" textLength="353.8" clip-path="url(#terminal-684416773-line-28)">very&#160;low&#160;latency&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="703.2" textLength="12.2" clip-path="url(#terminal-684416773-line-28)">
+</text><text class="terminal-684416773-r2" x="0" y="727.6" textLength="170.8" clip-path="url(#terminal-684416773-line-29)">huggingface&#160;&#160;&#160;</text><text class="terminal-684416773-r5" x="195.2" y="727.6" textLength="353.8" clip-path="url(#terminal-684416773-line-29)">Hugging&#160;Face&#160;Inference&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="573.4" y="727.6" textLength="97.6" clip-path="url(#terminal-684416773-line-29)">openai&#160;&#160;</text><text class="terminal-684416773-r3" x="695.4" y="727.6" textLength="268.4" clip-path="url(#terminal-684416773-line-29)">FREE&#160;—&#160;free&#160;tier&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="988.2" y="727.6" textLength="353.8" clip-path="url(#terminal-684416773-line-29)">Hosted&#160;inference&#160;for&#160;any&#160;HF&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="727.6" textLength="12.2" clip-path="url(#terminal-684416773-line-29)">
+</text><text class="terminal-684416773-r3" x="695.4" y="752" textLength="268.4" clip-path="url(#terminal-684416773-line-30)">(rate-limited)&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r6" x="988.2" y="752" textLength="353.8" clip-path="url(#terminal-684416773-line-30)">model;&#160;FREE&#160;tier&#160;with&#160;rate&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="752" textLength="12.2" clip-path="url(#terminal-684416773-line-30)">
+</text><text class="terminal-684416773-r6" x="988.2" y="776.4" textLength="353.8" clip-path="url(#terminal-684416773-line-31)">limits&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;&#160;</text><text class="terminal-684416773-r3" x="1342" y="776.4" textLength="12.2" clip-path="url(#terminal-684416773-line-31)">
+</text><text class="terminal-684416773-r3" x="1342" y="800.8" textLength="12.2" clip-path="url(#terminal-684416773-line-32)">
+</text><text class="terminal-684416773-r5" x="0" y="825.2" textLength="134.2" clip-path="url(#terminal-684416773-line-33)">▶&#160;Sign&#160;up:&#160;</text><text class="terminal-684416773-r5" x="134.2" y="825.2" textLength="280.6" clip-path="url(#terminal-684416773-line-33)">org-llm&#160;cloud&#160;--signup&#160;</text><text class="terminal-684416773-r5" x="414.8" y="825.2" textLength="12.2" clip-path="url(#terminal-684416773-line-33)">&lt;</text><text class="terminal-684416773-r7" x="427" y="825.2" textLength="48.8" clip-path="url(#terminal-684416773-line-33)">slug</text><text class="terminal-684416773-r5" x="475.8" y="825.2" textLength="12.2" clip-path="url(#terminal-684416773-line-33)">&gt;</text><text class="terminal-684416773-r5" x="488" y="825.2" textLength="195.2" clip-path="url(#terminal-684416773-line-33)">&#160;&#160;&#160;│&#160;Configure:&#160;</text><text class="terminal-684416773-r5" x="683.2" y="825.2" textLength="305" clip-path="url(#terminal-684416773-line-33)">org-llm&#160;cloud&#160;--configure</text><text class="terminal-684416773-r3" x="1342" y="825.2" textLength="12.2" clip-path="url(#terminal-684416773-line-33)">
 </text>
     </g>
     </g>

@@ -422,6 +422,31 @@ opencode is probably the right tool.
 
 ---
 
+## Pi bridge — third conversational interface
+
+`org-llm pi --install` auto-installs Pi (pi.dev) if missing, copies a
+TypeScript MCP-bridge extension to `~/.pi/extensions/`, and registers
+it in `~/.pi/config.json`. Once installed, every Pi session starts with
+all 40+ org-llm MCP tools registered as `org_llm_<name>` Pi tools, plus
+a per-turn dynamic system prompt (something opencode itself can't do).
+
+```sh
+org-llm pi --install     # auto-install Pi + bridge, idempotent
+org-llm pi --status      # verify bridge + registration + tool count
+org-llm pi               # start a Pi session with org-llm tools loaded
+org-llm pi --reinstall   # rebuild the bridge from bundled TypeScript
+```
+
+<div align="center"><img src="docs/img/29-pi-status.svg" alt="org-llm pi --status" width="780" /></div>
+
+Theme parity: the same `opencode_persona_intro` /
+`mcp_tool_success_suffix` / `mcp_tool_error_suffix` surfaces from
+`theme_studio` that decorate opencode also feed Pi, so the active
+LCARS palette + dial voices show up identically across all three
+conversational surfaces (opencode · Claude Code · Pi).
+
+---
+
 ## Smart RAG retrieval
 
 `org-llm ask` does more than pure vector search. It auto-detects three
@@ -595,6 +620,15 @@ eyes on every change without leaving your terminal.
 
 <div align="center"><img src="docs/img/17-doctor-walkthrough.svg" alt="org-llm doctor --walkthrough" width="780" /></div>
 
+### Power-boost — RAM-fit probe + cloud routing suggestion
+
+`org-llm doctor --power-boost` checks active model size vs free RAM
+and proposes a downsize / upsize / cloud route in one screen. The
+in-opencode LLM has the same probe via the `proactive_doctor` MCP
+tool and is instructed to call it after 3+ non-converging tool calls.
+
+<div align="center"><img src="docs/img/27-doctor-power-boost.svg" alt="org-llm doctor --power-boost" width="780" /></div>
+
 ---
 
 ## MCP file + browser grants
@@ -746,6 +780,24 @@ org-llm knob list
 User knobs participate **automatically** in the LLM-driven theming
 quality gate (see below) — once they have a `keywords_by_level` block
 in the registry, any LLM-themed surface enforces them.
+
+<div align="center"><img src="docs/img/26-knob-list.svg" alt="org-llm knob list" width="780" /></div>
+
+### LCARS palette picker
+
+Five named LCARS palettes ship — switchable with one command, no
+rebuild. Per-channel hex overrides via `--primary` / `--secondary` /
+`--tertiary`.
+
+```sh
+org-llm palette                            # text-based picker
+org-llm palette red                        # red-alert mode
+org-llm palette green                      # Voyager astrometrics
+org-llm palette gold --primary '#FFD60A'   # named + per-channel override
+org-llm palette reset                      # back to classic
+```
+
+<div align="center"><img src="docs/img/25-palette-picker.svg" alt="org-llm palette picker" width="780" /></div>
 
 ---
 
@@ -969,6 +1021,8 @@ org-llm self log                   # print the org-mode self-mod log
 app is broken, you can `bash ~/.local/share/org-llm/snapshots/<ts>/rollback.sh`
 from any shell — no Python needed. It does its own pre-rollback
 backup into `/tmp/` so you can un-rollback.
+
+<div align="center"><img src="docs/img/28-self-snapshot.svg" alt="org-llm self snapshot" width="780" /></div>
 
 **Safety guarantees on `llm-revise`:**
 

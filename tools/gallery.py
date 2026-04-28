@@ -407,6 +407,197 @@ def scene_splash_lcars_classic():
     )
 
 
+def scene_palette_picker():
+    """`org-llm palette` — text-based picker showing all 5 LCARS palettes."""
+    from rich.table import Table
+    con = _new_console(width=100)
+    tbl = Table(box=None, pad_edge=False, show_header=True,
+                  header_style="lcars1")
+    tbl.add_column("",            width=2)
+    tbl.add_column("Name",        style="lcars2", no_wrap=True, width=10)
+    tbl.add_column("Swatch",      no_wrap=True, width=24)
+    tbl.add_column("Description", style="dim")
+    bundles = [
+        ("classic", "#FF9900", "#CC88FF", "#4488FF",
+            "Canonical TNG — orange · purple · blue", True),
+        ("red",     "#FF3B30", "#FF8C7A", "#FFD60A",
+            "Red alert — red · salmon · amber", False),
+        ("green",   "#34C759", "#5AC8FA", "#FFD60A",
+            "Voyager astrometrics — green · sky · gold", False),
+        ("gold",    "#FFD60A", "#FF9500", "#FF3B30",
+            "Operations / engineering — gold · amber · red", False),
+        ("violet",  "#BF5AF2", "#FF6B9D", "#5AC8FA",
+            "Sciences / medbay — violet · magenta · sky", False),
+    ]
+    for name, c1, c2, c3, desc, is_active in bundles:
+        marker = "◉" if is_active else "◯"
+        swatch = (f"[{c1}]████████[/{c1}]"
+                   f"[{c2}]████████[/{c2}]"
+                   f"[{c3}]████████[/{c3}]")
+        tbl.add_row(marker, name, swatch, desc)
+    con.print()
+    con.print(Panel(tbl,
+                      title="[lcars1]LCARS palettes[/lcars1]  "
+                            "[dim]active: classic[/dim]",
+                      border_style="lcars2", padding=(1, 1)))
+    con.print()
+    con.print("▶ [dim]Pick:[/dim]   [bold]org-llm palette <name>[/bold]")
+    con.print("▶ [dim]Tweak:[/dim]  [bold]org-llm palette <name> "
+              "--primary '#RRGGBB'[/bold]")
+    con.print("▶ [dim]Reset:[/dim]  [bold]org-llm palette reset[/bold]")
+    _save(con, "25-palette-picker", "org-llm palette — picker")
+
+
+def scene_knob_list():
+    """`org-llm knob list` — pluggable theme-knob registry view."""
+    from rich.table import Table
+    con = _new_console(width=100)
+    tbl = Table(box=None, pad_edge=False, show_header=True,
+                  header_style="lcars1")
+    tbl.add_column("Knob",        style="lcars1", no_wrap=True, width=14)
+    tbl.add_column("Source",      style="dim", width=9)
+    tbl.add_column("Active level", style="lcars2", width=12)
+    tbl.add_column("Pool size",   style="lcars3", justify="right", width=9)
+    tbl.add_column("Description", style="dim")
+    rows = [
+        ("trek",       "built-in",  "[lcars1]2 (config)[/lcars1]", "19",
+         "Star Trek references — LCARS readouts, warp, stardates"),
+        ("commie",     "built-in",  "[lcars1]2 (config)[/lcars1]", "16",
+         "Solidarity / mutual aid / collective / abolition"),
+        ("queer",      "built-in",  "[lcars1]2 (config)[/lcars1]", "12",
+         "Queer / trans / pride references"),
+        ("synthwave",  "user",      "[lcars2]3 (env)[/lcars2]",    "11",
+         "Neon · VHS · 1980s · dusk light"),
+        ("cottagecore","user",      "[dim]2 (default)[/dim]",      " 7",
+         "Sourdough · linen · garden · slow living"),
+        ("dinosaur",   "user",      "[dim]0 (silent)[/dim]",       " 4",
+         "Roar · prehistoric · jurassic"),
+    ]
+    for r in rows:
+        tbl.add_row(*r)
+    con.print()
+    con.print(Panel(tbl,
+                      title="[lcars1]Theme knobs[/lcars1]  "
+                            "[dim](built-in + user-defined; pool feeds the "
+                            "LLM-driven theme gate)[/dim]",
+                      border_style="lcars2", padding=(1, 1)))
+    con.print()
+    con.print("▶ [bold]org-llm knob edit synthwave[/bold]   "
+              "[dim]edit pool in $EDITOR[/dim]")
+    con.print("▶ [bold]org-llm knob add NAME --llm --vibe '...'[/bold]   "
+              "[dim]LLM-generate a new knob bundle[/dim]")
+    _save(con, "26-knob-list", "org-llm knob list")
+
+
+def scene_doctor_power_boost():
+    """`org-llm doctor --power-boost` — RAM-fit suggestion + cloud route."""
+    from rich.table import Table
+    con = _new_console(width=100)
+    body = (
+        "[lcars1]Hardware probe[/lcars1]\n"
+        "  Total RAM:     16.0 GB\n"
+        "  Free RAM:       3.2 GB    [yellow]△ tight[/yellow]\n"
+        "  GPU VRAM:       (none — CPU inference)\n"
+        "  Active model:  [lcars2]gemma3:12b[/lcars2]  (8.1 GB)\n\n"
+        "[lcars1]Verdict[/lcars1]\n"
+        "  [yellow]downsize[/yellow]   active model exceeds free RAM by 4.9 GB; "
+        "swap is likely\n"
+        "             paging — explains the 18s response times you've\n"
+        "             been seeing.\n\n"
+        "[lcars1]Recommendation[/lcars1]\n"
+        "  Local swap →  [bold lcars2]llama3.2:3b[/bold lcars2] "
+        "[dim](2.0 GB, fits with 1.2 GB headroom)[/dim]\n"
+        "  Cloud route → [bold lcars2]anthropic/claude-haiku-4-5[/bold lcars2] "
+        "[dim](~$0.0008/req)[/dim]\n\n"
+        "[lcars3]Apply now?[/lcars3]\n"
+        "  [bold]org-llm doctor --power-boost --apply[/bold]    "
+        "[dim](writes chat_model)[/dim]\n"
+        "  [bold]org-llm cloud --route anthropic[/bold]        "
+        "[dim](one-shot)[/dim]"
+    )
+    con.print()
+    con.print(Panel(body,
+                      title="[lcars1]doctor --power-boost[/lcars1]  "
+                            "[dim]proactive RAM-fit probe[/dim]",
+                      border_style="lcars2", padding=(1, 2)))
+    _save(con, "27-doctor-power-boost", "org-llm doctor --power-boost")
+
+
+def scene_self_snapshot():
+    """`org-llm self snapshot` — bundle source + DB + rollback.sh."""
+    from rich.table import Table
+    con = _new_console(width=100)
+    body = (
+        "[lcars3]✓[/lcars3] Snapshot bundled to "
+        "[bold]~/.local/share/org-llm/snapshots/2026-04-27T22-31-04Z/[/bold]\n\n"
+        "[lcars1]Bundle contents[/lcars1]\n"
+        "  src.tar.zst         13.4 KB   org_llm/ at HEAD c90b6e2\n"
+        "  org-llm.db.zst      4.7 MB    full DB (config + history + "
+        "embeddings)\n"
+        "  rollback.sh         2.1 KB    standalone restore (no Python "
+        "dep — bash + tar)\n"
+        "  manifest.json       0.9 KB    sha256 + counts + git rev\n\n"
+        "[lcars1]Tagged[/lcars1]   pre-rescue-test\n"
+        "[lcars1]Triggered by[/lcars1]   self llm-revise — about to patch "
+        "[bold]search.py[/bold]\n\n"
+        "[lcars3]Roll back[/lcars3]\n"
+        "  [bold]org-llm self rollback pre-rescue-test[/bold]   "
+        "[dim](this snapshot)[/dim]\n"
+        "  [bold]org-llm self rollback[/bold]                   "
+        "[dim](most recent)[/dim]\n"
+        "  [bold]bash ~/.local/share/org-llm/snapshots/.../rollback.sh[/bold]\n"
+        "                                              "
+        "[dim](no org-llm needed)[/dim]\n\n"
+        "[dim]Snapshot list:[/dim] [bold]org-llm self snapshots[/bold]"
+    )
+    con.print()
+    con.print(Panel(body,
+                      title="[lcars1]self snapshot[/lcars1]  "
+                            "[dim]source + DB + standalone rollback bundle[/dim]",
+                      border_style="lcars2", padding=(1, 2)))
+    _save(con, "28-self-snapshot", "org-llm self snapshot")
+
+
+def scene_pi_status():
+    """`org-llm pi --status` — Pi bridge registration + tool count."""
+    from rich.table import Table
+    con = _new_console(width=100)
+    rows = [
+        ("Pi binary",        "✓",
+         "/home/u/.pi/bin/pi  v0.18.4"),
+        ("Bridge installed", "✓",
+         "~/.pi/extensions/pi-org-llm/  (40+ org_llm_* tools)"),
+        ("Auto-load",        "✓",
+         "~/.pi/config.json registers org-llm at boot"),
+        ("MCP subprocess",   "✓",
+         "spawned on session start, terminated cleanly on exit"),
+        ("Tool registration","✓",
+         "40 MCP tools → 40 Pi tools (org_llm_search_notes, …)"),
+        ("Persona injection","✓",
+         "before_agent_start hook adds search-first system prompt"),
+        ("Theme parity",     "✓",
+         "uses opencode_persona_intro / mcp_*_suffix from theme_studio"),
+    ]
+    tbl = Table(box=None, pad_edge=False, show_header=False)
+    tbl.add_column("Check",  style="lcars2", width=20, no_wrap=True)
+    tbl.add_column("Status", style="lcars1", width=4)
+    tbl.add_column("Detail", style="dim")
+    for r in rows:
+        tbl.add_row(*r)
+    con.print()
+    con.print(Panel(tbl,
+                      title="[lcars1]pi --status[/lcars1]  "
+                            "[dim]bridge to pi.dev — third conversational "
+                            "interface[/dim]",
+                      border_style="lcars2", padding=(1, 2)))
+    con.print()
+    con.print("▶ [bold]org-llm pi[/bold]              "
+              "[dim]start a Pi session with org-llm tools loaded[/dim]")
+    con.print("▶ [bold]org-llm pi --reinstall[/bold]  "
+              "[dim]rebuild the bridge from the bundled TypeScript[/dim]")
+    _save(con, "29-pi-status", "org-llm pi --status")
+
+
 def scene_splash():
     """LCARS splash menu — the default no-args view (Doom-Emacs-style)."""
     from rich.columns import Columns
@@ -880,6 +1071,13 @@ SCENES = [
     scene_splash_lcars_green,
     scene_splash_lcars_gold,
     scene_splash_lcars_violet,
+    # Newly-added feature scenes (palette CLI, knob registry,
+    # power-boost doctor, self snapshot, pi bridge status).
+    scene_palette_picker,
+    scene_knob_list,
+    scene_doctor_power_boost,
+    scene_self_snapshot,
+    scene_pi_status,
 ]
 
 
