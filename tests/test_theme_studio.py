@@ -341,6 +341,66 @@ class TestOpencodeWiring:
         assert "make it so" in out
 
 
+class TestCrossReferences:
+    """`theme_cross_references_level` controls how aggressively the
+    LLM hunts for overlaps between dialed-up knobs (Worf's labor
+    solidarity, queer joy in the holodeck, …). Levels 0-3."""
+
+    def test_default_level_is_2_normal(self, monkeypatch):
+        """Cold-cache / no env / no DB row → level 2 (normal)."""
+        monkeypatch.delenv("ORG_LLM_THEME_CROSS_REFERENCES_LEVEL",
+                            raising=False)
+        # Ensure no DB at the override path
+        from pathlib import Path
+        monkeypatch.setenv("ORG_LLM_DB", str(Path("/tmp/no-such-db.sqlite")))
+        assert ts._read_cross_ref_level() == 2
+
+    def test_env_override_wins(self, monkeypatch):
+        monkeypatch.setenv("ORG_LLM_THEME_CROSS_REFERENCES_LEVEL", "0")
+        assert ts._read_cross_ref_level() == 0
+        monkeypatch.setenv("ORG_LLM_THEME_CROSS_REFERENCES_LEVEL", "3")
+        assert ts._read_cross_ref_level() == 3
+
+    def test_env_clamps_out_of_range(self, monkeypatch):
+        monkeypatch.setenv("ORG_LLM_THEME_CROSS_REFERENCES_LEVEL", "99")
+        assert ts._read_cross_ref_level() == 3
+        monkeypatch.setenv("ORG_LLM_THEME_CROSS_REFERENCES_LEVEL", "-5")
+        assert ts._read_cross_ref_level() == 0
+
+    def test_higher_level_picks_stronger_guidance(self):
+        """The system-prompt builder swaps in different cross-ref
+        guidance per level — pin the contract so a future refactor
+        can't drop the intensity gradient."""
+        gen0 = ts._gen_system_for_level(0)
+        gen3 = ts._gen_system_for_level(3)
+        # Level 0 says "OFF"; level 3 says "MAX" / "every variant"
+        assert "OFF" in gen0 and "do not mix" in gen0.lower()
+        assert "MAX" in gen3 and "every variant" in gen3.lower()
+        # Both share the same base rules
+        for shared in ("Honor the active theme dials",
+                        "Stay on-task"):
+            assert shared in gen0 and shared in gen3
+
+    def test_user_msg_includes_cross_hint_when_2plus_knobs_active(
+            self, monkeypatch):
+        """When 2+ knobs are active AND cross-ref level >= 2, the
+        per-call user message gains a CROSS-REFERENCE hint listing
+        the active knobs. Helps small models stay on task."""
+        monkeypatch.setenv("ORG_LLM_THEME_CROSS_REFERENCES_LEVEL", "2")
+        s = ts.SURFACES[0]   # use the first registered surface
+        user_msg, _sys = ts._gen_prompt(s, {"trek": 2, "commie": 3,
+                                                "queer": 0})
+        assert "CROSS-REFERENCE" in user_msg
+        assert "trek" in user_msg and "commie" in user_msg
+
+    def test_user_msg_skips_cross_hint_at_level_below_2(
+            self, monkeypatch):
+        monkeypatch.setenv("ORG_LLM_THEME_CROSS_REFERENCES_LEVEL", "1")
+        s = ts.SURFACES[0]
+        user_msg, _sys = ts._gen_prompt(s, {"trek": 2, "commie": 3})
+        assert "CROSS-REFERENCE" not in user_msg
+
+
 class TestVerify:
     def test_reports_per_variant_pass_fail(self, tmp_path, monkeypatch):
         """First variant has 'engage' (level 2) and 'warp' (level 1) —

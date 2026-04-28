@@ -206,6 +206,13 @@ MODEL_DEFAULTS = {
     "lcars_color_primary":     "",
     "lcars_color_secondary":   "",
     "lcars_color_tertiary":    "",
+    # ── Theme cross-reference intensity ───────────────────────────────────
+    # 0 = no overlap (each knob voiced separately)
+    # 1 = sparse (occasional overlaps when 2+ knobs at level 3)
+    # 2 = normal (~half of variants bridge worlds when 2+ knobs > 1)
+    # 3 = max (every variant finds real overlap between every active knob)
+    # See theme_studio._CROSS_REF_GUIDANCE for the exact prompt language.
+    "theme_cross_references_level": "2",
     "code_dirs":      "~/repos",            # comma-sep paths for `code-index`
     "db_version":     "1",
     # ── Proactive doctor knobs ─────────────────────────────────────────────

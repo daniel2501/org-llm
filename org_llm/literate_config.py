@@ -78,6 +78,11 @@ KEY_DESCRIPTIONS = {
     "lcars_color_primary":   "Hex override for the primary LCARS channel (e.g. #FF9900).",
     "lcars_color_secondary": "Hex override for the secondary LCARS channel.",
     "lcars_color_tertiary":  "Hex override for the tertiary LCARS channel.",
+    "theme_cross_references_level":
+        "How aggressively the LLM finds overlaps between knobs "
+        "(0=off, 1=sparse, 2=normal, 3=max). e.g. trek+commie+queer at "
+        "level 3 produces 'Worf's labor solidarity', 'queer joy in the "
+        "holodeck' rather than three separate single-voice lines.",
     "trek_level":        "Star Trek voice intensity (0-3).",
     "commie_level":      "Solidarity / collective-action voice (0-3).",
     "queer_level":       "Pride / care voice (0-3).",
