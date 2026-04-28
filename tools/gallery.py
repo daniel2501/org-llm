@@ -912,8 +912,8 @@ def scene_theme_studio_show():
          "your second brain, scripted",
          "Engage warp 9 — second brain online, captain."),
         ("splash_slogan",
-         "local · queer · collective · free",
-         "stardate · solidarity · queer joy · free"),
+         "local · open · collective · free",
+         "stardate · solidarity · subspace · free"),
         ("setup_panel_title",
          "🚀  Setup needed",
          "🛰  Subspace handshake required"),
@@ -945,7 +945,7 @@ def scene_theme_studio_show():
     con.print()
     con.print(Panel(tbl,
                       title="[lcars1]theme-studio show[/lcars1]  "
-                            "[dim]Active dials: trek=3 commie=2 queer=2[/dim]",
+                            "[dim]Active dials: trek=3 commie=2[/dim]",
                       border_style="lcars2", padding=(0, 1)))
     con.print()
     con.print("▶ [bold]org-llm theme-studio regenerate[/bold]  "
@@ -959,7 +959,7 @@ def scene_theme_studio_verify():
     """`theme-studio verify` — quality gate pass/fail per variant."""
     from rich.table import Table
     con = _new_console(width=110)
-    con.rule("[lcars1]Levels: trek=3, commie=2, queer=2[/lcars1]")
+    con.rule("[lcars1]Levels: trek=3, commie=2[/lcars1]")
 
     def _row(passed, variant, reason=""):
         return ("[green]✓[/green]" if passed else "[red]✗[/red]",
@@ -970,7 +970,7 @@ def scene_theme_studio_verify():
         ("splash_subtitle", [
             _row(True,  "Engage warp 9 — second brain online, captain."),
             _row(True,  "Make it so: your subspace knowledge graph awaits."),
-            _row(True,  "Federation-grade memory, queer joy at warp 9."),
+            _row(True,  "Federation-grade memory, comradely warp 9 ops."),
             _row(False, "your second brain, scripted",
                   "no theme keyword from pool (24 options)"),
             _row(False, "AI productivity, simplified.",
