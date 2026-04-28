@@ -36,8 +36,16 @@ def chat(prompt: str, model: str, base_url: str, system: str = "",
 
     Every call is recorded to the logbook (kind=llm). At normal verbosity
     the prompt + response are stored truncated; at verbose verbosity the
-    full bodies land in the org log + DB so dbt can analyze drift."""
+    full bodies land in the org log + DB so dbt can analyze drift.
+
+    Inline lag detection: when a call takes more than ~8s AND a faster
+    alternative is already on disk, surface a one-line hint pointing
+    the user at `models --upgrade`. Cheap (one indexed query against
+    the History rows we just wrote). Suppressible via env
+    ORG_LLM_LAG_DETECTOR=off."""
     from .logbook import track_event
+    import time as _t
+    t0 = _t.monotonic()
     with track_event("llm", "chat", model=model,
                        args=f"prompt_chars={len(prompt)}, "
                             f"system_chars={len(system or '')}, "
@@ -49,5 +57,48 @@ def chat(prompt: str, model: str, base_url: str, system: str = "",
         messages.append({"role": "user", "content": prompt})
         out = client.chat(model=model, messages=messages).message.content
         ev["response"] = out or ""
-        return out
+
+    # Lag check runs OUTSIDE track_event so its own DB queries don't
+    # nest into the open transaction. Fail-silent — perf telemetry must
+    # never break a chat call.
+    if (out and len(out) >= 10
+            and os.environ.get("ORG_LLM_LAG_DETECTOR", "").lower()
+                != "off"):
+        try:
+            from . import perf as _perf
+            warn = _perf.check_lag(model, _t.monotonic() - t0, out)
+            if warn is not None:
+                _emit_lag_warning(warn, model)
+        except Exception:
+            pass
+    return out
+
+
+def _emit_lag_warning(warn, current_model: str) -> None:
+    """One-line themed hint shown above the next CLI output. Imports
+    from ui at call time to avoid a circular import."""
+    try:
+        from .ui import on_screen as _on
+    except Exception:
+        return
+    cur = warn.current_tok_s or 0.0
+    sug = warn.suggested_tok_s
+    speedup = (sug / cur) if cur > 0 else None
+    bits = [
+        f"[yellow]Lag:[/yellow] {current_model} ran "
+        f"{warn.elapsed_s:.0f}s",
+    ]
+    if cur:
+        bits.append(f"({cur:.1f} tok/s)")
+    if speedup and speedup >= 1.5:
+        bits.append(f"— [bold]{warn.suggested_model}[/bold] "
+                    f"runs {speedup:.1f}× faster on this hardware "
+                    f"({sug:.1f} tok/s).")
+    else:
+        bits.append(f"— faster alternatives exist.")
+    bits.append("[dim]Tune:[/dim] [bold]org-llm models --upgrade[/bold]")
+    _on(" ".join(bits))
+
+
+import os  # used by lag-detector env override
 # llm.py:1 ends here
