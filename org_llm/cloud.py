@@ -394,6 +394,26 @@ def catalog_is_stale() -> bool:
 
 # ── Live refresh from provider APIs ──────────────────────────────────────────
 
+# Slugs containing any of these markers are non-chat-compatible model
+# classes (image generation, embedding, moderation, etc.) — calling
+# them as chat returns errors or nonsense. Both `refresh_from_openrouter`
+# and `merge_refresh` consult this list so that image-gen models neither
+# enter the cache from a fresh fetch NOR survive from a stale local
+# row through carry-forward.
+_NON_CHAT_MARKERS: tuple[str, ...] = (
+    "image", "vision", "tts", "speech", "audio", "video",
+    "embedding", "embed-", "moderation", "rerank", "diffusion",
+    "whisper", "dall-e", "dalle",
+)
+
+
+def _is_non_chat_slug(slug: str) -> bool:
+    """True when the slug looks like a non-chat model class we should
+    exclude from chat/fast/reason/code/instruct/text recommendations."""
+    s = slug.lower()
+    return any(m in s for m in _NON_CHAT_MARKERS)
+
+
 def refresh_from_openrouter(*, timeout: float = 15.0
                               ) -> tuple[list[dict], str]:
     """Fetch the live OpenRouter model list + pricing.
@@ -434,19 +454,7 @@ def refresh_from_openrouter(*, timeout: float = 15.0
         # Heuristic role mapping. Names with "coder"/"code" → code role;
         # "r1"/"reasoning" → reason; default → chat+instruct.
         s = slug.lower()
-        # Exclusion: non-chat-compatible model classes (image, vision,
-        # tts, audio, video, embed, moderation). Without this an
-        # image-gen model like `openai/gpt-5-image-mini` got tagged
-        # (chat, instruct, fast) on the "mini" branch and surfaced as
-        # a `fast` role recommendation in --upgrade. Drop those slugs
-        # entirely — we'd rather under-recommend than recommend a
-        # model that returns errors when called as chat.
-        _NON_CHAT_MARKERS = (
-            "image", "vision", "tts", "speech", "audio", "video",
-            "embedding", "embed-", "moderation", "rerank", "diffusion",
-            "whisper", "dall-e", "dalle",
-        )
-        if any(m in s for m in _NON_CHAT_MARKERS):
+        if _is_non_chat_slug(s):
             continue
         roles = ["chat", "instruct"]
         if "coder" in s or "code" in s:
@@ -552,26 +560,35 @@ def merge_refresh(new_rows: list[dict], *,
             merged.append(r)
             added.append(slug)
     # Carry forward local-only rows (paid Anthropic/OpenAI models,
-    # HuggingFace — refresh only covers OpenRouter today).
+    # HuggingFace — refresh only covers OpenRouter today). Apply the
+    # non-chat exclusion list HERE too so a stale image/vision/audio
+    # model from a prior refresh (when the filter didn't exist yet)
+    # gets purged on next refresh instead of surviving forever.
     seen = {m["slug"] for m in merged}
     carried_over = 0
+    purged_stale = 0
     for m in CLOUD_MODELS:
-        if m.slug not in seen:
-            merged.append({
-                "provider": m.provider,
-                "slug":     m.slug,
-                "roles":    list(m.roles),
-                "quality":  m.quality,
-                "cost_in":  m.cost_in,
-                "cost_out": m.cost_out,
-                "license":  m.license,
-                "note":     m.note,
-            })
-            carried_over += 1
+        if m.slug in seen:
+            continue
+        if _is_non_chat_slug(m.slug):
+            purged_stale += 1
+            continue
+        merged.append({
+            "provider": m.provider,
+            "slug":     m.slug,
+            "roles":    list(m.roles),
+            "quality":  m.quality,
+            "cost_in":  m.cost_in,
+            "cost_out": m.cost_out,
+            "license":  m.license,
+            "note":     m.note,
+        })
+        carried_over += 1
     summary = {
         "added":           added,
         "changed":         changed,
         "carried_over":    carried_over,
+        "purged_stale":    purged_stale,
         "total":           len(merged),
         "price_changes":   price_changes,
     }

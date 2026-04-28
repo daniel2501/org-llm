@@ -11862,11 +11862,15 @@ def cloud(
         path = _cloud.write_user_catalog(
             merged, providers_meta=providers_for_cache)
         _cloud.reload_catalog()
+        purged_msg = (f", {summary.get('purged_stale', 0)} non-chat "
+                       f"purged"
+                       if summary.get("purged_stale") else "")
         on_screen(f"[lcars3]Wrote[/lcars3] {path}  "
                    f"[dim]({summary['total']} model(s); "
                    f"{len(summary['added'])} new, "
                    f"{len(summary['changed'])} repriced, "
-                   f"{summary['carried_over']} carried over from local)[/dim]")
+                   f"{summary['carried_over']} carried over"
+                   f"{purged_msg})[/dim]")
 
         # LLM diff-analysis — generate user-facing alerts.
         full_summary = dict(summary)
