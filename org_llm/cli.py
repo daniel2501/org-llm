@@ -10547,15 +10547,31 @@ def launch(
     # binary isn't on PATH (rare, but `which` returns "" cleanly).
     import shutil as _sh
     mcp_cmd_bin = _sh.which("org-llm") or "org-llm"
+    # IMPORTANT: opencode's McpLocalConfig schema uses `environment`
+    # (not `env`) for the env-var bag. We previously wrote `env`,
+    # which opencode silently ignored — and worse, the whole MCP
+    # entry seemed to be skipped entirely on startup, leading to the
+    # Phase 7 verification failure where the in-opencode model
+    # reported "I don't have a search_notes MCP tool available" even
+    # though the bridge was correctly configured server-side.
+    # `enabled: true` is the documented default but spelling it out
+    # guards against version drift.
+    # CRITICAL: opencode's `instructions` field is Array<string>, NOT
+    # a single string (per Config schema in @opencode-ai/sdk
+    # types.gen.d.ts). We previously wrote it as one giant string —
+    # opencode silently dropped it, leaving the model with NO system
+    # prompt and the user saw "I'm opencode, not org-llm" in
+    # responses (Phase 7 verification). Wrap in a single-element list.
     oc_config: dict = {
         "model":        active_model_str,
         "provider":     active_provider_block,
-        "instructions": instructions,
+        "instructions": [instructions],
         "mcp": {
             "org-llm": {
-                "type": "local",
-                "command": [mcp_cmd_bin, "mcp"],
-                "env": {"ORG_LLM_DB": str(DB_PATH)},
+                "type":        "local",
+                "command":     [mcp_cmd_bin, "mcp"],
+                "environment": {"ORG_LLM_DB": str(DB_PATH)},
+                "enabled":     True,
             }
         },
     }

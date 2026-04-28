@@ -52,6 +52,16 @@ def _build_mcp_invocation_argv(mcp_block: dict) -> list[str]:
     return [cmd] + list(args)
 
 
+def _mcp_env(mcp_block: dict) -> dict[str, str]:
+    """Extract the MCP env-var bag. Opencode uses key `environment`
+    (per McpLocalConfig in @opencode-ai/sdk types.gen.d.ts); claude
+    uses key `env`. Accept both — what matters is the resulting dict.
+    """
+    return dict(mcp_block.get("environment")
+                 or mcp_block.get("env")
+                 or {})
+
+
 def _spawn_mcp_and_initialize(argv: list[str], env: dict[str, str],
                                 timeout: float = 8.0) -> dict | None:
     """Start the MCP server with `argv`, send a JSON-RPC initialize,
@@ -117,6 +127,69 @@ class TestOpencodeLaunchMCP:
                        r.output, flags=re.DOTALL | re.MULTILINE)
         # Fallback: just look for the mcp.org-llm server name
         assert "org-llm" in r.output and "\"mcp\"" in r.output, r.output
+
+    def test_opencode_instructions_is_a_list_not_string(self, cli_org,
+                                                           monkeypatch):
+        """Per @opencode-ai/sdk types.gen.d.ts, Config.instructions is
+        `Array<string>`, NOT a single string. We wrote a giant string
+        for months — opencode silently dropped it, leaving the model
+        with NO system prompt. The Phase 7 model literally said "I'm
+        opencode, not org-llm" because our persona/search-first rules
+        never reached it."""
+        monkeypatch.setattr("org_llm.cli._opencode_bin", lambda: "/usr/bin/true")
+        monkeypatch.setattr(os, "execvp",
+                              lambda p, a: (_ for _ in ()).throw(SystemExit(0)))
+        runner.invoke(app, ["launch"])
+        cfg = json.loads((Path(cli_org) / ".opencode.json").read_text())
+        instr = cfg.get("instructions")
+        assert isinstance(instr, list), (
+            f".opencode.json `instructions` must be a list per opencode's "
+            f"Config.instructions: Array<string> schema. Got {type(instr).__name__}. "
+            "Without the list wrapper, opencode silently drops the entire "
+            "system prompt and the model has no idea it's running as org-llm."
+        )
+        assert all(isinstance(x, str) for x in instr), (
+            "instructions list must contain only strings"
+        )
+        # And the persona content is actually IN there
+        joined = "\n".join(instr)
+        assert "search_notes" in joined, (
+            "system prompt missing search-first rules"
+        )
+        assert "org-llm" in joined.lower(), (
+            "system prompt doesn't identify as org-llm — model will think "
+            "it's vanilla opencode"
+        )
+
+    def test_opencode_mcp_block_uses_environment_not_env(self, cli_org,
+                                                            monkeypatch):
+        """opencode's McpLocalConfig schema (per
+        @opencode-ai/sdk/dist/v2/gen/types.gen.d.ts) uses key
+        `environment` for the env-var bag, NOT `env`. Phase 7
+        verification regressed because we wrote `env` — opencode
+        silently dropped the whole MCP entry, the in-opencode model
+        had no search_notes / ask_notes / etc. tools, and fell
+        back to grep. This test pins the correct key."""
+        monkeypatch.setattr("org_llm.cli._opencode_bin", lambda: "/usr/bin/true")
+        monkeypatch.setattr(os, "execvp",
+                              lambda p, a: (_ for _ in ()).throw(SystemExit(0)))
+        runner.invoke(app, ["launch"])
+        cfg = json.loads((Path(cli_org) / ".opencode.json").read_text())
+        mcp_block = cfg.get("mcp", {}).get("org-llm")
+        assert mcp_block, "no .mcp.org-llm in written config"
+        assert "environment" in mcp_block, (
+            "MCP block missing `environment` key — opencode will silently "
+            "ignore env vars (or skip the whole entry on some versions). "
+            "Use `environment` (per McpLocalConfig schema), not `env`."
+        )
+        assert "env" not in mcp_block, (
+            "MCP block still has the old `env` key — opencode will skip "
+            "the entry. Use `environment` per McpLocalConfig schema."
+        )
+        assert mcp_block.get("enabled") is True, (
+            "MCP block missing explicit `enabled: true`. Documented as "
+            "default but spelling it guards against version drift."
+        )
 
     def test_resolved_mcp_invocation_is_not_uv_directory_trick(self, cli_db,
                                                                  monkeypatch,
@@ -185,7 +258,7 @@ class TestOpencodeLaunchMCP:
             resolved = shutil.which(argv[0])
             if resolved:
                 argv[0] = resolved
-        env_for_spawn = {k: v for k, v in (mcp_block.get("env") or {}).items()}
+        env_for_spawn = _mcp_env(mcp_block)
         resp = _spawn_mcp_and_initialize(argv, env_for_spawn,
                                             timeout=8.0)
         assert resp is not None, (
