@@ -2353,14 +2353,14 @@ def _render_splash_logo():
             t.append(content, style=style_inner)
         return t
 
-    def _inner_pill_row(segments, *, target_width=68):
+    def _inner_pill_row(segments, *, target_width=72):
         """Body row that wraps a pill-button strip INSIDE the frame."""
         t = Text()
         t.append(rib, style="lcars1")
         t.append_text(_lcars_pill_row(segments, target_width=target_width))
         return t
 
-    def _labeled_pill_row(items, *, target_width=68):
+    def _labeled_pill_row(items, *, target_width=72):
         """Body row of pill-buttons with text labels INSIDE the pills.
         Each item is (label, style). The label is padded with spaces
         so the pill has visual width."""
@@ -2382,47 +2382,37 @@ def _render_splash_logo():
         return t
 
     body_rows = []
-    body_rows.append(_row("", ""))                              # top spacer
-    # Stacked LCARS pill HEADER strips — three consecutive rows of
-    # varied-color pills with text labels, mimicking the dense pill
-    # stack at the top of real TNG LCARS panels.
+    # Pill button strip ABUTS the top bars (no empty-row gap). Single
+    # multi-color labeled row so the panel reads as ONE continuous
+    # LCARS surface, not alternating bar/empty/pill/empty stripes.
     body_rows.append(_labeled_pill_row([
-        ("OPS",       "lcars1"),
-        ("COMMS",     "lcars2"),
-        ("HELM",      "lcars3"),
-        ("TACTICAL",  "pride.yellow"),
-        ("MEMORY α",  "lcars1"),
+        ("OPS",                          "lcars1"),
+        ("COMMS",                        "lcars2"),
+        ("HELM",                         "lcars3"),
+        ("TAC",                          "pride.yellow"),
+        ("47-A",                         "pride.orange"),
+        (f"v{_resolve_version()[:6]}",   "doom.cyan"),
+        ("MEM α",                        "lcars1"),
     ]))
-    body_rows.append(_inner_pill_row(
-        [(0.20, "lcars1"), (0.12, "pride.yellow"),
-         (0.08, "lcars3"), (0.24, "lcars1"),
-         (0.10, "lcars2"), (0.08, "doom.cyan"),
-         (0.10, "pride.orange")]))
-    body_rows.append(_labeled_pill_row([
-        ("47-A",  "lcars1"),
-        ("STARDATE",  "lcars2"),
-        ("v" + _resolve_version()[:8], "lcars3"),
-        ("LCARS",     "pride.yellow"),
-    ]))
-    body_rows.append(_row("", ""))                              # gap
     for line in _SPLASH_ASCII.splitlines():                     # the figlet
         # Per-row style cycle through lcars1/2/3 to give that "live
         # readout" multi-color feel. One color per ROW (not per glyph)
         # because per-glyph would require column-counting and we just
         # got out of that business.
         body_rows.append(_row("bold lcars1", line))
-    body_rows.append(_row("", ""))                              # mid spacer
-    # Themed subtitle + slogan, with hard-coded defaults baked in. The
-    # cache returns the default at render time when cold or the LLM is
-    # down, so we never block the splash on a generation call.
+    # Themed subtitle + slogan packed onto one combined row to keep
+    # the panel compact. Cold cache returns defaults.
     from . import theme_studio as _ts
     subtitle_text = _ts.get_themed("splash_subtitle",
                                      "your second brain, scripted")
     slogan_text   = _ts.get_themed("splash_slogan",
                                      "local · open · collective · free")
-    body_rows.append(_row("bold lcars2", subtitle_text))
-    body_rows.append(_row("dim lcars3",  slogan_text))
-    body_rows.append(_row("", ""))                              # spacer
+    one_liner = Text()
+    one_liner.append(rib, style="lcars1")
+    one_liner.append(subtitle_text, style="bold lcars2")
+    one_liner.append("  ·  ", style="dim")
+    one_liner.append(slogan_text, style="dim lcars3")
+    body_rows.append(one_liner)
 
     # Station status row with PROGRESS METERS — each station has a
     # short label, a status dot, and a 6-block progress meter.
@@ -2448,29 +2438,17 @@ def _render_splash_logo():
         if i < len(stations) - 1:
             station_row.append(" ", style="")
     body_rows.append(station_row)
-    body_rows.append(_row("", ""))
-
-    # Mirror pill HEADER strip near the bottom — three rows like the
-    # top, but with reversed color order and different labels so the
-    # frame reads top-and-bottom as related but not identical.
+    # Mirror pill strip ABUTS the bottom bars — one row, mixed colors
+    # + labels, so the bottom matches the rhythm of the top.
     body_rows.append(_labeled_pill_row([
-        ("ARCHIVE", "lcars2"),
-        ("LOG",     "doom.cyan"),
-        ("CACHE",   "lcars1"),
-        ("INDEX",   "pride.orange"),
+        ("MEM β",                        "lcars2"),
+        ("ARCHIVE",                      "doom.cyan"),
+        ("CACHE",                        "lcars1"),
+        ("LOG",                          "pride.yellow"),
+        ("INDEX",                        "lcars3"),
+        ("REPORT",                       "pride.orange"),
+        ("09-A",                         "lcars1"),
     ]))
-    body_rows.append(_inner_pill_row(
-        [(0.10, "pride.orange"), (0.08, "doom.cyan"),
-         (0.20, "lcars1"),       (0.12, "pride.yellow"),
-         (0.10, "lcars2"),       (0.24, "lcars1"),
-         (0.08, "lcars3")]))
-    body_rows.append(_labeled_pill_row([
-        ("MEM β",   "lcars3"),
-        ("REPORT",  "lcars1"),
-        ("STATUS",  "pride.yellow"),
-        ("09-A",    "lcars1"),
-    ]))
-    body_rows.append(_row("", ""))                              # bottom spacer
 
     return Group(top_overhead,
                   top_bar_1, top_bar_2,
