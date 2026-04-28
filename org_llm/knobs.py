@@ -123,9 +123,11 @@ BUILTIN_KNOBS: list[KnobDef] = [
     KnobDef(
         name="commie",
         description=("Collectivist / liberatory references — solidarity, "
-                      "mutual aid, workers, abolition. Level 3 = unmistakably "
+                      "mutual aid, workers, abolition. CORE concept of the "
+                      "app — defaulted higher than trek so the baseline "
+                      "voice leans collective. Level 3 = unmistakably "
                       "left-coded copy."),
-        default_level=2,
+        default_level=3,
         keywords_by_level={
             1: ["solidarity", "comrade"],
             2: ["mutual aid", "workers", "collective", "from each",

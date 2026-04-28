@@ -83,16 +83,17 @@ SURFACES: list[Surface] = [
                       "appears below the subtitle. Comma-separated values "
                       "should each be ONE WORD."),
         len_min=12, len_max=70, n_variants=6,
-        default="local · open · collective · free",
+        default="solidarity · collective · local · free",
     ),
     Surface(
         key="setup_panel_title",
         description=("The title of the first-run banner that prompts a "
-                      "new user to run onboarding. Lean Trek by default "
-                      "('Bridge commissioning required'), shift voice "
-                      "with active dials."),
+                      "new user to run onboarding. Default leans collective "
+                      "('Crew commissioning required'), reshapes per active "
+                      "dials. Commie is the most-baseline knob and should "
+                      "show through any rendering."),
         len_min=6, len_max=44, n_variants=5,
-        default="🚀  Bridge commissioning required",
+        default="🚀  Crew commissioning required",
     ),
     Surface(
         key="doctor_all_green",
@@ -273,19 +274,18 @@ SURFACES: list[Surface] = [
     Surface(
         key="setup_intro_banner",
         description=("ONE-line themed welcome printed before the first "
-                      "onboarding step starts. Default 'Beginning bridge "
-                      "commissioning sequence.'"),
+                      "onboarding step. Default leans commie (the core "
+                      "voice) with a touch of trek."),
         len_min=20, len_max=120, n_variants=5,
-        default="Beginning bridge commissioning sequence.",
+        default="The collective begins your commissioning. Solidarity through every step.",
     ),
     Surface(
         key="setup_complete_banner",
         description=("ONE-line celebratory message printed when "
                       "commissioning finishes (all 15 steps done). "
-                      "Default 'Bridge commissioned. All systems "
-                      "nominal — engage at will.'"),
+                      "Default leans commie + trek."),
         len_min=20, len_max=140, n_variants=5,
-        default="Bridge commissioned. All systems nominal — engage at will.",
+        default="Crew commissioned. All hands on deck — solidarity at warp.",
     ),
     Surface(
         key="opencode_proactive_doctor_line",

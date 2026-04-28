@@ -75,9 +75,14 @@ class TestBuiltinSeed:
         for knob in K.BUILTIN_KNOBS:
             assert set(knob.keywords_by_level.keys()) >= {1, 2, 3}, knob.name
 
-    def test_builtins_default_to_level_2(self):
-        for knob in K.BUILTIN_KNOBS:
-            assert knob.default_level == 2, knob.name
+    def test_builtin_default_levels(self):
+        """Commie is the most-baseline voice of the app — defaults to
+        level 3 so the collective feel shows through any rendering.
+        Trek + queer hover at level 2 (visible but not maxed)."""
+        defaults = {k.name: k.default_level for k in K.BUILTIN_KNOBS}
+        assert defaults.get("commie") == 3, defaults
+        assert defaults.get("trek")   == 2, defaults
+        assert defaults.get("queer")  == 2, defaults
 
 
 # ── load_knobs: merge built-ins + DB overrides ────────────────────────────────

@@ -1229,11 +1229,11 @@ def setup(
     from . import theme_studio as _ts
     intro_banner = _ts.get_themed(
         "setup_intro_banner",
-        "Beginning bridge commissioning sequence.",
+        "The collective begins your commissioning. Solidarity through every step.",
     )
     console.print()
     console.rule(
-        "[lcars1]🚀  org-llm onboarding — bridge commissioning sequence[/lcars1]"
+        "[lcars1]🚀  org-llm onboarding — crew commissioning sequence[/lcars1]"
     )
     console.print()
     on_screen(f"[lcars3]⏵ {intro_banner}[/lcars3]")
@@ -1876,9 +1876,9 @@ def setup(
     _clear_setup_state()
     complete_banner = _ts.get_themed(
         "setup_complete_banner",
-        "Bridge commissioned. All systems nominal — engage at will.",
+        "Crew commissioned. All hands on deck — solidarity at warp.",
     )
-    console.rule("[lcars1]✦  Bridge commissioned[/lcars1]")
+    console.rule("[lcars1]✦  Crew commissioned[/lcars1]")
     console.print()
     on_screen(f"[lcars3]🛸 {complete_banner}[/lcars3]")
     console.print()
@@ -2406,7 +2406,7 @@ def _render_splash_logo():
     subtitle_text = _ts.get_themed("splash_subtitle",
                                      "your second brain, scripted")
     slogan_text   = _ts.get_themed("splash_slogan",
-                                     "local · open · collective · free")
+                                     "solidarity · collective · local · free")
     one_liner = Text()
     one_liner.append(rib, style="lcars1")
     one_liner.append(subtitle_text, style="bold lcars2")
@@ -2533,11 +2533,12 @@ def _show_splash():
         from . import theme_studio as _ts2
         banner_title = _ts2.get_themed(
             "setup_panel_title",
-            "🚀  Bridge commissioning required",
+            "🚀  Crew commissioning required",
         )
         msg = (
-            "[bold lcars1]New crew aboard.[/bold lcars1] No vault indexed, "
-            "no chat model assigned, no helm configured.\n\n"
+            "[bold lcars1]Welcome, comrade.[/bold lcars1] No vault indexed, "
+            "no chat model assigned, no helm configured. The collective "
+            "is ready to commission you.\n\n"
             "Run [bold]org-llm onboarding[/bold] (alias: [bold]setup[/bold]) — a "
             "15-step interactive commissioning walk-through, resume-aware "
             "(an interrupted run picks up where it left off):\n\n"
