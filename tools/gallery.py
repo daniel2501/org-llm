@@ -289,6 +289,342 @@ Compact (~6KB config.el) with one custom module under lisp/.
     _save(con, "09-review-emacs", "org-llm review-emacs")
 
 
+def scene_splash():
+    """LCARS splash menu — the default no-args view (Doom-Emacs-style)."""
+    from rich.columns import Columns
+    con = _new_console(width=110)
+    from org_llm.cli import _SPLASH_LOGO, _SPLASH_MENU
+    con.print(_SPLASH_LOGO)
+    groups: dict[str, list] = {}
+    for key, verb, label, group in _SPLASH_MENU:
+        groups.setdefault(group, []).append((key, verb, label))
+    panels = []
+    for group_name in ("Query", "Write", "Workspaces", "Insight",
+                          "Maintenance", "Config", "Help"):
+        items = groups.get(group_name) or []
+        if not items: continue
+        body = "\n".join(
+            f"  [lcars1]{key:>2}[/lcars1]  [lcars2]{verb:<22}[/lcars2] "
+            f"[dim]{label}[/dim]"
+            for key, verb, label in items)
+        panels.append(Panel(body,
+                              title=f"[lcars1]{group_name}[/lcars1]",
+                              border_style="lcars2", padding=(0, 1)))
+    con.print(Columns(panels, equal=False, expand=False))
+    con.print()
+    con.print("▶ [dim]Pick a verb above —[/dim] [bold]org-llm <verb>[/bold]  "
+              "or [bold]org-llm --help[/bold] for the full list.")
+    _save(con, "10-splash", "org-llm — default splash menu")
+
+
+def scene_askbook():
+    """Multi-model askbook — same question to chat / reason / cloud."""
+    from rich.table import Table
+    con = _new_console(width=110)
+    tbl = Table(box=None, pad_edge=False)
+    tbl.add_column("When",    style="lcars1", no_wrap=True, width=19)
+    tbl.add_column("Backend", style="lcars3", width=8)
+    tbl.add_column("Model",   style="dim",   width=18)
+    tbl.add_column("Status",  width=8)
+    tbl.add_column("Title",   style="lcars2")
+    rows = [
+        ("2026-04-27T09:12:03", "chat",   "gemma3",       "[green]done[/green]",
+         "How does dbt fit org-llm?"),
+        ("2026-04-27T09:12:08", "reason", "deepseek-r1",  "[green]done[/green]",
+         "Plan the next refactor of mcp_server.py"),
+        ("2026-04-27T09:13:21", "cloud",  "gpt-oss-20b",  "[green]done[/green]",
+         "Second opinion on the dbt model design"),
+        ("2026-04-27T09:14:02", "fast",   "phi3.5",       "[green]done[/green]",
+         "Tag suggestions for synthwave note"),
+        ("2026-04-27T09:15:44", "claude", "(claude code)","[yellow]pending[/yellow]",
+         "Review the Pi extension for bugs"),
+        ("2026-04-27T09:16:00", "pi",     "(pi default)", "[yellow]pending[/yellow]",
+         "What would a 16th-extension look like?"),
+    ]
+    for r in rows:
+        tbl.add_row(*r)
+    con.print()
+    con.print(Panel(tbl,
+                      title="[lcars1]askbook[/lcars1]  "
+                            "[dim](6 entries — chat, reason, fast, code, "
+                            "text, cloud, claude, pi)[/dim]",
+                      border_style="lcars2", padding=(1, 1)))
+    con.print()
+    con.print("▶ Add: [bold]org-llm askbook add 'your question' "
+              "--backend reason[/bold]")
+    con.print("▶ Run pending: [bold]org-llm askbook run[/bold]  "
+              "│  Open: [bold]~/org/llm-askbook.org[/bold]")
+    _save(con, "11-askbook", "org-llm askbook — multi-model Q/A")
+
+
+def scene_models_dashboard():
+    """The default `org-llm models` view: assignments + auto-suggestions."""
+    from rich.table import Table
+    con = _new_console(width=110)
+    con.rule("[lcars1]Model Assignments[/lcars1]  "
+              "[dim](hardware: 15 GB RAM (CPU))[/dim]")
+    tbl = Table(box=None, pad_edge=False)
+    tbl.add_column("Role",    style="lcars1",  no_wrap=True)
+    tbl.add_column("Model",   style="lcars2",  no_wrap=True)
+    tbl.add_column("Purpose", style="dim")
+    tbl.add_column("VRAM",    style="lcars3", width=6, no_wrap=True)
+    tbl.add_column("Pulled",  width=8, no_wrap=True)
+    tbl.add_column("Fits",    width=6, no_wrap=True)
+    rows = [
+        ("embed",    "nomic-embed-text", "Semantic search embeddings",
+         "0.3G", "[green]✓[/green]", "[green]✓[/green]"),
+        ("chat",     "gemma3",            "ask / general Q&A",
+         "3.3G", "[green]✓[/green]", "[green]✓[/green]"),
+        ("code",     "qwen2.5-coder",     "Code generation",
+         "4.7G", "[green]✓[/green]", "[green]✓[/green]"),
+        ("reason",   "deepseek-r1",       "Planning & complex reasoning",
+         "5.2G", "[green]✓[/green]", "[green]✓[/green]"),
+        ("fast",     "phi3.5",            "Tagging & classification",
+         "2.2G", "[green]✓[/green]", "[green]✓[/green]"),
+        ("instruct", "mistral-nemo",      "Capture & instruction following",
+         "7.1G", "[green]✓[/green]", "[red]✗[/red]"),
+        ("text",     "gemma3",            "Summarization & text analysis",
+         "3.3G", "[green]✓[/green]", "[green]✓[/green]"),
+    ]
+    for r in rows: tbl.add_row(*r)
+    con.print(tbl)
+    con.print()
+    sug = Table(box=None, pad_edge=False)
+    sug.add_column("Role",      style="lcars1")
+    sug.add_column("Current",   style="dim")
+    sug.add_column("→",         width=2)
+    sug.add_column("Suggested", style="lcars2")
+    sug.add_column("VRAM",      style="lcars3", width=6)
+    sug.add_column("Why",       style="dim")
+    sug.add_row("instruct",
+                "mistral-nemo",
+                "[bold yellow]↓[/bold yellow]",
+                "llama3.2:3b",
+                "2.0G",
+                "current too big for 4 GB free RAM")
+    con.print(Panel(sug, title="[lcars1]Suggestions[/lcars1]",
+                      border_style="lcars2", padding=(1, 1)))
+    con.print()
+    con.print("▶ Apply one:   [bold]org-llm models --set instruct=llama3.2:3b[/bold]")
+    con.print("▶ Apply all:   [bold]org-llm models --tune --apply[/bold]")
+    _save(con, "12-models-dashboard", "org-llm models — dashboard")
+
+
+def scene_captains_log():
+    """Captain's Log — recent events table + reflect digest."""
+    from rich.table import Table
+    con = _new_console(width=110)
+    tbl = Table(box=None, pad_edge=False)
+    tbl.add_column("When",     style="lcars1", no_wrap=True, width=19)
+    tbl.add_column("Kind",     style="lcars3", width=10)
+    tbl.add_column("Command",  style="lcars2", no_wrap=True, width=22)
+    tbl.add_column("Model",    style="dim", width=14)
+    tbl.add_column("ms",       style="lcars3", width=6, justify="right")
+    tbl.add_column("Outcome",  width=8)
+    rows = [
+        ("2026-04-27T09:12:03", "cli",   "ask",            "gemma3",        "1842", "[green]ok[/green]"),
+        ("2026-04-27T09:12:21", "llm",   "chat",           "gemma3",        "1521", "[green]ok[/green]"),
+        ("2026-04-27T09:13:01", "mcp",   "search_notes",   "(no llm)",      "  47", "[green]ok[/green]"),
+        ("2026-04-27T09:13:22", "cli",   "models --tune",  "(no llm)",      "  18", "[green]ok[/green]"),
+        ("2026-04-27T09:14:11", "cloud", "cloud_chat",     "gpt-oss-20b",   "2104", "[green]ok[/green]"),
+        ("2026-04-27T09:14:30", "mcp",   "proactive_doctor","(no llm)",     " 102", "[green]ok[/green]"),
+        ("2026-04-27T09:15:12", "cli",   "tag",            "phi3.5",        " 833", "[green]ok[/green]"),
+        ("2026-04-27T09:16:55", "cli",   "embed",          "nomic-embed",   "  91", "[red]err[/red]"),
+    ]
+    for r in rows:
+        tbl.add_row(*r)
+    con.print()
+    con.print(Panel(tbl,
+                      title="[lcars1]Captain's Log[/lcars1]  "
+                            "[dim](recent — DB ↔ ~/org/captains-log.org)[/dim]",
+                      border_style="lcars2", padding=(1, 1)))
+    digest = (
+        "[lcars1]Patterns[/lcars1]\n"
+        "  • [lcars2]ask[/lcars2] is the dominant verb (38% of last 50 events) — "
+        "consider warming the chat model on launch.\n"
+        "  • [lcars2]embed[/lcars2] failed once after a long idle gap — "
+        "Ollama process likely OOM-killed; suggest [bold]watch[/bold].\n"
+        "  • [lcars2]cloud_chat[/lcars2] used 4× this hour — "
+        "switch to local [bold]reason[/bold] role for cost savings?\n\n"
+        "[lcars1]Suggestions[/lcars1]\n"
+        "  ▶ [bold]org-llm watch[/bold] — start the background auto-embedder\n"
+        "  ▶ [bold]org-llm models --set chat=gemma3:12b[/bold] — bigger fits"
+    )
+    con.print()
+    con.print(Panel(digest,
+                      title="[lcars1]log --reflect[/lcars1]  "
+                            "[dim](LLM analysis of recent events)[/dim]",
+                      border_style="lcars3", padding=(1, 2)))
+    _save(con, "13-captains-log", "org-llm log — Captain's Log + reflect")
+
+
+def scene_literate_config():
+    """Literate config tangle — round-trippable org file preview."""
+    con = _new_console(width=110)
+    body = (
+        "[dim]# ~/org/org-llm-config.org  (generated by `org-llm config --tangle`)[/dim]\n"
+        "[lcars1]#+TITLE: org-llm — literate config[/lcars1]\n"
+        "[lcars1]#+OPTIONS: toc:nil[/lcars1]\n"
+        "\n"
+        "[lcars2]* chat_model[/lcars2]\n"
+        "  :PROPERTIES:\n"
+        "  :ENV:        ORG_LLM_CHAT_MODEL\n"
+        "  :SOURCE:     env\n"
+        "  :END:\n"
+        "  Model used for [lcars3]ask[/lcars3], capture, and free-form chat.\n"
+        "  [dim]#+begin_src text :tangle ~/.local/share/org-llm/cfg/chat_model[/dim]\n"
+        "  qwen2.5:14b\n"
+        "  [dim]#+end_src[/dim]\n"
+        "\n"
+        "[lcars2]* doctor_proactive_mode[/lcars2]\n"
+        "  :PROPERTIES:\n"
+        "  :ENV:        ORG_LLM_DOCTOR_PROACTIVE_MODE\n"
+        "  :SOURCE:     config\n"
+        "  :ALLOWED:    off | passive | active | aggressive\n"
+        "  :END:\n"
+        "  How aggressively the doctor self-invokes from inside opencode.\n"
+        "  [dim]#+begin_src text :tangle ~/.local/share/org-llm/cfg/doctor_proactive_mode[/dim]\n"
+        "  active\n"
+        "  [dim]#+end_src[/dim]\n"
+        "\n"
+        "[lcars2]** Knob: trek_level[/lcars2]\n"
+        "  :PROPERTIES:\n"
+        "  :ENV:        ORG_LLM_TREK_LEVEL\n"
+        "  :SOURCE:     env\n"
+        "  :END:\n"
+        "  *** msg 0 [neutral]   :: \"Engaging.\"\n"
+        "  *** msg 1 [warm]      :: \"Engaging warp drive.\"\n"
+        "  *** msg 2 [festive]   :: \"Engage. Make it so. Tea, Earl Grey, hot.\"\n"
+        "  *** msg 3 [maximal]   :: \"To boldly go where no comrade has gone before.\"\n"
+    )
+    con.print()
+    con.print(Panel(body,
+                      title="[lcars1]config --tangle  →  ~/org/org-llm-config.org[/lcars1]",
+                      border_style="lcars2", padding=(1, 2)))
+    con.print()
+    con.print("▶ Round-trip: [bold]org-llm config --apply-from-org[/bold]  "
+              "│  Diff: [bold]config --diff-org[/bold]")
+    _save(con, "14-literate-config", "org-llm config --tangle")
+
+
+def scene_dbt_status():
+    """`org-llm dbt status` — model freshness + lineage health."""
+    from rich.table import Table
+    con = _new_console(width=110)
+    tbl = Table(box=None, pad_edge=False)
+    tbl.add_column("Model",      style="lcars2", no_wrap=True, width=22)
+    tbl.add_column("Layer",      style="lcars1", width=10)
+    tbl.add_column("Rows",       style="lcars3", justify="right", width=8)
+    tbl.add_column("Last build", style="dim", no_wrap=True, width=19)
+    tbl.add_column("Tests",      width=10)
+    tbl.add_column("Status",     width=10)
+    rows = [
+        ("stg_files",         "staging", "1842",  "2026-04-27T08:00:00",
+         "[green]4/4[/green]",   "[green]fresh[/green]"),
+        ("stg_nodes",         "staging", "23104", "2026-04-27T08:00:01",
+         "[green]6/6[/green]",   "[green]fresh[/green]"),
+        ("stg_history",       "staging", "987",   "2026-04-27T08:00:02",
+         "[green]3/3[/green]",   "[green]fresh[/green]"),
+        ("nodes_by_tag",      "marts",   "412",   "2026-04-27T08:00:03",
+         "[green]2/2[/green]",   "[green]fresh[/green]"),
+        ("recent_nodes",      "marts",   "318",   "2026-04-27T08:00:04",
+         "[green]1/1[/green]",   "[green]fresh[/green]"),
+        ("cli_invocations",   "marts",   "742",   "2026-04-27T08:00:05",
+         "[green]2/2[/green]",   "[green]fresh[/green]"),
+        ("llm_calls",         "marts",   "245",   "2026-04-27T08:00:06",
+         "[green]2/2[/green]",   "[green]fresh[/green]"),
+        ("recent_activity",   "marts",   " 60",   "2026-04-26T22:14:00",
+         "[yellow]0/0[/yellow]", "[yellow]stale[/yellow]"),
+    ]
+    for r in rows:
+        tbl.add_row(*r)
+    con.print()
+    con.print(Panel(tbl,
+                      title="[lcars1]dbt status[/lcars1]  "
+                            "[dim](~/.local/share/org-llm/dbt/  ·  dbt-sqlite)[/dim]",
+                      border_style="lcars2", padding=(1, 1)))
+    con.print()
+    con.print("▶ Build all:    [bold]org-llm dbt build[/bold]")
+    con.print("▶ Lessons:      [bold]org-llm dbt lessons --level intro[/bold]")
+    con.print("▶ LLM design:   [bold]org-llm dbt design 'sessions per day from history'[/bold]")
+    _save(con, "15-dbt-status", "org-llm dbt status")
+
+
+def scene_llm_rescue():
+    """LLM rescue — uncaught exception → diagnosis → optional self-rewrite."""
+    con = _new_console(width=110)
+    err = (
+        "[red]Traceback (most recent call last):[/red]\n"
+        "  File \"org_llm/cli.py\", line 4821, in ask\n"
+        "    rows = search.find(query, top_k=top_k)\n"
+        "  File \"org_llm/search.py\", line 113, in find\n"
+        "    vec = embed_one(query, model=embed_model, base_url=url)\n"
+        "  File \"org_llm/llm.py\", line 87, in embed_one\n"
+        "    raise ConnectionError(f\"ollama unreachable at {base_url}\")\n"
+        "[red]ConnectionError: ollama unreachable at http://127.0.0.1:11434[/red]"
+    )
+    diag = (
+        "[lcars1]What happened[/lcars1]\n"
+        "  Embed call failed because Ollama isn't running. Every search /\n"
+        "  ask path needs a live embed model — they all fan out from here.\n\n"
+        "[lcars1]Likely cause[/lcars1]\n"
+        "  Ollama daemon is stopped or the URL in config is wrong.\n\n"
+        "[lcars1]Fix (try in order)[/lcars1]\n"
+        "  1. [bold]systemctl --user start ollama[/bold]   — start the daemon\n"
+        "  2. [bold]org-llm doctor --fix[/bold]             — auto-detect + start\n"
+        "  3. [bold]org-llm config get ollama_url[/bold]    — verify URL\n\n"
+        "[lcars1]Self-rewrite available[/lcars1]\n"
+        "  This error path could fall back to keyword search when embed is\n"
+        "  unreachable. Apply? [bold][y]es[/bold] / [bold][n]o[/bold] / [bold][d]iff[/bold]\n"
+        "  [dim](snapshot taken — auto-rollback on test failure)[/dim]"
+    )
+    con.print()
+    con.print(Panel(err,
+                      title="[red]Uncaught exception[/red]",
+                      border_style="red", padding=(1, 2)))
+    con.print()
+    con.print(Panel(diag,
+                      title="[lcars1]LLM rescue  ·  gemma3[/lcars1]  "
+                            "[dim](1.4 s)[/dim]",
+                      border_style="lcars2", padding=(1, 2)))
+    _save(con, "16-llm-rescue", "org-llm LLM rescue + self-rewrite")
+
+
+def scene_doctor_walkthrough():
+    """`org-llm doctor --walkthrough` — narrated step-by-step."""
+    con = _new_console(width=110)
+    body = (
+        "[lcars1]Step 1/6  ·  Ollama daemon[/lcars1]\n"
+        "  $ pgrep -x ollama\n"
+        "  [green]✓ running (pid 28471)[/green]\n\n"
+        "[lcars1]Step 2/6  ·  Required local models[/lcars1]\n"
+        "  $ ollama list | grep -E 'nomic-embed|gemma3|phi3.5'\n"
+        "  [green]✓ nomic-embed-text  768 dim   present[/green]\n"
+        "  [green]✓ gemma3            3.3 GB   present[/green]\n"
+        "  [yellow]△ phi3.5            2.2 GB   not pulled — fast role unavailable[/yellow]\n\n"
+        "[lcars1]Step 3/6  ·  RAM headroom vs chat model[/lcars1]\n"
+        "  free RAM: 4.1 GB    chat_model: gemma3 (3.3 GB)\n"
+        "  [yellow]△ tight — under 1 GB headroom; risk of OOM under context[/yellow]\n\n"
+        "[lcars1]Step 4/6  ·  DB integrity[/lcars1]\n"
+        "  $ sqlite3 org-llm.db 'PRAGMA integrity_check;'\n"
+        "  [green]✓ ok  ·  1842 files  ·  23104 nodes  ·  98% embedded[/green]\n\n"
+        "[lcars1]Step 5/6  ·  Cloud reachability (configured)[/lcars1]\n"
+        "  openrouter   [green]✓ 200 OK (87 ms)[/green]\n"
+        "  anthropic    [green]✓ 200 OK (134 ms)[/green]\n\n"
+        "[lcars1]Step 6/6  ·  Verdict[/lcars1]\n"
+        "  [green]✓ healthy with 1 warning[/green]\n"
+        "  [yellow]→ pull phi3.5 to enable the fast role[/yellow]\n"
+        "  [yellow]→ consider downsizing chat_model or adding swap[/yellow]\n\n"
+        "[dim]Apply ALL fixes:[/dim] [bold]org-llm doctor --fix[/bold]"
+    )
+    con.print()
+    con.print(Panel(body,
+                      title="[lcars1]doctor --walkthrough[/lcars1]  "
+                            "[dim](narrated end-to-end check)[/dim]",
+                      border_style="lcars2", padding=(1, 2)))
+    _save(con, "17-doctor-walkthrough", "org-llm doctor --walkthrough")
+
+
 SCENES = [
     scene_pride_banner,
     scene_doctor_table,
@@ -299,6 +635,14 @@ SCENES = [
     scene_tutor_welcome,
     scene_creds_status,
     scene_review_emacs_panel,
+    scene_splash,
+    scene_askbook,
+    scene_models_dashboard,
+    scene_captains_log,
+    scene_literate_config,
+    scene_dbt_status,
+    scene_llm_rescue,
+    scene_doctor_walkthrough,
 ]
 
 

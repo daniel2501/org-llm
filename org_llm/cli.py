@@ -6332,7 +6332,8 @@ _TUTOR_STEPS = [
         "       doctor-walkthrough → proactive-doctor → install-tools → db → dbt →\n"
         "       opencode → source → performance → grants → knob → personalize → self →\n"
         "       theme → env → review-emacs → creds → cloud → launch → emacs → claude\n"
-        "       → captains-log → watch → literate-config → man → done",
+        "       → captains-log → watch → literate-config → man → splash → askbook →\n"
+        "       pi → done",
     ),
     (
         "init",
@@ -7371,6 +7372,59 @@ _TUTOR_STEPS = [
         "  it isn't, --install prints the right rc snippet for your\n"
         "  $SHELL (bash / zsh / fish).\n\n"
         "[dim]Source: org_llm/manpage.py  |  Output: man 1 org-llm[/dim]",
+    ),
+    (
+        "splash",
+        "[lcars2]org-llm splash[/lcars2] — Doom-Emacs-style menu, default no-args view\n\n"
+        "Bare [bold]org-llm[/bold] (no command) opens the splash by default.\n"
+        "It shows a logo, a numbered menu of jumping-off commands, and a\n"
+        "first-run banner that links to [bold]config[/bold] when the DB is empty.\n\n"
+        "[lcars1]What's on it:[/lcars1]\n"
+        "  • Top features wired to one-letter shortcuts (a=ask, l=launch,\n"
+        "    o=opencode, t=tutor welcome, p=pi, …)\n"
+        "  • Vault stats line — node count, embedded count, last index time\n"
+        "  • Suggested next step based on actual DB state\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm[/bold]            — splash (default no-args)\n"
+        "  [bold]org-llm splash[/bold]     — same, explicit\n"
+        "  [bold]SPC l SPC[/bold]          — Doom keybinding\n\n"
+        "[dim]Source: cli.py → _show_splash + _SPLASH_MENU  |  scene_splash in tools/gallery.py[/dim]",
+    ),
+    (
+        "askbook",
+        "[lcars2]org-llm askbook[/lcars2] — multi-model Q/A scratchpad as an org file\n\n"
+        "An org file at [bold]~/org/org-llm-askbook.org[/bold] where each entry is\n"
+        "a [bold]:PROPERTIES:[/bold] block with QUESTION + BACKEND + MODEL + STATUS,\n"
+        "followed by an empty answer body. [bold]askbook run[/bold] fills in pending\n"
+        "answers using the named backend.\n\n"
+        "[lcars1]Backends supported:[/lcars1]  chat reason fast code text cloud claude pi\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm askbook add 'question?' --backend cloud[/bold]\n"
+        "  [bold]org-llm askbook run[/bold]                     — fill in all pending\n"
+        "  [bold]org-llm askbook list[/bold]                    — show entries\n"
+        "  [bold]org-llm askbook export ~/org/q-log.org[/bold]  — copy to other org file\n\n"
+        "[lcars1]Why a literate file?[/lcars1]\n"
+        "  Same question, several models, captured side-by-side in plain org —\n"
+        "  diffable, taggable, indexable into the same vault you ask about.\n\n"
+        "[dim]Source: org_llm/askbook.py  |  scene_askbook in tools/gallery.py[/dim]",
+    ),
+    (
+        "pi",
+        "[lcars2]org-llm pi[/lcars2] — Pi extension bridge (third conversational interface)\n\n"
+        "[lcars1]The three faces:[/lcars1]\n"
+        "  • [bold]launch[/bold]   → opencode  (already integrated)\n"
+        "  • [bold]claude[/bold]   → Claude Code  (already integrated)\n"
+        "  • [bold]pi[/bold]       → Pi @ pi.dev  (this command)\n\n"
+        "[lcars1]How it works:[/lcars1]\n"
+        "  A small TypeScript bridge in [bold]org_llm/pi_extension/[/bold] spawns\n"
+        "  [bold]org-llm mcp[/bold] over stdio, registers each MCP tool as a Pi tool,\n"
+        "  and injects the same persona/search-first system prompt opencode\n"
+        "  and Claude Code see — so Pi is themed and behaves identically.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm pi --install[/bold]   — auto-install Pi + register the bridge\n"
+        "  [bold]org-llm pi[/bold]             — start a Pi session with org-llm tools loaded\n"
+        "  [bold]org-llm pi --status[/bold]    — verify bridge + tool registration\n\n"
+        "[dim]Source: org_llm/pi_extension/pi-org-llm.ts (compiled at install time)[/dim]",
     ),
     (
         "done",
