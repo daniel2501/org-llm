@@ -3069,6 +3069,11 @@ def watch(
     """
     from . import auto_embedder as _ae
 
+    if interval < 0:
+        red_alert(f"--interval must be 0 (use config default) or "
+                   f"positive seconds (got {interval}).")
+        raise typer.Exit(1)
+
     # Per-invocation overrides write directly to the watcher module's
     # config-resolution path via ENV — keeps the watcher single-source-
     # of-truth for cadence/quiet.
@@ -12726,6 +12731,11 @@ def askbook_add(
 ):
     """Append one new question to the askbook (default: pending)."""
     from . import askbook as _ab
+    if not question or not question.strip():
+        red_alert("Empty question. Pass a non-empty string.")
+        on_screen("[dim]Try:[/dim] [bold]org-llm askbook add "
+                   "'why is sqlite-vec fast?'[/bold]")
+        raise typer.Exit(1)
     if backend not in _ab.SUPPORTED_BACKENDS:
         red_alert(f"Unknown backend {backend!r}. "
                   f"Choose from: {', '.join(_ab.SUPPORTED_BACKENDS)}")
@@ -14516,6 +14526,9 @@ def personalize(
     the local LLM (chat_model / fast_model). Use --no-llm to keep the
     whole flow offline.
     """
+    if max_themes <= 0:
+        red_alert(f"--max must be positive (got {max_themes}).")
+        raise typer.Exit(1)
     # --show: just print existing knobs and bail.
     if show:
         knobs = _read_user_knobs()
