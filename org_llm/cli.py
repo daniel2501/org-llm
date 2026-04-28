@@ -3837,26 +3837,80 @@ def _benchmark_local_models(
     prompt = ("Write a 2-line haiku about an org-roam knowledge "
                "vault. Nothing else.")
     results: list[dict] = []
-    for c in candidates:
-        console.print(f"[lcars2]▶[/lcars2] [dim]·[/dim] "
-                      f"[lcars2]{c['tag']}[/lcars2] …", end="")
-        try:
-            t0 = _t.monotonic()
-            resp = _chat(prompt, model=c["tag"], base_url=url, timeout=120)
-            dt = _t.monotonic() - t0
-            tok_est = max(1, len(resp) // 4)
-            tok_per_s = tok_est / dt if dt > 0 else 0.0
-            qual = _quality(c["tag"]) or _quality(c["stem"])
-            score = qual * tok_per_s
-            results.append({
-                **c, "time": dt, "tok_s": tok_per_s,
-                "qual": qual, "score": score, "ok": True,
-            })
-            console.print(f" [green]{tok_per_s:5.1f} tok/s[/green]  "
-                          f"[dim]({dt:.1f}s, q={qual})[/dim]")
-        except Exception as e:
-            results.append({**c, "ok": False, "err": str(e)[:60]})
-            console.print(f" [red]× {str(e)[:60]}[/red]")
+    n = len(candidates)
+    if n == 0:
+        return results
+
+    # Themed progress bar. The benchmark loop spends most of its wall
+    # time inside a single `_chat` call per model with no incremental
+    # output — without a spinner / ETA the user thinks it hung. We
+    # render:
+    #   • themed spinner (knob-driven via _pick_thinking_spinner)
+    #   • "[i/n] benchmarking model:tag" headline that updates per model
+    #   • running elapsed (Rich's TimeElapsedColumn)
+    #   • dynamic ETA from completed-models average × remaining count
+    #     (more accurate than Rich's TaskProgressColumn estimate, which
+    #     assumes uniform per-step time we don't have yet)
+    from rich.progress import (Progress, SpinnerColumn, TextColumn,
+                                 BarColumn, TimeElapsedColumn,
+                                 MofNCompleteColumn)
+    from .ui import _pick_thinking_spinner
+    spin_name, spin_style = _pick_thinking_spinner()
+
+    def _eta_str(completed_times: list[float], remaining: int) -> str:
+        if not completed_times or remaining <= 0:
+            return ""
+        avg = sum(completed_times) / len(completed_times)
+        eta_s = avg * remaining
+        if eta_s < 60:
+            return f" · ETA ~{eta_s:.0f}s"
+        return f" · ETA ~{eta_s/60:.1f}min"
+
+    completed_times: list[float] = []
+    with Progress(
+        SpinnerColumn(spinner_name=spin_name, style=spin_style),
+        TextColumn("[lcars2]{task.description}[/lcars2]"),
+        BarColumn(bar_width=None),
+        MofNCompleteColumn(),
+        TextColumn("[dim]elapsed[/dim]"),
+        TimeElapsedColumn(),
+        TextColumn("{task.fields[eta]}"),
+        console=console, transient=False,
+    ) as prog:
+        task = prog.add_task("benchmarking", total=n, eta="")
+        for i, c in enumerate(candidates, 1):
+            prog.update(task,
+                         description=f"[{i}/{n}] {c['tag']}",
+                         eta=_eta_str(completed_times, n - i + 1))
+            try:
+                t0 = _t.monotonic()
+                resp = _chat(prompt, model=c["tag"], base_url=url, timeout=120)
+                dt = _t.monotonic() - t0
+                completed_times.append(dt)
+                tok_est = max(1, len(resp) // 4)
+                tok_per_s = tok_est / dt if dt > 0 else 0.0
+                qual = _quality(c["tag"]) or _quality(c["stem"])
+                score = qual * tok_per_s
+                results.append({
+                    **c, "time": dt, "tok_s": tok_per_s,
+                    "qual": qual, "score": score, "ok": True,
+                })
+                # Per-model result line ABOVE the live progress region
+                # so the running tally stays visible after the bar
+                # finishes. console.print escapes the live region.
+                console.print(
+                    f"  [green]✓[/green] {c['tag']:<28}  "
+                    f"[lcars3]{tok_per_s:5.1f} tok/s[/lcars3]  "
+                    f"[dim]({dt:.1f}s, q={qual})[/dim]"
+                )
+            except Exception as e:
+                results.append({**c, "ok": False, "err": str(e)[:60]})
+                console.print(
+                    f"  [red]×[/red] {c['tag']:<28}  "
+                    f"[red]{str(e)[:80]}[/red]"
+                )
+            prog.update(task, advance=1,
+                         eta=_eta_str(completed_times, n - i))
     return results
 
 
