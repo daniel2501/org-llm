@@ -3695,8 +3695,16 @@ def models(
               help="Show FOSS catalog filtered by hardware")] = False,
     tune:     Annotated[bool, typer.Option("--tune",     "-t",
               help="Analyze current config and recommend upgrades (read-only)")] = False,
+    benchmark: Annotated[bool, typer.Option("--benchmark", "-B",
+              help="Time real tok/s on each pulled model that fits, rank "
+                   "by speed × quality. With --apply, set each role to "
+                   "its top scorer.")] = False,
+    role:     Annotated[str,  typer.Option("--role",
+              help="Scope --benchmark to one role (chat / fast / code / "
+                   "reason / instruct / text). Default: all roles.")] = "",
     apply:    Annotated[bool, typer.Option("--apply", "-A",
-              help="With --tune: actually apply recommendations (default: read-only)")] = False,
+              help="With --tune or --benchmark: write the picks to config "
+                   "(default: read-only)")] = False,
     pull:     Annotated[str,  typer.Option("--pull",     "-p",
               help="Pull a model via Ollama")] = "",
     assign:   Annotated[bool, typer.Option("--assign",   "-a",
@@ -3865,6 +3873,192 @@ def models(
                         session.add(Cfg(key=key, value=rec["suggested"]))
                 session.commit()
             hail("Config updated. Pull new models with: org-llm models --pull <tag>")
+            make_it_so()
+        return
+
+    # ── benchmark (real tok/s on this hardware) ───────────────────────────────
+    if benchmark:
+        from .models import _quality
+        from .llm import chat as _chat, list_models as _list_models
+        import time as _t
+
+        # Iterate the actual PULLED tags from Ollama (not CATALOG) — those
+        # are what we can actually call. CATALOG tags like 'phi3.5:3.8b'
+        # don't resolve when ollama only has 'phi3.5:latest'.
+        pulled_raw = sorted(set(_list_models(url)))
+        # Filter out embed-only models — they don't support /chat.
+        embed_stems = {"nomic-embed-text", "mxbai-embed-large",
+                       "bge-m3", "snowflake-arctic-embed2"}
+
+        def _catalog_meta(tag: str):
+            """Look up a catalog entry by stem-match so we can attach
+            params/roles/quality to a pulled model whose tag may differ
+            from the CATALOG tag (e.g. 'phi3.5:latest' ↔ 'phi3.5:3.8b')."""
+            stem = _normalize_tag(tag).split(":")[0]
+            for m in CATALOG:
+                if m.tag.split(":")[0] == stem:
+                    return m
+            return None
+
+        candidates = []
+        for raw_tag in pulled_raw:
+            stem = _normalize_tag(raw_tag).split(":")[0]
+            if stem in embed_stems:
+                continue
+            meta = _catalog_meta(raw_tag)
+            roles = meta.roles if meta else ("chat",)
+            params = meta.params if meta else "?"
+            vram = meta.vram_gb if meta else 0.0
+            # Hardware fit: skip a model whose CATALOG vram exceeds
+            # what we can fit (cuts the embarrassing OOM-after-30s case).
+            budget = vram_gb if vram_gb is not None else ram_gb * 0.55
+            if vram > 0 and vram > budget:
+                continue
+            if role and role not in roles:
+                continue
+            candidates.append({
+                "tag": raw_tag, "stem": stem, "params": params,
+                "vram": vram, "roles": roles,
+            })
+
+        if not candidates:
+            scope = f" with role={role!r}" if role else ""
+            red_alert(f"No pulled models fit this hardware{scope}.")
+            on_screen("[dim]Pull a candidate first:[/dim] "
+                       "[bold]org-llm models --discover[/bold]")
+            raise typer.Exit(1)
+
+        console.rule("[lcars1]Model benchmark[/lcars1]")
+        hw_info = (f"{vram_gb:.0f}GB VRAM" if vram_gb else f"{ram_gb:.0f}GB RAM (CPU)")
+        scope_label = f" (role={role})" if role else ""
+        hail(f"Hardware: {hw_info}{scope_label} — {len(candidates)} model(s) to time")
+
+        # Fixed prompt — short enough to benchmark fast, real enough to
+        # exercise the model. Ask for a 2-line haiku so we get ~30-40
+        # tokens of output; gives stable tok/s across runs.
+        prompt = ("Write a 2-line haiku about an org-roam knowledge "
+                   "vault. Nothing else.")
+        results: list[dict] = []
+        for c in candidates:
+            console.print(f"[lcars2]▶[/lcars2] [dim]·[/dim] "
+                          f"[lcars2]{c['tag']}[/lcars2] …", end="")
+            try:
+                t0 = _t.monotonic()
+                resp = _chat(prompt, model=c["tag"], base_url=url,
+                              timeout=120)
+                dt = _t.monotonic() - t0
+                # Rough token count: ollama doesn't return stats here,
+                # so estimate from chars (~4 chars / token for English).
+                tok_est = max(1, len(resp) // 4)
+                tok_per_s = tok_est / dt if dt > 0 else 0.0
+                qual = _quality(c["tag"]) or _quality(c["stem"])
+                # Score = quality × tok/s, normalised so a fast 7B beats
+                # a slightly higher-quality 12B that runs at 1/3 speed.
+                score = qual * tok_per_s
+                results.append({
+                    "tag":   c["tag"], "stem": c["stem"],
+                    "params": c["params"],
+                    "vram":  c["vram"], "roles": c["roles"],
+                    "time":  dt, "tok_s": tok_per_s,
+                    "qual":  qual, "score": score, "ok": True,
+                })
+                console.print(f" [green]{tok_per_s:5.1f} tok/s[/green]  "
+                              f"[dim]({dt:.1f}s, q={qual})[/dim]")
+            except Exception as e:
+                results.append({"tag": c["tag"], "ok": False,
+                                 "err": str(e)[:60]})
+                console.print(f" [red]× {str(e)[:60]}[/red]")
+
+        # Render ranked table
+        ok = [r for r in results if r["ok"]]
+        ok.sort(key=lambda r: r["score"], reverse=True)
+        if not ok:
+            red_alert("No model completed the benchmark.")
+            raise typer.Exit(1)
+
+        console.print()
+        tbl = Table(box=None, pad_edge=False, show_header=True)
+        tbl.add_column("Rank",   width=5,  style="lcars1", no_wrap=True)
+        tbl.add_column("Model",  style="lcars2", no_wrap=True)
+        tbl.add_column("Params", width=6, style="dim",   no_wrap=True)
+        tbl.add_column("tok/s",  style="lcars3", justify="right")
+        tbl.add_column("Quality", style="dim", justify="right")
+        tbl.add_column("Score",  style="lcars1", justify="right")
+        tbl.add_column("Roles",  style="dim", overflow="fold")
+        for i, r in enumerate(ok, 1):
+            tbl.add_row(
+                f"#{i}", r["tag"], r["params"],
+                f"{r['tok_s']:.1f}", str(r["qual"]),
+                f"{r['score']:.0f}", " ".join(r["roles"]),
+            )
+        console.print(tbl)
+        console.print()
+
+        # Per-role winners — pick the highest-score model that supports
+        # each role.
+        role_winners: dict[str, dict] = {}
+        for r in ok:
+            for rl in r["roles"]:
+                if rl not in role_winners or r["score"] > role_winners[rl]["score"]:
+                    role_winners[rl] = r
+
+        # Compare to currently-configured model per role
+        on_screen("[lcars1]Per-role recommendations:[/lcars1]")
+        rec_tbl = Table(box=None, pad_edge=False, show_header=True)
+        rec_tbl.add_column("Role",    style="lcars1", no_wrap=True)
+        rec_tbl.add_column("Current", style="dim",    no_wrap=True)
+        rec_tbl.add_column("→",       width=2)
+        rec_tbl.add_column("Top scorer", style="lcars2", no_wrap=True)
+        rec_tbl.add_column("Δ tok/s",    style="lcars3", justify="right")
+        picks_to_apply: list[tuple[str, str]] = []  # (role_key, new_tag)
+        for role_name, role_key, _ in _TASK_MODEL_KEYS:
+            if role and role_name != role:
+                continue
+            cur = current.get(role_name) or "(unset)"
+            winner = role_winners.get(role_name)
+            if not winner:
+                rec_tbl.add_row(role_name, cur, "·",
+                                "[dim]no candidate fits[/dim]", "—")
+                continue
+            # Match by stem too — user's config row says "phi3.5" but
+            # the benchmarked tag was "phi3.5:latest".
+            cur_stem = _normalize_tag(cur).split(":")[0] if cur else ""
+            cur_speed = next((r["tok_s"] for r in ok
+                              if r["tag"] == cur or r["stem"] == cur_stem),
+                              None)
+            if cur_speed is None:
+                delta = "[dim]n/a[/dim]"
+            else:
+                d = winner["tok_s"] - cur_speed
+                delta = f"[green]+{d:.1f}[/green]" if d > 0 else (
+                        f"[red]{d:.1f}[/red]" if d < 0 else "·")
+            arrow = "·" if winner["tag"] == cur else "[bold yellow]↑[/]"
+            rec_tbl.add_row(role_name, cur, arrow, winner["tag"], delta)
+            if winner["tag"] != cur:
+                picks_to_apply.append((role_key, winner["tag"]))
+        console.print(rec_tbl)
+        console.print()
+
+        if not apply:
+            on_screen("Read-only — re-run with [bold]--apply[/bold] to "
+                       "write these picks to config.")
+            return
+        if not picks_to_apply:
+            on_screen("[dim]Nothing to apply — current config is already "
+                       "the top scorer in every role.[/dim]")
+            return
+        if typer.confirm(f"Apply {len(picks_to_apply)} change(s)?",
+                          default=False):
+            from .db import Config as Cfg
+            with get_session(engine) as session:
+                for key, tag in picks_to_apply:
+                    row = session.get(Cfg, key)
+                    if row:
+                        row.value = tag
+                    else:
+                        session.add(Cfg(key=key, value=tag))
+                session.commit()
+            hail(f"Applied {len(picks_to_apply)} change(s).")
             make_it_so()
         return
 
