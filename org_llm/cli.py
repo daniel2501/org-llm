@@ -10539,6 +10539,14 @@ def launch(
         }
         active_model_label = f"{chat_mdl}  (Ollama, local)"
 
+    # MCP invocation: was `["uv", "--directory", "<site-packages>",
+    # "run", "org-llm", "mcp"]` — that path is fragile (uv looks for a
+    # project at PWD, fails to find one in site-packages, exits silent).
+    # `org-llm mcp` works directly because `org-llm` is on PATH after
+    # `uv tool install`. Keep absolute path form as a fallback when the
+    # binary isn't on PATH (rare, but `which` returns "" cleanly).
+    import shutil as _sh
+    mcp_cmd_bin = _sh.which("org-llm") or "org-llm"
     oc_config: dict = {
         "model":        active_model_str,
         "provider":     active_provider_block,
@@ -10546,10 +10554,7 @@ def launch(
         "mcp": {
             "org-llm": {
                 "type": "local",
-                "command": [
-                    "uv", "--directory", str(org_llm_dir),
-                    "run", "org-llm", "mcp",
-                ],
+                "command": [mcp_cmd_bin, "mcp"],
                 "env": {"ORG_LLM_DB": str(DB_PATH)},
             }
         },
@@ -10765,9 +10770,15 @@ def claude_frontend(
         except Exception:
             pass
 
+    # Same simpler MCP invocation as the launch path — `org-llm mcp`
+    # directly is more portable than the `uv --directory site-packages
+    # run` trick that fails silently when uv can't find a project at
+    # the working directory.
+    import shutil as _sh
+    mcp_cmd_bin = _sh.which("org-llm") or "org-llm"
     mcp_entry = {
-        "command": "uv",
-        "args": ["--directory", str(org_llm_dir), "run", "org-llm", "mcp"],
+        "command": mcp_cmd_bin,
+        "args": ["mcp"],
         "env": {"ORG_LLM_DB": str(DB_PATH)},
     }
     existing_settings.setdefault("mcpServers", {})["org-llm"] = mcp_entry
@@ -10930,8 +10941,16 @@ org-roam second brain via org-llm MCP tools.
     console.print()
 
     # ── Hand off to claude ────────────────────────────────────────────────────
+    # Pass --mcp-config inline so Claude Code reliably loads the org-llm
+    # bridge regardless of project-local-settings auto-discovery (which
+    # has been unreliable across versions). The same JSON we wrote to
+    # .claude/settings.json gets handed to claude on the command line.
+    # Without this, the live verification in Phase 7 showed search_notes
+    # / ask_notes / etc. weren't loaded — Claude Code fell back to grep.
+    mcp_inline = json.dumps({"mcpServers":
+        {"org-llm": existing_settings["mcpServers"]["org-llm"]}})
     os.chdir(org_dir)
-    os.execvp(claude_bin, [claude_bin])
+    os.execvp(claude_bin, [claude_bin, "--mcp-config", mcp_inline])
 
 
 @app.command(rich_help_panel="Models & Cloud")

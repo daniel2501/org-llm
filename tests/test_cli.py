@@ -12,22 +12,9 @@ from org_llm.db import make_engine, get_session, Config
 runner = CliRunner()
 
 
-# cli_db now lives in conftest.py so test_knobs.py + future test files
-# can reuse it. Cross-file fixture sharing is the whole point of conftest.
-
-
-@pytest.fixture
-def cli_org(tmp_path, cli_db):
-    """Temp org dir wired into the CLI DB config."""
-    org = tmp_path / "org"
-    org.mkdir()
-    (org / "test.org").write_text("#+title: CLI Test Note\n\nTest body about socialism.\n")
-
-    engine = make_engine(cli_db)
-    with get_session(engine) as s:
-        s.get(Config, "org_dir").value = str(org)
-        s.commit()
-    return org
+# cli_db + cli_org now live in conftest.py so test_knobs.py +
+# test_workspace_mcp.py + other test files can reuse them.
+# Cross-file fixture sharing is the whole point of conftest.
 
 
 class TestInit:

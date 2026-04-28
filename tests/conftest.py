@@ -34,6 +34,28 @@ def cli_db(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def cli_org(tmp_path, cli_db):
+    """Temp org dir wired into the CLI DB config — adds a single
+    test note so the indexer finds something. Used by tests that
+    exercise launch/claude/pi config-generation paths."""
+    from org_llm.db import make_engine, get_session, Config
+    org = tmp_path / "org"
+    org.mkdir()
+    (org / "test.org").write_text(
+        "#+title: CLI Test Note\n\nTest body about socialism.\n"
+    )
+    engine = make_engine(cli_db)
+    with get_session(engine) as s:
+        row = s.get(Config, "org_dir")
+        if row:
+            row.value = str(org)
+        else:
+            s.add(Config(key="org_dir", value=str(org)))
+        s.commit()
+    return org
+
+
+@pytest.fixture
 def session(db_engine):
     with get_session(db_engine) as s:
         yield s
