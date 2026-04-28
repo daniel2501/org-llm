@@ -3,7 +3,7 @@ name = "org-llm"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "typer[all]>=0.12",
+    "typer>=0.12",
     "rich>=13",
     "sqlalchemy>=2",
     "sqlite-vec>=0.1",
