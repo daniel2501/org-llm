@@ -2033,16 +2033,121 @@ def _llm_one_liner(prompt: str, *, system: str = "",
     return fallback
 
 
-_SPLASH_LOGO = r"""[lcars1]
-       ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄
-      █     ████  ████  ████  ████  ████  ████   ▄▄▄▄                █
-     █     [/lcars1][lcars2]   ▄▄▄▄▄    ▄▄▄▄    ▄▄▄▄▄              ▀▀▀▀[/lcars2][lcars1]                █[/lcars1]
-[lcars1]    █  [/lcars1][lcars2]      █     █  █     █  █     █                                  █[/lcars2]
-[lcars2]   █  [/lcars2][lcars1] ████ █  ▄▄ █  █▄▄▄▄█  █     █          [bold lcars1]o r g - l l m[/bold lcars1][lcars2]              █[/lcars2]
-[lcars1]    █     █▄▄█ █     █  █     █          [bold lcars2]your second brain, scripted[/bold lcars2]   █[/lcars1]
-     █                                                                █
-      █▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄█[/lcars1]
-"""
+# ASCII Shadow figlet for "ORG-LLM" — fixed-width 60 cols. Hand-checked
+# row-by-row so every line is the same length; the previous attempt at
+# a hand-drawn LCARS frame zig-zagged because rich style tags mid-line
+# made character-counting unreliable. Keeping ALL style markup at the
+# block boundary (apply once outside) avoids that whole class of bug.
+_SPLASH_ASCII = (
+    " ██████╗ ██████╗  ██████╗      ██╗     ██╗     ███╗   ███╗ \n"
+    "██╔═══██╗██╔══██╗██╔════╝      ██║     ██║     ████╗ ████║ \n"
+    "██║   ██║██████╔╝██║  ███╗     ██║     ██║     ██╔████╔██║ \n"
+    "██║   ██║██╔══██╗██║   ██║     ██║     ██║     ██║╚██╔╝██║ \n"
+    "╚██████╔╝██║  ██║╚██████╔╝     ███████╗███████╗██║ ╚═╝ ██║ \n"
+    " ╚═════╝ ╚═╝  ╚═╝ ╚═════╝      ╚══════╝╚══════╝╚═╝     ╚═╝ "
+)
+
+
+def _lcars_bar(segments, callsign, *, target_width=78):
+    """Build a chunky multi-segment horizontal LCARS bar.
+
+    segments: list of (proportion, style) — proportions are normalised
+              against the available width (after subtracting gaps + the
+              right-aligned callsign).
+    callsign: tiny right-justified label like '47-Δ'. Pure flair — the
+              real LCARS UI sprinkles these across every panel as
+              visual anchor points.
+    """
+    from rich.text import Text
+    n_segs   = len(segments)
+    n_gaps   = n_segs - 1
+    cs_len   = len(callsign) + 2          # 2 spaces of breathing room
+    body_w   = max(20, target_width - n_gaps - cs_len)
+    total_p  = sum(p for p, _ in segments) or 1.0
+    bar = Text()
+    used = 0
+    for i, (prop, style) in enumerate(segments):
+        if i == n_segs - 1:
+            length = max(2, body_w - used)
+        else:
+            length = max(2, int(round(body_w * prop / total_p)))
+            used += length
+        bar.append("█" * length, style=style)
+        if i < n_segs - 1:
+            bar.append(" ")               # tiny black gap = LCARS hallmark
+    bar.append("  ")
+    bar.append(callsign, style="dim lcars1")
+    return bar
+
+
+def _render_splash_logo():
+    """Return a Rich Renderable for the splash — full LCARS readout.
+
+    Layout (top → bottom):
+      ━ multi-segment chunky bar (orange / purple / blue / orange) + 47-Δ callsign
+      ━ left vertical 'rib' stripe + figlet 'ORG-LLM' + subtitle + slogan
+      ━ mirrored chunky bar + 09-Δ callsign
+
+    Hand-built as Rich Text rows so the multi-style segmented bars stay
+    aligned regardless of terminal width — earlier hand-drawn ASCII
+    frames mis-counted style markers and zig-zagged the right edge.
+    """
+    from rich.console import Group
+    from rich.text    import Text
+
+    # Pick a target width once so top + bottom + body are all consistent.
+    # 78 is the sweet spot for a 80-col terminal (room for the prompt).
+    # On wider terminals Rich will leave the right side ragged, which
+    # actually mimics real LCARS panels (open right edge).
+    target_w = 78
+
+    top_bar = _lcars_bar(
+        [(0.30, "lcars1"),  # big orange opener
+         (0.10, "lcars2"),  # purple chip
+         (0.08, "lcars3"),  # blue chip
+         (0.40, "lcars1"),  # long orange
+         (0.12, "lcars2")], # purple tail
+        "47-Δ", target_width=target_w,
+    )
+    bottom_bar = _lcars_bar(
+        [(0.20, "lcars1"),  # short orange
+         (0.18, "lcars3"),  # mid blue
+         (0.10, "lcars2"),  # purple chip
+         (0.40, "lcars1"),  # long orange
+         (0.12, "lcars3")], # blue tail
+        "09-Δ", target_width=target_w,
+    )
+
+    # Vertical rib on the left of every body row. Width matches the
+    # rounded corners on top/bottom so the visual frame snaps shut.
+    rib = "███   "
+
+    def _row(style_inner, content):
+        """One body row: orange rib + (styled) content."""
+        t = Text()
+        t.append(rib, style="lcars1")
+        if content:
+            t.append(content, style=style_inner)
+        return t
+
+    body_rows = [_row("", "")]                                  # top spacer
+    for line in _SPLASH_ASCII.splitlines():                     # the figlet
+        # Per-row style cycle through lcars1/2/3 to give that "live
+        # readout" multi-color feel. One color per ROW (not per glyph)
+        # because per-glyph would require column-counting and we just
+        # got out of that business.
+        body_rows.append(_row("bold lcars1", line))
+    body_rows.append(_row("", ""))                              # mid spacer
+    body_rows.append(_row("bold lcars2", "your second brain, scripted"))
+    body_rows.append(_row("dim lcars3",  "local · queer · collective · free"))
+    body_rows.append(_row("", ""))                              # bottom spacer
+
+    return Group(top_bar, *body_rows, bottom_bar)
+
+
+# Backward-compat shim: callers historically did `console.print(_SPLASH_LOGO)`.
+# We keep that working by exposing the Renderable under the old name.
+_SPLASH_LOGO = _render_splash_logo()
 
 
 def _is_first_run() -> bool:
