@@ -37,7 +37,8 @@ include = ["org_llm/dbt_templates/**/*.sql",
            "org_llm/dbt_templates/**/*.yml",
            "org_llm/pi_extension/**/*.ts",
            "org_llm/pi_extension/**/*.md",
-           "org_llm/skill_examples/**/*.org"]
+           "org_llm/skill_examples/**/*.org",
+           "org_llm/data/**/*.json"]
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-cov"]

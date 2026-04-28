@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-28",
+  "stale_after_days": 90,
+  "remote_url": "https://raw.githubusercontent.com/daniel2501/org-llm/main/org_llm/data/cloud_catalog.json",
+  "doc": "Curated cloud catalog used by `org-llm cloud --tune` + `models --upgrade`. Refresh OpenRouter rows live with `org-llm cloud --refresh-catalog`; that command also liveness-probes every provider URL and pulls the canonical providers list from `remote_url`. Other providers' model pricing (Groq, HF, GPU rentals) needs manual PRs — `cloud --propose-update` prints a ready-to-paste diff.",
+  "providers_doc": "Mirrors the PROVIDERS NamedTuple in cloud.py. PRs welcome when providers launch / shut down / change pricing.",
+  "providers": [
+    {"slug": "runpod",      "status": "active", "kind": "gpu_rental"},
+    {"slug": "vast",        "status": "active", "kind": "gpu_rental"},
+    {"slug": "lambda",      "status": "active", "kind": "gpu_rental"},
+    {"slug": "tensordock",  "status": "active", "kind": "gpu_rental"},
+    {"slug": "salad",       "status": "active", "kind": "gpu_rental"},
+    {"slug": "paperspace",  "status": "active", "kind": "gpu_rental"},
+    {"slug": "coreweave",   "status": "active", "kind": "gpu_rental"},
+    {"slug": "openrouter",  "status": "active", "kind": "hosted_inference"},
+    {"slug": "groq",        "status": "active", "kind": "hosted_inference"},
+    {"slug": "huggingface", "status": "active", "kind": "hosted_inference"}
+  ],
+  "cloud_models": [
+    {
+      "provider": "openrouter",
+      "slug": "openai/gpt-oss-20b:free",
+      "roles": ["chat", "instruct", "fast"],
+      "quality": 110,
+      "cost_in": 0.0,
+      "cost_out": 0.0,
+      "license": "Apache 2.0",
+      "note": "OpenAI's open release; free, rate-limited"
+    },
+    {
+      "provider": "openrouter",
+      "slug": "meta-llama/llama-3.1-8b-instruct:free",
+      "roles": ["chat", "instruct", "fast"],
+      "quality": 120,
+      "cost_in": 0.0,
+      "cost_out": 0.0,
+      "license": "Llama 3 community",
+      "note": "Meta Llama 3.1 8B; free tier"
+    },
+    {
+      "provider": "openrouter",
+      "slug": "deepseek/deepseek-r1:free",
+      "roles": ["reason"],
+      "quality": 175,
+      "cost_in": 0.0,
+      "cost_out": 0.0,
+      "license": "MIT",
+      "note": "DeepSeek R1 reasoning; free tier (slow)"
+    },
+    {
+      "provider": "openrouter",
+      "slug": "deepseek/deepseek-r1-distill-llama-70b:free",
+      "roles": ["reason", "chat"],
+      "quality": 160,
+      "cost_in": 0.0,
+      "cost_out": 0.0,
+      "license": "MIT",
+      "note": "R1 reasoning distilled into Llama 70B; free"
+    },
+    {
+      "provider": "openrouter",
+      "slug": "google/gemini-2.0-flash-exp:free",
+      "roles": ["chat", "instruct", "fast"],
+      "quality": 145,
+      "cost_in": 0.0,
+      "cost_out": 0.0,
+      "license": "Gemini ToS",
+      "note": "Google Gemini 2.0 Flash; experimental free"
+    },
+    {
+      "provider": "openrouter",
+      "slug": "meta-llama/llama-3.3-70b-instruct",
+      "roles": ["chat", "instruct", "text", "reason"],
+      "quality": 180,
+      "cost_in": 0.13,
+      "cost_out": 0.40,
+      "license": "Llama 3 community",
+      "note": "Meta Llama 3.3 70B; strong open chat"
+    },
+    {
+      "provider": "openrouter",
+      "slug": "qwen/qwen-2.5-72b-instruct",
+      "roles": ["chat", "instruct", "text"],
+      "quality": 195,
+      "cost_in": 0.13,
+      "cost_out": 0.40,
+      "license": "Apache 2.0",
+      "note": "Alibaba Qwen 2.5 72B; frontier open"
+    },
+    {
+      "provider": "openrouter",
+      "slug": "deepseek/deepseek-r1",
+      "roles": ["reason"],
+      "quality": 200,
+      "cost_in": 0.55,
+      "cost_out": 2.19,
+      "license": "MIT",
+      "note": "DeepSeek R1 reasoning; best open reasoning"
+    },
+    {
+      "provider": "openrouter",
+      "slug": "qwen/qwen-2.5-coder-32b-instruct",
+      "roles": ["code"],
+      "quality": 200,
+      "cost_in": 0.07,
+      "cost_out": 0.16,
+      "license": "Apache 2.0",
+      "note": "Best open code model on cloud"
+    },
+    {
+      "provider": "openrouter",
+      "slug": "openai/gpt-oss-120b",
+      "roles": ["chat", "instruct", "text", "reason"],
+      "quality": 190,
+      "cost_in": 0.30,
+      "cost_out": 0.50,
+      "license": "Apache 2.0",
+      "note": "OpenAI's larger open release"
+    },
+    {
+      "provider": "openrouter",
+      "slug": "anthropic/claude-sonnet-4.6",
+      "roles": ["chat", "instruct", "text", "reason"],
+      "quality": 250,
+      "cost_in": 3.00,
+      "cost_out": 15.00,
+      "license": "Closed API",
+      "note": "Anthropic Claude Sonnet 4.6; long context, tool use"
+    },
+    {
+      "provider": "openrouter",
+      "slug": "openai/gpt-5.5",
+      "roles": ["chat", "instruct", "text"],
+      "quality": 245,
+      "cost_in": 5.00,
+      "cost_out": 15.00,
+      "license": "Closed API",
+      "note": "OpenAI GPT-5.5; structured output specialist"
+    },
+    {
+      "provider": "openrouter",
+      "slug": "anthropic/claude-opus-4-7",
+      "roles": ["chat", "instruct", "reason", "text"],
+      "quality": 260,
+      "cost_in": 15.00,
+      "cost_out": 75.00,
+      "license": "Closed API",
+      "note": "Claude Opus 4.7; frontier reasoning, expensive"
+    },
+    {
+      "provider": "groq",
+      "slug": "llama-3.1-8b-instant",
+      "roles": ["chat", "fast", "instruct"],
+      "quality": 120,
+      "cost_in": 0.0,
+      "cost_out": 0.0,
+      "license": "Llama 3 community",
+      "note": "Free tier; ~750 tok/s on Groq LPU"
+    },
+    {
+      "provider": "groq",
+      "slug": "llama-3.3-70b-versatile",
+      "roles": ["chat", "instruct", "text", "reason"],
+      "quality": 180,
+      "cost_in": 0.59,
+      "cost_out": 0.79,
+      "license": "Llama 3 community",
+      "note": "70B on Groq LPU; very fast"
+    },
+    {
+      "provider": "groq",
+      "slug": "deepseek-r1-distill-llama-70b",
+      "roles": ["reason", "chat"],
+      "quality": 160,
+      "cost_in": 0.75,
+      "cost_out": 0.99,
+      "license": "MIT",
+      "note": "R1 reasoning distilled, fast LPU"
+    },
+    {
+      "provider": "groq",
+      "slug": "qwen-2.5-32b",
+      "roles": ["chat", "instruct"],
+      "quality": 165,
+      "cost_in": 0.30,
+      "cost_out": 0.40,
+      "license": "Apache 2.0",
+      "note": "Qwen 2.5 32B on Groq"
+    },
+    {
+      "provider": "huggingface",
+      "slug": "meta-llama/Llama-3.3-70B-Instruct",
+      "roles": ["chat", "instruct", "text"],
+      "quality": 180,
+      "cost_in": 0.50,
+      "cost_out": 0.50,
+      "license": "Llama 3 community",
+      "note": "Llama 3.3 70B via HF router"
+    },
+    {
+      "provider": "huggingface",
+      "slug": "deepseek-ai/DeepSeek-R1",
+      "roles": ["reason"],
+      "quality": 200,
+      "cost_in": 0.55,
+      "cost_out": 2.19,
+      "license": "MIT",
+      "note": "DeepSeek R1 via HF router"
+    }
+  ]
+}

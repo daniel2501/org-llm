@@ -11599,6 +11599,15 @@ def cloud(
     budget:      Annotated[float, typer.Option("--budget", "-b",
                  help="With --tune: cap on USD per 1M output tokens (e.g. 0 = "
                       "free-tier only, 0.5 = cheap paid). Default: no cap.")] = -1.0,
+    refresh_catalog: Annotated[bool, typer.Option("--refresh-catalog",
+                 help="Pull live cloud-model pricing from provider APIs "
+                      "(currently OpenRouter only). Writes a user-cache "
+                      "override at ~/.local/share/org-llm/cloud_catalog.json. "
+                      "After refresh, an LLM analyses the diff and surfaces "
+                      "alerts for cheaper / better alternatives.")] = False,
+    propose_update:  Annotated[bool, typer.Option("--propose-update",
+                 help="Diff your active cache against the bundled catalog and "
+                      "print a PR-ready snippet for `data/cloud_catalog.json`.")] = False,
 ):
     """Manage cloud GPU backends — RunPod, Vast.ai, Lambda, TensorDock, Salad, and more.
 
@@ -11623,8 +11632,163 @@ def cloud(
 
     # default: show status
     if not any([status, providers, signup, console_, configure, test, assess,
-                cost, creds, quick_start, recommend_upgrade, upgrade, tune]):
+                cost, creds, quick_start, recommend_upgrade, upgrade, tune,
+                refresh_catalog, propose_update]):
         status = True
+
+    # ── refresh catalog from live provider APIs ──────────────────────────────
+    if refresh_catalog:
+        from . import cloud as _cloud
+        console.rule("[lcars1]Refresh cloud catalog[/lcars1]")
+        on_screen("Polling [bold]OpenRouter[/bold] /api/v1/models for live "
+                   "pricing…")
+        try:
+            new_rows, msg = _cloud.refresh_from_openrouter()
+            on_screen(f"[dim]{msg}[/dim]")
+        except Exception as e:
+            red_alert(f"Refresh failed: {type(e).__name__}: {e}")
+            on_screen("[dim]Network down? Try again, or hand-edit the user "
+                       "cache at ~/.local/share/org-llm/cloud_catalog.json[/dim]")
+            raise typer.Exit(1)
+        merged, summary = _cloud.merge_refresh(new_rows)
+
+        # Provider lifecycle: probe known signup URLs for liveness +
+        # pull the canonical providers roster from the remote catalog
+        # so newly-launched providers + retired ones surface here.
+        on_screen("Probing provider URLs (HEAD)…")
+        liveness = _cloud.probe_provider_liveness()
+        dead = [r for r in liveness if not r["alive"]]
+        if dead:
+            on_screen(f"[yellow]{len(dead)} provider URL(s) didn't respond:"
+                       f"[/yellow]")
+            for r in dead:
+                err = r["error"] or f"HTTP {r['status_code']}"
+                on_screen(f"  [red]✗[/red] {r['slug']:<14} {err}")
+        else:
+            on_screen("[dim]All provider URLs responded.[/dim]")
+
+        on_screen("Pulling canonical providers roster…")
+        remote = _cloud.fetch_remote_catalog()
+        provider_diff = None
+        if remote and isinstance(remote.get("providers"), list):
+            local_providers = _cloud._bundled_provider_meta()
+            provider_diff = _cloud.diff_provider_rosters(
+                local_providers, remote.get("providers", []))
+            if provider_diff["added"]:
+                on_screen(f"[lcars3]New providers in canonical roster:[/lcars3] "
+                           f"{', '.join(provider_diff['added'])}")
+            if provider_diff["removed"]:
+                on_screen(f"[yellow]Retired providers:[/yellow] "
+                           f"{', '.join(provider_diff['removed'])}")
+            if provider_diff["changed"]:
+                for c in provider_diff["changed"]:
+                    on_screen(f"  ~ {c['slug']}: {c['field']} "
+                               f"{c['from']!r} → {c['to']!r}")
+            providers_for_cache = remote.get("providers")
+        else:
+            providers_for_cache = None
+            if remote is None:
+                on_screen("[dim](Remote roster unreachable — "
+                           "skipping provider diff.)[/dim]")
+
+        # Mark dead-on-probe providers as `status: retired_candidate`
+        # in the local cache so subsequent runs / the LLM analysis can
+        # surface them. We don't auto-delete — that belongs in a PR.
+        if providers_for_cache is not None and dead:
+            dead_slugs = {r["slug"] for r in dead}
+            for entry in providers_for_cache:
+                if (entry.get("slug") in dead_slugs
+                        and entry.get("status") == "active"):
+                    entry["status"] = "retired_candidate"
+                    entry["last_probe_error"] = next(
+                        (r["error"] or f"HTTP {r['status_code']}"
+                          for r in dead if r["slug"] == entry["slug"]),
+                        "")
+
+        path = _cloud.write_user_catalog(
+            merged, providers_meta=providers_for_cache)
+        _cloud.reload_catalog()
+        on_screen(f"[lcars3]Wrote[/lcars3] {path}  "
+                   f"[dim]({summary['total']} model(s); "
+                   f"{len(summary['added'])} new, "
+                   f"{len(summary['changed'])} repriced, "
+                   f"{summary['carried_over']} carried over from local)[/dim]")
+
+        # LLM diff-analysis — generate user-facing alerts.
+        full_summary = dict(summary)
+        full_summary["dead_providers"] = [r["slug"] for r in dead]
+        full_summary["new_providers"] = (provider_diff["added"]
+                                            if provider_diff else [])
+        full_summary["retired_providers"] = (provider_diff["removed"]
+                                                if provider_diff else [])
+        if (summary["added"] or summary["changed"]
+                or full_summary["dead_providers"]
+                or full_summary["new_providers"]
+                or full_summary["retired_providers"]):
+            _llm_analyze_catalog_diff(full_summary, engine)
+        else:
+            on_screen("[dim]Nothing newsworthy — providers + prices "
+                       "match the canonical catalog.[/dim]")
+        return
+
+    # ── propose update: PR-ready diff vs bundled JSON ─────────────────────────
+    if propose_update:
+        from . import cloud as _cloud
+        bundled = _cloud._read_json_safe(_cloud._bundled_catalog_path()) or {}
+        user    = _cloud._read_json_safe(_cloud._user_catalog_path())
+        if not user:
+            on_screen("[dim]No user cache to propose — run "
+                       "[bold]org-llm cloud --refresh-catalog[/bold] first.[/dim]")
+            return
+        bundled_by_slug = {m.get("slug"): m
+                            for m in bundled.get("cloud_models", [])}
+        user_by_slug    = {m.get("slug"): m
+                            for m in user.get("cloud_models", [])}
+        added   = [s for s in user_by_slug if s not in bundled_by_slug]
+        removed = [s for s in bundled_by_slug if s not in user_by_slug]
+        changed: list[dict] = []
+        for s, urec in user_by_slug.items():
+            if s not in bundled_by_slug:
+                continue
+            brec = bundled_by_slug[s]
+            for k in ("cost_in", "cost_out", "license", "note", "quality"):
+                if urec.get(k) != brec.get(k):
+                    changed.append({
+                        "slug": s, "field": k,
+                        "from": brec.get(k), "to": urec.get(k),
+                    })
+                    break
+        console.rule("[lcars1]Propose catalog update[/lcars1]")
+        on_screen(f"Active cache:  {_cloud._user_catalog_path()}")
+        on_screen(f"Bundled (PR target):  "
+                   f"{_cloud._bundled_catalog_path().relative_to(_cloud._bundled_catalog_path().parents[2])}")
+        on_screen("")
+        on_screen(f"[lcars1]Diff:[/lcars1]  "
+                   f"{len(added)} added · {len(changed)} changed · "
+                   f"{len(removed)} removed")
+        if added:
+            on_screen("[lcars2]Added (open a PR with):[/lcars2]")
+            import json as _j
+            for s in added[:8]:
+                on_screen(f"  + {_j.dumps(user_by_slug[s])}")
+            if len(added) > 8:
+                on_screen(f"  …(+{len(added)-8} more)")
+        if changed:
+            on_screen("[lcars2]Changed:[/lcars2]")
+            for c in changed[:10]:
+                on_screen(f"  ~ {c['slug']}.{c['field']}: "
+                           f"{c['from']!r} → {c['to']!r}")
+            if len(changed) > 10:
+                on_screen(f"  …(+{len(changed)-10} more)")
+        if removed:
+            on_screen("[lcars2]Removed (provider dropped):[/lcars2]")
+            for s in removed[:8]:
+                on_screen(f"  - {s}")
+        on_screen("")
+        on_screen("[dim]Open a PR against "
+                   "[bold]org_llm/data/cloud_catalog.json[/bold] "
+                   "with these edits to share the updated pricing.[/dim]")
+        return
 
     # ── tune cloud_model from the curated catalog ────────────────────────────
     if tune:
@@ -12089,15 +12253,15 @@ def cloud(
     if console_:
         p = get_provider(console_)
         if not p:
-            # fall back to configured provider
-            with get_session(engine) as session:
-                slug = _cfg(session, "cloud_provider")
-            p = get_provider(slug)
-        if p:
-            hail(f"Opening {p.name} console…")
-            open_url(p.console_url)
-        else:
-            red_alert("No provider configured. Run: org-llm cloud --configure")
+            # User passed an explicit slug that doesn't match — error
+            # cleanly with the valid set rather than silently falling
+            # through to the configured provider (which surprises the
+            # user when they typo'd a provider name).
+            red_alert(f"Unknown provider: {console_!r}")
+            on_screen(f"Available: {', '.join(p.slug for p in PROVIDERS)}")
+            raise typer.Exit(1)
+        hail(f"Opening {p.name} console…")
+        open_url(p.console_url)
         return
 
     # ── Configure ─────────────────────────────────────────────────────────────
@@ -15901,6 +16065,108 @@ def _shell_quote_repair(argv: list[str]) -> list[str] | None:
         return None
     glued = " ".join(words)
     return head + flags + [glued]
+
+
+def _llm_analyze_catalog_diff(summary: dict, engine) -> None:
+    """After a successful catalog refresh, run an LLM analysis pass to
+    surface user-facing alerts about meaningful changes.
+
+    Cheap (one chat call to a small model). Falls back to a
+    deterministic summary panel if the LLM is unreachable. The output
+    is purely informational — config writes still require the user
+    going through `cloud --tune --apply` or equivalent.
+    """
+    from rich.panel import Panel
+    added         = summary.get("added", [])
+    changed       = summary.get("changed", [])
+    price_changes = summary.get("price_changes", [])
+
+    # Read the user's currently-configured cloud_model so the LLM can
+    # tell them whether the diff affects them personally.
+    try:
+        with get_session(engine) as session:
+            cur_model    = _cfg(session, "cloud_model")
+            cur_provider = _cfg(session, "cloud_provider")
+    except Exception:
+        cur_model = cur_provider = ""
+
+    sys_msg = (
+        "You write short, concrete alerts after a cloud-model catalog "
+        "refresh. Output STRICTLY 3-6 bullet lines starting with `• `, "
+        "no preamble, no markdown headers. Each bullet is one observation "
+        "the user might act on. Mention model slugs literally. If their "
+        "current model is affected (price change, deprecated, or a "
+        "cheaper-better alternative emerged), put that bullet first and "
+        "prefix it with `[YOU]`. Be honest if nothing is news — say so "
+        "in one bullet. Never invent slugs that aren't in the data."
+    )
+    user_msg = (
+        f"User's current cloud config:\n"
+        f"  cloud_provider = {cur_provider or '(unset)'}\n"
+        f"  cloud_model    = {cur_model or '(unset)'}\n\n"
+        f"Catalog refresh summary:\n"
+        f"  Added slugs:   {added[:30]}\n"
+        f"  Changed prices ({len(price_changes)}):\n"
+    )
+    for c in price_changes[:20]:
+        user_msg += (
+            f"    {c['slug']}: ${c['old_cost_out']}/Mtok out → "
+            f"${c['new_cost_out']}/Mtok\n"
+        )
+
+    advice = ""
+    rescue_err = ""
+    try:
+        from .llm import chat as _chat
+        from .ui  import thinking as _thinking
+        with get_session(engine) as session:
+            url = _ollama_url(session)
+            mdl = (_cfg(session, "fast_model")
+                    or _cfg(session, "chat_model")
+                    or "llama3.2")
+        with _thinking("Analyzing catalog diff", model=mdl):
+            advice = _chat(user_msg, model=mdl, base_url=url,
+                            system=sys_msg, timeout=45.0) or ""
+    except Exception as e:
+        rescue_err = f"{type(e).__name__}: {e}"
+
+    if advice:
+        # Sanitize same way as crash-rescue advice — the LLM here gets
+        # the same whitelisted safety check, since we surface its
+        # output as actionable advice to the user.
+        try:
+            from .rescue import sanitize_llm_advice as _san
+            checked = _san(advice)
+        except Exception:
+            checked = None
+        title = "[lcars1]Catalog refresh — alerts[/lcars1]"
+        if checked is not None and not checked.safe:
+            warn = "\n".join(f"  • {f}" for f in checked.flagged)
+            console.print(Panel(
+                f"[yellow]Advice flagged — verify before acting:[/yellow]\n"
+                f"{warn}\n\n{advice}",
+                title=title, border_style="warn", padding=(1, 2),
+            ))
+        else:
+            console.print(Panel(advice, title=title,
+                                  border_style="lcars2", padding=(1, 2)))
+    else:
+        # Fallback: deterministic summary so the user always sees
+        # SOMETHING after a refresh.
+        body = (f"• {len(added)} new model(s) added to the catalog.\n"
+                f"• {len(price_changes)} model(s) with price changes.")
+        if cur_model and any(c["slug"] == cur_model for c in price_changes):
+            body += f"\n• [YOU] Your current cloud_model {cur_model} "
+            body += "had a price change."
+        if rescue_err:
+            body += f"\n\n[dim](LLM analysis unavailable: {rescue_err})[/dim]"
+        console.print(Panel(body,
+                              title="[lcars1]Catalog refresh — alerts[/lcars1]",
+                              border_style="lcars2", padding=(1, 2)))
+
+    on_screen("[dim]Re-run[/dim] [bold]org-llm cloud --tune[/bold] "
+               "[dim]to see how this catalog refresh shifts your "
+               "recommendations.[/dim]")
 
 
 def _maybe_publish_self_rewrite(target: Path, snap, exc: BaseException,

@@ -275,77 +275,428 @@ class CloudModelInfo(NamedTuple):
     note:      str        # one-line description
 
 
-CLOUD_MODELS: list[CloudModelInfo] = [
-    # ── OpenRouter (multi-model gateway) ─────────────────────────────────────
-    # FREE tier
-    CloudModelInfo("openrouter", "openai/gpt-oss-20b:free",
-                    ("chat", "instruct", "fast"), 110, 0.0, 0.0,
-                    "Apache 2.0", "OpenAI's open release; free, rate-limited"),
-    CloudModelInfo("openrouter", "meta-llama/llama-3.1-8b-instruct:free",
-                    ("chat", "instruct", "fast"), 120, 0.0, 0.0,
-                    "Llama 3 community", "Meta Llama 3.1 8B; free tier"),
-    CloudModelInfo("openrouter", "deepseek/deepseek-r1:free",
-                    ("reason",), 175, 0.0, 0.0,
-                    "MIT", "DeepSeek R1 reasoning; free tier (slow)"),
-    CloudModelInfo("openrouter", "deepseek/deepseek-r1-distill-llama-70b:free",
-                    ("reason", "chat"), 160, 0.0, 0.0,
-                    "MIT", "R1 reasoning distilled into Llama 70B; free"),
-    CloudModelInfo("openrouter", "google/gemini-2.0-flash-exp:free",
-                    ("chat", "instruct", "fast"), 145, 0.0, 0.0,
-                    "Gemini ToS", "Google Gemini 2.0 Flash; experimental free"),
-    # CHEAP PAID — open weights
-    CloudModelInfo("openrouter", "meta-llama/llama-3.3-70b-instruct",
-                    ("chat", "instruct", "text", "reason"), 180, 0.13, 0.40,
-                    "Llama 3 community", "Meta Llama 3.3 70B; strong open chat"),
-    CloudModelInfo("openrouter", "qwen/qwen-2.5-72b-instruct",
-                    ("chat", "instruct", "text"), 195, 0.13, 0.40,
-                    "Apache 2.0", "Alibaba Qwen 2.5 72B; frontier open"),
-    CloudModelInfo("openrouter", "deepseek/deepseek-r1",
-                    ("reason",), 200, 0.55, 2.19,
-                    "MIT", "DeepSeek R1 reasoning; best open reasoning"),
-    CloudModelInfo("openrouter", "qwen/qwen-2.5-coder-32b-instruct",
-                    ("code",), 200, 0.07, 0.16,
-                    "Apache 2.0", "Best open code model on cloud"),
-    CloudModelInfo("openrouter", "openai/gpt-oss-120b",
-                    ("chat", "instruct", "text", "reason"), 190, 0.30, 0.50,
-                    "Apache 2.0", "OpenAI's larger open release"),
-    # PREMIUM — closed APIs
-    CloudModelInfo("openrouter", "anthropic/claude-sonnet-4.6",
-                    ("chat", "instruct", "text", "reason"), 250, 3.00, 15.00,
-                    "Closed API", "Anthropic Claude Sonnet 4.6; long context, tool use"),
-    CloudModelInfo("openrouter", "openai/gpt-5.5",
-                    ("chat", "instruct", "text"), 245, 5.00, 15.00,
-                    "Closed API", "OpenAI GPT-5.5; structured output specialist"),
-    CloudModelInfo("openrouter", "anthropic/claude-opus-4-7",
-                    ("chat", "instruct", "reason", "text"), 260, 15.00, 75.00,
-                    "Closed API", "Claude Opus 4.7; frontier reasoning, expensive"),
+# ── Catalog loader: bundled JSON + user-cache override ───────────────────────
+# CLOUD_MODELS used to live here as a hardcoded list. It now loads from
+# a JSON file shipped with the package (data/cloud_catalog.json) so:
+#  • Pricing edits don't require source changes (community PRs are JSON
+#    diffs, far less risky than Python edits).
+#  • A user cache at ~/.local/share/org-llm/cloud_catalog.json can
+#    override the bundled file with fresher data — written by
+#    `org-llm cloud --refresh-catalog`, which polls live provider APIs.
+#  • Every entry carries an `updated_at` stamp so stale recommendations
+#    can be flagged in the UI.
 
-    # ── Groq (ultra-fast LPU inference) ──────────────────────────────────────
-    CloudModelInfo("groq", "llama-3.1-8b-instant",
-                    ("chat", "fast", "instruct"), 120, 0.0, 0.0,
-                    "Llama 3 community", "Free tier; ~750 tok/s on Groq LPU"),
-    CloudModelInfo("groq", "llama-3.3-70b-versatile",
-                    ("chat", "instruct", "text", "reason"), 180, 0.59, 0.79,
-                    "Llama 3 community", "70B on Groq LPU; very fast"),
-    CloudModelInfo("groq", "deepseek-r1-distill-llama-70b",
-                    ("reason", "chat"), 160, 0.75, 0.99,
-                    "MIT", "R1 reasoning distilled, fast LPU"),
-    CloudModelInfo("groq", "qwen-2.5-32b",
-                    ("chat", "instruct"), 165, 0.30, 0.40,
-                    "Apache 2.0", "Qwen 2.5 32B on Groq"),
+import json as _json
+from pathlib import Path as _Path
 
-    # ── Hugging Face Inference (router) ──────────────────────────────────────
-    CloudModelInfo("huggingface", "meta-llama/Llama-3.3-70B-Instruct",
-                    ("chat", "instruct", "text"), 180, 0.50, 0.50,
-                    "Llama 3 community", "Llama 3.3 70B via HF router"),
-    CloudModelInfo("huggingface", "deepseek-ai/DeepSeek-R1",
-                    ("reason",), 200, 0.55, 2.19,
-                    "MIT", "DeepSeek R1 via HF router"),
-]
-
+# Module-state — populated by _load_catalog() below.
+CLOUD_MODELS:             list[CloudModelInfo] = []
 CLOUD_MODELS_BY_PROVIDER: dict[str, list[CloudModelInfo]] = {}
-for _m in CLOUD_MODELS:
-    CLOUD_MODELS_BY_PROVIDER.setdefault(_m.provider, []).append(_m)
+CATALOG_META: dict = {
+    "version":          1,
+    "updated_at":       "",         # ISO-date the catalog was last refreshed
+    "stale_after_days": 90,
+    "source":           "bundled",   # "bundled" | "user_cache" | "merged"
+}
+
+
+def _bundled_catalog_path() -> _Path:
+    """Path to the JSON shipped with the package."""
+    return _Path(__file__).resolve().parent / "data" / "cloud_catalog.json"
+
+
+def _user_catalog_path() -> _Path:
+    """User-writable override at the standard org-llm data dir."""
+    import os as _os
+    base = _Path(_os.environ.get("XDG_DATA_HOME")
+                  or _os.path.expanduser("~/.local/share"))
+    return base / "org-llm" / "cloud_catalog.json"
+
+
+def _read_json_safe(p: _Path) -> dict | None:
+    try:
+        if p.exists():
+            return _json.loads(p.read_text())
+    except Exception:
+        return None
+    return None
+
+
+def _build_models(rows: list[dict]) -> list[CloudModelInfo]:
+    """Coerce JSON rows → CloudModelInfo namedtuples. Rows missing
+    required keys are skipped silently (we never want a typo in the
+    catalog to blow up a chat call)."""
+    out: list[CloudModelInfo] = []
+    for r in rows or []:
+        try:
+            out.append(CloudModelInfo(
+                provider = r["provider"],
+                slug     = r["slug"],
+                roles    = tuple(r.get("roles", ("chat",))),
+                quality  = int(r.get("quality", 100)),
+                cost_in  = float(r.get("cost_in", 0.0)),
+                cost_out = float(r.get("cost_out", 0.0)),
+                license  = r.get("license", ""),
+                note     = r.get("note", ""),
+            ))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _load_catalog() -> None:
+    """(Re)populate the module-state CLOUD_MODELS / CATALOG_META.
+
+    User cache wins when present + valid; bundled JSON is the
+    authoritative fallback. Called at import time and again on
+    explicit refresh.
+    """
+    global CLOUD_MODELS, CLOUD_MODELS_BY_PROVIDER, CATALOG_META
+
+    bundled = _read_json_safe(_bundled_catalog_path()) or {}
+    user    = _read_json_safe(_user_catalog_path()) or {}
+    if user and isinstance(user.get("cloud_models"), list):
+        # User cache present + has the right shape — use it as source.
+        CLOUD_MODELS = _build_models(user.get("cloud_models", []))
+        CATALOG_META = {
+            "version":          user.get("version", 1),
+            "updated_at":       user.get("updated_at", ""),
+            "stale_after_days": user.get("stale_after_days", 90),
+            "source":           "user_cache",
+        }
+    else:
+        CLOUD_MODELS = _build_models(bundled.get("cloud_models", []))
+        CATALOG_META = {
+            "version":          bundled.get("version", 1),
+            "updated_at":       bundled.get("updated_at", ""),
+            "stale_after_days": bundled.get("stale_after_days", 90),
+            "source":           "bundled",
+        }
+
+    CLOUD_MODELS_BY_PROVIDER = {}
+    for _m in CLOUD_MODELS:
+        CLOUD_MODELS_BY_PROVIDER.setdefault(_m.provider, []).append(_m)
+
+
+# Populate on import.
+_load_catalog()
+
+
+def reload_catalog() -> None:
+    """Public hook so the refresh-catalog verb can re-import after
+    writing the user cache without restarting the process."""
+    _load_catalog()
+
+
+def catalog_age_days() -> int | None:
+    """Days since the active catalog was last updated; None when the
+    `updated_at` field is missing or unparseable."""
+    raw = (CATALOG_META.get("updated_at") or "").strip()
+    if not raw:
+        return None
+    from datetime import date, datetime
+    try:
+        d = datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        try:
+            d = datetime.fromisoformat(raw).date()
+        except Exception:
+            return None
+    return (date.today() - d).days
+
+
+def catalog_is_stale() -> bool:
+    """True when the catalog is older than `stale_after_days`."""
+    age = catalog_age_days()
+    if age is None:
+        return False
+    return age > int(CATALOG_META.get("stale_after_days", 90))
+
+
+# ── Live refresh from provider APIs ──────────────────────────────────────────
+
+def refresh_from_openrouter(*, timeout: float = 15.0
+                              ) -> tuple[list[dict], str]:
+    """Fetch the live OpenRouter model list + pricing.
+
+    Returns ``(rows, message)``: ``rows`` is the list-of-dicts shaped
+    like our JSON catalog (provider/slug/roles/quality/cost_in/cost_out
+    /license/note). ``message`` is a human-readable summary of what was
+    fetched (counts, source).
+
+    OpenRouter is the highest-volume churn source — they add models
+    weekly. The endpoint is open (no API key needed for the model
+    list). Other providers don't expose comparable JSON; those rows
+    must come from manual PRs against the bundled catalog.
+    """
+    import urllib.request as _ur
+    req = _ur.Request("https://openrouter.ai/api/v1/models",
+                       headers={"User-Agent": "org-llm/refresh-catalog"})
+    with _ur.urlopen(req, timeout=timeout) as resp:
+        payload = _json.loads(resp.read().decode("utf-8"))
+    raw_models = payload.get("data") or []
+    rows: list[dict] = []
+    for m in raw_models:
+        slug = m.get("id") or m.get("slug")
+        if not slug:
+            continue
+        # OpenRouter pricing is per-token strings ("0.0000003" = $0.30/Mtok).
+        pricing = m.get("pricing") or {}
+        try:
+            cost_in  = float(pricing.get("prompt", 0)) * 1_000_000
+            cost_out = float(pricing.get("completion", 0)) * 1_000_000
+        except (TypeError, ValueError):
+            cost_in = cost_out = 0.0
+        # Heuristic role mapping. Names with "coder"/"code" → code role;
+        # "r1"/"reasoning" → reason; default → chat+instruct.
+        s = slug.lower()
+        roles = ["chat", "instruct"]
+        if "coder" in s or "code" in s:
+            roles = ["code"]
+        elif "r1" in s or "reasoning" in s:
+            roles = ["reason"]
+            if "distill" in s:
+                roles.append("chat")
+        elif "flash" in s or "8b" in s or "instant" in s or "mini" in s:
+            roles = ["chat", "instruct", "fast"]
+        # Heuristic quality tier from parameter count or model line. We
+        # only set quality when we don't already have a curated score
+        # — the merge step preserves curated quality.
+        if "70b" in s or "72b" in s or "120b" in s:
+            quality = 190
+        elif "32b" in s or "30b" in s:
+            quality = 175
+        elif "13b" in s or "14b" in s:
+            quality = 150
+        elif "8b" in s or "9b" in s or "12b" in s:
+            quality = 125
+        else:
+            quality = 110
+        # Premium closed APIs go higher. Still heuristic.
+        if "claude" in s or "gpt-5" in s or "gpt-4.5" in s:
+            quality = max(quality, 240)
+        license_ = (m.get("context_length") and "see openrouter") or ""
+        # Better: pull from model.architecture or top_provider.
+        top = (m.get("top_provider") or {}).get("name") or ""
+        note = m.get("description") or top or ""
+        if len(note) > 80:
+            note = note[:77] + "…"
+        rows.append({
+            "provider": "openrouter",
+            "slug":     slug,
+            "roles":    roles,
+            "quality":  quality,
+            "cost_in":  round(cost_in, 4),
+            "cost_out": round(cost_out, 4),
+            "license":  license_,
+            "note":     note,
+        })
+    msg = (f"Fetched {len(rows)} model(s) from OpenRouter "
+            f"(/api/v1/models).")
+    return rows, msg
+
+
+def merge_refresh(new_rows: list[dict], *,
+                    preserve_curated_quality: bool = True
+                   ) -> tuple[list[dict], dict]:
+    """Merge live-refreshed rows into the active catalog.
+
+    Strategy:
+      • For matching slugs: update cost_in / cost_out / license / note
+        from the refresh; KEEP curated quality + roles (they're our
+        editorial calls, the live API can't reproduce them).
+      • For new slugs not in the local catalog: add them with the
+        refresh's heuristic quality.
+      • For local rows the refresh didn't return: keep them (paid
+        models occasionally drop off the API but still work).
+
+    Returns (merged_rows, diff_summary). The diff summary has counts
+    of added / changed / unchanged so the caller can tell the user.
+    """
+    by_slug = {m.slug: m for m in CLOUD_MODELS}
+    merged: list[dict] = []
+    added:    list[str] = []
+    changed:  list[str] = []
+    price_changes: list[dict] = []
+    for r in new_rows:
+        slug = r["slug"]
+        if slug in by_slug:
+            old = by_slug[slug]
+            new_row = {
+                "provider": old.provider,
+                "slug":     slug,
+                "roles":    list(old.roles),
+                "quality":  old.quality if preserve_curated_quality
+                              else r.get("quality", old.quality),
+                "cost_in":  r.get("cost_in",  old.cost_in),
+                "cost_out": r.get("cost_out", old.cost_out),
+                "license":  r.get("license") or old.license,
+                "note":     r.get("note")    or old.note,
+            }
+            merged.append(new_row)
+            if (abs(new_row["cost_out"] - old.cost_out) > 0.001
+                    or abs(new_row["cost_in"] - old.cost_in) > 0.001):
+                changed.append(slug)
+                price_changes.append({
+                    "slug": slug,
+                    "old_cost_out": old.cost_out,
+                    "new_cost_out": new_row["cost_out"],
+                    "old_cost_in":  old.cost_in,
+                    "new_cost_in":  new_row["cost_in"],
+                })
+        else:
+            merged.append(r)
+            added.append(slug)
+    # Carry forward local-only rows (paid Anthropic/OpenAI models, Groq,
+    # HuggingFace — refresh only covers OpenRouter today).
+    seen = {m["slug"] for m in merged}
+    carried_over = 0
+    for m in CLOUD_MODELS:
+        if m.slug not in seen:
+            merged.append({
+                "provider": m.provider,
+                "slug":     m.slug,
+                "roles":    list(m.roles),
+                "quality":  m.quality,
+                "cost_in":  m.cost_in,
+                "cost_out": m.cost_out,
+                "license":  m.license,
+                "note":     m.note,
+            })
+            carried_over += 1
+    summary = {
+        "added":           added,
+        "changed":         changed,
+        "carried_over":    carried_over,
+        "total":           len(merged),
+        "price_changes":   price_changes,
+    }
+    return merged, summary
+
+
+def write_user_catalog(rows: list[dict], *,
+                          providers_meta: list[dict] | None = None,
+                          stale_after_days: int | None = None) -> _Path:
+    """Persist refreshed rows to the user cache. Stamps `updated_at`
+    with today's date."""
+    import datetime as _dt
+    p = _user_catalog_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "updated_at": _dt.date.today().isoformat(),
+        "stale_after_days": (stale_after_days
+                              if stale_after_days is not None
+                              else CATALOG_META.get("stale_after_days", 90)),
+        "doc": ("Auto-generated by `org-llm cloud --refresh-catalog`. "
+                 "Edit by hand at your own risk; rerun the refresh to "
+                 "restore from live provider APIs."),
+        "cloud_models": rows,
+    }
+    if providers_meta is not None:
+        payload["providers"] = providers_meta
+    p.write_text(_json.dumps(payload, indent=2))
+    return p
+
+
+# ── Provider lifecycle: liveness probes + remote canonical roster ────────────
+
+def _bundled_provider_meta() -> list[dict]:
+    """Return the providers list as recorded in the active catalog
+    JSON (not the PROVIDERS NamedTuple list, which is the in-memory
+    source of truth for runtime data)."""
+    user    = _read_json_safe(_user_catalog_path()) or {}
+    bundled = _read_json_safe(_bundled_catalog_path()) or {}
+    if isinstance(user.get("providers"), list):
+        return user["providers"]
+    return list(bundled.get("providers", []))
+
+
+def probe_provider_liveness(*, timeout: float = 5.0) -> list[dict]:
+    """HEAD-probe every PROVIDER's signup_url. Returns one dict per
+    provider with keys: slug, name, signup_url, status_code, alive,
+    error.
+
+    Cheap (parallelisable) but conservative — many providers serve a
+    redirect chain or block HEAD. We treat any 2xx OR 3xx as alive,
+    and a connection error as dead.
+    """
+    import urllib.request as _ur
+    import urllib.error  as _ue
+    import socket as _sock
+    out: list[dict] = []
+    for p in PROVIDERS:
+        url = p.signup_url or p.docs_url or p.console_url
+        record = {
+            "slug": p.slug, "name": p.name,
+            "signup_url": url,
+            "status_code": None, "alive": False, "error": "",
+        }
+        try:
+            req = _ur.Request(url, method="HEAD",
+                                headers={"User-Agent":
+                                          "org-llm/refresh-catalog"})
+            with _ur.urlopen(req, timeout=timeout) as resp:
+                code = resp.getcode()
+                record["status_code"] = code
+                record["alive"] = (200 <= code < 400)
+        except _ue.HTTPError as e:
+            # Some providers reject HEAD with 4xx/5xx but the site is
+            # very much alive. 405 (method not allowed) and 403 (anti-
+            # bot) count as alive; 404 on the signup page is suspicious.
+            record["status_code"] = e.code
+            record["alive"] = e.code in (403, 405)
+            if not record["alive"]:
+                record["error"] = f"HTTP {e.code}"
+        except (_ue.URLError, _sock.timeout, OSError) as e:
+            record["error"] = str(e)[:80]
+            record["alive"] = False
+        out.append(record)
+    return out
+
+
+def fetch_remote_catalog(remote_url: str = "",
+                            *, timeout: float = 10.0
+                           ) -> dict | None:
+    """Pull the canonical catalog from this repo's main branch.
+
+    Used by `--refresh-catalog` to discover newly-added providers
+    without requiring a release of org-llm. Returns the parsed JSON
+    or None on failure (network down, unreachable, malformed)."""
+    import urllib.request as _ur
+    if not remote_url:
+        bundled = _read_json_safe(_bundled_catalog_path()) or {}
+        remote_url = bundled.get("remote_url", "")
+    if not remote_url:
+        return None
+    try:
+        req = _ur.Request(remote_url,
+                           headers={"User-Agent":
+                                      "org-llm/refresh-catalog"})
+        with _ur.urlopen(req, timeout=timeout) as resp:
+            return _json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def diff_provider_rosters(local: list[dict],
+                             remote: list[dict]) -> dict:
+    """Compare two providers lists. Returns added/removed/changed."""
+    by_local  = {p.get("slug"): p for p in local  if p.get("slug")}
+    by_remote = {p.get("slug"): p for p in remote if p.get("slug")}
+    added   = sorted(set(by_remote) - set(by_local))
+    removed = sorted(set(by_local)  - set(by_remote))
+    changed = []
+    for slug, lr in by_local.items():
+        rr = by_remote.get(slug)
+        if not rr:
+            continue
+        if lr.get("status") != rr.get("status"):
+            changed.append({"slug": slug,
+                              "field": "status",
+                              "from": lr.get("status"),
+                              "to":   rr.get("status")})
+    return {"added": added, "removed": removed, "changed": changed}
 
 
 def cloud_models_for_provider(provider_slug: str) -> list[CloudModelInfo]:
