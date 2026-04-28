@@ -16603,9 +16603,24 @@ def main():
                 "[dim]to see valid flags, or[/dim] "
                 "[bold]org-llm <verb> --help[/bold] [dim]for one verb.[/dim]")
     elif "no such command" in err_lower:
-        _on("[dim]Run[/dim] [bold]org-llm --help[/bold] "
-            "[dim]to see all subcommands, or[/dim] "
-            "[bold]org-llm splash[/bold] [dim]for a quick menu.[/dim]")
+        # If argv[0] is a known top-level verb but argv[1] is the
+        # unknown one, the user typed a bad SUBcommand — point them at
+        # the verb's own help, not the global help. Otherwise fall
+        # back to the global hint.
+        verb = (sys.argv[1] if len(sys.argv) > 1
+                  and not sys.argv[1].startswith("-") else "")
+        try:
+            known_top = set(typer.main.get_command(app).commands.keys())
+        except Exception:
+            known_top = set()
+        if verb in known_top and len(sys.argv) > 2:
+            _on(f"[dim]Run[/dim] [bold]org-llm {verb} --help[/bold] "
+                f"[dim]to see[/dim] [lcars2]{verb}[/lcars2] "
+                f"[dim]subcommands.[/dim]")
+        else:
+            _on("[dim]Run[/dim] [bold]org-llm --help[/bold] "
+                "[dim]to see all subcommands, or[/dim] "
+                "[bold]org-llm splash[/bold] [dim]for a quick menu.[/dim]")
     elif ("missing argument" in err_lower
             or "missing option" in err_lower
             or "missing parameter" in err_lower):
