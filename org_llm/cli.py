@@ -11997,6 +11997,15 @@ def pi(
         elif pi_bin and reinstall:
             on_screen(f"[dim]Pi present:[/dim] {pi_bin}  "
                       f"[dim](re-copying bridge…)[/dim]")
+        elif reinstall and not pi_bin:
+            # --reinstall is documented as "force re-copy of the bundled
+            # bridge" — silently falling into the Pi installer here would
+            # surprise the user (and the installer fails opaquely if Node
+            # is missing). Direct them to the right verb.
+            red_alert("--reinstall expects Pi to already be installed.")
+            on_screen("  Run [bold]org-llm pi --install[/bold] first to "
+                       "install Pi + the bridge.")
+            raise typer.Exit(1)
         else:
             hail("Installing Pi…")
             ok = (_install_pi_via_npm() if use_npm else _install_pi_via_curl())
