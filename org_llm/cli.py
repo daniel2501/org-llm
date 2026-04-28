@@ -11665,6 +11665,27 @@ def cloud(
                 refresh_catalog, propose_update]):
         status = True
 
+    # ── catalog-staleness warning ─────────────────────────────────────────────
+    # Surface a one-line yellow nudge above the headline when the active
+    # catalog is older than `stale_after_days` (default 90). Only fires on
+    # the verbs that actually consume the catalog data (providers / cost /
+    # tune / status / upgrade); --refresh-catalog itself skips it.
+    def _staleness_banner() -> None:
+        try:
+            from . import cloud as _cloud
+            if _cloud.catalog_is_stale():
+                age = _cloud.catalog_age_days() or 0
+                src = _cloud.CATALOG_META.get("source", "bundled")
+                on_screen(f"[yellow]Catalog is {age} days old[/yellow] "
+                           f"[dim]({src}; refresh with[/dim] "
+                           f"[bold]org-llm cloud --refresh-catalog[/bold]"
+                           f"[dim]).[/dim]")
+        except Exception:
+            pass
+
+    if (providers or cost or tune or upgrade or status):
+        _staleness_banner()
+
     # ── refresh catalog from live provider APIs ──────────────────────────────
     if refresh_catalog:
         from . import cloud as _cloud
