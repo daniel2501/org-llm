@@ -508,6 +508,43 @@ def _proactive_doctor_off() -> bool:
             .strip().lower() == "off")
 
 
+# Env-var allowlist that propagates from the launching shell into the
+# MCP-server subprocess started by `org-llm launch` / `org-llm claude`.
+# Keep it tight: the harnesses (opencode / Claude Code) sandbox the MCP
+# entry's environment, so we explicitly opt in only the org-llm knobs
+# that affect the server's behaviour. Other env vars (PATH, HOME, etc.)
+# are inherited via the OS-level subprocess machinery.
+_MCP_INHERIT_ENV_VARS = (
+    "ORG_LLM_PROACTIVE_DOCTOR",   # umbrella suppression flag
+    "ORG_LLM_LAG_DETECTOR",       # granular lag-detector toggle
+    "ORG_LLM_OLLAMA_URL",         # remote Ollama overrides
+    "ORG_LLM_FAST_MODEL",         # role overrides via env
+    "ORG_LLM_CHAT_MODEL",
+    "ORG_LLM_REASON_MODEL",
+    "ORG_LLM_CODE_MODEL",
+    "ORG_LLM_INSTRUCT_MODEL",
+    "ORG_LLM_TEXT_MODEL",
+    "ORG_LLM_THEME",              # dark / light
+    "ORG_LLM_LCARS_PALETTE",      # palette pick
+    "ORG_LLM_THEME_CROSS_REFERENCES_LEVEL",
+    "ORG_LLM_ORG_DIR",            # vault override
+)
+
+
+def _mcp_inherit_env(base: dict) -> dict:
+    """Merge `base` (caller-provided required keys like ORG_LLM_DB)
+    with any allow-listed env vars present in the user's current
+    shell. Used by `launch` (opencode) and `claude` so flags like
+    --suppress-proactive-doctor propagate into the MCP subprocess
+    instead of being silently dropped at the harness boundary."""
+    merged = dict(base)
+    for var in _MCP_INHERIT_ENV_VARS:
+        val = os.environ.get(var)
+        if val is not None:
+            merged[var] = val
+    return merged
+
+
 def _auto_init_db_if_needed(silent: bool = False) -> bool:
     """Initialize the SQLite DB if it doesn't exist yet. Idempotent.
 
@@ -11201,7 +11238,7 @@ def launch(
             "org-llm": {
                 "type":        "local",
                 "command":     [mcp_cmd_bin, "mcp"],
-                "environment": {"ORG_LLM_DB": str(DB_PATH)},
+                "environment": _mcp_inherit_env({"ORG_LLM_DB": str(DB_PATH)}),
                 "enabled":     True,
             }
         },
@@ -11426,7 +11463,7 @@ def claude_frontend(
     mcp_entry = {
         "command": mcp_cmd_bin,
         "args": ["mcp"],
-        "env": {"ORG_LLM_DB": str(DB_PATH)},
+        "env": _mcp_inherit_env({"ORG_LLM_DB": str(DB_PATH)}),
     }
     existing_settings.setdefault("mcpServers", {})["org-llm"] = mcp_entry
 
