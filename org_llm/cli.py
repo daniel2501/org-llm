@@ -14240,6 +14240,19 @@ def personalize(
                                        use_llm=not no_llm,
                                        max_themes=max_themes)
 
+    # Surface the LLM-synthesis failure mode (if any) BEFORE rendering
+    # the proposals — even when the deterministic fallback rescued
+    # the run, the user wants to know why "fallback-tag" everywhere.
+    if not no_llm:
+        synth_err = getattr(_p._llm_synthesize_themes, "last_error", "")
+        if synth_err:
+            on_screen(f"[yellow]LLM theme synthesis fell back:[/yellow] "
+                      f"{synth_err}")
+            on_screen(f"[dim]Using deterministic tag-based proposals instead. "
+                      f"Try a bigger model:[/dim]")
+            on_screen(f"  [bold]ORG_LLM_CHAT_MODEL=qwen2.5-coder "
+                      f"org-llm personalize[/bold]")
+
     if not proposals:
         on_screen("No themes detected yet. Index more notes first:")
         on_screen("  [bold]org-llm index[/bold]   then re-run [bold]org-llm personalize[/bold]")

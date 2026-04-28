@@ -284,13 +284,13 @@ Propose up to {max_themes} evocative themes. JSON only."""
         from .ui import thinking
     except Exception:
         thinking = None
-    result: dict = {"resp": ""}
+    result: dict = {"resp": "", "error": ""}
     def _run():
         try:
             result["resp"] = chat(user_prompt, model=model, base_url=base_url,
                                    system=_THEME_SYNTHESIS_SYSTEM) or ""
-        except Exception:
-            pass
+        except Exception as e:
+            result["error"] = f"{type(e).__name__}: {e}"
     if thinking is not None:
         with thinking("Synthesising themes", model=model):
             t = threading.Thread(target=_run, daemon=True)
@@ -298,22 +298,41 @@ Propose up to {max_themes} evocative themes. JSON only."""
     else:
         t = threading.Thread(target=_run, daemon=True)
         t.start(); t.join(timeout=90.0)
+    # Stash the failure mode on the function itself so the caller can
+    # surface it to the user. Same pattern as messages_from_vibe.
     if t.is_alive():
+        _llm_synthesize_themes.last_error = "timed out after 90s"
+        return []
+    if result["error"]:
+        _llm_synthesize_themes.last_error = result["error"]
+        return []
+    if not result["resp"]:
+        _llm_synthesize_themes.last_error = "model returned empty response"
         return []
     cleaned = _strip_fences(result["resp"])
     try:
         plan = json.loads(cleaned)
-    except Exception:
+    except Exception as e:
+        _llm_synthesize_themes.last_error = (
+            f"JSON parse failed: {type(e).__name__}: {e}. "
+            f"Raw response (first 200 chars): {cleaned[:200]!r}"
+        )
         return []
 
+    raw_themes = (plan.get("themes") or [])
+    rejected: list[str] = []
     proposals: list[ThemeProposal] = []
-    for raw in (plan.get("themes") or [])[:max_themes]:
-        name = _normalize(str(raw.get("name", "")))
+    for raw in raw_themes[:max_themes]:
+        name_orig = str(raw.get("name", ""))
+        name = _normalize(name_orig)
         if not name or len(name) > 24:
+            rejected.append(f"{name_orig!r} (length)")
             continue
         if name in _BORING_TAGS:
+            rejected.append(f"{name!r} (boring)")
             continue
         if _looks_like_identifier(name):
+            rejected.append(f"{name!r} (identifier-shaped)")
             continue
         reason  = (raw.get("reason")  or "")[:200]
         imagery = (raw.get("imagery") or "")[:200]
@@ -327,6 +346,15 @@ Propose up to {max_themes} evocative themes. JSON only."""
             default_level=2,
             reason=reason,
         ))
+    # If the LLM produced themes but ALL got filtered, surface that —
+    # the user otherwise sees fallback-tag with no clue why.
+    if raw_themes and not proposals:
+        _llm_synthesize_themes.last_error = (
+            f"LLM produced {len(raw_themes)} themes but all rejected: "
+            + "; ".join(rejected[:5])
+        )
+    elif proposals:
+        _llm_synthesize_themes.last_error = ""
     return proposals
 
 
