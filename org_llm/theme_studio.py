@@ -688,10 +688,14 @@ def regenerate(*, model: str, base_url: str,
             "accepted": len(variants),
             "variants": variants,
         }
+        # Persist after each surface so partial progress survives
+        # cancellation / kill / crash. Earlier behaviour only flushed
+        # at the end of the whole loop, which lost everything if the
+        # user Ctrl-C'd a 10-minute run.
+        _save_cache(cache)
         if progress:
             progress(surface.key,
                       f"{len(variants)} accepted")
-    _save_cache(cache)
     return report
 
 

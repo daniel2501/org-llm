@@ -364,10 +364,20 @@ def trans_stripe(width: int = 48) -> Text:
 # ── progress context managers ─────────────────────────────────────────────────
 
 @contextmanager
-def warp(msg: str = "Processing", transient: bool = True):
-    """Star Trek spinner with LCARS styling."""
+def warp(msg: str = "Processing", transient: bool = True,
+         spinner: tuple[str, str] | None = None):
+    """General-purpose I/O spinner — themed by the user's active knobs.
+
+    Distinct from `thinking()` (LLM calls), but goes through the same
+    knob-driven catalogue so trek/commie/queer or user-defined dials
+    influence both. The spinner animation + colour adapt to whatever
+    knobs are currently dialled up; default is the Doom-aligned smooth
+    purple `dots11` when nothing is active. Pass an explicit
+    `spinner=(name, style)` to override.
+    """
+    name, style = spinner or _pick_thinking_spinner()
     with Progress(
-        SpinnerColumn(spinner_name="arc", style="lcars1"),
+        SpinnerColumn(spinner_name=name, style=style),
         TextColumn("[lcars2]{task.description}[/lcars2]"),
         transient=transient,
         console=console,
@@ -624,8 +634,9 @@ def heartbeat(msg: str, *, stall_secs: float = 60.0,
     stop_evt  = threading.Event()
     warned    = [False]
 
+    name, style = _pick_thinking_spinner()
     with Progress(
-        SpinnerColumn(spinner_name="arc", style="trans.blue"),
+        SpinnerColumn(spinner_name=name, style=style),
         TextColumn("[trans.pink]{task.description}[/trans.pink]"),
         console=console,
         transient=True,
