@@ -2863,15 +2863,14 @@ def _suggest_code_ask(session, roots: list[Path]) -> str:
     return f"Try it: [bold]org-llm ask{cloud_flag} '{question}'[/bold]"
 
 
-@app.command(name="code-index", rich_help_panel="Indexing")
-def code_index(
-    paths: Annotated[list[str], typer.Argument(
-        help="Code directories to index. Defaults to the `code_dirs` config row (~/repos).")] = None,
-    force: Annotated[bool, typer.Option("--force", "-f", help="Re-index unchanged files")] = False,
-    embed_after: Annotated[bool, typer.Option("--embed/--no-embed", "-e/-E",
-                  help="Run `embed` after indexing so the new code is searchable immediately")] = True,
+def _code_index_impl(
+    paths: list[str] | None = None,
+    force: bool = False,
+    embed_after: bool = True,
 ):
-    """Index source-code repos so `ask` can answer across notes AND code.
+    """Implementation of `org-llm code index` (and the back-compat
+    `org-llm code-index` top-level alias). Extracted so both call
+    sites share one body.
 
     Walks each directory, picking up files with extensions known to be
     source-code-shaped (.py .el .rs .ts .md .org .yaml …). Skips obvious
@@ -5829,38 +5828,21 @@ def _power_boost_chat_model() -> tuple[str, str]:
             f"(e.g. llama3.2:1b) or configure cloud")
 
 
-@app.command(rich_help_panel="Maintenance")
-def doctor(
-    diagnose: Annotated[bool, typer.Option("--diagnose/--no-diagnose", "-d",
-              help="LLM explains failures and suggests fixes (default: on when issues found)")] = True,
-    fix:      Annotated[bool, typer.Option("--fix",          "-f",
-              help="Auto-apply safe fixes (init DB, start Ollama)")] = False,
-    install_tool: Annotated[str, typer.Option("--install",   "-i",
-              help="Install + theme a FOSS CLI tool by name (e.g. bat, eza). Use 'all' to install everything in the registry.")] = "",
-    list_tools:   Annotated[bool, typer.Option("--list-tools","-l",
-              help="List all installable FOSS tools")] = False,
-    walkthrough:  Annotated[bool, typer.Option("--walkthrough", "-w",
-              help="LLM-driven self-test: generate a tour, run each command, assess output, suggest fixes")] = False,
-    report_to:    Annotated[str,  typer.Option("--report-to",   "-r",
-              help="Append a structured report of this run to PATH (an .org file)")] = "",
-    benchmark_fixers: Annotated[bool, typer.Option("--benchmark-fixers", "-B",
-              help="Score multiple cloud LLMs on canonical fix scenarios; persist the winner as fixer_model")] = False,
-    apply_fixer:  Annotated[bool, typer.Option("--apply-fixer", "-A",
-              help="With --benchmark-fixers, write the top-scoring model to config:fixer_model")] = False,
-    power_boost:  Annotated[bool, typer.Option("--power-boost", "-P",
-              help="Diagnose chat_model vs available RAM; suggest (or with --apply, switch to) a model that fits or cloud routing")] = False,
-    apply:        Annotated[bool, typer.Option("--apply", "-a",
-              help="With --power-boost, actually write the suggested change to config")] = False,
+def _doctor_impl(
+    diagnose: bool = True,
+    fix: bool = False,
+    install_tool: str = "",
+    list_tools: bool = False,
+    walkthrough: bool = False,
+    report_to: str = "",
+    benchmark_fixers: bool = False,
+    apply_fixer: bool = False,
+    power_boost: bool = False,
+    apply: bool = False,
 ):
-    """Deep health check, LLM tuning advisor, and FOSS tool installer.
-
-    --walkthrough turns doctor into a self-tester: the cloud LLM picks a
-    set of read-only commands to run, watches the output, judges each
-    against expectations, and ends with a punch-list of issues + fixes.
-
-    --report-to writes a structured org-mode log of the run to a file
-    (compatible with the dev log format in your vault).
-    """
+    """Implementation of `org-llm doctor` (and every subcommand under
+    it). Extracted so the subgroup callback + each subcommand share
+    one body — the actual decision tree below dispatches on flags."""
     if walkthrough:
         return _doctor_walkthrough(report_to=report_to)
     if benchmark_fixers:
@@ -6800,6 +6782,120 @@ def doctor(
                           "[bold]org-llm performance --benchmark[/bold] for tuning data.")
         except Exception:
             pass
+
+
+# ── `doctor` subgroup: walkthrough / fix / power-boost / diagnose / install ─
+#
+# Was one massive top-level command driven by ~10 mutually-exclusive
+# flags. The flags still work (callback exposes them all), and each
+# popular operation now also has a real subcommand for discoverability.
+# Tutor steps + Doom bindings can address the subverbs by name.
+doctor_app = typer.Typer(
+    help="Health checks, LLM-driven self-test, RAM/cloud routing advice, "
+         "and FOSS-tool installer.",
+    cls=PrefixGroup,
+    invoke_without_command=True,
+)
+app.add_typer(doctor_app, name="doctor", rich_help_panel="Maintenance")
+
+
+@doctor_app.callback(invoke_without_command=True)
+def _doctor_root(
+    ctx: typer.Context,
+    diagnose: Annotated[bool, typer.Option("--diagnose/--no-diagnose", "-d",
+              help="LLM explains failures and suggests fixes")] = True,
+    fix:      Annotated[bool, typer.Option("--fix", "-f",
+              help="Auto-apply safe fixes (init DB, start Ollama, …)")] = False,
+    install_tool: Annotated[str, typer.Option("--install", "-i",
+              help="Install + theme a FOSS CLI tool by name")] = "",
+    list_tools:   Annotated[bool, typer.Option("--list-tools","-l",
+              help="List all installable FOSS tools")] = False,
+    walkthrough:  Annotated[bool, typer.Option("--walkthrough", "-w",
+              help="LLM-driven self-test (legacy flag — prefer `doctor walkthrough`)")] = False,
+    report_to:    Annotated[str,  typer.Option("--report-to", "-r",
+              help="Append a structured org-mode report to PATH")] = "",
+    benchmark_fixers: Annotated[bool, typer.Option("--benchmark-fixers", "-B",
+              help="Score multiple cloud LLMs on canonical fix scenarios")] = False,
+    apply_fixer:  Annotated[bool, typer.Option("--apply-fixer", "-A")] = False,
+    power_boost:  Annotated[bool, typer.Option("--power-boost", "-P",
+              help="Probe RAM vs chat_model (legacy flag — prefer `doctor power-boost`)")] = False,
+    apply:        Annotated[bool, typer.Option("--apply", "-a",
+              help="With --power-boost, write the suggested change to config")] = False,
+):
+    """Doctor — health checks + LLM advisor + FOSS-tool installer.
+
+    Bare `org-llm doctor` runs the default check. The legacy mode flags
+    (--walkthrough, --power-boost, --fix, --install, --benchmark-fixers,
+    …) still work; each also has a proper subcommand under `doctor`.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    _doctor_impl(diagnose=diagnose, fix=fix, install_tool=install_tool,
+                  list_tools=list_tools, walkthrough=walkthrough,
+                  report_to=report_to, benchmark_fixers=benchmark_fixers,
+                  apply_fixer=apply_fixer, power_boost=power_boost,
+                  apply=apply)
+
+
+@doctor_app.command("walkthrough")
+def doctor_walkthrough_sub(
+    report_to: Annotated[str, typer.Option("--report-to", "-r",
+              help="Append a structured report to PATH (org file)")] = "",
+):
+    """LLM-driven self-test — generates a tour, runs each command,
+    judges output, ends with a punch-list of issues + fixes."""
+    _doctor_impl(walkthrough=True, report_to=report_to)
+
+
+@doctor_app.command("fix")
+def doctor_fix_sub():
+    """Auto-apply safe fixes (init DB, start Ollama, pull missing models, …)."""
+    _doctor_impl(fix=True)
+
+
+@doctor_app.command("power-boost")
+def doctor_power_boost_sub(
+    apply: Annotated[bool, typer.Option("--apply", "-a",
+              help="Write the suggested change to config")] = False,
+):
+    """Probe chat_model vs available RAM; suggest downsize / cloud route.
+    With --apply, write the recommended change to the config row."""
+    _doctor_impl(power_boost=True, apply=apply)
+
+
+@doctor_app.command("diagnose")
+def doctor_diagnose_sub():
+    """Run the LLM diagnose pass over the current health-check results."""
+    _doctor_impl(diagnose=True)
+
+
+@doctor_app.command("install")
+def doctor_install_sub(
+    tool: Annotated[str, typer.Argument(
+        help="FOSS CLI tool name (bat / eza / …) or 'all' for everything.")],
+):
+    """Install + theme a FOSS CLI tool. `doctor install all` installs
+    every tool in the registry."""
+    _doctor_impl(install_tool=tool)
+
+
+@doctor_app.command("list-tools")
+def doctor_list_tools_sub():
+    """List every FOSS tool the doctor can install + theme."""
+    _doctor_impl(list_tools=True)
+
+
+@doctor_app.command("benchmark-fixers")
+def doctor_benchmark_fixers_sub(
+    apply_fixer: Annotated[bool, typer.Option("--apply", "-a",
+              help="Persist the top-scoring model as fixer_model")] = False,
+    report_to:   Annotated[str, typer.Option("--report-to", "-r",
+              help="Append the benchmark report to PATH")] = "",
+):
+    """Score cloud LLMs on canonical fix scenarios; optionally persist
+    the winner as `fixer_model` in config."""
+    _doctor_impl(benchmark_fixers=True, apply_fixer=apply_fixer,
+                  report_to=report_to)
 
 
 # Step groupings for the welcome inventory display. Steps not listed
@@ -8403,25 +8499,13 @@ def _strip_code_fences(s: str, lang: str = "") -> str:
     return "\n".join(lines).strip()
 
 
-@app.command(rich_help_panel="Querying")
-def code(
-    task:     Annotated[str,  typer.Argument(help="What to generate")],
-    lang:     Annotated[str,  typer.Option("--lang", "-l",
-              help="Language: python | sh | elisp | sql | rust")] = "python",
-    model:    Annotated[str,  typer.Option("--model", "-m",
-              help="Override model")] = "",
-    context:  Annotated[bool, typer.Option("--context", "-c",
-              help="Retrieve relevant org notes as context")] = True,
-    output:   Annotated[str,  typer.Option("--output", "-o",
-              help="Write generated code to file")] = "",
-    cloud_:   Annotated[bool, typer.Option("--cloud", "-C",
-              help="Route the chat through the configured cloud backend instead of local Ollama")] = False,
+def _code_generate_impl(
+    task: str, lang: str = "python", model: str = "",
+    context: bool = True, output: str = "", cloud_: bool = False,
 ):
-    """Generate code for an org/roam task using the code model.
-
-    Pass --cloud to use the configured cloud provider (set up via
-    `org-llm cloud --quick-start <slug>`) when the local code_model is too
-    big for available RAM.
+    """Implementation of `org-llm code generate` (and the back-compat
+    bare `org-llm code TASK` callback). Extracted so both call sites
+    share one body.
     """
     from .llm import chat as local_chat, embed
     from .search import vector_search
@@ -8544,6 +8628,168 @@ def code(
         hail(f"Written to {output}")
 
     make_it_so()
+
+
+# ── `code` subgroup: index / generate / search ───────────────────────────────
+#
+# Was three top-level verbs (`code-index`, `code`, no separate search).
+# Now one subgroup with index/generate/search subcommands. The bare
+# back-compat form `org-llm code 'task'` still routes to generate via
+# the subgroup callback, so existing scripts + Doom bindings keep working.
+code_app = typer.Typer(
+    help="Code corpus — index your repos, search across them, generate code.",
+    cls=PrefixGroup,
+    invoke_without_command=True,
+)
+app.add_typer(code_app, name="code", rich_help_panel="Querying")
+
+
+@code_app.callback(invoke_without_command=True)
+def _code_root(ctx: typer.Context):
+    """Code corpus — index your repos, search across them, generate code.
+
+    Bare `org-llm code` shows this help. To generate, use one of:
+        org-llm code generate 'a 5-line python sleep'
+        org-llm code-gen      'a 5-line python sleep'   (top-level alias)
+
+    The bare back-compat form `org-llm code 'task'` doesn't work
+    inside a subgroup (Typer would parse the task string as a
+    subcommand name); use `code generate` or the `code-gen` alias.
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    # No subcommand → show subgroup help
+    click_cmd = typer.main.get_command(code_app)
+    try:
+        click_cmd.main(args=["--help"], prog_name="org-llm code",
+                        standalone_mode=False)
+    except SystemExit:
+        pass
+
+
+@code_app.command("generate")
+def code_generate(
+    task:    Annotated[str,  typer.Argument(help="What to generate")],
+    lang:    Annotated[str,  typer.Option("--lang", "-l",
+              help="Language: python | sh | elisp | sql | rust")] = "python",
+    model:   Annotated[str,  typer.Option("--model", "-m",
+              help="Override model")] = "",
+    context: Annotated[bool, typer.Option("--context", "-c",
+              help="Retrieve relevant org notes as context")] = True,
+    output:  Annotated[str,  typer.Option("--output", "-o",
+              help="Write generated code to file")] = "",
+    cloud_:  Annotated[bool, typer.Option("--cloud", "-C",
+              help="Route through configured cloud backend")] = False,
+):
+    """Generate code for an org/roam task using the code model."""
+    _code_generate_impl(task=task, lang=lang, model=model,
+                          context=context, output=output, cloud_=cloud_)
+
+
+@code_app.command("index")
+def code_index(
+    paths: Annotated[list[str], typer.Argument(
+        help="Code directories to index. Defaults to the `code_dirs` "
+             "config row (~/repos).")] = None,
+    force: Annotated[bool, typer.Option("--force", "-f",
+              help="Re-index unchanged files")] = False,
+    embed_after: Annotated[bool, typer.Option("--embed/--no-embed", "-e/-E",
+              help="Run `embed` after indexing so the new code is "
+                   "searchable immediately")] = True,
+):
+    """Index source-code repos so `ask` can answer across notes AND code."""
+    _code_index_impl(paths=paths, force=force, embed_after=embed_after)
+
+
+@code_app.command("search")
+def code_search(
+    query: Annotated[str, typer.Argument(help="What to search for in your code corpus")],
+    lang:  Annotated[str, typer.Option("--lang", "-l",
+              help="Filter by code language tag (python | el | rs | …)")] = "",
+    limit: Annotated[int, typer.Option("--limit", "-n",
+              help="Max results to display")] = 10,
+):
+    """Semantic search scoped to the code corpus only.
+
+    Uses the same vector index as the regular `search` command but
+    post-filters to nodes tagged `code` (and optionally `code:<lang>`).
+    For everything-search across notes + code, use `org-llm search`.
+    """
+    from .llm import embed
+    from .search import vector_search
+    from rich.table import Table
+
+    engine = _engine()
+    with get_session(engine) as session:
+        url       = _ollama_url(session)
+        embed_mdl = _cfg(session, "embed_model") or "nomic-embed-text"
+        with warp(f"Searching code corpus for {query!r}"):
+            qvec = embed(query, model=embed_mdl, base_url=url)
+            # Over-fetch then post-filter on tags (vector_search has no
+            # tag-filter parameter; over-fetching keeps ranking honest).
+            raw = vector_search(session, qvec, limit=max(limit * 4, 40),
+                                  query_text=query)
+        wanted = {"code"}
+        if lang:
+            wanted.add(f"code:{lang}")
+        rows = []
+        for r in raw:
+            tag_set = set((r.tags or "").split())
+            if wanted.issubset(tag_set if not lang else
+                                {t for t in tag_set if t in wanted}):
+                rows.append(r)
+            if len(rows) >= limit:
+                break
+
+    if not rows:
+        on_screen(f"[dim]No code corpus hits for {query!r}.[/dim]")
+        on_screen("[dim]Index first with[/dim] [bold]org-llm code index[/bold]"
+                  "[dim] (and ensure `embed` has run).[/dim]")
+        return
+
+    tbl = Table(box=None, pad_edge=False, show_header=True)
+    tbl.add_column("Score", style="lcars3", width=6, justify="right")
+    tbl.add_column("Title", style="lcars2")
+    tbl.add_column("Tags",  style="dim")
+    tbl.add_column("File",  style="dim")
+    for r in rows:
+        tbl.add_row(f"{getattr(r, 'distance', 0):.3f}",
+                     r.title or "(untitled)",
+                     r.tags or "",
+                     getattr(r, "file_path", "") or "")
+    console.print(tbl)
+
+
+# Back-compat: `org-llm code-index <paths>` keeps working as a top-level
+# verb so existing scripts + Doom keybindings + tutor steps don't break.
+@app.command(name="code-index", hidden=True, rich_help_panel="Indexing")
+def code_index_legacy_alias(
+    paths: Annotated[list[str], typer.Argument(
+        help="Code directories to index")] = None,
+    force: Annotated[bool, typer.Option("--force", "-f")] = False,
+    embed_after: Annotated[bool, typer.Option(
+        "--embed/--no-embed", "-e/-E")] = True,
+):
+    """Alias for `org-llm code index` — kept for back-compat."""
+    _code_index_impl(paths=paths, force=force, embed_after=embed_after)
+
+
+# Back-compat: the bare `org-llm code TASK` form can't survive the
+# subgroup conversion (Typer parses TASK as a subcommand). Surface
+# the same functionality at the top level under a different name so
+# scripts that need the one-shot form keep working.
+@app.command(name="code-gen", hidden=True, rich_help_panel="Querying")
+def code_generate_legacy_alias(
+    task:    Annotated[str,  typer.Argument(help="What to generate")],
+    lang:    Annotated[str,  typer.Option("--lang", "-l")] = "python",
+    model:   Annotated[str,  typer.Option("--model", "-m")] = "",
+    context: Annotated[bool, typer.Option("--context/--no-context", "-c")] = True,
+    output:  Annotated[str,  typer.Option("--output", "-o")] = "",
+    cloud_:  Annotated[bool, typer.Option("--cloud", "-C")] = False,
+):
+    """Alias for `org-llm code generate` — kept for back-compat."""
+    _code_generate_impl(task=task, lang=lang, model=model,
+                          context=context, output=output, cloud_=cloud_)
 
 
 # ── emacs config review ──────────────────────────────────────────────────────

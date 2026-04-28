@@ -220,7 +220,7 @@ candidates.
 | `org-llm init` | Create the SQLite DB and seed default config |
 | `org-llm index` | Parse all `.org` files into the database (incremental by mtime) |
 | `org-llm embed` | Generate embeddings for unembedded nodes (`embed_model`) |
-| `org-llm code-index [PATHS]` | Index `~/repos` (or any tree) so `ask` answers across notes + code |
+| `org-llm code index [PATHS]` · `code search Q` · `code generate T` | Code corpus subgroup — index, search, generate. Top-level aliases `code-index` + `code-gen` for back-compat. |
 | `org-llm discover [DIRS]` | Probe filesystem for org/repo/dotfiles/Emacs roots; powers code-index auto-heal |
 | `org-llm search "query"` | Semantic or keyword search (`-k` for keyword) |
 | `org-llm ask "q"` | RAG Q&A; auto-detects time windows, path hints, and tag references |
@@ -477,24 +477,37 @@ the LLM actually saw:
 
 ## Code analysis (cross-corpus)
 
-`org-llm code-index` walks `~/repos` (or any tree) and indexes source
-files into the same DB so `ask` can answer about notes AND code in one
-query. Skips `.git` / `node_modules` / `.venv` / `target` / `dist` etc.;
-truncates per-file body at 24 KB; tags every code node `code:<lang>`.
+The `code` subgroup gives you three verbs in one family — index your
+repos, search across them, and generate code grounded in your vault.
 
 ```sh
-org-llm code-index                                  # default: ~/repos
-org-llm code-index ~/repos/dotfiles ~/.config/doom  # explicit paths
+org-llm code index                                  # default: ~/repos
+org-llm code index ~/repos/dotfiles ~/.config/doom  # explicit paths
+org-llm code search "embed function"                # vector search, code-only
+org-llm code search "lcars" --lang python           # filter by language tag
+org-llm code generate "a 5-line python sleep"       # generate from prompt
 org-llm config code_dirs ~/repos,~/.config/doom     # persistent default
-org-llm ask --cloud "how does cli.py wire up MCP?"
+org-llm ask --cloud "how does cli.py wire up MCP?"  # cross-corpus: notes + code
 ```
 
+`code index` walks each tree and indexes source files into the same
+DB so `ask` can answer about notes AND code in one query. Skips
+`.git` / `node_modules` / `.venv` / `target` / `dist` etc.; truncates
+per-file body at 24 KB; tags every code node `code` and `code:<lang>`.
 After indexing it auto-embeds new nodes so they're searchable
 immediately. Pass `--no-embed` to skip.
 
-If *every* path you pass is missing, the command no longer red-alerts
-— it runs filesystem discovery and offers found code roots instead.
-See [Filesystem discovery](#filesystem-discovery) below.
+`code search` is scoped to those `code`-tagged nodes (with optional
+`--lang` filter) so you can hit only the corpus you indexed; for
+everything-search across notes + code, use `org-llm search`.
+
+If *every* path you pass to `code index` is missing, the command no
+longer red-alerts — it runs filesystem discovery and offers found
+code roots instead. See [Filesystem discovery](#filesystem-discovery)
+below.
+
+Back-compat: `org-llm code-index` (top-level alias) and `org-llm
+code-gen TASK` still work for existing scripts + Doom keybindings.
 
 ---
 
@@ -589,8 +602,8 @@ What self-heals automatically:
 Pick the best LLM for fix duty by benchmarking:
 
 ```sh
-org-llm doctor --benchmark-fixers          # score 6 candidate models
-org-llm doctor --benchmark-fixers --apply  # persist the winner as fixer_model
+org-llm doctor benchmark-fixers          # score 6 candidate models
+org-llm doctor benchmark-fixers --apply  # persist the winner as fixer_model
 ```
 
 Then `_llm_assisted_fix` prefers `fixer_model` over `cloud_model` for
@@ -606,10 +619,24 @@ any fix call. Current measured leaderboard on 10 canonical scenarios:
 
 ## Doctor self-test
 
+`doctor` is a subgroup now — bare `org-llm doctor` runs the default
+check; each popular operation has both a subcommand and a legacy flag:
+
 ```sh
-org-llm doctor -w                     # 13 read-only probes + LLM judgement
-org-llm doctor -wr ~/org/dev-log.org  # also append a structured org report
+org-llm doctor                        # default check
+org-llm doctor walkthrough            # 13 read-only probes + LLM judgement
+org-llm doctor walkthrough -r ~/org/dev-log.org  # also append a structured org report
+org-llm doctor fix                    # auto-apply safe fixes
+org-llm doctor power-boost --apply    # RAM-fit probe + write the recommendation
+org-llm doctor diagnose               # LLM diagnose pass
+org-llm doctor install bat            # install + theme one FOSS tool
+org-llm doctor install all            # install everything in the registry
+org-llm doctor list-tools             # registry of installable tools
+org-llm doctor benchmark-fixers       # score cloud LLMs on canonical fixes
 ```
+
+Legacy flags (`--walkthrough`, `--fix`, `--power-boost`, etc.) on
+the bare `doctor` command still work for back-compat.
 
 Two LLM passes per run: one for qualitative assessment (✓ PASS / ⚠ NIT /
 ✗ ISSUE per probe + top-3 recommendations), one for a structured list
@@ -618,16 +645,16 @@ of executable fixes which the runner applies to allow-listed verbs only.
 CI-friendly — wire it into a git pre-push hook to get a second pair of
 eyes on every change without leaving your terminal.
 
-<div align="center"><img src="docs/img/17-doctor-walkthrough.svg" alt="org-llm doctor --walkthrough" width="780" /></div>
+<div align="center"><img src="docs/img/17-doctor-walkthrough.svg" alt="org-llm doctor walkthrough" width="780" /></div>
 
 ### Power-boost — RAM-fit probe + cloud routing suggestion
 
-`org-llm doctor --power-boost` checks active model size vs free RAM
+`org-llm doctor power-boost` checks active model size vs free RAM
 and proposes a downsize / upsize / cloud route in one screen. The
 in-opencode LLM has the same probe via the `proactive_doctor` MCP
 tool and is instructed to call it after 3+ non-converging tool calls.
 
-<div align="center"><img src="docs/img/27-doctor-power-boost.svg" alt="org-llm doctor --power-boost" width="780" /></div>
+<div align="center"><img src="docs/img/27-doctor-power-boost.svg" alt="org-llm doctor power-boost" width="780" /></div>
 
 ---
 
@@ -647,7 +674,7 @@ org-llm grant-root ~
 
 # Browser:
 org-llm grant-browser
-org-llm doctor --install qutebrowser
+org-llm doctor install qutebrowser
 ```
 
 Always-denied paths (sensitive deny-list, even with grants):
@@ -1103,7 +1130,7 @@ deterministic templates only when the LLM is unreachable.
 | `org-llm index` / `embed` | a fitting follow-up question generated from your top tags + recent titles |
 | `org-llm capture` | a follow-up `ask` line about the freshly-saved note's neighbours |
 | `org-llm tag --apply` | Try-it line anchored to the just-tagged set |
-| `org-llm code-index` | per-file question generated from extracted symbols (`def`/`class`/`defun`/`fn`/`pub fn`/...) |
+| `org-llm code index` | per-file question generated from extracted symbols (`def`/`class`/`defun`/`fn`/`pub fn`/...) |
 | `org-llm models` | "Next: <plain reason> — `org-llm <command>`" picked by the LLM from current role/pulled state |
 | `org-llm doctor` | closing line summarises the worst real finding into one actionable sentence |
 | `org-llm ask` zero-results | 2-3 alternative queries from top tags + recent titles instead of empty exit |
@@ -1129,7 +1156,7 @@ Default is **dark** (LCARS-canonical bright orange/purple/blue on a dark
 terminal). Switch persistently with `org-llm theme light`, or per-command with
 `ORG_LLM_THEME=light org-llm …`. Every colour the app emits — Rich console,
 banners, panels, progress bars, plus the `bat`/`delta`/`starship`/`fzf` theme
-files written by `doctor --install` — switches in lockstep.
+files written by `doctor install` — switches in lockstep.
 
 <table>
 <tr>
@@ -1397,7 +1424,7 @@ patch, you review the summary, apply, then auto-test by re-running
 the failing command. If it still fails, **automatic rollback** —
 you're always returned to a known-good state.
 
-For slow / stuck sessions, `org-llm doctor --power-boost` probes
+For slow / stuck sessions, `org-llm doctor power-boost` probes
 chat_model fit vs available RAM and proposes a downsize/upsize/cloud
 switch. The in-opencode LLM has the same probe via `proactive_doctor`
 and is instructed (per the system prompt) to call it after 3+
