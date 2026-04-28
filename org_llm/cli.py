@@ -12154,14 +12154,42 @@ def cloud(
 
         # Step 4: paste + store
         api_key = key or typer.prompt(f"{chosen.name} API key", hide_input=True)
-        if not api_key.strip():
+        # Sanitize: hide_input prompts CAN capture ANSI escape sequences
+        # if the user presses arrow keys / function keys while the prompt
+        # is up, OR if the terminal is in bracketed-paste mode. A real
+        # case from this session: the captured key was
+        # `\x1b[Csk-or-v1-…f\x1b[C` (cursor-right escapes top-and-tail),
+        # which then 400's at the provider. Strip all control chars +
+        # ANSI sequences here so the Bearer header is clean.
+        import re as _re
+        api_key = _re.sub(r"\x1b\[[0-9;]*[a-zA-Z~]", "", api_key)
+        api_key = "".join(ch for ch in api_key if ch.isprintable())
+        api_key = api_key.strip()
+        if not api_key:
             red_alert("No key entered — aborting.")
             raise typer.Exit(1)
+        # Format sanity check — provider key prefixes are well-known.
+        # If the captured value looks wrong, abort BEFORE storing so the
+        # user gets a clean retry instead of a stored-but-broken key.
+        expected_prefixes = {
+            "openrouter":  ("sk-or-",),
+            "huggingface": ("hf_",),
+        }
+        prefixes = expected_prefixes.get(slug)
+        if prefixes and not any(api_key.startswith(p) for p in prefixes):
+            red_alert(f"Captured value doesn't look like a {chosen.name} key.")
+            on_screen(f"  Expected prefix: {' or '.join(prefixes)}")
+            on_screen(f"  Got:             {api_key[:14]}…  (len {len(api_key)})")
+            on_screen(f"[dim]Nothing was stored. Re-run the same command and "
+                       f"paste again — avoid pressing arrow keys while the "
+                       f"hidden-input prompt is up.[/dim]")
+            raise typer.Exit(1)
         slug_path = creds_mod.cloud_slug(slug)
-        if not creds_mod.write_secret(slug_path, api_key.strip()):
+        if not creds_mod.write_secret(slug_path, api_key):
             red_alert(f"Could not store key in pass at {slug_path}")
             raise typer.Exit(1)
-        hail(f"API key stored at {slug_path} (encrypted via GPG)")
+        hail(f"API key stored at {slug_path} (encrypted via GPG)  "
+              f"[dim]prefix {api_key[:14]}…[/dim]")
 
         # Step 5: configure org-llm + test
         endpoint = chosen.endpoint_hint   # for these providers it's a literal URL
@@ -12189,10 +12217,25 @@ def cloud(
         if cs.reachable and cs.auth_ok:
             hail(f"Endpoint reachable in {cs.latency_ms:.0f}ms ✓")
         elif cs.reachable:
-            red_alert("Endpoint responded but rejected the key. Re-check the paste and try again.")
+            red_alert("Endpoint responded but rejected the key. "
+                       "Re-check the paste and try again.")
             raise typer.Exit(1)
         else:
-            red_alert(f"Could not reach {endpoint}. Check your network.")
+            from .cloud import last_check_error as _lce
+            why = _lce(cs)
+            if why:
+                red_alert(f"Could not reach {endpoint}.")
+                on_screen(f"  Reason: [yellow]{why}[/yellow]")
+                if "400" in why:
+                    on_screen("[dim]HTTP 400 commonly means the captured "
+                               "key contained extra characters (terminal "
+                               "escapes, whitespace). Re-run and paste "
+                               "again.[/dim]")
+                elif "401" in why:
+                    on_screen("[dim]HTTP 401 means the key is rejected — "
+                               "expired, revoked, or never valid.[/dim]")
+            else:
+                red_alert(f"Could not reach {endpoint}. Check your network.")
             raise typer.Exit(1)
 
         # Real chat call to confirm end-to-end

@@ -841,15 +841,26 @@ def _candidate_paths(endpoint_url: str, kind: str) -> list[str]:
     return []
 
 
-def check_connection(endpoint_url: str, api_key: str = "", model: str = "") -> CloudStatus:
-    """Ping a cloud Ollama/OpenAI-compatible endpoint and return status."""
+def check_connection(endpoint_url: str, api_key: str = "", model: str = ""
+                       ) -> CloudStatus:
+    """Ping a cloud Ollama/OpenAI-compatible endpoint and return status.
+
+    Records the last failure reason on the returned CloudStatus when
+    every probe path fails — earlier this function just said "not
+    reachable" with no breadcrumb, which left "Check your network"
+    as the only error a user could see even when the actual cause was
+    a 400 from a malformed Bearer header. Now the caller can inspect
+    `status.error` and surface the real reason.
+    """
     import time
     url = endpoint_url.rstrip("/")
-    headers: dict[str, str] = {"Content-Type": "application/json"}
+    headers: dict[str, str] = {"Content-Type": "application/json",
+                                "User-Agent":   "org-llm/check-connection"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
     last_status: CloudStatus | None = None
+    last_err:    str = ""
     for path in _candidate_paths(endpoint_url, "tags"):
         try:
             req = urllib.request.Request(f"{url}{path}", headers=headers, method="GET")
@@ -861,13 +872,35 @@ def check_connection(endpoint_url: str, api_key: str = "", model: str = "") -> C
         except urllib.error.HTTPError as e:
             if e.code == 401:
                 last_status = CloudStatus("configured", endpoint_url, model, True, False, None)
+                last_err = f"HTTP 401 unauthorised at {path}"
                 continue
-            # Non-401 HTTP error (e.g. 404 because we picked the wrong path) — try next
+            # Non-401 HTTP error (e.g. 404 because we picked the wrong path,
+            # or 400 from a malformed Bearer header). Record + try next.
+            last_err = f"HTTP {e.code} {e.reason} at {path}"
             continue
-        except Exception:
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {str(e)[:120]}"
             continue
 
-    return last_status or CloudStatus("configured", endpoint_url, model, False, False, None)
+    if last_status is None:
+        last_status = CloudStatus("configured", endpoint_url, model,
+                                    False, False, None)
+    # Attach the last error reason via the dynamic `_error` attribute.
+    # CloudStatus is a NamedTuple so we can't add it as a field without
+    # bumping the version; stash it on the underlying class so callers
+    # that want detail can read it without breaking older callers.
+    try:
+        object.__setattr__(last_status, "_error", last_err)
+    except Exception:
+        pass
+    return last_status
+
+
+def last_check_error(status: CloudStatus) -> str:
+    """Return the failure reason recorded by `check_connection`, or ""
+    when the call succeeded. Safe to call on older CloudStatus values
+    that pre-date the diagnostic field."""
+    return getattr(status, "_error", "") or ""
 
 
 # ── Chat / embed via cloud ─────────────────────────────────────────────────────
