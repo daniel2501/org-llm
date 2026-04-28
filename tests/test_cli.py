@@ -621,6 +621,60 @@ class TestLogbook:
         assert r.exit_code == 0
         assert "nothing to reflect" in r.output.lower()
 
+    def test_export_writes_filtered_rows_to_chosen_org_file(
+            self, cli_db, monkeypatch, tmp_path):
+        """`org-llm log --export PATH` appends matching rows to PATH
+        in the same shape as Captain's Log itself, with a per-export
+        parent heading and a FILTER property line."""
+        from org_llm import logbook as _lb
+        monkeypatch.setenv("ORG_LLM_LOG_PATH", str(tmp_path / "log.org"))
+        _lb.write_event("cli", "ask",   outcome="ok",
+                          duration_ms=1200, response="answer one")
+        _lb.write_event("cli", "embed", outcome="error",
+                          response="ollama down")
+        _lb.write_event("llm", "chat",  model="phi4",
+                          outcome="ok", response="hello world")
+        dest = tmp_path / "journal.org"
+        r = runner.invoke(app, ["log", "--kind", "cli",
+                                  "--export", str(dest)])
+        assert r.exit_code == 0, r.output
+        assert dest.exists(), "export should create the file"
+        body = dest.read_text()
+        # Captain's Log export header + filter line
+        assert "Captain's Log export" in body
+        assert "kind=cli" in body
+        # Filtered rows are present, llm row is excluded
+        assert "ask" in body
+        assert "embed" in body
+        assert "chat" not in body
+        # Output is informative
+        assert "Exported" in r.output and "2" in r.output
+
+    def test_export_appends_on_repeat_invocations(
+            self, cli_db, monkeypatch, tmp_path):
+        """Second export to the same file stacks under a fresh parent
+        heading rather than overwriting."""
+        from org_llm import logbook as _lb
+        monkeypatch.setenv("ORG_LLM_LOG_PATH", str(tmp_path / "log.org"))
+        _lb.write_event("cli", "first",  outcome="ok")
+        dest = tmp_path / "journal.org"
+        r1 = runner.invoke(app, ["log", "--export", str(dest)])
+        assert r1.exit_code == 0
+        _lb.write_event("cli", "second", outcome="ok")
+        r2 = runner.invoke(app, ["log", "--export", str(dest)])
+        assert r2.exit_code == 0
+        body = dest.read_text()
+        assert body.count("Captain's Log export") == 2
+
+    def test_export_with_no_matches_errors(
+            self, cli_db, monkeypatch, tmp_path):
+        monkeypatch.setenv("ORG_LLM_LOG_PATH", str(tmp_path / "log.org"))
+        dest = tmp_path / "out.org"
+        r = runner.invoke(app, ["log", "--grep", "definitely-not-there",
+                                  "--export", str(dest)])
+        assert r.exit_code == 1
+        assert not dest.exists()
+
 
 class TestProactiveDoctor:
     """Detect when local chat_model can't fit in available RAM (the most

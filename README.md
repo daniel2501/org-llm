@@ -1145,6 +1145,7 @@ org-llm log --kind llm            # filter to LLM round-trips
 org-llm log --grep PATTERN        # substring search
 org-llm log --reflect             # LLM reflects: PATTERNS / SUGGESTIONS / HEADLINE
 org-llm log --tangle              # emacsclient instructions for tangling
+org-llm log --kind llm --export ~/org/journal.org    # append filtered rows to any org file
 ```
 
 Auto-reflect every Nth invocation (default 50, 0 to disable) prints a

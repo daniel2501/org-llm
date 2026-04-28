@@ -4127,6 +4127,8 @@ def log_show(
               help="Print Captain's Log path and exit")] = False,
     reflect: Annotated[bool, typer.Option("--reflect", "-R",
               help="LLM reflects on recent log: surfaces patterns + suggestions")] = False,
+    export:  Annotated[str, typer.Option("--export", "-e",
+              help="Append matching rows to this org file (any path; respects --kind/--grep/--limit)")] = "",
 ):
     """Captain's Log — CLI invocations, LLM calls, MCP tools, config changes.
 
@@ -4172,6 +4174,30 @@ def log_show(
                 if gl in (r.command or "").lower()
                 or gl in (r.query   or "").lower()
                 or gl in (r.response or "").lower()][:limit]
+
+    if export:
+        from . import logbook as _lb
+        dest = Path(export).expanduser()
+        filt_parts = []
+        if kind:  filt_parts.append(f"kind={kind}")
+        if grep:  filt_parts.append(f"grep={grep}")
+        filt_parts.append(f"limit={limit}")
+        n = _lb.export_rows_to_org(rows, dest,
+                                     source_filter=", ".join(filt_parts))
+        if n == 0:
+            red_alert(f"Nothing exported. (rows matched: {len(rows)}; "
+                      f"target: {dest})")
+            raise typer.Exit(1)
+        on_screen(f"[lcars3]✓[/lcars3] Exported [bold]{n}[/bold] event(s) "
+                  f"→ [bold]{dest}[/bold]")
+        if filt_parts and (kind or grep):
+            on_screen(f"  [dim]Filter:[/dim] {', '.join(filt_parts)}")
+        # Log the export itself so it appears in future Captain's Log
+        # queries — symmetric with --reflect.
+        _lb.write_event("cli", "log-export",
+                          args=f"dest={dest} {' '.join(filt_parts)}",
+                          response=f"exported {n} rows", outcome="ok")
+        return
 
     if reflect:
         from rich.panel import Panel

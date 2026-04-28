@@ -271,6 +271,74 @@ def write_event(kind: str, command: str, *, args: str = "",
                        duration_ms, outcome, level)
 
 
+def export_rows_to_org(rows, dest: Path, *, title: str = "",
+                          source_filter: str = "") -> int:
+    """Append `rows` (sqlalchemy History records) to a user-chosen org
+    file, formatted the same way as the canonical Captain's Log.
+
+    Idempotency: the destination gets a per-export `* Captain's Log
+    export — <iso ts>` parent heading so multiple exports stack
+    cleanly. We do NOT dedupe by row id — same export twice gives two
+    parents, which is the predictable behaviour.
+
+    Returns the number of rows written. Never raises into the caller —
+    on filesystem failure we return 0.
+    """
+    dest = Path(dest).expanduser()
+    if not rows:
+        return 0
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        is_new = not dest.exists()
+        with open(dest, "a") as f:
+            if is_new:
+                f.write(
+                    "#+TITLE: Captain's Log — exports\n"
+                    "#+OPTIONS: toc:nil\n"
+                    "#+STARTUP: showeverything\n\n"
+                    "Captain's Log entries copied here by "
+                    "[[shell:org-llm log --export][org-llm log "
+                    "--export]]. Source of truth remains "
+                    f"~{org_log_path().name}~.\n"
+                )
+            ts = datetime.now().isoformat(timespec="seconds")
+            header = title or f"Captain's Log export — {ts}"
+            filter_line = f" ({source_filter})" if source_filter else ""
+            f.write(f"\n* {header}{filter_line}\n")
+            f.write(f":PROPERTIES:\n:EXPORTED_AT: {ts}\n"
+                     f":ROW_COUNT:   {len(rows)}\n")
+            if source_filter:
+                f.write(f":FILTER:      {source_filter}\n")
+            f.write(":END:\n")
+            for r in rows:
+                kind     = getattr(r, "kind", "") or "?"
+                command  = getattr(r, "command", "") or "?"
+                model    = getattr(r, "model", "") or ""
+                args     = getattr(r, "args", "") or ""
+                response = getattr(r, "response", "") or ""
+                outcome  = getattr(r, "outcome", "") or ""
+                dur      = getattr(r, "duration_ms", None)
+                row_ts   = (getattr(r, "timestamp", "") or "")[:19]
+                f.write(f"\n** {row_ts} — {kind} — {command}\n")
+                f.write(":PROPERTIES:\n")
+                f.write(f":KIND:        {kind}\n")
+                f.write(f":COMMAND:     {command}\n")
+                f.write(f":MODEL:       {model}\n")
+                f.write(f":DURATION_MS: {dur if dur is not None else ''}\n")
+                f.write(f":OUTCOME:     {outcome}\n")
+                f.write(f":ARGS:        "
+                         f"{args.replace(chr(10), ' ')[:200]}\n")
+                f.write(":END:\n")
+                if response:
+                    safe = response.replace("\n#+end_src", "\n#+end_  src")
+                    f.write("#+begin_src text\n")
+                    f.write(safe.rstrip() + "\n")
+                    f.write("#+end_src\n")
+        return len(rows)
+    except Exception:
+        return 0
+
+
 @contextmanager
 def track_event(kind: str, command: str, *, args: str = "", model: str = ""):
     """Context manager — measures duration, captures exceptions, writes
