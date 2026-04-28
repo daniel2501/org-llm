@@ -289,6 +289,124 @@ Compact (~6KB config.el) with one custom module under lisp/.
     _save(con, "09-review-emacs", "org-llm review-emacs")
 
 
+def _splash_console_with_colorway(colorway: dict[str, str], width: int = 100):
+    """Build a fresh recording Console where the lcars1/2/3 styles are
+    overridden to a custom palette — used by the LCARS color-variant
+    scenes (red, green, gold, etc.) so we don't have to fork the
+    splash render code."""
+    from rich.console import Console
+    from rich.theme   import Theme
+    base = dict(ui.PALETTE)
+    base.update(colorway)
+    # Mirror ui._build_theme so every lcars-flavored style keeps its
+    # bold weight when we override the underlying color.
+    theme = Theme({
+        "info":         f"bold {base['info.cyan']}",
+        "success":      f"bold {base['pride.green']}",
+        "warn":         f"bold {base['warn.yellow']}",
+        "error":        f"bold {base['pride.red']}",
+        "dim":          f"dim {base['dim']}",
+        "lcars1":       f"bold {base['lcars1']}",
+        "lcars2":       f"bold {base['lcars2']}",
+        "lcars3":       f"bold {base['lcars3']}",
+        "pride.red":    f"bold {base['pride.red']}",
+        "pride.orange": f"bold {base['pride.orange']}",
+        "pride.yellow": f"bold {base['pride.yellow']}",
+        "pride.green":  f"bold {base['pride.green']}",
+        "pride.blue":   f"bold {base['pride.blue']}",
+        "pride.violet": f"bold {base['pride.violet']}",
+        "doom.cyan":    f"bold {base.get('doom.cyan', '#46d9ff')}",
+        "doom.magenta": f"bold {base.get('doom.magenta', '#c678dd')}",
+        "doom.green":   f"bold {base.get('doom.green',   '#98be65')}",
+        "doom.red":     f"bold {base.get('doom.red',     '#ff6c6b')}",
+        "doom.orange":  f"bold {base.get('doom.orange',  '#da8548')}",
+        "doom.yellow":  f"bold {base.get('doom.yellow',  '#ecbe7b')}",
+    })
+    return Console(theme=theme, record=True, force_terminal=True,
+                    width=width, color_system="truecolor")
+
+
+def _scene_splash_with_colorway(slug: str, title: str, colorway: dict[str, str]):
+    """Render the splash with a custom LCARS palette and save."""
+    from org_llm.cli import _render_splash_logo
+    con = _splash_console_with_colorway(colorway, width=100)
+    con.print(_render_splash_logo())
+    _save(con, slug, title)
+
+
+def scene_splash_lcars_red():
+    """LCARS red colorway — red alert / battle stations vibe."""
+    _scene_splash_with_colorway(
+        "20-splash-lcars-red",
+        "org-llm splash — LCARS red colorway",
+        {
+            "lcars1":       "#FF3B30",   # red alert
+            "lcars2":       "#FF8C7A",   # salmon
+            "lcars3":       "#FFD60A",   # warning amber
+            "pride.yellow": "#FFD60A",
+            "pride.orange": "#FF9500",
+        },
+    )
+
+
+def scene_splash_lcars_green():
+    """LCARS green colorway — Voyager-era astrometrics vibe."""
+    _scene_splash_with_colorway(
+        "21-splash-lcars-green",
+        "org-llm splash — LCARS green colorway",
+        {
+            "lcars1":       "#34C759",   # green
+            "lcars2":       "#5AC8FA",   # sky blue
+            "lcars3":       "#FFD60A",   # gold
+            "pride.yellow": "#FFD60A",
+            "pride.orange": "#A2C56A",
+        },
+    )
+
+
+def scene_splash_lcars_gold():
+    """LCARS gold/amber colorway — Operations / engineering panels."""
+    _scene_splash_with_colorway(
+        "22-splash-lcars-gold",
+        "org-llm splash — LCARS gold colorway",
+        {
+            "lcars1":       "#FFD60A",   # gold
+            "lcars2":       "#FF9500",   # warm amber
+            "lcars3":       "#FF3B30",   # red accent
+            "pride.yellow": "#FFE066",
+            "pride.orange": "#FF9500",
+        },
+    )
+
+
+def scene_splash_lcars_violet():
+    """LCARS violet/magenta colorway — Sciences / medbay panels."""
+    _scene_splash_with_colorway(
+        "23-splash-lcars-violet",
+        "org-llm splash — LCARS violet colorway",
+        {
+            "lcars1":       "#BF5AF2",   # violet
+            "lcars2":       "#FF6B9D",   # magenta
+            "lcars3":       "#5AC8FA",   # sky blue
+            "pride.yellow": "#FFD60A",
+            "pride.orange": "#D982E0",
+        },
+    )
+
+
+def scene_splash_lcars_classic():
+    """LCARS classic colorway — the default orange/purple/blue."""
+    _scene_splash_with_colorway(
+        "24-splash-lcars-classic",
+        "org-llm splash — LCARS classic (default) colorway",
+        {
+            "lcars1":       "#FF9900",
+            "lcars2":       "#CC88FF",
+            "lcars3":       "#4488FF",
+        },
+    )
+
+
 def scene_splash():
     """LCARS splash menu — the default no-args view (Doom-Emacs-style)."""
     from rich.columns import Columns
@@ -754,6 +872,14 @@ SCENES = [
     scene_theme_studio_show,
     scene_theme_studio_verify,
     scene_doctor_walkthrough,
+    # LCARS color-variant splashes (the new TNG-maximalist panel
+    # rendered through five distinct LCARS palettes for the README
+    # gallery).
+    scene_splash_lcars_classic,
+    scene_splash_lcars_red,
+    scene_splash_lcars_green,
+    scene_splash_lcars_gold,
+    scene_splash_lcars_violet,
 ]
 
 
