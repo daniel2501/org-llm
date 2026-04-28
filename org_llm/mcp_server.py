@@ -1,6 +1,8 @@
 # [[file:../../../org/20260425230731-org_llm.org::*mcp_server.py][mcp_server.py:1]]
 from __future__ import annotations
 from pathlib import Path
+import asyncio
+import inspect
 import os
 
 # Imported at module top so FastMCP can resolve `Context | None` annotations
@@ -8,6 +10,26 @@ import os
 # imports inside create_mcp_server() leave the symbol unresolvable from the
 # tool's __globals__.
 from mcp.server.fastmcp import Context
+
+
+def _format_mcp_error(tool_name: str, exc: Exception,
+                       match_structured) -> str:
+    """Friendly error string for MCP tool exceptions.
+
+    The CLI's structured-rescue registry pattern-matches the exception
+    against known shapes (Ollama 404, OOM, DB locked, etc.) and returns
+    a deterministic recovery hint. We surface that to the LLM here so
+    its next reply can quote the exact fix instead of dumping the
+    Python traceback verbatim.
+    """
+    hint = match_structured(exc)
+    head = f"ERROR in {tool_name}: {type(exc).__name__}: {str(exc)[:300]}"
+    if hint is None:
+        return head
+    return (f"{head}\n\n"
+            f"WHY: {hint.why}\n"
+            f"FIX: {hint.fix}\n"
+            f"(structured-rescue confidence: {hint.confidence})")
 
 
 def _make_engine():
@@ -107,6 +129,53 @@ def create_mcp_server():
 
     engine = _make_engine()
 
+    # ── structured-rescue wrapper for every MCP tool ──────────────────────────
+    # When an exception escapes a tool body, FastMCP returns a generic
+    # JSON-RPC error and the LLM in opencode/claude/pi sees an opaque
+    # traceback string. Wrap the `server.tool` decorator so every
+    # subsequently-registered tool runs through the same rescue path
+    # the CLI uses: structured registry first (Ollama 404 → "pull X",
+    # OOM → "doctor --power-boost", etc.), then a sanitized error
+    # string the LLM can act on.
+    def _wrap_tool_decorator(_orig_tool):
+        from .rescue import match_structured as _ms
+        import functools as _ft
+
+        def _copy_intro(wrapper, fn):
+            """Copy enough of `fn`'s introspection metadata onto
+            `wrapper` that FastMCP + pydantic can build the tool
+            schema. Plain `functools.wraps` doesn't copy
+            `__annotations__`, which pydantic inspects to derive
+            arg types — and our wrappers carry `*a, **kw` so they
+            have no annotations of their own."""
+            _ft.update_wrapper(wrapper, fn,
+                                updated=())   # don't merge __dict__
+            wrapper.__annotations__ = dict(fn.__annotations__)
+            wrapper.__wrapped__ = fn
+            return wrapper
+
+        def _wrapped_decorator(*args, **kwargs):
+            inner = _orig_tool(*args, **kwargs)
+
+            def wrap_fn(fn):
+                if asyncio.iscoroutinefunction(fn):
+                    async def _async_wrap(*a, **kw):
+                        try:
+                            return await fn(*a, **kw)
+                        except Exception as e:
+                            return _format_mcp_error(fn.__name__, e, _ms)
+                    return inner(_copy_intro(_async_wrap, fn))
+                else:
+                    def _sync_wrap(*a, **kw):
+                        try:
+                            return fn(*a, **kw)
+                        except Exception as e:
+                            return _format_mcp_error(fn.__name__, e, _ms)
+                    return inner(_copy_intro(_sync_wrap, fn))
+            return wrap_fn
+
+        return _wrapped_decorator
+
     server = FastMCP(
         "org-llm",
         instructions=(
@@ -136,6 +205,9 @@ def create_mcp_server():
             "the user's notes."
         ),
     )
+
+    # Apply the rescue wrapper *before* any tool registration below.
+    server.tool = _wrap_tool_decorator(server.tool)
 
     # ── search_notes ──────────────────────────────────────────────────────────
     @server.tool()
