@@ -22,7 +22,8 @@ def _cfg(session, key: str) -> str:
     return row.value if row else ""
 
 
-def _themed(tool: str, summary: str, body: str = "") -> str:
+def _themed(tool: str, summary: str, body: str = "",
+              outcome: str = "ok") -> str:
     """Wrap a tool's return string in the LCARS chat vocabulary so opencode
     output keeps the same visual rhythm as the CLI.
 
@@ -30,17 +31,34 @@ def _themed(tool: str, summary: str, body: str = "") -> str:
         ◀ <tool> — <summary>
         ────────────────────────────────────────────────
         <body>
+        ↳ <themed success/error suffix from theme_studio>
 
     Body is optional — short tool returns (e.g. capture_note returning a
-    node ID) get just the header. Free-text returns from search/ask/etc.
-    get the full sandwich. Clients without rich rendering still see plain
-    text; clients with monospace blocks render the separator cleanly.
+    node ID) get just the header + suffix. Free-text returns from
+    search/ask/etc. get the full sandwich. Clients without rich
+    rendering still see plain text; clients with monospace blocks
+    render the separator cleanly.
+
+    `outcome` is "ok" (default) or "error" — controls which themed
+    suffix from the theme_studio cache gets appended. Cold cache
+    falls back to the surface defaults baked into the registry.
     """
     head = f"◀ {tool} — {summary}"
+    # Suffix lookup: theme_studio.get_themed transparently returns
+    # the surface default when the cache is cold or LLM-down, so this
+    # stays cheap and never blocks.
+    try:
+        from . import theme_studio as _ts
+        if outcome == "error":
+            suffix = _ts.get_themed("mcp_tool_error_suffix", "↳ red alert")
+        else:
+            suffix = _ts.get_themed("mcp_tool_success_suffix", "↳ done.")
+    except Exception:
+        suffix = "↳ red alert" if outcome == "error" else "↳ done."
     if not body:
-        return head
+        return f"{head}\n{suffix}"
     sep = "─" * 60
-    return f"{head}\n{sep}\n{body.rstrip()}"
+    return f"{head}\n{sep}\n{body.rstrip()}\n{suffix}"
 
 
 def _theme_label(op: str) -> str:

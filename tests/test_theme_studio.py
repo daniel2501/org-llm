@@ -276,6 +276,71 @@ class TestRegenerate:
 
 # ── verify ────────────────────────────────────────────────────────────────────
 
+class TestOpencodeWiring:
+    """The opencode workspace prompt + MCP themed output now pull from
+    theme_studio. These tests pin that wiring so we don't lose it in a
+    refactor — call sites must call get_themed for the registered keys."""
+
+    def test_workspace_prompt_includes_themed_greeting_default(self,
+                                                                  tmp_path,
+                                                                  monkeypatch):
+        """When the cache is cold the workspace prompt should still
+        contain the splash_subtitle/opencode_greeting DEFAULTS — not
+        nothing, not raw markup."""
+        monkeypatch.setattr(ts, "_CACHE_PATH", tmp_path / "cache.json")
+        from org_llm.cli import _opencode_workspace_prompt
+        prompt = _opencode_workspace_prompt(
+            workspace="all",
+            n_files=1, n_nodes=1, n_embedded=1, pct_e=100,
+            org_dir="/tmp/org", skill_str="", recent_str="",
+            top_tags_str="", model_status="", discover_str="",
+            knobs_str="", hardware_str="",
+        )
+        # Default greeting from the surface registry must appear when
+        # cache is empty
+        assert "Hailing frequencies" in prompt or \
+                "org-llm operator" in prompt.lower() or \
+                "operating inside opencode" in prompt
+        # And the proactive-doctor themed leading line
+        assert "proactive_doctor" in prompt or \
+                "drifting" in prompt
+
+    def test_themed_appends_success_suffix(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ts, "_CACHE_PATH", tmp_path / "cache.json")
+        from org_llm.mcp_server import _themed
+        out = _themed("search_notes", "found 3 hits",
+                       body="node1\nnode2\nnode3", outcome="ok")
+        assert "↳ done." in out                  # default success suffix
+        assert "search_notes" in out
+
+    def test_themed_appends_error_suffix(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ts, "_CACHE_PATH", tmp_path / "cache.json")
+        from org_llm.mcp_server import _themed
+        out = _themed("search_notes", "ollama unreachable",
+                       outcome="error")
+        assert "↳ red alert" in out
+
+    def test_themed_uses_cached_variant_when_warm(self, tmp_path,
+                                                     monkeypatch):
+        """Once theme_studio's cache has a themed suffix, _themed picks
+        it up — proves the wiring goes through get_themed, not
+        hardcoded."""
+        cache_file = tmp_path / "cache.json"
+        monkeypatch.setattr(ts, "_CACHE_PATH", cache_file)
+        from org_llm.ui import _theme_levels
+        sig = ts._levels_signature(_theme_levels())
+        cache_file.write_text(json.dumps({
+            sig: {
+                "mcp_tool_success_suffix": {
+                    "variants": ["↳ make it so"],
+                }
+            }
+        }))
+        from org_llm.mcp_server import _themed
+        out = _themed("x", "y", outcome="ok")
+        assert "make it so" in out
+
+
 class TestVerify:
     def test_reports_per_variant_pass_fail(self, tmp_path, monkeypatch):
         """First variant has 'engage' (level 2) and 'warp' (level 1) —

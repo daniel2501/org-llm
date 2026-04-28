@@ -154,6 +154,118 @@ class TestActiveKeywordPool:
 
 # ── round-trip via load_knobs / save_knobs API surface ───────────────────────
 
+class TestKnobEditCommand:
+    """`org-llm knob edit NAME` opens a YAML editor, validates on save,
+    persists as a user override. We don't actually spawn $EDITOR — we
+    pre-write the YAML the editor "would have produced" and assert the
+    knob got the override."""
+
+    def test_show_renders_yaml_for_a_builtin(self, monkeypatch, cli_db):
+        """`--show` prints the YAML without spawning an editor — used
+        when the user just wants to see the structure."""
+        from typer.testing import CliRunner
+        from org_llm.cli import app
+        runner = CliRunner()
+        r = runner.invoke(app, ["knob", "edit", "trek", "--show"])
+        assert r.exit_code == 0, r.output
+        assert "name: trek" in r.output
+        assert "keywords_by_level:" in r.output
+        # Built-in level 1 keyword should appear
+        assert "warp" in r.output or "starship" in r.output
+
+    def test_unknown_name_errors_clearly(self, cli_db):
+        from typer.testing import CliRunner
+        from org_llm.cli import app
+        runner = CliRunner()
+        r = runner.invoke(app, ["knob", "edit", "no-such-knob"])
+        assert r.exit_code == 1
+        assert "no knob" in r.output.lower() or "not" in r.output.lower()
+
+    def test_revert_clears_user_override(self, monkeypatch, cli_db):
+        """After saving a custom version of trek, `--revert` should
+        drop it back to the built-in."""
+        # Plant a custom trek override
+        custom = K.KnobDef(
+            name="trek",
+            description="custom",
+            default_level=2,
+            keywords_by_level={3: ["customword"]},
+        )
+        K.save_knobs(list(K.BUILTIN_KNOBS) + [custom])
+        # Sanity: the custom keyword is now in the active pool
+        pool = K.active_keyword_pool({"trek": 3})
+        assert "customword" in pool
+
+        from typer.testing import CliRunner
+        from org_llm.cli import app
+        runner = CliRunner()
+        # Stub out the regen spawn so the test stays offline + fast
+        from org_llm import cli as _cli
+        monkeypatch.setattr(_cli, "_spawn_theme_regen_in_background",
+                              lambda key, value: None)
+        r = runner.invoke(app, ["knob", "edit", "trek", "--revert"])
+        assert r.exit_code == 0, r.output
+
+        # After revert, the built-in pool wins again
+        pool = K.active_keyword_pool({"trek": 3})
+        assert "customword" not in pool
+
+    def test_edit_validates_locked_name_field(self, monkeypatch, cli_db,
+                                                 tmp_path):
+        """If the user changes 'name:' in the YAML, the save should
+        abort cleanly without writing anything — built-in identity is
+        the boundary."""
+        # Simulate the editor by replacing subprocess.call with a writer
+        import subprocess
+        def fake_call(argv):
+            path = argv[-1]
+            with open(path, "w") as f:
+                f.write("name: not-trek\nkeywords_by_level:\n  3:\n    - x\n")
+            return 0
+        monkeypatch.setattr(subprocess, "call", fake_call)
+        # Force the editor probe to find SOMETHING so we get to subprocess.call
+        monkeypatch.setenv("EDITOR", "stub")
+
+        from typer.testing import CliRunner
+        from org_llm.cli import app
+        runner = CliRunner()
+        r = runner.invoke(app, ["knob", "edit", "trek"])
+        assert r.exit_code == 1
+        assert "name" in r.output.lower() and "lock" in r.output.lower()
+
+
+class TestAutoRegenTrigger:
+    """Setting a *_level config or rewriting theme_knobs should kick off
+    a background theme-cache regen. We assert the spawn-helper gets
+    called rather than running a real LLM."""
+
+    def test_setting_trek_level_spawns_regen(self, monkeypatch, cli_db):
+        from org_llm import cli as _cli
+        called: list[tuple[str, str]] = []
+        monkeypatch.setattr(_cli, "_spawn_theme_regen_in_background",
+                              lambda key, value: called.append((key, value)))
+        from typer.testing import CliRunner
+        from org_llm.cli import app
+        runner = CliRunner()
+        r = runner.invoke(app, ["config", "trek_level", "3"])
+        assert r.exit_code == 0, r.output
+        assert ("trek_level", "3") in called
+
+    def test_setting_unrelated_key_does_not_spawn_regen(self, monkeypatch,
+                                                          cli_db):
+        from org_llm import cli as _cli
+        called: list[tuple[str, str]] = []
+        monkeypatch.setattr(_cli, "_spawn_theme_regen_in_background",
+                              lambda key, value: called.append((key, value)))
+        from typer.testing import CliRunner
+        from org_llm.cli import app
+        runner = CliRunner()
+        # Pick a real config key the validator accepts
+        r = runner.invoke(app, ["config", "log_level", "minimal"])
+        assert r.exit_code == 0, r.output
+        assert called == []
+
+
 class TestSaveRoundTrip:
     def test_save_then_load_persists_user_overrides(self, monkeypatch,
                                                        tmp_path):

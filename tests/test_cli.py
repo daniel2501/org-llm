@@ -12,13 +12,8 @@ from org_llm.db import make_engine, get_session, Config
 runner = CliRunner()
 
 
-@pytest.fixture
-def cli_db(tmp_path, monkeypatch):
-    """Set ORG_LLM_DB env var so all CLI commands use a temp DB."""
-    db_path = tmp_path / "cli.db"
-    monkeypatch.setenv("ORG_LLM_DB", str(db_path))
-    runner.invoke(app, ["init"])
-    return db_path
+# cli_db now lives in conftest.py so test_knobs.py + future test files
+# can reuse it. Cross-file fixture sharing is the whole point of conftest.
 
 
 @pytest.fixture

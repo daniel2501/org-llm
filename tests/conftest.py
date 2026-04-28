@@ -18,6 +18,22 @@ def db_engine(tmp_path):
 
 
 @pytest.fixture
+def cli_db(tmp_path, monkeypatch):
+    """Fresh isolated DB wired in via ORG_LLM_DB so CLI commands hit it
+    instead of the user's real ~/.local/share/org-llm/.
+
+    Lifted from test_cli.py for cross-file reuse — test_knobs.py uses
+    it for the knob CLI tests too.
+    """
+    from typer.testing import CliRunner
+    from org_llm.cli import app
+    db_path = tmp_path / "cli.db"
+    monkeypatch.setenv("ORG_LLM_DB", str(db_path))
+    CliRunner().invoke(app, ["init"])
+    return db_path
+
+
+@pytest.fixture
 def session(db_engine):
     with get_session(db_engine) as s:
         yield s

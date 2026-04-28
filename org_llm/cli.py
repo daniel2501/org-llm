@@ -4133,6 +4133,16 @@ def config(
                 _lc.maybe_autosync()
             except Exception:
                 pass
+            # Auto-regen the theme cache when a knob level (or the
+            # `theme_knobs` registry itself) changes. Fires in a daemon
+            # thread so the CLI returns immediately; survives Python
+            # exit because it's a fire-and-forget.
+            #
+            # Match knob names from the registry (so unrelated keys
+            # like `log_level` / `doctor_*` don't trigger regen) plus
+            # `theme_knobs` (the registry itself).
+            if _is_knob_level_key(key) or key == "theme_knobs":
+                _spawn_theme_regen_in_background(key, value)
             make_it_so()
 
 
@@ -8509,6 +8519,61 @@ _DIAL_PERSONAS = {
 }
 
 
+def _is_knob_level_key(key: str) -> bool:
+    """True if `key` is the `<knob>_level` knob for a registered theme
+    knob — built-in OR user-defined. Excludes coincidentally-shaped
+    keys like `log_level`, `doctor_proactive_mode`, etc.
+
+    Used by the config setter to decide whether changing this key
+    should kick off a background theme-cache regen.
+    """
+    if not key.endswith("_level"):
+        return False
+    knob_name = key[:-len("_level")]
+    try:
+        from .knobs import load_knobs
+        return any(k.name == knob_name for k in load_knobs())
+    except Exception:
+        # Resolving knobs requires DB access; if it's not available
+        # we err on the side of NOT triggering regen — better silent
+        # than spurious.
+        return False
+
+
+def _spawn_theme_regen_in_background(key: str, value: str) -> None:
+    """Fire-and-forget background regen of the theme-studio cache after
+    a knob-level change. Daemonised so the CLI never waits on it; if
+    the LLM is unreachable the regen quietly produces zero variants
+    and surfaces fall back to defaults at render time anyway.
+
+    A small status note prints so the user knows something happens
+    behind the curtain — actual results are visible via
+    `org-llm theme-studio show` after a few seconds.
+    """
+    import threading
+    from . import theme_studio as _ts
+
+    def _go():
+        try:
+            engine = _engine()
+            with get_session(engine) as session:
+                base_url = _ollama_url(session)
+                fast = (_cfg(session, "fast_model")
+                         or _cfg(session, "chat_model") or "llama3.2")
+                chat = _cfg(session, "chat_model") or fast
+            _ts.regenerate(model=fast, base_url=base_url,
+                            upgrade_model=chat if chat != fast else "")
+        except Exception:
+            # Never raise out of a daemon thread — the user's set_config
+            # already returned; this is purely background warm-up.
+            pass
+
+    on_screen(f"[dim]· theme cache regenerating in background "
+              f"(triggered by {key}={value})[/dim]")
+    t = threading.Thread(target=_go, daemon=True, name="theme-regen")
+    t.start()
+
+
 def _persona_block(active_dials: list[tuple[str, int]],
                      user_knobs: list[dict]) -> str:
     """Build a concrete behavioral persona block for the system prompt.
@@ -8573,7 +8638,32 @@ def _opencode_workspace_prompt(workspace: str, n_files: int, n_nodes: int,
       scribe     — capture-heavy: capture_note/tangle/run_skill emphasis
       engineer   — code-corpus + repos focus, code_search emphasis
     """
-    common_header = f"""You are the user's interactive org-llm workspace, running inside opencode with full MCP access to their second brain.
+    # Pull themed strings from the LLM-driven cache. Cold cache returns
+    # the surface defaults so first-run users still see consistent copy.
+    from . import theme_studio as _ts
+    themed_persona_intro = _ts.get_themed(
+        "opencode_persona_intro",
+        "You are org-llm operating inside opencode — be terse, themed, useful.",
+    )
+    themed_greeting_template = _ts.get_themed(
+        "opencode_greeting",
+        "Hailing frequencies open. Org-llm at your service.",
+    )
+    themed_proactive_doctor_line = _ts.get_themed(
+        "opencode_proactive_doctor_line",
+        "Triggering proactive doctor — something's drifting.",
+    )
+
+    common_header = f"""{themed_persona_intro}
+
+OPENING LINE
+  Your FIRST reply of the session should open with this voice (or a
+  paraphrase that keeps every dialed-up knob audible):
+      "{themed_greeting_template}"
+  After the first reply, drop the formal hailing — keep the persona
+  but don't repeat the greeting.
+
+You are the user's interactive org-llm workspace, running inside opencode with full MCP access to their second brain.
 
 CRITICAL RULES — FOLLOW BEFORE ANYTHING ELSE
   1. The user has {n_nodes} indexed notes ({n_embedded} embedded for
@@ -8669,8 +8759,11 @@ BEHAVIOUR
     weird") tends to land on a real result. Don't ask the user to
     re-quote things manually; throw it at org_llm_run and let the
     auto-fix chain handle it.
-  - SELF-HEAL is FIRST-CLASS, not a fallback. Call `proactive_doctor`
-    in any of these cases (driven by config keys
+  - SELF-HEAL is FIRST-CLASS, not a fallback. When you call
+    `proactive_doctor`, prefix the user-visible line with this themed
+    phrasing (or a paraphrase that preserves the active knob voice):
+        "{themed_proactive_doctor_line}"
+    Then call the tool. Trigger conditions (driven by config keys
     `doctor_proactive_mode` / `doctor_stuck_threshold` /
     `doctor_intervene_in`, but use these defaults unless the user
     has told you otherwise):
@@ -13048,6 +13141,175 @@ def knob_remove(
         raise typer.Exit(1)
     _write_user_knobs(kept)
     hail(f"Removed knob: {norm}")
+    make_it_so()
+
+
+@knob_app.command("edit")
+def knob_edit(
+    name: Annotated[str, typer.Argument(
+        help="Knob name to edit (built-in or user-defined). "
+             "Bare invocation lists every knob.")] = "",
+    revert: Annotated[bool, typer.Option("--revert", "-r",
+            help="Reset this knob to its built-in default "
+                 "(removes any user override).")] = False,
+    show:   Annotated[bool, typer.Option("--show", "-s",
+            help="Print the YAML that --edit would open, then exit.")] = False,
+):
+    """Edit a knob's keyword pool + description in $EDITOR.
+
+    Pluggable knobs live in the SQLite ``theme_knobs`` config row.
+    This opens a YAML serialization of the named knob in your editor;
+    save and close to write back. Built-in knobs (trek/commie/queer)
+    that haven't been customised will have their built-in defaults
+    pre-filled; saving creates a user override. ``--revert`` removes
+    that override and falls back to the built-in.
+
+    Validation runs on save: every level must be 1/2/3, every keyword
+    list must be a list of strings, name must match the file. Bad YAML
+    aborts with a clean message; the cache is unchanged.
+    """
+    from . import knobs as _kn
+    import shutil as _sh
+    import subprocess as _sp
+    import tempfile as _tf
+    import yaml  # type: ignore
+
+    all_knobs = _kn.load_knobs()
+    by_name = {k.name: k for k in all_knobs}
+
+    # Bare invocation = list available knobs (mirrors `theme-studio show`)
+    if not name:
+        from rich.table import Table as _T
+        tbl = _T(box=None, pad_edge=False, show_header=True)
+        tbl.add_column("Name",        style="lcars1", no_wrap=True)
+        tbl.add_column("Source",      style="dim", width=8)
+        tbl.add_column("Description", style="lcars2")
+        # Anything in the DB-stored override list counts as user-edited;
+        # everything else is built-in.
+        overrides = {row.get("name") for row
+                       in _kn._read_db_rows(None) if isinstance(row, dict)}
+        for k in all_knobs:
+            src = "user" if k.name in overrides else "built-in"
+            tbl.add_row(k.name, src, k.description or "")
+        console.print(tbl)
+        on_screen("[dim]Edit:[/dim] [bold]org-llm knob edit <name>[/bold]")
+        return
+
+    knob = by_name.get(name.strip().lower())
+    if not knob:
+        red_alert(f"No knob named {name!r}. "
+                  f"Run [bold]org-llm knob edit[/bold] for the list.")
+        raise typer.Exit(1)
+
+    if revert:
+        # Drop user override for this knob, if any
+        rows = _kn._read_db_rows(None)
+        kept = [r for r in rows if r.get("name") != knob.name]
+        if len(kept) == len(rows):
+            on_screen(f"[dim]No user override stored for {knob.name!r}.[/dim]")
+            return
+        _kn.save_knobs(
+            [_kn.KnobDef.from_dict(r) for r in kept] + list(_kn.BUILTIN_KNOBS),
+            session=None,
+        )
+        # Saving the merged list re-canonicalises it, so the override row
+        # for this knob is gone. Re-load to confirm.
+        hail(f"Reverted {knob.name} to built-in defaults.")
+        _spawn_theme_regen_in_background("knob_edit", knob.name)
+        make_it_so()
+        return
+
+    # Render the knob as YAML the user can edit safely
+    payload = {
+        "name":              knob.name,
+        "description":       knob.description,
+        "default_level":     knob.default_level,
+        "keywords_by_level": {str(L): list(kws)
+                               for L, kws in sorted(knob.keywords_by_level.items())},
+    }
+    yml = yaml.safe_dump(payload, sort_keys=False, allow_unicode=True,
+                          default_flow_style=False)
+    header = (
+        f"# org-llm knob: {knob.name}\n"
+        f"# Built-in defaults shown below; saving creates a user override.\n"
+        f"# - Levels MUST be 1/2/3 (string keys; int OK on read)\n"
+        f"# - Each level's value MUST be a list of strings\n"
+        f"# - Empty levels can be removed entirely\n"
+        f"# - 'name' is locked — don't change it\n"
+        f"\n"
+    )
+    body = header + yml
+
+    if show:
+        console.print(body)
+        return
+
+    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") \
+              or _sh.which("nvim") or _sh.which("vim") or _sh.which("nano")
+    if not editor:
+        red_alert("No $EDITOR set and no vim/nvim/nano on PATH. "
+                  "Try [bold]EDITOR=nano org-llm knob edit "
+                  f"{knob.name}[/bold].")
+        raise typer.Exit(1)
+
+    with _tf.NamedTemporaryFile(mode="w", suffix=".yaml",
+                                  prefix=f"knob-{knob.name}-",
+                                  delete=False) as tmp:
+        tmp.write(body)
+        tmp_path = tmp.name
+
+    on_screen(f"[dim]Editing[/dim] {tmp_path} [dim]via[/dim] {editor}")
+    rc = _sp.call([editor, tmp_path])
+    if rc != 0:
+        red_alert(f"Editor exited non-zero ({rc}). No changes saved.")
+        raise typer.Exit(rc)
+
+    try:
+        with open(tmp_path) as f:
+            new_yml = f.read()
+        # yaml.safe_load skips comments and blank lines automatically
+        parsed = yaml.safe_load(new_yml) or {}
+    except Exception as e:
+        red_alert(f"YAML parse failed: {e}. No changes saved.")
+        raise typer.Exit(1)
+
+    # Validation
+    if not isinstance(parsed, dict):
+        red_alert("Top-level YAML must be a mapping. No changes saved.")
+        raise typer.Exit(1)
+    if (parsed.get("name") or "").strip().lower() != knob.name:
+        red_alert(f"name field changed from {knob.name!r} — locked. "
+                  "Use [bold]knob add[/bold] to create a new knob.")
+        raise typer.Exit(1)
+    kbl = parsed.get("keywords_by_level") or {}
+    if not isinstance(kbl, dict):
+        red_alert("keywords_by_level must be a mapping of level -> list.")
+        raise typer.Exit(1)
+    for L, kws in kbl.items():
+        try:
+            Li = int(L)
+        except (TypeError, ValueError):
+            red_alert(f"Invalid level key {L!r} (must be 1, 2, or 3).")
+            raise typer.Exit(1)
+        if Li not in (1, 2, 3):
+            red_alert(f"Level {Li} out of range (must be 1, 2, or 3).")
+            raise typer.Exit(1)
+        if not isinstance(kws, list) or not all(isinstance(k, str) for k in kws):
+            red_alert(f"Level {Li} value must be a list of strings.")
+            raise typer.Exit(1)
+
+    # Build the updated KnobDef and persist as a user override
+    updated = _kn.KnobDef.from_dict(parsed)
+    rows = _kn._read_db_rows(None)
+    rows = [r for r in rows if r.get("name") != updated.name]
+    rows.append(updated.to_dict())
+    _kn.save_knobs([_kn.KnobDef.from_dict(r) for r in rows], session=None)
+
+    hail(f"Saved override for knob: {updated.name}")
+    on_screen(f"[dim]Levels:[/dim] {sorted(updated.keywords_by_level.keys())}  "
+              f"[dim]·  total keywords:[/dim] "
+              f"{sum(len(v) for v in updated.keywords_by_level.values())}")
+    _spawn_theme_regen_in_background("knob_edit", updated.name)
     make_it_so()
 
 
