@@ -1312,6 +1312,16 @@ def create_mcp_server():
         for one of the vetted actions. NEVER call apply without user
         approval — that's a hard guardrail."""
         await _info(ctx, "proactive_doctor: probing chat_model + Ollama + cloud + perf")
+        # Honour the umbrella suppression so testing / scripted runs
+        # don't get auto-healing side-effects. Returns a one-line
+        # explanation rather than running the probes.
+        import os as _os
+        if (_os.environ.get("ORG_LLM_PROACTIVE_DOCTOR", "")
+                .strip().lower() == "off"):
+            return ("proactive_doctor: SUPPRESSED by "
+                    "ORG_LLM_PROACTIVE_DOCTOR=off / "
+                    "--suppress-proactive-doctor. No probes run. Re-enable "
+                    "by unsetting the env var or invoking without the flag.")
         import subprocess
         try:
             proc = subprocess.run(
@@ -1412,6 +1422,12 @@ def create_mcp_server():
         Returns the verb's stdout/stderr + a "DONE" or "FAILED" header.
         On failure, the action is logged but no rollback is auto-attempted —
         the user (or you) decide whether to try another action."""
+        import os as _os
+        if (_os.environ.get("ORG_LLM_PROACTIVE_DOCTOR", "")
+                .strip().lower() == "off"):
+            return ("REFUSED: proactive_doctor_apply is disabled by "
+                    "ORG_LLM_PROACTIVE_DOCTOR=off. The user opted out "
+                    "of auto-healing for this session.")
         if not user_approved:
             return ("REFUSED: proactive_doctor_apply requires "
                     "user_approved=True. The user must explicitly "

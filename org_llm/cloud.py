@@ -207,27 +207,6 @@ PROVIDERS: list[ProviderInfo] = [
                           "openai/gpt-5.5"),                         # closed API; structured-JSON specialist
     ),
     ProviderInfo(
-        slug        = "groq",
-        name        = "Groq",
-        signup_url  = "https://console.groq.com/",
-        console_url = "https://console.groq.com/keys",
-        docs_url    = "https://console.groq.com/docs",
-        api_compat  = "openai",
-        endpoint_hint = "https://api.groq.com/openai/v1",
-        gpu_costs   = {
-            "free tier (Llama 3.1 8B)":  0.00,
-            "Llama 3.3 70B":             0.79,
-            "Llama 3.1 8B paid":         0.05,
-        },
-        description = "Ultra-fast LPU inference; FREE tier with rate limits; very low latency",
-        pricing_url = "https://groq.com/pricing/",
-        # All Groq paid models happen to be FOSS-friendly (Meta Llama, Qwen,
-        # DeepSeek) — that's part of why we ship them.
-        paid_examples = ("llama-3.3-70b-versatile",
-                          "deepseek-r1-distill-llama-70b",
-                          "qwen-2.5-32b"),
-    ),
-    ProviderInfo(
         slug        = "huggingface",
         name        = "Hugging Face Inference",
         signup_url  = "https://huggingface.co/join",
@@ -547,7 +526,7 @@ def merge_refresh(new_rows: list[dict], *,
         else:
             merged.append(r)
             added.append(slug)
-    # Carry forward local-only rows (paid Anthropic/OpenAI models, Groq,
+    # Carry forward local-only rows (paid Anthropic/OpenAI models,
     # HuggingFace — refresh only covers OpenRouter today).
     seen = {m["slug"] for m in merged}
     carried_over = 0
@@ -846,7 +825,7 @@ def _candidate_paths(endpoint_url: str, kind: str) -> list[str]:
     """Return the list of probe paths to try for a given URL.
 
     OpenAI-compatible base URLs frequently already include `/v1` (OpenRouter,
-    Lambda, Groq, …). Naively appending `/v1/...` would yield `/v1/v1/...`
+    Lambda, …). Naively appending `/v1/...` would yield `/v1/v1/...`
     which 404s. We probe both `/v1/<thing>` and `/<thing>` so a single helper
     works for plain Ollama, hosted OpenAI gateways, and bare OpenAI APIs.
     """
@@ -1176,7 +1155,7 @@ def recommend_upgrade(
     # Latency
     if median_latency is not None and median_latency > 4000:
         reasons.append(f"Median cloud latency is {median_latency:.0f} ms — paid "
-                        "endpoints (Groq, Anthropic Sonnet) typically <1 s.")
+                        "endpoints (Anthropic Sonnet, OpenAI) typically <1 s.")
         score += 1
 
     # Fixer benchmark

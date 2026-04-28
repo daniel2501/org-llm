@@ -77,8 +77,22 @@ def _root(
     no_splash: Annotated[bool, typer.Option("--no-splash",
                 help="Suppress the splash menu when running without a command "
                      "(useful for scripts that want help text instead)")] = False,
+    suppress_proactive: Annotated[bool, typer.Option(
+              "--suppress-proactive-doctor", "--no-proactive-doctor", "-Q",
+              help="Disable every proactive auto-healing path for this "
+                   "invocation: lag-detector hints, auto-init-DB, "
+                   "auto-start-Ollama, auto-pull-missing-model, auto-index, "
+                   "and the in-MCP proactive_doctor tool. Useful for testing "
+                   "error paths or scripted runs where extra side-effects "
+                   "would mask the original failure. Equivalent env var: "
+                   "`ORG_LLM_PROACTIVE_DOCTOR=off`.")] = False,
 ):
     """Entry point. With no subcommand, shows the LCARS splash menu."""
+    if suppress_proactive:
+        # Single env var that every proactive path consults. Cheaper
+        # than threading a flag through every callsite, and lets the
+        # MCP server (run as a subprocess) inherit the suppression too.
+        os.environ["ORG_LLM_PROACTIVE_DOCTOR"] = "off"
     if ctx.invoked_subcommand is not None:
         return
     if no_splash:
@@ -485,6 +499,15 @@ def _ensure_model_pulled(model: str, base_url: str, _try_llm_fix: bool = True) -
 #   2. The user sees a one-line note that we self-healed (auditability).
 #   3. If the recovery itself fails, fall back to a friendly error.
 
+def _proactive_doctor_off() -> bool:
+    """True when the user has globally disabled auto-healing for this
+    invocation (via --suppress-proactive-doctor or ORG_LLM_PROACTIVE_DOCTOR
+    =off). Every auto-fix helper consults this so testing / scripted
+    runs can see the original failure mode without side-effects."""
+    return (os.environ.get("ORG_LLM_PROACTIVE_DOCTOR", "")
+            .strip().lower() == "off")
+
+
 def _auto_init_db_if_needed(silent: bool = False) -> bool:
     """Initialize the SQLite DB if it doesn't exist yet. Idempotent.
 
@@ -492,6 +515,8 @@ def _auto_init_db_if_needed(silent: bool = False) -> bool:
     Used by every command that needs config rows so 'no such table: config'
     becomes a self-heal instead of a red alert.
     """
+    if _proactive_doctor_off():
+        return False
     path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
     if path.exists():
         # Quick probe: if the path exists but tables don't, init is still safe
@@ -515,6 +540,8 @@ def _auto_init_db_if_needed(silent: bool = False) -> bool:
 
 def _auto_start_ollama_if_needed(base_url: str, silent: bool = False) -> bool:
     """Try to start `ollama serve` if it's not reachable. Returns True on success."""
+    if _proactive_doctor_off():
+        return False
     try:
         from .llm import list_models
         list_models(base_url)
@@ -672,6 +699,8 @@ def _llm_assisted_fix(error: str, attempted_command: str,
 
 def _auto_index_if_empty(silent: bool = False) -> bool:
     """If the index is empty but org_dir has .org files, run `index` automatically."""
+    if _proactive_doctor_off():
+        return False
     try:
         from .db import File, Node
         engine = _engine()
@@ -9628,7 +9657,7 @@ def review_emacs(
         f"Files (truncated where noted):\n\n{bundle}"
     )
 
-    # Cloud override: skip local pull, use OpenRouter / Groq / etc.
+    # Cloud override: skip local pull, use OpenRouter / etc.
     if cloud_:
         with get_session(engine) as session:
             cloud_provider = _cfg(session, "cloud_provider")
@@ -11583,7 +11612,7 @@ def cloud(
     cost:      Annotated[bool, typer.Option("--cost",       "-x",  help="Show cost table across providers")] = False,
     creds:     Annotated[bool, typer.Option("--creds",      "-r",  help="Show stored cloud credentials in `pass`")] = False,
     quick_start: Annotated[str, typer.Option("--quick-start", "-q",
-                 help="Provider slug for one-shot signup flow (e.g. openrouter, groq)")] = "",
+                 help="Provider slug for one-shot signup flow (e.g. openrouter)")] = "",
     key:         Annotated[str, typer.Option("--key", "-K",
                  help="API key for --quick-start (skips the interactive paste prompt)")] = "",
     recommend_upgrade: Annotated[bool, typer.Option("--recommend-upgrade", "-u",
@@ -11806,7 +11835,7 @@ def cloud(
         pool = cloud_models_for_provider(cur_provider)
         if not pool:
             red_alert(f"No curated catalog for provider {cur_provider!r}. "
-                       f"Supported: openrouter, groq, huggingface.")
+                       f"Supported: openrouter, huggingface.")
             raise typer.Exit(1)
 
         cap = budget if budget >= 0 else None
@@ -11983,13 +12012,12 @@ def cloud(
         slug = quick_start.lower()
         chosen = get_provider(slug)
         if not chosen:
-            red_alert(f"Unknown provider {slug!r}. Try: openrouter, groq, huggingface")
+            red_alert(f"Unknown provider {slug!r}. Try: openrouter, huggingface")
             raise typer.Exit(1)
 
         # Default model + key-prefix hints per provider for the "test" call
         model_for, key_hint = {
             "openrouter": ("openai/gpt-oss-20b:free",            "sk-or-v1-…"),
-            "groq":       ("llama-3.1-8b-instant",                "gsk_…"),
             "huggingface":("meta-llama/Llama-3.1-8B-Instruct",   "hf_…"),
         }.get(slug, (chosen.gpu_costs and list(chosen.gpu_costs)[0] or "", ""))
 

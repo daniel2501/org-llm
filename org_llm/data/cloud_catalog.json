@@ -3,7 +3,7 @@
   "updated_at": "2026-04-28",
   "stale_after_days": 90,
   "remote_url": "https://raw.githubusercontent.com/daniel2501/org-llm/main/org_llm/data/cloud_catalog.json",
-  "doc": "Curated cloud catalog used by `org-llm cloud --tune` + `models --upgrade`. Refresh OpenRouter rows live with `org-llm cloud --refresh-catalog`; that command also liveness-probes every provider URL and pulls the canonical providers list from `remote_url`. Other providers' model pricing (Groq, HF, GPU rentals) needs manual PRs — `cloud --propose-update` prints a ready-to-paste diff.",
+  "doc": "Curated cloud catalog used by `org-llm cloud --tune` + `models --upgrade`. Refresh OpenRouter rows live with `org-llm cloud --refresh-catalog`; that command also liveness-probes every provider URL and pulls the canonical providers list from `remote_url`. Other providers' model pricing (HF, GPU rentals) needs manual PRs — `cloud --propose-update` prints a ready-to-paste diff.",
   "providers_doc": "Mirrors the PROVIDERS NamedTuple in cloud.py. PRs welcome when providers launch / shut down / change pricing.",
   "providers": [
     {"slug": "runpod",      "status": "active", "kind": "gpu_rental"},
@@ -14,7 +14,6 @@
     {"slug": "paperspace",  "status": "active", "kind": "gpu_rental"},
     {"slug": "coreweave",   "status": "active", "kind": "gpu_rental"},
     {"slug": "openrouter",  "status": "active", "kind": "hosted_inference"},
-    {"slug": "groq",        "status": "active", "kind": "hosted_inference"},
     {"slug": "huggingface", "status": "active", "kind": "hosted_inference"}
   ],
   "cloud_models": [
@@ -147,46 +146,6 @@
       "cost_out": 75.00,
       "license": "Closed API",
       "note": "Claude Opus 4.7; frontier reasoning, expensive"
-    },
-    {
-      "provider": "groq",
-      "slug": "llama-3.1-8b-instant",
-      "roles": ["chat", "fast", "instruct"],
-      "quality": 120,
-      "cost_in": 0.0,
-      "cost_out": 0.0,
-      "license": "Llama 3 community",
-      "note": "Free tier; ~750 tok/s on Groq LPU"
-    },
-    {
-      "provider": "groq",
-      "slug": "llama-3.3-70b-versatile",
-      "roles": ["chat", "instruct", "text", "reason"],
-      "quality": 180,
-      "cost_in": 0.59,
-      "cost_out": 0.79,
-      "license": "Llama 3 community",
-      "note": "70B on Groq LPU; very fast"
-    },
-    {
-      "provider": "groq",
-      "slug": "deepseek-r1-distill-llama-70b",
-      "roles": ["reason", "chat"],
-      "quality": 160,
-      "cost_in": 0.75,
-      "cost_out": 0.99,
-      "license": "MIT",
-      "note": "R1 reasoning distilled, fast LPU"
-    },
-    {
-      "provider": "groq",
-      "slug": "qwen-2.5-32b",
-      "roles": ["chat", "instruct"],
-      "quality": 165,
-      "cost_in": 0.30,
-      "cost_out": 0.40,
-      "license": "Apache 2.0",
-      "note": "Qwen 2.5 32B on Groq"
     },
     {
       "provider": "huggingface",

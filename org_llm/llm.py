@@ -61,9 +61,12 @@ def chat(prompt: str, model: str, base_url: str, system: str = "",
     # Lag check runs OUTSIDE track_event so its own DB queries don't
     # nest into the open transaction. Fail-silent — perf telemetry must
     # never break a chat call.
+    # Suppressed when either ORG_LLM_LAG_DETECTOR=off (granular toggle)
+    # or ORG_LLM_PROACTIVE_DOCTOR=off (umbrella suppression for tests +
+    # scripted runs that don't want auto-healing side-effects).
     if (out and len(out) >= 10
-            and os.environ.get("ORG_LLM_LAG_DETECTOR", "").lower()
-                != "off"):
+            and os.environ.get("ORG_LLM_LAG_DETECTOR", "").lower() != "off"
+            and os.environ.get("ORG_LLM_PROACTIVE_DOCTOR", "").lower() != "off"):
         try:
             from . import perf as _perf
             warn = _perf.check_lag(model, _t.monotonic() - t0, out)
