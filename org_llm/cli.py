@@ -3230,6 +3230,17 @@ def ask(
         on_screen("[dim]Try:[/dim] [bold]org-llm ask "
                    "'what did I write about emacs last month?'[/bold]")
         raise typer.Exit(1)
+    # Numeric input bounds: catch nonsense before it shows up as
+    # silent zero-results / whole-vault dumps in the retrieval layer.
+    if top_k <= 0:
+        red_alert(f"--top-k must be positive (got {top_k}).")
+        raise typer.Exit(1)
+    if top_k > 200:
+        red_alert(f"--top-k {top_k} is unreasonable; capping at 200.")
+        top_k = 200
+    if days < 0:
+        red_alert(f"--days must be 0 or positive (got {days}).")
+        raise typer.Exit(1)
     from .llm import chat as local_chat, embed
     from .search import (
         existing_tags, nodes_with_tag,
@@ -4703,6 +4714,11 @@ def log_show(
     if kind and kind not in valid_kinds:
         red_alert(f"Unknown log kind '{kind}'. Valid: "
                    f"{', '.join(sorted(valid_kinds))}.")
+        raise typer.Exit(1)
+    # Negative limit silently returned every row (SQLAlchemy ignored
+    # it); zero returned nothing. Both surprise the user — guard them.
+    if limit <= 0:
+        red_alert(f"--limit must be positive (got {limit}).")
         raise typer.Exit(1)
 
     engine = _engine()
