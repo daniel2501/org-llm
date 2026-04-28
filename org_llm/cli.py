@@ -16667,6 +16667,7 @@ def _llm_diagnose_uncaught(exc: BaseException, argv: list[str]) -> None:
         hint = None
     crash_in_our_code = _our_module_in_traceback(exc) is not None
     skip_llm_diagnosis = False
+    skip_self_rewrite  = False
     if hint is not None:
         from rich.panel import Panel as _Panel
         body = (f"[bold]WHY:[/bold] {hint.why}\n"
@@ -16676,6 +16677,16 @@ def _llm_diagnose_uncaught(exc: BaseException, argv: list[str]) -> None:
         console.print()
         console.print(_Panel(body, title=title,
                               border_style="lcars2", padding=(1, 2)))
+
+        # User-caused exception (PermissionError, FileNotFoundError on
+        # a user-supplied path): the registry hint is the answer.
+        # There's nothing for the LLM to add and NOTHING to self-
+        # rewrite — patching our source can't fix what the user typed.
+        # Earlier this triggered both a redundant LLM "Run sudo …"
+        # panel AND a self-rewrite offer for `askbook.py` after a
+        # PermissionError on /root/cant-write.org — clean noise.
+        if getattr(hint, "user_caused", False):
+            return
         # High-confidence pattern + crash NOT in our code: the user has
         # a precise next step (e.g. `ollama serve`); skip both the LLM
         # diagnosis AND the self-rewrite — there's nothing in our

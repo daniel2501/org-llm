@@ -39,10 +39,16 @@ class StructuredHint(NamedTuple):
     ``why`` describes the root cause in one sentence; ``fix`` is a
     concrete shell command (or ``manual:`` prefix); ``confidence`` is
     "high" when we KNOW this matches, "medium" when it might.
+    ``user_caused`` is True for exceptions where the cause is on the
+    user's side (bad input path, permission denied, missing file the
+    user named) — those should NOT trigger the self-rewrite offer
+    even when a frame happens to be in org-llm code; patching our
+    source won't fix what the user typed.
     """
-    why:        str
-    fix:        str
-    confidence: str  # "high" | "medium"
+    why:         str
+    fix:         str
+    confidence:  str    # "high" | "medium"
+    user_caused: bool = False
 
 
 # Each registry entry is (predicate, builder). The predicate gets the
@@ -177,6 +183,7 @@ _REGISTRY: list[tuple[_Pred, _Builder]] = [
             fix=("org-llm config org_dir ~/org   "
                   "# or wherever your vault lives"),
             confidence="medium",
+            user_caused=True,
         ),
     ),
     # ── ImportError: a real third-party dep is missing (uv install drift) ─────
@@ -198,6 +205,7 @@ _REGISTRY: list[tuple[_Pred, _Builder]] = [
             fix=("manual: check ownership of "
                   "~/.local/share/org-llm/ and ~/org/."),
             confidence="medium",
+            user_caused=True,
         ),
     ),
     # ── KeyError on a Config row → migration / typo ───────────────────────────
@@ -275,6 +283,18 @@ class SanitizedAdvice(NamedTuple):
     flagged: list[str]    # human-readable reasons it's suspect
 
 
+# Narrative openers the LLM commonly wraps commands in
+# ("Run the X command", "Try X", "Use X to fix"). We strip these
+# before checking the lead token so a perfectly fine "FIX: Run sudo
+# pacman -S pass" doesn't get flagged because "Run" isn't in the
+# safe-token list — the meaningful command IS in the safe list, just
+# not at position 0.
+_NARRATIVE_OPENERS: set[str] = {
+    "run", "try", "use", "execute", "call", "consider", "check",
+    "type", "first", "then", "do", "issue",
+}
+
+
 def sanitize_llm_advice(advice: str) -> SanitizedAdvice:
     """Inspect an LLM-emitted FIX block. Returns the original text plus
     a flag list for any suspect content. The caller decides how to
@@ -298,9 +318,22 @@ def sanitize_llm_advice(advice: str) -> SanitizedAdvice:
                  if ln.strip().lower().startswith("fix:")]
     for line in fix_lines:
         body = line.split(":", 1)[1].strip()
-        first = body.split(maxsplit=1)[0] if body else ""
-        # Strip any leading shell adornments (backticks, $, etc.)
-        first = first.strip("`$()[]{}\"'")
+        # Skip narrative openers ("Run the X command" → check X).
+        # Walk through tokens until we land on something that ISN'T a
+        # plain narrative wrapper — that's the candidate command.
+        tokens = body.split()
+        while tokens:
+            head = tokens[0].strip("`$()[]{}\"',.").lower()
+            if head and head in _NARRATIVE_OPENERS:
+                tokens.pop(0)
+                continue
+            # Also skip determiners that follow openers ("Run THE X")
+            if head in {"the", "a", "an"}:
+                tokens.pop(0)
+                continue
+            break
+        first = (tokens[0].strip("`$()[]{}\"',.")
+                  if tokens else "")
         if first and first.lower() not in _SAFE_LEAD_TOKENS:
             flagged.append(
                 f"FIX line starts with an unrecognised command: "
