@@ -1413,6 +1413,40 @@ def setup(
                 on_screen(f"[dim]models --tune failed: {e}[/dim]")
             console.print()
 
+            # Optional follow-up: real-world benchmark on what was just
+            # pulled. --tune picks by static quality + RAM-fit; on CPU
+            # the fastest combo can be ≠ the highest-quality combo (we
+            # measured 8× speedup from this on a real workload). Default
+            # NO so onboarding stays under 10 min — opt-in for users who
+            # want the validated picks.
+            try:
+                from .llm import list_models as _lm
+                with get_session(engine_now) as _s:
+                    _ollama_url_now = _ollama_url(_s)
+                pulled_now = _lm(_ollama_url_now)
+            except Exception:
+                pulled_now = []
+            n_pulled = sum(1 for t in pulled_now
+                            if not any(s in t.lower()
+                                        for s in ("embed", "arctic")))
+            if n_pulled >= 2 and _confirm(
+                    f"Run a real tok/s benchmark to validate? "
+                    f"({n_pulled} pulled non-embed model(s); "
+                    f"~{n_pulled * 30}s on CPU)",
+                    default=False):
+                on_screen("[lcars2]Step 6b/15[/lcars2] "
+                           "models --upgrade --apply  "
+                           "[dim](real benchmark — may differ from --tune)[/dim]")
+                try:
+                    _run_with_stall_watch(
+                        ["org-llm", "models", "--upgrade", "--apply"],
+                        stall_secs=180.0,
+                        label="models --upgrade --apply",
+                    )
+                except Exception as e:
+                    on_screen(f"[dim]models --upgrade failed: {e}[/dim]")
+                console.print()
+
     # 6+7. index → tag — data-driven prompt
     try:
         from .db import File as _F, Node as _N
@@ -6432,6 +6466,9 @@ def _doctor_impl(
         on_screen("[dim]Manual fix:[/dim] "
                   "[bold]org-llm models --pull llama3.2:1b[/bold]  "
                   "[dim](smallest viable chat model)[/dim]")
+        on_screen("[dim]Or run a real benchmark to find the fastest model "
+                   "for your hardware:[/dim] "
+                   "[bold]org-llm models --upgrade[/bold]")
         return
     import os
     import shutil
