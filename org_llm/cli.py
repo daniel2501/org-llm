@@ -11323,6 +11323,15 @@ def cloud(
                  help="Analyse recent cloud usage; suggest a paid tier if free is choking")] = False,
     upgrade:     Annotated[str, typer.Option("--upgrade",      "-U",
                  help="Open a provider's billing/upgrade page (slug; default: configured provider)")] = "",
+    tune:        Annotated[bool, typer.Option("--tune", "-T",
+                 help="Recommend a better cloud_model from the curated catalog "
+                      "for your configured provider. With --apply, write picks "
+                      "to config.")] = False,
+    apply_tune:  Annotated[bool, typer.Option("--apply", "-A",
+                 help="With --tune: write the picks to config (default: read-only)")] = False,
+    budget:      Annotated[float, typer.Option("--budget", "-b",
+                 help="With --tune: cap on USD per 1M output tokens (e.g. 0 = "
+                      "free-tier only, 0.5 = cheap paid). Default: no cap.")] = -1.0,
 ):
     """Manage cloud GPU backends — RunPod, Vast.ai, Lambda, TensorDock, Salad, and more.
 
@@ -11347,8 +11356,106 @@ def cloud(
 
     # default: show status
     if not any([status, providers, signup, console_, configure, test, assess,
-                cost, creds, quick_start, recommend_upgrade, upgrade]):
+                cost, creds, quick_start, recommend_upgrade, upgrade, tune]):
         status = True
+
+    # ── tune cloud_model from the curated catalog ────────────────────────────
+    if tune:
+        from .cloud import (
+            recommend_cloud_models, cloud_models_for_provider,
+        )
+        with get_session(engine) as session:
+            cur_provider = _cfg(session, "cloud_provider")
+            cur_model    = _cfg(session, "cloud_model")
+        if not cur_provider:
+            red_alert("No cloud provider configured.")
+            on_screen("Run [bold]org-llm cloud --quick-start "
+                       "openrouter[/bold] first.")
+            raise typer.Exit(1)
+        pool = cloud_models_for_provider(cur_provider)
+        if not pool:
+            red_alert(f"No curated catalog for provider {cur_provider!r}. "
+                       f"Supported: openrouter, groq, huggingface.")
+            raise typer.Exit(1)
+
+        cap = budget if budget >= 0 else None
+        recs = recommend_cloud_models(
+            provider_slug=cur_provider,
+            current_model=cur_model,
+            budget_per_mtok_out=cap,
+        )
+
+        console.rule(f"[lcars1]Cloud tune  ·  {cur_provider}[/lcars1]")
+        budget_label = (f"≤ ${cap:.2f}/Mtok output" if cap is not None
+                         else "no budget cap")
+        hail(f"Provider: {cur_provider}  ·  current model: "
+              f"{cur_model or '(unset)'}  ·  budget: {budget_label}")
+
+        if not recs:
+            on_screen("[yellow]No catalog entries fit your budget.[/yellow] "
+                       "Try a higher --budget, or run with no --budget for "
+                       "the full ranked picks.")
+            raise typer.Exit(1)
+
+        narrow = console.width < 110
+        tbl = Table(box=None, pad_edge=False)
+        tbl.add_column("Role",      style="lcars1", no_wrap=True, width=8)
+        tbl.add_column("Current",   style="dim",    no_wrap=True,
+                       max_width=24, overflow="ellipsis")
+        tbl.add_column("→",         width=2)
+        tbl.add_column("Suggested", style="lcars2", no_wrap=True,
+                       max_width=30, overflow="ellipsis")
+        tbl.add_column("Quality",   style="dim",    justify="right", width=4)
+        tbl.add_column("$/Mtok out", style="lcars3", justify="right", width=8)
+        if not narrow:
+            tbl.add_column("License", style="dim", no_wrap=True,
+                           max_width=18, overflow="ellipsis")
+        for rec in recs:
+            arrow = "[bold yellow]↑[/]" if rec["upgrade"] else "·"
+            cost_label = ("[green]free[/green]" if rec["cost_out"] == 0
+                           else f"${rec['cost_out']:.2f}")
+            row = [
+                rec["role"], rec["current"] or "(unset)", arrow,
+                rec["suggested"], str(rec["quality"]), cost_label,
+            ]
+            if not narrow:
+                row.append(rec["license"])
+            tbl.add_row(*row)
+        console.print(tbl)
+        if narrow:
+            on_screen("[dim]Narrow terminal — License column hidden. "
+                       "Widen >= 110 cols to see it.[/dim]")
+        console.print()
+
+        # Single canonical pick for cloud_model: highest-quality chat winner
+        chat_pick = next((r for r in recs if r["role"] == "chat"), None)
+        if chat_pick and chat_pick["upgrade"]:
+            on_screen(f"Top pick for [lcars1]cloud_model[/lcars1] "
+                       f"(role=chat): [bold]{chat_pick['suggested']}[/bold]")
+
+        if not apply_tune:
+            on_screen("Read-only — re-run with [bold]--apply[/bold] to "
+                       "write the chat winner to [bold]cloud_model[/bold].")
+            return
+        if not chat_pick or not chat_pick["upgrade"]:
+            on_screen("[dim]Nothing to apply — current cloud_model is "
+                       "already the top scorer.[/dim]")
+            return
+        if typer.confirm(f"Set cloud_model to {chat_pick['suggested']}?",
+                          default=False):
+            from .db import Config as Cfg
+            with get_session(engine) as session:
+                row = session.get(Cfg, "cloud_model")
+                if row:
+                    row.value = chat_pick["suggested"]
+                else:
+                    session.add(Cfg(key="cloud_model",
+                                     value=chat_pick["suggested"]))
+                session.commit()
+            hail(f"cloud_model: {cur_model!r} → "
+                  f"{chat_pick['suggested']!r}")
+            make_it_so()
+        return
 
     # ── Recommend a paid upgrade based on recent usage telemetry ─────────────
     if recommend_upgrade:

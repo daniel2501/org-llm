@@ -252,6 +252,154 @@ def get_provider(slug: str) -> ProviderInfo | None:
     return PROVIDER_MAP.get(slug)
 
 
+# ── Curated cloud-model catalog ──────────────────────────────────────────────
+# Mirrors org_llm/models.py's CATALOG for local Ollama, but for hosted
+# inference providers. Used by `org-llm cloud --tune` to per-role
+# recommend a better cloud_model based on cost + quality.
+#
+# `roles` mirrors local CATALOG — role tags map to org-llm's role
+# config keys (chat / fast / code / reason / instruct / text).
+# `cost_in` / `cost_out` are USD per million input / output tokens
+# (0.0 = free tier, may have rate limits).
+# `quality` mirrors models._QUALITY scale: 50=tiny, 100=3B-class,
+# 150=14B-class, 200=70B-class.
+
+class CloudModelInfo(NamedTuple):
+    provider:  str        # provider slug from PROVIDER_MAP
+    slug:      str        # the model identifier the API call uses
+    roles:     tuple      # (chat, fast, code, reason, instruct, text)
+    quality:   int        # quality rank, comparable with local _QUALITY
+    cost_in:   float      # USD per 1M input tokens (0.0 = free tier)
+    cost_out:  float      # USD per 1M output tokens
+    license:   str        # license / openness shorthand
+    note:      str        # one-line description
+
+
+CLOUD_MODELS: list[CloudModelInfo] = [
+    # ── OpenRouter (multi-model gateway) ─────────────────────────────────────
+    # FREE tier
+    CloudModelInfo("openrouter", "openai/gpt-oss-20b:free",
+                    ("chat", "instruct", "fast"), 110, 0.0, 0.0,
+                    "Apache 2.0", "OpenAI's open release; free, rate-limited"),
+    CloudModelInfo("openrouter", "meta-llama/llama-3.1-8b-instruct:free",
+                    ("chat", "instruct", "fast"), 120, 0.0, 0.0,
+                    "Llama 3 community", "Meta Llama 3.1 8B; free tier"),
+    CloudModelInfo("openrouter", "deepseek/deepseek-r1:free",
+                    ("reason",), 175, 0.0, 0.0,
+                    "MIT", "DeepSeek R1 reasoning; free tier (slow)"),
+    CloudModelInfo("openrouter", "deepseek/deepseek-r1-distill-llama-70b:free",
+                    ("reason", "chat"), 160, 0.0, 0.0,
+                    "MIT", "R1 reasoning distilled into Llama 70B; free"),
+    CloudModelInfo("openrouter", "google/gemini-2.0-flash-exp:free",
+                    ("chat", "instruct", "fast"), 145, 0.0, 0.0,
+                    "Gemini ToS", "Google Gemini 2.0 Flash; experimental free"),
+    # CHEAP PAID — open weights
+    CloudModelInfo("openrouter", "meta-llama/llama-3.3-70b-instruct",
+                    ("chat", "instruct", "text", "reason"), 180, 0.13, 0.40,
+                    "Llama 3 community", "Meta Llama 3.3 70B; strong open chat"),
+    CloudModelInfo("openrouter", "qwen/qwen-2.5-72b-instruct",
+                    ("chat", "instruct", "text"), 195, 0.13, 0.40,
+                    "Apache 2.0", "Alibaba Qwen 2.5 72B; frontier open"),
+    CloudModelInfo("openrouter", "deepseek/deepseek-r1",
+                    ("reason",), 200, 0.55, 2.19,
+                    "MIT", "DeepSeek R1 reasoning; best open reasoning"),
+    CloudModelInfo("openrouter", "qwen/qwen-2.5-coder-32b-instruct",
+                    ("code",), 200, 0.07, 0.16,
+                    "Apache 2.0", "Best open code model on cloud"),
+    CloudModelInfo("openrouter", "openai/gpt-oss-120b",
+                    ("chat", "instruct", "text", "reason"), 190, 0.30, 0.50,
+                    "Apache 2.0", "OpenAI's larger open release"),
+    # PREMIUM — closed APIs
+    CloudModelInfo("openrouter", "anthropic/claude-sonnet-4.6",
+                    ("chat", "instruct", "text", "reason"), 250, 3.00, 15.00,
+                    "Closed API", "Anthropic Claude Sonnet 4.6; long context, tool use"),
+    CloudModelInfo("openrouter", "openai/gpt-5.5",
+                    ("chat", "instruct", "text"), 245, 5.00, 15.00,
+                    "Closed API", "OpenAI GPT-5.5; structured output specialist"),
+    CloudModelInfo("openrouter", "anthropic/claude-opus-4-7",
+                    ("chat", "instruct", "reason", "text"), 260, 15.00, 75.00,
+                    "Closed API", "Claude Opus 4.7; frontier reasoning, expensive"),
+
+    # ── Groq (ultra-fast LPU inference) ──────────────────────────────────────
+    CloudModelInfo("groq", "llama-3.1-8b-instant",
+                    ("chat", "fast", "instruct"), 120, 0.0, 0.0,
+                    "Llama 3 community", "Free tier; ~750 tok/s on Groq LPU"),
+    CloudModelInfo("groq", "llama-3.3-70b-versatile",
+                    ("chat", "instruct", "text", "reason"), 180, 0.59, 0.79,
+                    "Llama 3 community", "70B on Groq LPU; very fast"),
+    CloudModelInfo("groq", "deepseek-r1-distill-llama-70b",
+                    ("reason", "chat"), 160, 0.75, 0.99,
+                    "MIT", "R1 reasoning distilled, fast LPU"),
+    CloudModelInfo("groq", "qwen-2.5-32b",
+                    ("chat", "instruct"), 165, 0.30, 0.40,
+                    "Apache 2.0", "Qwen 2.5 32B on Groq"),
+
+    # ── Hugging Face Inference (router) ──────────────────────────────────────
+    CloudModelInfo("huggingface", "meta-llama/Llama-3.3-70B-Instruct",
+                    ("chat", "instruct", "text"), 180, 0.50, 0.50,
+                    "Llama 3 community", "Llama 3.3 70B via HF router"),
+    CloudModelInfo("huggingface", "deepseek-ai/DeepSeek-R1",
+                    ("reason",), 200, 0.55, 2.19,
+                    "MIT", "DeepSeek R1 via HF router"),
+]
+
+CLOUD_MODELS_BY_PROVIDER: dict[str, list[CloudModelInfo]] = {}
+for _m in CLOUD_MODELS:
+    CLOUD_MODELS_BY_PROVIDER.setdefault(_m.provider, []).append(_m)
+
+
+def cloud_models_for_provider(provider_slug: str) -> list[CloudModelInfo]:
+    """All curated cloud models hosted by this provider."""
+    return CLOUD_MODELS_BY_PROVIDER.get(provider_slug, [])
+
+
+def recommend_cloud_models(
+    *, provider_slug: str, current_model: str = "",
+    budget_per_mtok_out: float | None = None,
+    role_filter: str = "",
+) -> list[dict]:
+    """Per-role recommend the highest-quality cloud model that fits
+    the user's budget. Mirrors models.recommendations() for local.
+
+    Returns one dict per role with keys: role, current, suggested,
+    quality, cost_in, cost_out, license, note, upgrade (bool).
+    """
+    pool = cloud_models_for_provider(provider_slug)
+    if not pool:
+        return []
+    if budget_per_mtok_out is not None:
+        pool = [m for m in pool if m.cost_out <= budget_per_mtok_out]
+    if not pool:
+        return []
+
+    # Keys we recommend on, mirroring the local roles
+    # (skip "embed" — cloud embedding is a niche separately handled via
+    # cloud_embed / different config).
+    roles = ("chat", "fast", "code", "reason", "instruct", "text")
+    recs: list[dict] = []
+    for role in roles:
+        if role_filter and role != role_filter:
+            continue
+        candidates = [m for m in pool if role in m.roles]
+        if not candidates:
+            continue
+        candidates.sort(key=lambda m: (m.quality, -m.cost_out), reverse=True)
+        winner = candidates[0]
+        is_upgrade = current_model.lower() != winner.slug.lower()
+        recs.append({
+            "role":      role,
+            "current":   current_model,
+            "suggested": winner.slug,
+            "quality":   winner.quality,
+            "cost_in":   winner.cost_in,
+            "cost_out":  winner.cost_out,
+            "license":   winner.license,
+            "note":      winner.note,
+            "upgrade":   is_upgrade,
+        })
+    return recs
+
+
 # ── Approximate model VRAM requirements (GB) ──────────────────────────────────
 MODEL_VRAM: list[tuple[str, float]] = [
     ("1b",              1.5),
