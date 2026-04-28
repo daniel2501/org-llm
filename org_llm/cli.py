@@ -1456,6 +1456,38 @@ def setup(
             on_screen(f"[dim]dbt init/build failed: {e}[/dim]")
         console.print()
 
+    # 9.7. auto-embedder — opt-in here so the user knows about the
+    # background daemon thread before `org-llm launch` starts spawning
+    # it. Default Y: most users want the index + embeddings to stay
+    # current without remembering to run `org-llm embed`.
+    if "auto-embed" in done_set:
+        on_screen("[dim]✓ Step 9.7/15: auto-embedder enable "
+                  "(already done — skipping)[/dim]")
+        console.print()
+    elif _confirm("Enable the background auto-embedder? It runs while "
+                   "`org-llm launch` (or `org-llm watch`) is up, polls "
+                   "your vault every minute, and indexes/embeds new files "
+                   "automatically — Captain's Log records every batch",
+                   default=True):
+        try:
+            from .db import Config as _Cfg
+            engine_now = _engine()
+            with get_session(engine_now) as session:
+                row = session.get(_Cfg, "auto_embed_enabled")
+                if row: row.value = "true"
+                else:   session.add(_Cfg(key="auto_embed_enabled", value="true"))
+                session.commit()
+            hail("auto_embed_enabled = true (will start with `org-llm launch`).")
+            on_screen("[dim]Tweak cadence:[/dim] "
+                      "[bold]org-llm config auto_embed_interval_secs 120[/bold]")
+            on_screen("[dim]Standalone:[/dim]   "
+                      "[bold]org-llm watch[/bold]  (foreground)  ·  "
+                      "[bold]org-llm watch --daemon[/bold]  (setup hints)")
+            _mark_step_done("auto-embed")
+        except Exception as e:
+            on_screen(f"[dim]auto-embed enable failed: {e}[/dim]")
+        console.print()
+
     # 9. personalize — data-driven prompt
     try:
         from .db import Node as _N2
