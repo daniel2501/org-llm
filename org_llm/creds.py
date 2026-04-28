@@ -92,8 +92,8 @@ def install_help() -> str:
             "  Debian: sudo apt install pass\n"
             "  Arch:   sudo pacman -S pass\n"
             "  macOS:  brew install pass\n"
-            "  Or:     org-llm install --skip-ollama --skip-models --skip-fonts \\\n"
-            "                          --skip-opencode --skip-gh --skip-claude\n"
+            "  Or:     org-llm install-tools --skip-ollama --skip-models --skip-fonts \\\n"
+            "                                --skip-opencode --skip-gh --skip-claude\n"
         )
     if not is_initialized():
         return (

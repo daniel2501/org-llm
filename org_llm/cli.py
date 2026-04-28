@@ -17,7 +17,7 @@ from .ui import TREK_MSGS, console, hail, heartbeat, impulse, make_it_so, on_scr
 
 
 # ── Shortest-unique-prefix command resolution ────────────────────────────────
-# `org-llm do` → `doctor`, `org-llm rev` → `review-emacs`, etc.
+# `org-llm do` → `doctor`, `org-llm review` → `review-emacs`, etc.
 # Ambiguous prefixes (e.g. `s` matching search/skill/skills/skill-new/…) fail
 # with an explicit list of candidates instead of "No such command".
 
@@ -11942,15 +11942,27 @@ def pi(
             rows.append(("MCP tools available", "[dim]?[/dim]",
                           "[dim](can't introspect mcp_server.py)[/dim]"))
 
-        # 6. Persona injection: theme_studio surface for opencode_persona_intro
+        # 6. Persona injection: pi reads the MCP server's `instructions`
+        #    field at handshake time and prepends it to every system
+        #    prompt (see pi_extension/pi-org-llm.ts:212). Show the first
+        #    line of that — the actual string pi will inject — rather
+        #    than the opencode-specific theme surface.
         try:
-            from . import theme_studio as _ts
-            persona = _ts.get_themed("opencode_persona_intro")
-            rows.append(("Persona injection", "[green]✓[/green]",
-                          f"{persona[:60]}…" if len(persona) > 60 else persona))
+            from .mcp_server import create_mcp_server  # noqa: F401
+            import inspect, re as _re
+            src = inspect.getsource(create_mcp_server)
+            m = _re.search(r'instructions=\(\s*\n\s*"([^"]+)"', src)
+            first_line = m.group(1) if m else ""
+            if first_line:
+                rows.append(("Persona injection", "[green]✓[/green]",
+                              first_line if len(first_line) <= 60
+                              else f"{first_line[:60]}…"))
+            else:
+                rows.append(("Persona injection", "[dim]?[/dim]",
+                              "[dim]could not read MCP instructions[/dim]"))
         except Exception:
             rows.append(("Persona injection", "[dim]?[/dim]",
-                          "[dim]theme_studio unavailable[/dim]"))
+                          "[dim]mcp_server unavailable[/dim]"))
 
         tbl = _T(box=None, pad_edge=False, show_header=False)
         tbl.add_column("Check",  style="lcars2", width=20, no_wrap=True)
@@ -12859,7 +12871,7 @@ def self_snapshots():
             s.manifest.get("git_hash") or "-",
         )
     console.print()
-    console.rule("[lcars1]org-llm snapshots[/lcars1]")
+    console.rule("[lcars1]org-llm self snapshots[/lcars1]")
     console.print(tbl)
 
 
