@@ -409,9 +409,14 @@ def refresh_from_openrouter(*, timeout: float = 15.0
     must come from manual PRs against the bundled catalog.
     """
     import urllib.request as _ur
+    # Use the project's _urlopen wrapper, NOT bare urllib. _urlopen
+    # injects the resolved SSL context (Guix users have their CA
+    # bundle under ~/.guix-home/profile/etc/ssl/certs, not the
+    # locations Python's stdlib auto-discovers). Earlier this used
+    # bare urlopen and 500'd with CERTIFICATE_VERIFY_FAILED on Guix.
     req = _ur.Request("https://openrouter.ai/api/v1/models",
                        headers={"User-Agent": "org-llm/refresh-catalog"})
-    with _ur.urlopen(req, timeout=timeout) as resp:
+    with _urlopen(req, timeout=timeout) as resp:
         payload = _json.loads(resp.read().decode("utf-8"))
     raw_models = payload.get("data") or []
     rows: list[dict] = []
@@ -615,7 +620,7 @@ def probe_provider_liveness(*, timeout: float = 5.0) -> list[dict]:
             req = _ur.Request(url, method="HEAD",
                                 headers={"User-Agent":
                                           "org-llm/refresh-catalog"})
-            with _ur.urlopen(req, timeout=timeout) as resp:
+            with _urlopen(req, timeout=timeout) as resp:
                 code = resp.getcode()
                 record["status_code"] = code
                 record["alive"] = (200 <= code < 400)
@@ -652,7 +657,7 @@ def fetch_remote_catalog(remote_url: str = "",
         req = _ur.Request(remote_url,
                            headers={"User-Agent":
                                       "org-llm/refresh-catalog"})
-        with _ur.urlopen(req, timeout=timeout) as resp:
+        with _urlopen(req, timeout=timeout) as resp:
             return _json.loads(resp.read().decode("utf-8"))
     except Exception:
         return None
