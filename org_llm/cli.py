@@ -12429,6 +12429,11 @@ def context_add(
     vault is then scanned for nodes whose content references words in
     the new fact — those are proposed for `:stale:` tagging.
     """
+    if not fact or not fact.strip():
+        red_alert("Empty fact. Pass a non-empty string.")
+        on_screen("[dim]Try:[/dim] [bold]org-llm context add "
+                   "'I work at Acme as of 2026'[/bold]")
+        raise typer.Exit(1)
     from . import context as _ctx
     p = _ctx.add_fact(fact, source="cli")
     hail(f"Added to {p}")
@@ -15751,7 +15756,14 @@ def main():
             known = sorted(typer.main.get_command(app).commands.keys())
         except Exception:
             known = []
-        guess = _dl.get_close_matches(first, known, n=1, cutoff=0.6)
+        # Skip layer-0 when argv[0] is already a valid top-level verb —
+        # the unknown subcommand is at argv[1+] and difflib would just
+        # match argv[0] to itself, producing a confusing
+        # "did you mean knob? Retrying" self-loop.
+        if first in known:
+            guess = []
+        else:
+            guess = _dl.get_close_matches(first, known, n=1, cutoff=0.6)
         if guess:
             _on(f"[yellow]Unknown command [bold]{first!r}[/bold] — "
                 f"did you mean [bold]{guess[0]}[/bold]? Retrying.[/yellow]")
