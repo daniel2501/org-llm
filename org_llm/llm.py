@@ -72,6 +72,18 @@ def chat(prompt: str, model: str, base_url: str, system: str = "",
             warn = _perf.check_lag(model, _t.monotonic() - t0, out)
             if warn is not None:
                 _emit_lag_warning(warn, model)
+                # Record to the ring buffer so the MCP proactive_doctor
+                # can surface this lag event to the LLM next time it's
+                # called. opencode/claude don't render stderr, so the
+                # inline `_emit_lag_warning` print is invisible to them
+                # — the buffer is how they hear about it.
+                _perf.record_perf_alert(
+                    model           = model,
+                    elapsed_s       = warn.elapsed_s,
+                    current_tok_s   = warn.current_tok_s,
+                    suggested_model = warn.suggested_model,
+                    suggested_tok_s = warn.suggested_tok_s,
+                )
         except Exception:
             pass
     return out

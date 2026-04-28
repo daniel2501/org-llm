@@ -223,6 +223,91 @@ def check_lag(model: str, elapsed_s: float, response: str,
 
 # ── public: regression warner for batch operations ──────────────────────────
 
+# ── public: perf-alert ring buffer (visible to MCP / proactive_doctor) ──────
+
+_ALERT_BUFFER_PATH_ENV = "ORG_LLM_PERF_ALERTS_PATH"
+_ALERT_BUFFER_DEFAULT  = "~/.local/share/org-llm/perf_alerts.json"
+_ALERT_BUFFER_LIMIT    = 32
+
+
+def _alert_buffer_path() -> Path:
+    raw = os.environ.get(_ALERT_BUFFER_PATH_ENV) or _ALERT_BUFFER_DEFAULT
+    return Path(raw).expanduser()
+
+
+def record_perf_alert(*, model: str, elapsed_s: float,
+                         current_tok_s: float | None,
+                         suggested_model: str,
+                         suggested_tok_s: float,
+                         source: str = "lag_detector") -> None:
+    """Append a perf-alert event to the on-disk ring buffer.
+
+    The lag detector calls this whenever it would have printed a
+    yellow warning. Storing each event lets the MCP `proactive_doctor`
+    tool surface them later — opencode / claude don't render stderr,
+    so an inline-only warning was invisible.
+
+    Best-effort: if the file is unwritable or malformed we skip
+    silently. Telemetry must NEVER block a chat call.
+    """
+    import json, time
+    try:
+        p = _alert_buffer_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            existing = json.loads(p.read_text()) if p.exists() else []
+            if not isinstance(existing, list):
+                existing = []
+        except Exception:
+            existing = []
+        existing.append({
+            "ts":              time.time(),
+            "source":          source,
+            "model":           model,
+            "elapsed_s":       round(elapsed_s, 2),
+            "current_tok_s":   (round(current_tok_s, 2)
+                                  if current_tok_s is not None else None),
+            "suggested_model": suggested_model,
+            "suggested_tok_s": round(suggested_tok_s, 2),
+        })
+        # Cap the buffer so it doesn't grow unbounded.
+        existing = existing[-_ALERT_BUFFER_LIMIT:]
+        p.write_text(json.dumps(existing, indent=2))
+    except Exception:
+        pass
+
+
+def recent_perf_alerts(limit: int = 10) -> list[dict]:
+    """Read the most recent N alerts (newest last). Returns [] when
+    the file is missing / malformed / unreadable."""
+    import json
+    p = _alert_buffer_path()
+    if not p.exists():
+        return []
+    try:
+        rows = json.loads(p.read_text())
+        if not isinstance(rows, list):
+            return []
+        return rows[-max(1, limit):]
+    except Exception:
+        return []
+
+
+def clear_perf_alerts() -> int:
+    """Drop the buffer. Returns how many entries were cleared."""
+    import json
+    p = _alert_buffer_path()
+    if not p.exists():
+        return 0
+    try:
+        rows = json.loads(p.read_text())
+        n = len(rows) if isinstance(rows, list) else 0
+        p.write_text("[]")
+        return n
+    except Exception:
+        return 0
+
+
 def regression_warning(model: str, *, recent_window: int = 5,
                          baseline_window: int = 50,
                          slow_factor: float = 1.5) -> str | None:

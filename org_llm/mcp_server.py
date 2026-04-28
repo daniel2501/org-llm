@@ -1414,6 +1414,9 @@ def create_mcp_server():
 
         # Performance baseline — is the active chat_model running slower
         # than a known alternative? Cheap query against existing History.
+        # Also pull any unread perf alerts written by the inline lag
+        # detector — opencode/claude don't see stderr, so the ring
+        # buffer is how those events surface here.
         perf_lines: list[str] = []
         try:
             from . import perf as _perf
@@ -1438,6 +1441,20 @@ def create_mcp_server():
                     perf_lines.append(f"REGRESSION: {regwarn}")
             except Exception:
                 pass
+            # Surface unread lag-detector alerts (max 5 most recent).
+            alerts = _perf.recent_perf_alerts(limit=5)
+            if alerts:
+                perf_lines.append(
+                    f"LAG ALERTS ({len(alerts)} recent — opencode/claude "
+                    f"don't render stderr, so these were silent until now):")
+                for a in alerts:
+                    perf_lines.append(
+                        f"  · {a['model']} took {a['elapsed_s']:.0f}s; "
+                        f"{a['suggested_model']} runs faster at "
+                        f"{a['suggested_tok_s']:.1f} tok/s")
+                # Clear once surfaced — same alert shouldn't keep paging
+                # the LLM after it's been actioned.
+                _perf.clear_perf_alerts()
         except Exception as e:
             perf_lines.append(f"(perf probe failed: {e})")
 
@@ -1462,6 +1479,44 @@ def create_mcp_server():
         body += actions_block
         return _themed("proactive_doctor",
                         "model + ollama + cloud + vault + perf probe", body)
+
+    # ── recent_perf_alerts: lightweight lag-event poller ─────────────────────
+    @server.tool()
+    async def recent_perf_alerts(limit: int = 10,
+                                    clear: bool = False,
+                                    ctx: Context | None = None) -> str:
+        """Read recent lag-detector events from the perf ring buffer.
+
+        The inline lag detector in `llm.chat()` writes one event each
+        time a chat call ran meaningfully slower than its rolling
+        baseline AND a faster pulled alternative exists. opencode /
+        claude don't render stderr, so these events are otherwise
+        invisible inside the workspace harness.
+
+        Cheap (one JSON read). With `clear=True`, drains the buffer
+        so the same events don't page the LLM repeatedly after
+        they've been surfaced.
+        """
+        from . import perf as _perf
+        rows = _perf.recent_perf_alerts(limit=limit)
+        if not rows:
+            return "no recent perf alerts"
+        lines = [f"{len(rows)} recent perf alert(s):"]
+        for r in rows:
+            from datetime import datetime as _dt
+            ts = _dt.fromtimestamp(r["ts"]).strftime("%H:%M:%S")
+            cur = (f"{r['current_tok_s']:.1f}"
+                    if r.get("current_tok_s") is not None else "?")
+            lines.append(
+                f"  [{ts}] {r['model']} ran {r['elapsed_s']:.0f}s "
+                f"({cur} tok/s); {r['suggested_model']} would run "
+                f"{r['suggested_tok_s']:.1f} tok/s")
+        if clear:
+            n = _perf.clear_perf_alerts()
+            lines.append(f"  (cleared {n} alert(s))")
+        else:
+            lines.append("  (call again with clear=True to mark as read)")
+        return "\n".join(lines)
 
     # ── proactive_doctor_apply: vetted-action remediation ───────────────────
     @server.tool()
