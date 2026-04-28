@@ -892,12 +892,22 @@ class TestSplash:
         assert "Workspaces" in r.output
 
     def test_first_run_shows_setup_nudge(self, monkeypatch, tmp_path):
+        """Banner copy is Trek-coded by default (commissioning) but the
+        original `setup` command still works — both must appear so the
+        test catches either a regression of the lean-in OR a regression
+        of the muscle-memory alias."""
         # Pin DB to a path that doesn't exist → looks like first run
         monkeypatch.setenv("ORG_LLM_DB", str(tmp_path / "nope.db"))
         r = runner.invoke(app, ["splash"])
         assert r.exit_code == 0
-        assert "first run" in r.output.lower() or "setup needed" in r.output.lower()
-        assert "org-llm setup" in r.output
+        # Trek-coded banner phrasing
+        assert ("commissioning" in r.output.lower()
+                or "new crew aboard" in r.output.lower()
+                or "awaiting onboarding" in r.output.lower()), r.output
+        # Both vocab paths visible — onboarding is primary, setup remains
+        # an alias and is named in the banner so muscle memory survives
+        assert "org-llm onboarding" in r.output
+        assert "setup" in r.output.lower()
 
     def test_no_splash_flag_falls_back_to_help(self, cli_db):
         r = runner.invoke(app, ["--no-splash"])

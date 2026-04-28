@@ -81,10 +81,12 @@ SURFACES: list[Surface] = [
     ),
     Surface(
         key="setup_panel_title",
-        description=("The title of the first-run 'Setup needed' banner. "
-                      "Should signal action-required without being scary."),
-        len_min=6, len_max=40, n_variants=5,
-        default="🚀  Setup needed",
+        description=("The title of the first-run banner that prompts a "
+                      "new user to run onboarding. Lean Trek by default "
+                      "('Bridge commissioning required'), shift voice "
+                      "with active dials."),
+        len_min=6, len_max=44, n_variants=5,
+        default="🚀  Bridge commissioning required",
     ),
     Surface(
         key="doctor_all_green",

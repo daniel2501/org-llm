@@ -1925,6 +1925,30 @@ def setup(
     make_it_so()
 
 
+@app.command(rich_help_panel="Onboarding")
+def onboarding(
+    yes:        Annotated[bool, typer.Option("--yes", "-y",
+                help="Skip confirmations; pick reasonable defaults")] = False,
+    skip_models: Annotated[bool, typer.Option("--skip-models",
+                 help="Don't pull or tune Ollama models")] = False,
+    skip_index:  Annotated[bool, typer.Option("--skip-index",
+                 help="Don't run index/embed (do it later)")] = False,
+    skip_personalize: Annotated[bool, typer.Option("--skip-personalize",
+                      help="Don't auto-create theme knobs")] = False,
+    restart:    Annotated[bool, typer.Option("--restart",
+                help="Discard any saved progress and run every step from "
+                     "scratch. Default: resume after the last completed step.")] = False,
+):
+    """Crew commissioning sequence — alias for `org-llm setup`.
+
+    Bridge-themed entrypoint with identical behaviour. Existing
+    muscle memory (`org-llm setup`) keeps working; new users get
+    LCARS-coded vocabulary in the splash banner + this command.
+    """
+    setup(yes=yes, skip_models=skip_models, skip_index=skip_index,
+           skip_personalize=skip_personalize, restart=restart)
+
+
 @app.command(rich_help_panel="Indexing")
 def index(
     force: Annotated[bool, typer.Option("--force", "-f", help="Re-index all files")] = False,
@@ -2205,7 +2229,7 @@ def _render_splash_logo():
     else:
         bottom_overhead.append("STANDBY",  style="lcars2")
         bottom_overhead.append("  ▸  ",   style="dim")
-        bottom_overhead.append("AWAITING SETUP", style="dim lcars3")
+        bottom_overhead.append("AWAITING ONBOARDING", style="dim lcars3")
 
     bottom_bar = _lcars_bar(
         [(0.20, "lcars1"),
@@ -2322,18 +2346,28 @@ def _show_splash():
     console.print(_render_splash_logo())
 
     if _is_first_run():
-        msg = (
-            "[bold lcars1]Looks like first run.[/bold lcars1] No DB yet, "
-            "or no chat_model configured, or vault not indexed.\n\n"
-            "Run setup — it's a 15-step interactive walkthrough that's "
-            "resume-aware (an interrupted run picks up where it left off):\n\n"
-            "  [bold]org-llm setup[/bold]                — full walkthrough (default Y at each step)\n"
-            "  [bold]org-llm setup --yes[/bold]          — non-interactive defaults\n"
-            "  [bold]org-llm setup --restart[/bold]      — discard saved progress and start fresh\n\n"
-            "Already done part of setup? Re-run [bold]org-llm setup[/bold] — it'll skip "
-            "completed steps automatically."
+        # Banner title routes through theme_studio so a user with the
+        # commie/queer dials up gets onboarding copy in their voice
+        # once the cache is warm. Default leans Trek (the app's
+        # baseline aesthetic).
+        from . import theme_studio as _ts2
+        banner_title = _ts2.get_themed(
+            "setup_panel_title",
+            "🚀  Bridge commissioning required",
         )
-        console.print(Panel(msg, title="[lcars1]🚀  Setup needed[/lcars1]",
+        msg = (
+            "[bold lcars1]New crew aboard.[/bold lcars1] No vault indexed, "
+            "no chat model assigned, no helm configured.\n\n"
+            "Run [bold]org-llm onboarding[/bold] (alias: [bold]setup[/bold]) — a "
+            "15-step interactive commissioning walk-through, resume-aware "
+            "(an interrupted run picks up where it left off):\n\n"
+            "  [bold]org-llm onboarding[/bold]              — full walk-through (default Y at each step)\n"
+            "  [bold]org-llm onboarding --yes[/bold]        — non-interactive defaults\n"
+            "  [bold]org-llm onboarding --restart[/bold]    — discard saved progress and start fresh\n\n"
+            "Already part-commissioned? Re-run — it'll skip completed steps "
+            "automatically."
+        )
+        console.print(Panel(msg, title=f"[lcars1]{banner_title}[/lcars1]",
                               border_style="lcars1", padding=(1, 2)))
         console.print()
         on_screen("[dim]Or skip the splash entirely:[/dim] "
