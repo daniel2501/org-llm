@@ -1225,8 +1225,18 @@ def setup(
             "completed_steps": sorted(done_set),
         })
 
+    # Themed banner — Trek-coded by default, reshapes with active dials.
+    from . import theme_studio as _ts
+    intro_banner = _ts.get_themed(
+        "setup_intro_banner",
+        "Beginning bridge commissioning sequence.",
+    )
     console.print()
-    console.rule("[lcars1]org-llm setup — first-run walkthrough[/lcars1]")
+    console.rule(
+        "[lcars1]🚀  org-llm onboarding — bridge commissioning sequence[/lcars1]"
+    )
+    console.print()
+    on_screen(f"[lcars3]⏵ {intro_banner}[/lcars3]")
     console.print()
 
     # LLM-personalized welcome — reads what's on disk, writes a one-line
@@ -1864,7 +1874,14 @@ def setup(
     # Setup completed cleanly — clear the resume state so a fresh `setup`
     # invocation doesn't pointlessly offer to "resume" a finished run.
     _clear_setup_state()
-    console.rule("[lcars1]Setup complete[/lcars1]")
+    complete_banner = _ts.get_themed(
+        "setup_complete_banner",
+        "Bridge commissioned. All systems nominal — engage at will.",
+    )
+    console.rule("[lcars1]✦  Bridge commissioned[/lcars1]")
+    console.print()
+    on_screen(f"[lcars3]🛸 {complete_banner}[/lcars3]")
+    console.print()
 
     # LLM-generated personalized closing recommendations — feed the model
     # a snapshot of what setup actually accomplished, ask for 3 specific
@@ -2192,21 +2209,31 @@ def _render_splash_logo():
     # actually mimics real LCARS panels (open right edge).
     target_w = 78
 
-    # Themed callsigns + label prefixes (cold cache → Trek defaults)
+    # Themed callsigns + label prefixes + decorative chars — every one
+    # routes through theme_studio so a non-Trek user gets union-coded
+    # / pride-coded / cottagecore-coded chrome once their cache warms.
+    # Cold cache → Trek defaults preserved.
     top_callsign    = _resolve_callsign("splash_top_callsign",    "47-Δ")
     bottom_callsign = _resolve_callsign("splash_bottom_callsign", "09-Δ")
     stardate_prefix = _resolve_callsign("splash_stardate_prefix", "STARDATE")
     status_prefix   = _resolve_callsign("splash_status_prefix",   "VAULT")
+    sep             = _resolve_callsign("splash_separator_char",  "⏵")
+    top_emoji       = _resolve_callsign("splash_top_emoji",       "🛰")
+    bot_emoji       = _resolve_callsign("splash_bottom_emoji",    "🛸")
+    top_status_lbl  = _resolve_callsign("splash_top_status_label",
+                                          "LCARS readout active")
 
     # Overhead status line above the top bar — STARDATE + version
     version = _resolve_version()
     sd      = _stardate()
     top_overhead = Text()
+    top_overhead.append(f"  {sep}  ", style="lcars1")
+    top_overhead.append(f"{top_emoji}  ", style="")
     top_overhead.append(f"{stardate_prefix} {sd}", style="bold lcars1")
-    top_overhead.append("  ▸  ",                     style="dim")
+    top_overhead.append(f"  {sep}  ", style="lcars2")
     top_overhead.append(f"org-llm {version}",         style="lcars2")
-    top_overhead.append("  ▸  ",                     style="dim")
-    top_overhead.append("LCARS readout active",      style="dim lcars3")
+    top_overhead.append(f"  {sep}  ", style="lcars3")
+    top_overhead.append(f"📡 {top_status_lbl}",      style="dim lcars3")
 
     top_bar = _lcars_bar(
         [(0.30, "lcars1"),
@@ -2220,16 +2247,22 @@ def _render_splash_logo():
     # Overhead status line above the bottom bar — vault stats live, or
     # a quiet "STANDBY" when first-run (no DB yet).
     vstats = _vault_stats_oneline()
+    bot_status_ok    = _resolve_callsign("splash_bottom_status_label_ok",
+                                            "ALL DECKS NOMINAL")
+    bot_status_first = _resolve_callsign("splash_bottom_status_label_first_run",
+                                            "AWAITING ONBOARDING")
     bottom_overhead = Text()
+    bottom_overhead.append(f"  {sep}  ", style="lcars1")
+    bottom_overhead.append(f"{bot_emoji}  ", style="")
     bottom_overhead.append(f"{status_prefix} ", style="bold lcars1")
     if vstats:
         bottom_overhead.append(vstats, style="lcars2")
-        bottom_overhead.append("  ▸  ", style="dim")
-        bottom_overhead.append("ALL DECKS NOMINAL", style="dim lcars3")
+        bottom_overhead.append(f"  {sep}  ", style="lcars3")
+        bottom_overhead.append(bot_status_ok, style="dim lcars3")
     else:
         bottom_overhead.append("STANDBY",  style="lcars2")
-        bottom_overhead.append("  ▸  ",   style="dim")
-        bottom_overhead.append("AWAITING ONBOARDING", style="dim lcars3")
+        bottom_overhead.append(f"  {sep}  ", style="lcars3")
+        bottom_overhead.append(bot_status_first, style="dim lcars3")
 
     bottom_bar = _lcars_bar(
         [(0.20, "lcars1"),
@@ -2270,6 +2303,26 @@ def _render_splash_logo():
                                      "local · queer · collective · free")
     body_rows.append(_row("bold lcars2", subtitle_text))
     body_rows.append(_row("dim lcars3",  slogan_text))
+    body_rows.append(_row("", ""))                              # spacer
+
+    # Station status row — themable list of 5 short ALL-CAPS labels
+    # separated by " · ", each prefixed with a status indicator that
+    # cycles colors. Total reads like a starship readout.
+    stations_str = _resolve_callsign("splash_stations",
+                                       "COMMS · HELM · OPS · TAC · MEM")
+    stations = [s.strip() for s in stations_str.split("·") if s.strip()][:6]
+    station_styles = ["lcars1", "lcars3", "lcars2", "lcars3", "lcars1", "lcars2"]
+    station_dots   = ["◉",      "◉",      "◎",      "◯",      "◉",      "◯"]
+    station_row = Text()
+    station_row.append(rib, style="lcars1")
+    for i, label in enumerate(stations):
+        st  = station_styles[i % len(station_styles)]
+        dot = station_dots[i % len(station_dots)]
+        station_row.append(f"{dot} ", style=st)
+        station_row.append(label, style="bold lcars2")
+        if i < len(stations) - 1:
+            station_row.append("   ", style="")
+    body_rows.append(station_row)
     body_rows.append(_row("", ""))                              # bottom spacer
 
     return Group(top_overhead, top_bar,

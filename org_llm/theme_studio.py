@@ -57,6 +57,12 @@ class Surface:
     n_variants: int = 6                       # how many to generate per regen
     style_hint: str = ""                      # e.g. "ALL CAPS", "lowercase"
     default: str = ""                         # fallback when cache cold
+    # Decorative surfaces (emojis, separator chars, station labels)
+    # SHAPE the theme rather than carrying its message — so the
+    # keyword-pool gate doesn't apply. A 🛰 emoji can't reasonably
+    # contain "warp" or "stardate"; we still enforce length, markup
+    # balance, and forbidden phrases.
+    enforce_keywords: bool = True
 
 
 # Registered surfaces. Add to this list to make a new piece of UI themable —
@@ -190,6 +196,97 @@ SURFACES: list[Surface] = [
         len_min=3, len_max=14, n_variants=4,
         default="VAULT",
     ),
+
+    # ── Decorative flourishes (no keyword gate) ───────────────────────
+    # The theming engine drives the visual chrome too: emoji choice,
+    # separator char between overhead segments, station labels in the
+    # splash status row. Each accepts ANY active dial because the
+    # variants are PURE FLAVOUR — a Trek user gets satellites + warps,
+    # a queer user gets pride flags + queer joy, a commie user gets
+    # red stars + raised fists. The enforce_keywords=False flag tells
+    # the gate not to require a pool keyword (a 🛰 emoji can't contain
+    # 'warp' as text).
+    Surface(
+        key="splash_top_emoji",
+        description=("ONE emoji that prefixes the stardate on the "
+                      "splash top overhead. Default 🛰 (satellite)."),
+        len_min=1, len_max=4, n_variants=4,
+        default="🛰",
+        enforce_keywords=False,
+    ),
+    Surface(
+        key="splash_bottom_emoji",
+        description=("ONE emoji that prefixes the bottom-overhead status "
+                      "label. Default 🛸 (UFO)."),
+        len_min=1, len_max=4, n_variants=4,
+        default="🛸",
+        enforce_keywords=False,
+    ),
+    Surface(
+        key="splash_separator_char",
+        description=("ONE nerd-font separator character used between "
+                      "overhead segments. Default '⏵' (transport)."),
+        len_min=1, len_max=2, n_variants=4,
+        default="⏵",
+        enforce_keywords=False,
+    ),
+    Surface(
+        key="splash_top_status_label",
+        description=("Short ALL-CAPS phrase reading the system state on "
+                      "the top overhead, after the version. Default "
+                      "'LCARS readout active'."),
+        len_min=8, len_max=32, n_variants=5,
+        default="LCARS readout active",
+    ),
+    Surface(
+        key="splash_bottom_status_label_ok",
+        description=("Short ALL-CAPS phrase on the bottom overhead "
+                      "when the vault is configured (DB has nodes). "
+                      "Default 'ALL DECKS NOMINAL'."),
+        len_min=8, len_max=28, n_variants=5,
+        default="ALL DECKS NOMINAL",
+    ),
+    Surface(
+        key="splash_bottom_status_label_first_run",
+        description=("Short ALL-CAPS phrase on the bottom overhead in "
+                      "the first-run path. Default 'AWAITING ONBOARDING'."),
+        len_min=8, len_max=28, n_variants=5,
+        default="AWAITING ONBOARDING",
+    ),
+    Surface(
+        key="splash_stations",
+        description=("Five short ALL-CAPS station labels for the "
+                      "splash status row, separated by ' · '. Reads like "
+                      "starship bridge stations by default (COMMS · HELM "
+                      "· OPS · TAC · MEM); other dials might read like "
+                      "union locals, neighborhood collectives, etc. "
+                      "Output exactly 5 labels."),
+        len_min=20, len_max=60, n_variants=4,
+        default="COMMS · HELM · OPS · TAC · MEM",
+    ),
+
+    # ── Setup / commissioning wizard copy ─────────────────────────────
+    # The 15-step onboarding walkthrough was generic ("Step N of 15:
+    # initialize the database"). Theme it like a starship being
+    # commissioned — every step gets a themed framing that the
+    # registered surfaces feed via setup_step_intro(N).
+    Surface(
+        key="setup_intro_banner",
+        description=("ONE-line themed welcome printed before the first "
+                      "onboarding step starts. Default 'Beginning bridge "
+                      "commissioning sequence.'"),
+        len_min=20, len_max=120, n_variants=5,
+        default="Beginning bridge commissioning sequence.",
+    ),
+    Surface(
+        key="setup_complete_banner",
+        description=("ONE-line celebratory message printed when "
+                      "commissioning finishes (all 15 steps done). "
+                      "Default 'Bridge commissioned. All systems "
+                      "nominal — engage at will.'"),
+        len_min=20, len_max=140, n_variants=5,
+        default="Bridge commissioned. All systems nominal — engage at will.",
+    ),
     Surface(
         key="opencode_proactive_doctor_line",
         description=("ONE line the in-opencode LLM uses as a leading line "
@@ -286,7 +383,7 @@ def gate(text: str, surface: Surface, *,
     # enforce uniformly.
     if "\n" in s:
         return GateResult(False, "contains newline")
-    if keyword_pool:
+    if keyword_pool and getattr(surface, "enforce_keywords", True):
         if not any(kw.lower() in low for kw in keyword_pool):
             return GateResult(False,
                               f"no theme keyword from pool ({len(keyword_pool)} options)")
