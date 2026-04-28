@@ -4789,13 +4789,34 @@ def db_info(
     schema: Annotated[bool, typer.Option("--schema", "-s", help="Show CREATE TABLE statements")] = False,
     dict_:  Annotated[bool, typer.Option("--dict",   "-d", help="Print full data dictionary")] = False,
     query:  Annotated[str,  typer.Option("--query", "-q", help="Run a raw SQL SELECT")] = "",
+    vacuum: Annotated[bool, typer.Option("--vacuum", "-V",
+              help="Compact the SQLite DB on disk (reclaims space "
+                   "after large deletes / re-indexes)")] = False,
 ):
-    """Inspect the SQLite database: row counts, schema, data dictionary, or raw SQL."""
+    """Inspect the SQLite database: row counts, schema, data dictionary, raw SQL, or vacuum."""
     from rich.panel  import Panel
     from rich.syntax import Syntax
     from sqlalchemy  import inspect, text
 
     engine = _engine()
+
+    # ── vacuum: reclaim disk space ──────────────────────────────────────────
+    if vacuum:
+        path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        before = path.stat().st_size if path.exists() else 0
+        with engine.begin() as conn:
+            # SQLite VACUUM rebuilds the file from scratch — reclaims any
+            # pages freed by deletes / drops / re-indexes. Locks the DB for
+            # the duration; tolerate the brief blocking on a single-user box.
+            conn.execute(text("VACUUM"))
+        after = path.stat().st_size if path.exists() else 0
+        delta = before - after
+        hail(f"Vacuumed: {before/1024/1024:.1f} MB → "
+             f"{after/1024/1024:.1f} MB "
+             f"({'-' if delta >= 0 else '+'}"
+             f"{abs(delta)/1024/1024:.1f} MB)")
+        make_it_so()
+        return
 
     # ── tutor data dictionary ─────────────────────────────────────────────────
     if dict_:
@@ -11690,6 +11711,13 @@ def pi(
                    "Pi TUI with the bridge already loaded")] = False,
     show:    Annotated[bool, typer.Option("--show", "-s",
               help="Print the path to the bundled extension and exit")] = False,
+    status:  Annotated[bool, typer.Option("--status", "-S",
+              help="Health check: Pi binary present? bridge installed? "
+                   "config registers org-llm? MCP tool count visible?")] = False,
+    reinstall: Annotated[bool, typer.Option("--reinstall", "-r",
+              help="Force re-copy of the bundled bridge into "
+                   "~/.pi/extensions/ even if a copy already exists "
+                   "(picks up updates after `uv tool install --reinstall`)")] = False,
     use_npm: Annotated[bool, typer.Option("--npm",
               help="Prefer `npm install -g` over the curl installer")] = False,
 ):
@@ -11720,9 +11748,111 @@ def pi(
         raise typer.Exit(1)
 
     pi_bin = _pi_bin()
-    if install:
+    if status:
+        # Health check — answers the question "is the Pi bridge ready?"
+        # without launching anything. Mirrors the structure of the
+        # docs gallery scene_pi_status: each row is a check + symbol +
+        # detail. Honest about every layer.
+        from rich.table import Table as _T
+        from rich.panel import Panel as _P
+        rows: list[tuple[str, str, str]] = []
+
+        # 1. Pi binary
         if pi_bin:
+            rows.append(("Pi binary", "[green]✓[/green]",
+                          str(pi_bin)))
+        else:
+            rows.append(("Pi binary", "[red]✗[/red]",
+                          "[red]not found — run [bold]org-llm pi --install[/bold][/red]"))
+
+        # 2. Bundled extension exists
+        rows.append(("Bundled bridge", "[green]✓[/green]", str(src)))
+
+        # 3. Extension installed in ~/.pi/extensions/
+        try:
+            user_dst = _user_pi_extensions_dir() / src.name
+        except Exception:
+            user_dst = None
+        if user_dst and user_dst.exists():
+            rows.append(("Bridge installed",
+                          "[green]✓[/green]", str(user_dst)))
+        else:
+            rows.append(("Bridge installed",
+                          "[yellow]△[/yellow]",
+                          "[yellow]not yet — run [bold]org-llm pi --install[/bold][/yellow]"))
+
+        # 4. ~/.pi/config.json mentions org-llm extension
+        cfg_path = Path("~/.pi/config.json").expanduser()
+        cfg_ok = False
+        if cfg_path.exists():
+            try:
+                txt = cfg_path.read_text()
+                cfg_ok = "pi-org-llm" in txt or "org_llm" in txt
+            except Exception:
+                pass
+        if cfg_ok:
+            rows.append(("Auto-load config", "[green]✓[/green]",
+                          f"{cfg_path} registers org-llm"))
+        elif cfg_path.exists():
+            rows.append(("Auto-load config", "[yellow]△[/yellow]",
+                          f"{cfg_path} exists but doesn't reference org-llm"))
+        else:
+            rows.append(("Auto-load config", "[dim]·[/dim]",
+                          "[dim]not yet (created on first --install)[/dim]"))
+
+        # 5. MCP tool count — count @server.tool decorators in mcp_server.py
+        try:
+            mcp_path = Path(__file__).parent / "mcp_server.py"
+            tool_count = mcp_path.read_text().count("@server.tool()")
+            rows.append(("MCP tools available", "[green]✓[/green]",
+                          f"{tool_count} tools (registered as org_llm_<name>)"))
+        except Exception:
+            rows.append(("MCP tools available", "[dim]?[/dim]",
+                          "[dim](can't introspect mcp_server.py)[/dim]"))
+
+        # 6. Persona injection: theme_studio surface for opencode_persona_intro
+        try:
+            from . import theme_studio as _ts
+            persona = _ts.get_themed("opencode_persona_intro")
+            rows.append(("Persona injection", "[green]✓[/green]",
+                          f"{persona[:60]}…" if len(persona) > 60 else persona))
+        except Exception:
+            rows.append(("Persona injection", "[dim]?[/dim]",
+                          "[dim]theme_studio unavailable[/dim]"))
+
+        tbl = _T(box=None, pad_edge=False, show_header=False)
+        tbl.add_column("Check",  style="lcars2", width=20, no_wrap=True)
+        tbl.add_column("Status", style="lcars1", width=4)
+        tbl.add_column("Detail", style="dim", overflow="fold")
+        for r in rows:
+            tbl.add_row(*r)
+        console.print(_P(tbl,
+                          title="[lcars1]pi --status[/lcars1]  "
+                                "[dim]bridge to pi.dev — third "
+                                "conversational interface[/dim]",
+                          border_style="lcars2", padding=(1, 2)))
+        on_screen("")
+        on_screen("▶ [bold]org-llm pi --launch[/bold]   "
+                  "[dim]start a Pi session with org-llm tools loaded[/dim]")
+        on_screen("▶ [bold]org-llm pi --install[/bold]  "
+                  "[dim](re-)install Pi + bridge[/dim]")
+        return
+    # `--reinstall` is a stronger `--install`: forces re-copy of the
+    # bundled bridge into ~/.pi/extensions/ even when an old copy is
+    # already there. Use case: after `uv tool install --reinstall org-llm`
+    # bumped the bundled .ts source, the user-side copy is stale until
+    # a fresh `pi --install` runs — but `--install` alone is a no-op
+    # when Pi is already present. `--reinstall` flips both flags so the
+    # binary check is skipped (we know Pi is there) and the file copy
+    # happens unconditionally.
+    if reinstall:
+        install = True
+    if install:
+        if pi_bin and not reinstall:
             on_screen(f"[dim]Pi already installed:[/dim] {pi_bin}")
+        elif pi_bin and reinstall:
+            on_screen(f"[dim]Pi present:[/dim] {pi_bin}  "
+                      f"[dim](re-copying bridge…)[/dim]")
         else:
             hail("Installing Pi…")
             ok = (_install_pi_via_npm() if use_npm else _install_pi_via_curl())
