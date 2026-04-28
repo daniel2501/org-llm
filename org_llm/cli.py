@@ -4115,96 +4115,33 @@ def models(
 
     # ── benchmark (real tok/s on this hardware) ───────────────────────────────
     if benchmark:
-        from .models import _quality
-        from .llm import chat as _chat, list_models as _list_models
-        import time as _t
+        if role:
+            valid_roles = {r for m in CATALOG for r in m.roles}
+            if role not in valid_roles:
+                red_alert(f"Unknown role {role!r}. Valid: "
+                           f"{', '.join(sorted(valid_roles))}.")
+                raise typer.Exit(1)
 
-        # Iterate the actual PULLED tags from Ollama (not CATALOG) — those
-        # are what we can actually call. CATALOG tags like 'phi3.5:3.8b'
-        # don't resolve when ollama only has 'phi3.5:latest'.
-        pulled_raw = sorted(set(_list_models(url)))
-        # Filter out embed-only models — they don't support /chat.
-        embed_stems = {"nomic-embed-text", "mxbai-embed-large",
-                       "bge-m3", "snowflake-arctic-embed2"}
+        console.rule("[lcars1]Model benchmark[/lcars1]")
+        hw_info = (f"{vram_gb:.0f}GB VRAM" if vram_gb else f"{ram_gb:.0f}GB RAM (CPU)")
+        scope_label = f" (role={role})" if role else ""
+        hail(f"Hardware: {hw_info}{scope_label}")
 
-        def _catalog_meta(tag: str):
-            """Look up a catalog entry by stem-match so we can attach
-            params/roles/quality to a pulled model whose tag may differ
-            from the CATALOG tag (e.g. 'phi3.5:latest' ↔ 'phi3.5:3.8b')."""
-            stem = _normalize_tag(tag).split(":")[0]
-            for m in CATALOG:
-                if m.tag.split(":")[0] == stem:
-                    return m
-            return None
-
-        candidates = []
-        for raw_tag in pulled_raw:
-            stem = _normalize_tag(raw_tag).split(":")[0]
-            if stem in embed_stems:
-                continue
-            meta = _catalog_meta(raw_tag)
-            roles = meta.roles if meta else ("chat",)
-            params = meta.params if meta else "?"
-            vram = meta.vram_gb if meta else 0.0
-            # Hardware fit: skip a model whose CATALOG vram exceeds
-            # what we can fit (cuts the embarrassing OOM-after-30s case).
-            budget = vram_gb if vram_gb is not None else ram_gb * 0.55
-            if vram > 0 and vram > budget:
-                continue
-            if role and role not in roles:
-                continue
-            candidates.append({
-                "tag": raw_tag, "stem": stem, "params": params,
-                "vram": vram, "roles": roles,
-            })
-
-        if not candidates:
+        # Single benchmark implementation lives in the helper — both
+        # `--benchmark` and `--upgrade` use it so the live-progress UX
+        # (themed spinner / ETA / aligned per-model lines) is identical
+        # in both paths. Earlier this block had a divergent inline
+        # copy of the loop with no progress UI; that's why the new
+        # spinner code didn't fire when running `--benchmark`.
+        results = _benchmark_local_models(
+            url=url, vram_gb=vram_gb, ram_gb=ram_gb, role_filter=role,
+        )
+        if not results:
             scope = f" with role={role!r}" if role else ""
             red_alert(f"No pulled models fit this hardware{scope}.")
             on_screen("[dim]Pull a candidate first:[/dim] "
                        "[bold]org-llm models --discover[/bold]")
             raise typer.Exit(1)
-
-        console.rule("[lcars1]Model benchmark[/lcars1]")
-        hw_info = (f"{vram_gb:.0f}GB VRAM" if vram_gb else f"{ram_gb:.0f}GB RAM (CPU)")
-        scope_label = f" (role={role})" if role else ""
-        hail(f"Hardware: {hw_info}{scope_label} — {len(candidates)} model(s) to time")
-
-        # Fixed prompt — short enough to benchmark fast, real enough to
-        # exercise the model. Ask for a 2-line haiku so we get ~30-40
-        # tokens of output; gives stable tok/s across runs.
-        prompt = ("Write a 2-line haiku about an org-roam knowledge "
-                   "vault. Nothing else.")
-        results: list[dict] = []
-        for c in candidates:
-            console.print(f"[lcars2]▶[/lcars2] [dim]·[/dim] "
-                          f"[lcars2]{c['tag']}[/lcars2] …", end="")
-            try:
-                t0 = _t.monotonic()
-                resp = _chat(prompt, model=c["tag"], base_url=url,
-                              timeout=120)
-                dt = _t.monotonic() - t0
-                # Rough token count: ollama doesn't return stats here,
-                # so estimate from chars (~4 chars / token for English).
-                tok_est = max(1, len(resp) // 4)
-                tok_per_s = tok_est / dt if dt > 0 else 0.0
-                qual = _quality(c["tag"]) or _quality(c["stem"])
-                # Score = quality × tok/s, normalised so a fast 7B beats
-                # a slightly higher-quality 12B that runs at 1/3 speed.
-                score = qual * tok_per_s
-                results.append({
-                    "tag":   c["tag"], "stem": c["stem"],
-                    "params": c["params"],
-                    "vram":  c["vram"], "roles": c["roles"],
-                    "time":  dt, "tok_s": tok_per_s,
-                    "qual":  qual, "score": score, "ok": True,
-                })
-                console.print(f" [green]{tok_per_s:5.1f} tok/s[/green]  "
-                              f"[dim]({dt:.1f}s, q={qual})[/dim]")
-            except Exception as e:
-                results.append({"tag": c["tag"], "ok": False,
-                                 "err": str(e)[:60]})
-                console.print(f" [red]× {str(e)[:60]}[/red]")
 
         # Render ranked table
         ok = [r for r in results if r["ok"]]
