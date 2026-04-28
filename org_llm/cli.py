@@ -3689,6 +3689,77 @@ _TASK_MODEL_KEYS = [
 ]
 
 
+def _benchmark_local_models(
+    *, url: str, vram_gb: float | None, ram_gb: float,
+    role_filter: str = "",
+) -> list[dict]:
+    """Run a real tok/s benchmark on every PULLED Ollama model that
+    fits this hardware, optionally scoped to one role.
+
+    Returns a list of result dicts (keys: tag, stem, params, vram,
+    roles, time, tok_s, qual, score, ok | err) — same shape used by
+    `--benchmark` and `--upgrade`. Prints inline per-model progress
+    so the user sees live feedback.
+    """
+    from .models import _quality, CATALOG, fitting_hardware
+    from .llm import chat as _chat, list_models as _list_models
+    import time as _t
+
+    pulled_raw = sorted(set(_list_models(url)))
+    embed_stems = {"nomic-embed-text", "mxbai-embed-large",
+                    "bge-m3", "snowflake-arctic-embed2"}
+
+    def _meta(tag: str):
+        stem = _normalize_tag(tag).split(":")[0]
+        for m in CATALOG:
+            if m.tag.split(":")[0] == stem:
+                return m
+        return None
+
+    candidates: list[dict] = []
+    budget_g = vram_gb if vram_gb is not None else ram_gb * 0.55
+    for raw_tag in pulled_raw:
+        stem = _normalize_tag(raw_tag).split(":")[0]
+        if stem in embed_stems:
+            continue
+        m = _meta(raw_tag)
+        roles  = m.roles if m else ("chat",)
+        params = m.params if m else "?"
+        vram   = m.vram_gb if m else 0.0
+        if vram > 0 and vram > budget_g:
+            continue
+        if role_filter and role_filter not in roles:
+            continue
+        candidates.append({"tag": raw_tag, "stem": stem,
+                            "params": params, "vram": vram,
+                            "roles": roles})
+
+    prompt = ("Write a 2-line haiku about an org-roam knowledge "
+               "vault. Nothing else.")
+    results: list[dict] = []
+    for c in candidates:
+        console.print(f"[lcars2]▶[/lcars2] [dim]·[/dim] "
+                      f"[lcars2]{c['tag']}[/lcars2] …", end="")
+        try:
+            t0 = _t.monotonic()
+            resp = _chat(prompt, model=c["tag"], base_url=url, timeout=120)
+            dt = _t.monotonic() - t0
+            tok_est = max(1, len(resp) // 4)
+            tok_per_s = tok_est / dt if dt > 0 else 0.0
+            qual = _quality(c["tag"]) or _quality(c["stem"])
+            score = qual * tok_per_s
+            results.append({
+                **c, "time": dt, "tok_s": tok_per_s,
+                "qual": qual, "score": score, "ok": True,
+            })
+            console.print(f" [green]{tok_per_s:5.1f} tok/s[/green]  "
+                          f"[dim]({dt:.1f}s, q={qual})[/dim]")
+        except Exception as e:
+            results.append({**c, "ok": False, "err": str(e)[:60]})
+            console.print(f" [red]× {str(e)[:60]}[/red]")
+    return results
+
+
 @app.command(rich_help_panel="Models & Cloud")
 def models(
     discover: Annotated[bool, typer.Option("--discover", "-d",
@@ -3699,12 +3770,19 @@ def models(
               help="Time real tok/s on each pulled model that fits, rank "
                    "by speed × quality. With --apply, set each role to "
                    "its top scorer.")] = False,
+    upgrade:  Annotated[bool, typer.Option("--upgrade", "-u",
+              help="One-shot: benchmark local + tune cloud, render unified "
+                   "per-role recommendations. With --apply, write both "
+                   "sides to config.")] = False,
     role:     Annotated[str,  typer.Option("--role",
               help="Scope --benchmark to one role (chat / fast / code / "
                    "reason / instruct / text). Default: all roles.")] = "",
+    budget:   Annotated[float, typer.Option("--budget",
+              help="With --upgrade: USD/Mtok cap for cloud picks (0 = "
+                   "free-tier only, 1.0 = cheap paid). Default: no cap.")] = -1.0,
     apply:    Annotated[bool, typer.Option("--apply", "-A",
-              help="With --tune or --benchmark: write the picks to config "
-                   "(default: read-only)")] = False,
+              help="With --tune / --benchmark / --upgrade: write the picks "
+                   "to config (default: read-only)")] = False,
     pull:     Annotated[str,  typer.Option("--pull",     "-p",
               help="Pull a model via Ollama")] = "",
     assign:   Annotated[bool, typer.Option("--assign",   "-a",
@@ -4059,6 +4137,158 @@ def models(
                         session.add(Cfg(key=key, value=tag))
                 session.commit()
             hail(f"Applied {len(picks_to_apply)} change(s).")
+            make_it_so()
+        return
+
+    # ── one-shot upgrade: benchmark local + tune cloud, render unified ────────
+    if upgrade:
+        from .cloud import (
+            recommend_cloud_models, cloud_models_for_provider,
+        )
+        console.rule("[lcars1]Model upgrade  ·  local + cloud[/lcars1]")
+        hw_info = (f"{vram_gb:.0f}GB VRAM" if vram_gb else f"{ram_gb:.0f}GB RAM (CPU)")
+        on_screen(f"[lcars1]Local hardware:[/lcars1] {hw_info}")
+
+        # ── local side: real tok/s benchmark ───────────────────────────────
+        results = _benchmark_local_models(
+            url=url, vram_gb=vram_gb, ram_gb=ram_gb,
+            role_filter=role,
+        )
+        ok = [r for r in results if r["ok"]]
+        if not ok:
+            red_alert("No local model completed the benchmark.")
+            on_screen("[dim]Continuing with cloud-only recommendations.[/dim]")
+        ok.sort(key=lambda r: r["score"], reverse=True)
+        local_winners: dict[str, dict] = {}
+        for r in ok:
+            for rl in r["roles"]:
+                if rl not in local_winners or r["score"] > local_winners[rl]["score"]:
+                    local_winners[rl] = r
+
+        # ── cloud side: catalog-driven recommendations ────────────────────
+        with get_session(engine) as session:
+            cur_provider = _cfg(session, "cloud_provider")
+            cur_cloud_model = _cfg(session, "cloud_model")
+        cap = budget if budget >= 0 else None
+        cloud_recs: list[dict] = []
+        if cur_provider and cloud_models_for_provider(cur_provider):
+            cloud_recs = recommend_cloud_models(
+                provider_slug=cur_provider,
+                current_model=cur_cloud_model,
+                budget_per_mtok_out=cap,
+                role_filter=role,
+            )
+            on_screen(f"[lcars1]Cloud:[/lcars1] {cur_provider}  ·  "
+                       f"current model: {cur_cloud_model or '(unset)'}  ·  "
+                       f"budget: "
+                       f"{('≤ $' + format(cap, '.2f') + '/Mtok out') if cap is not None else 'no cap'}")
+        else:
+            on_screen("[dim]No cloud provider configured — local picks only.[/dim]")
+            on_screen("[dim]Run[/dim] [bold]org-llm cloud --quick-start "
+                       "openrouter[/bold] [dim]to enable cloud picks too.[/dim]")
+
+        cloud_by_role = {rec["role"]: rec for rec in cloud_recs}
+
+        # ── unified per-role table ────────────────────────────────────────
+        narrow = console.width < 110
+        tbl = Table(box=None, pad_edge=False)
+        tbl.add_column("Role",        style="lcars1", no_wrap=True, width=8)
+        tbl.add_column("Local pick",  style="lcars2", no_wrap=True,
+                       max_width=24, overflow="ellipsis")
+        tbl.add_column("tok/s",       style="lcars3", justify="right", width=6)
+        tbl.add_column("Cloud pick",  style="lcars2", no_wrap=True,
+                       max_width=28, overflow="ellipsis")
+        tbl.add_column("$/Mtok",      style="lcars3", justify="right", width=8)
+        if not narrow:
+            tbl.add_column("Quality (L / C)", style="dim", justify="right")
+
+        local_picks_to_apply: list[tuple[str, str]] = []
+        for role_name, role_key, _ in _TASK_MODEL_KEYS:
+            if role and role_name != role:
+                continue
+            cur = current.get(role_name) or "(unset)"
+            lwin = local_winners.get(role_name)
+            cwin = cloud_by_role.get(role_name)
+
+            local_label = (lwin["tag"] if lwin else "[dim]—[/dim]")
+            local_speed = (f"{lwin['tok_s']:.1f}" if lwin else "—")
+            cloud_label = (cwin["suggested"] if cwin else "[dim]—[/dim]")
+            cloud_cost = (
+                "[green]free[/green]" if (cwin and cwin["cost_out"] == 0)
+                else (f"${cwin['cost_out']:.2f}" if cwin else "—"))
+            qual_label = ""
+            if lwin and cwin:
+                qual_label = f"{lwin['qual']} / {cwin['quality']}"
+            elif lwin:
+                qual_label = f"{lwin['qual']} / —"
+            elif cwin:
+                qual_label = f"— / {cwin['quality']}"
+            row = [role_name, local_label, local_speed,
+                    cloud_label, cloud_cost]
+            if not narrow:
+                row.append(qual_label)
+            tbl.add_row(*row)
+
+            # Track local change for --apply
+            if lwin and lwin["tag"] != cur:
+                cur_stem = _normalize_tag(cur).split(":")[0] if cur != "(unset)" else ""
+                if cur_stem != lwin["stem"]:
+                    local_picks_to_apply.append((role_key, lwin["tag"]))
+
+        console.print()
+        console.print(tbl)
+        console.print()
+
+        # Cloud chat-model winner — the canonical cloud_model pick
+        cloud_chat_pick = next((r for r in cloud_recs if r["role"] == "chat"), None)
+        cloud_apply_pending = (cloud_chat_pick
+                                and cloud_chat_pick["upgrade"])
+
+        # Summary block
+        if local_picks_to_apply:
+            on_screen(f"[lcars1]Local changes ready:[/lcars1] "
+                       f"{len(local_picks_to_apply)} role(s)")
+            for k, v in local_picks_to_apply:
+                on_screen(f"  [dim]·[/dim] {k} = {v}")
+        else:
+            on_screen("[dim]Local config is already top-scorer for every role.[/dim]")
+        if cloud_apply_pending:
+            on_screen(f"[lcars1]Cloud change ready:[/lcars1]  cloud_model = "
+                       f"{cloud_chat_pick['suggested']}")
+        elif cur_provider:
+            on_screen("[dim]Cloud config is already the top scorer for chat.[/dim]")
+
+        if not apply:
+            on_screen("\nRead-only — re-run with [bold]--apply[/bold] to "
+                       "write all picks (local + cloud) to config.")
+            return
+
+        if not local_picks_to_apply and not cloud_apply_pending:
+            on_screen("[dim]Nothing to apply.[/dim]")
+            return
+
+        if typer.confirm(
+                f"Apply {len(local_picks_to_apply)} local + "
+                f"{1 if cloud_apply_pending else 0} cloud change(s)?",
+                default=False):
+            from .db import Config as Cfg
+            with get_session(engine) as session:
+                for key, tag in local_picks_to_apply:
+                    row_ = session.get(Cfg, key)
+                    if row_:
+                        row_.value = tag
+                    else:
+                        session.add(Cfg(key=key, value=tag))
+                if cloud_apply_pending:
+                    row_ = session.get(Cfg, "cloud_model")
+                    if row_:
+                        row_.value = cloud_chat_pick["suggested"]
+                    else:
+                        session.add(Cfg(key="cloud_model",
+                                         value=cloud_chat_pick["suggested"]))
+                session.commit()
+            hail("Config updated. Pull any new local models with: "
+                  "org-llm models --pull <tag>")
             make_it_so()
         return
 
