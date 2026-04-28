@@ -160,8 +160,19 @@ def register(app: typer.Typer) -> None:
                 n = session.query(Node).filter(Node.title.ilike(f"%{node}%")).first()
                 input = (n.body or n.title) if n else ""
 
+            # Snapshot the Skill row's attributes BEFORE the session
+            # closes — otherwise run_skill (called below) hits a
+            # DetachedInstanceError when it accesses sk.source / sk.lang.
+            from types import SimpleNamespace as _SN
+            sk_snapshot = _SN(
+                name=sk.name, lang=sk.lang, model_key=sk.model_key,
+                source=sk.source,
+                file_path=sk.file_path, heading=sk.heading,
+            )
+
         with warp(f"Running skill: {name}"):
-            output = run_skill(sk, input_text=input, cfg=cfg_dict, base_url=url)
+            output = run_skill(sk_snapshot, input_text=input,
+                                cfg=cfg_dict, base_url=url)
 
         console.print()
         console.rule(f"[lcars2]{name}[/lcars2]")

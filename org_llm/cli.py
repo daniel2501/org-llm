@@ -15250,6 +15250,15 @@ def main():
         _log_invocation("ok" if code == 0 else f"exit:{code}")
         raise
     except Exception as runtime_exc:
+        # User pressed N at a typer.confirm() / Ctrl-D'd a typer.prompt() —
+        # click raises Abort. That's not a crash, it's a normal user
+        # cancel. Don't run the LLM-rescue (which is expensive AND
+        # makes "exited cleanly" feel like a failure).
+        from click.exceptions import Abort as _ClickAbort
+        if isinstance(runtime_exc, _ClickAbort):
+            _log_invocation("aborted")
+            on_screen("[dim]Aborted.[/dim]")
+            sys.exit(130)
         # Anything else uncaught — LLM rescue. We deliberately don't catch
         # this earlier (each command can still raise typer.Exit cleanly);
         # this is the "Python crashed in a command body" path.
