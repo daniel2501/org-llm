@@ -6802,27 +6802,68 @@ def doctor(
             pass
 
 
+# Step groupings for the welcome inventory display. Steps not listed
+# here flow into "Misc" so the grouping never silently drops content.
+_TUTOR_STEP_GROUPS: list[tuple[str, list[str]]] = [
+    ("Start here",   ["welcome", "init", "install", "splash", "done"]),
+    ("Vault",        ["index", "embed", "search", "ask", "capture", "tag",
+                        "code-index", "code"]),
+    ("Workspaces",   ["opencode", "claude", "pi", "launch", "emacs",
+                        "askbook", "skills"]),
+    ("Doctor",       ["doctor", "doctor-walkthrough", "proactive-doctor",
+                        "performance"]),
+    ("Insight",      ["report", "captains-log", "watch", "db", "dbt"]),
+    ("Themes & self",["knob", "theme", "personalize", "self",
+                        "review-emacs", "literate-config", "source", "man"]),
+    ("Config & cloud",
+                       ["config", "cloud", "creds", "grants", "env",
+                        "discover"]),
+]
+
+
+def _format_tutor_step_groups(step_names: list[str]) -> str:
+    """Render the tutor inventory as themed grouped sections.
+
+    Pulls from _TUTOR_STEP_GROUPS for stable headings and order. Any
+    registered step not in the groups falls into 'Misc' rather than
+    silently disappearing — guards against future additions.
+    """
+    grouped: dict[str, list[str]] = {}
+    for label, members in _TUTOR_STEP_GROUPS:
+        present = [m for m in members if m in step_names]
+        if present:
+            grouped[label] = present
+    seen = {m for _, members in _TUTOR_STEP_GROUPS for m in members}
+    misc = [s for s in step_names if s not in seen]
+    if misc:
+        grouped["Misc"] = misc
+    lines: list[str] = []
+    for label, members in grouped.items():
+        # Tight 4-column-ish layout: " · " joined, soft-wrap on
+        # whitespace by Rich's panel renderer
+        items = "  ".join(f"[lcars2]{m}[/lcars2]" for m in members)
+        lines.append(f"  [lcars1]{label}:[/lcars1]  {items}")
+    return "\n".join(lines)
+
+
 _TUTOR_STEPS = [
     (
         "welcome",
-        "[bold lcars1]Welcome aboard, officer.[/bold lcars1]\n\n"
-        "[lcars1]org-llm[/lcars1] is your personal LLM-powered second brain, "
-        "built entirely on your org-roam notes.\n\n"
+        # Greeting leans commie (the most-baseline knob) — "comrade"
+        # over "officer", "the collective" over solo navigation.
+        # Step inventory rendered as grouped sections instead of a
+        # comma-separated wall — see _format_tutor_step_groups().
+        "[bold lcars1]Welcome aboard, comrade.[/bold lcars1]\n\n"
+        "[lcars1]org-llm[/lcars1] is the collective's personal LLM-powered "
+        "second brain, built entirely on your org-roam notes.\n\n"
         "  ✦ Local-first — Ollama serves models locally; cloud is opt-in via [bold]--cloud[/bold].\n"
         "  ✦ SQLite stores the index and config — one file, zero infra.\n"
         "  ✦ sqlite-vec provides vector search inside that same file.\n"
         "  ✦ Skills let you define LLM workflows as org-babel blocks.\n"
         "  ✦ dbt transforms raw indexed data into analytics-ready views.\n"
         "  ✦ Doom Emacs integration gives you SPC l bindings for everything.\n\n"
-        "Navigate with: [bold]org-llm tutor <step>[/bold]\n"
-        "All steps:     [bold]org-llm tutor --all[/bold]\n"
-        "Steps: welcome → init → index → embed → code-index → discover → search → ask\n"
-        "       → capture → tag → code → config → skills → report → doctor →\n"
-        "       doctor-walkthrough → proactive-doctor → install-tools → db → dbt →\n"
-        "       opencode → source → performance → grants → knob → personalize → self →\n"
-        "       theme → env → review-emacs → creds → cloud → launch → emacs → claude\n"
-        "       → captains-log → watch → literate-config → man → splash → askbook →\n"
-        "       pi → done",
+        "Navigate with: [bold]org-llm tutor <step>[/bold]   "
+        "Read all at once: [bold]org-llm tutor --all[/bold]\n",
     ),
     (
         "init",
@@ -7999,6 +8040,14 @@ def tutor(
 
     prev_step = step_names[idx - 2] if idx > 1 else None
     next_step = step_names[idx] if idx < total else None
+
+    # The welcome step gets the grouped step inventory appended at
+    # render time — keeps the literal _TUTOR_STEPS body lean (no
+    # hand-maintained step list) and lets the inventory adapt
+    # whenever a new step is registered.
+    if name == "welcome":
+        body = body + "\n\n[lcars1]Step inventory[/lcars1]\n" + \
+                _format_tutor_step_groups(step_names)
 
     console.print()
     console.print(Panel(
