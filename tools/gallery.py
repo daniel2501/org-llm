@@ -590,6 +590,115 @@ def scene_llm_rescue():
     _save(con, "16-llm-rescue", "org-llm LLM rescue + self-rewrite")
 
 
+def scene_theme_studio_show():
+    """`theme-studio show` — registry of themed surfaces with active values."""
+    from rich.table import Table
+    con = _new_console(width=110)
+    tbl = Table(box=None, pad_edge=False, show_header=True)
+    tbl.add_column("Surface",  style="lcars2", no_wrap=True, width=30)
+    tbl.add_column("Default",  style="dim",    width=34)
+    tbl.add_column("Active (cache)",   style="lcars1")
+    rows = [
+        ("splash_subtitle",
+         "your second brain, scripted",
+         "Engage warp 9 — second brain online, captain."),
+        ("splash_slogan",
+         "local · queer · collective · free",
+         "stardate · solidarity · queer joy · free"),
+        ("setup_panel_title",
+         "🚀  Setup needed",
+         "🛰  Subspace handshake required"),
+        ("doctor_all_green",
+         "All systems nominal.",
+         "All decks green, captain. The bridge is calm."),
+        ("captains_log_panel_title",
+         "Captain's Log",
+         "Captain's Log — Stardate 79213.4"),
+        ("models_panel_title",
+         "Model Assignments",
+         "LCARS Crew Manifest — Models in Service"),
+        ("ask_retrieving",
+         "Retrieving notes…",
+         "Subspace pull from your archive…"),
+        ("opencode_greeting",
+         "Hailing frequencies open. Org-llm at your service.",
+         "Hailing frequencies open. Org-llm reporting from "
+         "the bridge of your second brain — make it so."),
+        ("mcp_tool_success_suffix",
+         "↳ done.",
+         "↳ make it so"),
+        ("mcp_tool_error_suffix",
+         "↳ red alert",
+         "↳ shields buckling — red alert"),
+    ]
+    for r in rows:
+        tbl.add_row(*r)
+    con.print()
+    con.print(Panel(tbl,
+                      title="[lcars1]theme-studio show[/lcars1]  "
+                            "[dim]Active dials: trek=3 commie=2 queer=2[/dim]",
+                      border_style="lcars2", padding=(0, 1)))
+    con.print()
+    con.print("▶ [bold]org-llm theme-studio regenerate[/bold]  "
+              "[dim]repopulate the cache[/dim]")
+    con.print("▶ [bold]org-llm theme-studio verify[/bold]      "
+              "[dim]re-gate every cached variant[/dim]")
+    _save(con, "18-theme-studio-show", "org-llm theme-studio show")
+
+
+def scene_theme_studio_verify():
+    """`theme-studio verify` — quality gate pass/fail per variant."""
+    from rich.table import Table
+    con = _new_console(width=110)
+    con.rule("[lcars1]Levels: trek=3, commie=2, queer=2[/lcars1]")
+
+    def _row(passed, variant, reason=""):
+        return ("[green]✓[/green]" if passed else "[red]✗[/red]",
+                variant, reason)
+
+    panels = []
+    for skey, results, n_pass, n_total in [
+        ("splash_subtitle", [
+            _row(True,  "Engage warp 9 — second brain online, captain."),
+            _row(True,  "Make it so: your subspace knowledge graph awaits."),
+            _row(True,  "Federation-grade memory, queer joy at warp 9."),
+            _row(False, "your second brain, scripted",
+                  "no theme keyword from pool (24 options)"),
+            _row(False, "AI productivity, simplified.",
+                  "forbidden phrase: 'ai'"),
+            _row(True,  "Captain on bridge — solidarity through the deltas."),
+        ], 4, 6),
+        ("opencode_greeting", [
+            _row(True,  "Hailing frequencies open. Org-llm reporting "
+                          "from the bridge of your second brain — make it so."),
+            _row(True,  "Captain on deck. LCARS coupled. Mutual aid in the "
+                          "comms array. What can I dig out for you?"),
+            _row(True,  "Worf would be proud — your archive is fortified. "
+                          "Solidarity. Standing by."),
+            _row(False, "Hello! How can I assist you today?",
+                  "no theme keyword from pool (24 options)"),
+        ], 3, 4),
+    ]:
+        tbl = Table(box=None, pad_edge=False, show_header=True)
+        tbl.add_column("✓",       width=2)
+        tbl.add_column("Variant", style="lcars2")
+        tbl.add_column("Reason",  style="dim")
+        for r in results:
+            tbl.add_row(*r)
+        panels.append(Panel(tbl,
+                              title=f"[lcars1]{skey}[/lcars1]  "
+                                    f"[dim]{n_pass}/{n_total} pass[/dim]",
+                              border_style="lcars2", padding=(0, 1)))
+
+    for p in panels:
+        con.print(p)
+    con.print()
+    con.print("[lcars3]Pass rate:[/lcars3] 7/10 (70%)  "
+              "[dim]· retry failures with a stronger model:[/dim] "
+              "[bold]theme-studio regenerate --upgrade[/bold]")
+    _save(con, "19-theme-studio-verify", "org-llm theme-studio verify")
+
+
 def scene_doctor_walkthrough():
     """`org-llm doctor --walkthrough` — narrated step-by-step."""
     con = _new_console(width=110)
@@ -642,6 +751,8 @@ SCENES = [
     scene_literate_config,
     scene_dbt_status,
     scene_llm_rescue,
+    scene_theme_studio_show,
+    scene_theme_studio_verify,
     scene_doctor_walkthrough,
 ]
 

@@ -668,17 +668,26 @@ with `org-llm db -q "SELECT timestamp, query FROM history WHERE command='review-
 
 ---
 
-## Theme knobs
+## Theme knobs (pluggable registry)
 
-`trek` / `commie` / `queer` are built-in dials (0–3) that shape the
-completion-message pool. Levels are weights, not booleans:
+`trek` / `commie` / `queer` are built-in dials (0–3) that shape every
+themed surface across the app — completion messages, splash subtitle,
+panel titles, opencode greetings, MCP tool decorations. Levels are
+weights, not booleans:
 
 ```
 0 = silent  |  1 = sparse (½×)  |  2 = normal  |  3 = max (2×)
 ```
 
-Multi-tagged messages (e.g. `trek+commie`) use the MIN level — silence
-any tag and dependent messages disappear. Persist via the config DB:
+**Pluggable, not hardcoded.** Every knob — including the built-ins —
+is a `KnobDef` (name, description, cumulative `keywords_by_level`)
+loaded from `org_llm/knobs.py:BUILTIN_KNOBS` and merged with the
+SQLite `theme_knobs` config row. Adding a new dial is a config
+change, not a code change. Levels are cumulative: dialing trek to 3
+adds level-3 keywords on top of levels 1+2, so higher dial = MORE
+flavour available, not different.
+
+Persist + dial:
 
 ```sh
 org-llm config queer_level 1     # half pride
@@ -686,7 +695,9 @@ org-llm config commie_level 3    # 2× solidarity
 org-llm config trek_level 0      # silence Trek
 ```
 
-Or per-command via `ORG_LLM_<NAME>_LEVEL`. Define your own dials:
+Or per-command via `ORG_LLM_<NAME>_LEVEL`.
+
+### Define your own dial
 
 ```sh
 org-llm knob add dinosaur \
@@ -697,9 +708,55 @@ org-llm config dinosaur_level 2
 org-llm knob list
 ```
 
-User knobs live in the SQLite `user_theme_knobs` row; their levels
-follow the same `<name>_level` pattern. Built-in knobs can't be removed
-but can be set to 0.
+User knobs participate **automatically** in the LLM-driven theming
+quality gate (see below) — once they have a `keywords_by_level` block
+in the registry, any LLM-themed surface enforces them.
+
+---
+
+## LLM-driven theming + quality gate
+
+Knobs don't just shape the message pool — the active dials drive
+**every** themed surface in the app. The pipeline:
+
+1. **Surface registry** (`org_llm/theme_studio.py:SURFACES`) — every
+   themable UI slot (splash subtitle, splash slogan, panel titles,
+   doctor-all-green line, opencode greeting + persona intro, MCP
+   tool success/error suffixes, ask-retrieving spinner) declared
+   with length bounds + a default + a one-line LLM-facing description.
+2. **Generation** — `theme-studio regenerate` calls the LLM (fast_model,
+   escalating to chat_model on poor yield) once per surface with the
+   active dials and registry-sourced descriptions; expects N candidates.
+3. **Quality gate** — every candidate runs through `gate()`: length
+   bounds, forbidden phrases (system-prompt leaks, "as an AI", markdown
+   headers, prompt-escape sequences), well-formed Rich markup, AND must
+   contain at least one keyword from the cumulative pool of every
+   dialed-up knob.
+4. **Cache** — survivors written to `~/.local/share/org-llm/theme-cache.json`
+   keyed by dial signature. Surfaces read via `get_themed(key, default=…)`
+   — cold cache transparently returns the hardcoded default, so render
+   never blocks on generation.
+
+```sh
+org-llm theme-studio regenerate          # warm the cache for active dials
+org-llm theme-studio regenerate -o splash_subtitle,splash_slogan  # subset
+org-llm theme-studio verify              # re-run gate, report pass/fail per variant
+org-llm theme-studio show                # list every surface + active value
+org-llm theme-studio show splash_subtitle
+```
+
+<div align="center"><img src="docs/img/18-theme-studio-show.svg" alt="org-llm theme-studio show" width="780" /></div>
+
+The gate is the trust boundary — if it accepts garbage, you render
+garbage; if it rejects everything good, you never theme. `verify`
+prints a per-variant pass/fail report so you can see what the LLM is
+actually producing, and what's getting rejected and why:
+
+<div align="center"><img src="docs/img/19-theme-studio-verify.svg" alt="org-llm theme-studio verify" width="780" /></div>
+
+The pluggability test in `tests/test_theme_studio.py` proves a
+user-defined knob with its own keyword pool participates without any
+code change.
 
 ---
 

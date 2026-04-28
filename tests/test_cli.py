@@ -879,8 +879,12 @@ class TestSplash:
     def test_logo_always_renders(self, cli_db):
         r = runner.invoke(app, ["splash"])
         assert r.exit_code == 0
-        # The LCARS title shows in both first-run AND configured paths
-        assert "o r g - l l m" in r.output
+        # The LCARS readout always renders. Pick anchors unique to the
+        # full splash so this test catches both first-run and post-setup
+        # paths: callsign label, subtitle, and slogan are all stable.
+        assert "47-Δ" in r.output       # top-bar callsign
+        assert ("your second brain" in r.output
+                or "second brain" in r.output)
 
     def test_configured_user_sees_full_menu(self, cli_org, monkeypatch):
         """A populated vault skips the setup-nudge and shows the menu."""
