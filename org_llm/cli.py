@@ -8565,6 +8565,10 @@ def tag(
     from .db import Node
     from .llm import chat
 
+    if limit <= 0:
+        red_alert(f"--limit must be positive (got {limit}).")
+        raise typer.Exit(1)
+
     engine = _engine()
     with get_session(engine) as session:
         url   = _ollama_url(session)
