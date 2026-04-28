@@ -15021,18 +15021,81 @@ def _llm_diagnose_uncaught(exc: BaseException, argv: list[str]) -> None:
         f"Traceback tail:\n{tb_tail}"
     )
     advice = ""
+    rescue_err = ""
+    # The diagnosis prompt asks for THREE lines (WHY / FIX /
+    # WHY-IT-WORKS) — `_llm_one_liner` was the wrong receiver: it
+    # filters to the FIRST line that fits 6..240 chars and discards
+    # the rest. Use chat() directly so the user sees the full
+    # diagnosis. 30s (was 15s) since this fires once per crash.
     try:
-        advice = _llm_one_liner(user_msg, system=sys_msg, timeout=15.0,
-                                  fallback="")
-    except Exception:
-        pass
+        from .llm import chat as _chat
+        from .ui  import thinking as _thinking
+        engine_now = _engine()
+        with get_session(engine_now) as session:
+            url = _ollama_url(session)
+            # Prefer the smallest pulled model for rescue — the user is
+            # already mid-crash and a 30s phi3.5 wait makes things worse.
+            # Match the personalize pattern: try a known-small list first,
+            # fall back to fast_model / chat_model only if none pulled.
+            mdl = ""
+            try:
+                from .models import similar_pulled_model as _spm
+                # similar_pulled_model returns a real pulled tag for any
+                # query; using "llama3.2:1b" as the wishlist and falling
+                # through to whatever's actually local.
+                for cand in ("llama3.2:1b", "llama3.2:3b", "phi3.5"):
+                    hit = _spm(cand, url)
+                    if hit:
+                        mdl = hit
+                        break
+            except Exception:
+                pass
+            if not mdl:
+                mdl = (_cfg(session, "fast_model")
+                       or _cfg(session, "chat_model")
+                       or MODEL_DEFAULTS["chat_model"])
+        import threading as _thr
+        result: dict = {"text": "", "err": ""}
+        def _run():
+            try:
+                result["text"] = _chat(user_msg, model=mdl, base_url=url,
+                                         system=sys_msg, timeout=30.0) or ""
+            except Exception as e:
+                result["err"] = f"{type(e).__name__}: {e}"
+        with _thinking("LLM rescue", model=mdl):
+            t = _thr.Thread(target=_run, daemon=True)
+            t.start(); t.join(timeout=30.0)
+        if t.is_alive():
+            rescue_err = "rescue LLM call timed out (>30s)"
+        elif result["err"]:
+            rescue_err = result["err"]
+        else:
+            # Models occasionally emit ```bash …``` fences inside the
+            # FIX line despite the system prompt saying no markdown.
+            # Strip them so the Panel renders clean shell snippets,
+            # not literal backticks.
+            import re as _re
+            advice = (result["text"] or "").strip()
+            advice = _re.sub(r"```[a-z]*\n?", "", advice)
+            advice = _re.sub(r"\n?```", "", advice).strip()
+    except Exception as e:
+        rescue_err = f"{type(e).__name__}: {e}"
     if advice:
         from rich.panel import Panel
         console.print()
         console.print(Panel(advice, title="[lcars1]LLM rescue[/lcars1]",
                               border_style="lcars2", padding=(1, 2)))
     else:
-        _on("[dim](LLM unreachable for diagnosis — see traceback below.)[/dim]")
+        # Honest about what failed — was a generic
+        # "(LLM unreachable for diagnosis)" with no clue whether the
+        # model timed out / hit OOM / refused / wasn't pulled.
+        if rescue_err:
+            _on(f"[dim](LLM rescue failed: {rescue_err})[/dim]")
+        else:
+            # _llm_one_liner returned its empty fallback — model returned
+            # an empty / malformed response, didn't raise.
+            _on("[dim](LLM rescue produced no diagnosis — model may have "
+                "returned empty / refused; see traceback below.)[/dim]")
         _on(tb_tail.splitlines()[-1] if tb_tail.splitlines() else "")
 
     # 2. Optional self-rewrite — only when crash is in OUR code AND only

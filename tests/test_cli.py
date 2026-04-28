@@ -274,15 +274,22 @@ class TestLLMRescue:
 
     def test_diagnose_calls_llm_with_traceback_and_argv(self, monkeypatch):
         """The diagnosis path must give the LLM both argv AND the
-        traceback tail — without those, suggestions are useless."""
+        traceback tail — without those, suggestions are useless.
+
+        Mocks the underlying chat() (post-refactor — diagnose used to
+        route through _llm_one_liner which truncated to ONE line; the
+        WHY/FIX/WHY-IT-WORKS prompt needs the full multi-line response,
+        so the implementation now calls chat() directly).
+        """
         from org_llm import cli as _cli
+        from org_llm import llm as _llm
         captured: dict = {}
-        def fake_one_liner(user_msg, system="", timeout=15.0,
-                            fallback="", **kw):
-            captured["user"] = user_msg
+        def fake_chat(prompt, model, base_url, system="",
+                       timeout=None, **kw):
+            captured["user"]   = prompt
             captured["system"] = system
             return "WHY: x\nFIX: y\nWHY-IT-WORKS: z"
-        monkeypatch.setattr(_cli, "_llm_one_liner", fake_one_liner)
+        monkeypatch.setattr(_llm, "chat", fake_chat)
         # Ensure no TTY → skips the interactive self-rewrite path
         import sys as _sys
         monkeypatch.setattr(_sys.stdin, "isatty", lambda: False)
