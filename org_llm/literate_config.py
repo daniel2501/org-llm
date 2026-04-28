@@ -95,6 +95,52 @@ KEY_DESCRIPTIONS = {
 }
 
 
+def env_var_for(key: str) -> str:
+    """Canonical env override name for a config key.
+
+    Convention: every config key has an ORG_LLM_<KEY.upper()> env tap
+    that overrides the DB row at read time. This function returns the
+    name regardless of whether it's actively set — callers compose it
+    with os.environ.get() to check for an override.
+    """
+    return "ORG_LLM_" + key.upper()
+
+
+def effective_value(key: str) -> tuple[str, str]:
+    """Resolve a config key with env / DB / default precedence.
+
+    Returns (value, source) where source is one of:
+      "env"     — overridden by ORG_LLM_<KEY> at runtime
+      "config"  — set in the SQLite config table
+      "default" — unset, falling back to MODEL_DEFAULTS
+      ""        — unknown key (no value)
+
+    Used by `org-llm config` to surface the live picture with the
+    env override visible. Don't use this on the hot path — call sites
+    that read once should still hit the DB directly via _cfg().
+    """
+    env_name = env_var_for(key)
+    env_val = os.environ.get(env_name)
+    if env_val is not None:
+        return (env_val, "env")
+    try:
+        from .db import DB_PATH, Config, MODEL_DEFAULTS, make_engine
+        from sqlalchemy.orm import Session
+        path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if path.exists():
+            engine = make_engine(path)
+            with Session(engine) as s:
+                row = s.get(Config, key)
+                if row and row.value:
+                    return (row.value, "config")
+        from .db import MODEL_DEFAULTS
+        if key in MODEL_DEFAULTS:
+            return (MODEL_DEFAULTS[key], "default")
+    except Exception:
+        pass
+    return ("", "")
+
+
 def literate_path() -> Path:
     """Where the literate config file lives. Env override for tests."""
     return Path(os.environ.get("ORG_LLM_LITERATE_CONFIG_PATH")

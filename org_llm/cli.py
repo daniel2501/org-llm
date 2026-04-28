@@ -3789,20 +3789,32 @@ def config(
         red_alert("--tangle / --apply-from-org / --diff-org / --search are mutually exclusive.")
         raise typer.Exit(1)
     if search:
-        from .literate_config import KEY_DESCRIPTIONS as _DESCS
+        from .literate_config import (
+            KEY_DESCRIPTIONS as _DESCS,
+            env_var_for as _envname,
+        )
         from .db import Config as _Cfg, MODEL_DEFAULTS as _DEF
         engine = _engine()
         with get_session(engine) as session:
             db_rows = {r.key: r.value or "" for r in session.query(_Cfg).all()}
         all_keys = sorted(set(db_rows) | set(_DEF) | set(_DESCS))
         ql = search.lower()
-        hits: list[tuple[str, str, str, bool]] = []
+        hits: list[tuple[str, str, str, str, str]] = []
+        # Match on key name, description, AND env-var name so
+        # `--search ORG_LLM_LOG` finds log_* keys via their env taps too.
         for k in all_keys:
             desc = _DESCS.get(k, "")
-            if ql in k.lower() or ql in desc.lower():
-                cur  = db_rows.get(k, _DEF.get(k, ""))
-                from_default = (cur == _DEF.get(k, "")) and k in _DEF
-                hits.append((k, cur, desc, from_default))
+            env_name = _envname(k)
+            if (ql in k.lower() or ql in desc.lower()
+                    or ql in env_name.lower()):
+                env_val = os.environ.get(env_name)
+                if env_val is not None:
+                    cur, src = env_val, "env"
+                elif k in db_rows and db_rows[k]:
+                    cur, src = db_rows[k], "config"
+                else:
+                    cur, src = _DEF.get(k, ""), "default"
+                hits.append((k, cur, src, desc, env_name))
         if not hits:
             on_screen(f"[dim]No config keys match {search!r}.[/dim]")
             return
@@ -3810,19 +3822,27 @@ def config(
         tbl = Table(box=None, pad_edge=False)
         tbl.add_column("Key",         style="lcars1", no_wrap=True)
         tbl.add_column("Value",       style="lcars2")
-        tbl.add_column("From default", width=4, no_wrap=True)
+        tbl.add_column("Source",      width=8, no_wrap=True)
+        tbl.add_column("Env override", style="dim",   no_wrap=True)
         tbl.add_column("Description", style="dim")
-        for k, v, d, from_def in hits:
-            tbl.add_row(k, (v or "")[:40],
-                          "[green]✓[/green]" if from_def else "[yellow]·[/yellow]",
-                          d)
+        src_style = {
+            "env":     "[yellow]env[/yellow]",
+            "config":  "[lcars3]config[/lcars3]",
+            "default": "[dim]default[/dim]",
+        }
+        for k, v, src, d, env_name in hits:
+            tbl.add_row(k, (v or "")[:40], src_style[src], env_name, d)
         console.print()
         console.print(_Panel(tbl,
                               title=f"[lcars1]config search: {search!r}[/lcars1]  "
                                     f"[dim]({len(hits)} hit{'s' if len(hits) != 1 else ''})[/dim]",
                               border_style="lcars2", padding=(1, 1)))
-        on_screen("[dim]Set:[/dim] [bold]org-llm config <key> <value>[/bold]")
-        on_screen("[dim]Edit literately:[/dim] [bold]org-llm config --tangle --keys '<key>'[/bold]")
+        on_screen("[dim]Set:[/dim] "
+                  "[bold]org-llm config <key> <value>[/bold]  "
+                  "[dim](or:[/dim] [bold]ORG_LLM_<KEY>=value org-llm …[/bold]"
+                  "[dim] for one-shot env override)[/dim]")
+        on_screen("[dim]Edit literately:[/dim] "
+                  "[bold]org-llm config --tangle --keys '<key>'[/bold]")
         return
     if tangle:
         from . import literate_config as _lc
@@ -3874,23 +3894,62 @@ def config(
     engine = _engine()
     with get_session(engine) as session:
         if not key:
+            from .literate_config import env_var_for as _envname
             table = Table(box=None, pad_edge=False)
-            table.add_column("Key",   style="lcars1")
-            table.add_column("Value", style="lcars2")
-            for row in session.query(Cfg).order_by(Cfg.key):
-                table.add_row(row.key, row.value)
+            table.add_column("Key",          style="lcars1", no_wrap=True)
+            table.add_column("Value",        style="lcars2")
+            table.add_column("Source",       width=8, no_wrap=True)
+            table.add_column("Env override", style="dim",   no_wrap=True)
+            # Union of DB rows + MODEL_DEFAULTS so unset-but-known
+            # keys still show up with their default + ENV name.
+            known_keys = sorted(
+                {r.key for r in session.query(Cfg).all()} | set(MODEL_DEFAULTS.keys())
+            )
+            for k in known_keys:
+                env_name = _envname(k)
+                env_val  = os.environ.get(env_name)
+                row      = session.get(Cfg, k)
+                if env_val is not None:
+                    val, src = env_val, "[yellow]env[/yellow]"
+                elif row and row.value:
+                    val, src = row.value, "[lcars3]config[/lcars3]"
+                else:
+                    val, src = MODEL_DEFAULTS.get(k, ""), "[dim]default[/dim]"
+                # Show the env name regardless — discoverability win.
+                table.add_row(k, (val or "")[:60], src, env_name)
             console.print(table)
+            on_screen("[dim]Tip:[/dim] every key has an "
+                      "[bold]ORG_LLM_<KEY>[/bold] env override; set it for "
+                      "this shell to test a value without writing config.")
         elif not value:
+            from .literate_config import env_var_for as _envname, KEY_DESCRIPTIONS
+            env_name = _envname(key)
+            env_val  = os.environ.get(env_name)
             row = session.get(Cfg, key)
-            if row:
+            if env_val is not None:
+                console.print(env_val)
+                on_screen(f"[dim]Source:[/dim] [yellow]env override[/yellow]  "
+                          f"[dim]({env_name}={env_val!r})[/dim]")
+            elif row:
                 console.print(row.value)
+                on_screen(f"[dim]Source:[/dim] [lcars3]config table[/lcars3]  "
+                          f"[dim]·[/dim] env: [bold]{env_name}[/bold] (unset)")
             else:
                 # Unknown / unset — fuzzy-match against actual rows + defaults.
                 known = {r.key for r in session.query(Cfg).all()} | set(MODEL_DEFAULTS.keys())
                 guess = _dl.get_close_matches(key, sorted(known), n=3, cutoff=0.55)
-                console.print("[error]not set[/error]")
+                if key in MODEL_DEFAULTS:
+                    console.print(MODEL_DEFAULTS[key])
+                    on_screen(f"[dim]Source:[/dim] [dim]default[/dim]  "
+                              f"[dim]·[/dim] env: [bold]{env_name}[/bold] (unset)")
+                else:
+                    console.print("[error]not set[/error]")
+                    on_screen(f"[dim]Env tap:[/dim] [bold]{env_name}[/bold]")
                 if guess:
                     on_screen(f"[dim]Did you mean: {', '.join(guess)}?[/dim]")
+            desc = KEY_DESCRIPTIONS.get(key)
+            if desc:
+                on_screen(f"[dim]{desc}[/dim]")
         else:
             err = _validate_config(key, value)
             if err:

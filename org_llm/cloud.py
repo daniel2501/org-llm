@@ -398,6 +398,28 @@ def cloud_chat(
     prompt: str, model: str, endpoint_url: str,
     api_key: str = "", system: str = "",
 ) -> str:
+    """Cloud chat round-trip.
+
+    Logs every successful call to the logbook (kind=llm,
+    command=cloud-chat) so dbt + Captain's Log see it the same way as
+    local Ollama calls. Failures are also logged with outcome=error.
+    Conversation history is preserved in BOTH the History.response
+    column AND the org file.
+    """
+    from .logbook import track_event as _track
+    with _track("llm", "cloud-chat", model=model,
+                  args=f"prompt_chars={len(prompt)} "
+                       f"system_chars={len(system or '')} "
+                       f"endpoint={endpoint_url}") as ev:
+        out = _cloud_chat_core(prompt, model, endpoint_url, api_key, system)
+        ev["response"] = out or ""
+        return out
+
+
+def _cloud_chat_core(
+    prompt: str, model: str, endpoint_url: str,
+    api_key: str = "", system: str = "",
+) -> str:
     url = endpoint_url.rstrip("/")
     headers = {"Content-Type": "application/json"}
     if api_key:

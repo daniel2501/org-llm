@@ -675,11 +675,30 @@ def create_mcp_server():
 
     @server.tool()
     def get_config() -> str:
-        """Return current org-llm configuration (model assignments, org_dir, etc.)."""
-        from .db import Config
+        """Return current org-llm configuration with env-override visibility.
+
+        Each line shows: `key = value  [source]`  where source is one of
+        env (overridden by ORG_LLM_<KEY>), config (DB row), or default.
+        Use this to see what's ACTUALLY in effect — env vars trump DB
+        rows at read time, so a config table query alone misses overrides.
+        """
+        from .db import Config, MODEL_DEFAULTS
+        from .literate_config import env_var_for
         with get_session(engine) as session:
-            rows = session.query(Config).all()
-        return "\n".join(f"  {r.key} = {r.value}" for r in rows)
+            rows = {r.key: r.value or "" for r in session.query(Config).all()}
+        all_keys = sorted(set(rows) | set(MODEL_DEFAULTS))
+        lines: list[str] = []
+        for k in all_keys:
+            env_val = os.environ.get(env_var_for(k))
+            if env_val is not None:
+                lines.append(f"  {k} = {env_val!r}  [env]")
+            elif k in rows and rows[k]:
+                lines.append(f"  {k} = {rows[k]!r}  [config]")
+            elif k in MODEL_DEFAULTS:
+                lines.append(f"  {k} = {MODEL_DEFAULTS[k]!r}  [default]")
+        return _themed("get_config",
+                        f"{len(lines)} key(s)",
+                        "\n".join(lines))
 
     # ── set_config (allow-listed safe keys) ───────────────────────────────────
     _SETTABLE_KEYS = {
@@ -1329,16 +1348,15 @@ def create_mcp_server():
     @server.tool()
     async def search_config(query: str,
                               ctx: Context | None = None) -> str:
-        """Fuzzy-search config keys by name AND description.
+        """Fuzzy-search config keys by name AND description AND env-var name.
 
         Use when the user asks "what's that config key for X" / "how do
-        I tune Y" / "is there a setting for Z" — the search hits both
-        the key names and the human-readable descriptions in
-        literate_config.KEY_DESCRIPTIONS, then surfaces the current
-        value alongside the description so the user knows what to set.
+        I tune Y" / "is there a setting for Z". Each hit shows current
+        value with its source (env / config / default), the env var
+        name, and the description.
         """
         await _info(ctx, f"search_config: {query!r}")
-        from .literate_config import KEY_DESCRIPTIONS
+        from .literate_config import KEY_DESCRIPTIONS, env_var_for
         from .db import Config, MODEL_DEFAULTS
         with get_session(engine) as session:
             db_rows = {r.key: r.value or "" for r in session.query(Config).all()}
@@ -1347,9 +1365,21 @@ def create_mcp_server():
         all_keys = sorted(set(db_rows) | set(MODEL_DEFAULTS) | set(KEY_DESCRIPTIONS))
         for k in all_keys:
             desc = KEY_DESCRIPTIONS.get(k, "")
-            if ql in k.lower() or ql in desc.lower():
-                cur = db_rows.get(k, MODEL_DEFAULTS.get(k, ""))
-                hits.append(f"  {k} = {cur!r}\n    {desc}")
+            env_name = env_var_for(k)
+            if (ql in k.lower() or ql in desc.lower()
+                    or ql in env_name.lower()):
+                env_val = os.environ.get(env_name)
+                if env_val is not None:
+                    cur, src = env_val, "env"
+                elif k in db_rows and db_rows[k]:
+                    cur, src = db_rows[k], "config"
+                else:
+                    cur, src = MODEL_DEFAULTS.get(k, ""), "default"
+                hits.append(
+                    f"  {k} = {cur!r}  [{src}]\n"
+                    f"    env: {env_name}\n"
+                    f"    {desc}"
+                )
         if not hits:
             return _themed("search_config", f"no matches for {query!r}",
                             "Try a broader pattern or just `get_config` to "

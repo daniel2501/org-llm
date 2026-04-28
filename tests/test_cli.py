@@ -1324,6 +1324,46 @@ class TestLiterateConfig:
         r = runner.invoke(app, ["config", "--search", "x", "--tangle"])
         assert r.exit_code == 1
 
+    def test_env_var_for_canonical(self):
+        from org_llm.literate_config import env_var_for
+        assert env_var_for("chat_model") == "ORG_LLM_CHAT_MODEL"
+        assert env_var_for("doctor_proactive_mode") == "ORG_LLM_DOCTOR_PROACTIVE_MODE"
+        assert env_var_for("trek_level") == "ORG_LLM_TREK_LEVEL"
+
+    def test_effective_value_env_wins(self, cli_db, monkeypatch):
+        from org_llm.literate_config import effective_value
+        monkeypatch.setenv("ORG_LLM_CHAT_MODEL", "from-env")
+        val, src = effective_value("chat_model")
+        assert val == "from-env" and src == "env"
+
+    def test_effective_value_falls_through(self, cli_db, monkeypatch):
+        from org_llm.literate_config import effective_value
+        monkeypatch.delenv("ORG_LLM_CHAT_MODEL", raising=False)
+        val, src = effective_value("chat_model")
+        # Either config (from cli_db init) or default; both are valid here
+        assert src in ("config", "default")
+        assert val   # non-empty
+
+    def test_config_show_all_includes_env_column(self, cli_db):
+        r = runner.invoke(app, ["config"])
+        assert r.exit_code == 0
+        assert "Env override" in r.output
+        # Canonical env name shown for at least one key
+        assert "ORG_LLM_CHAT_MODEL" in r.output
+
+    def test_config_get_one_shows_env_source_when_set(self, cli_db, monkeypatch):
+        monkeypatch.setenv("ORG_LLM_CHAT_MODEL", "test-override-value")
+        r = runner.invoke(app, ["config", "chat_model"])
+        assert r.exit_code == 0
+        assert "test-override-value" in r.output
+        assert "env override" in r.output.lower() or "env" in r.output.lower()
+
+    def test_config_search_finds_by_env_name(self, cli_db):
+        # Querying the env var name should surface the matching key
+        r = runner.invoke(app, ["config", "--search", "ORG_LLM_LOG_LEVEL"])
+        assert r.exit_code == 0
+        assert "log_level" in r.output
+
 
 class TestAutoEmbedder:
     """Background watcher that polls the vault, indexes + embeds new
