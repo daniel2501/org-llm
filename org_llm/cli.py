@@ -3887,9 +3887,38 @@ def models(
                   f"[dim](hardware: "
                   f"{f'{vram_gb:.0f}GB VRAM' if vram_gb else f'{ram_gb:.0f}GB RAM (CPU)'}"
                   f")[/dim]")
-    # Build a tag → fits-locally lookup
+    # Build a tag → fits-locally lookup. Stem-fuzzy lookup so a
+    # configured model like `llama3.2` resolves to catalog entry
+    # `llama3.2:3b` (different version tag, same model family). Fixes
+    # "VRAM ?" + the wrongly-✓ Fits cell that appeared whenever the
+    # bare stem didn't exactly match a tagged catalog entry.
+    from .models import _norm
     catalog_by_tag = {m.tag: m for m in CATALOG}
+    catalog_by_stem: dict[str, list] = {}
+    for m in CATALOG:
+        catalog_by_stem.setdefault(_norm(m.tag).split(":")[0], []).append(m)
+
+    def _lookup_catalog(tag: str):
+        if not tag or tag == "—":
+            return None
+        if tag in catalog_by_tag:
+            return catalog_by_tag[tag]
+        stem = _norm(tag).split(":")[0]
+        # Pick the smallest-VRAM variant of that stem as a sensible
+        # default — captures the bare-stem-implies-:latest convention
+        # without claiming the largest variant fits.
+        candidates = catalog_by_stem.get(stem, [])
+        return min(candidates, key=lambda m: m.vram_gb) if candidates else None
+
     fitting_tags = {m.tag for m in fitting_hardware(vram_gb, ram_gb)}
+
+    # Track which pulled models are referenced by an assigned role so
+    # the Pulled table can label them ("Used by: chat" / unused).
+    used_by_role: dict[str, list[str]] = {}
+    for role, _key, _purpose in _TASK_MODEL_KEYS:
+        m = current.get(role) or "—"
+        if m and m != "—":
+            used_by_role.setdefault(_norm(m).split(":")[0], []).append(role)
 
     assign_tbl = Table(box=None, pad_edge=False)
     assign_tbl.add_column("Role",    style="lcars1",  no_wrap=True)
@@ -3900,7 +3929,7 @@ def models(
     assign_tbl.add_column("Fits",    width=6, no_wrap=True)
     for role, key, purpose in _TASK_MODEL_KEYS:
         m = current.get(role) or "—"
-        cat = catalog_by_tag.get(m)
+        cat = _lookup_catalog(m)
         vram = f"{cat.vram_gb:.1f}G" if cat else "[dim]?[/dim]"
         pulled_cell = (
             "[green]✓[/green]" if _is_pulled(m, pulled)
@@ -3908,7 +3937,12 @@ def models(
         )
         if m == "—":
             fits_cell = "[dim]—[/dim]"
-        elif m in fitting_tags or not cat:
+        elif cat is None:
+            # Honest about not knowing: don't claim ✓ when we have no
+            # size data for this tag.
+            fits_cell = "[dim]?[/dim]"
+        elif m in fitting_tags or _norm(m).split(":")[0] in {
+            _norm(t).split(":")[0] for t in fitting_tags}:
             fits_cell = "[green]✓[/green]"
         else:
             fits_cell = "[red]✗[/red]"
@@ -3917,10 +3951,18 @@ def models(
 
     console.print()
     if pulled:
-        pull_tbl = Table(title="Pulled in Ollama", box=None, pad_edge=False)
-        pull_tbl.add_column("Model", style="lcars3")
+        pull_tbl = Table(title="Pulled in Ollama", box=None, pad_edge=False,
+                          show_header=True, title_justify="left")
+        pull_tbl.add_column("Model",    style="lcars3", no_wrap=True)
+        pull_tbl.add_column("VRAM",     style="dim",    width=8, no_wrap=True)
+        pull_tbl.add_column("Used by",  style="lcars1", no_wrap=True)
         for name in sorted(pulled):
-            pull_tbl.add_row(name)
+            cat   = _lookup_catalog(name)
+            vram  = f"{cat.vram_gb:.1f}G" if cat else "?"
+            stem  = _norm(name).split(":")[0]
+            roles = used_by_role.get(stem, [])
+            roles_str = ", ".join(roles) if roles else "[dim](unused)[/dim]"
+            pull_tbl.add_row(name, vram, roles_str)
         console.print(pull_tbl)
     else:
         console.print("[dim]Ollama not reachable or no models pulled.[/dim]")
