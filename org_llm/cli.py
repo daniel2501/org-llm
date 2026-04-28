@@ -4206,9 +4206,15 @@ def models(
                 d = winner["tok_s"] - cur_speed
                 delta = f"[green]+{d:.1f}[/green]" if d > 0 else (
                         f"[red]{d:.1f}[/red]" if d < 0 else "·")
-            arrow = "·" if winner["tag"] == cur else "[bold yellow]↑[/]"
+            # Stem-match for the arrow: "qwen2.5-coder" + "qwen2.5-coder:latest"
+            # are the same Ollama model, so don't flag them as an upgrade. The
+            # apply step further down already uses the same stem-match
+            # heuristic; this just keeps the visual in sync with the
+            # behaviour the user gets when they run --apply.
+            same_model = (winner["tag"] == cur or winner["stem"] == cur_stem)
+            arrow = "·" if same_model else "[bold yellow]↑[/]"
             rec_tbl.add_row(role_name, cur, arrow, winner["tag"], delta)
-            if winner["tag"] != cur:
+            if not same_model:
                 picks_to_apply.append((role_key, winner["tag"]))
         console.print(rec_tbl)
         console.print()
