@@ -522,6 +522,13 @@ With prefix arg, prompt for model override."
   (org-llm--shell "grants" "*org-llm: grants*"))
 
 ;;;###autoload
+(defun org-llm-man (&optional install-only)
+  "Install + open the org-llm man page.  Prefix arg = install only (no open)."
+  (interactive "P")
+  (org-llm--vterm
+   (format "%s man%s" org-llm-binary (if install-only " --install" ""))))
+
+;;;###autoload
 (defun org-llm-tutor (step)
   "Open a tutor STEP (e.g. welcome, embed, dbt)."
   (interactive (list (read-string "Tutor step (welcome / embed / dbt / …): "
@@ -640,6 +647,7 @@ With prefix arg, prompt for model override."
        ;; ─── Tutor + source + advanced ──────────────────────────────────
        (:prefix ("H" . "help/tutor")
         :desc "Tutor step"               "H" #'org-llm-tutor
+        :desc "Man page"                 "m" #'org-llm-man
         :desc "Source (module)"          "s" #'org-llm-source
         :desc "Performance"              "p" #'org-llm-performance
         :desc "Personalize"              "P" #'org-llm-personalize

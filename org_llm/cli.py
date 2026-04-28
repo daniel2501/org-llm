@@ -1456,6 +1456,27 @@ def setup(
             on_screen(f"[dim]dbt init/build failed: {e}[/dim]")
         console.print()
 
+    # 9.6. man page — install + check MANPATH so `man org-llm` works
+    # immediately. Default Y (cheap, harmless, idempotent).
+    if "man-install" in done_set:
+        on_screen("[dim]✓ Step 9.6/15: man --install (already done — skipping)[/dim]")
+        console.print()
+    elif _confirm("Install the org-llm man page (so `man org-llm` works)?",
+                   default=True):
+        try:
+            from . import manpage as _mp
+            target, on_path = _mp.install_manpage()
+            hail(f"Installed: {target}")
+            if not on_path:
+                on_screen("[yellow]MANPATH doesn't cover the install dir.[/yellow]")
+                for line in _mp.manpath_setup_hint(
+                        target.parent.parent.parent).splitlines():
+                    on_screen(f"  {line}")
+            _mark_step_done("man-install")
+        except Exception as e:
+            on_screen(f"[dim]man install failed: {e}[/dim]")
+        console.print()
+
     # 9.7. auto-embedder — opt-in here so the user knows about the
     # background daemon thread before `org-llm launch` starts spawning
     # it. Default Y: most users want the index + embeddings to stay
@@ -3815,6 +3836,69 @@ def _captains_log_reflect(rows: list, model: str, base_url: str) -> str:
         return ""
 
 
+@app.command(name="man", rich_help_panel="Maintenance")
+def man(
+    install: Annotated[bool, typer.Option("--install", "-i",
+              help="Write the man page to ~/.local/share/man/man1/ "
+                   "and print MANPATH setup hint if needed")] = False,
+    show:    Annotated[bool, typer.Option("--show", "-s",
+              help="Render the man page to stdout (pipe to `man -l -` "
+                   "to view, or to `groff -man -Tutf8` to format)")] = False,
+    output:  Annotated[str,  typer.Option("--output", "-o",
+              help="Write to a custom path instead of the default")] = "",
+):
+    """Generate the org-llm man page.
+
+    The man page is derived live from the registered Typer commands +
+    their docstrings — same source `--help` reads from — so it stays
+    in parity with the rest of the docs without a build step.
+
+    Default (no flags): prints the install path + opens the man page
+    via `man org-llm` if it's already installed, else writes-and-opens.
+
+    [bold]--install[/bold] writes to $XDG_DATA_HOME/man/man1/org-llm.1
+    (default ~/.local/share/man/man1/org-llm.1) and prints the right
+    shell rc snippet if MANPATH doesn't already cover that location.
+    """
+    from . import manpage as _mp
+    if show:
+        print(_mp.render_manpage())
+        return
+    if output:
+        target = Path(output).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_mp.render_manpage())
+        hail(f"Wrote man page: {target}")
+        on_screen(f"[dim]View:[/dim]  [bold]man -l {target}[/bold]")
+        return
+    if install:
+        target, on_path = _mp.install_manpage()
+        hail(f"Installed: {target}")
+        if on_path:
+            on_screen("[lcars3]MANPATH already covers this location.[/lcars3]")
+            on_screen(f"[dim]Try:[/dim] [bold]man org-llm[/bold]")
+        else:
+            on_screen("[yellow]MANPATH does NOT include the install dir.[/yellow]")
+            for line in _mp.manpath_setup_hint(target.parent.parent.parent).splitlines():
+                on_screen(f"  {line}")
+            on_screen(f"[dim]Or open the file directly:[/dim] "
+                      f"[bold]man -l {target}[/bold]")
+        return
+    # No flags — install (idempotent) + try to open via `man`
+    target, on_path = _mp.install_manpage()
+    on_screen(f"[dim]Man page at:[/dim] {target}")
+    if on_path and shutil.which("man"):
+        on_screen("[dim]Opening with `man org-llm`…[/dim]")
+        import subprocess
+        try:
+            subprocess.run(["man", "org-llm"])
+        except Exception as e:
+            on_screen(f"[dim]man failed: {e}; "
+                      f"try [bold]man -l {target}[/bold][/dim]")
+    else:
+        on_screen(f"[dim]Open it:[/dim] [bold]man -l {target}[/bold]")
+
+
 @app.command(name="log", rich_help_panel="Maintenance")
 def log_show(
     kind:    Annotated[str, typer.Option("--kind", "-k",
@@ -6031,9 +6115,10 @@ _TUTOR_STEPS = [
         "All steps:     [bold]org-llm tutor --all[/bold]\n"
         "Steps: welcome → init → index → embed → code-index → discover → search → ask\n"
         "       → capture → tag → code → config → skills → report → doctor →\n"
-        "       doctor-walkthrough → install-tools → db → dbt → opencode → source →\n"
-        "       performance → grants → knob → personalize → self → theme → env →\n"
-        "       review-emacs → creds → cloud → launch → emacs → claude → done",
+        "       doctor-walkthrough → proactive-doctor → install-tools → db → dbt →\n"
+        "       opencode → source → performance → grants → knob → personalize → self →\n"
+        "       theme → env → review-emacs → creds → cloud → launch → emacs → claude\n"
+        "       → captains-log → watch → literate-config → man → done",
     ),
     (
         "init",
@@ -6935,6 +7020,145 @@ _TUTOR_STEPS = [
         "[dim]Source: cli.py → claude_frontend()  |  config: .claude/settings.json[/dim]",
     ),
     (
+        "captains-log",
+        "[lcars2]Captain's Log[/lcars2] — every event, two surfaces, zero drift\n\n"
+        "Every notable thing the app does is mirrored to BOTH the SQLite\n"
+        "history table AND [bold]~/org/captains-log.org[/bold] so dbt + your\n"
+        "vault search both see it. Stardate optional.\n\n"
+        "[lcars1]What's logged:[/lcars1]\n"
+        "  cli      — every `org-llm <verb>` invocation + outcome\n"
+        "  llm      — every chat()/embed() round-trip with model + latency\n"
+        "  mcp      — every MCP tool call from opencode/claude\n"
+        "  config   — every set_config write (old → new diff)\n"
+        "  doctor   — proactive_doctor verdicts + log-reflect outputs\n"
+        "  embed    — auto-embed batches\n\n"
+        "[lcars1]Read it:[/lcars1]\n"
+        "  [bold]org-llm log[/bold]                       — recent entries (themed table)\n"
+        "  [bold]org-llm log --kind llm[/bold]            — filter by event kind\n"
+        "  [bold]org-llm log --grep PATTERN[/bold]        — substring search\n"
+        "  [bold]org-llm log --reflect[/bold]             — LLM patterns + suggestions + headline\n"
+        "  [bold]org-llm log --tangle[/bold]              — emacsclient instructions for tangling\n\n"
+        "[lcars1]Auto-reflect:[/lcars1]\n"
+        "  Every Nth successful invocation (default 50; 0 = off via\n"
+        "  [bold]config log_auto_reflect_every[/bold]) the LLM scans recent\n"
+        "  entries and prints a one-line HEADLINE in the footer — so\n"
+        "  patterns surface without you asking. Skip with --kind log/setup/init.\n\n"
+        "[lcars1]Knobs:[/lcars1]\n"
+        "  [bold]config log_level[/bold]            off | minimal | normal | verbose\n"
+        "  [bold]config log_kinds[/bold]            comma-sep filter on what to record\n"
+        "  [bold]config log_max_rows_per_kind[/bold] rotation cap (default 1000)\n\n"
+        "[lcars1]dbt analytics on top:[/lcars1]\n"
+        "  [bold]org-llm dbt build[/bold] populates stg_history → llm_calls,\n"
+        "  cli_invocations, recent_activity marts. Query your own usage.\n\n"
+        "[dim]Source: org_llm/logbook.py  |  Org file: ~/org/captains-log.org[/dim]",
+    ),
+    (
+        "watch",
+        "[lcars2]org-llm watch[/lcars2] — background auto-embedder\n\n"
+        "Daemon thread polls your vault every ~60s, runs incremental\n"
+        "[bold]index_directory[/bold] + [bold]embed_nodes[/bold] when files\n"
+        "change, and records every batch to Captain's Log. Manual\n"
+        "[bold]org-llm embed[/bold] continues to work unchanged — this just\n"
+        "means you don't have to remember to run it.\n\n"
+        "[lcars1]Opt in:[/lcars1]\n"
+        "  [bold]org-llm config auto_embed_enabled true[/bold]\n"
+        "  (or pick during [bold]org-llm setup[/bold] step 9.7)\n\n"
+        "[lcars1]Standalone watcher (foreground):[/lcars1]\n"
+        "  [bold]org-llm watch[/bold]                 — Ctrl-C to stop\n"
+        "  [bold]org-llm watch --interval 30[/bold]   — override poll cadence\n"
+        "  [bold]org-llm watch --no-quiet[/bold]      — print per-batch stats\n"
+        "  [bold]org-llm watch --daemon[/bold]        — systemd-run/tmux/nohup hints\n\n"
+        "[lcars1]Inside `org-llm launch`:[/lcars1]\n"
+        "  watcher_thread() spawns automatically when auto_embed_enabled,\n"
+        "  dies cleanly when opencode exits.\n\n"
+        "[lcars1]Status surfacing:[/lcars1]\n"
+        "  Every CLI command's footer prints the watcher's last batch\n"
+        "  summary if it reported in within 5 minutes — silent when idle.\n"
+        "  e.g. [dim]· auto-embed 12s ago: +3f +5n +5e[/dim]\n\n"
+        "[dim]Source: org_llm/auto_embedder.py  |  Status: ~/.local/share/org-llm/auto-embedder.json[/dim]",
+    ),
+    (
+        "literate-config",
+        "[lcars2]Literate config[/lcars2] — DB ↔ org-file round-trip\n\n"
+        "[bold]org-llm config --tangle[/bold] mirrors every user-tweakable\n"
+        "config key to [bold]~/org/org-llm-config.org[/bold] — same shape\n"
+        "as context.org / llm-history.org / captains-log.org. One heading\n"
+        "per key, PROPERTIES drawer with default + description, and a\n"
+        "[bold]#+begin_src text :tangle …[/bold] block whose contents IS\n"
+        "the value.\n\n"
+        "[lcars1]Round-trip:[/lcars1]\n"
+        "  [bold]org-llm config --tangle[/bold]                  — DB → org file\n"
+        "  [bold]org-llm config --apply-from-org[/bold]          — org file → DB (read your edits)\n"
+        "  [bold]org-llm config --diff-org[/bold]                — preview diffs (read-only)\n"
+        "  [bold]org-llm config --apply-from-org --dry-run[/bold] — what would change\n\n"
+        "[lcars1]Selective:[/lcars1]\n"
+        "  [bold]org-llm config --tangle --keys 'doctor_*'[/bold]   — only doctor knobs\n"
+        "  [bold]org-llm config --tangle --to ~/org/cfg.org[/bold]  — custom path\n"
+        "  [bold]org-llm config --tangle --no-knobs[/bold]          — skip Theme knobs section\n\n"
+        "[lcars1]Search:[/lcars1]\n"
+        "  [bold]org-llm config --search PATTERN[/bold]\n"
+        "    Fuzzy-matches against key names AND descriptions —\n"
+        "    [bold]--search embeddings[/bold] finds embed_model;\n"
+        "    [bold]--search doctor[/bold] surfaces all four doctor_* knobs.\n\n"
+        "[lcars1]Theme knobs round-trip too:[/lcars1]\n"
+        "  Each user-defined knob renders a [bold]** Knob: NAME[/bold] heading\n"
+        "  with [bold]*** msg N [style][/bold] subheadings carrying messages.\n"
+        "  Edit the message bodies in org, [bold]--apply-from-org[/bold] to push back.\n\n"
+        "[lcars1]Auto-sync:[/lcars1]\n"
+        "  [bold]config config_org_autosync true[/bold]\n"
+        "  Re-tangles the org file after every set_config write.\n"
+        "  Off by default — opt in once you actually use the file.\n\n"
+        "[dim]Source: org_llm/literate_config.py  |  Excludes: cloud_usage, db_version[/dim]",
+    ),
+    (
+        "proactive-doctor",
+        "[lcars2]Proactive doctor[/lcars2] — fix slowness before you complain\n\n"
+        "Two layers:\n"
+        "  1. [bold]org-llm doctor --power-boost[/bold]\n"
+        "     Probes available RAM vs. chat_model size. Returns one of:\n"
+        "       ok        current model fits, no action\n"
+        "       upsize    bigger model also fits — quality at no speed cost\n"
+        "       downsize  current too big — swap to a fitting one\n"
+        "       cloud     nothing local fits, route via configured provider\n"
+        "       manual    no fitting local + no cloud — pull a smaller model\n"
+        "     [bold]--apply[/bold] writes the suggested chat_model to config.\n\n"
+        "  2. [bold]proactive_doctor[/bold] MCP tool (auto-called from opencode)\n"
+        "     The in-opencode LLM is instructed (per system prompt) to\n"
+        "     call this after 3+ non-converging tool calls, hard errors,\n"
+        "     or noticed slowness. It runs --power-boost + a `doctor`\n"
+        "     snapshot together.\n\n"
+        "[lcars1]Configurable aggressiveness:[/lcars1]\n"
+        "  [bold]config doctor_proactive_mode[/bold]   off | passive | active | aggressive\n"
+        "  [bold]config doctor_stuck_threshold[/bold]  N tool calls before LLM self-doctors\n"
+        "  [bold]config doctor_intervene_in[/bold]     comma-sep triggers (search-empty,\n"
+        "                                tool-error, long-response, optimization, …)\n"
+        "  [bold]config doctor_auto_apply[/bold]       true = apply suggestions immediately\n\n"
+        "[lcars1]At launch:[/lcars1]\n"
+        "  [bold]org-llm launch[/bold] runs --power-boost at startup; if there's an\n"
+        "  upsize/cloud opportunity, the system prompt's OPPORTUNITIES\n"
+        "  block tells the LLM to mention it in the first reply.\n\n"
+        "[dim]Source: cli.py → _power_boost_chat_model()  |  mcp_server.py → proactive_doctor[/dim]",
+    ),
+    (
+        "man",
+        "[lcars2]org-llm man[/lcars2] — derived live from the Typer registry\n\n"
+        "The man page isn't a build artifact. [bold]org-llm man --install[/bold]\n"
+        "walks the registered commands + their docstrings (same source\n"
+        "[bold]--help[/bold] reads from) and writes\n"
+        "[bold]~/.local/share/man/man1/org-llm.1[/bold] in roff format. New CLI\n"
+        "verb? Re-run the install — no separate doc step.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm man[/bold]              install (idempotent) + open via `man`\n"
+        "  [bold]org-llm man --install[/bold]    write + print MANPATH hint if needed\n"
+        "  [bold]org-llm man --show[/bold]       render to stdout (pipe to `groff -man`)\n"
+        "  [bold]org-llm man --output PATH[/bold] write to a custom location\n\n"
+        "[lcars1]MANPATH:[/lcars1]\n"
+        "  ~/.local/share/man is on most distros' default manpath. When\n"
+        "  it isn't, --install prints the right rc snippet for your\n"
+        "  $SHELL (bash / zsh / fish).\n\n"
+        "[dim]Source: org_llm/manpage.py  |  Output: man 1 org-llm[/dim]",
+    ),
+    (
         "done",
         "[bold lcars1]You're ready to explore your second brain.[/bold lcars1]\n\n"
         "[lcars1]Recommended first flight:[/lcars1]\n\n"
@@ -6953,7 +7177,11 @@ _TUTOR_STEPS = [
         "  [bold]org-llm skill-new my_skill[/bold]  — create your first skill\n"
         "  [bold]org-llm tag[/bold]                 — auto-tag untagged nodes\n"
         "  [bold]org-llm source mcp_server[/bold]   — see all MCP tools\n"
-        "  [bold]org-llm tutor --all[/bold]          — read the whole manual\n\n"
+        "  [bold]org-llm tutor --all[/bold]          — read the whole manual\n"
+        "  [bold]org-llm man --install[/bold]        — install the man page (man org-llm)\n"
+        "  [bold]org-llm log --reflect[/bold]        — Captain's Log: LLM patterns + suggestions\n"
+        "  [bold]org-llm config --tangle[/bold]      — literate config to ~/org/org-llm-config.org\n"
+        "  [bold]org-llm watch[/bold]                — start the background auto-embedder\n\n"
         "Engage. ☭ ✊ 🏳️‍🌈 — Queer, collective, free.",
     ),
 ]

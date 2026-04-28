@@ -21,12 +21,14 @@ falls back to multi-provider GPU clouds when your laptop runs out of VRAM.
 |---|---|
 | 🔍 **Semantic search** over your full org-roam graph (`sqlite-vec`, no vector DB) | 💬 **RAG Q&A** grounded in your own notes (`org-llm ask "…"`) |
 | 🧠 **Hardware-aware FOSS model catalog** — auto-pick the best fit for your VRAM | ☁️ **7+ cloud providers** when you outgrow local — RunPod, Vast, Lambda, Salad, OpenRouter, Groq, HF |
-| 🛡️ **Encrypted credentials** via the standard Unix `pass` manager — never in plaintext | 🤖 **MCP server** — every capability exposed as a tool to opencode and Claude Code |
-| 📓 **Org-babel skills** — define LLM workflows as `:skill:`-tagged source blocks | 🔬 **`doctor`** — deep health check + LLM-powered diagnosis of failures |
-| 🚀 **`launch` / `claude`** — one-shot interactive workspaces with full vault context | 🎨 **FOSS tool installer** — `bat`, `eza`, `delta`, `zellij`, … with LCARS/Doom themes |
-| 📊 **dbt analytics** wrapped end-to-end (`org-llm dbt build/status/doctor`) — `stg_nodes`, `nodes_by_tag`, `recent_nodes`, `orphan_nodes` views, plus an MCP/slash surface so the in-opencode LLM can run them too | ⚡ **Fish/bash/zsh completions** + shortest-prefix command matching (`do` → `doctor`) |
-| 🪄 **`personalize`** — LLM reads your real content and proposes evocative theme knobs (`brainwave`, `workbench`, `laboratory`, …) | 🛟 **Layered auto-recovery** — every error tries fuzzy-match → LLM intent repair → SRE fix before bailing |
-| 🤖 **LLM copywriting throughout** — Try-it lines, models nudge, doctor closing, tutor recommendation all generated from real state | 🌐 **Cloud→local fallback** — rate-limit / auth fail / `--cloud` without setup all auto-degrade with a yellow warning |
+| 🛡️ **Encrypted credentials** via the standard Unix `pass` manager — never in plaintext | 🤖 **MCP server** with 38+ tools — every capability exposed to opencode + Claude Code, with themed LCARS-styled output |
+| 📓 **Org-babel skills** — define LLM workflows as `:skill:`-tagged source blocks | 🔬 **Proactive `doctor`** — power-boost probe at launch surfaces upgrades; LLM rescue on every uncaught exception with opt-in self-rewrite + auto-rollback |
+| 🚀 **`launch` / `claude`** — themed workspaces with 51+ slash commands, persona-binding from active dials, stall watcher, optional auto-embedder | 🎨 **FOSS tool installer** — `bat`, `eza`, `delta`, `zellij`, … with LCARS/Doom themes |
+| 📊 **dbt analytics + LLM lessons** — `org-llm dbt build/status/doctor/design/walkthrough/lessons`, mart layer over both notes AND the Captain's Log | ⚡ **Fish/bash/zsh completions** + shortest-prefix command matching (`do` → `doctor`) |
+| 🪄 **`personalize` + `knob add --llm`** — auto-create theme knobs from your vault, OR build one from a free-form vibe + specifics (font/icon/color/wording) | 🛟 **Layered auto-recovery** — every error tries fuzzy-match → LLM intent repair → SRE fix → optional self-rewrite-with-rollback |
+| 🤖 **LLM copywriting throughout** — Try-it lines, models nudge, doctor closing, tutor recommendation all generated from real state | 🌐 **Cloud↔local routing** — `launch --cloud/--local`, auto-detect when configured, redacted secrets in `--dry-run` |
+| 📓 **Captain's Log** — every CLI invocation, LLM call, MCP tool call, config change mirrored to BOTH SQLite history AND `~/org/captains-log.org` for vault-level analytics; `--reflect` for LLM pattern-spotting | 🗂 **Literate config** — `org-llm config --tangle` writes a round-trippable `~/org/org-llm-config.org` (selective via `--keys`); `--apply-from-org` pushes edits back |
+| 🔄 **Background auto-embedder** — opt-in daemon thread keeps the index + embeddings fresh without manual `embed` runs; surfaces stats in CLI footers | 📖 **Live man page** — `org-llm man --install` derives a `man 1 org-llm` page from the Typer registry; stays in sync without a build step |
 
 ---
 
@@ -172,7 +174,7 @@ candidates.
 | `org-llm models` | Discover, tune (catalog-based), assign, or pull FOSS LLMs |
 | `org-llm performance` | Hardware-aware tuner — uses *free* RAM + measured tok/s (`--benchmark`) |
 | `org-llm cloud` | Multi-provider GPU cloud — signup, configure, status, cost, `--quick-start` |
-| `org-llm launch [-w WORKSPACE] [--cloud/--local]` | Open themed opencode TUI: 32 MCP tools, LCARS theme, 31 slash-commands, auto cloud-or-local routing, stall watcher |
+| `org-llm launch [-w WORKSPACE] [--cloud/--local]` | Open themed opencode TUI: 38+ MCP tools, LCARS theme, 51+ slash commands, auto cloud-or-local routing, stall watcher, optional auto-embedder daemon |
 | `org-llm claude` | Same, but Claude Code (`ANTHROPIC_API_KEY` from `pass`) |
 | `org-llm doctor` | Deep health check + LLM diagnosis; `--install all` bulk-installs FOSS tools |
 | `org-llm doctor -w` | LLM-driven self-test: 13 read-only probes + cloud-LLM judgement |
@@ -338,7 +340,7 @@ What gets written into your vault:
 - `.opencode.json` — model, provider, MCP server, instructions, theme reference.
 - `.opencode/themes/org-llm-lcars.json` — LCARS palette (orange /
   purple / blue) matching the CLI, both light and dark variants.
-- `.opencode/command/<name>.md` — **31 slash-commands** that mirror
+- `.opencode/command/<name>.md` — **51+ slash-commands** that mirror
   the CLI surface, grouped by intent:
   - *Querying* — `/search`, `/ask`, `/capture`, `/context`, `/stale`
   - *Code* — `/code` (search), `/code-gen`, `/code-index`
@@ -1048,7 +1050,7 @@ Then write a `.tape` script under `docs/tape/` and run `vhs <script>.tape`.
 git clone git@github.com:daniel2501/org-llm.git
 cd org-llm
 uv sync                 # install deps + dev tools
-uv run pytest -q        # run the test suite (510+ tests)
+uv run pytest -q        # run the test suite (625+ tests)
 uv run python tools/gallery.py   # regenerate README screenshots
 ```
 
@@ -1080,11 +1082,147 @@ org_llm/
   search.py       # signal-boosted vector + keyword search
   skills.py       # :skill: org-babel block extractor + runner
   ui.py           # console, themes, banners, themed spinners
-tests/            # 540+ tests across 18 test files
+tests/            # 625+ tests across 19 test files
 org_llm/dbt_templates/  # bundled dbt starter project (copied to user-space on `dbt init`)
 doom/             # Doom Emacs integration (org-llm.el)
 tools/            # gallery.py screenshot generator
 ```
+
+---
+
+## Captain's Log
+
+Every notable event — CLI invocation, LLM round-trip, MCP tool call,
+config change, doctor verdict — is mirrored to **two surfaces** that
+stay in lockstep:
+
+- the SQLite `history` table (queryable, joinable, dbt-friendly)
+- `~/org/captains-log.org` — themed, with a `:tangle` block per
+  high-volume kind so plaintext mirrors land at
+  `~/.local/share/org-llm/log/<kind>.log` after `org-babel-tangle`.
+
+```sh
+org-llm log                       # recent entries (themed table)
+org-llm log --kind llm            # filter to LLM round-trips
+org-llm log --grep PATTERN        # substring search
+org-llm log --reflect             # LLM reflects: PATTERNS / SUGGESTIONS / HEADLINE
+org-llm log --tangle              # emacsclient instructions for tangling
+```
+
+Auto-reflect every Nth invocation (default 50, 0 to disable) prints a
+one-line headline at the end of routine commands so patterns surface
+without your asking.
+
+dbt models on top of the log: `stg_history` view, `llm_calls`,
+`cli_invocations`, `recent_activity` marts. `org-llm dbt build` after
+heavy use to query your own usage like data.
+
+---
+
+## Background auto-embedder
+
+Opt-in daemon thread that polls your vault every ~60s, runs
+incremental `index_directory` + `embed_nodes` when files change, and
+records every batch to Captain's Log. Manual `org-llm embed` keeps
+working unchanged — this just means you don't have to remember.
+
+```sh
+org-llm config auto_embed_enabled true   # opt in (or pick during setup)
+org-llm watch                            # foreground watcher
+org-llm watch --daemon                   # systemd / tmux / nohup hints
+```
+
+When the watcher has reported in within 5 minutes, every other CLI
+command's footer briefly shows its status (e.g.
+`· auto-embed 12s ago: +3f +5n +5e`). Silent when idle.
+
+---
+
+## Literate config — DB ↔ org-file round-trip
+
+`org-llm config --tangle` writes `~/org/org-llm-config.org` shaped
+like context.org / llm-history.org / captains-log.org: one heading
+per key with a PROPERTIES drawer + a `#+begin_src text :tangle …`
+block whose content IS the value. Edit message bodies in place,
+`--apply-from-org` to push back.
+
+```sh
+org-llm config --tangle                          # write the org file
+org-llm config --apply-from-org                  # apply edits back to DB
+org-llm config --diff-org                        # preview pending changes
+org-llm config --search PATTERN                  # fuzzy-find key + description
+org-llm config --tangle --keys 'doctor_*' \      # selective: just doctor knobs
+              --to ~/org/doctor-config.org
+```
+
+Theme knobs round-trip too — every user-defined knob renders a
+`** Knob: NAME` heading with `*** msg N [style]` subheadings so you
+can edit message bodies in org. `org-llm knob add NAME --llm
+--vibe '...' --specifics font=X color=Y` LLM-generates a themed
+message bundle from a free-form vibe + a small specifics dict.
+
+Auto-sync (`config_org_autosync=true`) re-tangles after every CLI /
+MCP set so the file stays fresh; off by default.
+
+---
+
+## LLM rescue + self-rewrite
+
+When any uncaught exception bubbles out of a command body, `main()`
+catches it, hands the type/message/traceback-tail to the configured
+chat model, and renders a strict-format diagnosis:
+
+```
+WHY: <root cause in one sentence>
+FIX: <one shell command, or 'manual:' step>
+WHY-IT-WORKS: <one-sentence justification>
+```
+
+If the offending frame is in org-llm itself, you're offered an
+opt-in self-rewrite: snapshot first (the same `self_mod` machinery
+that powers `org-llm self snapshot/rollback`), LLM proposes a JSON
+patch, you review the summary, apply, then auto-test by re-running
+the failing command. If it still fails, **automatic rollback** —
+you're always returned to a known-good state.
+
+For slow / stuck sessions, `org-llm doctor --power-boost` probes
+chat_model fit vs available RAM and proposes a downsize/upsize/cloud
+switch. The in-opencode LLM has the same probe via `proactive_doctor`
+and is instructed (per the system prompt) to call it after 3+
+non-converging tool calls.
+
+---
+
+## Models dashboard
+
+`org-llm models` (no flags) is a single-screen view: every role
+with current model, fits-in-RAM, pulled status, and an automatic
+**Suggestions** panel running the same `recommendations()` as
+`--tune`. Tweak in one shot:
+
+```sh
+org-llm models --set chat=gemma3       # one-shot assignment
+org-llm models --pull <tag>            # pull via Ollama
+org-llm models --tune --apply          # apply ALL suggestions
+```
+
+---
+
+## Man page
+
+`org-llm man --install` writes `~/.local/share/man/man1/org-llm.1`
+derived live from the Typer registry — same source `--help` reads
+from, so the man page stays in parity without a build step.
+
+```sh
+org-llm man --install     # write + print MANPATH hint if needed
+org-llm man               # install (idempotent) + open in `man`
+org-llm man --show        # render to stdout
+org-llm man --output PATH # write to a custom location
+```
+
+When the install dir isn't on `manpath`, the install hint includes
+the right shell rc snippet for your `$SHELL` (bash / zsh / fish).
 
 ---
 

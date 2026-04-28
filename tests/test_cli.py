@@ -708,6 +708,81 @@ class TestProactiveDoctor:
         assert "proactive_doctor" in server._tool_manager._tools
 
 
+class TestManPage:
+    """`org-llm man` derives a man page from the Typer registry. Stays
+    in parity with --help / docstrings without a build step."""
+
+    def test_render_returns_roff(self):
+        from org_llm.manpage import render_manpage
+        text = render_manpage()
+        assert text.startswith(".TH ORG-LLM 1 ")
+        # Required sections present
+        for sec in (".SH NAME", ".SH SYNOPSIS", ".SH DESCRIPTION",
+                     ".SH COMMANDS", ".SH FILES", ".SH ENVIRONMENT"):
+            assert sec in text, f"missing section: {sec}"
+        # A handful of canonical verbs should appear
+        for verb in ("init", "index", "embed", "ask", "doctor",
+                     "log", "dbt", "watch", "config"):
+            assert f".SS {verb}" in text, f"missing command section: {verb}"
+
+    def test_render_strips_rich_markup(self):
+        """man pages must not contain [bold] / [lcars2] tokens — those
+        are Rich tags that mean nothing to roff and confuse readers."""
+        from org_llm.manpage import render_manpage
+        text = render_manpage()
+        assert "[bold]" not in text
+        assert "[/bold]" not in text
+        assert "[lcars" not in text
+
+    def test_install_writes_to_user_man_dir(self, tmp_path, monkeypatch):
+        from org_llm import manpage as _mp
+        # Override XDG_DATA_HOME so we don't pollute the real one
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+        target, _on_path = _mp.install_manpage()
+        assert target.exists()
+        assert target.parent.name == "man1"
+        text = target.read_text()
+        assert ".TH ORG-LLM 1 " in text
+
+    def test_install_to_explicit_dir(self, tmp_path):
+        from org_llm.manpage import install_manpage
+        target, _ = install_manpage(dir_override=tmp_path / "custom")
+        assert target.parent == tmp_path / "custom"
+        assert target.name == "org-llm.1"
+
+    def test_cli_show_prints_roff(self, cli_db):
+        r = runner.invoke(app, ["man", "--show"])
+        assert r.exit_code == 0
+        assert ".TH ORG-LLM 1 " in r.output
+
+    def test_cli_install_via_output(self, cli_db, tmp_path):
+        target = tmp_path / "out.1"
+        r = runner.invoke(app, ["man", "--output", str(target)])
+        assert r.exit_code == 0
+        assert target.exists()
+        assert ".TH ORG-LLM 1 " in target.read_text()
+
+    def test_manpath_hint_picks_shell(self, monkeypatch, tmp_path):
+        from org_llm.manpage import manpath_setup_hint
+        monkeypatch.setenv("SHELL", "/bin/zsh")
+        out = manpath_setup_hint(tmp_path)
+        assert "zshrc" in out
+        monkeypatch.setenv("SHELL", "/usr/bin/fish")
+        out = manpath_setup_hint(tmp_path)
+        assert "fish" in out and "set -gx" in out
+
+    def test_man_page_includes_every_registered_verb(self):
+        """Parity: every Typer command must show up as a .SS section.
+        Catches silent drift between CLI surface and the man page."""
+        import typer
+        from org_llm.cli import app
+        from org_llm.manpage import render_manpage
+        text = render_manpage()
+        registered = set(typer.main.get_command(app).commands.keys())
+        missing = [v for v in registered if f".SS {v}" not in text]
+        assert not missing, f"verbs missing from man page: {missing}"
+
+
 class TestKnobLLM:
     """`org-llm knob add --llm` calls the LLM to generate themed messages
     from a free-form vibe + specifics dict."""
