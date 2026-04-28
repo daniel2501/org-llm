@@ -1325,6 +1325,84 @@ def create_mcp_server():
         except Exception as e:
             return f"reflect_on_log failed: {e}"
 
+    # ── Config search ─────────────────────────────────────────────────────────
+    @server.tool()
+    async def search_config(query: str,
+                              ctx: Context | None = None) -> str:
+        """Fuzzy-search config keys by name AND description.
+
+        Use when the user asks "what's that config key for X" / "how do
+        I tune Y" / "is there a setting for Z" — the search hits both
+        the key names and the human-readable descriptions in
+        literate_config.KEY_DESCRIPTIONS, then surfaces the current
+        value alongside the description so the user knows what to set.
+        """
+        await _info(ctx, f"search_config: {query!r}")
+        from .literate_config import KEY_DESCRIPTIONS
+        from .db import Config, MODEL_DEFAULTS
+        with get_session(engine) as session:
+            db_rows = {r.key: r.value or "" for r in session.query(Config).all()}
+        ql = query.lower()
+        hits: list[str] = []
+        all_keys = sorted(set(db_rows) | set(MODEL_DEFAULTS) | set(KEY_DESCRIPTIONS))
+        for k in all_keys:
+            desc = KEY_DESCRIPTIONS.get(k, "")
+            if ql in k.lower() or ql in desc.lower():
+                cur = db_rows.get(k, MODEL_DEFAULTS.get(k, ""))
+                hits.append(f"  {k} = {cur!r}\n    {desc}")
+        if not hits:
+            return _themed("search_config", f"no matches for {query!r}",
+                            "Try a broader pattern or just `get_config` to "
+                            "see all keys.")
+        return _themed("search_config",
+                        f"{len(hits)} match(es) for {query!r}",
+                        "\n".join(hits))
+
+    # ── Theme knob: LLM-built ─────────────────────────────────────────────────
+    @server.tool()
+    async def add_theme_knob(name: str, vibe: str = "",
+                              specifics: dict[str, str] | None = None,
+                              n_messages: int = 8,
+                              ctx: Context | None = None) -> str:
+        """Register a new LLM-built theme knob in the user's config.
+
+        Knobs control `make_it_so` completion vocabulary — a "synthwave"
+        knob, when ORG_LLM_SYNTHWAVE_LEVEL >= 1, mixes synthwave-flavored
+        completion phrases into every successful command's tail message.
+
+        Use this when the user says "give me a knob about X" or
+        "make my workspace feel more like Y". The LLM generates ~8
+        themed messages; the user can later edit them via the literate
+        config file or `org-llm knob remove/add`.
+
+        `vibe` is a free-form description ("1980s neon, late-night
+        coding"). `specifics` is a small dict of detail directives the
+        user wants in EVERY message — font, icon, color, wording quirk,
+        sound, image. Empty dict = LLM picks freely from the vibe.
+        """
+        await _info(ctx, f"add_theme_knob: {name} (vibe={vibe[:40]!r})")
+        import shlex, subprocess
+        argv = ["org-llm", "knob", "add", name, "--llm",
+                 "--count", str(max(3, min(20, n_messages)))]
+        if vibe:
+            argv += ["--vibe", vibe]
+        for k, v in (specifics or {}).items():
+            argv += ["--specifics", f"{k}={v}"]
+        try:
+            proc = subprocess.run(argv, capture_output=True, text=True,
+                                    timeout=180)
+        except FileNotFoundError:
+            return "org-llm binary not on PATH inside the MCP server env."
+        except subprocess.TimeoutExpired:
+            return "knob generation timed out after 180s."
+        out = (proc.stdout or "")
+        if proc.stderr:
+            out += "\n[stderr]\n" + proc.stderr
+        if len(out) > 8000:
+            out = out[:8000] + "\n…(truncated)"
+        return _themed("add_theme_knob",
+                        f"{name} (exit {proc.returncode})", out)
+
     # ── Live context refresh ──────────────────────────────────────────────────
     @server.tool()
     def refresh_context() -> str:

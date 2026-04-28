@@ -489,6 +489,96 @@ def generate_messages(proposal: ThemeProposal, model: str = "",
     return _template_messages(proposal.name, proposal.sample_titles)
 
 
+def messages_from_vibe(
+    name: str,
+    *,
+    vibe: str = "",
+    specifics: dict[str, str] | None = None,
+    model: str,
+    base_url: str,
+    n: int = 8,
+    seed_messages: list[list[str]] | None = None,
+) -> list[list[str]] | None:
+    """LLM-generate themed messages for a user-specified knob.
+
+    Free-form `vibe` describes the world (e.g. "1980s neon, late-night
+    coding"). `specifics` is a small dict of detail directives the user
+    wants reflected in EVERY message — font name, icon, wording quirk,
+    color, sound, image. Optional `seed_messages` give the LLM concrete
+    style anchors before it writes more.
+
+    Returns the full message list (seed + new) on success, None on
+    failure so the caller can fall back to manual flags or templates.
+    """
+    try:
+        from .llm import chat
+    except Exception:
+        return None
+    spec_lines = []
+    for k, v in (specifics or {}).items():
+        spec_lines.append(f"  - {k}: {v}")
+    spec_block = ("\n".join(spec_lines) or "  (none)")
+    seed_block = ""
+    if seed_messages:
+        seed_block = "User-provided seed messages (preserve style):\n"
+        for m in seed_messages:
+            text = m[0] if isinstance(m, list) and m else str(m)
+            seed_block += f"  - {text}\n"
+    user_msg = (
+        f"Theme name: {name}\n"
+        f"Vibe: {vibe or '(unstated — infer from the name)'}\n\n"
+        f"Specifics the user wants reflected:\n{spec_block}\n\n"
+        f"{seed_block}"
+        f"Generate exactly {n} new messages in the style above."
+    )
+    # Same SYSTEM prompt as _llm_messages but tweaked to honour the
+    # specifics dict — each line should reference at least one of the
+    # specifics when sensible, without sounding forced.
+    sys_msg = (
+        _MESSAGE_SYSTEM
+        + "\n\nWHEN THE USER SUPPLIES SPECIFICS:\n"
+          "- Honor every concrete detail the user named (a font name, "
+          "a particular icon, a phrase, a color, a sound). Each detail "
+          "should appear in AT LEAST ONE message; spread them across "
+          "the bundle.\n"
+          "- If the user named seed messages above, match their voice "
+          "and don't duplicate them.\n"
+    )
+    try:
+        from .ui import thinking
+        with thinking(f"Writing {name}", model=model):
+            resp = chat(user_msg, model=model, base_url=base_url,
+                         system=sys_msg, timeout=120.0)
+    except Exception:
+        try:
+            resp = chat(user_msg, model=model, base_url=base_url,
+                         system=sys_msg, timeout=120.0)
+        except Exception:
+            return None
+    if not resp:
+        return None
+    lines: list[str] = []
+    for raw in resp.splitlines():
+        l = raw.strip(" -–—•\"'").strip()
+        if not l:
+            continue
+        if not (l.startswith("◀") or l.startswith("▶")):
+            l = ("◀ " if len(lines) % 2 == 0 else "▶ ") + l
+        if 8 <= len(l) <= 140:
+            lines.append(l)
+        if len(lines) >= n:
+            break
+    if len(lines) < 3:
+        return None
+    msgs: list[list[str]] = []
+    if seed_messages:
+        msgs.extend([list(m) for m in seed_messages
+                       if isinstance(m, list) and len(m) >= 1])
+    for i, l in enumerate(lines[:n]):
+        msgs.append([l, _STYLE_CYCLE[(len(msgs) + i) % len(_STYLE_CYCLE)]])
+    return msgs
+
+
 # ── Apply: write to the user_theme_knobs config row ───────────────────────
 
 def proposals_to_knobs(proposals: list[ThemeProposal], model: str = "",

@@ -708,6 +708,85 @@ class TestProactiveDoctor:
         assert "proactive_doctor" in server._tool_manager._tools
 
 
+class TestKnobLLM:
+    """`org-llm knob add --llm` calls the LLM to generate themed messages
+    from a free-form vibe + specifics dict."""
+
+    def test_specifics_must_be_key_value(self, cli_db, monkeypatch):
+        # Stub LLM so we never make a network call
+        monkeypatch.setattr("org_llm.personalize.messages_from_vibe",
+                              lambda *a, **k: [["◀ ok", "lcars1"]])
+        r = runner.invoke(app, ["knob", "add", "synthwave",
+                                  "--llm", "-S", "no-equals-here"])
+        assert r.exit_code == 1
+        assert "key=value" in r.output
+
+    def test_llm_path_persists_generated_messages(self, cli_db, monkeypatch):
+        captured = {}
+        def fake_mfv(name, *, vibe="", specifics=None, model="",
+                       base_url="", n=8, seed_messages=None):
+            captured["name"] = name
+            captured["vibe"] = vibe
+            captured["specifics"] = specifics
+            captured["seed"] = seed_messages
+            return [["◀ Carrier wave locked.", "lcars1"],
+                    ["▶ Synthesis done.", "lcars2"]]
+        monkeypatch.setattr("org_llm.personalize.messages_from_vibe", fake_mfv)
+        r = runner.invoke(app, [
+            "knob", "add", "synthwave",
+            "--llm", "-V", "1980s neon",
+            "-S", "font=Berkeley Mono", "-S", "color=magenta",
+            "--count", "4",
+        ])
+        assert r.exit_code == 0, r.output
+        assert captured["name"] == "synthwave"
+        assert captured["vibe"] == "1980s neon"
+        assert captured["specifics"] == {"font": "Berkeley Mono",
+                                           "color": "magenta"}
+        # Knob landed in user_theme_knobs
+        from org_llm.literate_config import _read_user_knobs
+        knobs = _read_user_knobs()
+        synth = next((k for k in knobs if k["name"] == "synthwave"), None)
+        assert synth is not None
+        assert "Carrier wave" in synth["messages"][0][0]
+
+    def test_llm_seed_messages_survive(self, cli_db, monkeypatch):
+        captured = {}
+        def fake_mfv(name, *, vibe="", specifics=None, model="",
+                       base_url="", n=8, seed_messages=None):
+            captured["seed"] = seed_messages
+            # Pretend the LLM returned seed + extra
+            return (seed_messages or []) + [["▶ Generated.", "lcars1"]]
+        monkeypatch.setattr("org_llm.personalize.messages_from_vibe", fake_mfv)
+        r = runner.invoke(app, [
+            "knob", "add", "homelab",
+            "--llm",
+            "-m", "◀ Rack rebooted.|info",
+        ])
+        assert r.exit_code == 0
+        # Seed was passed through
+        assert captured["seed"] is not None
+        assert any("Rack rebooted" in (m[0] if isinstance(m, list) else "")
+                    for m in captured["seed"])
+
+    def test_llm_failure_falls_back_to_seed(self, cli_db, monkeypatch):
+        monkeypatch.setattr("org_llm.personalize.messages_from_vibe",
+                              lambda *a, **k: None)
+        r = runner.invoke(app, [
+            "knob", "add", "fallback",
+            "--llm", "-V", "x",
+            "-m", "◀ Manual fallback.|info",
+        ])
+        assert r.exit_code == 0
+        assert "failed" in r.output.lower() or "fallback" in r.output.lower()
+        from org_llm.literate_config import _read_user_knobs
+        knobs = _read_user_knobs()
+        fb = next((k for k in knobs if k["name"] == "fallback"), None)
+        assert fb is not None
+        assert any("Manual fallback" in (m[0] if isinstance(m, list) else "")
+                    for m in fb["messages"])
+
+
 class TestLiterateConfig:
     """~/org/org-llm-config.org — DB ↔ org-file round-trip mirror."""
 
@@ -822,6 +901,67 @@ class TestLiterateConfig:
         assert r.exit_code == 0
         assert (tmp_path / "cfg.org").exists()
 
+    def test_selective_tangle_with_keys_filter(self, cli_db, monkeypatch, tmp_path):
+        from org_llm import literate_config as _lc
+        target = tmp_path / "doctor-only.org"
+        _lc.tangle_db_to_org(keys=["doctor_*"], to_path=target,
+                              include_knobs=False)
+        text = target.read_text()
+        assert "* doctor_proactive_mode" in text
+        assert "* doctor_auto_apply" in text
+        # Non-doctor keys must be filtered OUT
+        assert "* chat_model" not in text
+        assert "* log_level"  not in text
+
+    def test_selective_tangle_with_explicit_keys(self, cli_db, tmp_path):
+        from org_llm import literate_config as _lc
+        target = tmp_path / "two-keys.org"
+        _lc.tangle_db_to_org(keys=["chat_model", "ollama_url"],
+                              to_path=target, include_knobs=False)
+        text = target.read_text()
+        assert "* chat_model" in text
+        assert "* ollama_url" in text
+        assert "* embed_model" not in text   # not requested
+
+    def test_no_knobs_omits_section(self, cli_db, monkeypatch, tmp_path):
+        from org_llm import literate_config as _lc
+        # Seed a knob to make sure it WOULD render
+        _lc._write_user_knobs([{
+            "name": "synthwave", "default_level": 2,
+            "messages": [["◀ Carrier locked.", "lcars1"]],
+        }])
+        target = tmp_path / "no-knobs.org"
+        _lc.tangle_db_to_org(to_path=target, include_knobs=False)
+        text = target.read_text()
+        assert "Theme knobs" not in text
+        assert "synthwave" not in text
+
+    def test_knobs_round_trip_through_literate_file(self, cli_db, monkeypatch, tmp_path):
+        from org_llm import literate_config as _lc
+        # Seed a synthetic knob via the literate writer
+        _lc._write_user_knobs([{
+            "name": "synthwave", "default_level": 2,
+            "messages": [["◀ Carrier locked.", "lcars1"],
+                          ["▶ Done — synth swells.", "lcars2"]],
+        }])
+        monkeypatch.setenv("ORG_LLM_LITERATE_CONFIG_PATH",
+                            str(tmp_path / "cfg.org"))
+        _lc.tangle_db_to_org()
+        path = tmp_path / "cfg.org"
+        text = path.read_text()
+        assert "** Knob: synthwave" in text
+        # Hand-edit one of the message bodies
+        text = text.replace("Carrier locked.", "Carrier locked tight.")
+        path.write_text(text)
+        n, changes = _lc.apply_org_to_db()
+        assert n >= 1
+        assert any(k == "user_theme_knobs" for k, _, _ in changes)
+        knobs = _lc._read_user_knobs()
+        synth = next((k for k in knobs if k["name"] == "synthwave"), None)
+        assert synth is not None
+        assert any("Carrier locked tight" in (m[0] if isinstance(m, list) else "")
+                    for m in synth["messages"])
+
     def test_config_diff_org_cli_flag(self, cli_db, monkeypatch, tmp_path):
         from org_llm import literate_config as _lc
         monkeypatch.setenv("ORG_LLM_LITERATE_CONFIG_PATH",
@@ -832,6 +972,28 @@ class TestLiterateConfig:
         r = runner.invoke(app, ["config", "--diff-org"])
         assert r.exit_code == 0
         assert "in sync" in r.output.lower() or "diff" in r.output.lower()
+
+    def test_config_search_finds_by_key(self, cli_db):
+        r = runner.invoke(app, ["config", "--search", "doctor"])
+        assert r.exit_code == 0
+        assert "doctor_proactive_mode" in r.output
+        assert "doctor_auto_apply" in r.output
+
+    def test_config_search_finds_by_description(self, cli_db):
+        # "embeddings" is in the embed_model description but not the key
+        r = runner.invoke(app, ["config", "--search", "embeddings"])
+        assert r.exit_code == 0
+        assert "embed_model" in r.output
+
+    def test_config_search_no_hits(self, cli_db):
+        r = runner.invoke(app, ["config", "--search", "xxxnotaconfigxxx"])
+        assert r.exit_code == 0
+        assert "no config keys match" in r.output.lower() or \
+                "no" in r.output.lower()
+
+    def test_config_search_mutex_with_other_modes(self, cli_db):
+        r = runner.invoke(app, ["config", "--search", "x", "--tangle"])
+        assert r.exit_code == 1
 
 
 class TestAutoEmbedder:

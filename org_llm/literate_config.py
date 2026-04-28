@@ -42,9 +42,12 @@ _TANGLE_DIR    = Path("~/.local/share/org-llm/config").expanduser()
 
 
 # Keys that round-trip cleanly. JSON state + internal counters excluded.
+# user_theme_knobs IS round-trippable but lives in its own dedicated
+# section of the literate file with one heading per knob — see
+# `_render_knobs_section` / `_parse_knobs_from_org`.
 EXCLUDED_KEYS = {
     "cloud_usage",        # event log, not config
-    "user_theme_knobs",   # managed by `org-llm knob`
+    "user_theme_knobs",   # rendered separately as Theme Knobs heading tree
     "db_version",         # internal
 }
 
@@ -139,6 +142,142 @@ def _gather_entries() -> list[_ConfigEntry]:
     return entries
 
 
+def _read_user_knobs() -> list[dict]:
+    """Pull the user_theme_knobs JSON list from config, or [] on failure."""
+    try:
+        from .db import DB_PATH, Config, make_engine
+        from sqlalchemy.orm import Session
+        import json as _json
+        path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if not path.exists():
+            return []
+        engine = make_engine(path)
+        with Session(engine) as s:
+            row = s.get(Config, "user_theme_knobs")
+            if not row or not row.value:
+                return []
+            data = _json.loads(row.value)
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _write_user_knobs(knobs: list[dict]) -> bool:
+    """Persist the knob list back to the config table. Best-effort."""
+    try:
+        from .db import DB_PATH, Config, make_engine
+        from sqlalchemy.orm import Session
+        import json as _json
+        path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if not path.exists():
+            return False
+        engine = make_engine(path)
+        payload = _json.dumps(knobs)
+        with Session(engine) as s:
+            row = s.get(Config, "user_theme_knobs")
+            if row: row.value = payload
+            else:   s.add(Config(key="user_theme_knobs", value=payload))
+            s.commit()
+        return True
+    except Exception:
+        return False
+
+
+def _render_knobs_section(knobs: list[dict]) -> str:
+    """Render Knobs section: one * Knob: <name> heading per knob, with
+    an Index drawer (default level + meta) and one * subheading per
+    message. Each message body lives in a `:tangle` block so the user
+    can edit message text directly in org and apply back."""
+    if not knobs:
+        return (
+            "* Theme knobs\n"
+            "  (No user-defined knobs yet — built-in trek/commie/queer "
+            "dials are configured in the per-key sections above.)\n\n"
+            "  Add one with:\n"
+            "    [bold]org-llm knob add NAME --llm "
+            "--vibe 'description' "
+            "--specifics font=X --specifics color=Y[/bold]\n"
+            "  or in opencode: [bold]/knob-add NAME description[/bold]\n\n"
+        )
+    td = tangle_dir()
+    lines = ["* Theme knobs\n",
+              "  Each `* Knob: NAME` is a user-built knob. Edit the message\n",
+              "  bodies in place, then `org-llm config --apply-from-org` to\n",
+              "  push edits back. Add a new one with `org-llm knob add ...`.\n\n"]
+    for k in knobs:
+        name = k.get("name", "?")
+        default_level = k.get("default_level", 2)
+        keywords = ", ".join(k.get("keywords") or [])
+        msgs = k.get("messages") or []
+        lines.append(
+            f"** Knob: {name}\n"
+            f":PROPERTIES:\n"
+            f":KNOB:          {name}\n"
+            f":DEFAULT_LEVEL: {default_level}\n"
+            f":KEYWORDS:      {keywords}\n"
+            f":N_MESSAGES:    {len(msgs)}\n"
+            f":END:\n\n"
+        )
+        for i, m in enumerate(msgs):
+            text  = m[0] if isinstance(m, list) and len(m) >= 1 else str(m)
+            style = m[1] if isinstance(m, list) and len(m) >= 2 else "lcars1"
+            lines.append(
+                f"*** msg {i+1} [{style}]\n"
+                f"#+name: knob-{name}-msg-{i+1}\n"
+                f"#+begin_src text :tangle {td}/knob-{name}-{i+1:02d}.txt\n"
+                f"{text}\n"
+                f"#+end_src\n\n"
+            )
+    return "".join(lines)
+
+
+_KNOB_HEADING_RE   = re.compile(r"^\*\* Knob: (\S+)\s*$", re.MULTILINE)
+_MSG_HEADING_RE    = re.compile(
+    r"^\*\*\* msg \d+ \[([^\]]+)\]\s*$", re.MULTILINE)
+_KNOB_LEVEL_RE     = re.compile(r":DEFAULT_LEVEL:\s*(\d+)")
+_KNOB_KEYWORDS_RE  = re.compile(r":KEYWORDS:\s*(.*)$", re.MULTILINE)
+
+
+def _parse_knobs_from_org(text: str) -> list[dict]:
+    """Reverse of _render_knobs_section: extract the knob list from
+    the literate org. Robust to message edits + reorderings."""
+    out: list[dict] = []
+    knob_matches = list(_KNOB_HEADING_RE.finditer(text))
+    for i, m in enumerate(knob_matches):
+        name = m.group(1).strip()
+        end = (knob_matches[i + 1].start() if i + 1 < len(knob_matches)
+                else len(text))
+        slab = text[m.end():end]
+        # Parse meta from the PROPERTIES drawer
+        lvl_m = _KNOB_LEVEL_RE.search(slab)
+        kw_m  = _KNOB_KEYWORDS_RE.search(slab)
+        default_level = int(lvl_m.group(1)) if lvl_m else 2
+        keywords = [k.strip() for k in (kw_m.group(1) if kw_m else "").split(",") if k.strip()]
+        # Parse messages: each *** msg N [style] heading + adjacent block.
+        msgs: list[list[str]] = []
+        msg_matches = list(_MSG_HEADING_RE.finditer(slab))
+        for j, mm in enumerate(msg_matches):
+            style = mm.group(1).strip()
+            mend = (msg_matches[j + 1].start() if j + 1 < len(msg_matches)
+                     else len(slab))
+            body = slab[mm.end():mend]
+            blk = _BLOCK_RE.search(body)
+            if not blk:
+                continue
+            value = blk.group(1)
+            if value.endswith("\n"):
+                value = value[:-1]
+            msgs.append([value, style])
+        if msgs:
+            out.append({
+                "name":          name,
+                "default_level": default_level,
+                "keywords":      keywords,
+                "messages":      msgs,
+            })
+    return out
+
+
 def _render_org(entries: list[_ConfigEntry]) -> str:
     """Build the full org file body from entries.
 
@@ -223,13 +362,50 @@ def _parse_org(text: str) -> dict[str, str]:
     return out
 
 
-def tangle_db_to_org() -> Path:
+def tangle_db_to_org(*, keys: list[str] | None = None,
+                       include_knobs: bool = True,
+                       to_path: Path | None = None) -> Path:
     """Render the literate file from the current DB state. Returns
-    the path written. Idempotent — safe to call repeatedly."""
+    the path written. Idempotent — safe to call repeatedly.
+
+    Selective:
+      - `keys` (None = all allow-listed) restricts the per-key section
+        to the named keys + their fuzzy prefix matches. Anything not
+        listed is omitted from the rendered output, but the DB still
+        owns the canonical value.
+      - `include_knobs` (default True) controls whether the user's
+        theme-knob section is rendered.
+      - `to_path` overrides the default literate_path() — useful for
+        focused side-files (e.g. ~/org/org-llm-doctor-config.org).
+
+    Combined output:
+      header → one * heading per allow-listed (filtered) config key →
+      optional Theme knobs section with one ** Knob heading per
+      registered user knob and *** msg N subheadings carrying messages.
+    """
     entries = _gather_entries()
-    p = literate_path()
+    if keys:
+        # Allow exact match + prefix glob ("doctor_*" matches anything
+        # starting with "doctor_"). Bare prefix match is the common case
+        # for "give me all the doctor knobs in one file".
+        wanted: set[str] = set()
+        for raw in keys:
+            raw = raw.strip()
+            if not raw:
+                continue
+            if raw.endswith("*"):
+                stem = raw[:-1]
+                wanted.update(e.key for e in entries if e.key.startswith(stem))
+            else:
+                wanted.add(raw)
+        entries = [e for e in entries if e.key in wanted]
+    knobs = _read_user_knobs() if include_knobs else []
+    p = to_path or literate_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(_render_org(entries))
+    body = _render_org(entries)
+    if include_knobs:
+        body += _render_knobs_section(knobs)
+    p.write_text(body)
     return p
 
 
@@ -238,14 +414,23 @@ def apply_org_to_db(*, dry_run: bool = False) -> tuple[int, list[tuple[str, str,
 
     Returns (n_changed, [(key, old, new), ...]). When `dry_run=True`,
     nothing is written; the change list is the diff that *would* apply.
+
+    Two halves:
+      • Per-key config blocks (everything except user_theme_knobs).
+      • Theme knobs section — parsed back into the JSON list and
+        compared by serialised form so cosmetic edits to messages
+        register as a single user_theme_knobs change.
     """
     p = literate_path()
     if not p.exists():
         return (0, [])
-    parsed = _parse_org(p.read_text())
+    text = p.read_text()
+    parsed = _parse_org(text)
+    parsed_knobs = _parse_knobs_from_org(text)
     changes: list[tuple[str, str, str]] = []
     from .db import DB_PATH, Config, make_engine
     from sqlalchemy.orm import Session
+    import json as _json
     path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
     if not path.exists():
         return (0, [])
@@ -265,6 +450,25 @@ def apply_org_to_db(*, dry_run: bool = False) -> tuple[int, list[tuple[str, str,
                 row.value = new_val
             else:
                 s.add(Config(key=key, value=new_val))
+        # Knobs round-trip — diff the JSON serialisation so message
+        # text edits register as a single user_theme_knobs change.
+        if parsed_knobs:
+            knob_row = s.get(Config, "user_theme_knobs")
+            old_json = (knob_row.value or "[]") if knob_row else "[]"
+            new_json = _json.dumps(parsed_knobs, sort_keys=True)
+            try:
+                old_norm = _json.dumps(_json.loads(old_json), sort_keys=True)
+            except Exception:
+                old_norm = old_json
+            if old_norm != new_json:
+                changes.append(("user_theme_knobs",
+                                  f"{len(_json.loads(old_json) if old_json else [])} knob(s)",
+                                  f"{len(parsed_knobs)} knob(s) (edits applied)"))
+                if not dry_run:
+                    if knob_row:
+                        knob_row.value = new_json
+                    else:
+                        s.add(Config(key="user_theme_knobs", value=new_json))
         if not dry_run:
             s.commit()
     return (len(changes), changes)

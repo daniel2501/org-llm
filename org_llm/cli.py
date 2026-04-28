@@ -3583,23 +3583,80 @@ def config(
             help="Show what would change if we applied the org file (read-only)")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run", "-n",
             help="With --apply-from-org, preview without writing")] = False,
+    keys: Annotated[str, typer.Option("--keys", "-K",
+            help="With --tangle: comma-sep keys (or 'doctor_*' prefix-glob) "
+                 "to include. Omits everything else. Default: all keys.")] = "",
+    to_path: Annotated[str, typer.Option("--to", "-O",
+            help="With --tangle: write to PATH instead of "
+                 "~/org/org-llm-config.org. Useful for focused side-files.")] = "",
+    no_knobs: Annotated[bool, typer.Option("--no-knobs",
+            help="With --tangle: skip the Theme knobs section.")] = False,
+    search:  Annotated[str, typer.Option("--search", "-S",
+            help="Fuzzy-search config keys: matches on key name AND "
+                 "description. Returns each hit with its current value.")] = "",
 ):
     """Get or set a config value. No args = show all.
 
     Literate-config mode (org-file mirror):
-      --tangle          write ~/org/org-llm-config.org from DB
-      --apply-from-org  read it back, write changes to DB
-      --diff-org        show the would-apply diff without writing
-    Round-trips every user-tweakable key. Excludes runtime state
-    (cloud_usage, user_theme_knobs, db_version).
+      --tangle [--keys K1,K2 --to PATH --no-knobs]
+                          write a literate org file from DB. Selective
+                          via --keys (e.g. 'chat_model,doctor_*'); custom
+                          path via --to (good for focused side-files).
+      --apply-from-org    read it back, write changes to DB
+      --diff-org          show the would-apply diff without writing
+
+    Round-trips every user-tweakable key + every user-defined theme
+    knob (one heading per knob, one src block per message). Excludes
+    runtime state (cloud_usage, db_version).
     """
-    if sum(1 for f in (tangle, apply_from_org, diff_org) if f) > 1:
-        red_alert("--tangle, --apply-from-org, --diff-org are mutually exclusive.")
+    if sum(1 for f in (tangle, apply_from_org, diff_org, bool(search)) if f) > 1:
+        red_alert("--tangle / --apply-from-org / --diff-org / --search are mutually exclusive.")
         raise typer.Exit(1)
+    if search:
+        from .literate_config import KEY_DESCRIPTIONS as _DESCS
+        from .db import Config as _Cfg, MODEL_DEFAULTS as _DEF
+        engine = _engine()
+        with get_session(engine) as session:
+            db_rows = {r.key: r.value or "" for r in session.query(_Cfg).all()}
+        all_keys = sorted(set(db_rows) | set(_DEF) | set(_DESCS))
+        ql = search.lower()
+        hits: list[tuple[str, str, str, bool]] = []
+        for k in all_keys:
+            desc = _DESCS.get(k, "")
+            if ql in k.lower() or ql in desc.lower():
+                cur  = db_rows.get(k, _DEF.get(k, ""))
+                from_default = (cur == _DEF.get(k, "")) and k in _DEF
+                hits.append((k, cur, desc, from_default))
+        if not hits:
+            on_screen(f"[dim]No config keys match {search!r}.[/dim]")
+            return
+        from rich.panel import Panel as _Panel
+        tbl = Table(box=None, pad_edge=False)
+        tbl.add_column("Key",         style="lcars1", no_wrap=True)
+        tbl.add_column("Value",       style="lcars2")
+        tbl.add_column("From default", width=4, no_wrap=True)
+        tbl.add_column("Description", style="dim")
+        for k, v, d, from_def in hits:
+            tbl.add_row(k, (v or "")[:40],
+                          "[green]✓[/green]" if from_def else "[yellow]·[/yellow]",
+                          d)
+        console.print()
+        console.print(_Panel(tbl,
+                              title=f"[lcars1]config search: {search!r}[/lcars1]  "
+                                    f"[dim]({len(hits)} hit{'s' if len(hits) != 1 else ''})[/dim]",
+                              border_style="lcars2", padding=(1, 1)))
+        on_screen("[dim]Set:[/dim] [bold]org-llm config <key> <value>[/bold]")
+        on_screen("[dim]Edit literately:[/dim] [bold]org-llm config --tangle --keys '<key>'[/bold]")
+        return
     if tangle:
         from . import literate_config as _lc
-        p = _lc.tangle_db_to_org()
-        hail(f"Wrote literate config: {p}")
+        keys_list = [k.strip() for k in keys.split(",")] if keys else None
+        target = Path(to_path).expanduser() if to_path else None
+        p = _lc.tangle_db_to_org(keys=keys_list,
+                                    include_knobs=not no_knobs,
+                                    to_path=target)
+        scope = "all keys" if not keys_list else f"{len(keys_list)} key spec(s)"
+        hail(f"Wrote literate config ({scope}): {p}")
         on_screen(f"[dim]Edit it; then:[/dim] "
                   "[bold]org-llm config --apply-from-org[/bold]")
         return
@@ -8713,6 +8770,32 @@ def _opencode_slash_commands(workspace: str) -> dict:
             "With no args, call `get_config` and show the four current\n"
             "doctor_* settings with a one-line description of each.\n"
         ),
+        "config-search": (
+            "---\n"
+            "description: Fuzzy-search config keys + descriptions\n"
+            "---\n"
+            "Treat my words after /config-search as the QUERY. Call\n"
+            "`search_config(query=...)` and present the hits — key,\n"
+            "current value, description. If I sound like I'm asking\n"
+            "to TUNE one of the hits, suggest the exact set_config\n"
+            "call (e.g. `set_config('chat_model', 'gemma3')`) and\n"
+            "wait for my confirmation before applying.\n"
+        ),
+        "knob-add": (
+            "---\n"
+            "description: LLM-build a new theme knob (vibe + specifics → messages)\n"
+            "---\n"
+            "If I said something after /knob-add, treat the first word as\n"
+            "the knob NAME (lowercased, [a-z0-9_-]+) and the rest as the\n"
+            "VIBE description. Look back through my recent messages for any\n"
+            "specific details I mentioned (font name, icon, color, wording,\n"
+            "sound, image) and pass them as `specifics` (key=value dict).\n"
+            "Then call `add_theme_knob(name, vibe, specifics)` and surface\n"
+            "the rendered message bundle. Confirm with me before activating\n"
+            "by suggesting:\n"
+            "  set_config('<name>_level', '2') — or just `org-llm knob add`\n"
+            "  in a real terminal if the user wants per-shell control.\n"
+        ),
     }
 
     if workspace == "researcher":
@@ -11684,6 +11767,19 @@ def knob_add(
              help="Add a done-message. Repeatable. Format: 'text|style' or just 'text' (style defaults to lcars1).")] = None,
     default_level: Annotated[int, typer.Option("--default-level", "-l",
                    help="Level 0..3 used when ORG_LLM_<NAME>_LEVEL is unset.")] = 2,
+    use_llm: Annotated[bool, typer.Option("--llm/--no-llm",
+              help="Have the LLM generate the messages from --vibe + --specifics. "
+                   "If --message is also given, those seed the LLM and survive "
+                   "into the final bundle.")] = False,
+    vibe:    Annotated[str, typer.Option("--vibe", "-V",
+              help="Free-form description for --llm (e.g. '1980s neon, late-night coding'). "
+                   "If empty, the LLM infers from the name alone.")] = "",
+    specifics: Annotated[list[str], typer.Option("--specifics", "-S",
+                help="key=value detail for --llm — repeatable. Examples: "
+                     "font=Berkeley Mono, icon=, color=#ff00ff, "
+                     "wording='end on a question', sound=carrier-wave")] = None,
+    n_messages: Annotated[int, typer.Option("--count", "-N",
+                help="With --llm: how many new messages to generate")] = 8,
 ):
     """Register a new theme knob.
 
@@ -11691,14 +11787,21 @@ def knob_add(
     matching ORG_LLM_<NAME>_LEVEL env var (0=off, 1+=on). After registering,
     the messages roll into `make_it_so`'s pool whenever the level is ≥ 1.
 
-    Example:
-      org-llm knob add dinosaur \\
-        -m '◀ ROAR.|info' \\
-        -m '◀ Dino-mite work, comrade.|lcars1' \\
-        -m '◀ Extinction is for capitalism, not progress.|pride.green'
+    [lcars1]Manual mode[/lcars1] (default — no LLM):
+      [bold]org-llm knob add dinosaur \\[/bold]
+        [bold]-m '◀ ROAR.|info' \\[/bold]
+        [bold]-m '◀ Dino-mite work, comrade.|lcars1' \\[/bold]
+        [bold]-m '◀ Extinction is for capitalism, not progress.|pride.green'[/bold]
 
-    Then:
-      ORG_LLM_DINOSAUR_LEVEL=2 org-llm doctor
+    [lcars1]LLM mode[/lcars1] (--llm + --vibe + --specifics):
+      [bold]org-llm knob add synthwave --llm \\[/bold]
+        [bold]--vibe '1980s neon, retro-futurism, late-night coding' \\[/bold]
+        [bold]-S 'font=Berkeley Mono' -S 'color=magenta' \\[/bold]
+        [bold]-S "wording=end with a synth metaphor"[/bold]
+
+    Activate any knob with:
+      [bold]ORG_LLM_<NAME>_LEVEL=2 org-llm doctor[/bold]
+    or set the level persistently via the literate config file.
     """
     import re
     norm = name.strip().lower()
@@ -11717,6 +11820,37 @@ def knob_add(
             msgs.append([text.strip(), style.strip() or "lcars1"])
         else:
             msgs.append([m.strip(), "lcars1"])
+
+    # ── LLM mode: generate messages from vibe + specifics ───────────────────
+    if use_llm or vibe or specifics:
+        spec_dict: dict[str, str] = {}
+        for raw in (specifics or []):
+            if "=" not in raw:
+                red_alert(f"--specifics expects key=value (got {raw!r})")
+                raise typer.Exit(1)
+            k, _, v = raw.partition("=")
+            k, v = k.strip(), v.strip()
+            if not k:
+                continue
+            spec_dict[k] = v
+        engine_now = _engine()
+        with get_session(engine_now) as session:
+            url = _ollama_url(session)
+            mdl = (_cfg(session, "instruct_model")
+                   or _cfg(session, "chat_model")
+                   or "llama3.2")
+        from .personalize import messages_from_vibe as _mfv
+        with warp(f"LLM crafting {n_messages} messages for {norm} ({mdl})…"):
+            generated = _mfv(norm, vibe=vibe, specifics=spec_dict,
+                              model=mdl, base_url=url,
+                              n=n_messages, seed_messages=msgs)
+        if not generated:
+            red_alert("LLM message generation failed; keeping seed messages "
+                      "only. Add more with [bold]-m 'text|style'[/bold] "
+                      "or retry with [bold]--llm[/bold].")
+        else:
+            msgs = generated
+
     if not msgs:
         on_screen("[yellow]No --message entries given. Add at least one with -m later via `knob edit`,[/yellow]")
         on_screen("[yellow]or pass several -m flags now to seed the knob.[/yellow]")
