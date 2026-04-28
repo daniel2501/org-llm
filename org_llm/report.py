@@ -121,13 +121,21 @@ def report_overview(session) -> None:
 
 
 def report_top_tags(session, limit: int = 20) -> None:
-    """Tag frequency leaderboard."""
+    """Tag frequency leaderboard.
+
+    Tags are space-separated in the column. We split into a JSON array
+    and let SQLite's json_each iterate. Earlier impl stripped EVERY
+    colon to handle org-mode literal :tag: syntax — but that mangled
+    valid `code:python` / `code:markdown` etc. into `codepython` /
+    `codemarkdown`. Now we strip leading/trailing colons only via
+    SQL trim(), preserving the colon-as-namespace shape `code:lang`.
+    """
     from sqlalchemy import text
     rows = session.execute(text("""
-        SELECT trim(value) AS tag, count(*) AS cnt
+        SELECT trim(value, ':') AS tag, count(*) AS cnt
         FROM nodes,
-             json_each('["' || replace(replace(tags,' ','","'),':','') || '"]')
-        WHERE tags != ''
+             json_each('["' || replace(tags, ' ', '","') || '"]')
+        WHERE tags != '' AND trim(value, ':') != ''
         GROUP BY tag
         ORDER BY cnt DESC
         LIMIT :lim
