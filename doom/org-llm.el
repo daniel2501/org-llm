@@ -182,6 +182,44 @@ With prefix arg, run --install instead (idempotent install + wire into
    "*org-llm: pi*"))
 
 ;;;###autoload
+(defun org-llm-splash ()
+  "Open the org-llm splash menu (LCARS logo + linked verb shortcuts)."
+  (interactive)
+  (org-llm--shell "splash" "*org-llm: splash*"))
+
+;;;###autoload
+(defun org-llm-askbook ()
+  "Show the askbook table (multi-model Q/A scratchpad)."
+  (interactive)
+  (org-llm--shell "askbook show" "*org-llm: askbook*"))
+
+;;;###autoload
+(defun org-llm-askbook-add (question backend)
+  "Add a QUESTION to the askbook with chosen BACKEND (chat/reason/cloud/etc)."
+  (interactive
+   (list (read-string "Question: ")
+         (completing-read "Backend: "
+            '("chat" "reason" "fast" "code" "text" "cloud" "claude" "pi")
+            nil t nil nil "chat")))
+  (org-llm--vterm
+   (format "%s askbook add %s --backend %s --run"
+           org-llm-binary
+           (shell-quote-argument question)
+           backend)))
+
+;;;###autoload
+(defun org-llm-askbook-run ()
+  "Process every pending askbook entry."
+  (interactive)
+  (org-llm--vterm (format "%s askbook run" org-llm-binary)))
+
+;;;###autoload
+(defun org-llm-askbook-open ()
+  "Open ~/org/llm-askbook.org for direct editing."
+  (interactive)
+  (find-file (expand-file-name "~/org/llm-askbook.org")))
+
+;;;###autoload
 (defun org-llm-doctor ()
   "Run org-llm doctor health check in vterm."
   (interactive)
@@ -590,6 +628,8 @@ With prefix arg, run --install instead (idempotent install + wire into
        :desc "Code generate"             "g" #'org-llm-code
        :desc "Stale-content sweep"       "z" #'org-llm-stale
        :desc "Review Emacs config"       "x" #'org-llm-review-emacs
+       :desc "Splash menu"               "SPC" #'org-llm-splash
+       :desc "Askbook (multi-model Q/A)" "k" #'org-llm-askbook
        :desc "Ask dwim"                  "." #'org-llm-ask-dwim
 
        ;; ─── Captain's Log ──────────────────────────────────────────────
@@ -631,6 +671,13 @@ With prefix arg, run --install instead (idempotent install + wire into
         :desc "Run skill"                "r" #'org-llm-skill-run
         :desc "New skill"                "n" #'org-llm-skill-new
         :desc "Re-index skills"          "i" #'org-llm-skill-index)
+
+       ;; ─── Askbook ────────────────────────────────────────────────────
+       (:prefix ("B" . "askbook")
+        :desc "Show table"               "B" #'org-llm-askbook
+        :desc "Add question"             "a" #'org-llm-askbook-add
+        :desc "Run pending"              "r" #'org-llm-askbook-run
+        :desc "Open askbook.org"         "o" #'org-llm-askbook-open)
 
        ;; ─── Config (incl. literate round-trip) ─────────────────────────
        (:prefix ("G" . "config")

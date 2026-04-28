@@ -41,7 +41,29 @@ app = typer.Typer(
     help="org-llm: LLM-powered org-roam CLI",
     rich_markup_mode="rich",
     cls=PrefixGroup,
+    invoke_without_command=True,    # bare `org-llm` runs the splash
 )
+
+
+@app.callback(invoke_without_command=True)
+def _root(
+    ctx: typer.Context,
+    splash: Annotated[bool, typer.Option("--splash",
+              help="Show the splash menu (also the default with no command)")] = False,
+    no_splash: Annotated[bool, typer.Option("--no-splash",
+                help="Suppress the splash menu when running without a command "
+                     "(useful for scripts that want help text instead)")] = False,
+):
+    """Entry point. With no subcommand, shows the LCARS splash menu."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if no_splash:
+        # Fall back to Typer's default --help output.
+        click_cmd = typer.main.get_command(app)
+        click_cmd.main(args=["--help"], prog_name="org-llm",
+                         standalone_mode=False)
+        return
+    _show_splash()
 
 
 # ── Env var taps ──────────────────────────────────────────────────────────────
@@ -1985,6 +2007,139 @@ def _llm_one_liner(prompt: str, *, system: str = "",
         if 6 <= len(l) <= 240:
             return l
     return fallback
+
+
+_SPLASH_LOGO = r"""[lcars1]
+       ▄▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▄
+      █     ████  ████  ████  ████  ████  ████   ▄▄▄▄                █
+     █     [/lcars1][lcars2]   ▄▄▄▄▄    ▄▄▄▄    ▄▄▄▄▄              ▀▀▀▀[/lcars2][lcars1]                █[/lcars1]
+[lcars1]    █  [/lcars1][lcars2]      █     █  █     █  █     █                                  █[/lcars2]
+[lcars2]   █  [/lcars2][lcars1] ████ █  ▄▄ █  █▄▄▄▄█  █     █          [bold lcars1]o r g - l l m[/bold lcars1][lcars2]              █[/lcars2]
+[lcars1]    █     █▄▄█ █     █  █     █          [bold lcars2]your second brain, scripted[/bold lcars2]   █[/lcars1]
+     █                                                                █
+      █▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄█[/lcars1]
+"""
+
+
+def _is_first_run() -> bool:
+    """Detect whether the user has done initial setup. Used by splash to
+    show a prominent setup nudge instead of the menu when the DB is
+    empty / chat_model unset / org_dir missing."""
+    try:
+        path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if not path.exists():
+            return True
+        from .db import Config, make_engine
+        from sqlalchemy.orm import Session
+        engine = make_engine(path)
+        with Session(engine) as s:
+            chat = s.get(Config, "chat_model")
+            org_dir = s.get(Config, "org_dir")
+            if not chat or not chat.value:
+                return True
+            if not org_dir or not org_dir.value:
+                return True
+            # Tightest signal: zero indexed nodes → didn't finish setup.
+            from .db import Node
+            n_nodes = s.query(Node).count()
+            if n_nodes == 0:
+                return True
+    except Exception:
+        return True
+    return False
+
+
+_SPLASH_MENU = [
+    # (key, verb-or-cmd, label, group)
+    ("a",  "ask",          "Ask your notes",                "Query"),
+    ("s",  "search",       "Semantic search",               "Query"),
+    ("k",  "askbook show", "Askbook (multi-model Q/A)",     "Query"),
+    ("c",  "capture",      "Capture a note",                "Write"),
+    ("o",  "launch",       "Launch opencode workspace",     "Workspaces"),
+    ("C",  "claude",       "Launch Claude Code",            "Workspaces"),
+    ("p",  "pi --launch",  "Launch Pi (bridge)",            "Workspaces"),
+    ("l",  "log",          "Captain's Log",                 "Insight"),
+    ("L",  "log --reflect","Log reflection (LLM)",          "Insight"),
+    ("r",  "report",       "Vault report",                  "Insight"),
+    ("d",  "doctor",       "Doctor (health + LLM diagnosis)","Maintenance"),
+    ("?",  "doctor --power-boost", "Power-boost probe",     "Maintenance"),
+    ("D",  "dbt status",   "dbt analytics layer",           "Maintenance"),
+    ("m",  "models",       "Models dashboard",              "Maintenance"),
+    ("g",  "config",       "Show config",                   "Config"),
+    ("G",  "config --tangle", "Tangle literate config",     "Config"),
+    ("t",  "tutor welcome","Tutor walkthrough",             "Help"),
+    ("M",  "man --install","Install man page",              "Help"),
+    ("h",  "--help",       "Full --help",                   "Help"),
+]
+
+
+def _show_splash():
+    """LCARS-themed splash menu. Runs by default when `org-llm` is
+    invoked with no arguments. Doom Emacs vibe: logo + linked actions
+    the user can hit by keystroke. Special-cases the first-run state
+    with a prominent `org-llm setup` nudge."""
+    from rich.panel import Panel
+    from rich.columns import Columns
+    console.print()
+    console.print(_SPLASH_LOGO)
+
+    if _is_first_run():
+        msg = (
+            "[bold lcars1]Looks like first run.[/bold lcars1] No DB yet, "
+            "or no chat_model configured, or vault not indexed.\n\n"
+            "Run setup — it's a 15-step interactive walkthrough that's "
+            "resume-aware (an interrupted run picks up where it left off):\n\n"
+            "  [bold]org-llm setup[/bold]                — full walkthrough (default Y at each step)\n"
+            "  [bold]org-llm setup --yes[/bold]          — non-interactive defaults\n"
+            "  [bold]org-llm setup --restart[/bold]      — discard saved progress and start fresh\n\n"
+            "Already done part of setup? Re-run [bold]org-llm setup[/bold] — it'll skip "
+            "completed steps automatically."
+        )
+        console.print(Panel(msg, title="[lcars1]🚀  Setup needed[/lcars1]",
+                              border_style="lcars1", padding=(1, 2)))
+        console.print()
+        on_screen("[dim]Or skip the splash entirely:[/dim] "
+                  "[bold]org-llm --no-splash[/bold]  for plain --help")
+        return
+
+    # Group menu items by section, render as columns.
+    groups: dict[str, list[tuple[str, str, str]]] = {}
+    for key, verb, label, group in _SPLASH_MENU:
+        groups.setdefault(group, []).append((key, verb, label))
+    panels = []
+    for group_name in ("Query", "Write", "Workspaces", "Insight",
+                          "Maintenance", "Config", "Help"):
+        items = groups.get(group_name) or []
+        if not items:
+            continue
+        body_lines = []
+        for key, verb, label in items:
+            body_lines.append(
+                f"  [lcars1]{key:>2}[/lcars1]  [lcars2]{verb:<22}[/lcars2] "
+                f"[dim]{label}[/dim]"
+            )
+        panels.append(Panel(
+            "\n".join(body_lines),
+            title=f"[lcars1]{group_name}[/lcars1]",
+            border_style="lcars2", padding=(0, 1),
+        ))
+    console.print(Columns(panels, equal=False, expand=False))
+    console.print()
+    on_screen("[dim]Pick a verb above —[/dim] "
+              "[bold]org-llm <verb>[/bold]  or  [bold]org-llm --help[/bold] for the full list.")
+    on_screen("[dim]Skip splash:[/dim] "
+              "[bold]org-llm --no-splash[/bold]  ·  "
+              "[dim]Tutor:[/dim] [bold]org-llm tutor welcome[/bold]")
+
+
+@app.command(rich_help_panel="Onboarding")
+def splash():
+    """Show the LCARS splash menu — same as `org-llm` with no args.
+
+    Doom-Emacs-style: a banner + a keyed menu of frequent actions.
+    First-run users see a prominent setup nudge instead.
+    """
+    _show_splash()
 
 
 def _suggest_note_ask(session, prefix: str = "Try it: ") -> str:
@@ -10915,6 +11070,143 @@ history_app = typer.Typer(
     cls=PrefixGroup,
 )
 app.add_typer(history_app, name="history", rich_help_panel="Context & Vault")
+
+
+# ── askbook: literate Q/A scratchpad across model backends ────────────────
+
+askbook_app = typer.Typer(
+    help="Literate Q/A scratchpad: pose questions to chat / reason / "
+         "fast / code / text / cloud / claude / pi backends. Answers "
+         "tangle back into ~/org/llm-askbook.org alongside the question.",
+    cls=PrefixGroup,
+)
+app.add_typer(askbook_app, name="askbook", rich_help_panel="Querying")
+
+
+@askbook_app.command("add")
+def askbook_add(
+    question: Annotated[str, typer.Argument(help="The question to ask")],
+    backend:  Annotated[str, typer.Option("--backend", "-b",
+              help="chat | reason | fast | code | text | cloud | claude | pi")] = "chat",
+    model:    Annotated[str, typer.Option("--model", "-m",
+              help="Override the configured model for this backend")] = "",
+    title:    Annotated[str, typer.Option("--title", "-t",
+              help="Override the auto-derived heading title")] = "",
+    run_now:  Annotated[bool, typer.Option("--run/--no-run", "-r",
+              help="Process this entry immediately (else it stays "
+                   "pending; run with `org-llm askbook run`)")] = False,
+):
+    """Append one new question to the askbook (default: pending)."""
+    from . import askbook as _ab
+    if backend not in _ab.SUPPORTED_BACKENDS:
+        red_alert(f"Unknown backend {backend!r}. "
+                  f"Choose from: {', '.join(_ab.SUPPORTED_BACKENDS)}")
+        raise typer.Exit(1)
+    entry = _ab.add_entry(question, backend=backend, model=model, title=title)
+    hail(f"Added: [{entry.backend}/{entry.model or 'default'}] {entry.title}")
+    on_screen(f"[dim]File:[/dim] {_ab.askbook_path()}")
+    if run_now:
+        with warp(f"Asking {entry.backend} ({entry.model or 'default'})…"):
+            _ab.run_pending(backend_filter=backend, limit=1)
+        on_screen(f"[dim]Done — open the file or:[/dim] "
+                  f"[bold]org-llm askbook show[/bold]")
+    else:
+        on_screen(f"[dim]Run pending:[/dim] "
+                  f"[bold]org-llm askbook run[/bold]")
+
+
+@askbook_app.command("run")
+def askbook_run(
+    backend: Annotated[str, typer.Option("--backend", "-b",
+             help="Only process entries with this backend")] = "",
+    limit:   Annotated[int, typer.Option("--limit", "-n",
+             help="Cap on how many to process this run")] = 0,
+):
+    """Process every pending askbook entry; persist answers in place."""
+    from . import askbook as _ab
+    with warp(f"Processing pending entries"
+                + (f" (backend={backend})" if backend else "")):
+        ran = _ab.run_pending(backend_filter=backend, limit=limit)
+    if not ran:
+        on_screen("[dim]Nothing pending.[/dim]")
+        return
+    hail(f"Processed {len(ran)} entry/entries.")
+    for e in ran:
+        sym = "[green]✓[/green]" if e.status == "done" else "[red]✗[/red]"
+        on_screen(f"  {sym} [{e.backend}] {e.title}")
+    on_screen(f"[dim]Open:[/dim] [bold]{_ab.askbook_path()}[/bold]")
+
+
+@askbook_app.command("show")
+def askbook_show(
+    backend: Annotated[str, typer.Option("--backend", "-b",
+             help="Only show entries from this backend")] = "",
+    status:  Annotated[str, typer.Option("--status", "-s",
+             help="pending | done | error")] = "",
+    limit:   Annotated[int, typer.Option("--limit", "-n",
+             help="Tail-N entries (default: all)")] = 0,
+):
+    """List askbook entries with their backend/status/title."""
+    from . import askbook as _ab
+    from rich.panel import Panel
+    entries = _ab.parse_entries()
+    if backend: entries = [e for e in entries if e.backend == backend]
+    if status:  entries = [e for e in entries if e.status == status]
+    if limit:   entries = entries[-limit:]
+    if not entries:
+        on_screen("[dim]No entries match.[/dim]")
+        on_screen(f"[dim]Add one:[/dim] "
+                  f"[bold]org-llm askbook add 'your question'[/bold]")
+        return
+    tbl = Table(box=None, pad_edge=False)
+    tbl.add_column("When",    style="lcars1", no_wrap=True, width=19)
+    tbl.add_column("Backend", style="lcars3", width=8)
+    tbl.add_column("Model",   style="dim",   width=18)
+    tbl.add_column("Status",  width=8)
+    tbl.add_column("Title",   style="lcars2")
+    for e in entries:
+        sym = ("[green]done[/green]" if e.status == "done"
+                 else "[red]error[/red]" if e.status == "error"
+                 else "[yellow]pending[/yellow]")
+        tbl.add_row(e.timestamp, e.backend, e.model[:18], sym, e.title[:60])
+    console.print()
+    console.print(Panel(tbl,
+                          title=f"[lcars1]askbook[/lcars1]  "
+                                f"[dim]({len(entries)} entries)[/dim]",
+                          border_style="lcars2", padding=(1, 1)))
+    on_screen(f"[dim]File:[/dim] {_ab.askbook_path()}")
+
+
+@askbook_app.command("export")
+def askbook_export(
+    output:  Annotated[str, typer.Argument(
+              help="Path to write the export to (e.g. "
+                   "~/org/dbt-conversation.org)")],
+    backend: Annotated[str, typer.Option("--backend", "-b",
+             help="Only export entries from this backend")] = "",
+    status:  Annotated[str, typer.Option("--status", "-s",
+             help="pending | done | error")] = "",
+):
+    """Save (a slice of) the askbook to another org file.
+
+    Useful for archiving conversation history per topic — e.g. one file
+    per project, one per backend, one per status. Original askbook is
+    untouched.
+    """
+    from . import askbook as _ab
+    n = _ab.export_to(Path(output), backend_filter=backend,
+                        status_filter=status)
+    if not n:
+        on_screen(f"[dim]Nothing matched the filter.[/dim]")
+        return
+    hail(f"Exported {n} entry/entries → {output}")
+
+
+@askbook_app.command("path")
+def askbook_path_cmd():
+    """Print the askbook file path (for piping into editor invocations)."""
+    from . import askbook as _ab
+    console.print(str(_ab.askbook_path()))
 
 
 # ── self: read / revise / snapshot / rollback the running app ─────────────

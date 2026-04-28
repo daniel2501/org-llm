@@ -708,6 +708,158 @@ class TestProactiveDoctor:
         assert "proactive_doctor" in server._tool_manager._tools
 
 
+class TestAskbook:
+    """Literate Q/A scratchpad across model backends."""
+
+    def test_add_creates_pending_entry(self, monkeypatch, tmp_path):
+        from org_llm import askbook as _ab
+        monkeypatch.setenv("ORG_LLM_ASKBOOK_PATH", str(tmp_path / "ab.org"))
+        entry = _ab.add_entry("What is dbt?", backend="chat", model="x")
+        assert entry.status == "pending"
+        assert entry.backend == "chat"
+        text = (tmp_path / "ab.org").read_text()
+        assert "TODO Q[" in text
+        assert "What is dbt?" in text
+
+    def test_add_rejects_unknown_backend(self, monkeypatch, tmp_path):
+        from org_llm import askbook as _ab
+        monkeypatch.setenv("ORG_LLM_ASKBOOK_PATH", str(tmp_path / "ab.org"))
+        try:
+            _ab.add_entry("?", backend="wizard")
+            raise AssertionError("expected ValueError")
+        except ValueError as e:
+            assert "wizard" in str(e)
+
+    def test_parse_round_trip(self, monkeypatch, tmp_path):
+        from org_llm import askbook as _ab
+        monkeypatch.setenv("ORG_LLM_ASKBOOK_PATH", str(tmp_path / "ab.org"))
+        _ab.add_entry("Q1", backend="chat", model="m1")
+        _ab.add_entry("Q2", backend="reason", model="m2")
+        entries = _ab.parse_entries()
+        assert len(entries) == 2
+        assert entries[0].backend == "chat" and entries[0].model == "m1"
+        assert entries[1].backend == "reason" and entries[1].model == "m2"
+
+    def test_run_pending_fills_in_answer(self, monkeypatch, tmp_path, cli_db):
+        from org_llm import askbook as _ab
+        monkeypatch.setenv("ORG_LLM_ASKBOOK_PATH", str(tmp_path / "ab.org"))
+        _ab.add_entry("Q?", backend="chat", model="gemma3")
+        # Stub out the LLM so test stays offline.
+        monkeypatch.setattr("org_llm.llm.chat",
+                              lambda *a, **kw: "STUB ANSWER")
+        ran = _ab.run_pending()
+        assert len(ran) == 1
+        assert ran[0].status == "done"
+        assert "STUB ANSWER" in ran[0].answer
+        # Persisted in the file
+        text = (tmp_path / "ab.org").read_text()
+        assert "STUB ANSWER" in text
+        assert "DONE Q[" in text
+
+    def test_run_pending_filter_by_backend(self, monkeypatch, tmp_path, cli_db):
+        from org_llm import askbook as _ab
+        monkeypatch.setenv("ORG_LLM_ASKBOOK_PATH", str(tmp_path / "ab.org"))
+        _ab.add_entry("Q-chat",   backend="chat",   model="x")
+        _ab.add_entry("Q-reason", backend="reason", model="y")
+        monkeypatch.setattr("org_llm.llm.chat",
+                              lambda *a, **kw: "OK")
+        ran = _ab.run_pending(backend_filter="reason")
+        assert len(ran) == 1 and ran[0].backend == "reason"
+        # The other one is still pending
+        rest = _ab.parse_entries()
+        chat_entry = next(e for e in rest if e.backend == "chat")
+        assert chat_entry.status == "pending"
+
+    def test_unsupported_backend_marks_error(self, monkeypatch, tmp_path, cli_db):
+        from org_llm import askbook as _ab
+        monkeypatch.setenv("ORG_LLM_ASKBOOK_PATH", str(tmp_path / "ab.org"))
+        # Bypass add_entry's validation by forging the file directly:
+        path = tmp_path / "ab.org"
+        path.write_text(
+            "#+title: x\n"
+            "* TODO Q[2026-04-27T10:00:00] borked\n"
+            ":PROPERTIES:\n"
+            ":BACKEND: nonsense\n:MODEL: m\n:STATUS: pending\n"
+            ":TIMESTAMP: 2026-04-27T10:00:00\n:END:\n\n"
+            "#+name: q-2026-04-27T10-00-00\n"
+            "#+begin_src text :tangle /tmp/q.txt\n?\n#+end_src\n\n"
+            "#+name: a-2026-04-27T10-00-00\n"
+            "#+begin_src text :tangle /tmp/a.txt\n(pending)\n#+end_src\n\n"
+        )
+        ran = _ab.run_pending()
+        assert ran[0].status == "error"
+
+    def test_export_writes_filtered_subset(self, monkeypatch, tmp_path, cli_db):
+        from org_llm import askbook as _ab
+        monkeypatch.setenv("ORG_LLM_ASKBOOK_PATH", str(tmp_path / "ab.org"))
+        _ab.add_entry("Q1", backend="chat",   model="x")
+        _ab.add_entry("Q2", backend="reason", model="y")
+        out = tmp_path / "exported.org"
+        n = _ab.export_to(out, backend_filter="chat")
+        assert n == 1
+        assert out.exists()
+        assert "Q1" in out.read_text()
+        assert "Q2" not in out.read_text()
+
+    def test_cli_add_show_run(self, cli_db, monkeypatch, tmp_path):
+        monkeypatch.setenv("ORG_LLM_ASKBOOK_PATH", str(tmp_path / "ab.org"))
+        r1 = runner.invoke(app, ["askbook", "add", "What's up?",
+                                   "--backend", "chat", "--model", "x"])
+        assert r1.exit_code == 0, r1.output
+        r2 = runner.invoke(app, ["askbook", "show"])
+        assert r2.exit_code == 0
+        assert "What's up?" in r2.output
+        # Stub LLM and run
+        monkeypatch.setattr("org_llm.llm.chat",
+                              lambda *a, **kw: "Cool, thanks for asking.")
+        r3 = runner.invoke(app, ["askbook", "run"])
+        assert r3.exit_code == 0
+        assert "1 entry" in r3.output or "1 entries" in r3.output
+        text = (tmp_path / "ab.org").read_text()
+        assert "Cool, thanks" in text
+
+
+class TestSplash:
+    """The default-no-args splash menu — Doom-Emacs-esque."""
+
+    def test_logo_always_renders(self, cli_db):
+        r = runner.invoke(app, ["splash"])
+        assert r.exit_code == 0
+        # The LCARS title shows in both first-run AND configured paths
+        assert "o r g - l l m" in r.output
+
+    def test_configured_user_sees_full_menu(self, cli_org, monkeypatch):
+        """A populated vault skips the setup-nudge and shows the menu."""
+        # cli_org indexed at least one node; force re-population to be sure
+        runner.invoke(app, ["index"])
+        r = runner.invoke(app, ["splash"])
+        assert r.exit_code == 0
+        # Section headers from the full menu path
+        assert "Query" in r.output
+        assert "Workspaces" in r.output
+
+    def test_first_run_shows_setup_nudge(self, monkeypatch, tmp_path):
+        # Pin DB to a path that doesn't exist → looks like first run
+        monkeypatch.setenv("ORG_LLM_DB", str(tmp_path / "nope.db"))
+        r = runner.invoke(app, ["splash"])
+        assert r.exit_code == 0
+        assert "first run" in r.output.lower() or "setup needed" in r.output.lower()
+        assert "org-llm setup" in r.output
+
+    def test_no_splash_flag_falls_back_to_help(self, cli_db):
+        r = runner.invoke(app, ["--no-splash"])
+        # --help exit handling varies; we just want the help-style content
+        assert r.exit_code in (0, 2)
+        assert "Commands" in r.output or "Usage" in r.output
+
+    def test_menu_includes_askbook_and_pi(self, cli_org):
+        runner.invoke(app, ["index"])
+        r = runner.invoke(app, ["splash"])
+        assert r.exit_code == 0
+        assert "askbook" in r.output.lower()
+        assert "Launch Pi" in r.output
+
+
 class TestPiBridge:
     """`org-llm pi` — bridge to Pi (pi.dev). Bundle ships with the wheel;
     --install copies it into ~/.pi/extensions/ + wires ~/.pi/config.json."""
