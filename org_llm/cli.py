@@ -2048,6 +2048,66 @@ _SPLASH_ASCII = (
 )
 
 
+def _stardate() -> str:
+    """Approximate TNG-era stardate from today's date.
+
+    The TNG/Voyager-era convention: stardate ≈ (year_offset * 1000) +
+    (day_of_year / 365 * 1000), where year_offset measures years from
+    2323 (per the franchise's loose canon). We use 1946 as a tongue-
+    in-cheek proxy so 2026 lands at a familiar 79xxx-range stardate
+    — close enough to feel right for an LCARS readout, no claim to
+    actual canonical accuracy.
+    """
+    from datetime import datetime as _dt
+    now = _dt.now()
+    base = (now.year - 1946) * 1000.0
+    day_frac = (now.timetuple().tm_yday +
+                (now.hour * 3600 + now.minute * 60 + now.second) / 86400.0
+               ) / 366.0 * 1000.0
+    return f"{base + day_frac:.1f}"
+
+
+def _vault_stats_oneline() -> str:
+    """Compact vault stats for the splash status line.
+
+    Pulls counts from the live DB if it exists; returns the empty
+    string when there's no DB yet (first-run path) so callers can
+    fall back to a static label.
+    """
+    try:
+        path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if not path.exists():
+            return ""
+        from .db import File, Node, make_engine
+        from sqlalchemy.orm import Session as _S
+        engine = make_engine(path)
+        with _S(engine) as s:
+            n_files = s.query(File).count()
+            n_nodes = s.query(Node).count()
+            n_emb   = s.query(Node).filter(Node.embedding.isnot(None)).count()
+        if n_nodes == 0:
+            return ""
+        pct_e = int(round(n_emb * 100 / max(n_nodes, 1)))
+        return f"{n_files}f · {n_nodes}n · {pct_e}%e"
+    except Exception:
+        return ""
+
+
+def _resolve_callsign(surface_key: str, default: str) -> str:
+    """Themed callsign with a sane fallback.
+
+    The default carries a Trek easter egg (47 = Joe Menosky's running
+    in-joke, Δ = Starfleet delta) but theme_studio can override it
+    when the user dials up commie or queer or a custom knob — a
+    union worker's callsign reads differently than a starship's.
+    """
+    try:
+        from . import theme_studio as _ts
+        return _ts.get_themed(surface_key, default)
+    except Exception:
+        return default
+
+
 def _lcars_bar(segments, callsign, *, target_width=78):
     """Build a chunky multi-segment horizontal LCARS bar.
 
@@ -2084,13 +2144,20 @@ def _render_splash_logo():
     """Return a Rich Renderable for the splash — full LCARS readout.
 
     Layout (top → bottom):
-      ━ multi-segment chunky bar (orange / purple / blue / orange) + 47-Δ callsign
+      ━ overhead status line: STARDATE + version
+      ━ multi-segment chunky bar (orange/purple/blue/orange) + themed callsign
       ━ left vertical 'rib' stripe + figlet 'ORG-LLM' + subtitle + slogan
-      ━ mirrored chunky bar + 09-Δ callsign
+      ━ overhead status line: VAULT stats (or static slogan when first-run)
+      ━ mirrored chunky bar + themed callsign
 
     Hand-built as Rich Text rows so the multi-style segmented bars stay
     aligned regardless of terminal width — earlier hand-drawn ASCII
     frames mis-counted style markers and zig-zagged the right edge.
+
+    All four "labels" (top callsign, bottom callsign, stardate prefix,
+    status prefix) route through theme_studio so the user's dials can
+    rewrite them — a commie+queer-coded user gets union-coded callsigns
+    if the LLM has cached themed variants. Cold cache → defaults.
     """
     from rich.console import Group
     from rich.text    import Text
@@ -2101,21 +2168,52 @@ def _render_splash_logo():
     # actually mimics real LCARS panels (open right edge).
     target_w = 78
 
+    # Themed callsigns + label prefixes (cold cache → Trek defaults)
+    top_callsign    = _resolve_callsign("splash_top_callsign",    "47-Δ")
+    bottom_callsign = _resolve_callsign("splash_bottom_callsign", "09-Δ")
+    stardate_prefix = _resolve_callsign("splash_stardate_prefix", "STARDATE")
+    status_prefix   = _resolve_callsign("splash_status_prefix",   "VAULT")
+
+    # Overhead status line above the top bar — STARDATE + version
+    version = _resolve_version()
+    sd      = _stardate()
+    top_overhead = Text()
+    top_overhead.append(f"{stardate_prefix} {sd}", style="bold lcars1")
+    top_overhead.append("  ▸  ",                     style="dim")
+    top_overhead.append(f"org-llm {version}",         style="lcars2")
+    top_overhead.append("  ▸  ",                     style="dim")
+    top_overhead.append("LCARS readout active",      style="dim lcars3")
+
     top_bar = _lcars_bar(
-        [(0.30, "lcars1"),  # big orange opener
-         (0.10, "lcars2"),  # purple chip
-         (0.08, "lcars3"),  # blue chip
-         (0.40, "lcars1"),  # long orange
-         (0.12, "lcars2")], # purple tail
-        "47-Δ", target_width=target_w,
+        [(0.30, "lcars1"),
+         (0.10, "lcars2"),
+         (0.08, "lcars3"),
+         (0.40, "lcars1"),
+         (0.12, "lcars2")],
+        top_callsign, target_width=target_w,
     )
+
+    # Overhead status line above the bottom bar — vault stats live, or
+    # a quiet "STANDBY" when first-run (no DB yet).
+    vstats = _vault_stats_oneline()
+    bottom_overhead = Text()
+    bottom_overhead.append(f"{status_prefix} ", style="bold lcars1")
+    if vstats:
+        bottom_overhead.append(vstats, style="lcars2")
+        bottom_overhead.append("  ▸  ", style="dim")
+        bottom_overhead.append("ALL DECKS NOMINAL", style="dim lcars3")
+    else:
+        bottom_overhead.append("STANDBY",  style="lcars2")
+        bottom_overhead.append("  ▸  ",   style="dim")
+        bottom_overhead.append("AWAITING SETUP", style="dim lcars3")
+
     bottom_bar = _lcars_bar(
-        [(0.20, "lcars1"),  # short orange
-         (0.18, "lcars3"),  # mid blue
-         (0.10, "lcars2"),  # purple chip
-         (0.40, "lcars1"),  # long orange
-         (0.12, "lcars3")], # blue tail
-        "09-Δ", target_width=target_w,
+        [(0.20, "lcars1"),
+         (0.18, "lcars3"),
+         (0.10, "lcars2"),
+         (0.40, "lcars1"),
+         (0.12, "lcars3")],
+        bottom_callsign, target_width=target_w,
     )
 
     # Vertical rib on the left of every body row. Width matches the
@@ -2150,12 +2248,15 @@ def _render_splash_logo():
     body_rows.append(_row("dim lcars3",  slogan_text))
     body_rows.append(_row("", ""))                              # bottom spacer
 
-    return Group(top_bar, *body_rows, bottom_bar)
+    return Group(top_overhead, top_bar,
+                  *body_rows,
+                  bottom_overhead, bottom_bar)
 
 
-# Backward-compat shim: callers historically did `console.print(_SPLASH_LOGO)`.
-# We keep that working by exposing the Renderable under the old name.
-_SPLASH_LOGO = _render_splash_logo()
+# Splash content is now resolved at render time, not import time —
+# stardate + vault stats reflect the moment of invocation. Call sites
+# (`_show_splash`, `tools/gallery.py:scene_splash`) call
+# `_render_splash_logo()` directly. There is no module-level constant.
 
 
 def _is_first_run() -> bool:
@@ -2218,7 +2319,7 @@ def _show_splash():
     from rich.panel import Panel
     from rich.columns import Columns
     console.print()
-    console.print(_SPLASH_LOGO)
+    console.print(_render_splash_logo())
 
     if _is_first_run():
         msg = (

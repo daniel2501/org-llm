@@ -293,8 +293,8 @@ def scene_splash():
     """LCARS splash menu — the default no-args view (Doom-Emacs-style)."""
     from rich.columns import Columns
     con = _new_console(width=110)
-    from org_llm.cli import _SPLASH_LOGO, _SPLASH_MENU
-    con.print(_SPLASH_LOGO)
+    from org_llm.cli import _render_splash_logo, _SPLASH_MENU
+    con.print(_render_splash_logo())
     groups: dict[str, list] = {}
     for key, verb, label, group in _SPLASH_MENU:
         groups.setdefault(group, []).append((key, verb, label))

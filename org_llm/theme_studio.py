@@ -155,6 +155,40 @@ SURFACES: list[Surface] = [
         default="↳ red alert",
     ),
     Surface(
+        key="splash_top_callsign",
+        description=("A 4-6 char alphanumeric callsign in the top-right "
+                      "of the splash bar — pure LCARS flair, decorative "
+                      "anchor. Default is '47-Δ' (Trek easter egg). "
+                      "If a knob is dialed up, lean in."),
+        len_min=2, len_max=12, n_variants=5,
+        default="47-Δ",
+    ),
+    Surface(
+        key="splash_bottom_callsign",
+        description=("A 4-6 char alphanumeric callsign in the bottom-right "
+                      "of the splash bar. Should READ like a section / "
+                      "deck / channel code, e.g. '09-Δ', 'OPS-7', "
+                      "'COMMS-3', 'BRIDGE'. Match the active dials."),
+        len_min=2, len_max=12, n_variants=5,
+        default="09-Δ",
+    ),
+    Surface(
+        key="splash_stardate_prefix",
+        description=("Short label that appears before the stardate "
+                      "number on the splash overhead line. Keep ALL CAPS. "
+                      "Default 'STARDATE'."),
+        len_min=4, len_max=20, n_variants=4,
+        default="STARDATE",
+    ),
+    Surface(
+        key="splash_status_prefix",
+        description=("Short ALL-CAPS label preceding the vault status "
+                      "stats on the splash bottom overhead line. "
+                      "Default 'VAULT'."),
+        len_min=3, len_max=14, n_variants=4,
+        default="VAULT",
+    ),
+    Surface(
         key="opencode_proactive_doctor_line",
         description=("ONE line the in-opencode LLM uses as a leading line "
                       "when it self-invokes the proactive_doctor MCP tool "
