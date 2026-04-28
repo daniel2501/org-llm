@@ -1009,7 +1009,41 @@ def cost_per_1k_tokens(
 
 
 def open_url(url: str) -> None:
-    import webbrowser
+    """Open `url` in the user's default browser without leaking the
+    browser's stdout/stderr into our TTY.
+
+    `webbrowser.open()` spawns a child process (xdg-open, qutebrowser,
+    etc.) that inherits stdout/stderr from us. Some browsers print
+    diagnostic lines like "INFO: Opening in existing instance" that
+    interleave with whatever prompt or progress region we render
+    immediately after. The classic case: a hidden-input password
+    prompt for an API key that gets visually clobbered by the
+    browser's log line, so the user can't tell when it's ready for
+    paste. Fix: redirect child stdout/stderr to /dev/null and start
+    a new session so the browser is fully detached from our TTY.
+
+    Falls back to plain webbrowser.open() if direct subprocess
+    detection fails — better an interleaved prompt than no browser.
+    """
+    import webbrowser, subprocess, shutil
+    # webbrowser.get() returns a Browser object whose `.name` is the
+    # underlying command (xdg-open, qutebrowser, firefox, etc.).
+    try:
+        browser = webbrowser.get()
+        cmd = getattr(browser, "name", "") or ""
+        bin_path = shutil.which(cmd) if cmd else ""
+        if bin_path:
+            subprocess.Popen(
+                [bin_path, url],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            return
+    except Exception:
+        pass
+    # Fallback — leakier but always works
     webbrowser.open(url)
 
 

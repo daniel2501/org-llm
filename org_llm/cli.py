@@ -12150,7 +12150,17 @@ def cloud(
         console.print()
         on_screen("Sign in (Google/GitHub button), click [bold]Create Key[/bold], copy it, paste below.")
         on_screen(f"  Key format: [dim]{key_hint}[/dim]")
+        on_screen("[dim]At the prompt: paste your key, then press Enter. "
+                   "Don't press arrow keys — the hidden prompt captures "
+                   "control characters into the value.[/dim]")
         console.print()
+        # Tiny wait so any browser-launch stdout (qutebrowser's
+        # "Opening in existing instance" etc.) lands BEFORE the prompt
+        # renders, instead of interleaving with it. The open_url helper
+        # now redirects child output to /dev/null but a brief settle is
+        # cheap insurance.
+        import time as _t
+        _t.sleep(0.3)
 
         # Step 4: paste + store
         api_key = key or typer.prompt(f"{chosen.name} API key", hide_input=True)
