@@ -2138,8 +2138,16 @@ def _render_splash_logo():
         # got out of that business.
         body_rows.append(_row("bold lcars1", line))
     body_rows.append(_row("", ""))                              # mid spacer
-    body_rows.append(_row("bold lcars2", "your second brain, scripted"))
-    body_rows.append(_row("dim lcars3",  "local · queer · collective · free"))
+    # Themed subtitle + slogan, with hard-coded defaults baked in. The
+    # cache returns the default at render time when cold or the LLM is
+    # down, so we never block the splash on a generation call.
+    from . import theme_studio as _ts
+    subtitle_text = _ts.get_themed("splash_subtitle",
+                                     "your second brain, scripted")
+    slogan_text   = _ts.get_themed("splash_slogan",
+                                     "local · queer · collective · free")
+    body_rows.append(_row("bold lcars2", subtitle_text))
+    body_rows.append(_row("dim lcars3",  slogan_text))
     body_rows.append(_row("", ""))                              # bottom spacer
 
     return Group(top_bar, *body_rows, bottom_bar)
@@ -11027,6 +11035,156 @@ knob_app = typer.Typer(help="Define custom theme knobs (dinosaur, coffee, …) t
                             "extend the trek/commie/queer dials.",
                        cls=PrefixGroup)
 app.add_typer(knob_app, name="knob", rich_help_panel="Themes")
+
+
+# ── theme studio: LLM-driven themed UI strings + cache + verify ───────────
+theme_studio_app = typer.Typer(
+    help="LLM-driven theme cache. Surfaces (splash, panel titles, "
+         "opencode greetings) pull themed variants from the cache; the "
+         "cache regenerates when knobs change.",
+    cls=PrefixGroup,
+)
+app.add_typer(theme_studio_app, name="theme-studio",
+                rich_help_panel="Themes")
+
+
+@theme_studio_app.command("regenerate")
+def theme_studio_regenerate(
+    only:    Annotated[str, typer.Option("--only", "-o",
+              help="Comma-separated surface keys to regenerate (default: all)")] = "",
+    upgrade: Annotated[bool, typer.Option("--upgrade", "-u",
+              help="If fast_model produces too few accepted variants, "
+                   "retry once with chat_model")] = True,
+):
+    """Regenerate the LLM-driven theme cache for the active dial levels.
+
+    Hits the LLM once per registered surface, runs every candidate
+    through a quality gate (length / theme keyword / no forbidden
+    phrases / well-formed Rich markup), and writes survivors to
+    ~/.local/share/org-llm/theme-cache.json. Surfaces fall back to
+    hardcoded defaults at render time when the cache is cold or
+    insufficient — this is just the cache *warm-up* path.
+    """
+    from . import theme_studio as _ts
+    only_keys = [k.strip() for k in only.split(",") if k.strip()] or None
+    engine = _engine()
+    with get_session(engine) as session:
+        url = _ollama_url(session)
+        fast_mdl = (_cfg(session, "fast_model")
+                     or _cfg(session, "chat_model") or "llama3.2")
+        chat_mdl = _cfg(session, "chat_model") or fast_mdl
+    upgrade_mdl = chat_mdl if upgrade and chat_mdl != fast_mdl else ""
+
+    from rich.live import Live
+    from rich.table import Table
+
+    def _table(rows):
+        t = Table(box=None, pad_edge=False, show_header=True)
+        t.add_column("Surface", style="lcars2", no_wrap=True)
+        t.add_column("Status",  style="lcars1")
+        t.add_column("Detail",  style="dim")
+        for r in rows:
+            t.add_row(*r)
+        return t
+
+    rows: list[tuple[str, str, str]] = []
+    state: dict[str, tuple[str, str]] = {}
+    keys = [s.key for s in _ts.SURFACES if (only_keys is None or s.key in only_keys)]
+    for k in keys:
+        state[k] = ("…", "queued")
+
+    def _refresh():
+        return _table([(k, *state[k]) for k in keys])
+
+    with Live(_refresh(), refresh_per_second=4, console=console) as live:
+        def _progress(key, msg):
+            state[key] = ("⌛", "generating") if msg == "generating" else (
+                "✓" if "accepted" in msg and not msg.startswith("0 ") else "△",
+                msg,
+            )
+            live.update(_refresh())
+        report = _ts.regenerate(model=fast_mdl, base_url=url,
+                                  upgrade_model=upgrade_mdl,
+                                  only=only_keys,
+                                  progress=_progress)
+
+    total = len(report)
+    fully_accepted = sum(1 for r in report.values() if r["accepted"] >= 3)
+    on_screen("")
+    on_screen(f"[lcars3]Cache written:[/lcars3] {_ts.cache_path()}")
+    on_screen(f"[lcars1]Surfaces with ≥3 variants:[/lcars1] "
+              f"{fully_accepted}/{total}")
+    if fully_accepted < total // 2:
+        on_screen("[yellow]LLM gate-passed too few variants. "
+                  "The active model may be undersized for theming. "
+                  "Try [bold]org-llm models --tune --apply[/bold] or "
+                  "[bold]--upgrade[/bold] (default true).[/yellow]")
+    on_screen("[dim]Inspect:[/dim] [bold]org-llm theme-studio verify[/bold]")
+
+
+@theme_studio_app.command("verify")
+def theme_studio_verify(
+    only: Annotated[str, typer.Option("--only", "-o",
+            help="Comma-separated surface keys to verify (default: all)")] = "",
+):
+    """Re-run the quality gate over every cached variant. Reports
+    pass/fail per variant with the rejection reason — used to confirm
+    the LLM is actually producing themed output that meets the bar."""
+    from . import theme_studio as _ts
+    from rich.table import Table
+    only_keys = [k.strip() for k in only.split(",") if k.strip()] or None
+    report = _ts.verify(only=only_keys)
+    if not report:
+        on_screen("[dim]Cache is empty. "
+                  "Run [bold]org-llm theme-studio regenerate[/bold].[/dim]")
+        return
+    for sig, by_surface in report.items():
+        console.rule(f"[lcars1]Levels: {sig}[/lcars1]")
+        for skey, payload in by_surface.items():
+            tbl = Table(box=None, pad_edge=False, show_header=True)
+            tbl.add_column("✓", style="lcars3", width=2)
+            tbl.add_column("Variant", style="lcars2")
+            tbl.add_column("Reason",  style="dim")
+            for r in payload["results"]:
+                tbl.add_row("✓" if r["ok"] else "✗",
+                              r["variant"], r["reason"])
+            from rich.panel import Panel
+            console.print(Panel(tbl,
+                                  title=f"[lcars1]{skey}[/lcars1]  "
+                                        f"[dim]{payload['n_passing']}/"
+                                        f"{payload['n_total']} pass[/dim]",
+                                  border_style="lcars2", padding=(0, 1)))
+
+
+@theme_studio_app.command("show")
+def theme_studio_show(
+    surface: Annotated[str, typer.Argument(
+        help="Surface key — try 'splash_subtitle', 'opencode_greeting', etc. "
+             "Blank lists every registered surface.")] = "",
+):
+    """Show the active themed variant for a surface (what the user
+    actually sees right now). Bare invocation lists every registered
+    surface."""
+    from . import theme_studio as _ts
+    if not surface:
+        from rich.table import Table
+        tbl = Table(box=None, pad_edge=False, show_header=True)
+        tbl.add_column("Key",      style="lcars2", no_wrap=True)
+        tbl.add_column("Default",  style="dim")
+        tbl.add_column("Active",   style="lcars1")
+        for s in _ts.SURFACES:
+            active = _ts.get_themed(s.key, s.default)
+            tbl.add_row(s.key, s.default, active)
+        console.print(tbl)
+        return
+    if surface not in _ts.SURFACE_BY_KEY:
+        red_alert(f"Unknown surface {surface!r}. "
+                  f"Run [bold]org-llm theme-studio show[/bold] for the list.")
+        raise typer.Exit(1)
+    s = _ts.SURFACE_BY_KEY[surface]
+    on_screen(f"[lcars1]Surface:[/lcars1]  {s.key}")
+    on_screen(f"[lcars1]Default:[/lcars1]  {s.default}")
+    on_screen(f"[lcars1]Active:[/lcars1]   {_ts.get_themed(s.key, s.default)}")
 
 
 # ── context (LLM-readable current-truth file) ─────────────────────────────
