@@ -2149,7 +2149,7 @@ def _resolve_callsign(surface_key: str, default: str) -> str:
         return default
 
 
-def _lcars_bar(segments, callsign, *, target_width=78):
+def _lcars_bar(segments, callsign, *, target_width=78, pills=True):
     """Build a chunky multi-segment horizontal LCARS bar.
 
     segments: list of (proportion, style) — proportions are normalised
@@ -2158,12 +2158,25 @@ def _lcars_bar(segments, callsign, *, target_width=78):
     callsign: tiny right-justified label like '47-Δ'. Pure flair — the
               real LCARS UI sprinkles these across every panel as
               visual anchor points.
+    pills:    when True (default), each segment is wrapped in
+              Powerline rounded half-circle caps  /  (U+E0B6/U+E0B4)
+              so each block reads as a TNG-style pill button. When
+              False, segments are plain block glyphs (legacy look).
+
+    Pill caps require a nerd font / powerline-patched font — Doom
+    Emacs / Starship / Powerline users have these by default. Falls
+    back to readable boxes in fonts without them.
     """
     from rich.text import Text
+    PILL_L = ""   # left rounded half-circle (filled)
+    PILL_R = ""   # right rounded half-circle (filled)
+
     n_segs   = len(segments)
     n_gaps   = n_segs - 1
-    cs_len   = len(callsign) + 2          # 2 spaces of breathing room
-    body_w   = max(20, target_width - n_gaps - cs_len)
+    # Each pill-cap pair "consumes" 2 columns vs. plain block chars
+    cap_overhead = (2 * n_segs) if pills else 0
+    cs_len   = len(callsign) + 2
+    body_w   = max(20, target_width - n_gaps - cs_len - cap_overhead)
     total_p  = sum(p for p, _ in segments) or 1.0
     bar = Text()
     used = 0
@@ -2173,7 +2186,12 @@ def _lcars_bar(segments, callsign, *, target_width=78):
         else:
             length = max(2, int(round(body_w * prop / total_p)))
             used += length
-        bar.append("█" * length, style=style)
+        if pills:
+            bar.append(PILL_L, style=style)
+            bar.append("█" * length, style=style)
+            bar.append(PILL_R, style=style)
+        else:
+            bar.append("█" * length, style=style)
         if i < n_segs - 1:
             bar.append(" ")               # tiny black gap = LCARS hallmark
     bar.append("  ")
@@ -2273,11 +2291,23 @@ def _render_splash_logo():
         bottom_callsign, target_width=target_w,
     )
 
-    # Vertical rib on the left of every body row. Width matches the
-    # rounded corners on top/bottom so the visual frame snaps shut.
-    rib = "███   "
+    # Vertical rib on the left of every body row, with curve-cut
+    # quadrant glyphs at top + bottom so the rib FLOWS into the bars
+    # instead of abutting them in a hard square. The pill caps on
+    # the bars + ▟/▜ elbows on the rib together give the TNG "["
+    # silhouette: rounded-down from the top bar, straight column,
+    # rounded-up to the bottom bar.
+    #
+    # ▟ = QUADRANT UPPER LEFT NOT (lower 3 quadrants filled, upper-
+    #     left cut out) — used at TOP of rib so the upper-left corner
+    #     of the rib feels curved-into the bar above.
+    # ▜ = QUADRANT LOWER LEFT NOT (upper 3 + lower-right filled) —
+    #     used at BOTTOM of rib for the mirror effect.
+    rib_mid = "███▌  "        # solid rib + ▌ soft right edge
+    rib_top = "▟██▌  "        # curve-in at upper-left
+    rib_bot = "▜██▌  "        # curve-in at lower-left
 
-    def _row(style_inner, content):
+    def _row(style_inner, content, *, rib=rib_mid):
         """One body row: orange rib + (styled) content."""
         t = Text()
         t.append(rib, style="lcars1")
@@ -2285,7 +2315,7 @@ def _render_splash_logo():
             t.append(content, style=style_inner)
         return t
 
-    body_rows = [_row("", "")]                                  # top spacer
+    body_rows = [_row("", "", rib=rib_top)]                     # top elbow
     for line in _SPLASH_ASCII.splitlines():                     # the figlet
         # Per-row style cycle through lcars1/2/3 to give that "live
         # readout" multi-color feel. One color per ROW (not per glyph)
@@ -2314,7 +2344,7 @@ def _render_splash_logo():
     station_styles = ["lcars1", "lcars3", "lcars2", "lcars3", "lcars1", "lcars2"]
     station_dots   = ["◉",      "◉",      "◎",      "◯",      "◉",      "◯"]
     station_row = Text()
-    station_row.append(rib, style="lcars1")
+    station_row.append(rib_mid, style="lcars1")
     for i, label in enumerate(stations):
         st  = station_styles[i % len(station_styles)]
         dot = station_dots[i % len(station_dots)]
@@ -2323,7 +2353,7 @@ def _render_splash_logo():
         if i < len(stations) - 1:
             station_row.append("   ", style="")
     body_rows.append(station_row)
-    body_rows.append(_row("", ""))                              # bottom spacer
+    body_rows.append(_row("", "", rib=rib_bot))                 # bottom elbow
 
     return Group(top_overhead, top_bar,
                   *body_rows,
