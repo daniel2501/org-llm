@@ -10288,6 +10288,211 @@ def mcp():
     _mcp_main()
 
 
+def _bundled_pi_extension() -> Path:
+    """Path to the TypeScript Pi extension shipped with the package."""
+    return Path(__file__).resolve().parent / "pi_extension" / "pi-org-llm.ts"
+
+
+def _user_pi_extensions_dir() -> Path:
+    """Where the user's Pi extensions live (Pi convention)."""
+    return Path("~/.pi/extensions").expanduser()
+
+
+def _pi_bin() -> str | None:
+    """Locate the `pi` binary across known install locations. Pi installs
+    via curl|bash usually drop it under ~/.bun/bin or ~/.local/bin; the
+    npm path puts it on the global npm bin dir."""
+    import shutil as _sh
+    found = _sh.which("pi")
+    if found:
+        return found
+    for cand in (
+        Path("~/.bun/bin/pi").expanduser(),
+        Path("~/.local/bin/pi").expanduser(),
+        Path("/opt/homebrew/bin/pi"),
+        Path("/usr/local/bin/pi"),
+    ):
+        if cand.exists():
+            return str(cand)
+    # npm global bin?
+    if _sh.which("npm"):
+        try:
+            import subprocess as _sp
+            r = _sp.run(["npm", "bin", "-g"], capture_output=True,
+                          text=True, timeout=5)
+            cand = Path(r.stdout.strip()) / "pi"
+            if cand.exists():
+                return str(cand)
+        except Exception:
+            pass
+    return None
+
+
+def _install_pi_via_curl() -> bool:
+    """Run pi.dev's official installer. Returns True on success."""
+    import subprocess as _sp
+    import shutil as _sh
+    if not _sh.which("curl"):
+        red_alert("curl not found — install curl OR run "
+                  "[bold]npm install -g @mariozechner/pi-coding-agent[/bold] manually.")
+        return False
+    on_screen("[dim]Running:[/dim] curl -fsSL https://pi.dev/install.sh | bash")
+    try:
+        # Two-step so we can show meaningful errors instead of "bash failed".
+        r1 = _sp.run(["curl", "-fsSL", "https://pi.dev/install.sh"],
+                       capture_output=True, text=True, timeout=30)
+        if r1.returncode != 0 or not r1.stdout:
+            red_alert(f"Couldn't fetch installer: {r1.stderr.strip()[:200]}")
+            return False
+        r2 = _sp.run(["bash"], input=r1.stdout, text=True, timeout=180)
+        return r2.returncode == 0
+    except Exception as e:
+        red_alert(f"Pi install failed: {e}")
+        return False
+
+
+def _install_pi_via_npm() -> bool:
+    import subprocess as _sp, shutil as _sh
+    if not _sh.which("npm"):
+        return False
+    on_screen("[dim]Running:[/dim] npm install -g @mariozechner/pi-coding-agent")
+    try:
+        r = _sp.run(["npm", "install", "-g", "@mariozechner/pi-coding-agent"],
+                       timeout=300)
+        return r.returncode == 0
+    except Exception as e:
+        red_alert(f"npm install failed: {e}")
+        return False
+
+
+def _wire_pi_config(extension_path: Path) -> bool:
+    """Add our extension to ~/.pi/config.json so `pi` loads it
+    automatically. Best-effort — if the file format changes we just
+    leave a hint instead of clobbering it."""
+    import json as _json
+    cfg_path = Path("~/.pi/config.json").expanduser()
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg: dict = {}
+    if cfg_path.exists():
+        try:
+            cfg = _json.loads(cfg_path.read_text() or "{}")
+            if not isinstance(cfg, dict):
+                return False   # don't clobber unexpected shape
+        except Exception:
+            return False
+    extensions = cfg.get("extensions") or []
+    if not isinstance(extensions, list):
+        return False
+    target = str(extension_path)
+    if target not in extensions:
+        extensions.append(target)
+    cfg["extensions"] = extensions
+    try:
+        cfg_path.write_text(_json.dumps(cfg, indent=2))
+        return True
+    except Exception:
+        return False
+
+
+@app.command(rich_help_panel="Workspaces")
+def pi(
+    install: Annotated[bool, typer.Option("--install", "-i",
+              help="Install Pi (if missing) and copy the bridge "
+                   "extension to ~/.pi/extensions/")] = False,
+    launch:  Annotated[bool, typer.Option("--launch", "-l",
+              help="After install, exec into `pi` so you land in the "
+                   "Pi TUI with the bridge already loaded")] = False,
+    show:    Annotated[bool, typer.Option("--show", "-s",
+              help="Print the path to the bundled extension and exit")] = False,
+    use_npm: Annotated[bool, typer.Option("--npm",
+              help="Prefer `npm install -g` over the curl installer")] = False,
+):
+    """Bridge org-llm into [Pi](https://pi.dev/) — alternate conversational interface.
+
+    Pi is a minimal MIT-licensed terminal coding harness with deep
+    TypeScript hooks (input interception, per-turn system prompts, full
+    UI control). It doesn't ship with MCP support; the bundled
+    [bold]pi-org-llm[/bold] extension adds it for org-llm specifically.
+
+    [lcars1]Quickstart:[/lcars1]
+      [bold]org-llm pi --install[/bold]      install Pi if missing + copy extension
+      [bold]org-llm pi --launch[/bold]       install (idempotent) + launch Pi TUI
+      [bold]org-llm pi --show[/bold]         print path to bundled extension
+
+    The extension auto-loads via [bold]~/.pi/config.json[/bold] so plain
+    [bold]pi[/bold] picks it up. To opt out per-session, run
+    [bold]pi --no-extensions[/bold] (Pi's flag).
+
+    See [bold]org-llm source pi_extension[/bold] for the bridge source.
+    """
+    src = _bundled_pi_extension()
+    if show:
+        console.print(str(src))
+        return
+    if not src.exists():
+        red_alert(f"Bundled Pi extension missing at {src}. Reinstall org-llm.")
+        raise typer.Exit(1)
+
+    pi_bin = _pi_bin()
+    if install:
+        if pi_bin:
+            on_screen(f"[dim]Pi already installed:[/dim] {pi_bin}")
+        else:
+            hail("Installing Pi…")
+            ok = (_install_pi_via_npm() if use_npm else _install_pi_via_curl())
+            if not ok:
+                # Fall through to the other installer as a last resort
+                ok = (_install_pi_via_curl() if use_npm else _install_pi_via_npm())
+            if not ok:
+                red_alert("Pi install failed. Try manually:")
+                on_screen("  [bold]curl -fsSL https://pi.dev/install.sh | bash[/bold]")
+                on_screen("  [bold]npm install -g @mariozechner/pi-coding-agent[/bold]")
+                raise typer.Exit(1)
+            pi_bin = _pi_bin()
+            if pi_bin:
+                hail(f"Pi installed at {pi_bin}")
+
+        # Copy the bundled extension to user dir.
+        dst_dir = _user_pi_extensions_dir()
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        dst = dst_dir / src.name
+        import shutil as _sh
+        _sh.copy(src, dst)
+        hail(f"Installed bridge: {dst}")
+
+        # Wire ~/.pi/config.json so plain `pi` loads it.
+        if _wire_pi_config(dst):
+            on_screen("[lcars3]Wired into ~/.pi/config.json — "
+                      "plain [bold]pi[/bold] will auto-load the extension.[/lcars3]")
+        else:
+            on_screen("[yellow]Couldn't auto-wire ~/.pi/config.json. "
+                      "Add manually:[/yellow]")
+            on_screen("  [bold]" '{ "extensions": ["' + str(dst) + '"] }' "[/bold]")
+            on_screen("  [dim]…or invoke per-session:[/dim] "
+                      f"[bold]pi -e {dst}[/bold]")
+        if not launch:
+            on_screen("[dim]Try:[/dim] [bold]org-llm pi --launch[/bold]  "
+                      "or just [bold]pi[/bold]")
+        return
+
+    # Default / --launch path
+    if not pi_bin:
+        red_alert("Pi not installed. Run [bold]org-llm pi --install[/bold] first.")
+        raise typer.Exit(1)
+    if launch or not install:
+        hail(f"Launching Pi (with org-llm bridge)…")
+        # Make sure the user dir copy exists before exec — important for
+        # the case where they `--launch` directly without `--install`.
+        dst_dir = _user_pi_extensions_dir()
+        dst = dst_dir / src.name
+        if not dst.exists():
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            import shutil as _sh
+            _sh.copy(src, dst)
+            on_screen(f"[dim]Seeded extension at {dst}[/dim]")
+        os.execvp(pi_bin, [pi_bin])
+
+
 @app.command(rich_help_panel="LLM Auth (MCP)")
 def grant(
     path: Annotated[str, typer.Argument(help="Filesystem path to authorise the LLM to read")],

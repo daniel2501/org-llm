@@ -708,6 +708,108 @@ class TestProactiveDoctor:
         assert "proactive_doctor" in server._tool_manager._tools
 
 
+class TestPiBridge:
+    """`org-llm pi` — bridge to Pi (pi.dev). Bundle ships with the wheel;
+    --install copies it into ~/.pi/extensions/ + wires ~/.pi/config.json."""
+
+    def test_bundled_extension_ships_with_package(self):
+        from org_llm.cli import _bundled_pi_extension
+        p = _bundled_pi_extension()
+        assert p.exists(), f"bundled extension missing at {p}"
+        text = p.read_text()
+        # Sanity-check the bridge is what it claims to be.
+        for marker in ("orgLlmExtension", "tools/list", "tools/call",
+                        "notifications/progress", "notifications/initialized"):
+            assert marker in text, f"missing marker in bridge: {marker}"
+
+    def test_show_prints_bundled_path(self, cli_db):
+        r = runner.invoke(app, ["pi", "--show"])
+        assert r.exit_code == 0
+        assert "pi-org-llm.ts" in r.output
+
+    def test_pi_help_advertises_modes(self, cli_db):
+        r = runner.invoke(app, ["pi", "--help"])
+        assert r.exit_code == 0
+        for flag in ("--install", "--launch", "--show", "--npm"):
+            assert flag in r.output
+
+    def test_install_copies_to_user_dir(self, monkeypatch, tmp_path):
+        """Mock pi as already installed; --install just copies the
+        extension and wires the config."""
+        from org_llm import cli as _cli
+        monkeypatch.setenv("HOME", str(tmp_path))
+        # Pretend pi is already on PATH at a fake location
+        fake_pi = tmp_path / "fake-pi"
+        fake_pi.write_text("#!/bin/sh\nexit 0\n")
+        fake_pi.chmod(0o755)
+        monkeypatch.setattr(_cli, "_pi_bin", lambda: str(fake_pi))
+        # Override the user-extensions dir to land under tmp
+        monkeypatch.setattr(
+            _cli, "_user_pi_extensions_dir",
+            lambda: tmp_path / "pi-extensions",
+        )
+        r = runner.invoke(app, ["pi", "--install"])
+        assert r.exit_code == 0, r.output
+        target = tmp_path / "pi-extensions" / "pi-org-llm.ts"
+        assert target.exists()
+
+    def test_install_invokes_installer_when_missing(self, monkeypatch, tmp_path):
+        """When pi isn't on PATH, --install calls the installer helper.
+        We intercept that helper to avoid actually shelling out."""
+        from org_llm import cli as _cli
+        # First call returns None (not installed); second returns path.
+        states = iter([None, "/fake/pi"])
+        monkeypatch.setattr(_cli, "_pi_bin", lambda: next(states))
+        called: dict[str, bool] = {}
+        def fake_curl():
+            called["curl"] = True
+            return True
+        monkeypatch.setattr(_cli, "_install_pi_via_curl", fake_curl)
+        monkeypatch.setattr(_cli, "_install_pi_via_npm", lambda: False)
+        monkeypatch.setattr(
+            _cli, "_user_pi_extensions_dir",
+            lambda: tmp_path / "ext",
+        )
+        r = runner.invoke(app, ["pi", "--install"])
+        assert r.exit_code == 0, r.output
+        assert called.get("curl") is True
+
+    def test_install_failure_surfaces_manual_steps(self, monkeypatch, tmp_path):
+        from org_llm import cli as _cli
+        monkeypatch.setattr(_cli, "_pi_bin", lambda: None)
+        monkeypatch.setattr(_cli, "_install_pi_via_curl", lambda: False)
+        monkeypatch.setattr(_cli, "_install_pi_via_npm", lambda: False)
+        r = runner.invoke(app, ["pi", "--install"])
+        assert r.exit_code == 1
+        # Should mention both install methods so the user can retry by hand
+        assert "curl" in r.output and "npm" in r.output
+
+    def test_wire_pi_config_appends_extension(self, monkeypatch, tmp_path):
+        from org_llm.cli import _wire_pi_config
+        monkeypatch.setenv("HOME", str(tmp_path))
+        ext = tmp_path / "pi-org-llm.ts"
+        ext.write_text("// bridge")
+        ok = _wire_pi_config(ext)
+        assert ok is True
+        cfg = tmp_path / ".pi" / "config.json"
+        assert cfg.exists()
+        import json as _json
+        data = _json.loads(cfg.read_text())
+        assert str(ext) in data.get("extensions", [])
+
+    def test_wire_pi_config_idempotent(self, monkeypatch, tmp_path):
+        from org_llm.cli import _wire_pi_config
+        monkeypatch.setenv("HOME", str(tmp_path))
+        ext = tmp_path / "pi-org-llm.ts"
+        ext.write_text("// bridge")
+        _wire_pi_config(ext)
+        _wire_pi_config(ext)        # second call should be a no-op
+        import json as _json
+        data = _json.loads((tmp_path / ".pi" / "config.json").read_text())
+        # Extension appears exactly once
+        assert data["extensions"].count(str(ext)) == 1
+
+
 class TestManPage:
     """`org-llm man` derives a man page from the Typer registry. Stays
     in parity with --help / docstrings without a build step."""

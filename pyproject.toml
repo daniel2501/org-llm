@@ -26,10 +26,16 @@ build-backend = "hatchling.build"
 # org-llm` users can `org-llm dbt init` immediately. The starter project
 # lives at org_llm/dbt_templates/ and is copied to ~/.local/share/org-llm/dbt/
 # on init for in-place editing.
+#
+# Same pattern for the Pi extension: org_llm/pi_extension/pi-org-llm.ts
+# ships with the wheel and `org-llm pi --install` copies it into the
+# user's ~/.pi/extensions/ dir.
 [tool.hatch.build.targets.wheel]
 packages = ["org_llm"]
 include = ["org_llm/dbt_templates/**/*.sql",
-           "org_llm/dbt_templates/**/*.yml"]
+           "org_llm/dbt_templates/**/*.yml",
+           "org_llm/pi_extension/**/*.ts",
+           "org_llm/pi_extension/**/*.md"]
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-cov"]

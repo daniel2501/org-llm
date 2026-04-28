@@ -171,6 +171,17 @@ With prefix arg, prompt for model override."
    (format "%s claude" org-llm-binary) org-llm-claude-buffer))
 
 ;;;###autoload
+(defun org-llm-pi (&optional install)
+  "Launch Pi (with the org-llm bridge extension) in a full vterm buffer.
+With prefix arg, run --install instead (idempotent install + wire into
+~/.pi/config.json so plain pi auto-loads the bridge)."
+  (interactive "P")
+  (org-llm--vterm-fullscreen
+   (format "%s pi%s" org-llm-binary
+           (if install " --install" " --launch"))
+   "*org-llm: pi*"))
+
+;;;###autoload
 (defun org-llm-doctor ()
   "Run org-llm doctor health check in vterm."
   (interactive)
@@ -562,6 +573,7 @@ With prefix arg, prompt for model override."
        :desc "Launch opencode"           "o" #'org-llm-launch
        :desc "Launch opencode --cloud"   "O" #'org-llm-launch-cloud
        :desc "Launch Claude Code"        "C" #'org-llm-claude
+       :desc "Launch Pi (bridge)"        "p" #'org-llm-pi
        :desc "Ask notes"                 "a" #'org-llm-ask
        :desc "Ask (reason model)"        "A" (cmd! (org-llm-ask (read-string "Ask (reason): ") t))
        :desc "Search notes"              "s" #'org-llm-search
