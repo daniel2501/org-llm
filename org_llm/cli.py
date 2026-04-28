@@ -16233,21 +16233,37 @@ def _llm_analyze_catalog_diff(summary: dict, engine) -> None:
 
     sys_msg = (
         "You write short, concrete alerts after a cloud-model catalog "
-        "refresh. Output STRICTLY 3-6 bullet lines starting with `• `, "
-        "no preamble, no markdown headers. Each bullet is one observation "
-        "the user might act on. Mention model slugs literally. If their "
-        "current model is affected (price change, deprecated, or a "
-        "cheaper-better alternative emerged), put that bullet first and "
-        "prefix it with `[YOU]`. Be honest if nothing is news — say so "
-        "in one bullet. Never invent slugs that aren't in the data."
+        "refresh. Output STRICTLY 3-6 non-empty bullet lines starting "
+        "with `• `, no preamble, no markdown headers, no blank bullets. "
+        "Each bullet is one observation the user might act on. Mention "
+        "model slugs LITERALLY — copy them character-for-character from "
+        "the data given to you. NEVER invent slugs, even if a similar "
+        "name 'sounds right'. If you don't see a slug in the data, "
+        "don't write it. If their current model is affected (price "
+        "change, dropped, or a cheaper-better alternative emerged), "
+        "put that bullet first and prefix it with `[YOU]`. Be honest "
+        "if nothing is news — say so in one bullet."
     )
+    # Include a short literal slug list so the LLM has explicit grounding.
+    # We supply ONLY the slugs that actually changed or got added (the
+    # full 378-row list would be too much noise).
+    grounded_slugs: list[str] = []
+    grounded_slugs.extend(added[:40])
+    grounded_slugs.extend(c["slug"] for c in price_changes[:40])
+    grounded_slugs = sorted(set(grounded_slugs))
     user_msg = (
         f"User's current cloud config:\n"
         f"  cloud_provider = {cur_provider or '(unset)'}\n"
         f"  cloud_model    = {cur_model or '(unset)'}\n\n"
-        f"Catalog refresh summary:\n"
-        f"  Added slugs:   {added[:30]}\n"
-        f"  Changed prices ({len(price_changes)}):\n"
+        f"AUTHORITATIVE slug list (the ONLY slugs you may reference "
+        f"in your output — anything else is a hallucination):\n"
+    )
+    for s in grounded_slugs[:80]:
+        user_msg += f"  - {s}\n"
+    user_msg += (
+        f"\nCatalog refresh summary:\n"
+        f"  {len(added)} slugs newly added\n"
+        f"  Price changes ({len(price_changes)}):\n"
     )
     for c in price_changes[:20]:
         user_msg += (
@@ -16272,24 +16288,70 @@ def _llm_analyze_catalog_diff(summary: dict, engine) -> None:
         rescue_err = f"{type(e).__name__}: {e}"
 
     if advice:
-        # Sanitize same way as crash-rescue advice — the LLM here gets
-        # the same whitelisted safety check, since we surface its
-        # output as actionable advice to the user.
+        # Drop empty bullets ("• " with nothing after) — the LLM
+        # routinely emits these as separators and they pollute the
+        # panel.
+        import re as _re
+        cleaned = _re.sub(r"^\s*•\s*$\n?", "", advice, flags=_re.M)
+        # Strip leading blank lines from the panel body.
+        cleaned = cleaned.lstrip("\n").rstrip()
+
+        # Anti-hallucination: extract every slug-shaped token from the
+        # LLM output and check it exists in the freshly-merged catalog.
+        # Real example from this session: gemma3 invented
+        # `openai/gpt-125b:free`, `antares/rasputin-latest`,
+        # `deepseek-v4-pro`, etc. — none of which exist. A user could
+        # have followed that advice and tried to switch their config to
+        # a fictional model. The whitelisted shell-pattern sanitizer
+        # doesn't catch this because the strings ARE valid slugs in
+        # SHAPE; they just aren't in the catalog.
+        from . import cloud as _cloud
+        known_slugs = {m.slug.lower() for m in _cloud.CLOUD_MODELS}
+        # Slugs look like `provider/model[:tag]` — at least one slash,
+        # word/dot/colon/dash chars, no whitespace. Conservative regex.
+        _SLUG_RX = _re.compile(r"\b([a-z0-9-]+/[a-z0-9._:-]+)\b",
+                                flags=_re.I)
+        mentioned = set()
+        for m in _SLUG_RX.finditer(cleaned):
+            mentioned.add(m.group(1).lower())
+        invented = sorted(s for s in mentioned if s not in known_slugs)
+
+        # The shell-injection sanitizer still applies (the LLM could
+        # in theory emit `pip install ...` even here). Keep that layer
+        # too.
         try:
             from .rescue import sanitize_llm_advice as _san
-            checked = _san(advice)
+            checked = _san(cleaned)
         except Exception:
             checked = None
         title = "[lcars1]Catalog refresh — alerts[/lcars1]"
-        if checked is not None and not checked.safe:
-            warn = "\n".join(f"  • {f}" for f in checked.flagged)
+        suspect = ((checked is not None and not checked.safe)
+                    or bool(invented))
+        if suspect:
+            flag_lines: list[str] = []
+            if invented:
+                flag_lines.append(
+                    f"LLM mentioned {len(invented)} slug(s) not in the "
+                    f"refreshed catalog — likely hallucinations:")
+                for s in invented[:6]:
+                    flag_lines.append(f"  · {s}")
+                if len(invented) > 6:
+                    flag_lines.append(f"  · …and {len(invented)-6} more")
+            if checked is not None:
+                for f in checked.flagged:
+                    flag_lines.append(f"  · {f}")
+            warn = "\n".join(flag_lines)
             console.print(Panel(
                 f"[yellow]Advice flagged — verify before acting:[/yellow]\n"
-                f"{warn}\n\n{advice}",
+                f"{warn}\n\n{cleaned}",
                 title=title, border_style="warn", padding=(1, 2),
             ))
+            on_screen("[dim]The flagged slugs are not in the catalog. "
+                       "Cross-check with[/dim] [bold]org-llm cloud "
+                       "--tune[/bold] [dim]which only suggests real "
+                       "models from the merged data.[/dim]")
         else:
-            console.print(Panel(advice, title=title,
+            console.print(Panel(cleaned, title=title,
                                   border_style="lcars2", padding=(1, 2)))
     else:
         # Fallback: deterministic summary so the user always sees
