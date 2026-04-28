@@ -13952,6 +13952,145 @@ def theme(
     make_it_so()
 
 
+@app.command(rich_help_panel="Themes")
+def palette(
+    name: Annotated[str, typer.Argument(
+        help="LCARS palette name (classic | red | green | gold | violet) "
+             "OR 'show' / 'reset'. Bare = list every named palette + the "
+             "current selection.")] = "",
+    primary:   Annotated[str, typer.Option("--primary",
+                help="Override the primary LCARS channel with a hex color "
+                     "(e.g. #FF9900). Empty = clear the override.")] = None,
+    secondary: Annotated[str, typer.Option("--secondary",
+                help="Override the secondary LCARS channel with a hex color")] = None,
+    tertiary:  Annotated[str, typer.Option("--tertiary",
+                help="Override the tertiary LCARS channel with a hex color")] = None,
+):
+    """Pick or preview an LCARS color palette.
+
+    Five named palettes ship: classic (TNG default orange/purple/blue),
+    red (red-alert), green (Voyager astrometrics), gold (engineering),
+    violet (sciences). Per-channel hex overrides via --primary /
+    --secondary / --tertiary stack on top of the named palette.
+
+    Bare invocation lists every palette with a text-based color slider
+    so you can see the swatches without leaving the terminal.
+    """
+    from . import palettes as _pal
+    from .db   import Config as _Cfg
+    from rich.table import Table
+    from rich.panel import Panel
+
+    if name == "reset":
+        engine = _engine()
+        with get_session(engine) as session:
+            for k in ("lcars_palette",
+                       "lcars_color_primary",
+                       "lcars_color_secondary",
+                       "lcars_color_tertiary"):
+                row = session.get(_Cfg, k)
+                if row:
+                    session.delete(row)
+            session.commit()
+        hail("LCARS palette reset to classic (no overrides).")
+        make_it_so()
+        return
+
+    # No arg OR explicit "show" → list all palettes + the active one
+    if not name or name == "show":
+        active = _pal.active_palette_name()
+        overrides = _pal.palette_overrides()
+        # Render each palette as a text-based "slider": name + a
+        # row of three colored block segments showing the swatches.
+        tbl = Table(box=None, pad_edge=False, show_header=True,
+                     header_style="lcars1")
+        tbl.add_column("",          width=2)
+        tbl.add_column("Name",      style="lcars2", no_wrap=True, width=10)
+        tbl.add_column("Swatch",    no_wrap=True, width=24)
+        tbl.add_column("Description", style="dim")
+        for pname, bundle in _pal.list_palettes():
+            marker = "◉" if pname == active else "◯"
+            # Swatch: three contiguous "█████" blocks each in the
+            # palette's primary/secondary/tertiary color
+            swatch_bits = []
+            for k, prefix in (("lcars1", "[#"),
+                               ("lcars2", "[#"),
+                               ("lcars3", "[#")):
+                hex_val = bundle.get(k, "#888888").lstrip("#")
+                swatch_bits.append(f"[{bundle[k]}]████████[/{bundle[k]}]")
+            swatch = "".join(swatch_bits)
+            tbl.add_row(marker, pname, swatch,
+                          bundle.get("description", ""))
+        console.print()
+        console.print(Panel(tbl,
+                              title="[lcars1]LCARS palettes[/lcars1]  "
+                                    f"[dim]active: {active}[/dim]",
+                              border_style="lcars2", padding=(1, 1)))
+        # Per-channel overrides if any
+        if overrides:
+            console.print()
+            on_screen("[lcars1]Active per-channel overrides:[/lcars1]")
+            for k, v in overrides.items():
+                on_screen(f"  [lcars2]{k:<8}[/lcars2] [{v}]████████[/{v}]  {v}")
+        console.print()
+        on_screen("[dim]Pick:[/dim]   [bold]org-llm palette <name>[/bold]")
+        on_screen("[dim]Tweak:[/dim]  [bold]org-llm palette <name> "
+                  "--primary '#RRGGBB'[/bold]")
+        on_screen("[dim]Reset:[/dim]  [bold]org-llm palette reset[/bold]")
+        return
+
+    # Validate the chosen palette name
+    if name not in _pal.PALETTES:
+        red_alert(f"Unknown palette {name!r}. "
+                  f"Choices: {', '.join(p[0] for p in _pal.list_palettes())}.")
+        raise typer.Exit(1)
+
+    # Validate hex overrides up-front so we don't half-apply
+    overrides_to_set: list[tuple[str, str | None]] = []
+    for opt_val, cfg_key in ((primary,   "lcars_color_primary"),
+                               (secondary, "lcars_color_secondary"),
+                               (tertiary,  "lcars_color_tertiary")):
+        if opt_val is None:
+            continue
+        if opt_val == "":
+            overrides_to_set.append((cfg_key, None))   # delete row
+            continue
+        if not _pal._is_hex_color(opt_val):
+            red_alert(f"{cfg_key} value {opt_val!r} is not a hex color "
+                      "(expected #RRGGBB).")
+            raise typer.Exit(1)
+        overrides_to_set.append((cfg_key, _pal._normalise_hex(opt_val)))
+
+    # Persist
+    engine = _engine()
+    with get_session(engine) as session:
+        row = session.get(_Cfg, "lcars_palette")
+        if row:
+            row.value = name
+        else:
+            session.add(_Cfg(key="lcars_palette", value=name))
+        for cfg_key, val in overrides_to_set:
+            existing = session.get(_Cfg, cfg_key)
+            if val is None:
+                if existing:
+                    session.delete(existing)
+            else:
+                if existing:
+                    existing.value = val
+                else:
+                    session.add(_Cfg(key=cfg_key, value=val))
+        session.commit()
+
+    bundle = _pal.PALETTES[name]
+    swatch = "".join(f"[{bundle[k]}]████████[/{bundle[k]}]"
+                       for k in ("lcars1", "lcars2", "lcars3"))
+    console.print()
+    on_screen(f"[lcars1]Active LCARS palette:[/lcars1] [bold]{name}[/bold]  {swatch}")
+    on_screen(f"[dim]{bundle.get('description', '')}[/dim]")
+    on_screen("[dim]Run any command (e.g. [bold]org-llm[/bold]) to see it apply.[/dim]")
+    make_it_so()
+
+
 @app.command(rich_help_panel="Maintenance")
 def completion(
     shell:   Annotated[str,  typer.Argument(help="Shell: fish | bash | zsh | powershell | pwsh")] = "fish",

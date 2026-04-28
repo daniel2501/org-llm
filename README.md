@@ -30,8 +30,43 @@ shortcuts; first-run users see a setup nudge instead.
 </div>
 
 <div align="center">
-  <img src="docs/img/10-splash.svg" alt="org-llm splash" width="780" />
+  <img src="docs/img/24-splash-lcars-classic.svg" alt="org-llm splash — LCARS classic colorway" width="900" />
 </div>
+
+### Five LCARS palettes, switchable via `org-llm palette <name>`
+
+The splash + every themed surface (panels, banners, opencode greeting,
+MCP tool decorations) re-skins to whichever LCARS palette is active.
+Switch with one command — no rebuild, no editor open, no config file
+edit. Per-channel hex overrides via `--primary` / `--secondary` /
+`--tertiary` stack on top.
+
+```sh
+org-llm palette                            # text-based palette picker
+org-llm palette red                        # red-alert mode
+org-llm palette green                      # Voyager astrometrics
+org-llm palette gold --primary '#FFD60A'   # gold + custom override
+org-llm palette reset                      # back to classic
+```
+
+<table>
+<tr>
+  <td align="center"><b>classic</b><br/><sub>orange · purple · blue</sub><br/>
+    <img src="docs/img/24-splash-lcars-classic.svg" alt="LCARS classic" /></td>
+  <td align="center"><b>red</b><br/><sub>red · salmon · amber</sub><br/>
+    <img src="docs/img/20-splash-lcars-red.svg" alt="LCARS red — red alert" /></td>
+</tr>
+<tr>
+  <td align="center"><b>green</b><br/><sub>green · sky · gold</sub><br/>
+    <img src="docs/img/21-splash-lcars-green.svg" alt="LCARS green — Voyager astrometrics" /></td>
+  <td align="center"><b>gold</b><br/><sub>gold · amber · red</sub><br/>
+    <img src="docs/img/22-splash-lcars-gold.svg" alt="LCARS gold — engineering" /></td>
+</tr>
+<tr>
+  <td align="center" colspan="2"><b>violet</b><br/><sub>violet · magenta · sky</sub><br/>
+    <img src="docs/img/23-splash-lcars-violet.svg" alt="LCARS violet — sciences / medbay" width="500" /></td>
+</tr>
+</table>
 
 ---
 

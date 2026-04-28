@@ -194,8 +194,26 @@ def _selected_mode() -> str:
     return "dark"
 
 
+def _apply_lcars_palette_overrides(base: dict[str, str]) -> dict[str, str]:
+    """Layer named-bundle + per-channel LCARS overrides on top of the
+    base dark/light palette. See palettes.py for the resolution order.
+    Resilient: any failure leaves the base palette unchanged."""
+    try:
+        from . import palettes as _p
+        overrides = _p.palette_overrides()
+        if overrides:
+            merged = dict(base)
+            merged.update(overrides)
+            return merged
+    except Exception:
+        pass
+    return base
+
+
 THEME_MODE: str = _selected_mode()
-PALETTE: dict[str, str] = LIGHT_PALETTE if THEME_MODE == "light" else DARK_PALETTE
+PALETTE: dict[str, str] = _apply_lcars_palette_overrides(
+    LIGHT_PALETTE if THEME_MODE == "light" else DARK_PALETTE
+)
 
 
 def _resolve_mode_with_db() -> str:
@@ -222,13 +240,15 @@ def _resolve_mode_with_db() -> str:
 
 
 def reload_palette() -> None:
-    """Re-read the palette after a config change. Idempotent."""
+    """Re-read the palette + LCARS overrides after a config change.
+
+    Always rebuilds (was: short-circuit when mode unchanged) so an
+    `lcars_palette` change without a `theme` change still propagates.
+    """
     global THEME_MODE, PALETTE, THEME, console
-    new_mode = _resolve_mode_with_db()
-    if new_mode == THEME_MODE:
-        return
-    THEME_MODE = new_mode
-    PALETTE = LIGHT_PALETTE if THEME_MODE == "light" else DARK_PALETTE
+    THEME_MODE = _resolve_mode_with_db()
+    base = LIGHT_PALETTE if THEME_MODE == "light" else DARK_PALETTE
+    PALETTE = _apply_lcars_palette_overrides(base)
     THEME = _build_theme(PALETTE)
     console = Console(theme=THEME)
 

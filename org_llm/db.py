@@ -197,6 +197,15 @@ MODEL_DEFAULTS = {
     "text_model":     "gemma3",             # 5.4 GB — summarization, text analysis
     "embed_dim":      "768",
     "theme":          "dark",               # dark | light  (UI color mode)
+    # ── LCARS palette + per-channel overrides ─────────────────────────────
+    # `lcars_palette` picks one of the named bundles in palettes.py
+    # (classic | red | green | gold | violet). The per-channel keys
+    # accept any hex color and stack on top of the named palette;
+    # empty string = no override.
+    "lcars_palette":           "classic",
+    "lcars_color_primary":     "",
+    "lcars_color_secondary":   "",
+    "lcars_color_tertiary":    "",
     "code_dirs":      "~/repos",            # comma-sep paths for `code-index`
     "db_version":     "1",
     # ── Proactive doctor knobs ─────────────────────────────────────────────
