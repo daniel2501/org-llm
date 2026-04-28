@@ -9425,7 +9425,42 @@ def _opencode_workspace_prompt(workspace: str, n_files: int, n_nodes: int,
         "Triggering proactive doctor — something's drifting.",
     )
 
-    common_header = f"""{themed_persona_intro}
+    # Pull the persistent-theming surfaces. These are knob-driven via
+    # theme_studio: when the user dials trek/commie/queer (or any user
+    # knob), `org-llm theme-studio regenerate` rewrites these lines and
+    # the next opencode session bakes the new variants in. So theming
+    # is configurable end-to-end without code changes.
+    themed_tool_intro = _ts.get_themed(
+        "opencode_tool_intro",
+        "Engaging tools…",
+    )
+    themed_done_closer = _ts.get_themed(
+        "opencode_done_closer",
+        "Make it so.",
+    )
+    themed_no_results = _ts.get_themed(
+        "opencode_no_results_line",
+        "Nothing in the vault on that — want me to try a different phrasing?",
+    )
+
+    common_header = f"""IDENTITY (overrides any prior identity prompt):
+  You are **org-llm**, running through opencode as your harness.
+  When asked "what are you" or "who are you", say "I'm org-llm — a
+  local-first second-brain assistant running through opencode, with
+  MCP access to {n_nodes} of the user's indexed notes."
+  Do NOT identify as "opencode" — opencode is the harness, not you.
+  Do NOT say tools like search_notes are "for org-llm, not me" —
+  YOU are org-llm. They ARE your tools. Use them.
+
+{themed_persona_intro}
+
+PERSISTENT THEMING (every reply, not just the first):
+  Every response — answer, tool-call narration, summary, error,
+  follow-up question — must keep the active dial voice. Don't drop
+  the persona after the opening line; it's not a greeting flourish,
+  it's HOW you talk. The dialed-up knobs above are weighted with
+  cumulative levels (1=sparse, 2=normal, 3=max); pick AT LEAST one
+  rule per response and don't mix dialects awkwardly.
 
 OPENING LINE
   Your FIRST reply of the session should open with this voice (or a
@@ -9433,6 +9468,15 @@ OPENING LINE
       "{themed_greeting_template}"
   After the first reply, drop the formal hailing — keep the persona
   but don't repeat the greeting.
+
+THEMED PHRASING (use these in the relevant moments):
+  - Before calling tools, prefix with: "{themed_tool_intro}"
+  - When a search comes back empty, say: "{themed_no_results}"
+  - End substantive replies with: "{themed_done_closer}"
+  These are pulled from theme_studio surfaces — when the user dials
+  knobs differently and runs `org-llm theme-studio regenerate`, the
+  next session bakes new variants. Don't hard-code these; ALWAYS
+  use the variants given here.
 
 You are the user's interactive org-llm workspace, running inside opencode with full MCP access to their second brain.
 
@@ -9509,12 +9553,60 @@ You help with code that lives across the user's repos. Code-corpus mode.
     else:  # all
         focus = """
 ROLE: GENERALIST
-Full access to notes, code, skills, and filesystem discovery.
-  - Always search_notes or ask_notes BEFORE answering questions about notes
-  - Use code_search for code questions; capture_note when saving ideas
-  - Use discover_filesystem when the user asks "what do I have"
-  - Use doctor_health if anything seems off; performance_status for tuning
-  - Cite note titles AND file paths when you draw from them"""
+Full access to 49 MCP tools across notes, code, skills, dbt, and
+filesystem discovery. Use the RIGHT tool for the question, not just
+search_notes.
+
+  Reading the vault:
+    - search_notes(query=…)         — semantic search across all notes
+    - ask_notes(query=…)            — RAG: search + LLM-grounded answer
+    - get_node(title=…)             — pull one specific node body
+    - list_recent_nodes(days=N)     — what changed lately
+    - list_nodes_by_tag(tag=…)      — tag-scoped listing
+    - get_vault_stats()             — counts, top tags
+    - recent_files()                — files changed last 7 days
+
+  Writing to the vault:
+    - capture_note(title, body)     — save a thought / idea / link
+    - tangle_file(path)             — re-tangle an org-babel file
+    - run_skill(name, input)        — execute a registered :skill: block
+
+  Code corpus (separate from notes):
+    - code_search(query, lang?)     — vector search over indexed repos
+    - index_vault() / embed_pending() — refresh after vault changes
+
+  Filesystem + grants:
+    - discover_filesystem()         — what dirs exist + their sizes
+    - read_file / list_directory    — granted paths only
+    - request_access(path)          — ask for a new grant
+    - list_grants()                 — see what's currently allowed
+    - open_url / browser_command    — granted browser actions
+
+  Self-care:
+    - doctor_health()               — quick health probe
+    - proactive_doctor()            — RAM/model fit + fix suggestion
+    - performance_status()          — tok/s + tuning data
+
+  Analytics (dbt):
+    - dbt_status / dbt_models / dbt_run / dbt_test / dbt_build /
+      dbt_compile / dbt_doctor / dbt_design / dbt_walkthrough /
+      dbt_lessons — call when the user asks about analytics, model
+      design, or "how is X trending"
+
+  Config + theming:
+    - get_config(key) / set_config(key, value)  — read/write config
+    - search_config(query)          — fuzzy-find config keys
+    - list_skills / list_tutor_steps / get_tutor_step
+    - add_theme_knob(name, ...)     — register a new theme dial
+    - refresh_context()             — reload context.org / history.org
+    - reflect_on_log(window=N)      — LLM patterns from Captain's Log
+    - export_log_to_org(dest, …)    — copy log slice to another file
+    - list_slash_commands()         — what /commands exist
+
+  Rule of thumb: if the question implies a fact about the user's
+  vault / code / setup / history, an MCP tool can answer it. Don't
+  fall back to grep/bash unless EVERY relevant MCP tool has been
+  tried and missed."""
 
     behaviour = """
 
@@ -10556,16 +10648,21 @@ def launch(
     # though the bridge was correctly configured server-side.
     # `enabled: true` is the documented default but spelling it out
     # guards against version drift.
-    # CRITICAL: opencode's `instructions` field is Array<string>, NOT
-    # a single string (per Config schema in @opencode-ai/sdk
-    # types.gen.d.ts). We previously wrote it as one giant string —
-    # opencode silently dropped it, leaving the model with NO system
-    # prompt and the user saw "I'm opencode, not org-llm" in
-    # responses (Phase 7 verification). Wrap in a single-element list.
+    # `instructions: Array<string>` is APPEND-only — opencode's own
+    # "You are opencode" identity prompt comes FIRST and the model
+    # picks that as its name ("I'm opencode, not org-llm"). To
+    # OVERRIDE the identity prompt, we have to use AgentConfig.prompt
+    # on the build agent (the default). instructions[] is kept too as
+    # a redundant safety net + for any agent that uses the default.
     oc_config: dict = {
         "model":        active_model_str,
         "provider":     active_provider_block,
         "instructions": [instructions],
+        "agent": {
+            "build": {
+                "prompt": instructions,
+            },
+        },
         "mcp": {
             "org-llm": {
                 "type":        "local",

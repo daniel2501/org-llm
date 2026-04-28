@@ -295,6 +295,32 @@ SURFACES: list[Surface] = [
         len_min=20, len_max=110, n_variants=5,
         default="Triggering proactive doctor — something's drifting.",
     ),
+    Surface(
+        key="opencode_tool_intro",
+        description=("Short themed phrase the in-opencode LLM prefixes "
+                      "to its tool-call narration. Default 'Engaging tools…' "
+                      "(Trek). Knob-driven: commie might prefer "
+                      "'Coordinating effort…', queer might prefer "
+                      "'Reaching out, love…'."),
+        len_min=8, len_max=36, n_variants=5,
+        default="Engaging tools…",
+    ),
+    Surface(
+        key="opencode_done_closer",
+        description=("Short themed phrase the in-opencode LLM ends "
+                      "substantive replies with. Default 'Make it so.' "
+                      "(Trek). Commie: 'Solidarity.', queer: 'With care, love.'"),
+        len_min=4, len_max=30, n_variants=6,
+        default="Make it so.",
+    ),
+    Surface(
+        key="opencode_no_results_line",
+        description=("ONE line for when search_notes / ask_notes returns "
+                      "empty. Friendly + offers a re-phrase. Stays in the "
+                      "active dial voice."),
+        len_min=20, len_max=120, n_variants=5,
+        default="Nothing in the vault on that — want me to try a different phrasing?",
+    ),
 ]
 
 SURFACE_BY_KEY = {s.key: s for s in SURFACES}
