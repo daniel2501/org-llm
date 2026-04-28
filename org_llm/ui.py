@@ -694,7 +694,7 @@ def _pride_banner() -> str:
     headline_color = PALETTE["fg"] if THEME_MODE == "light" else "white"
     blocks = "  [pride.red]█[/] [pride.orange]█[/] [pride.yellow]█[/] [pride.green]█[/] [pride.blue]█[/] [pride.violet]█[/]"
     rev    = "[pride.violet]█[/] [pride.blue]█[/] [pride.green]█[/] [pride.yellow]█[/] [pride.orange]█[/] [pride.red]█[/]"
-    return f"{blocks}  [bold {headline_color}]QUEER & PRESENT[/]  {rev}"
+    return f"{blocks}  [bold {headline_color}]PRIDE & PRESENT[/]  {rev}"
 
 
 PRIDE_BANNER = _pride_banner()
