@@ -1518,6 +1518,168 @@ def create_mcp_server():
             lines.append("  (call again with clear=True to mark as read)")
         return "\n".join(lines)
 
+    # ── self_rewrite: LLM-driven patch of org-llm's own source ──────────────
+    @server.tool()
+    async def self_rewrite(
+            module: str,
+            intent: str,
+            user_approved: bool = False,
+            ctx: Context | None = None) -> str:
+        """LLM-rewrite ONE org-llm source file to fix a bug or address a
+        well-defined intent. Snapshots before any change; verifies by
+        re-running tests; auto-rolls-back if the patch introduces a
+        regression.
+
+        STRICT GUARDRAILS:
+          • `user_approved` MUST be True. Set it only after the user
+            has read your rewrite proposal and replied yes IN CHAT.
+            Calling with user_approved=False is a hard error.
+          • `module` must resolve to a file inside the org_llm/
+            package. No arbitrary filesystem writes — paths outside
+            the package raise.
+          • A snapshot is created BEFORE any write so
+            `org-llm self rollback <snap_id>` always exists as escape.
+
+        Steps (deterministic, in this order):
+          1. Resolve `module` to org_llm/<name>.py.
+          2. Take a snapshot via `self_mod.create_snapshot`.
+          3. Ask the configured code_model for a JSON patch via
+             `self_mod.llm_revise(target, intent)`.
+          4. Apply via `self_mod.apply_plan`. If apply refuses (bad
+             diff shape), bail with snapshot intact.
+          5. Run `pytest` on the targeted-tests subset (theme_studio
+             + workspace_mcp + cli) under a 5-minute timeout.
+          6. If tests pass, return success + the snapshot ID for
+             reference. If tests FAIL, automatically roll back via
+             `self_mod.rollback(snap)` and return the rollback summary.
+
+        Returns a structured multi-line string the LLM can read out
+        to the user verbatim — never auto-applies further changes."""
+        if not user_approved:
+            return ("REFUSED: self_rewrite requires user_approved=True. "
+                    "The user must read your rewrite proposal in chat "
+                    "and explicitly say yes BEFORE you call this tool.")
+        import os as _os
+        if (_os.environ.get("ORG_LLM_PROACTIVE_DOCTOR", "")
+                .strip().lower() == "off"):
+            return ("REFUSED: self_rewrite is disabled by "
+                    "ORG_LLM_PROACTIVE_DOCTOR=off — the user opted out "
+                    "of auto-healing for this session.")
+
+        # ── 1. resolve target ───────────────────────────────────────────────
+        from pathlib import Path as _P
+        pkg_root = _P(__file__).resolve().parent
+        # Accept "cli", "cli.py", or absolute paths inside the package.
+        m = module.strip()
+        if not m:
+            return "REFUSED: empty `module`."
+        if not m.endswith(".py"):
+            m += ".py"
+        if "/" in m:
+            target = _P(m).resolve()
+        else:
+            target = (pkg_root / m).resolve()
+        try:
+            target.relative_to(pkg_root)
+        except ValueError:
+            return (f"REFUSED: {target} is outside the org_llm package. "
+                    f"self_rewrite only patches files under "
+                    f"{pkg_root}.")
+        if not target.exists():
+            return f"REFUSED: {target} does not exist."
+
+        # ── 2. snapshot ─────────────────────────────────────────────────────
+        try:
+            from . import self_mod as _sm
+        except Exception as e:
+            return f"FAILED: cannot import self_mod: {e}"
+        try:
+            snap = _sm.create_snapshot(
+                label=f"pre-self_rewrite-{target.stem}")
+        except Exception as e:
+            return f"FAILED: snapshot creation refused: {e}"
+        await _info(ctx,
+                    f"self_rewrite: snapshot {snap.id} taken before "
+                    f"patching {target.name}")
+
+        # ── 3. propose patch ────────────────────────────────────────────────
+        try:
+            with get_session(engine) as session:
+                url   = _ollama_url(session)
+                model = (_cfg(session, "code_model")
+                          or _cfg(session, "chat_model")
+                          or "llama3.2")
+            plan = _sm.llm_revise(target, intent,
+                                    model=model, base_url=url)
+        except Exception as e:
+            return (f"FAILED: LLM didn't propose a patch: {e}\n"
+                    f"Snapshot {snap.id} kept; nothing was changed.")
+        if not plan or not plan.get("ops"):
+            return (f"NO-OP: LLM returned no operations. Intent may be "
+                    f"too vague or the file already satisfies it. "
+                    f"Snapshot: {snap.id}.")
+
+        # ── 4. apply ────────────────────────────────────────────────────────
+        ok, msg = _sm.apply_plan(target, plan)
+        if not ok:
+            return (f"REFUSED: apply_plan rejected the diff: {msg}\n"
+                    f"Snapshot {snap.id} kept; nothing was changed.")
+        await _info(ctx, f"self_rewrite: patch applied to {target.name}")
+
+        # ── 5. verify with tests ────────────────────────────────────────────
+        import subprocess
+        try:
+            proc = subprocess.run(
+                ["uv", "run", "pytest",
+                 "tests/test_theme_studio.py",
+                 "tests/test_workspace_mcp.py",
+                 "tests/test_cli.py",
+                 "-q", "--no-header", "-x"],
+                cwd=str(pkg_root.parent),
+                capture_output=True, text=True, timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            # Out of an abundance of caution, roll back. A 5-minute
+            # test run that doesn't finish is itself a regression.
+            try:
+                _sm.rollback(snap, also_db=False)
+            except Exception:
+                pass
+            return (f"FAILED: verify tests timed out (>300s); rolled back "
+                    f"to snapshot {snap.id}.")
+        except Exception as e:
+            return (f"FAILED: could not spawn test runner: {e}. Snapshot "
+                    f"{snap.id} kept; patch is still applied. Manual "
+                    f"verification needed.")
+
+        # ── 6. rollback on regression, otherwise summarise success ──────────
+        if proc.returncode != 0:
+            tail = (proc.stdout or "") + (proc.stderr or "")
+            tail = tail[-2000:]
+            try:
+                summary = _sm.rollback(snap, also_db=False)
+                n_restored = (summary.get("restored_files", "?")
+                                if isinstance(summary, dict) else "?")
+            except Exception as e:
+                return (f"FAILED: tests regressed AND rollback raised "
+                        f"({e}). Manual recovery: bash "
+                        f"~/.local/share/org-llm/snapshots/"
+                        f"{snap.id}/rollback.sh\n\n--- test tail ---\n"
+                        f"{tail}")
+            return (f"REVERTED: tests regressed after the patch; rolled "
+                    f"back to snapshot {snap.id} ({n_restored} files "
+                    f"restored). Patch summary: "
+                    f"{plan.get('summary', '(none)')!r}\n\n"
+                    f"--- test tail ---\n{tail}")
+        return (f"DONE: self_rewrite succeeded on {target.name}. "
+                f"Snapshot {snap.id} retained for review.\n"
+                f"  summary:   {plan.get('summary', '(none)')!r}\n"
+                f"  risk:      {plan.get('risk', '(none)')!r}\n"
+                f"  test_hint: {plan.get('test_hint', '(none)')!r}\n"
+                f"Tell the user: tests pass, but a human review of the "
+                f"diff is recommended. Roll back any time with "
+                f"`org-llm self rollback {snap.id}`.")
+
     # ── proactive_doctor_apply: vetted-action remediation ───────────────────
     @server.tool()
     async def proactive_doctor_apply(
