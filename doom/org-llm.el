@@ -456,6 +456,60 @@ also prompts for GREP."
   (org-llm--vterm (format "%s skill-new %s" org-llm-binary
                            (shell-quote-argument name))))
 
+;;;###autoload
+(defun org-llm-skill-examples ()
+  "Install the bundled starter-skills bundle into ~/org."
+  (interactive)
+  (org-llm--shell "skill-examples" "*org-llm: skill-examples*"))
+
+;;;###autoload
+(defun org-llm-code-gen (task)
+  "Top-level alias for `org-llm code generate TASK` (back-compat).
+Use TASK as the prompt for the code-generation model."
+  (interactive "sCode-gen task: ")
+  (org-llm--vterm (format "%s code-gen %s" org-llm-binary
+                           (shell-quote-argument task))))
+
+;;;###autoload
+(defun org-llm-onboarding ()
+  "Crew commissioning sequence — alias for `org-llm setup`."
+  (interactive)
+  (org-llm--vterm (format "%s onboarding" org-llm-binary)))
+
+
+;;; ── Themes: LCARS palette + theme-studio surface registry ───────────────────
+
+;;;###autoload
+(defun org-llm-palette (&optional name)
+  "Pick an LCARS palette by NAME (classic | red | green | gold | violet).
+With no arg, opens the text-based picker showing all palettes + the
+current selection."
+  (interactive (list (completing-read "Palette (blank = picker): "
+                                       '("" "classic" "red" "green"
+                                         "gold" "violet" "reset")
+                                       nil nil)))
+  (org-llm--shell (concat "palette" (and name (not (string-empty-p name))
+                                            (concat " " name)))
+                   "*org-llm: palette*"))
+
+;;;###autoload
+(defun org-llm-theme-studio-show ()
+  "Show every themed surface + its currently-active value."
+  (interactive)
+  (org-llm--shell "theme-studio show" "*org-llm: theme-studio*"))
+
+;;;###autoload
+(defun org-llm-theme-studio-regenerate ()
+  "Regenerate the LLM-driven theme cache for active dials."
+  (interactive)
+  (org-llm--vterm (format "%s theme-studio regenerate" org-llm-binary)))
+
+;;;###autoload
+(defun org-llm-theme-studio-verify ()
+  "Re-run the quality gate over every cached themed variant."
+  (interactive)
+  (org-llm--shell "theme-studio verify" "*org-llm: theme-studio verify*"))
+
 
 ;;; ── Config (incl. literate config round-trip) ───────────────────────────────
 
@@ -691,6 +745,7 @@ also prompts for GREP."
         :desc "List skills"              "K" #'org-llm-skills
         :desc "Run skill"                "r" #'org-llm-skill-run
         :desc "New skill"                "n" #'org-llm-skill-new
+        :desc "Install starter bundle"   "e" #'org-llm-skill-examples
         :desc "Re-index skills"          "i" #'org-llm-skill-index)
 
        ;; ─── Askbook ────────────────────────────────────────────────────
@@ -715,7 +770,11 @@ also prompts for GREP."
         :desc "Trek dial"                "t" (cmd! (org-llm-dial "trek"   (read-string "Trek 0-3: ")))
         :desc "Commie dial"              "c" (cmd! (org-llm-dial "commie" (read-string "Commie 0-3: ")))
         :desc "Queer dial"               "q" (cmd! (org-llm-dial "queer"  (read-string "Queer 0-3: ")))
-        :desc "Knob (interactive)"       "k" #'org-llm-knob)
+        :desc "Knob (interactive)"       "k" #'org-llm-knob
+        :desc "LCARS palette picker"     "p" #'org-llm-palette
+        :desc "Theme-studio show"        "s" #'org-llm-theme-studio-show
+        :desc "Theme-studio regenerate"  "g" #'org-llm-theme-studio-regenerate
+        :desc "Theme-studio verify"      "v" #'org-llm-theme-studio-verify)
 
        ;; ─── Models management ──────────────────────────────────────────
        (:prefix ("M" . "models")
