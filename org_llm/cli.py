@@ -12419,6 +12419,7 @@ def askbook_run(
 
 
 @askbook_app.command("show")
+@askbook_app.command("list")  # muscle-memory alias (matches `knob list`)
 def askbook_show(
     backend: Annotated[str, typer.Option("--backend", "-b",
              help="Only show entries from this backend")] = "",
