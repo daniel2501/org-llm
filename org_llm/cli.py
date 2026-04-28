@@ -45,9 +45,33 @@ app = typer.Typer(
 )
 
 
+def _resolve_version() -> str:
+    """Return the installed package version, or 'dev' for editable trees.
+
+    Source order: importlib.metadata (works for `uv tool install`,
+    `pip install`, wheel installs) → fallback to a marker. Never
+    raises — version probes are common in CI scripts and we don't
+    want a metadata blip to fail an unrelated build.
+    """
+    try:
+        from importlib.metadata import version as _v
+        return _v("org-llm")
+    except Exception:
+        return "dev"
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        on_screen(f"org-llm {_resolve_version()}")
+        raise typer.Exit()
+
+
 @app.callback(invoke_without_command=True)
 def _root(
     ctx: typer.Context,
+    version: Annotated[bool, typer.Option("--version", "-V",
+              help="Print version and exit",
+              callback=_version_callback, is_eager=True)] = False,
     splash: Annotated[bool, typer.Option("--splash",
               help="Show the splash menu (also the default with no command)")] = False,
     no_splash: Annotated[bool, typer.Option("--no-splash",
@@ -13918,10 +13942,46 @@ def main():
     except Exception:
         pass
 
-    # All layers exhausted — print the original Typer error and tip.
+    # All layers exhausted — print the original Typer error and a
+    # context-aware hint. Branch on the parse-error shape so we don't
+    # tell a user with `--versionx` to wrap their query in quotes.
     _on(f"[red]Could not auto-recover: {original_error}[/red]")
-    _on("[dim]Tip: wrap the query in single quotes — "
-        "[bold]org-llm ask 'your full question here'[/bold][/dim]")
+    err_lower = original_error.lower()
+    if "no such option" in err_lower:
+        # Try to fish the bad option out of the message and find a
+        # close match against registered top-level options.
+        import re as _re
+        import difflib as _dl
+        m = _re.search(r"no such option:?\s*['\"]?(-{1,2}[\w-]+)", err_lower)
+        bad = m.group(1) if m else ""
+        known: list[str] = []
+        try:
+            click_cmd = typer.main.get_command(app)
+            for p in click_cmd.params:
+                known.extend(p.opts)   # collects '--version', '-V', etc.
+        except Exception:
+            pass
+        guess = _dl.get_close_matches(bad, known, n=1, cutoff=0.6) if bad else []
+        if guess:
+            _on(f"[dim]Did you mean[/dim] [bold]{guess[0]}[/bold]?  "
+                f"[dim]See[/dim] [bold]org-llm --help[/bold] [dim]for all flags.[/dim]")
+        else:
+            _on("[dim]Run[/dim] [bold]org-llm --help[/bold] "
+                "[dim]to see valid flags, or[/dim] "
+                "[bold]org-llm <verb> --help[/bold] [dim]for one verb.[/dim]")
+    elif "no such command" in err_lower:
+        _on("[dim]Run[/dim] [bold]org-llm --help[/bold] "
+            "[dim]to see all subcommands, or[/dim] "
+            "[bold]org-llm splash[/bold] [dim]for a quick menu.[/dim]")
+    elif "missing argument" in err_lower or "missing option" in err_lower:
+        _on("[dim]Add the missing argument or run[/dim] "
+            "[bold]org-llm <verb> --help[/bold] [dim]to see what's required.[/dim]")
+    else:
+        # Generic catch-all — the shell-quoting hint applies to ask /
+        # capture / search / etc. where unquoted multi-word input is
+        # the most common failure shape.
+        _on("[dim]Tip: wrap the query in single quotes — "
+            "[bold]org-llm ask 'your full question here'[/bold][/dim]")
     _log_invocation("unrecovered_parse_error", response=original_error)
     sys.exit(2)
 # cli.py:1 ends here

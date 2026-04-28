@@ -1108,7 +1108,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13" },
     { name = "sqlalchemy", specifier = ">=2" },
     { name = "sqlite-vec", specifier = ">=0.1" },
-    { name = "typer", extras = ["all"], specifier = ">=0.12" },
+    { name = "typer", specifier = ">=0.12" },
 ]
 
 [package.metadata.requires-dev]
