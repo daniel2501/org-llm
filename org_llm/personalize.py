@@ -544,18 +544,26 @@ def messages_from_vibe(
           "- If the user named seed messages above, match their voice "
           "and don't duplicate them.\n"
     )
+    last_error: str = ""
+    resp = ""
     try:
         from .ui import thinking
         with thinking(f"Writing {name}", model=model):
             resp = chat(user_msg, model=model, base_url=base_url,
                          system=sys_msg, timeout=120.0)
-    except Exception:
+    except Exception as e:
+        last_error = f"{type(e).__name__}: {e}"
         try:
             resp = chat(user_msg, model=model, base_url=base_url,
                          system=sys_msg, timeout=120.0)
-        except Exception:
+        except Exception as e2:
+            last_error = f"{type(e2).__name__}: {e2}"
+            messages_from_vibe.last_error = last_error  # surface to caller
             return None
     if not resp:
+        messages_from_vibe.last_error = (
+            last_error or "model returned empty response (likely OOM/timeout)"
+        )
         return None
     lines: list[str] = []
     for raw in resp.splitlines():
@@ -569,7 +577,13 @@ def messages_from_vibe(
         if len(lines) >= n:
             break
     if len(lines) < 3:
+        messages_from_vibe.last_error = (
+            f"only {len(lines)} valid lines in {len(resp)}-char response "
+            "(model may have refused / hallucinated commentary)"
+        )
         return None
+    # Successful — clear any prior error sentinel so callers can rely on it
+    messages_from_vibe.last_error = ""
     msgs: list[list[str]] = []
     if seed_messages:
         msgs.extend([list(m) for m in seed_messages

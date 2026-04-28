@@ -13842,8 +13842,13 @@ def knob_add(
         engine_now = _engine()
         with get_session(engine_now) as session:
             url = _ollama_url(session)
-            mdl = (_cfg(session, "instruct_model")
-                   or _cfg(session, "chat_model")
+            # Prefer chat_model first (typically the user's main daily-driver
+            # model that we know fits + is responsive). instruct_model can be
+            # heavier (mistral-nemo, etc.) and OOM on tight RAM. Fall through
+            # in size-likely-to-succeed order: chat → text → instruct → llama3.2.
+            mdl = (_cfg(session, "chat_model")
+                   or _cfg(session, "text_model")
+                   or _cfg(session, "instruct_model")
                    or "llama3.2")
         from .personalize import messages_from_vibe as _mfv
         with warp(f"LLM crafting {n_messages} messages for {norm} ({mdl})…"):
@@ -13851,9 +13856,15 @@ def knob_add(
                               model=mdl, base_url=url,
                               n=n_messages, seed_messages=msgs)
         if not generated:
-            red_alert("LLM message generation failed; keeping seed messages "
-                      "only. Add more with [bold]-m 'text|style'[/bold] "
-                      "or retry with [bold]--llm[/bold].")
+            err = getattr(_mfv, "last_error", "") or "unknown"
+            red_alert(f"LLM message generation failed: {err}")
+            on_screen(f"[dim]Tried model:[/dim] [bold]{mdl}[/bold]")
+            on_screen("[dim]Try a smaller / pulled model:[/dim]")
+            on_screen(f"  [bold]ORG_LLM_CHAT_MODEL=llama3.2:1b "
+                      f"org-llm knob add {norm} --llm --vibe '{vibe}'[/bold]")
+            on_screen("[dim]Or skip LLM and seed manually:[/dim]")
+            on_screen(f"  [bold]org-llm knob add {norm} -m 'text|lcars1' "
+                      "-m 'more text|lcars2'[/bold]")
         else:
             msgs = generated
 
@@ -14067,12 +14078,19 @@ def knob_edit(
 def knob_list():
     """Show all theme knobs (built-in + user-defined) and their current levels."""
     from rich.table import Table as _T
+    from . import knobs as _kn
     knobs = _read_user_knobs()
-    builtins = [
-        {"name": "trek",   "messages": "(built-in Trek refs)",  "default_level": 2},
-        {"name": "commie", "messages": "(built-in solidarity)", "default_level": 2},
-        {"name": "queer",  "messages": "(built-in pride)",      "default_level": 2},
-    ]
+    # Pull built-ins from the registry (was hand-listed here with stale
+    # default_level=2 even though the registry now seeds commie at 3).
+    # Reading the source-of-truth means future knobs.py tweaks
+    # propagate without an extra cli.py edit.
+    builtins = []
+    for k in _kn.BUILTIN_KNOBS:
+        builtins.append({
+            "name":          k.name,
+            "messages":      f"(built-in: {k.description.split(' — ')[0][:38]})",
+            "default_level": k.default_level,
+        })
     tbl = _T(box=None, pad_edge=False)
     tbl.add_column("Knob",       style="lcars1", no_wrap=True)
     tbl.add_column("Type",       style="dim",    width=8)
