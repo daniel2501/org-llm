@@ -459,8 +459,14 @@ def refresh_from_openrouter(*, timeout: float = 15.0
         # Premium closed APIs go higher. Still heuristic.
         if "claude" in s or "gpt-5" in s or "gpt-4.5" in s:
             quality = max(quality, 240)
-        license_ = (m.get("context_length") and "see openrouter") or ""
-        # Better: pull from model.architecture or top_provider.
+        # OpenRouter's /api/v1/models doesn't return a canonical
+        # license string. Leave this empty so `merge_refresh` keeps the
+        # curated license when one exists ("Apache 2.0", "MIT",
+        # "Closed API", etc.) — overwriting curated values with a weak
+        # placeholder like "see openrouter" was a regression that
+        # showed up in `cloud --propose-update` as 4 spurious license
+        # changes per refresh.
+        license_ = ""
         top = (m.get("top_provider") or {}).get("name") or ""
         note = m.get("description") or top or ""
         if len(note) > 80:
