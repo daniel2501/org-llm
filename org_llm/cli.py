@@ -2302,11 +2302,16 @@ def _render_splash_logo():
     top_overhead.append(f"  {sep}  ", style="lcars3")
     top_overhead.append(f"📡 {top_status_lbl}",      style="dim lcars3")
 
-    # Top bar of the L-frame — SOLID continuous orange so the bar +
-    # rib + bottom bar read as ONE shape. Multi-color segmentation
-    # lives INSIDE the frame as pill-button rows below.
-    top_bar = _lcars_solid_bar(target_w, callsign=top_callsign,
-                                  callsign_dot="◉")
+    # Top of the L-frame — TWO STACKED SOLID BARS in orange so the
+    # frame emerges from a substantial color mass at the corner.
+    # Real TNG LCARS panels often stack 2-3 bar rows at the top with
+    # different callsigns; the visual mass is what makes the rib
+    # read as connected to the bars.
+    top_bar_1 = _lcars_solid_bar(target_w, callsign=top_callsign,
+                                    callsign_dot="◉")
+    top_bar_2 = _lcars_solid_bar(target_w - 4,
+                                    callsign="DECK 47-A",
+                                    callsign_dot="◉")
 
     # Overhead status line above the bottom bar — vault stats live, or
     # a quiet "STANDBY" when first-run (no DB yet).
@@ -2328,14 +2333,16 @@ def _render_splash_logo():
         bottom_overhead.append(f"  {sep}  ", style="lcars3")
         bottom_overhead.append(bot_status_first, style="dim lcars3")
 
-    bottom_bar = _lcars_solid_bar(target_w, callsign=bottom_callsign,
-                                     callsign_dot="◯")
+    bottom_bar_1 = _lcars_solid_bar(target_w - 4,
+                                       callsign="DECK 09-A",
+                                       callsign_dot="◯")
+    bottom_bar_2 = _lcars_solid_bar(target_w, callsign=bottom_callsign,
+                                       callsign_dot="◯")
 
-    # SOLID rib — every body row starts with ██ orange continuous so
-    # the rib joins the top bar (above) and bottom bar (below) into
-    # ONE colored L-shape. No more elbow chars / quadrant cut-outs
-    # that visually broke the flow. The single trailing space gives
-    # padding before content; column 2 is the inner edge of the L.
+    # SOLID rib — every body row starts with `██  ` orange. The
+    # connection-visibility comes from STACKING multiple bar rows at
+    # top + bottom so the rib emerges from a substantial color block
+    # at each corner, not a single thin line.
     rib = "██  "
 
     def _row(style_inner, content):
@@ -2346,21 +2353,58 @@ def _render_splash_logo():
             t.append(content, style=style_inner)
         return t
 
-    def _inner_pill_row(segments, *, target_width=58):
-        """Body row that wraps a pill-button strip INSIDE the L-frame.
-        Solid rib on the left, then a row of multi-color pills."""
+    def _inner_pill_row(segments, *, target_width=68):
+        """Body row that wraps a pill-button strip INSIDE the frame."""
         t = Text()
         t.append(rib, style="lcars1")
         t.append_text(_lcars_pill_row(segments, target_width=target_width))
         return t
 
+    def _labeled_pill_row(items, *, target_width=68):
+        """Body row of pill-buttons with text labels INSIDE the pills.
+        Each item is (label, style). The label is padded with spaces
+        so the pill has visual width."""
+        from rich.text import Text as _T
+        t = Text()
+        t.append(rib, style="lcars1")
+        # Even-distribute remaining width across items
+        cap_overhead = 2 * len(items)
+        gap_overhead = max(0, len(items) - 1)
+        body_w = max(20, target_width - cap_overhead - gap_overhead)
+        per_item = max(6, body_w // len(items))
+        for i, (label, style) in enumerate(items):
+            inner = label.center(per_item)
+            t.append(_PILL_L, style=style)
+            t.append(inner, style=style)
+            t.append(_PILL_R, style=style)
+            if i < len(items) - 1:
+                t.append(" ")
+        return t
+
     body_rows = []
     body_rows.append(_row("", ""))                              # top spacer
-    # Pill-button strip: 6 short pills mixing trek lcars colors
+    # Stacked LCARS pill HEADER strips — three consecutive rows of
+    # varied-color pills with text labels, mimicking the dense pill
+    # stack at the top of real TNG LCARS panels.
+    body_rows.append(_labeled_pill_row([
+        ("OPS",       "lcars1"),
+        ("COMMS",     "lcars2"),
+        ("HELM",      "lcars3"),
+        ("TACTICAL",  "pride.yellow"),
+        ("MEMORY α",  "lcars1"),
+    ]))
     body_rows.append(_inner_pill_row(
-        [(0.18, "lcars1"), (0.10, "lcars2"), (0.08, "lcars3"),
-         (0.22, "lcars1"), (0.12, "lcars3"), (0.10, "lcars2")]))
-    body_rows.append(_row("", ""))
+        [(0.20, "lcars1"), (0.12, "pride.yellow"),
+         (0.08, "lcars3"), (0.24, "lcars1"),
+         (0.10, "lcars2"), (0.08, "doom.cyan"),
+         (0.10, "pride.orange")]))
+    body_rows.append(_labeled_pill_row([
+        ("47-A",  "lcars1"),
+        ("STARDATE",  "lcars2"),
+        ("v" + _resolve_version()[:8], "lcars3"),
+        ("LCARS",     "pride.yellow"),
+    ]))
+    body_rows.append(_row("", ""))                              # gap
     for line in _SPLASH_ASCII.splitlines():                     # the figlet
         # Per-row style cycle through lcars1/2/3 to give that "live
         # readout" multi-color feel. One color per ROW (not per glyph)
@@ -2375,40 +2419,64 @@ def _render_splash_logo():
     subtitle_text = _ts.get_themed("splash_subtitle",
                                      "your second brain, scripted")
     slogan_text   = _ts.get_themed("splash_slogan",
-                                     "local · queer · collective · free")
+                                     "local · open · collective · free")
     body_rows.append(_row("bold lcars2", subtitle_text))
     body_rows.append(_row("dim lcars3",  slogan_text))
     body_rows.append(_row("", ""))                              # spacer
 
-    # Station status row — themable list of 5 short ALL-CAPS labels
-    # separated by " · ", each prefixed with a status indicator that
-    # cycles colors. Total reads like a starship readout.
+    # Station status row with PROGRESS METERS — each station has a
+    # short label, a status dot, and a 6-block progress meter.
     stations_str = _resolve_callsign("splash_stations",
                                        "COMMS · HELM · OPS · TAC · MEM")
-    stations = [s.strip() for s in stations_str.split("·") if s.strip()][:6]
-    station_styles = ["lcars1", "lcars3", "lcars2", "lcars3", "lcars1", "lcars2"]
-    station_dots   = ["◉",      "◉",      "◎",      "◯",      "◉",      "◯"]
+    stations = [s.strip() for s in stations_str.split("·") if s.strip()][:5]
+    station_styles = ["lcars1", "lcars3", "lcars2", "pride.yellow",
+                       "doom.cyan", "pride.orange"]
+    # Pseudo-random but deterministic-per-startup progress fills so
+    # the meters feel "live" rather than always full / always empty.
+    import hashlib as _h
+    seed = int(_h.md5(sd.encode()).hexdigest()[:4], 16)
     station_row = Text()
     station_row.append(rib, style="lcars1")
     for i, label in enumerate(stations):
-        st  = station_styles[i % len(station_styles)]
-        dot = station_dots[i % len(station_dots)]
-        station_row.append(f"{dot} ", style=st)
-        station_row.append(label, style="bold lcars2")
+        st = station_styles[i % len(station_styles)]
+        # Fill: 2-6 blocks of 6 total, derived from seed for stability
+        fill = 2 + ((seed >> (i * 3)) & 0x7) % 5
+        meter = "▰" * fill + "▱" * (6 - fill)
+        station_row.append("◉ ", style=st)
+        station_row.append(f"{label:<5}", style="bold lcars2")
+        station_row.append(f"{meter} ", style=st)
         if i < len(stations) - 1:
-            station_row.append("   ", style="")
+            station_row.append(" ", style="")
     body_rows.append(station_row)
     body_rows.append(_row("", ""))
-    # Mirror pill-button strip near the bottom — inverted color order
-    # so the eye reads top + bottom as different but related strips.
+
+    # Mirror pill HEADER strip near the bottom — three rows like the
+    # top, but with reversed color order and different labels so the
+    # frame reads top-and-bottom as related but not identical.
+    body_rows.append(_labeled_pill_row([
+        ("ARCHIVE", "lcars2"),
+        ("LOG",     "doom.cyan"),
+        ("CACHE",   "lcars1"),
+        ("INDEX",   "pride.orange"),
+    ]))
     body_rows.append(_inner_pill_row(
-        [(0.10, "lcars2"), (0.12, "lcars3"), (0.22, "lcars1"),
-         (0.08, "lcars3"), (0.10, "lcars2"), (0.18, "lcars1")]))
+        [(0.10, "pride.orange"), (0.08, "doom.cyan"),
+         (0.20, "lcars1"),       (0.12, "pride.yellow"),
+         (0.10, "lcars2"),       (0.24, "lcars1"),
+         (0.08, "lcars3")]))
+    body_rows.append(_labeled_pill_row([
+        ("MEM β",   "lcars3"),
+        ("REPORT",  "lcars1"),
+        ("STATUS",  "pride.yellow"),
+        ("09-A",    "lcars1"),
+    ]))
     body_rows.append(_row("", ""))                              # bottom spacer
 
-    return Group(top_overhead, top_bar,
+    return Group(top_overhead,
+                  top_bar_1, top_bar_2,
                   *body_rows,
-                  bottom_overhead, bottom_bar)
+                  bottom_bar_1, bottom_bar_2,
+                  bottom_overhead)
 
 
 # Splash content is now resolved at render time, not import time —

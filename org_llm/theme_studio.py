@@ -83,7 +83,7 @@ SURFACES: list[Surface] = [
                       "appears below the subtitle. Comma-separated values "
                       "should each be ONE WORD."),
         len_min=12, len_max=70, n_variants=6,
-        default="local · queer · collective · free",
+        default="local · open · collective · free",
     ),
     Surface(
         key="setup_panel_title",
