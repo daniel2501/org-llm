@@ -7,7 +7,16 @@ from typing import Annotated
 import typer
 
 from .db import get_session, make_engine, DB_PATH
-from .ui import console, hail, make_it_so, on_screen, red_alert, warp, TREK_MSGS
+from .ui import (console, hail, make_it_so, on_screen, red_alert, warp,
+                  TREK_MSGS, thinking)
+
+
+def _ollama_url(session) -> str:
+    """Match cli.py's _ollama_url helper — env > config > default."""
+    import os
+    return (os.environ.get("ORG_LLM_OLLAMA_URL")
+            or _cfg(session, "ollama_url")
+            or "http://localhost:11434")
 
 
 def _engine():
@@ -21,6 +30,12 @@ def _cfg(session, key):
     from .db import Config
     r = session.get(Config, key)
     return r.value if r else ""
+
+
+# (Note: `_ollama_url` is defined above the imports section just below
+# `_cfg` is referenced — but in Python module-load order this still
+# resolves fine since both are top-level names defined before any
+# call into `skill_new` happens.)
 
 
 def _org_dir(session):
@@ -166,6 +181,72 @@ def register(app: typer.Typer) -> None:
         hail(f"Registered {count} skills.")
         make_it_so()
 
+    @app.command("skill-examples", rich_help_panel="Skills")
+    def skill_examples(
+        file:    Annotated[str,  typer.Option("--file", "-f",
+                  help="Target org file (relative to org_dir). Default: "
+                       "starter-skills.org so the bundle has its own "
+                       "namespace and won't collide with skill-new.")
+                ] = "starter-skills.org",
+        force:   Annotated[bool, typer.Option("--force", "-F",
+                  help="Overwrite the target file if it exists")] = False,
+        no_index: Annotated[bool, typer.Option("--no-index",
+                  help="Skip the auto skill-index after install")] = False,
+    ):
+        """Install a bundle of working starter skills into your vault.
+
+        Copies =org_llm/skill_examples/starter.org= (shipped with the
+        package) into your org_dir + auto-runs =skill-index= so the
+        skills are immediately runnable. Seven examples included:
+        =summarize=, =action_items=, =brainstorm=, =proofread=,
+        =recent_grep= (sh, no LLM), =emojify=, =captains_log=. Edit
+        any of them as templates for your own.
+        """
+        from pathlib import Path
+        import shutil
+
+        engine = _engine()
+        with get_session(engine) as session:
+            org_dir = _org_dir(session)
+
+        # Locate the bundled examples — works for editable installs
+        # AND wheel installs (the file ships under org_llm/skill_examples/).
+        try:
+            bundled = Path(__file__).parent / "skill_examples" / "starter.org"
+        except Exception:
+            bundled = None
+        if not bundled or not bundled.exists():
+            red_alert("Bundled starter.org not found. Reinstall with "
+                      "[bold]uv tool install --reinstall org-llm[/bold].")
+            raise typer.Exit(1)
+
+        target = org_dir / file
+        if target.exists() and not force:
+            red_alert(
+                f"{target} already exists. Use --force to overwrite, "
+                "or --file to pick a different name (e.g. "
+                f"--file phase3-starter.org)."
+            )
+            raise typer.Exit(1)
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(bundled, target)
+        hail(f"Copied 7 starter skills to {target}")
+
+        if no_index:
+            on_screen("[dim]Skipping auto-index. "
+                      "Run [bold]org-llm skill-index[/bold] to register them.[/dim]")
+            return
+
+        from .skills import index_skills
+        with get_session(engine) as session:
+            with warp("Indexing the new skills"):
+                count = index_skills(session, org_dir)
+        hail(f"Indexed {count} skills total. "
+             f"Try: [bold]org-llm skill summarize 'meeting notes here'[/bold]")
+        make_it_so()
+
+
     @app.command("skill-new", rich_help_panel="Skills")
     def skill_new(
         name:      Annotated[str, typer.Argument(help="Skill name (snake_case)")],
@@ -175,6 +256,10 @@ def register(app: typer.Typer) -> None:
                    help="Model config key to use")] = "text_model",
         file:      Annotated[str, typer.Option("--file", "-f",
                    help="Org file to append to (relative to org_dir)")] = "skills.org",
+        llm_brief: Annotated[str, typer.Option("--llm",
+                   help="Free-form description; the LLM writes the skill body "
+                        "for you instead of a generic placeholder. "
+                        "e.g. --llm 'pull URLs out of clipboard text'")] = "",
     ):
         """Scaffold a new skill block into an org file and open instructions."""
         from pathlib import Path
@@ -185,20 +270,61 @@ def register(app: typer.Typer) -> None:
             org_dir = _org_dir(session)
 
         heading = name.replace("_", " ").title()
-        if lang == "python":
-            body = (
-                "# {{input}} is replaced with your input at runtime.\n"
-                "# cfg dict has all config keys (chat_model, org_dir, etc.)\n"
-                "# llm.chat(prompt) calls the configured model.\n\n"
-                "prompt = f\"Process this input:\\n\\n{{input}}\"\n"
-                "result = llm.chat(prompt)\n"
-                "print(result)\n"
-            )
-        else:
-            body = (
-                "# {{input}} is replaced with your input at runtime.\n"
-                "echo \"Processing: {{input}}\"\n"
-            )
+        description = "Describe what this skill does."
+
+        # --llm path: have the configured chat_model write the body
+        # for us, grounded in the brief. Cold path falls back to the
+        # generic placeholder if the LLM is unreachable.
+        body = ""
+        if llm_brief:
+            try:
+                from .llm import chat as _chat
+                with get_session(_engine()) as _s:
+                    _url = _ollama_url(_s)
+                    _mdl = (_cfg(_s, "chat_model") or "llama3.2")
+                _sys = (
+                    f"You write minimal {lang} skill bodies for org-llm. "
+                    "Output ONLY runnable code — no markdown fences, no "
+                    "explanation, no preamble. Available variables in "
+                    "Python skills: {{input}} (string from CLI), "
+                    "llm.chat(prompt) (calls the configured model), "
+                    "cfg (dict of all config). For sh skills: {{input}} "
+                    "is substituted at runtime. Keep it under 25 lines."
+                )
+                _user = (
+                    f"Skill name: {name}\n"
+                    f"Brief: {llm_brief}\n\n"
+                    f"Write the {lang} body that does this. Use {{input}} "
+                    f"as the placeholder."
+                )
+                with thinking(f"Writing {name}", model=_mdl):
+                    body = (_chat(_user, model=_mdl, base_url=_url,
+                                    system=_sys, timeout=60.0) or "").strip()
+                # Strip stray markdown fences if the model added them anyway
+                if body.startswith("```"):
+                    body = body.split("\n", 1)[-1]
+                if body.endswith("```"):
+                    body = body.rsplit("\n", 1)[0]
+                body = body.rstrip() + "\n"
+                description = llm_brief
+            except Exception:
+                body = ""
+
+        if not body:
+            if lang == "python":
+                body = (
+                    "# {{input}} is replaced with your input at runtime.\n"
+                    "# cfg dict has all config keys (chat_model, org_dir, etc.)\n"
+                    "# llm.chat(prompt) calls the configured model.\n\n"
+                    "prompt = f\"Process this input:\\n\\n{{input}}\"\n"
+                    "result = llm.chat(prompt)\n"
+                    "print(result)\n"
+                )
+            else:
+                body = (
+                    "# {{input}} is replaced with your input at runtime.\n"
+                    "echo \"Processing: {{input}}\"\n"
+                )
 
         template = (
             f"\n* {heading}                                    :skill:\n"
@@ -207,7 +333,7 @@ def register(app: typer.Typer) -> None:
             f":SKILL_LANG: {lang}\n"
             f":SKILL_MODEL: {model_key}\n"
             f":END:\n\n"
-            f"Describe what this skill does.\n\n"
+            f"{description}\n\n"
             f"#+begin_src {lang}\n"
             f"{body}"
             f"#+end_src\n"

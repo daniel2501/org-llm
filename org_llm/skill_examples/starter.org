@@ -1,0 +1,164 @@
+#+TITLE: org-llm starter skills
+#+AUTHOR: org-llm
+#+OPTIONS: toc:nil
+
+A handful of working :skill: blocks you can run as-is or use as
+templates. Each one is a real `org-llm skill <name> "<input>"` you
+can invoke from the CLI, opencode, Claude Code, or Pi.
+
+How to use this file:
+- `org-llm skill-examples` copied this file into your vault.
+- Run `org-llm skill-index` to register every skill below.
+- Try them: `org-llm skill summarize "meeting transcript here"`.
+- Edit any one in $EDITOR and re-run `skill-index` to apply changes.
+- Add your own with `org-llm skill-new <name>` (or
+  `skill-new <name> --llm 'what it should do'` for an LLM-generated
+  body).
+
+Tags below tell the indexer they're skills (not regular notes).
+
+* Summarize                                                     :skill:
+:PROPERTIES:
+:SKILL_NAME: summarize
+:SKILL_LANG: python
+:SKILL_MODEL: text_model
+:END:
+
+Compress any text into 3-5 bullet points. The text_model is tuned for
+this kind of structured rewrite; works well on meeting transcripts,
+long emails, articles.
+
+#+begin_src python
+prompt = (
+    "Summarize the following content into 3-5 short bullet points. "
+    "Lead with the most important point. Plain text only, no markdown.\n\n"
+    "{{input}}"
+)
+result = llm.chat(prompt)
+print(result)
+#+end_src
+
+* Action Items                                                  :skill:
+:PROPERTIES:
+:SKILL_NAME: action_items
+:SKILL_LANG: python
+:SKILL_MODEL: fast_model
+:END:
+
+Pull explicit action items out of meeting notes / a to-do dump.
+Returns a numbered list with owner-and-deadline when the input has
+them; honest "no actions found" when it doesn't.
+
+#+begin_src python
+prompt = (
+    "Extract every explicit action item from the text below as a "
+    "numbered list. For each: who owns it (if named), what they "
+    "do, and the deadline (if stated). If none, output exactly: "
+    "'No actions found.'\n\n{{input}}"
+)
+print(llm.chat(prompt))
+#+end_src
+
+* Brainstorm                                                    :skill:
+:PROPERTIES:
+:SKILL_NAME: brainstorm
+:SKILL_LANG: python
+:SKILL_MODEL: chat_model
+:END:
+
+Generate five ideas off a seed prompt. Useful before writing,
+designing, or planning. Uses the chat_model because creativity benefits
+from a slightly larger model.
+
+#+begin_src python
+prompt = (
+    "Brainstorm 5 distinct ideas for the following. Each idea is "
+    "ONE line, max 18 words. Number them 1-5. No preamble.\n\n"
+    "Topic: {{input}}"
+)
+print(llm.chat(prompt))
+#+end_src
+
+* Proofread                                                     :skill:
+:PROPERTIES:
+:SKILL_NAME: proofread
+:SKILL_LANG: python
+:SKILL_MODEL: fast_model
+:END:
+
+Catch typos and grammar issues without rewriting the prose. Returns a
+diff-style list (line + suggestion) rather than a "polished" version,
+so you stay in control of voice.
+
+#+begin_src python
+prompt = (
+    "Proofread the following. Output ONLY a numbered list of issues "
+    "you found, each as: '<original phrase> -> <correction>'. If "
+    "the text is clean, output exactly: 'No issues found.'\n\n"
+    "{{input}}"
+)
+print(llm.chat(prompt))
+#+end_src
+
+* Recent Vault Grep                                             :skill:
+:PROPERTIES:
+:SKILL_NAME: recent_grep
+:SKILL_LANG: sh
+:SKILL_MODEL: text_model
+:END:
+
+A pure-shell skill (no LLM call) that greps the user's org dir for
+{{input}} in files modified within the last 14 days. Demonstrates
+that skills don't have to call out to a model — they can be plain
+shell or Python helpers grouped under the org-llm namespace.
+
+#+begin_src sh
+find ~/org -name '*.org' -mtime -14 -type f \
+  -exec grep -l --color=never -i "{{input}}" {} + \
+  | head -20
+#+end_src
+
+* Translate to Emoji                                            :skill:
+:PROPERTIES:
+:SKILL_NAME: emojify
+:SKILL_LANG: python
+:SKILL_MODEL: fast_model
+:END:
+
+Re-render a sentence using only emojis where it makes sense to do so.
+Pure flair, useful for testing whether a model handles whimsical
+prompts well.
+
+#+begin_src python
+prompt = (
+    "Translate the following English sentence into a sequence of "
+    "emoji. Use ONE emoji per concept. No words. Output the emojis "
+    "in order on a single line.\n\n{{input}}"
+)
+print(llm.chat(prompt))
+#+end_src
+
+* Captain's Log Entry                                           :skill:
+:PROPERTIES:
+:SKILL_NAME: captains_log
+:SKILL_LANG: python
+:SKILL_MODEL: text_model
+:END:
+
+Write a Trek-coded captain's log entry framing today's events. The
+{{input}} is what happened; the skill produces a stardate-tagged log
+entry in TNG voice. Pairs nicely with the org-llm Captain's Log feature.
+
+#+begin_src python
+import datetime
+sd = (datetime.datetime.now().year - 1946) * 1000.0
+sd += datetime.datetime.now().timetuple().tm_yday / 366.0 * 1000.0
+prompt = (
+    f"You are the captain. Write a SHORT log entry (3-4 sentences, "
+    f"max 80 words) starting 'Captain's Log, Stardate {sd:.1f}: ' "
+    f"that recounts the following events in TNG voice. End with a "
+    f"forward-looking sentence about next steps.\n\n"
+    f"Events: {{input}}"
+)
+print(llm.chat(prompt))
+#+end_src
