@@ -164,7 +164,7 @@ org-llm ask "what did I write about cooperative governance last month?"
    ┌─────────┐       ┌──────────┐    ┌──────────┐     ┌──────────┐      ┌────────────┐
    │ Ollama  │       │ MCP      │    │ opencode │     │ Claude   │      │ Cloud GPU  │
    │ (local) │       │ stdio    │ ─▶ │ workspace│     │ Code     │      │ (RunPod /  │
-   │ chat    │ ◀──── │ 32 tools │    │          │     │ workspace│      │  Vast / …) │
+   │ chat    │ ◀──── │ 49 tools │    │          │     │ workspace│      │  Vast / …) │
    │ embed   │       └──────────┘    └──────────┘     └──────────┘      └────────────┘
    └─────────┘
 ```
@@ -283,7 +283,7 @@ copy. See `org-llm tutor creds` for the full setup.
 
 ## MCP integration
 
-`org-llm mcp` runs an MCP stdio server that exposes **32 tools** to any
+`org-llm mcp` runs an MCP stdio server that exposes **49 tools** to any
 MCP-aware client (opencode, Claude Code, …). The toolbox is designed
 to give the LLM in opencode parity with the CLI, not a stripped-down
 subset.
@@ -1111,7 +1111,7 @@ org_llm/
   fixer_bench.py  # benchmark cloud LLMs on canonical fix scenarios
   indexer.py      # parse org → files/nodes
   llm.py          # thin Ollama wrapper
-  mcp_server.py   # FastMCP server with 32 tools
+  mcp_server.py   # FastMCP server with 49 tools
   models.py       # FOSS model catalog + tool registry + theming
   performance.py  # hardware-aware tuner (free RAM, measured tok/s)
   personalize.py  # LLM-driven theme synthesis from real content

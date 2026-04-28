@@ -301,6 +301,26 @@ With prefix arg, run --install instead (idempotent install + wire into
   (interactive)
   (find-file (expand-file-name "~/org/captains-log.org")))
 
+;;;###autoload
+(defun org-llm-log-export (path &optional kind grep)
+  "Append filtered Captain's Log rows to PATH (any org file).
+With \\[universal-argument] also prompt for KIND filter; double prefix
+also prompts for GREP."
+  (interactive
+   (list (read-file-name "Export to org file: " "~/org/" nil nil)
+         (when current-prefix-arg
+           (completing-read "kind (blank = all): "
+                            '("" "cli" "llm" "mcp" "config" "doctor" "dbt" "embed")
+                            nil t))
+         (when (equal current-prefix-arg '(16))
+           (read-string "grep (blank = none): "))))
+  (let ((args (concat (format " --export %s" (shell-quote-argument path))
+                      (and kind (not (string-empty-p kind))
+                           (format " --kind %s" kind))
+                      (and grep (not (string-empty-p grep))
+                           (format " --grep %s" (shell-quote-argument grep))))))
+    (org-llm--shell (concat "log" args) "*org-llm: log-export*")))
+
 
 ;;; ── dbt ──────────────────────────────────────────────────────────────────────
 
@@ -638,6 +658,7 @@ With prefix arg, run --install instead (idempotent install + wire into
         :desc "Grep"                     "g" #'org-llm-log-grep
         :desc "Filter by kind"           "k" #'org-llm-log-kind
         :desc "LLM reflect"              "r" #'org-llm-log-reflect
+        :desc "Export → org file"        "e" #'org-llm-log-export
         :desc "Open captains-log.org"    "o" #'org-llm-log-open)
 
        ;; ─── dbt ────────────────────────────────────────────────────────

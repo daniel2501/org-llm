@@ -1344,6 +1344,60 @@ def create_mcp_server():
         except Exception as e:
             return f"reflect_on_log failed: {e}"
 
+    # ── Captain's Log export ──────────────────────────────────────────────────
+    @server.tool()
+    async def export_log_to_org(dest_path: str,
+                                  kind: str = "",
+                                  grep: str = "",
+                                  limit: int = 100,
+                                  ctx: Context | None = None) -> str:
+        """Append filtered Captain's Log rows to a user-chosen org file.
+
+        Use when the user says 'save my recent LLM activity to my journal'
+        or 'export today's tool calls to ~/org/work.org'. The destination
+        gets a per-export parent heading + FILTER property; rows mirror
+        the canonical Captain's Log shape (PROPERTIES drawer +
+        #+begin_src text body block). Source of truth stays in the DB.
+        """
+        await _info(ctx,
+                    f"export_log_to_org: dest={dest_path!r} kind={kind!r} "
+                    f"grep={grep!r} limit={limit}")
+        try:
+            from . import logbook as _lb
+            from .db import History
+            from pathlib import Path as _P
+            with get_session(engine) as session:
+                q = session.query(History).order_by(History.id.desc())
+                if kind:
+                    q = q.filter(History.kind == kind)
+                rows = q.limit(max(1, min(1000, limit * (4 if grep else 1)))
+                                ).all()
+            if grep:
+                gl = grep.lower()
+                rows = [r for r in rows
+                        if gl in (r.command or "").lower()
+                        or gl in (r.query or "").lower()
+                        or gl in (r.response or "").lower()][:limit]
+            else:
+                rows = rows[:limit]
+            if not rows:
+                return _themed("export_log_to_org",
+                               "No rows matched", "")
+            filt = []
+            if kind: filt.append(f"kind={kind}")
+            if grep: filt.append(f"grep={grep}")
+            filt.append(f"limit={limit}")
+            n = _lb.export_rows_to_org(rows, _P(dest_path).expanduser(),
+                                          source_filter=", ".join(filt))
+            _lb.write_event("mcp", "export_log_to_org",
+                              args=f"dest={dest_path} {' '.join(filt)}",
+                              response=f"exported {n} rows", outcome="ok")
+            return _themed("export_log_to_org",
+                           f"exported {n} rows → {dest_path}",
+                           f"filter: {', '.join(filt)}")
+        except Exception as e:
+            return f"export_log_to_org failed: {e}"
+
     # ── Config search ─────────────────────────────────────────────────────────
     @server.tool()
     async def search_config(query: str,
