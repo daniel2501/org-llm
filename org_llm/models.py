@@ -113,6 +113,45 @@ def _norm(tag: str) -> str:
     return n
 
 
+def similar_pulled_model(missing: str, base_url: str) -> str:
+    """Best-effort: find a pulled model whose stem looks closest to
+    `missing` so callers can suggest an immediate-swap option when a
+    configured model isn't available locally.
+
+    Strategy:
+      1. Same stem first (phi3.5 → phi4 or phi3.5:latest)
+      2. difflib close-match across all pulled stems
+      3. "" when nothing close
+
+    Returns one tag string or empty. Resilient to Ollama being down
+    (returns "" rather than raising)."""
+    try:
+        import difflib
+        import urllib.request
+        import json
+        url = base_url.rstrip("/") + "/api/tags"
+        with urllib.request.urlopen(url, timeout=5) as r:
+            data = json.loads(r.read().decode())
+        pulled = [m.get("name", "") for m in data.get("models", [])]
+    except Exception:
+        return ""
+    if not pulled:
+        return ""
+    miss_stem = _norm(missing).split(":")[0]
+    # 1) any pulled tag sharing the stem
+    same_stem = [p for p in pulled if _norm(p).split(":")[0] == miss_stem]
+    if same_stem:
+        return same_stem[0]
+    # 2) difflib close match across stems
+    stems = [_norm(p).split(":")[0] for p in pulled]
+    hit = difflib.get_close_matches(miss_stem, stems, n=1, cutoff=0.6)
+    if hit:
+        for p in pulled:
+            if _norm(p).split(":")[0] == hit[0]:
+                return p
+    return ""
+
+
 def _matches_pulled(tag: str, pulled: set[str]) -> bool:
     """A catalog tag matches the pulled set if its stem matches any pulled stem."""
     if not pulled:

@@ -8305,13 +8305,24 @@ def source(
 
 @app.command(rich_help_panel="Querying")
 def capture(
+    text:   Annotated[str,  typer.Argument(
+            help="Bare body — the note content. With no --title, the title "
+                 "is derived from the first line (or stamped 'Captured note "
+                 "— <ts>'). Mutually exclusive with --body.")] = "",
     title:  Annotated[str,  typer.Option("--title",  "-t", help="Note title")] = "",
-    body:   Annotated[str,  typer.Option("--body",   "-b", help="Raw content / prompt")] = "",
+    body:   Annotated[str,  typer.Option("--body",   "-b",
+            help="Raw content / prompt (alternative to the bare positional)")] = "",
     file:   Annotated[str,  typer.Option("--file",   "-f", help="Target org file (relative to org_dir)")] = "inbox.org",
     polish: Annotated[bool, typer.Option("--polish/--no-polish", "-p/-P",
             help="Let LLM structure the note (default: on; --no-polish writes raw body)")] = True,
 ):
-    """Capture a new note into your org vault, optionally polished by an LLM."""
+    """Capture a new note into your org vault, optionally polished by an LLM.
+
+    Three calling forms (use whichever fits):
+        org-llm capture 'a quick thought'                # bare positional
+        org-llm capture --body 'a thought' --title 'X'   # explicit
+        org-llm capture                                  # interactive prompts
+    """
     import uuid
     from datetime import datetime
 
@@ -8321,10 +8332,37 @@ def capture(
         url       = _ollama_url(session)
         model     = _cfg(session, "instruct_model") or "mistral-nemo"
 
+    # Bare positional: "org-llm capture 'a quick thought'" — fold into
+    # body unless --body was also provided (in which case the explicit
+    # flag wins and we treat the positional as a no-op to keep the CLI
+    # forgiving rather than complaining about both).
+    if text and not body:
+        body = text
+
     if not title:
-        title = typer.prompt("Note title")
+        # Derive a title from the first non-empty line of the body when
+        # the user didn't specify one — keeps `capture 'thought'`
+        # zero-prompt. Falls back to a stamp when body is empty (for
+        # the fully-interactive form below).
+        first_line = next((ln.strip() for ln in body.splitlines()
+                            if ln.strip()), "")
+        if first_line:
+            # Cap at 60 chars so headings stay readable
+            title = first_line[:60].rstrip(" .…")
+        else:
+            title = ("Captured note — "
+                     + datetime.now().strftime("%Y-%m-%d %H:%M"))
+
+    # Only prompt interactively when BOTH title-derivation + body
+    # produced nothing (i.e. fully bare invocation).
     if not body:
         body = typer.prompt("Content (or prompt for LLM)")
+        # Re-derive title from the freshly-prompted body
+        if title.startswith("Captured note — "):
+            first_line = next((ln.strip() for ln in body.splitlines()
+                                if ln.strip()), "")
+            if first_line:
+                title = first_line[:60].rstrip(" .…")
 
     content = body
     if polish:
@@ -8450,6 +8488,37 @@ def tag(
         on_screen(f"No {mode_label} to tag.")
         return
 
+    # Ensure the configured fast_model is reachable BEFORE we start
+    # the loop. Previous behaviour iterated all nodes, swallowed every
+    # LLM exception silently, marched the progress bar to 100%, then
+    # printed "Tagged 0 nodes." with no explanation. Fail fast instead
+    # — and offer to swap to a pulled model with a similar name so the
+    # user can recover with one keypress.
+    if not _ollama_has(model, url):
+        # Try to auto-pull first (idempotent; cheap if it's actually there)
+        pulled_ok = _ensure_model_pulled(model, url)
+        if not pulled_ok:
+            from .models import similar_pulled_model
+            try:
+                fallback = similar_pulled_model(model, url)
+            except Exception:
+                fallback = ""
+            red_alert(
+                f"fast_model [bold]{model}[/bold] is not pulled and could "
+                f"not be auto-pulled."
+            )
+            if fallback:
+                on_screen(f"[dim]Closest pulled model:[/dim] "
+                          f"[bold]{fallback}[/bold]  "
+                          f"[dim](try)[/dim] "
+                          f"[bold]org-llm config fast_model {fallback}[/bold]")
+            on_screen(f"[dim]Or pull it:[/dim] "
+                      f"[bold]ollama pull {model}[/bold]")
+            on_screen(f"[dim]Or override one-shot:[/dim] "
+                      f"[bold]ORG_LLM_FAST_MODEL={fallback or 'phi4'} "
+                      f"org-llm tag …[/bold]")
+            raise typer.Exit(1)
+
     hail(f"Auto-tagging {len(nodes)} {mode_label} with [bold]{model}[/bold]")
     system = (
         "You are an org-mode expert. Given a note title and body, output ONLY a space-separated "
@@ -8459,6 +8528,8 @@ def tag(
 
     tagged = 0
     skipped_unchanged = 0
+    failed = 0
+    last_error = ""
     with get_session(engine) as session:
         with impulse("Tagging", total=len(nodes)) as (prog, task):
             for node in nodes:
@@ -8484,12 +8555,26 @@ def tag(
                             db_node.auto_tagger_model = model
                             tagged += 1
                         session.commit()
-                except Exception:
+                except Exception as e:
                     session.rollback()
+                    failed += 1
+                    last_error = f"{type(e).__name__}: {e}"
                 prog.advance(task)
 
-    hail(f"Tagged {tagged} nodes."
-         + (f" {skipped_unchanged} unchanged." if skipped_unchanged else ""))
+    # Honest accounting — was: "Tagged 0 nodes." with no reason. Now
+    # the user sees successes, no-ops, AND failures with the last LLM
+    # error message so the silent-failure mode is impossible.
+    summary_bits = [f"Tagged {tagged} nodes"]
+    if skipped_unchanged:
+        summary_bits.append(f"{skipped_unchanged} unchanged")
+    if failed:
+        summary_bits.append(f"[error]{failed} failed[/error]")
+    hail(", ".join(summary_bits) + ".")
+    if failed:
+        on_screen(f"[dim]Last LLM error:[/dim] {last_error[:200]}")
+        on_screen(f"[dim]If this is the configured fast_model, try[/dim] "
+                  f"[bold]org-llm doctor power-boost --apply[/bold] "
+                  f"[dim]or[/dim] [bold]ollama pull {model}[/bold]")
     if apply:
         on_screen("[warn]--apply (write to org files) not yet implemented.[/warn]")
     if tagged > 0:
@@ -15282,10 +15367,23 @@ def main():
     elif "missing argument" in err_lower or "missing option" in err_lower:
         _on("[dim]Add the missing argument or run[/dim] "
             "[bold]org-llm <verb> --help[/bold] [dim]to see what's required.[/dim]")
+    elif "got unexpected extra argument" in err_lower:
+        # The user passed too many positional args (or a flag-only
+        # command got bare text). Pull the actual verb from argv so
+        # the hint points at THAT command's --help, not generic ask.
+        verb = (sys.argv[1] if len(sys.argv) > 1
+                  and not sys.argv[1].startswith("-") else "")
+        if verb:
+            _on(f"[dim]Run[/dim] [bold]org-llm {verb} --help[/bold] "
+                f"[dim]to see what arguments[/dim] [lcars2]{verb}[/lcars2] "
+                f"[dim]actually accepts (it may use --flag-style options).[/dim]")
+        else:
+            _on("[dim]Run[/dim] [bold]org-llm <verb> --help[/bold] "
+                "[dim]for the verb you tried.[/dim]")
     else:
         # Generic catch-all — the shell-quoting hint applies to ask /
-        # capture / search / etc. where unquoted multi-word input is
-        # the most common failure shape.
+        # search where unquoted multi-word input is the most common
+        # failure shape.
         _on("[dim]Tip: wrap the query in single quotes — "
             "[bold]org-llm ask 'your full question here'[/bold][/dim]")
     _log_invocation("unrecovered_parse_error", response=original_error)

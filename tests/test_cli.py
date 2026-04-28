@@ -64,7 +64,11 @@ class TestIndex:
     def test_indexes_files(self, cli_org):
         result = runner.invoke(app, ["index"])
         assert result.exit_code == 0
-        assert "Indexed" in result.output
+        # Wording differs by mode (full vs incremental); both forms
+        # are acceptable success signals.
+        out = result.output
+        assert ("Indexed" in out or "Re-indexed" in out
+                or "Index up to date" in out), out
 
     def test_force_flag(self, cli_org):
         runner.invoke(app, ["index"])
