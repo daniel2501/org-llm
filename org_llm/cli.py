@@ -2008,9 +2008,29 @@ def index(
         with get_session(engine) as session:
             files, nodes = index_directory(org_dir, session)
 
-    hail(f"Indexed {files} files, {nodes} nodes.")
-    if nodes > 0:
-        with get_session(_engine()) as session:
+    # `index_directory` returns (files_changed, nodes_in_changed_files) —
+    # NOT (newly-added rows, total). Without distinguishing the two, the
+    # incremental run "Indexed 1 files, 3550 nodes" reads as 3550 NEW
+    # nodes when actually it's the count of nodes IN the one changed file
+    # (most are upserts of existing rows). Fix: query the post-index
+    # totals and word the message based on whether this was a full
+    # re-index or an incremental run.
+    from .db import File as _F, Node as _N
+    with get_session(_engine()) as session:
+        total_files = session.query(_F).count()
+        total_nodes = session.query(_N).count()
+        if force:
+            # All rows were deleted then re-walked — deltas == totals
+            hail(f"Indexed {total_files} files, {total_nodes} nodes "
+                 f"(full re-index).")
+        elif files == 0:
+            hail(f"Index up to date — no files changed since last run. "
+                 f"Total: {total_files} files, {total_nodes} nodes.")
+        else:
+            hail(f"Re-indexed {files} file(s) "
+                 f"({nodes} node(s) refreshed). "
+                 f"Total: {total_files} files, {total_nodes} nodes.")
+        if total_nodes > 0:
             on_screen(_suggest_note_ask(session, prefix="Try it: "))
     make_it_so()
 
