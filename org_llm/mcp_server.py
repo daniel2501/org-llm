@@ -218,7 +218,28 @@ def create_mcp_server():
             "                              check. Cites specific probes +\n"
             "                              activity correlations.\n"
             "Use these WHEN the question is about the host system. Don't\n"
-            "search_notes for 'why is my CPU pegged' — that's an EMH job."
+            "search_notes for 'why is my CPU pegged' — that's an EMH job.\n"
+            "\n"
+            "WALK + TEACH — context grows over time:\n"
+            "When the user says 'walk me through my notes', 'review my\n"
+            "vault', 'what should I think about today?', or asks you to\n"
+            "help them tag/organize notes:\n"
+            "  - `walk_pick_targets`     — get N candidate notes worth a\n"
+            "                              walk (orphans / recent /\n"
+            "                              untagged-substantive)\n"
+            "  - For each one, present it + ASK the user about it\n"
+            "  - `walk_extract_facts`    — mine atomic claims from the\n"
+            "                              user's response (no auto-save)\n"
+            "  - SHOW extracted facts to user, get explicit approval\n"
+            "  - `walk_save_facts(user_approved=True)` — persist to the\n"
+            "                              llm-context overlay (refuses\n"
+            "                              without user_approved=True)\n"
+            "  - `walk_review_pending`   — re-walk old facts; user\n"
+            "                              confirms/updates/supersedes\n"
+            "Saved facts flow into ask_notes' system prompt automatically\n"
+            "— so once you've helped the user teach you something, future\n"
+            "questions get the benefit. Periodically (every few sessions)\n"
+            "OFFER to run walk_review_pending to keep context current."
         ),
     )
 
@@ -291,9 +312,24 @@ def create_mcp_server():
                                 "Try a different phrasing.")
             await _info(ctx, f"{label}: matched {len(results)} note(s)")
             rag_ctx = "\n\n---\n\n".join(f"# {r.title}\n{r.body[:800]}" for r in results)
+        # Fold the user's llm-context overlay into the system prompt
+        # so saved facts (from `walk`, `context add`, etc.) ground
+        # the answer alongside the RAG-retrieved notes. Phase 13.1
+        # surfaced the gap: ask_notes was bypassing this.
+        from . import context as _ctx_mod
+        overlay = _ctx_mod.read_context_for_prompt(max_chars=4000)
         system = (
-            "You are an assistant with access to a personal org-mode knowledge base. "
-            "Answer using only the provided notes. Be concise. Cite note titles."
+            "You are an assistant with access to a personal "
+            "org-mode knowledge base. Answer using ONLY the provided "
+            "notes plus the user's current-truth overlay below. Be "
+            "concise. Cite note titles. When the overlay contradicts "
+            "a retrieved note, the overlay wins (it represents the "
+            "user's CURRENT truth; the note is historical record).\n\n"
+            f"User's current-truth overlay:\n{overlay}"
+            if overlay else
+            "You are an assistant with access to a personal "
+            "org-mode knowledge base. Answer using only the provided "
+            "notes. Be concise. Cite note titles."
         )
         await _report(ctx, 3, 3, f"{label} — synthesizing answer with {chat_model}")
         try:
@@ -2354,6 +2390,155 @@ def create_mcp_server():
         return _themed("refresh_context",
                         f"snapshot at {datetime.now().strftime('%H:%M:%S')}",
                         body)
+
+    # ── walk + teach (Phase 13) ───────────────────────────────────────────
+    @server.tool()
+    def walk_pick_targets(track: str = "notes",
+                            window_days: int = 7,
+                            k: int = 5) -> str:
+        """Suggest 1-N notes worth walking through with the user — the
+        in-opencode LLM should call this to drive the `walk` workflow
+        from inside the workspace conversation. Use when the user
+        says things like 'help me review my recent notes', 'walk me
+        through my vault', 'what should I think about today?'.
+
+        Returns one node per line with id, title, and selection
+        reason. The LLM picks one (or a few), then asks the user to
+        explain it. After the user responds, call walk_extract_facts
+        to mine atomic claims, then walk_save_facts to persist.
+
+        Tracks: 'notes' (Phase 13.1 — implemented), 'dailies' /
+        'projects' (planned)."""
+        from . import walk as _walk
+        with get_session(engine) as session:
+            try:
+                nodes = _walk.select_walk_nodes(
+                    session, track=track,
+                    window_days=max(1, window_days),
+                    k=max(1, min(20, k)),
+                )
+            except ValueError as e:
+                return f"unsupported track: {e}"
+        if not nodes:
+            return ("no walk-worthy nodes — try a wider window_days, "
+                    "or ask the user to capture a few notes first")
+        lines = [f"Selected {len(nodes)} note(s) for the walk:"]
+        for i, n in enumerate(nodes, 1):
+            lines.append(
+                f"  {i}. id={n.node_id or '(none)'}  "
+                f"title={n.title!r}  reason={n.reason}"
+            )
+            body_preview = n.body[:200].replace('\n', ' ')
+            lines.append(f"     body: {body_preview}…"
+                          if len(n.body) > 200 else
+                          f"     body: {body_preview}")
+        return "\n".join(lines)
+
+    @server.tool()
+    def walk_extract_facts(node_id: str, user_response: str,
+                              note_title: str = "",
+                              note_body: str = "") -> str:
+        """Given a user's natural-language response about a specific
+        note, extract atomic factual claims they MADE (not things
+        they paraphrased from the note). Call this AFTER the user
+        has explained what the note means in their current life.
+
+        Returns the proposed FACTS + a SLUG (topic name). Show them
+        to the user, get confirmation, then call walk_save_facts.
+
+        node_id: the node's :ID: from walk_pick_targets output.
+        note_title / note_body: helpful context (LLM picks them up
+        from walk_pick_targets and threads them here)."""
+        from . import walk as _walk
+        # Build a minimal WalkNode from what the LLM passes — we're
+        # not re-querying the DB because the LLM already has the
+        # context from walk_pick_targets.
+        node = _walk.WalkNode(
+            node_id=node_id, title=note_title or "(unknown)",
+            body=note_body or "", tags="", file_path="",
+            mtime=0.0, score=1.0, reason="mcp",
+        )
+        with get_session(engine) as session:
+            url = _cfg(session, "ollama_url") or "http://localhost:11434"
+            mdl = (_cfg(session, "fast_model")
+                    or _cfg(session, "chat_model") or "llama3.2:1b")
+        facts, slug = _walk.extract_facts_from_response(
+            node, user_response, model=mdl, base_url=url)
+        if not facts:
+            return ("NO_FACTS — user's response had nothing context-worthy "
+                    "(restated the note, asked a question, or stayed "
+                    "general).")
+        out = [f"Extracted {len(facts)} fact(s) (suggested slug: {slug or 'general'}):"]
+        for i, f in enumerate(facts, 1):
+            out.append(f"  {i}. {f}")
+        out.append("")
+        out.append("Now confirm with the user, then call walk_save_facts(facts=[...], "
+                    f"source='walk:{node_id[:8]}') to persist.")
+        return "\n".join(out)
+
+    @server.tool()
+    def walk_save_facts(facts: list[str],
+                          source: str = "walk:mcp",
+                          user_approved: bool = False) -> str:
+        """Persist user-approved facts to the LLM-context overlay.
+        Each fact gets one line in the active-facts block; the LLM
+        sees them in every future RAG call's system prompt.
+
+        Requires user_approved=True — the in-workspace LLM must
+        explicitly confirm with the user before calling. Without
+        the flag we refuse and surface the proposed facts for
+        explicit approval (same pattern as proactive_doctor_apply).
+        """
+        if not user_approved:
+            shown = "\n".join(f"  - {f}" for f in facts[:8])
+            return ("REFUSED: walk_save_facts requires user_approved=True.\n"
+                    "Show these facts to the user FIRST and get explicit "
+                    "confirmation:\n\n" + shown +
+                    "\n\nIf they confirm, call this tool again with "
+                    "user_approved=True.")
+        if not facts:
+            return "NO_FACTS to save."
+        from . import context as _ctx
+        saved = 0
+        for f in facts:
+            f = (f or "").strip()
+            if not f:
+                continue
+            try:
+                _ctx.add_fact(f, source=source)
+                saved += 1
+            except Exception as e:
+                return (f"saved {saved}/{len(facts)} before error: "
+                        f"{type(e).__name__}: {e}")
+        return (f"Saved {saved} fact(s) to context. They flow into "
+                f"the system prompt on every future chat call. "
+                f"Run `org-llm context show` to inspect.")
+
+    @server.tool()
+    def walk_review_pending(max_facts: int = 5) -> str:
+        """List previously-saved context facts that are due for
+        re-review (oldest first). Use when the user says 'are my
+        notes still current?' / 'review my context' / 'what facts
+        am I assuming?'. After listing, ask the user about each
+        one — they confirm, update, or supersede. Use
+        walk_save_facts(user_approved=True) to write any updates.
+        """
+        from . import walk as _walk
+        cards = _walk.select_review_facts(max_facts=max(1, min(20, max_facts)))
+        if not cards:
+            return ("no saved context facts to review yet — user has "
+                    "not run `walk` or `context add`.")
+        out = [f"Reviewing {len(cards)} context fact(s), oldest first:"]
+        for i, c in enumerate(cards, 1):
+            out.append(f"  {i}. \"{c.line}\"  "
+                        f"[added {c.history_ts or '?'}, "
+                        f"source: {c.source}]")
+        out.append("")
+        out.append("Ask the user about each: 'still true?' If yes → "
+                    "no-op. If updated → call walk_save_facts with the "
+                    "new wording. If superseded → save the new truth, "
+                    "noting which old line it replaces.")
+        return "\n".join(out)
 
     return server
 

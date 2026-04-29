@@ -9988,6 +9988,267 @@ def source(
 
 
 @app.command(rich_help_panel="Querying")
+def walk(
+    track:        Annotated[str, typer.Argument(
+                  help="Walk track: 'notes' (Phase 13.1 — default) or "
+                       "'dailies' / 'projects' (planned).")] = "notes",
+    window_days:  Annotated[int, typer.Option("--window-days", "-w",
+                  help="Only consider nodes touched in the last N days.")] = 7,
+    max_nodes:    Annotated[int, typer.Option("--max-nodes", "-n",
+                  help="Cap the walk to N nodes (1-20 reasonable).")] = 5,
+    pick:         Annotated[list[str], typer.Option("--pick", "-p",
+                  help="Walk SPECIFIC notes you choose. Each --pick is a "
+                       "node_id, a title substring, or a file path. "
+                       "Skips automatic selection. Multiple --pick allowed.")] = None,
+    review:       Annotated[bool, typer.Option("--review",
+                  help="Re-walk previously-saved context facts, oldest "
+                       "first. The LLM asks 'still true?' for each; you "
+                       "confirm, update, or mark superseded.")] = False,
+    no_save:      Annotated[bool, typer.Option("--no-save",
+                  help="Dry-run: extract facts but don't append to context.")] = False,
+):
+    """Walk through your vault with the LLM, teach it what each note
+    means in your CURRENT life, persist the lessons as context.
+
+    The LLM picks N notes worth attention (orphans, recent captures,
+    untagged-but-substantive) and presents each one. You explain in
+    natural language. The LLM extracts atomic factual claims you
+    MADE (skipping things you just paraphrased) and proposes them
+    for saving to your context — the same overlay `org-llm context
+    add` writes to.
+
+    Track 'notes' is the only one wired in Phase 13.1; 'dailies'
+    and 'projects' land in 13.2-3. See ~/org/org-llm-test-session/
+    phase-13-walk-and-teach.org for the full spec.
+    """
+    from . import walk as _walk
+    from . import context as _ctx
+
+    if review and (pick or track != "notes"):
+        red_alert("--review can't combine with --pick or a non-default track.")
+        raise typer.Exit(1)
+    if track not in ("notes",) and not review:
+        red_alert(f"track {track!r} not yet wired. Phase 13.1 ships "
+                   f"only 'notes'; 'dailies' and 'projects' are coming.")
+        raise typer.Exit(1)
+    if max_nodes < 1 or max_nodes > 20:
+        red_alert(f"--max-nodes must be 1..20 (got {max_nodes}).")
+        raise typer.Exit(1)
+
+    engine = _engine()
+    with get_session(engine) as session:
+        url = _ollama_url(session)
+        mdl = (_cfg(session, "fast_model")
+               or _cfg(session, "chat_model")
+               or "llama3.2:1b")
+
+        if review:
+            # Different shape entirely — see _walk_review() below.
+            return _walk_review(mdl=mdl, url=url, max_facts=max_nodes,
+                                  no_save=no_save)
+        if pick:
+            nodes = _walk.select_picked_nodes(session, picks=list(pick))
+            if not nodes:
+                red_alert(f"No notes matched any --pick value "
+                           f"({', '.join(pick)}).")
+                raise typer.Exit(1)
+        else:
+            nodes = _walk.select_walk_nodes(session, track=track,
+                                              window_days=window_days,
+                                              k=max_nodes)
+
+    if not nodes:
+        on_screen("[dim]No walk-worthy nodes in the last "
+                   f"{window_days} day(s). Try a wider --window-days, "
+                   "use --pick to choose specific notes, or capture "
+                   "some new notes first.[/dim]")
+        return
+
+    from rich.panel import Panel as _P
+    from rich.text  import Text  as _T
+    hail(f"Walking {len(nodes)} note(s) with [bold]{mdl}[/bold]  "
+         f"[dim](window: {window_days}d)[/dim]")
+    console.print()
+
+    facts_total  = 0
+    files_total: set[str] = set()
+
+    for i, node in enumerate(nodes, 1):
+        # Present the note
+        body_preview = node.body if len(node.body) <= 600 else (
+            node.body[:600] + "\n[…truncated…]")
+        title_line = _T()
+        title_line.append(f"{i}/{len(nodes)}  ", style="lcars1")
+        title_line.append(node.title, style="bold lcars2")
+        meta = (f"[dim]reason: {node.reason}  ·  "
+                f"file: {node.file_path.rsplit('/', 1)[-1]}  ·  "
+                f"tags: {node.tags or '(none)'}[/dim]")
+        console.print(_P(_T.from_markup(meta) + _T("\n\n") + _T(body_preview),
+                          title=title_line, border_style="lcars2",
+                          padding=(1, 2)))
+
+        # Read user response
+        on_screen("[lcars3]What's this for? Anything I should remember "
+                   "about it?[/lcars3]")
+        on_screen("[dim](Empty line to skip this note. Ctrl-C to stop "
+                   "the walk.)[/dim]")
+        try:
+            response = typer.prompt("> ", default="", show_default=False)
+        except (KeyboardInterrupt, EOFError):
+            on_screen("\n[dim]walk cancelled.[/dim]")
+            break
+        if not response.strip():
+            on_screen("[dim]skipped.[/dim]")
+            console.print()
+            continue
+
+        # Extract via LLM
+        with warp(f"Extracting facts via {mdl}…"):
+            facts, slug = _walk.extract_facts_from_response(
+                node, response, model=mdl, base_url=url)
+
+        if not facts:
+            on_screen("[dim]No atomic facts found in your response. "
+                       "Skipping save.[/dim]")
+            console.print()
+            continue
+
+        # Show + confirm
+        on_screen(f"[lcars1]Pulling out {len(facts)} fact(s):[/lcars1]")
+        for f in facts:
+            on_screen(f"  • {f}")
+        if slug:
+            on_screen(f"[dim]suggested topic: {slug}  "
+                       f"(Phase 13.4 will route per-slug)[/dim]")
+        if no_save:
+            on_screen("[dim]--no-save active; skipping persistence.[/dim]")
+            console.print()
+            continue
+        if not typer.confirm("Save these to context?", default=True):
+            on_screen("[dim]not saved.[/dim]")
+            console.print()
+            continue
+
+        # Persist via existing context.add_fact (Phase 13.4 will
+        # multiplex per-slug; for now everything lands in the single
+        # context file).
+        for f in facts:
+            try:
+                p = _ctx.add_fact(f, source=f"walk:{node.node_id[:8]}")
+                files_total.add(str(p))
+                facts_total += 1
+            except Exception as e:
+                on_screen(f"[dim]save failed: {type(e).__name__}: {e}[/dim]")
+        on_screen(f"[lcars3]✓ saved {len(facts)} fact(s) to context.[/lcars3]")
+        console.print()
+
+    console.print()
+    summary_bits = [f"Walk complete — {facts_total} fact(s) saved"]
+    if files_total:
+        summary_bits.append(f"to {len(files_total)} context file(s)")
+    hail(", ".join(summary_bits) + ".")
+    if facts_total:
+        on_screen("[dim]New facts feed into RAG on the next chat call. "
+                   "See[/dim] [bold]org-llm context show[/bold]")
+    make_it_so()
+
+
+def _walk_review(*, mdl: str, url: str, max_facts: int, no_save: bool):
+    """`org-llm walk --review` — re-walk previously-saved context
+    facts. For each one, ask the user 'still true?'. Three actions:
+    confirm (no-op), update (replace with new wording), supersede
+    (mark old as historical, append the new truth as a fresh fact).
+    """
+    from . import walk as _walk
+    from . import context as _ctx
+
+    facts = _walk.select_review_facts(max_facts=max_facts)
+    if not facts:
+        on_screen("[dim]No saved context facts to review yet. "
+                   "Run[/dim] [bold]org-llm walk[/bold] [dim]first.[/dim]")
+        return
+
+    hail(f"Reviewing {len(facts)} context fact(s), oldest first.")
+    console.print()
+    n_kept = n_updated = n_superseded = 0
+
+    from rich.panel import Panel as _P
+
+    for i, card in enumerate(facts, 1):
+        console.print(_P(
+            f"[bold]{card.line}[/bold]\n\n"
+            f"[dim]added {card.history_ts or '(unknown date)'}  ·  "
+            f"source: {card.source}[/dim]",
+            title=f"[lcars1]{i}/{len(facts)}  reviewing fact[/lcars1]",
+            border_style="lcars2", padding=(1, 2),
+        ))
+        on_screen("[lcars3]Still true? [k] keep / [u] update / "
+                   "[s] superseded / [Enter]=keep[/lcars3]")
+        try:
+            choice = typer.prompt("> ", default="k", show_default=False).strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            on_screen("\n[dim]review cancelled.[/dim]")
+            break
+        if choice in ("", "k", "keep", "y", "yes"):
+            n_kept += 1
+            on_screen("[dim]kept.[/dim]")
+            console.print()
+            continue
+        if choice in ("u", "update"):
+            try:
+                new_line = typer.prompt("New wording", default=card.line)
+            except (KeyboardInterrupt, EOFError):
+                continue
+            if not new_line.strip() or new_line.strip() == card.line:
+                on_screen("[dim]no change — kept.[/dim]")
+                n_kept += 1
+                console.print()
+                continue
+            if no_save:
+                on_screen("[dim]--no-save active; preview only.[/dim]")
+            else:
+                # Add the updated fact (appends; old line stays for
+                # history). Phase 13.4 will support real-replace via
+                # per-slug files; for now we append.
+                _ctx.add_fact(new_line.strip(),
+                                source=f"walk-review:update")
+                n_updated += 1
+                on_screen("[lcars3]✓ added the updated wording.[/lcars3]")
+            console.print()
+            continue
+        if choice in ("s", "supersede", "superseded"):
+            try:
+                replacement = typer.prompt("What's true now? "
+                                              "(leave empty to just mark old as superseded)",
+                                              default="")
+            except (KeyboardInterrupt, EOFError):
+                continue
+            if no_save:
+                on_screen("[dim]--no-save active; preview only.[/dim]")
+            else:
+                if replacement.strip():
+                    _ctx.add_fact(replacement.strip(),
+                                    source=f"walk-review:supersedes "
+                                           f"\"{card.line[:32]}…\"")
+                    on_screen("[lcars3]✓ added new truth; old fact "
+                               "stays in history for context.[/lcars3]")
+                else:
+                    on_screen("[dim]marked superseded (history "
+                               "still records the original).[/dim]")
+                n_superseded += 1
+            console.print()
+            continue
+        on_screen(f"[dim]unknown choice {choice!r} — kept.[/dim]")
+        n_kept += 1
+        console.print()
+
+    console.print()
+    hail(f"Review done — {n_kept} kept, {n_updated} updated, "
+          f"{n_superseded} superseded.")
+    make_it_so()
+
+
+@app.command(rich_help_panel="Querying")
 def capture(
     text:   Annotated[str,  typer.Argument(
             help="Bare body — the note content. With no --title, the title "
@@ -12210,6 +12471,39 @@ def _opencode_slash_commands(workspace: str) -> dict:
             "Read `get_context` first, then call `find_stale_notes` with\n"
             "keywords drawn from each context fact. Group by likely-stale\n"
             "topic. Suggest at most 5 notes to review; do NOT modify.\n"
+        ),
+        "walk": (
+            "---\n"
+            "description: Walk through notes; user teaches; context grows\n"
+            "---\n"
+            "1. Call `walk_pick_targets(track='notes', window_days=7, k=5)`\n"
+            "   to surface notes worth a guided walk.\n"
+            "2. For EACH selected note, present it (title + body preview)\n"
+            "   and ask the user: 'What's this for? Anything I should\n"
+            "   remember about it?'\n"
+            "3. After their reply, call `walk_extract_facts(node_id=...,\n"
+            "   user_response=...)` to mine atomic claims.\n"
+            "4. SHOW the extracted facts to the user. Get explicit\n"
+            "   confirmation. If yes → call `walk_save_facts(facts=[...],\n"
+            "   user_approved=True, source='walk:<short-id>')`.\n"
+            "5. Move to the next note. After the last one, summarize\n"
+            "   what was saved.\n"
+            "\n"
+            "IMPORTANT: never call walk_save_facts without explicit\n"
+            "user_approved=True — the tool refuses by design.\n"
+        ),
+        "walk-review": (
+            "---\n"
+            "description: Review previously-saved context — still true?\n"
+            "---\n"
+            "1. Call `walk_review_pending(max_facts=5)` for the oldest\n"
+            "   un-reviewed facts.\n"
+            "2. For EACH, ask the user: 'Still true?' Three answers:\n"
+            "   keep (no-op), update (capture new wording), supersede\n"
+            "   (the old line is wrong now; user provides the new truth).\n"
+            "3. For updates / supersessions: call `walk_save_facts` with\n"
+            "   the new wording. The old line stays in history; the new\n"
+            "   one becomes current truth.\n"
         ),
 
         # ── Code ──────────────────────────────────────────────────────────
