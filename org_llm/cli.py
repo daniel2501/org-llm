@@ -6132,19 +6132,46 @@ def log_show(
                        "[dim] to widen the window or wait for activity to "
                        "accumulate.[/dim]")
             return
+        # Auto-fallback: log --reflect is a structured-format task
+        # that doesn't need the full chat model, so on CPU-only
+        # hardware where chat_model can't fit the 60s timeout, drop
+        # to fast_model on first ReadTimeout. Phase 11 Day 7
+        # surfaced this — user had llama3.2 (3B) as chat_model and
+        # llama3.2:1b as fast_model; chat_model always timed out.
+        with get_session(engine) as session:
+            fast_mdl = _cfg(session, "fast_model") or ""
         try:
             with warp(f"LLM reflecting on {len(rows)} event(s) with {mdl}…"):
                 reflection = _captains_log_reflect(rows, mdl, url)
         except Exception as e:
-            red_alert(f"LLM reflection failed: "
-                       f"{type(e).__name__}: {e}")
-            on_screen(f"[dim]Model:[/dim] [bold]{mdl}[/bold]  "
-                       f"[dim]Endpoint:[/dim] {url}")
-            on_screen(f"[dim]Try:[/dim] "
-                       f"[bold]ollama pull {mdl}[/bold]  "
-                       f"[dim]or[/dim] "
-                       f"[bold]org-llm config chat_model llama3.2:1b[/bold]")
-            raise typer.Exit(1)
+            err_class = type(e).__name__
+            timeoutish = ("Timeout" in err_class
+                            or "timed out" in str(e).lower())
+            if timeoutish and fast_mdl and fast_mdl != mdl:
+                on_screen(f"[dim]chat_model[/dim] [bold]{mdl}[/bold] "
+                           f"[dim]timed out — retrying with[/dim] "
+                           f"[bold]{fast_mdl}[/bold]")
+                try:
+                    with warp(f"LLM reflecting (fallback) "
+                                 f"with {fast_mdl}…"):
+                        reflection = _captains_log_reflect(
+                            rows, fast_mdl, url)
+                    mdl = fast_mdl                       # for logging below
+                except Exception as e2:
+                    red_alert(f"LLM reflection failed (after fallback): "
+                               f"{type(e2).__name__}: {e2}")
+                    on_screen(f"[dim]Tried[/dim] [bold]{mdl}[/bold] "
+                               f"[dim]then[/dim] [bold]{fast_mdl}[/bold]")
+                    raise typer.Exit(1)
+            else:
+                red_alert(f"LLM reflection failed: {err_class}: {e}")
+                on_screen(f"[dim]Model:[/dim] [bold]{mdl}[/bold]  "
+                           f"[dim]Endpoint:[/dim] {url}")
+                on_screen(f"[dim]Try:[/dim] "
+                           f"[bold]ollama pull {mdl}[/bold]  "
+                           f"[dim]or[/dim] "
+                           f"[bold]org-llm config chat_model llama3.2:1b[/bold]")
+                raise typer.Exit(1)
         if not reflection:
             red_alert(f"LLM reflection returned empty response from "
                        f"[bold]{mdl}[/bold].")
