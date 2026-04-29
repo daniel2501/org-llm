@@ -11352,7 +11352,13 @@ def launch(
     if not no_theme:
         oc_config["theme"] = "org-llm-lcars"
 
-    config_path  = org_dir / ".opencode.json"
+    # opencode searches `<cwd>/.opencode/opencode.json` (directory +
+    # file), NOT a flat `.opencode.json` dotfile. We were writing the
+    # latter — opencode silently ignored it, so the MCP server never
+    # got spawned and the in-opencode LLM only saw its built-in tools
+    # (no search_notes, no proactive_doctor, nothing from this app).
+    # Real failure mode the user hit during Phase 9.7 walkthrough.
+    config_path  = org_dir / ".opencode" / "opencode.json"
     theme_path   = org_dir / ".opencode" / "themes"  / "org-llm-lcars.json"
     command_dir  = org_dir / ".opencode" / "command"
 
@@ -11380,6 +11386,7 @@ def launch(
         return
 
     # ── Write all files ───────────────────────────────────────────────────────
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(oc_config, indent=2))
     if use_cloud:
         # The provider block embeds the API key. Restrict to owner so a

@@ -115,7 +115,7 @@ def _spawn_mcp_and_initialize(argv: list[str], env: dict[str, str],
 # ── opencode (launch) ────────────────────────────────────────────────────────
 
 class TestOpencodeLaunchMCP:
-    """`org-llm launch --dry-run` writes a working `.opencode.json`."""
+    """`org-llm launch --dry-run` writes a working `.opencode/opencode.json`."""
 
     def test_dry_run_includes_mcp_block_with_org_llm_server(self, cli_db, capsys):
         # Run launch in dry-run; capture the printed JSON
@@ -140,10 +140,10 @@ class TestOpencodeLaunchMCP:
         monkeypatch.setattr(os, "execvp",
                               lambda p, a: (_ for _ in ()).throw(SystemExit(0)))
         runner.invoke(app, ["launch"])
-        cfg = json.loads((Path(cli_org) / ".opencode.json").read_text())
+        cfg = json.loads((Path(cli_org) / ".opencode" / "opencode.json").read_text())
         instr = cfg.get("instructions")
         assert isinstance(instr, list), (
-            f".opencode.json `instructions` must be a list per opencode's "
+            f".opencode/opencode.json `instructions` must be a list per opencode's "
             f"Config.instructions: Array<string> schema. Got {type(instr).__name__}. "
             "Without the list wrapper, opencode silently drops the entire "
             "system prompt and the model has no idea it's running as org-llm."
@@ -174,7 +174,7 @@ class TestOpencodeLaunchMCP:
         monkeypatch.setattr(os, "execvp",
                               lambda p, a: (_ for _ in ()).throw(SystemExit(0)))
         runner.invoke(app, ["launch"])
-        cfg = json.loads((Path(cli_org) / ".opencode.json").read_text())
+        cfg = json.loads((Path(cli_org) / ".opencode" / "opencode.json").read_text())
         mcp_block = cfg.get("mcp", {}).get("org-llm")
         assert mcp_block, "no .mcp.org-llm in written config"
         assert "environment" in mcp_block, (
@@ -244,7 +244,7 @@ class TestOpencodeLaunchMCP:
         runner.invoke(app, ["launch"])
         # cli_org IS the org_dir (the fixture creates it + sets the
         # config row). The config file gets written there.
-        cfg_path = Path(cli_org) / ".opencode.json"
+        cfg_path = Path(cli_org) / ".opencode" / "opencode.json"
         assert cfg_path.exists(), (
             f"launch didn't write .opencode.json at {cfg_path}"
         )
