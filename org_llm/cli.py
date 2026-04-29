@@ -13340,45 +13340,46 @@ def launch(
         )
 
     # ── Phase 12.4 — inject insight cards into the system prompt ────────────
-    # The headline "Claude Code for org-roam" experience: the
-    # workspace LLM opens with "I noticed N things since you were
-    # last active" rather than an empty prompt. Cards come from the
-    # Phase 12.1+12.2 pipeline (deterministic generators + scorer-
-    # picked optional LLM narration). Gated on the same env flag
-    # (ORG_LLM_INSIGHT_PREMOUNT) so it stays opt-in while the
-    # quality of cards is still being tuned.
-    # Always gather cards (deterministic — fast) so the Phase 16.1 TUI
-    # plugin has data to render. Narration (LLM rewrite of card bodies)
-    # is the slow step; skip it under --no-banner since the plugin
-    # renders titles + first-line snippets where narration is less
-    # impactful than for the system-prompt path.
+    # ALWAYS gather cards. The deterministic generators are fast; the
+    # plugin (Phase 16.1) needs `insight-cards.json` populated so the
+    # /insights dialog has something to show on open. Previously the
+    # whole gather was gated on ORG_LLM_INSIGHT_PREMOUNT, which made
+    # `count: 0` the silent-default — user reported "no cards
+    # visible" on 2026-04-29 because the flag wasn't set. The flag
+    # now ONLY gates the slow narration step + system-prompt
+    # injection (the LLM rewrite of card bodies); the plugin always
+    # gets fresh cards regardless.
     _cards: list = []
     _premount_enabled = os.environ.get("ORG_LLM_INSIGHT_PREMOUNT", "").lower() in ("1", "on", "true")
-    if _premount_enabled:
-        try:
-            from . import insights as _insights
-            with get_session(_engine()) as _s:
-                _narr_model = (_cfg(_s, "chat_model")
-                                or _cfg(_s, "fast_model")
-                                or "llama3.2:1b")
-                _narr_url = _ollama_url(_s)
-                _cards = _insights.cached_gather(
-                    _s,
-                    cache_key=f"launch-prompt:{workspace}",
-                    narrate=not no_banner,
-                    narration_model=_narr_model,
-                    narration_url=_narr_url,
-                    voice="plain",
-                )
-            if _cards and not no_banner:
-                injected = _render_insights_for_prompt(_cards)
-                # Append to END for recency-weighted anchoring —
-                # LLMs follow late instructions more reliably than
-                # early ones in long system prompts.
-                instructions = instructions + "\n\n" + injected
-        except Exception:
-            _cards = []
-            # never block launch on insight gen failure
+    try:
+        from . import insights as _insights
+        with get_session(_engine()) as _s:
+            _narr_model = (_cfg(_s, "chat_model")
+                            or _cfg(_s, "fast_model")
+                            or "llama3.2:1b")
+            _narr_url = _ollama_url(_s)
+            # Narrate ONLY when we're going to inject into the system
+            # prompt — narration is the slow LLM step. Plugin path
+            # uses card titles + first-line body snippets, where
+            # narration is less impactful than in the prompt path.
+            _narrate = _premount_enabled and not no_banner
+            _cards = _insights.cached_gather(
+                _s,
+                cache_key=f"launch-prompt:{workspace}",
+                narrate=_narrate,
+                narration_model=_narr_model,
+                narration_url=_narr_url,
+                voice="plain",
+            )
+        if _cards and _premount_enabled and not no_banner:
+            injected = _render_insights_for_prompt(_cards)
+            # Append to END for recency-weighted anchoring —
+            # LLMs follow late instructions more reliably than
+            # early ones in long system prompts.
+            instructions = instructions + "\n\n" + injected
+    except Exception:
+        _cards = []
+        # never block launch on insight gen failure
 
     # ── Build .opencode.json ──────────────────────────────────────────────────
     #

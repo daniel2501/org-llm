@@ -290,6 +290,75 @@ class TestOpencodeLaunchMCP:
             f"AGENTS.md — opencode won't auto-load it. Got: {instr!r}"
         )
 
+    def test_insight_cards_gathered_without_premount_env_flag(self, cli_org,
+                                                                 monkeypatch):
+        """User reported on 2026-04-29: launched opencode, plugin
+        didn't show cards. Root cause: the gather was gated on
+        ORG_LLM_INSIGHT_PREMOUNT — without that flag set, cards
+        stayed empty and `insight-cards.json` always wrote
+        `count: 0`, making the plugin no-op.
+
+        The deterministic generators are fast; gating them was always
+        wrong. Only narration (the slow LLM rewrite) + system-prompt
+        injection should respect the flag. Pin: insight-cards.json
+        gets WRITTEN with at least the `cards` array shape, regardless
+        of the env flag (whether or not the array is empty depends on
+        what the test fixture's vault yields)."""
+        # Explicitly UNSET the flag for this test — the bug was that
+        # the absence of the flag meant cards never gathered.
+        monkeypatch.delenv("ORG_LLM_INSIGHT_PREMOUNT", raising=False)
+        monkeypatch.setattr("org_llm.cli._opencode_bin", lambda: "/usr/bin/true")
+        monkeypatch.setattr(os, "execvp",
+                              lambda p, a: (_ for _ in ()).throw(SystemExit(0)))
+
+        # Stub `cached_gather` so the test doesn't need real generators
+        # to run — we're testing the GATE, not the gather logic.
+        # Returning a sentinel card proves the gather got CALLED.
+        from org_llm import insights as _insights
+        called = {"narrate": None, "count": 0}
+
+        def _stub_gather(session, *, cache_key, narrate, narration_model,
+                          narration_url, voice):
+            called["narrate"] = narrate
+            called["count"] += 1
+            from dataclasses import dataclass
+            @dataclass
+            class _Card:
+                kind: str = "test"
+                title: str = "test card"
+                body: str = "from gather stub"
+                evidence: dict = None
+                suggested_command: str = ""
+                suggested_question: str = ""
+            return [_Card()]
+
+        monkeypatch.setattr(_insights, "cached_gather", _stub_gather)
+        runner.invoke(app, ["launch"])
+
+        # The gather MUST have been called — that's the bug fix.
+        assert called["count"] == 1, (
+            "cached_gather() was not called during launch. The Phase "
+            "12.4 ORG_LLM_INSIGHT_PREMOUNT gate is blocking it again "
+            "— without the gather, the TUI plugin has no cards to "
+            "render and the user sees nothing on open."
+        )
+        # Narration is the slow step — should still respect the flag.
+        assert called["narrate"] is False, (
+            f"Narration should be off when ORG_LLM_INSIGHT_PREMOUNT is "
+            f"unset (it's the slow LLM rewrite). Got narrate="
+            f"{called['narrate']!r} — gate moved to the wrong layer?"
+        )
+
+        # And insight-cards.json carries the gathered card.
+        cards_path = Path(cli_org) / ".opencode" / "insight-cards.json"
+        assert cards_path.exists(), "launch didn't write insight-cards.json"
+        payload = json.loads(cards_path.read_text())
+        assert payload.get("count", 0) >= 1, (
+            f"insight-cards.json count={payload.get('count')} after the "
+            f"stubbed gather returned 1 card. The plugin will see no "
+            f"cards and stay silent on open."
+        )
+
     def test_tui_plugin_auto_opens_dialog_on_mount(self):
         """User asked: cards should APPEAR ON OPEN, not require typing
         /insights. Pin that the plugin source actually calls
