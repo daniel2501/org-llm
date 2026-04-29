@@ -3395,19 +3395,28 @@ def ask(
                 border_style="lcars2", padding=(1, 2)))
             return
 
-        # Build the EMH prompt: latest reading + window stats per
+        # Build the EMH prompt: latest reading + status COUNTS per
         # probe + activity correlations for alert/critical events.
+        # Deliberately NOT exposing the 0..1 `normalized` health
+        # score: small chat models keep inverting it ("0.97 norm-mean
+        # means CPU was at 97% utilization") even when the system
+        # prompt explicitly defines it. Status enums are unambiguous
+        # and the probe already did the health calculation.
         summary_lines: list[str] = []
         for probe, vs in sorted(by_probe.items()):
-            norms = [float(v["normalized"]) for v in vs if v["normalized"]]
-            if not norms:
-                continue
             latest = vs[0]
+            counts: dict[str, int] = {}
+            for v in vs:
+                k = (v.get("status") or "nominal")
+                counts[k] = counts.get(k, 0) + 1
+            counts_text = " ".join(
+                f"{k}={counts.get(k, 0)}"
+                for k in ("nominal", "watch", "alert", "critical")
+            )
             summary_lines.append(
                 f"  {probe:<14} latest={latest['label']:<22} "
-                f"status={latest['status']:<8} "
-                f"norm-min={min(norms):.2f}  norm-max={max(norms):.2f}  "
-                f"norm-mean={sum(norms)/len(norms):.2f}  n={len(vs)}"
+                f"status_now={latest['status']:<8} "
+                f"window_counts: {counts_text}  n={len(vs)}"
             )
         seen: set[str] = set()
         corr_lines: list[str] = []

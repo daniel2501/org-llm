@@ -673,20 +673,27 @@ def llm_optimization_advice(window_secs: int = 3600) -> str:
                 f"to recommend. Advice surfaces automatically when "
                 f"a probe trips watch / alert / critical.")
 
-    # Compose a tight prompt: latest reading + min/max/mean per probe.
+    # Compose a tight prompt: latest reading + status COUNTS per
+    # probe. Deliberately NOT exposing the 0..1 `normalized` health
+    # score — small chat models keep inverting it (treating norm-mean
+    # as "% utilization") even when the prompt defines it. Status
+    # enums are unambiguous; the probe has already done the health
+    # calculation, so the LLM never needs to recompute.
     summary_lines: list[str] = []
     for probe, vs in sorted(by_probe.items()):
-        norms = [float(v["normalized"]) for v in vs
-                  if v["normalized"]]
-        if not norms:
-            continue
         latest = vs[0]
+        counts: dict[str, int] = {}
+        for v in vs:
+            k = (v.get("status") or "nominal")
+            counts[k] = counts.get(k, 0) + 1
+        counts_text = " ".join(
+            f"{k}={counts.get(k, 0)}"
+            for k in ("nominal", "watch", "alert", "critical")
+        )
         summary_lines.append(
             f"  {probe:<14} latest={latest['label']:<22} "
-            f"status={latest['status']:<8} "
-            f"norm-min={min(norms):.2f}  norm-max={max(norms):.2f}  "
-            f"norm-mean={sum(norms)/len(norms):.2f}  "
-            f"n={len(vs)}"
+            f"status_now={latest['status']:<8} "
+            f"window_counts: {counts_text}  n={len(vs)}"
         )
 
     # Activity correlation — pair readings where status was alert/
@@ -715,18 +722,18 @@ def llm_optimization_advice(window_secs: int = 3600) -> str:
         "optimisation suggestions for THOSE probes only, not the "
         "nominal ones.\n"
         "\n"
-        "How to read the data (CRITICAL):\n"
-        "  • `normalized` is a 0..1 HEALTH score. 1.0 = best "
-        "(full headroom), 0.0 = worst (at the critical threshold). "
-        "HIGH normalized = HEALTHY. Do NOT interpret normalized as "
-        "utilization or load.\n"
+        "How to read the data:\n"
+        "  • `status_now` is the current health enum: nominal / "
+        "watch / alert / critical. The probe has already done the "
+        "health calculation. Trust it.\n"
+        "  • `window_counts` shows how many readings landed in each "
+        "status enum during the window. e.g. "
+        "`nominal=80 watch=2 alert=0 critical=0` means the probe "
+        "was mostly fine with two brief blips.\n"
         "  • `label` is a human-readable display string (e.g. "
         "'12 models', 'not running', '76°C / crit 100°C'). It is "
         "NOT a config value. Do NOT propose 'swap to latest=<label>' "
         "or treat label fragments as command arguments.\n"
-        "  • Only describe a trend if min and max actually differ "
-        "meaningfully. With a stable range do not invent a "
-        "trajectory ('steadily increasing', 'gradually draining').\n"
         "\n"
         "Output STRICTLY 1-3 bullet lines starting with `• `, no "
         "preamble. Each bullet: ONE actionable suggestion targeting "
