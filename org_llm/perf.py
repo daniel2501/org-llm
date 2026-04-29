@@ -62,13 +62,48 @@ def _normalize_model(name: str) -> str:
     return n
 
 
-def _row_tok_s(response: str | None, duration_ms: int | None) -> float | None:
-    """tok/s for a single History row, or None if it can't be measured."""
+def _row_tok_s(response: str | None, duration_ms: int | None,
+                 outcome: str | None = None) -> float | None:
+    """tok/s for a single History row, or None if it can't be measured.
+
+    Filters out junk samples that would otherwise inflate baselines:
+
+      • Error rows. The History.response column stores the exception
+        message text on outcome=error (e.g. "ResponseError: model
+        requires more system memory (6.9 GiB)…"). Treating those as
+        real generation made fastest_known() report mistral-nemo at
+        ~28 tok/s when it actually OOMs and runs ~1 tok/s — every
+        "fast" mistral row was a fast-failing 500 with the error
+        message as the response.
+
+      • Sub-second durations. A real 10+ chars completion at 28+
+        tok/s is conceivable on a fast cloud endpoint but on local
+        CPU is almost always a cache hit / refusal / immediate
+        error, not actual generation work.
+
+      • Tiny replies. Single-word answers / refusals give noisy
+        per-call tok/s estimates.
+    """
+    if outcome and outcome.lower() == "error":
+        return None
     if not response or not duration_ms or duration_ms <= 0:
+        return None
+    if duration_ms < 1000:
+        # Anything that "completed" in under a second on local
+        # hardware is almost certainly a cache hit or error response.
         return None
     chars = len(response)
     if chars < 10:
-        # Tiny replies (single-word, refusals) make for unstable tok/s.
+        return None
+    # Defensive: error messages routinely start with "ResponseError:"
+    # or "HTTP" / "401" / "404" patterns. Drop any response that
+    # looks like a stringified exception. This catches rows where
+    # outcome was incorrectly recorded as "ok" but the body is an
+    # error trail.
+    head = response.lstrip()[:60].lower()
+    if (head.startswith(("responseerror", "http", "error:",
+                            "traceback", "exception"))
+            or "status code: 5" in head or "status code: 4" in head):
         return None
     tok_est = chars / _CHARS_PER_TOKEN
     return tok_est / (duration_ms / 1000.0)
@@ -97,7 +132,7 @@ def recent_tok_s(model: str, *, limit: int = 20) -> float | None:
     for r in rows:
         if _normalize_model(r.model or "") != target:
             continue
-        v = _row_tok_s(r.response, r.duration_ms)
+        v = _row_tok_s(r.response, r.duration_ms, getattr(r, "outcome", None))
         if v is None:
             continue
         samples.append(v)
@@ -142,7 +177,7 @@ def fastest_known(role: str, *, current_model: str = "",
         m = _normalize_model(r.model or "")
         if not m:
             continue
-        v = _row_tok_s(r.response, r.duration_ms)
+        v = _row_tok_s(r.response, r.duration_ms, getattr(r, "outcome", None))
         if v is None:
             continue
         role_models.setdefault(m, []).append(v)
@@ -333,7 +368,7 @@ def regression_warning(model: str, *, recent_window: int = 5,
     for r in rows:
         if _normalize_model(r.model or "") != target:
             continue
-        v = _row_tok_s(r.response, r.duration_ms)
+        v = _row_tok_s(r.response, r.duration_ms, getattr(r, "outcome", None))
         if v is None:
             continue
         if len(recent) < recent_window:

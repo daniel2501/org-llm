@@ -3359,11 +3359,27 @@ def ask(
     try:
         with get_session(engine) as session:
             url        = _ollama_url(session)
-            embed_mdl  = _cfg(session, "embed_model") or "nomic-embed-text"
-            chat_mdl   = model or (
-                _cfg(session, "reason_model") if reason
-                else _cfg(session, "chat_model")
-            ) or MODEL_DEFAULTS["chat_model"]
+            embed_mdl  = (os.environ.get("ORG_LLM_EMBED_MODEL")
+                           or _cfg(session, "embed_model")
+                           or "nomic-embed-text")
+            # Resolution order for the chat-side model:
+            #   1. --model flag (explicit per-call override)
+            #   2. ORG_LLM_REASON_MODEL / ORG_LLM_CHAT_MODEL env var
+            #      (the docs at line 522 advertise these env taps;
+            #      this branch was reading config-only and silently
+            #      ignored the env var, surprising users who set it)
+            #   3. corresponding config row
+            #   4. MODEL_DEFAULTS fallback
+            if reason:
+                chat_mdl = (model
+                              or os.environ.get("ORG_LLM_REASON_MODEL")
+                              or _cfg(session, "reason_model")
+                              or MODEL_DEFAULTS["chat_model"])
+            else:
+                chat_mdl = (model
+                              or os.environ.get("ORG_LLM_CHAT_MODEL")
+                              or _cfg(session, "chat_model")
+                              or MODEL_DEFAULTS["chat_model"])
             cloud_provider = _cfg(session, "cloud_provider")
             cloud_endpoint = _cfg(session, "cloud_endpoint_url")
             cloud_model    = _cfg(session, "cloud_model")
