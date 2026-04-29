@@ -108,7 +108,15 @@ def run_skill(
         with tempfile.NamedTemporaryFile(suffix=".py", mode="w", delete=False) as f:
             f.write(header + src)
             tmp = f.name
-        result = subprocess.run(["python3", tmp], capture_output=True, text=True)
+        # Use the SAME interpreter that's running org-llm so the
+        # subprocess sees the org-llm venv's site-packages (where
+        # `ollama` and friends actually live). Phase 11 Day 8 hit
+        # this: subprocess invoked the system /usr/bin/python3,
+        # which had no ollama module → ModuleNotFoundError on every
+        # python skill that used `llm.chat`.
+        import sys as _sys
+        result = subprocess.run([_sys.executable, tmp],
+                                  capture_output=True, text=True)
         Path(tmp).unlink(missing_ok=True)
         return result.stdout.strip() or result.stderr.strip()
 
