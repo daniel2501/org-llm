@@ -214,54 +214,136 @@ def probe_disk() -> Reading:
     free_gb  = usage.free  / 2**30
     total_gb = usage.total / 2**30
     pct_free = usage.free / max(1, usage.total)
-    norm = pct_free
-    stat = _status_from_norm(norm)
+    # Disk-specific bands: 25%+ free is normal; below 5% is dire.
+    # The generic _status_from_norm cliff at 0.7 was way too tight —
+    # it called 60% free "watch" while the message read "well-stocked".
+    if   pct_free >= 0.25:
+        stat, msg = "nominal", "Cargo bays well-stocked."
+    elif pct_free >= 0.10:
+        stat = "watch"
+        msg  = "Recommend `org-llm db --vacuum` and snapshot pruning."
+    elif pct_free >= 0.05:
+        stat = "alert"
+        msg  = "Stowage critical — clear cache or move data."
+    else:
+        stat, msg = "critical", "RED ALERT — disk exhaustion imminent."
     label = f"{free_gb:.1f} / {total_gb:.1f} GB"
-    if   norm > 0.30: msg = "Cargo bays well-stocked."
-    elif norm > 0.15: msg = "Recommend `org-llm db --vacuum` and snapshot pruning."
-    elif norm > 0.07: msg = "Stowage critical — clear cache or move data."
-    else:             msg = "RED ALERT — disk exhaustion imminent."
-    return Reading("disk", free_gb, norm, label, stat, msg)
+    # Keep `normalized` proportional for trend analysis — sensor_log
+    # consumers (LLM advice, sparklines) read it.
+    return Reading("disk", free_gb, pct_free, label, stat, msg)
 
 
 # ── thermals ─────────────────────────────────────────────────────────────────
 
 def probe_thermal() -> Reading:
-    """Highest temperature across all available zones."""
-    temps: list[float] = []
+    """CPU package / coretemp temperature, normalised against the
+    sensor's REPORTED critical threshold (typically 100°C for Intel,
+    similar for AMD). NOT the highest sensor across all zones — that
+    falsely flagged routine 77°C CPU loads as "critical" because the
+    old hand-coded curve assumed 95°C critical, ignoring the real
+    sensor metadata.
+
+    Pick order:
+      1. psutil coretemp `Package id 0` (or first Core entry)
+      2. /sys/class/thermal zone whose `type` looks CPU-ish
+      3. psutil any `*temp*` entry as last resort
+
+    Skip non-CPU thermals (wifi, nvme, gpu) — those have very
+    different design envelopes and reading the max across them
+    surfaces the wrong warnings (NVMe at 32°C is the COLD one).
+    """
+    cpu_temp: float | None = None
+    crit_temp: float = 100.0   # safe Intel/AMD assumption when no sensor reports
+
+    # First choice — psutil with proper labels + critical threshold.
     try:
-        for zone in Path("/sys/class/thermal").glob("thermal_zone*"):
-            try:
-                t_milli = int((zone / "temp").read_text().strip())
-                temps.append(t_milli / 1000.0)
-            except (FileNotFoundError, ValueError):
-                continue
-    except (FileNotFoundError, OSError):
+        import psutil
+        data = (psutil.sensors_temperatures()
+                  if hasattr(psutil, "sensors_temperatures") else {})
+        # Prefer coretemp Package; fall back to first Core; then anything else.
+        ranked: list[tuple[int, float, float | None]] = []
+        for chip, entries in data.items():
+            for t in entries:
+                if not t.current or t.current <= 0:
+                    continue
+                lbl = (t.label or "").lower()
+                # Skip clearly non-CPU sensors
+                if any(x in chip.lower()
+                        for x in ("nvme", "wifi", "wlan", "iwlwifi",
+                                   "battery", "gpu")):
+                    continue
+                if "gpu" in lbl:
+                    continue
+                # Score: package > core 0 > any core > anything labelled cpu
+                score = 0
+                if "package" in lbl:                   score = 100
+                elif lbl == "core 0":                  score = 80
+                elif lbl.startswith("core"):           score = 70
+                elif "cpu" in lbl or chip.lower() == "coretemp":
+                                                        score = 50
+                else:
+                    continue
+                ranked.append((score, t.current, t.critical))
+        if ranked:
+            ranked.sort(reverse=True)
+            cpu_temp = ranked[0][1]
+            if ranked[0][2]:
+                crit_temp = float(ranked[0][2])
+    except Exception:
         pass
-    if not temps:
+
+    # Second choice — /sys/class/thermal cpu-ish zone.
+    if cpu_temp is None:
         try:
-            import psutil
-            data = psutil.sensors_temperatures() if hasattr(psutil, "sensors_temperatures") else {}
-            for entries in data.values():
-                for t in entries:
-                    if t.current and t.current > 0:
-                        temps.append(t.current)
-        except Exception:
+            for zone in Path("/sys/class/thermal").glob("thermal_zone*"):
+                try:
+                    zt = (zone / "type").read_text().strip().lower()
+                except FileNotFoundError:
+                    continue
+                # CPU package types across distros
+                if not any(s in zt for s in ("x86_pkg_temp", "cpu",
+                                                "coretemp", "k10temp",
+                                                "zen", "soc")):
+                    continue
+                try:
+                    t_milli = int((zone / "temp").read_text().strip())
+                    cpu_temp = t_milli / 1000.0
+                    break
+                except (FileNotFoundError, ValueError):
+                    continue
+        except (FileNotFoundError, OSError):
             pass
-    if not temps:
-        return Reading("thermal", None, 1.0, "n/a",
-                        "nominal", "Thermal sensors unreachable.")
-    hi = max(temps)
-    # 35°C nominal, 95°C critical (thermal throttle for most CPUs).
-    norm = max(0.0, 1.0 - (hi - 35.0) / 60.0)
-    norm = min(1.0, max(0.0, norm))
-    stat = _status_from_norm(norm)
-    label = f"{hi:.0f}°C"
-    if   hi < 60: msg = "Coolant flow nominal across all decks."
-    elif hi < 75: msg = "Temperatures elevated — check vents."
-    elif hi < 90: msg = "Plasma manifolds running hot. Reduce load."
-    else:         msg = "RED ALERT — thermal critical. Throttle imminent."
-    return Reading("thermal", hi, norm, label, stat, msg)
+
+    if cpu_temp is None:
+        return Reading("thermal", None, 1.0, "n/a", "nominal",
+                        "Thermal sensors unreachable.")
+
+    # Normalise against the sensor's reported critical threshold.
+    # Treat 50°C as the "totally idle, room-temp baseline" and the
+    # sensor's reported `critical` as the floor (norm=0). 80% of the
+    # way to critical → norm=0.2 (alert), 60% → 0.4 (watch),
+    # below 40% → nominal. This puts a 77°C reading on a
+    # critical=100°C CPU at norm=0.46 (watch) instead of "critical",
+    # matching what the silicon's actually doing.
+    floor = 50.0
+    crit  = max(crit_temp, floor + 10.0)   # avoid div-by-zero
+    norm = (crit - cpu_temp) / (crit - floor)
+    norm = max(0.0, min(1.0, norm))
+    headroom = crit - cpu_temp
+    label = f"{cpu_temp:.0f}°C / crit {crit:.0f}°C"
+    # Thermal-specific bands by °C of headroom — generic norm cliff
+    # at 0.7 was too tight (30°C of headroom → norm=0.6 → "watch"
+    # contradicting the "plenty of headroom" message). Status now
+    # follows headroom directly so the message and status agree.
+    if   headroom > 20:
+        stat, msg = "nominal", "Coolant flow nominal — plenty of headroom."
+    elif headroom > 12:
+        stat, msg = "watch",   "Temperatures elevated under load. Vents OK."
+    elif headroom >  6:
+        stat, msg = "alert",   "Plasma manifolds running hot — close to throttle."
+    else:
+        stat, msg = "critical", "RED ALERT — thermal critical. Throttle imminent."
+    return Reading("thermal", cpu_temp, norm, label, stat, msg)
 
 
 # ── network ──────────────────────────────────────────────────────────────────
