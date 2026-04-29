@@ -5750,23 +5750,32 @@ def sensors_dashboard(
                         title="[lcars1]activity correlations  · what the user was doing during alerts[/lcars1]",
                         border_style="lcars2", padding=(1, 2))
 
-        layout = _Layout()
-        layout.split_column(
-            _Layout(_P(head, title=f"[lcars1]sensors  · drill: {name}[/lcars1]",
-                         border_style="lcars1", padding=(1, 2)), size=7),
-            _Layout(chart_box, size=4),
-            _Layout(corr_box),
-        )
-        return layout
+        # Drill renders three stacked panels — NOT a Layout (which
+        # would stretch the last panel to full terminal height) and
+        # NOT a Live loop (drill is a one-shot deep dive; the
+        # overview is the live view).
+        return [
+            _P(head, title=f"[lcars1]sensors  · drill: {name}[/lcars1]",
+                 border_style="lcars1", padding=(1, 2)),
+            chart_box,
+            corr_box,
+        ]
 
-    # Build the renderer once + loop
-    render = (lambda: _drill_panel(drill)) if drill else (lambda: _overview_panel())
+    # Drill = one-shot stacked panels. Overview = live-refreshing dashboard.
+    if drill:
+        result = _drill_panel(drill)
+        if isinstance(result, list):
+            for panel in result:
+                console.print(panel)
+        else:                       # error panel from invalid name
+            console.print(result)
+        return
     try:
-        with Live(render(), console=console, refresh_per_second=2,
-                    transient=False) as live:
+        with Live(_overview_panel(), console=console,
+                    refresh_per_second=2, transient=False) as live:
             while True:
                 time.sleep(max(1, interval))
-                live.update(render())
+                live.update(_overview_panel())
     except KeyboardInterrupt:
         console.print()
         on_screen("[dim]sensors dashboard exited.[/dim]")
