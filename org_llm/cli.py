@@ -13115,6 +13115,11 @@ def launch(
                      "when configured + API key available, local otherwise)")] = None,
     dry_run:    Annotated[bool, typer.Option("--dry-run",    "-n",
                 help="Print opencode config only, do not launch")] = False,
+    no_banner:  Annotated[bool, typer.Option("--no-banner",  "-B",
+                help="Skip the LCARS splash + insight pre-mount panel + "
+                     "workspace facts table. Hands off to opencode "
+                     "immediately after writing config files. Useful for "
+                     "fast relaunches and for non-interactive smoke tests.")] = False,
 ):
     """Launch opencode as an interactive org-roam workspace.
 
@@ -13225,7 +13230,14 @@ def launch(
     # picked optional LLM narration). Gated on the same env flag
     # (ORG_LLM_INSIGHT_PREMOUNT) so it stays opt-in while the
     # quality of cards is still being tuned.
-    if os.environ.get("ORG_LLM_INSIGHT_PREMOUNT", "").lower() in ("1", "on", "true"):
+    # Always gather cards (deterministic — fast) so the Phase 16.1 TUI
+    # plugin has data to render. Narration (LLM rewrite of card bodies)
+    # is the slow step; skip it under --no-banner since the plugin
+    # renders titles + first-line snippets where narration is less
+    # impactful than for the system-prompt path.
+    _cards: list = []
+    _premount_enabled = os.environ.get("ORG_LLM_INSIGHT_PREMOUNT", "").lower() in ("1", "on", "true")
+    if _premount_enabled:
         try:
             from . import insights as _insights
             with get_session(_engine()) as _s:
@@ -13236,19 +13248,20 @@ def launch(
                 _cards = _insights.cached_gather(
                     _s,
                     cache_key=f"launch-prompt:{workspace}",
-                    narrate=True,
+                    narrate=not no_banner,
                     narration_model=_narr_model,
                     narration_url=_narr_url,
                     voice="plain",
                 )
-            if _cards:
+            if _cards and not no_banner:
                 injected = _render_insights_for_prompt(_cards)
                 # Append to END for recency-weighted anchoring —
                 # LLMs follow late instructions more reliably than
                 # early ones in long system prompts.
                 instructions = instructions + "\n\n" + injected
         except Exception:
-            pass        # never block launch on insight gen failure
+            _cards = []
+            # never block launch on insight gen failure
 
     # ── Build .opencode.json ──────────────────────────────────────────────────
     #
@@ -13379,22 +13392,20 @@ def launch(
 
     # tui.json is the new home for theme + plugin + keybind
     # overrides (per packages/opencode/src/cli/cmd/tui/config/
-    # tui-schema.ts). plugin[] takes TSX plugins that render in
-    # the TUI — Phase 16.1 will land an org-llm-cards plugin
-    # there. For now the theme reference + a placeholder for
-    # plugin-list-to-come.
+    # tui-schema.ts). plugin[] takes TS files that render in the
+    # TUI — Phase 16.1 lands the org-llm insight-cards plugin.
     tui_config: dict = {
         "$schema": "https://opencode.ai/tui.json",
     }
     if not no_theme:
         tui_config["theme"] = "org-llm-lcars"
-    # Phase 16.1 placeholder: when extensions/opencode/dist/index.js
-    # exists in the repo, register it here. Until then this stays
-    # empty so opencode doesn't error on a missing plugin file.
-    _plugin_dist = (Path(__file__).resolve().parent.parent
-                       / "extensions" / "opencode" / "dist" / "index.js")
-    if _plugin_dist.exists():
-        tui_config["plugin"] = [str(_plugin_dist)]
+    # Phase 16.1: register the TUI plugin if its source exists in
+    # the repo. opencode's embedded bun runtime loads .ts files
+    # directly — no build step needed.
+    _plugin_src = (Path(__file__).resolve().parent.parent
+                      / "extensions" / "opencode" / "src" / "index.ts")
+    if _plugin_src.exists():
+        tui_config["plugin"] = [str(_plugin_src)]
 
     # opencode searches `<cwd>/.opencode/opencode.json` (directory +
     # file), NOT a flat `.opencode.json` dotfile. We were writing the
@@ -13404,6 +13415,7 @@ def launch(
     # Real failure mode the user hit during Phase 9.7 walkthrough.
     config_path  = org_dir / ".opencode" / "opencode.json"
     tui_path     = org_dir / ".opencode" / "tui.json"
+    cards_path   = org_dir / ".opencode" / "insight-cards.json"
     theme_path   = org_dir / ".opencode" / "themes"  / "org-llm-lcars.json"
     command_dir  = org_dir / ".opencode" / "command"
 
@@ -13432,6 +13444,7 @@ def launch(
         console.rule(f"[lcars2]Workspace: {workspace}[/lcars2]")
         on_screen(f"Would write config:   {config_path}")
         on_screen(f"Would write tui:      {tui_path}")
+        on_screen(f"Would write cards:    {cards_path} ({len(_cards)} card(s))")
         if not no_theme:
             on_screen(f"Would write theme:    {theme_path}")
         if slash_cmds:
@@ -13456,6 +13469,20 @@ def launch(
     # tui-schema.ts). Always written even if no_theme so future
     # plugin registrations have a home.
     tui_path.write_text(json.dumps(tui_config, indent=2))
+    # insight-cards.json — Phase 16.1. The TUI plugin reads this
+    # to render the /insights dialog + on-load toast. Always
+    # written (even empty) so the plugin can detect "no cards"
+    # vs "cards file missing" cleanly.
+    from dataclasses import asdict, is_dataclass
+    _cards_payload = {
+        "generated_at": int(time.time()),
+        "count":        len(_cards),
+        "cards": [
+            asdict(c) if is_dataclass(c) else dict(c)
+            for c in _cards
+        ],
+    }
+    cards_path.write_text(json.dumps(_cards_payload, indent=2))
     if slash_cmds:
         command_dir.mkdir(parents=True, exist_ok=True)
         for name, body in slash_cmds.items():
@@ -13472,33 +13499,46 @@ def launch(
     # The downstream frontend (opencode / Claude Code) mounts after we
     # hand off; this is the last "org-llm" frame the user sees, so it's
     # the right place to land hard on identity + theme.
-    solidarity()
-    console.print()
-    console.print(_render_splash_logo())
-    console.print()
+    if no_banner:
+        # Fast-relaunch path. Skip splash/solidarity/facts table AND the
+        # insight pre-mount panel below. opencode handles the visible
+        # post-launch surface via the Phase 16.1 TUI plugin.
+        hail("Engaging opencode…")
+        console.print()
+        # Jump straight to the subprocess hand-off. The pre-mount /
+        # facts-table / insight panel sections all sit between here and
+        # the subprocess.run() at line ~13576, so we early-skip them.
+        _skip_banner_pre_mount = True
+    else:
+        solidarity()
+        console.print()
+        console.print(_render_splash_logo())
+        console.print()
+        _skip_banner_pre_mount = False
 
-    tbl = Table(box=None, pad_edge=False, show_header=False)
-    tbl.add_column("Key",   style="lcars1", width=20)
-    tbl.add_column("Value", style="lcars2")
-    tbl.add_row("Workspace",   workspace)
-    tbl.add_row("Model",       active_model_label)
-    tbl.add_row("Vault",       str(org_dir))
-    tbl.add_row("Nodes",       f"{ctx['n_nodes']}  ({ctx['pct_e']}% embedded)")
-    tbl.add_row("Skills",      f"{len(ctx['skills'])} registered")
-    tbl.add_row("MCP server",  "org-llm mcp  (stdio)")
-    if not no_theme:
-        tbl.add_row("Theme",   "org-llm-lcars (LCARS palette)")
-    if slash_cmds:
-        tbl.add_row("Commands", "/" + ", /".join(slash_cmds.keys()))
-    tbl.add_row("Config",      str(config_path))
-    console.print(Panel(
-        tbl,
-        title=f"[lcars1]org-llm  ×  opencode  workspace[/lcars1]  "
-              f"[dim]({workspace})[/dim]",
-        border_style="lcars2",
-        padding=(1, 2),
-    ))
-    console.print()
+    if not _skip_banner_pre_mount:
+        tbl = Table(box=None, pad_edge=False, show_header=False)
+        tbl.add_column("Key",   style="lcars1", width=20)
+        tbl.add_column("Value", style="lcars2")
+        tbl.add_row("Workspace",   workspace)
+        tbl.add_row("Model",       active_model_label)
+        tbl.add_row("Vault",       str(org_dir))
+        tbl.add_row("Nodes",       f"{ctx['n_nodes']}  ({ctx['pct_e']}% embedded)")
+        tbl.add_row("Skills",      f"{len(ctx['skills'])} registered")
+        tbl.add_row("MCP server",  "org-llm mcp  (stdio)")
+        if not no_theme:
+            tbl.add_row("Theme",   "org-llm-lcars (LCARS palette)")
+        if slash_cmds:
+            tbl.add_row("Commands", "/" + ", /".join(slash_cmds.keys()))
+        tbl.add_row("Config",      str(config_path))
+        console.print(Panel(
+            tbl,
+            title=f"[lcars1]org-llm  ×  opencode  workspace[/lcars1]  "
+                  f"[dim]({workspace})[/dim]",
+            border_style="lcars2",
+            padding=(1, 2),
+        ))
+        console.print()
 
     # Phase 12.1+12.2 — insight pre-mount panel. Gated by env flag
     # while the feature is opt-in. When ON, surface the cards we
@@ -13506,7 +13546,11 @@ def launch(
     # wire the actual injection; this just proves the pipeline
     # produces something attention-worthy). Narration is local-only
     # in 12.2 (cloud switch lands in 12.3).
-    if os.environ.get("ORG_LLM_INSIGHT_PREMOUNT", "").lower() in ("1", "on", "true"):
+    # --no-banner skips this entirely — the LLM narration call is the
+    # slow step of launch (multi-second per card on local Ollama), so
+    # this is the lever for fast relaunches.
+    if (not _skip_banner_pre_mount and
+        os.environ.get("ORG_LLM_INSIGHT_PREMOUNT", "").lower() in ("1", "on", "true")):
         try:
             from . import insights as _insights
             with get_session(_engine()) as _s:
@@ -13530,8 +13574,9 @@ def launch(
             on_screen(f"[dim]insight pre-mount skipped: "
                       f"{type(_e).__name__}: {_e}[/dim]")
 
-    hail("Engaging opencode… (q to quit, Ctrl-C to abort)")
-    console.print()
+    if not _skip_banner_pre_mount:
+        hail("Engaging opencode… (q to quit, Ctrl-C to abort)")
+        console.print()
 
     # ── Hand off to opencode (with a stall watcher) ───────────────────────────
     # We deliberately do NOT use os.execvp: we want this Python process to

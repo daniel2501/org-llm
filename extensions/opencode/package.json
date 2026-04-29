@@ -8,7 +8,7 @@
   "type": "module",
   "module": "src/index.ts",
   "scripts": {
-    "build":     "bun build ./src/index.ts --outdir ./dist --target bun",
+    "build":     "echo 'no build step — opencode loads src/index.ts directly via its embedded bun runtime'",
     "test":      "bun test",
     "test:ci":   "bun test --reporter=junit --reporter-outfile=.artifacts/junit.xml",
     "typecheck": "tsc --noEmit"
