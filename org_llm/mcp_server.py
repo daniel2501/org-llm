@@ -1598,19 +1598,31 @@ def create_mcp_server():
                                      ctx: Context | None = None) -> str:
         """Pull rows from the sensor_log timeseries.
 
-        `probe=""` returns all probes; pass a specific probe name
-        (battery / cpu / memory / disk / thermal / network / ollama /
-        auto_embedder) to scope. `window_minutes` defaults to one hour.
+        For ALL probes: pass `probe=""` (empty string) or omit the
+        argument. Do NOT pass `*`, `all`, `any`, or any other
+        wildcard — the column is matched literally and a wildcard
+        will return zero rows.
 
-        Each row carries the user-activity context recorded at probe
-        time, so the LLM can correlate resource spikes with the verbs
-        that caused them. Use this when the user asks "have I been
-        thrashing the CPU lately?" or "was the battery dropping during
-        my last ask?" — the answers are in this table.
+        For a SPECIFIC probe: pass one of `battery`, `cpu`, `memory`,
+        `disk`, `thermal`, `network`, `ollama`, `auto_embedder`.
+
+        `window_minutes` defaults to one hour. Each row carries the
+        user-activity context recorded at probe time, so the LLM can
+        correlate resource spikes with the verbs that caused them.
+        Use this when the user asks "have I been thrashing the CPU
+        lately?" or "was the battery dropping during my last ask?" —
+        the answers are in this table.
         """
         from . import life_support as _ls
+        # Defensive: small models keep passing `*` / `all` as a
+        # wildcard despite the docstring. Normalize those to empty
+        # so the user's question gets answered instead of returning
+        # a confusing 'no data' string.
+        probe_norm = (probe or "").strip().lower()
+        if probe_norm in ("", "*", "all", "any", "none", "null"):
+            probe_norm = ""
         rows = _ls.recent_readings(
-            probe=probe or None,
+            probe=probe_norm or None,
             since_secs=max(60, window_minutes * 60),
             limit=max(1, min(500, limit)),
         )
