@@ -2709,6 +2709,57 @@ def create_mcp_server():
         return "\n".join(out)
 
     @server.tool()
+    def insight_card_feedback(
+        card_kind:        str,
+        card_title:       str,
+        reaction:         str,
+        reason:           str = "",
+        narration_model:  str = "deterministic",
+        suggested_cmd:    str = "",
+    ) -> str:
+        """Record user feedback on a Phase 12 insight card.
+
+        `reaction`: 'good' (helpful), 'bad' (useless / wrong), or
+        'clicked' (the user acted on the card's suggestion). Empty
+        string is also accepted for "shown but no signal yet".
+
+        Use when the user reacts to a card: 'that one was useful',
+        'the stale-candidates one was wrong', 'tell me more about
+        the orphan one' (counts as 'clicked'). The in-workspace LLM
+        should call this naturally as part of card-discussion turns;
+        no explicit user_approved gate (it's append-only telemetry,
+        not destructive).
+
+        Phase 12.5 substrate. `doctor --diagnose-cards` reads from
+        this table to surface card-quality patterns over time.
+        """
+        valid_reactions = {"", "good", "bad", "clicked"}
+        if reaction not in valid_reactions:
+            return (f"REFUSED: reaction must be one of "
+                    f"{sorted(valid_reactions)}, got {reaction!r}.")
+        if not card_kind or not card_kind.strip():
+            return "REFUSED: card_kind required."
+        from .db import InsightEngagement
+        import time as _t
+        with get_session(engine) as session:
+            session.add(InsightEngagement(
+                shown_at=int(_t.time()),
+                card_kind=card_kind.strip(),
+                card_title=card_title or "",
+                card_body="",                # body not always available at feedback time
+                evidence_json="",
+                reaction=reaction,
+                reason=reason.strip() or None,
+                suggested_cmd=suggested_cmd or None,
+                narration_model=narration_model or "deterministic",
+            ))
+            session.commit()
+        return (f"Recorded {reaction!r} on card "
+                f"({card_kind}: {card_title[:60]!r}). "
+                f"Aggregated patterns surface via "
+                f"`org-llm doctor --diagnose-cards`.")
+
+    @server.tool()
     def walk_review_pending(max_facts: int = 5) -> str:
         """List previously-saved context facts that are due for
         re-review (oldest first). Use when the user says 'are my

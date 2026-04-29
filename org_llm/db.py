@@ -127,6 +127,33 @@ class SensorLog(Base):
     context    = Column(Text)                       # last-N History rows summary
 
 
+class InsightEngagement(Base):
+    """User reactions to Phase 12 insight cards.
+
+    Phase 12.5: every card the user marks as bad / clicks / dismisses
+    writes a row here. `doctor --diagnose-cards` clusters the rows by
+    (card_kind, narration_model) and surfaces patterns:
+        - "All 4 bad cards this week were stale_candidates →
+           contradiction-detection threshold may be too lax"
+        - "Cloud-narrated cards have 80% bad-rate vs local at 20% →
+           cloud prompt may have drifted"
+    The table is the substrate for that diagnosis. dbt (Phase 12.7)
+    will eventually surface a per-generator quality view from it.
+    """
+    __tablename__ = "insight_engagement"
+
+    id              = Column(Integer, primary_key=True)
+    shown_at        = Column(Integer, nullable=False)   # unix epoch seconds
+    card_kind       = Column(Text,    nullable=False)   # "new_captures", "stale_candidates", ...
+    card_title      = Column(Text)                       # what the user actually saw
+    card_body       = Column(Text)                       # the LLM-narrated body (or determ.)
+    evidence_json   = Column(Text)                       # raw deterministic anchor (JSON)
+    reaction        = Column(Text,    nullable=False, default="")  # "" | "good" | "bad" | "clicked"
+    reason          = Column(Text)                       # optional free-form (why was it bad?)
+    suggested_cmd   = Column(Text)                       # the / handle we offered
+    narration_model = Column(Text)                       # "deterministic" | model name
+
+
 def _load_sqlite_vec(dbapi_conn, _):
     dbapi_conn.enable_load_extension(True)
     sqlite_vec.load(dbapi_conn)

@@ -8585,6 +8585,125 @@ def doctor_list_tools_sub():
     _doctor_impl(list_tools=True)
 
 
+@doctor_app.command("diagnose-cards")
+def doctor_diagnose_cards_sub(
+    days:    Annotated[int, typer.Option("--days", "-d",
+              help="Window of recent insight_engagement rows to analyze")] = 30,
+):
+    """Cluster recent Phase 12 insight-card reactions; surface
+    quality patterns the user can act on.
+
+    Reads the `insight_engagement` table populated by the MCP
+    `insight_card_feedback` tool. Examples of patterns this might
+    flag:
+
+      - "All 4 bad cards in the last week were stale_candidates →
+         contradiction-detection threshold may be too lax"
+      - "Cloud-narrated cards have 80% bad-rate vs local at 20%
+         → cloud prompt may have drifted"
+      - "topic_cluster cards are 80% ignored regardless of content
+         → either user doesn't care about clustering, or format
+         isn't grabbing them"
+
+    Output is a Rich panel with the patterns ranked by signal
+    strength + concrete next steps (config tweaks, generator-
+    pause flags). Read-only — never modifies anything.
+    """
+    from .db import InsightEngagement
+    from rich.panel import Panel as _P
+    from rich.table import Table as _T
+    import time as _t
+
+    cutoff = int(_t.time()) - max(1, days) * 86400
+    engine = _engine()
+    with get_session(engine) as session:
+        rows = (session.query(InsightEngagement)
+                  .filter(InsightEngagement.shown_at >= cutoff)
+                  .all())
+
+    if not rows:
+        console.print(_P(
+            f"No insight-card reactions recorded in the last "
+            f"{days} day(s).\n\n"
+            f"This table is populated when the in-workspace LLM "
+            f"(or you) marks cards as good / bad / clicked via the "
+            f"`insight_card_feedback` MCP tool. Once you've used "
+            f"the workspace for a few days, re-run this verb for "
+            f"diagnosis.",
+            title="[lcars1]doctor — diagnose cards[/lcars1]",
+            border_style="lcars2", padding=(1, 2),
+        ))
+        return
+
+    # Cluster + count.
+    from collections import Counter, defaultdict
+    by_kind:    Counter = Counter()
+    bad_kind:   Counter = Counter()
+    good_kind:  Counter = Counter()
+    by_model:   Counter = Counter()
+    bad_model:  Counter = Counter()
+    for r in rows:
+        by_kind[r.card_kind] += 1
+        if r.reaction == "bad":
+            bad_kind[r.card_kind] += 1
+            bad_model[r.narration_model or "deterministic"] += 1
+        elif r.reaction == "good":
+            good_kind[r.card_kind] += 1
+        by_model[r.narration_model or "deterministic"] += 1
+
+    findings: list[tuple[float, str]] = []   # (signal_strength, sentence)
+
+    for kind, n in by_kind.items():
+        bad = bad_kind[kind]
+        good = good_kind[kind]
+        if n >= 3 and bad / n >= 0.5:
+            sig = bad / n
+            findings.append((sig,
+                f"`{kind}` generator has {bad}/{n} ({bad/n:.0%}) "
+                f"bad ratings → consider tightening the generator's "
+                f"selection criteria, or reviewing its narration "
+                f"prompt for hallucination."))
+        elif n >= 5 and good / n >= 0.6:
+            findings.append((good / n,
+                f"`{kind}` generator has {good}/{n} ({good/n:.0%}) "
+                f"good ratings — this is the strong signal among "
+                f"current generators. Lean on it; consider raising "
+                f"its score weight in `gather_insights()`."))
+
+    for model, n in by_model.items():
+        bad = bad_model[model]
+        if n >= 3 and bad / n >= 0.5:
+            findings.append((bad / n,
+                f"Cards narrated via `{model}` have {bad}/{n} "
+                f"({bad/n:.0%}) bad ratings → narration prompt or "
+                f"the model itself is the source. Try a different "
+                f"narration_model_pref."))
+
+    findings.sort(key=lambda x: -x[0])
+
+    tbl = _T(box=None, pad_edge=False, show_header=True)
+    tbl.add_column("Signal",  style="lcars1", width=8, no_wrap=True)
+    tbl.add_column("Pattern", style="lcars2", overflow="fold")
+    if findings:
+        for sig, sentence in findings[:8]:
+            tbl.add_row(f"{sig:.0%}", sentence)
+    else:
+        tbl.add_row("—", "No patterns crossed the diagnosis threshold "
+                          "yet (need ≥3 ratings per generator/model). "
+                          "More signal will sharpen this.")
+
+    body_top = (f"Window: last {days}d  ·  {len(rows)} reaction(s)  ·  "
+                f"{len(by_kind)} card kind(s)  ·  {len(by_model)} "
+                f"narration model(s)\n")
+    grid = _T.grid(padding=(0, 1))
+    grid.add_column()
+    grid.add_row(body_top)
+    grid.add_row(tbl)
+    console.print(_P(grid,
+                       title="[lcars1]doctor — diagnose cards[/lcars1]",
+                       border_style="lcars2", padding=(1, 2)))
+
+
 @doctor_app.command("benchmark-fixers")
 def doctor_benchmark_fixers_sub(
     apply_fixer: Annotated[bool, typer.Option("--apply", "-a",
