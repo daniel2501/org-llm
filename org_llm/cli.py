@@ -13147,7 +13147,6 @@ def launch(
         # @ai-sdk/openai-compatible is the right adapter for an
         # OpenAI-compatible local endpoint (which Ollama exposes
         # at /v1).
-        from .models import _pulled_normalized
         try:
             pulled = sorted(_pulled_normalized(ollama_url))
         except Exception:
