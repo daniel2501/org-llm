@@ -5634,6 +5634,51 @@ def man(
         on_screen(f"[dim]Open it:[/dim] [bold]man -l {target}[/bold]")
 
 
+def _render_insights_for_prompt(cards) -> str:
+    """Phase 12.4 — render insight cards as a markdown block to
+    prepend to the workspace LLM's system prompt. The workspace
+    LLM is instructed to OPEN the conversation with these
+    observations, not wait to be asked.
+
+    Format is plain markdown with explicit "open with this on
+    first message" guidance so the LLM doesn't bury the cards
+    until later turns.
+    """
+    if not cards:
+        return ""
+    lines = [
+        "# OPEN WITH THIS ON YOUR VERY FIRST RESPONSE",
+        "",
+        "On your first message of this session, lead with a brief",
+        "'I noticed N things since you were last here' overview drawn",
+        "from the cards below. Pick the most attention-worthy 1-3",
+        "and ask the user which to start with. Keep the opener",
+        "tight — 4-8 lines total.",
+        "",
+        "Treat the `/foo` markers below as CONCEPTUAL handles, not",
+        "real slash commands. Don't tell the user to type `/synth`",
+        "or `/stitch` — those don't exist. Instead: when the user",
+        "picks a card, drive the conversation through MCP tools",
+        "(walk_*, search_notes, ask_notes, capture_note, etc.) or",
+        "ask the user what they want to do next.",
+        "",
+        "If the user opens with their own question, fold ONE relevant",
+        "card into your answer instead of running through all of them.",
+        "",
+        "## Things I noticed",
+        "",
+    ]
+    for i, c in enumerate(cards, 1):
+        lines.append(f"{i}. **{c.title}**")
+        lines.append(f"   {c.body}")
+        if c.suggested_command:
+            lines.append(f"   _conceptual handle: {c.suggested_command}_")
+        lines.append("")
+    lines.append("---")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _render_insights_panel(cards):
     """Render Phase 12.1 deterministic insight cards as a Rich panel
     that prints during `org-llm launch`. The actual workspace-side
@@ -13026,6 +13071,36 @@ def launch(
             projects_str=ctx.get("projects_str", ""),
             persona_block=ctx.get("persona_block", ""),
         )
+
+    # ── Phase 12.4 — inject insight cards into the system prompt ────────────
+    # The headline "Claude Code for org-roam" experience: the
+    # workspace LLM opens with "I noticed N things since you were
+    # last active" rather than an empty prompt. Cards come from the
+    # Phase 12.1+12.2 pipeline (deterministic generators + scorer-
+    # picked optional LLM narration). Gated on the same env flag
+    # (ORG_LLM_INSIGHT_PREMOUNT) so it stays opt-in while the
+    # quality of cards is still being tuned.
+    if os.environ.get("ORG_LLM_INSIGHT_PREMOUNT", "").lower() in ("1", "on", "true"):
+        try:
+            from . import insights as _insights
+            with get_session(_engine()) as _s:
+                _narr_model = (_cfg(_s, "chat_model")
+                                or _cfg(_s, "fast_model")
+                                or "llama3.2:1b")
+                _narr_url = _ollama_url(_s)
+                _cards = _insights.cached_gather(
+                    _s,
+                    cache_key=f"launch-prompt:{workspace}",
+                    narrate=True,
+                    narration_model=_narr_model,
+                    narration_url=_narr_url,
+                    voice="plain",
+                )
+            if _cards:
+                injected = _render_insights_for_prompt(_cards)
+                instructions = injected + "\n\n" + instructions
+        except Exception:
+            pass        # never block launch on insight gen failure
 
     # ── Build .opencode.json ──────────────────────────────────────────────────
     if use_cloud:
