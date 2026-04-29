@@ -152,9 +152,19 @@ def _do_one_pass(stop_event: threading.Event) -> dict:
         engine = make_engine(path)
 
         with get_session(engine) as session:
+            # Honour ORG_LLM_ORG_DIR env override exactly like the
+            # CLI's _org_dir() helper. Phase 11 Day 4 surfaced the
+            # divergence: a user running with ORG_LLM_DB pointed at
+            # an isolated test corpus DB but ORG_LLM_ORG_DIR pointed
+            # at the test corpus directory had `walk watch` happily
+            # walking ~/org and indexing 549 real-vault files into
+            # the test DB. The CLI honoured the env var; the watcher
+            # didn't. Now both do.
             org_dir_row = session.get(Config, "org_dir")
-            org_dir = Path((org_dir_row.value if org_dir_row else "~/org")
-                            ).expanduser()
+            org_dir = Path(
+                os.environ.get("ORG_LLM_ORG_DIR")
+                or (org_dir_row.value if org_dir_row else "~/org")
+            ).expanduser()
             url       = (session.get(Config, "ollama_url").value
                           if session.get(Config, "ollama_url")
                           else "http://localhost:11434")
