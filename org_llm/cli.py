@@ -8281,7 +8281,11 @@ def _doctor_impl(
     console.print()
 
     # ── LLM Diagnosis ─────────────────────────────────────────────────────────
-    if (issues or diagnose) and ollama_live:
+    # Honors --no-diagnose strictly: skip the LLM round-trip even when issues
+    # are present. The deterministic checks above already named the failures;
+    # forcing a chat call when the user opted out turns a doctor run into a
+    # multi-minute hang on a saturated Ollama.
+    if diagnose and ollama_live:
         with get_session(engine) as session:
             url = _ollama_url(session)
             preferred = [
@@ -8396,9 +8400,19 @@ def _doctor_impl(
         )
 
         from .llm import chat
+        # Up-front context: the diagnose path can take up to its full 60s
+        # budget on a saturated local Ollama. Tell the user what's running,
+        # how long it might take, and how to skip — so the spinner isn't a
+        # black box. Then `heartbeat` ticks elapsed time + warns at half-
+        # budget if the model goes silent.
+        on_screen(f"[dim]Dr. Crusher diagnosing with [bold]{diag_model}[/bold] — "
+                   f"up to 60s on local Ollama. "
+                   f"Skip with [bold]--no-diagnose[/bold].[/dim]")
         try:
-            with thinking("Diagnosing", model=diag_model):
-                diagnosis = chat(prompt, model=diag_model, base_url=url, system=system)
+            with heartbeat(f"Diagnosing with {diag_model}",
+                            stall_secs=60.0, warn_at=10.0):
+                diagnosis = chat(prompt, model=diag_model, base_url=url,
+                                  system=system, timeout=60.0)
             console.print(Panel(
                 diagnosis,
                 title=f"[lcars1]LLM Diagnosis ({diag_model})[/lcars1]",
@@ -8406,8 +8420,22 @@ def _doctor_impl(
                 padding=(1, 2),
             ))
         except Exception as e:
-            red_alert(f"LLM diagnosis failed ({diag_model}): {e}")
-            on_screen("Pull a chat-capable model:  [bold]ollama pull llama3.2[/bold]")
+            err = str(e).lower()
+            if "timeout" in err or "timed out" in err:
+                red_alert(f"LLM diagnosis hit the 60s timeout. "
+                           f"Local Ollama is likely saturated or "
+                           f"{diag_model} is too large for this hardware.")
+                on_screen("[dim]Try one of:[/dim]")
+                on_screen("  [bold]org-llm doctor --no-diagnose[/bold]   "
+                           "[dim]deterministic checks only (no LLM)[/dim]")
+                on_screen("  [bold]org-llm models --tune[/bold]          "
+                           "[dim]pick a faster model for this hardware[/dim]")
+                on_screen("  [bold]org-llm launch --cloud[/bold]         "
+                           "[dim](if cloud is configured) — route off-box[/dim]")
+            else:
+                red_alert(f"LLM diagnosis failed ({diag_model}): {e}")
+                on_screen("Pull a chat-capable model:  "
+                           "[bold]ollama pull llama3.2[/bold]")
         console.print()
     elif issues and not ollama_live:
         red_alert(
@@ -10169,7 +10197,8 @@ def source(
         )
         prompt = f"Module: {module}\n\n```python\n{src[:6000]}\n```"
         with warp(f"Explaining {module} with {chat_mdl}"):
-            explanation = chat(prompt, model=chat_mdl, base_url=url, system=system)
+            explanation = chat(prompt, model=chat_mdl, base_url=url,
+                                system=system, timeout=90.0)
 
         console.print()
         console.rule(f"[lcars1]{chat_mdl} explains {module}[/lcars1]")
@@ -10536,7 +10565,8 @@ def capture(
         )
         from .llm import chat
         with thinking("Polishing", model=model):
-            content = chat(body, model=model, base_url=url, system=system)
+            content = chat(body, model=model, base_url=url, system=system,
+                            timeout=60.0)
 
     node_id  = str(uuid.uuid4())
     ts       = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -11647,7 +11677,8 @@ def review_emacs(
         from .llm import chat
         try:
             with warp(f"Reviewing {flavor} config with {chat_mdl}"):
-                review = chat(prompt, model=chat_mdl, base_url=url, system=system)
+                review = chat(prompt, model=chat_mdl, base_url=url,
+                               system=system, timeout=120.0)
         except Exception as exc:
             msg = str(exc).lower()
             if "memory" in msg or "out of memory" in msg or "oom" in msg:
