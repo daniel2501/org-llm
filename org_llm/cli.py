@@ -10083,7 +10083,16 @@ def _apply_auto_tags_to_files(engine) -> tuple[int, int]:
     from .db import Node, File as _File
     from sqlalchemy.orm import joinedload
 
-    by_file: dict[str, dict[str, set[str]]] = defaultdict(dict)
+    # Two lookup paths per file:
+    #   id_to_tags    — node has a :ID: in the file's :PROPERTIES:
+    #                   block; match by ID. Authoritative.
+    #   title_to_tags — node is a heading without :ID:. Fall back to
+    #                   matching by heading text. Collisions are rare
+    #                   and the worst case (two headings with same
+    #                   text in same file) gets the same tags, which
+    #                   is the desired behaviour.
+    by_file_id:    dict[str, dict[str, set[str]]] = defaultdict(dict)
+    by_file_title: dict[str, dict[str, set[str]]] = defaultdict(dict)
     with get_session(engine) as session:
         rows = (session.query(Node, _File.path)
                   .join(_File, _File.id == Node.file_id)
@@ -10094,11 +10103,20 @@ def _apply_auto_tags_to_files(engine) -> tuple[int, int]:
             tags = set((node.auto_tags or "").split())
             if not tags:
                 continue
-            if not node.node_id:
-                continue
-            by_file[path][node.node_id] = tags
+            if node.node_id:
+                by_file_id[path][node.node_id] = tags
+            else:
+                title = (node.title or "").strip()
+                if title:
+                    # Merge if title appears twice (e.g. two headings
+                    # with identical text — both get the union).
+                    if title in by_file_title[path]:
+                        by_file_title[path][title] |= tags
+                    else:
+                        by_file_title[path][title] = tags
 
-    if not by_file:
+    all_paths = set(by_file_id) | set(by_file_title)
+    if not all_paths:
         return (0, 0)
 
     head_re = _re_apply.compile(
@@ -10108,10 +10126,32 @@ def _apply_auto_tags_to_files(engine) -> tuple[int, int]:
         r"^:ID:\s+([0-9a-fA-F-]+)\s*$"
     )
 
+    def _merge_tags_into_heading(head_line: str, new_tags: set[str]) -> tuple[str, int]:
+        """Return (rebuilt_line, count_added). Idempotent."""
+        m = head_re.match(head_line)
+        if not m:
+            return (head_line + "\n", 0)
+        prefix          = m.group(1)
+        title           = m.group(2).rstrip()
+        existing_suffix = m.group(3) or ""
+        existing_tags = set()
+        if existing_suffix:
+            existing_tags = {t for t in
+                               existing_suffix.strip().strip(":").split(":")
+                               if t}
+        added = new_tags - existing_tags
+        if not added:
+            return (head_line + "\n", 0)
+        merged = sorted(existing_tags | new_tags)
+        new_suffix = ":" + ":".join(merged) + ":"
+        return (f"{prefix}{title} {new_suffix}\n", len(added))
+
     files_touched = 0
     total_tags    = 0
 
-    for path, id_to_tags in by_file.items():
+    for path in all_paths:
+        id_map    = by_file_id.get(path, {})
+        title_map = by_file_title.get(path, {})
         try:
             content = Path(path).read_text()
         except (FileNotFoundError, OSError):
@@ -10119,11 +10159,30 @@ def _apply_auto_tags_to_files(engine) -> tuple[int, int]:
         lines = content.splitlines(keepends=True)
         out = list(lines)
 
+        # Pre-pass: title-fallback. For each heading line, look up
+        # its title in title_map. ID-matched headings get processed
+        # in the second pass and their tags MERGE on top.
+        modified = False
+        for i, line in enumerate(lines):
+            raw = line.rstrip("\n")
+            m_head = head_re.match(raw)
+            if not m_head:
+                continue
+            heading_title = m_head.group(2).rstrip()
+            tags_for_title = title_map.get(heading_title)
+            if not tags_for_title:
+                continue
+            new_line, added = _merge_tags_into_heading(raw, tags_for_title)
+            if added:
+                out[i] = new_line
+                modified = True
+                total_tags += added
+
+        # Second pass: :ID:-based matching (authoritative; merges
+        # on top of any title-fallback tags applied above).
         current_head_line: int | None = None
         in_props = False
-        modified = False
-
-        for i, line in enumerate(lines):
+        for i, line in enumerate(out):       # iterate `out` to see prior pass's mods
             raw = line.rstrip("\n")
             stripped = raw.strip()
             m_head = head_re.match(raw)
@@ -10142,28 +10201,15 @@ def _apply_auto_tags_to_files(engine) -> tuple[int, int]:
                 if not m_id:
                     continue
                 node_id = m_id.group(1)
-                tags_for_node = id_to_tags.get(node_id)
+                tags_for_node = id_map.get(node_id)
                 if not tags_for_node:
                     continue
-                head_line = out[current_head_line].rstrip("\n")
-                m = head_re.match(head_line)
-                if not m:
-                    continue
-                prefix         = m.group(1)
-                title          = m.group(2).rstrip()
-                existing_suffix = m.group(3) or ""
-                existing_tags = set()
-                if existing_suffix:
-                    existing_tags = {t for t in
-                                       existing_suffix.strip().strip(":").split(":")
-                                       if t}
-                merged = sorted(existing_tags | tags_for_node)
-                new_suffix = ":" + ":".join(merged) + ":"
-                rebuilt = f"{prefix}{title} {new_suffix}\n"
-                if rebuilt != out[current_head_line]:
-                    out[current_head_line] = rebuilt
+                new_line, added = _merge_tags_into_heading(
+                    out[current_head_line].rstrip("\n"), tags_for_node)
+                if added:
+                    out[current_head_line] = new_line
                     modified = True
-                    total_tags += len(tags_for_node - existing_tags)
+                    total_tags += added
 
         if modified:
             try:
