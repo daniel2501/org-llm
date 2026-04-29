@@ -13118,67 +13118,65 @@ def launch(
             pass        # never block launch on insight gen failure
 
     # ── Build .opencode.json ──────────────────────────────────────────────────
+    #
+    # Augmented (Phase 15): write BOTH providers (Ollama + cloud) into
+    # the config when both are available, regardless of `use_cloud`.
+    # opencode's model picker can switch between them in-session
+    # without needing a re-launch. `use_cloud` only decides which
+    # one is the DEFAULT (the top-level `model` field).
+    #
+    # Ollama provider block (always written if reachable):
+    try:
+        pulled = sorted(_pulled_normalized(ollama_url))
+    except Exception:
+        pulled = []
+    ollama_models_map = {
+        tag: {
+            "name":      tag,
+            "tool_call": True,
+            # Per-model num_ctx — opencode docs warn tool calls fail
+            # when the default 2048 truncates long system prompts
+            # (workspace + tool descriptions + insight cards = 5-8k).
+            "options":   {"num_ctx": 32768},
+        }
+        for tag in sorted({chat_mdl, *pulled}) if tag
+    }
+    ollama_provider_block = {
+        "npm":     "@ai-sdk/openai-compatible",
+        "name":    "Ollama (local)",
+        "options": {"baseURL": f"{ollama_url.rstrip('/')}/v1"},
+        "models":  ollama_models_map,
+    }
+
+    active_provider_block: dict = {"ollama": ollama_provider_block}
+
     if use_cloud:
-        # opencode model strings are "<provider-slug>/<model-name>". The
-        # cloud_model already includes the upstream model slug (e.g.
-        # "openai/gpt-oss-20b:free"), so we get nested slashes — opencode
-        # treats anything after the first slash as the model id, so this
-        # works fine.
+        # Cloud provider also gets a proper schema-compliant block
+        # (npm + models). Most cloud endpoints are OpenAI-compatible
+        # so we use the same adapter as Ollama. The model id is the
+        # raw upstream slug (e.g. "openai/gpt-oss-20b:free").
+        cloud_models_map = {
+            cloud_model: {
+                "name":      cloud_model,
+                "tool_call": True,
+            },
+        }
+        active_provider_block[cloud_provider] = {
+            "npm":     "@ai-sdk/openai-compatible",
+            "name":    cloud_provider.title(),
+            "options": {
+                "baseURL": cloud_endpoint,
+                "apiKey":  cloud_key,
+            },
+            "models":  cloud_models_map,
+        }
         active_model_str   = f"{cloud_provider}/{cloud_model}"
         active_provider_id = cloud_provider
-        active_provider_block = {
-            cloud_provider: {
-                "name": cloud_provider.title(),
-                "options": {
-                    "baseURL": cloud_endpoint,
-                    "apiKey":  cloud_key,
-                },
-            }
-        }
-        active_model_label = f"{cloud_model}  ({cloud_provider} cloud)"
+        active_model_label = (f"{cloud_model}  ({cloud_provider} cloud, "
+                                f"+ ollama local available)")
     else:
         active_model_str   = f"ollama/{chat_mdl}"
         active_provider_id = "ollama"
-        # Phase 15: opencode's ConfigProvider.Info schema requires
-        # `npm` (which adapter package to load) and a `models` map
-        # for the provider entry to register. Without those, opencode
-        # silently drops our provider definition and falls back to
-        # its bundled big-pickle. Per the opencode docs example,
-        # @ai-sdk/openai-compatible is the right adapter for an
-        # OpenAI-compatible local endpoint (which Ollama exposes
-        # at /v1).
-        try:
-            pulled = sorted(_pulled_normalized(ollama_url))
-        except Exception:
-            pulled = []
-        # Build a models map covering at least the chat model + every
-        # locally-pulled tag so opencode's model picker reflects what
-        # the user actually has on disk.
-        wanted = {chat_mdl}
-        wanted.update(pulled)
-        # Per-model num_ctx is the practical fix for: opencode's
-        # docs warn that tool calls fail when Ollama's default 2048
-        # context window truncates a long system prompt. Phase 12.4
-        # workspace prompt + 56 MCP tool descriptions + insight
-        # cards adds up to 5-8k tokens. 16384 is the recommended
-        # floor in the opencode docs; we go to 32768 for safety
-        # since the user has 15 GB RAM and mistral-nemo handles it.
-        models_map = {
-            tag: {
-                "name":      tag,
-                "tool_call": True,
-                "options":   {"num_ctx": 32768},
-            }
-            for tag in sorted(wanted) if tag
-        }
-        active_provider_block = {
-            "ollama": {
-                "npm":     "@ai-sdk/openai-compatible",
-                "name":    "Ollama (local)",
-                "options": {"baseURL": f"{ollama_url.rstrip('/')}/v1"},
-                "models":  models_map,
-            }
-        }
         active_model_label = f"{chat_mdl}  (Ollama, local)"
 
     # MCP invocation: was `["uv", "--directory", "<site-packages>",
