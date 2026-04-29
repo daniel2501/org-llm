@@ -1518,27 +1518,56 @@ def create_mcp_server():
             lines.append("  (call again with clear=True to mark as read)")
         return "\n".join(lines)
 
+    # Token store + helpers shared with proactive_doctor_apply pattern,
+    # but for self_rewrite the (action, reason) tuple is (module, intent).
+    _self_rewrite_tokens: dict[str, dict] = {}
+    _SELF_REWRITE_TTL_S = 300
+
+    def _gen_sr_token() -> str:
+        import secrets
+        return secrets.token_hex(8).upper()
+
+    def _take_sr_token(token: str, module: str, intent: str
+                          ) -> tuple[bool, str]:
+        import time as _t
+        rec = _self_rewrite_tokens.pop(token, None)
+        if rec is None:
+            return False, "token unknown or already consumed"
+        if rec["expires"] < _t.time():
+            return False, "token expired (5-minute TTL)"
+        if rec["module"] != module:
+            return False, (f"token was issued for module "
+                            f"{rec['module']!r}, not {module!r}")
+        if rec["intent"] != intent:
+            return False, (f"token was issued with intent "
+                            f"{rec['intent']!r}, not {intent!r}")
+        return True, ""
+
     # ── self_rewrite: LLM-driven patch of org-llm's own source ──────────────
     @server.tool()
     async def self_rewrite(
             module: str,
             intent: str,
-            user_approved: bool = False,
+            approval_token: str = "",
             ctx: Context | None = None) -> str:
         """LLM-rewrite ONE org-llm source file to fix a bug or address a
         well-defined intent. Snapshots before any change; verifies by
         re-running tests; auto-rolls-back if the patch introduces a
         regression.
 
-        STRICT GUARDRAILS:
-          • `user_approved` MUST be True. Set it only after the user
-            has read your rewrite proposal and replied yes IN CHAT.
-            Calling with user_approved=False is a hard error.
-          • `module` must resolve to a file inside the org_llm/
-            package. No arbitrary filesystem writes — paths outside
-            the package raise.
-          • A snapshot is created BEFORE any write so
-            `org-llm self rollback <snap_id>` always exists as escape.
+        STRICT GUARDRAILS (token-based; the LLM cannot fake approval):
+
+        FIRST CALL: pass module + intent WITHOUT approval_token. Tool
+        returns a PENDING APPROVAL message with a token. Show it to
+        the user verbatim. Do NOT proceed without their explicit
+        token-bearing reply.
+
+        SECOND CALL: pass module + intent + approval_token=<token>.
+        Token must match the (module, intent) tuple that issued it
+        and must be within the 5-minute TTL.
+
+        `module` must resolve to a file inside the org_llm/ package.
+        No arbitrary filesystem writes — paths outside raise.
 
         Steps (deterministic, in this order):
           1. Resolve `module` to org_llm/<name>.py.
@@ -1551,20 +1580,41 @@ def create_mcp_server():
              + workspace_mcp + cli) under a 5-minute timeout.
           6. If tests pass, return success + the snapshot ID for
              reference. If tests FAIL, automatically roll back via
-             `self_mod.rollback(snap)` and return the rollback summary.
-
-        Returns a structured multi-line string the LLM can read out
-        to the user verbatim — never auto-applies further changes."""
-        if not user_approved:
-            return ("REFUSED: self_rewrite requires user_approved=True. "
-                    "The user must read your rewrite proposal in chat "
-                    "and explicitly say yes BEFORE you call this tool.")
-        import os as _os
+             `self_mod.rollback(snap)` and return the rollback summary."""
+        import os as _os, time as _t
         if (_os.environ.get("ORG_LLM_PROACTIVE_DOCTOR", "")
                 .strip().lower() == "off"):
             return ("REFUSED: self_rewrite is disabled by "
                     "ORG_LLM_PROACTIVE_DOCTOR=off — the user opted out "
                     "of auto-healing for this session.")
+
+        # No token → issue one + demand explicit user consent
+        if not approval_token:
+            tok = _gen_sr_token()
+            _self_rewrite_tokens[tok] = {
+                "module":  module,
+                "intent":  intent,
+                "expires": _t.time() + _SELF_REWRITE_TTL_S,
+            }
+            return (
+                f"PENDING APPROVAL: self_rewrite\n"
+                f"  module={module!r}\n  intent={intent!r}\n\n"
+                f"Token: {tok}  (expires in 5 minutes)\n\n"
+                f"Self-rewrite patches org-llm's OWN source code. "
+                f"This is high-stakes. Relay this message to the user "
+                f"verbatim and ONLY proceed when they reply with the "
+                f"literal token:\n"
+                f'  "I want to LLM-rewrite `{module}` for: '
+                f'{intent}\\n\\nReply `approve {tok}` to proceed. A '
+                f'snapshot will be taken; tests will run; an automatic '
+                f'rollback fires if anything regresses."\n\n'
+                f"After the user types `approve {tok}`, call this tool "
+                f"again with approval_token={tok!r}."
+            )
+
+        ok, why = _take_sr_token(approval_token, module, intent)
+        if not ok:
+            return f"REFUSED: approval_token invalid — {why}"
 
         # ── 1. resolve target ───────────────────────────────────────────────
         from pathlib import Path as _P
@@ -1680,23 +1730,76 @@ def create_mcp_server():
                 f"diff is recommended. Roll back any time with "
                 f"`org-llm self rollback {snap.id}`.")
 
+    # ── Token-based approval store (defeats LLM faking user_approved) ───────
+    # Earlier the apply tool just trusted a `user_approved=True` flag
+    # set by the LLM. A real-world test showed gpt-oss-20b setting that
+    # flag UNILATERALLY when asked to "test the guard" — defeating the
+    # whole purpose of the gate. The LLM cannot be the source of truth
+    # for user intent; an out-of-band token the LLM CAN'T have invented
+    # is the only honest enforcement.
+    #
+    # Flow:
+    #   1. LLM calls proactive_doctor_apply(action, reason) without any
+    #      token. Tool generates a fresh token, stores
+    #      {token: (action, reason, expiry)} in this dict, and returns
+    #      a PENDING APPROVAL message instructing the LLM to relay the
+    #      token to the user verbatim.
+    #   2. The user reads the token + the proposed action, and replies
+    #      something like "approve TOKEN" in chat.
+    #   3. LLM calls again with approval_token=TOKEN.
+    #   4. Tool validates: token exists, not expired, action+reason
+    #      match what was first proposed. Pops the entry and runs.
+    #
+    # In-memory only (per MCP-server process) with a 5-minute TTL —
+    # restarting the MCP server invalidates pending approvals, which
+    # is the correct safety property.
+    _approval_tokens: dict[str, dict] = {}
+    _APPROVAL_TTL_S = 300
+
+    def _gen_approval_token() -> str:
+        import secrets
+        return secrets.token_hex(8).upper()   # 16 hex chars
+
+    def _take_approval(token: str, action: str, reason: str
+                          ) -> tuple[bool, str]:
+        """Validate + consume an approval token. Returns (ok, why)."""
+        import time as _t
+        rec = _approval_tokens.pop(token, None)
+        if rec is None:
+            return False, "token unknown or already consumed"
+        if rec["expires"] < _t.time():
+            return False, "token expired (5-minute TTL)"
+        if rec["action"] != action:
+            return False, (f"token was issued for action "
+                            f"{rec['action']!r}, not {action!r}")
+        if rec["reason"] != reason:
+            return False, (f"token was issued with reason "
+                            f"{rec['reason']!r}, not {reason!r}")
+        return True, ""
+
     # ── proactive_doctor_apply: vetted-action remediation ───────────────────
     @server.tool()
     async def proactive_doctor_apply(
             action: str,
             reason: str = "",
-            user_approved: bool = False,
+            approval_token: str = "",
             ctx: Context | None = None) -> str:
         """Apply ONE vetted remediation action to fix a diagnosed issue.
 
-        STRICT GUARDRAILS:
-          • `user_approved` MUST be True. Set it only after the user
-            has read your remediation pitch in chat and replied yes.
-            Calling with user_approved=False is a hard error.
-          • `action` MUST be in the vetted whitelist below. Anything
-            else returns an error and is logged as an attempted bypass.
-          • Every call is recorded to the Captain's Log (kind=doctor)
-            with the action, reason, and outcome. The user can audit.
+        STRICT GUARDRAILS (token-based; the LLM cannot fake approval):
+
+        FIRST CALL: pass action + reason WITHOUT approval_token. The
+        tool returns a PENDING APPROVAL message containing a token
+        and instructions. Show the FULL message to the user verbatim;
+        do not abbreviate, do not auto-fill the token, do not call
+        again unless the user has read the proposal AND replied with
+        the literal token.
+
+        SECOND CALL (after explicit user consent): pass action + reason
+        + approval_token=<token-from-step-1>. The token is validated
+        + consumed. Tokens have a 5-minute TTL and are bound to the
+        action + reason from the first call — you cannot reuse a
+        token for a different remediation.
 
         Vetted actions:
           - `tune_models`        — runs `org-llm models --upgrade --apply`
@@ -1708,19 +1811,43 @@ def create_mcp_server():
           - `regen_themes`       — runs `org-llm theme-studio regenerate`
           - `init_db`            — runs `org-llm init` (only if DB missing)
 
-        Returns the verb's stdout/stderr + a "DONE" or "FAILED" header.
-        On failure, the action is logged but no rollback is auto-attempted —
-        the user (or you) decide whether to try another action."""
-        import os as _os
+        Every call is recorded to the Captain's Log (kind=doctor)
+        with the action, reason, and outcome. The user can audit.
+        """
+        import os as _os, time as _t
         if (_os.environ.get("ORG_LLM_PROACTIVE_DOCTOR", "")
                 .strip().lower() == "off"):
             return ("REFUSED: proactive_doctor_apply is disabled by "
                     "ORG_LLM_PROACTIVE_DOCTOR=off. The user opted out "
                     "of auto-healing for this session.")
-        if not user_approved:
-            return ("REFUSED: proactive_doctor_apply requires "
-                    "user_approved=True. The user must explicitly "
-                    "consent in chat before any remediation runs.")
+
+        # No token supplied → issue one and demand explicit user consent
+        # before the second call. The LLM can't bypass this; it has no
+        # way to invent a valid token.
+        if not approval_token:
+            tok = _gen_approval_token()
+            _approval_tokens[tok] = {
+                "action":  action,
+                "reason":  reason,
+                "expires": _t.time() + _APPROVAL_TTL_S,
+            }
+            return (
+                f"PENDING APPROVAL: action={action!r} reason={reason!r}\n\n"
+                f"Token: {tok}  (expires in 5 minutes)\n\n"
+                f"Relay this message to the user verbatim:\n"
+                f'  "I want to run `{action}` ({reason}). '
+                f"Reply with `approve {tok}` to proceed.\"\n\n"
+                f"Then, AFTER the user types `approve {tok}` (or "
+                f"otherwise gives explicit consent that includes the "
+                f"literal token), call this tool again with "
+                f"approval_token={tok!r}. Do NOT call without an "
+                f"explicit user-typed token in their last message."
+            )
+
+        # Token supplied → validate
+        ok, why = _take_approval(approval_token, action, reason)
+        if not ok:
+            return f"REFUSED: approval_token invalid — {why}"
 
         VETTED: dict[str, list[str]] = {
             "tune_models":         ["org-llm", "models", "--upgrade", "--apply"],
@@ -1735,16 +1862,24 @@ def create_mcp_server():
             return (f"REFUSED: unknown action {action!r}. Vetted set: "
                     f"{', '.join(sorted(VETTED))}.")
 
-        await _info(ctx, f"proactive_doctor_apply: action={action} reason={reason!r}")
+        await _info(ctx, f"proactive_doctor_apply: action={action} reason={reason!r} approved=YES")
         import subprocess
+
+        # Slow actions (tune_models runs `models --upgrade --apply`
+        # which takes 1-2 min on CPU; regen_themes takes 10+ min)
+        # exceed opencode's MCP request timeout (~60s). Fork them
+        # background-detached and return immediately with a status
+        # file path the user can tail. Fast actions (restart_ollama,
+        # init_db, pull_smallest_chat which is one-shot HTTP) stay
+        # synchronous so the LLM can summarise the outcome inline.
+        SLOW = {"tune_models", "regen_themes"}
 
         # Log BEFORE running so the audit trail captures intent even if
         # the subprocess hangs.
         try:
             from .logbook import track_event
             with track_event("doctor", "proactive_doctor_apply",
-                              args=f'action={action!r} reason={reason!r} '
-                                    f'user_approved={user_approved}'):
+                              args=f'action={action!r} reason={reason!r}'):
                 if action == "restart_ollama":
                     # No clean shell-injection vector — pkill + ollama serve.
                     try:
@@ -1765,11 +1900,45 @@ def create_mcp_server():
                         return f"FAILED: restart_ollama: {e}"
 
                 cmd = VETTED[action]
+                if action in SLOW:
+                    # Fork detached, write stdout+stderr to a per-job
+                    # file the user can tail. Return a job ID + the
+                    # path so the LLM can tell the user how to follow.
+                    from pathlib import Path as _P
+                    import time as _t, secrets as _sec, os as _os2
+                    job_id = (f"{action}-"
+                                f"{int(_t.time())}-{_sec.token_hex(3)}")
+                    log_dir = _P(_os2.environ.get("XDG_DATA_HOME")
+                                  or _os2.path.expanduser("~/.local/share"))
+                    log_dir = log_dir / "org-llm" / "apply-jobs"
+                    log_dir.mkdir(parents=True, exist_ok=True)
+                    log_path = log_dir / f"{job_id}.log"
+                    try:
+                        with open(log_path, "wb") as fh:
+                            subprocess.Popen(
+                                cmd,
+                                stdout=fh, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL,
+                                start_new_session=True,
+                            )
+                        return (
+                            f"STARTED: {action}. job_id={job_id}\n"
+                            f"reason={reason!r}\n"
+                            f"This action runs longer than the MCP "
+                            f"timeout. Tail the live log with:\n"
+                            f"  tail -f {log_path}\n"
+                            f"or check completion in a few minutes "
+                            f"with `org-llm log --kind doctor`."
+                        )
+                    except Exception as e:
+                        return f"FAILED: {action} could not spawn: {e}"
+
+                # Synchronous path for fast actions
                 try:
                     proc = subprocess.run(cmd, capture_output=True,
-                                            text=True, timeout=600)
+                                            text=True, timeout=50)
                 except subprocess.TimeoutExpired:
-                    return (f"FAILED: {action} timed out after 600s. "
+                    return (f"FAILED: {action} timed out after 50s. "
                             f"Check `org-llm log --kind doctor` for context.")
                 except Exception as e:
                     return f"FAILED: {action}: {e}"
