@@ -5561,12 +5561,13 @@ def _captains_log_reflect(rows: list, model: str, base_url: str) -> str:
         f"Last {len(rows)} events from Captain's Log:\n\n{blob}\n\n"
         f"Reflect: what should the user know?"
     )
-    try:
-        from .llm import chat as _chat
-        return _chat(user_msg, model=model, base_url=base_url,
-                       system=sys_msg, timeout=60.0)
-    except Exception:
-        return ""
+    # Bubble the actual error to the caller via an exception
+    # (rather than the previous catch-all-return-"" pattern, which
+    # gave the user a generic 'model unreachable?' red alert with
+    # no diagnostic — Phase 11 Day 7).
+    from .llm import chat as _chat
+    return _chat(user_msg, model=model, base_url=base_url,
+                   system=sys_msg, timeout=60.0)
 
 
 @app.command(name="man", rich_help_panel="Maintenance")
@@ -6131,11 +6132,24 @@ def log_show(
                        "[dim] to widen the window or wait for activity to "
                        "accumulate.[/dim]")
             return
-        with warp(f"LLM reflecting on {len(rows)} event(s) with {mdl}…"):
-            reflection = _captains_log_reflect(rows, mdl, url)
+        try:
+            with warp(f"LLM reflecting on {len(rows)} event(s) with {mdl}…"):
+                reflection = _captains_log_reflect(rows, mdl, url)
+        except Exception as e:
+            red_alert(f"LLM reflection failed: "
+                       f"{type(e).__name__}: {e}")
+            on_screen(f"[dim]Model:[/dim] [bold]{mdl}[/bold]  "
+                       f"[dim]Endpoint:[/dim] {url}")
+            on_screen(f"[dim]Try:[/dim] "
+                       f"[bold]ollama pull {mdl}[/bold]  "
+                       f"[dim]or[/dim] "
+                       f"[bold]org-llm config chat_model llama3.2:1b[/bold]")
+            raise typer.Exit(1)
         if not reflection:
-            red_alert("LLM reflection failed (model unreachable?). "
-                      "Run [bold]org-llm doctor --power-boost[/bold] for diagnosis.")
+            red_alert(f"LLM reflection returned empty response from "
+                       f"[bold]{mdl}[/bold].")
+            on_screen("[dim]Try a different chat_model:[/dim] "
+                       "[bold]org-llm config chat_model llama3.2:1b[/bold]")
             raise typer.Exit(1)
         console.print()
         console.print(Panel(reflection,
