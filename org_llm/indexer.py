@@ -105,9 +105,40 @@ def index_directory(org_dir: Path, session: Session,
                      progress_cb=None) -> tuple[int, int]:
     """Index all .org files under org_dir. Returns (files_indexed, nodes_indexed).
 
+    Pre-pass: prune file rows whose path no longer exists on disk
+    (file deleted or renamed). Nodes cascade-delete via the FK.
+    Without this, a rename leaves the OLD path as a stale record
+    that doctor flags forever — and search still returns hits
+    pointing at non-existent files. Phase 11 Day 6 surfaced exactly
+    this friction: plain `org-llm index` after a rename did NOT
+    self-heal, the user had to know to run `index --force`.
+
     `progress_cb`, if given, is called with (current_file_index,
     total_files, current_path_str) after each file. Legacy no-arg
     callbacks are tolerated via `_call_cb`."""
+    from .db import File as _File
+    # Stale-prune pre-pass. Cheap: one query, in-memory existence
+    # check, scoped delete. Only touches files under or matching
+    # `org_dir` so multi-vault setups stay isolated.
+    org_str = str(org_dir.resolve())
+    try:
+        all_files = session.query(_File).all()
+        for f in all_files:
+            try:
+                fp = Path(f.path)
+            except Exception:
+                continue
+            # Skip rows that don't belong to THIS org_dir — keeps
+            # multi-vault DBs (rare but supported) safe.
+            if not str(fp.resolve() if fp.is_absolute() else (org_dir / fp).resolve()
+                        ).startswith(org_str):
+                continue
+            if not fp.exists():
+                session.delete(f)
+        session.commit()
+    except Exception:
+        session.rollback()
+
     paths = sorted(org_dir.rglob("*.org"))
     total = len(paths)
     files, nodes = 0, 0
