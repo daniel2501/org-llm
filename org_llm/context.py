@@ -323,6 +323,43 @@ def ensure_context_file_exists() -> Path:
     return p
 
 
+def _strip_disambig_placeholder(text: str) -> str:
+    """Idempotently remove the * Disambiguations section's
+    placeholder explanation + #+begin_quote example IF a real
+    *** entry already exists in the section.
+
+    Cheap to run on every save: detects "real entry exists" via
+    presence of any `*** ` heading inside the section, and strips
+    the placeholder pattern only when a real entry is detected.
+    Preserves user-authored content there because we only match
+    the EXACT shipped placeholder strings.
+    """
+    sect_re = re.compile(
+        r"(\* Disambiguations[^\n]*\n"
+        r"(?::PROPERTIES:[^\n]*\n(?:[^\n]*\n)*?:END:\s*\n)?)"
+        r"([\s\S]*?)"
+        r"(?=\n\* |\Z)",
+        re.M)
+    m = sect_re.search(text)
+    if not m:
+        return text
+    body = m.group(2)
+    has_real_entry = bool(re.search(r"^\*\*\* ", body, re.M))
+    if not has_real_entry:
+        return text
+    cleaned_body = re.sub(
+        r"\nWhen older notes use a name/word ambiguously, "
+        r"clarify here\. Example:\n\n"
+        r"#\+begin_quote\n"
+        r"- \"the team\" before 2026 = my team at <previous-employer>\n"
+        r"- \"the team\" after 2026 = my team at <current-employer>\n"
+        r"#\+end_quote\n?",
+        "", body)
+    if cleaned_body == body:
+        return text
+    return text[:m.start(2)] + cleaned_body + text[m.end(2):]
+
+
 def _normalize_history_runons(text: str) -> str:
     """One-time cleanup of legacy run-on history-block entries.
 
@@ -362,6 +399,7 @@ def add_fact(fact: str, source: str = "cli") -> Path:
     # (two regex passes) and idempotent — already-clean files
     # are no-ops.
     text = _normalize_history_runons(text)
+    text = _strip_disambig_placeholder(text)
 
     fact_line = f"- {fact.strip()}"
     today = datetime.now().date().isoformat()
@@ -445,6 +483,7 @@ def add_disambiguation(term: str, periods: dict[str, str],
     text = p.read_text(errors="replace")
     # Same legacy-run-on cleanup as add_fact — idempotent.
     text = _normalize_history_runons(text)
+    text = _strip_disambig_placeholder(text)
 
     block = [f"\n*** {term.strip()}"]
     for period, meaning in periods.items():
@@ -561,6 +600,7 @@ def remove_fact(line: str, source: str = "walk-remove") -> bool:
     p = ensure_context_file_exists()
     text = p.read_text(errors="replace")
     text = _normalize_history_runons(text)
+    text = _strip_disambig_placeholder(text)
 
     block_re = re.compile(
         r"(#\+name:\s*active-facts\s*\n#\+begin_src[^\n]*\n)([\s\S]*?)(\n#\+end_src)",
