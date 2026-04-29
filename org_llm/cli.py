@@ -9949,11 +9949,39 @@ def capture(
                 title = first_line[:60].rstrip(" .…")
 
     content = body
-    if polish:
+    # Polish only meaningful drafts. Single-sentence captures should be
+    # written verbatim — the user wrote one thought, not a request for
+    # the LLM to template a structured outline around it. (Phase 11
+    # Day 1 turned 'Daily todo lists. Plans and progress tracking for
+    # projects.' into a 50-line generic planner with invented times,
+    # routines, and shell snippets. Don't.)
+    if polish and len(body.split()) >= 12:
         system = (
-            "You are an org-mode expert. Structure the following content as a clean org-mode "
-            "note body. Use headings (* **), bullet points (- ), and code blocks (#+begin_src) "
-            "where appropriate. Do not include the title. Output only the org-mode markup."
+            "You re-format a draft into clean org-mode syntax. "
+            "PRESERVE the user's content exactly — do NOT add "
+            "information the user did not provide. Do NOT invent "
+            "specific times, schedules, names, code samples, sub-tasks, "
+            "or examples that aren't literally in the input. Polishing "
+            "is light cleanup (line breaks, list structure for "
+            "obviously-list-shaped content, fix typos), not creative "
+            "expansion.\n"
+            "\n"
+            "Output ORG-MODE syntax ONLY. Never use markdown. Specifically:\n"
+            "  - bold:    *bold*    (single asterisks. NOT **bold**)\n"
+            "  - italic:  /italic/\n"
+            "  - code:    =verbatim= or ~code~\n"
+            "  - bullets: - item    (hyphens. NOT * item)\n"
+            "  - sub-headings: stars at column 0, e.g.\n"
+            "      ** Sub-heading\n"
+            "  - code blocks:\n"
+            "      #+begin_src lang\n"
+            "      ...\n"
+            "      #+end_src\n"
+            "    NEVER wrap them in backticks or triple-backtick "
+            "markdown fences.\n"
+            "\n"
+            "Do NOT include the note's heading line (the title is "
+            "added by the caller). Output ONLY the body text."
         )
         from .llm import chat
         with thinking("Polishing", model=model):
