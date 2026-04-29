@@ -13156,8 +13156,19 @@ def launch(
         # the user actually has on disk.
         wanted = {chat_mdl}
         wanted.update(pulled)
+        # Per-model num_ctx is the practical fix for: opencode's
+        # docs warn that tool calls fail when Ollama's default 2048
+        # context window truncates a long system prompt. Phase 12.4
+        # workspace prompt + 56 MCP tool descriptions + insight
+        # cards adds up to 5-8k tokens. 16384 is the recommended
+        # floor in the opencode docs; we go to 32768 for safety
+        # since the user has 15 GB RAM and mistral-nemo handles it.
         models_map = {
-            tag: {"name": tag, "tool_call": True}
+            tag: {
+                "name":      tag,
+                "tool_call": True,
+                "options":   {"num_ctx": 32768},
+            }
             for tag in sorted(wanted) if tag
         }
         active_provider_block = {
