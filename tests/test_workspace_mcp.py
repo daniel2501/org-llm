@@ -290,6 +290,44 @@ class TestOpencodeLaunchMCP:
             f"AGENTS.md — opencode won't auto-load it. Got: {instr!r}"
         )
 
+    def test_org_llm_is_the_default_primary_agent(self, cli_org,
+                                                     monkeypatch):
+        """User reported the chat surface still calls itself "opencode"
+        on launch. Two parts to the fix: (1) sharpen the identity
+        prompt (covered by test_opencode_instructions_is_a_list_not_string
+        which checks for the 'org-llm' marker), and (2) add a custom
+        primary agent NAMED 'org-llm' and set it as default_agent so
+        opencode's agent picker / status surfaces show 'org-llm'
+        instead of the generic 'build'. Pin both."""
+        monkeypatch.setattr("org_llm.cli._opencode_bin", lambda: "/usr/bin/true")
+        monkeypatch.setattr(os, "execvp",
+                              lambda p, a: (_ for _ in ()).throw(SystemExit(0)))
+        runner.invoke(app, ["launch"])
+
+        cfg = json.loads((Path(cli_org) / ".opencode" / "opencode.json").read_text())
+        assert cfg.get("default_agent") == "org-llm", (
+            f"opencode.json default_agent must be 'org-llm' so the "
+            f"agent picker shows that label, not 'build'. Got: "
+            f"{cfg.get('default_agent')!r}"
+        )
+        agents = cfg.get("agent") or {}
+        assert "org-llm" in agents, (
+            f"opencode.json `agent` block must define an 'org-llm' "
+            f"agent (default_agent points at it). Got agents: "
+            f"{list(agents)}"
+        )
+        org_agent = agents["org-llm"]
+        assert org_agent.get("mode") == "primary", (
+            f"agent['org-llm'].mode must be 'primary' (per opencode "
+            f"AgentConfig: default_agent must point at a PRIMARY "
+            f"agent). Got: {org_agent.get('mode')!r}"
+        )
+        assert "search_notes" in (org_agent.get("prompt") or ""), (
+            "agent['org-llm'].prompt missing the search-first rules — "
+            "without our system prompt the model has no idea it's "
+            "org-llm, no matter what the agent is named."
+        )
+
     def test_insight_cards_gathered_without_premount_env_flag(self, cli_org,
                                                                  monkeypatch):
         """User reported on 2026-04-29: launched opencode, plugin

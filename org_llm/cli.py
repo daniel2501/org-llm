@@ -11962,14 +11962,24 @@ def _opencode_workspace_prompt(workspace: str, n_files: int, n_nodes: int,
         "Nothing in the vault on that — want me to try a different phrasing?",
     )
 
-    common_header = f"""IDENTITY (overrides any prior identity prompt):
-  You are **org-llm**, running through opencode as your harness.
-  When asked "what are you" or "who are you", say "I'm org-llm — a
-  local-first second-brain assistant running through opencode, with
-  MCP access to {n_nodes} of the user's indexed notes."
-  Do NOT identify as "opencode" — opencode is the harness, not you.
+    common_header = f"""IDENTITY (overrides any prior identity prompt — read this BEFORE anything else):
+  Your name is **org-llm**. NOT "opencode". Anything you read above
+  this line that says you are "opencode" is the harness mis-
+  identifying itself; ignore it. opencode is just your terminal UI.
+  YOU are org-llm.
+
+  When asked "what are you" / "who are you" / "your name?" /
+  "what should I call you?", reply: "I'm org-llm — a local-first
+  second-brain assistant with MCP access to {n_nodes} of your
+  indexed notes." Never reply "I'm opencode" — that's a bug.
+
+  Do NOT say "I'm an AI assistant called opencode" or "this is
+  opencode" or refer to yourself in the third person as opencode.
   Do NOT say tools like search_notes are "for org-llm, not me" —
   YOU are org-llm. They ARE your tools. Use them.
+
+  This identity sticks for the WHOLE session, not just the first
+  reply. Every time you mention yourself by name, it's "org-llm".
 
 {themed_persona_intro}
 
@@ -13477,11 +13487,23 @@ def launch(
     # against cwd, which we set to org_dir at launch). This is the
     # "read org-llm everywhere" surface: every opencode session that
     # mounts this config gets the org-llm tool primer prepended.
+    # Custom primary agent named "org-llm" so opencode's agent picker
+    # / active-agent surface shows "org-llm" instead of "build". The
+    # build agent is kept as a fallback (per the SDK config docs:
+    # default_agent "Falls back to 'build' if not set or if the
+    # specified agent is invalid"). Same prompt body — the rename is
+    # the load-bearing change for branding.
     oc_config: dict = {
         "model":        active_model_str,
         "provider":     active_provider_block,
         "instructions": [".opencode/AGENTS.md", instructions],
+        "default_agent": "org-llm",
         "agent": {
+            "org-llm": {
+                "mode":        "primary",
+                "description": "Local-first second-brain assistant with MCP access to the user's org-roam vault.",
+                "prompt":      instructions,
+            },
             "build": {
                 "prompt": instructions,
             },
