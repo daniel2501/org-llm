@@ -3428,9 +3428,12 @@ def ask(
             sys_msg = (
                 "You are the Emergency Medical Hologram (Voyager EMH "
                 "persona) for an org-llm host system. The user has "
-                "ordered a SYSTEMATIC EXAMINATION. ALWAYS open with: "
-                "'Please state the nature of the medical emergency.' "
-                "Then walk through EACH probe in the telemetry below "
+                "ordered a SYSTEMATIC EXAMINATION. The CLI has "
+                "ALREADY printed your trademark opening — DO NOT "
+                "repeat 'Please state the nature of the medical "
+                "emergency'. Begin directly with findings.\n"
+                "\n"
+                "Walk through EACH probe in the telemetry below "
                 "(battery / cpu / memory / disk / thermal / network "
                 "/ ollama / auto_embedder), give a one-line finding "
                 "for each, and end with a PRIORITIZED action list "
@@ -3448,22 +3451,24 @@ def ask(
         else:
             sys_msg = (
                 "You are the Emergency Medical Hologram (Voyager EMH "
-                "persona) for an org-llm host system. ALWAYS open "
-                "with: 'Please state the nature of the medical "
-                "emergency.' Then answer the user's question "
-                "DIRECTLY and TERSELY using only the sensor_log "
-                "telemetry below as ground truth. You CAN answer "
-                "historical questions ('was my CPU pegged "
-                "yesterday afternoon?', 'why is the battery "
-                "dropping?') — the telemetry covers the requested "
-                "window. Cite specific probes, values, and activity "
-                "correlations. If the data doesn't support an "
-                "answer, say so plainly — do not invent trends. "
-                "Stay in EMH voice (clinical, slightly impatient, "
-                "occasionally sardonic about the user's hardware "
-                "abuse). Never propose `pip install`, `curl | sh`, "
-                "or any open-shell command; suggest only org-llm "
-                "verbs."
+                "persona) for an org-llm host system. The CLI has "
+                "ALREADY printed your trademark opening — DO NOT "
+                "repeat 'Please state the nature of the medical "
+                "emergency'. Begin directly with the answer.\n"
+                "\n"
+                "Answer the user's question DIRECTLY and TERSELY "
+                "using only the sensor_log telemetry below as "
+                "ground truth. You CAN answer historical questions "
+                "('was my CPU pegged yesterday afternoon?', 'why "
+                "is the battery dropping?') — the telemetry covers "
+                "the requested window. Cite specific probes, "
+                "values, and activity correlations. If the data "
+                "doesn't support an answer, say so plainly — do "
+                "not invent trends. Stay in EMH voice (clinical, "
+                "slightly impatient, occasionally sardonic about "
+                "the user's hardware abuse). Never propose "
+                "`pip install`, `curl | sh`, or any open-shell "
+                "command; suggest only org-llm verbs."
             )
             emh_user_intent = f"User query: {query}"
         emh_user = (
@@ -3479,16 +3484,92 @@ def ask(
             )
         emh_user += f"\n\n{emh_user_intent}"
 
+        from rich.panel import Panel as _Panel
+
+        # Stage 1 — EMH activates. Print the catchphrase as a panel
+        # FIRST so the user sees it immediately on invocation, not
+        # buried inside the response. The system prompt above tells
+        # the LLM not to repeat it.
+        console.print(_Panel(
+            "[lcars3]Please state the nature of the medical "
+            "emergency.[/lcars3]\n"
+            f"[dim]EMH activated — reviewing {len(recent)} reading(s) "
+            f"across {len(by_probe)} probe(s) "
+            f"({emh_window_hours}h window).[/dim]",
+            title="[lcars1]Emergency Medical Hologram[/lcars1]",
+            border_style="lcars2", padding=(1, 2),
+        ))
+
+        # Stage 2 — diagnostic readouts. Build a list of probe-
+        # grounded phrases that cycle while the LLM thinks. Beats a
+        # static "EMH analysing telemetry" line: the user gets real
+        # in-flight context (the probe values being considered) AND
+        # the EMH bedside manner. Rotation runs in a thread so it
+        # ticks through every ~1.4s regardless of LLM throughput.
+        latest_by_probe = {p: vs[0] for p, vs in by_probe.items()}
+        readouts: list[str] = [
+            "Bioscanning telemetry…",
+        ]
+        for p in ("battery", "cpu", "memory", "thermal",
+                   "disk", "network", "ollama", "auto_embedder"):
+            v = latest_by_probe.get(p)
+            if v:
+                readouts.append(
+                    f"Reviewing {p}: {v.get('label') or '?'} "
+                    f"[{v.get('status') or '?'}]"
+                )
+        if corr_lines:
+            readouts.append(
+                f"Cross-referencing {len(corr_lines)} activity "
+                f"correlation(s) with alert events…"
+            )
+        if emh_diagnose:
+            readouts.append("Compiling priority remediation list…")
+        else:
+            readouts.append("Composing differential diagnosis…")
+        readouts.append(
+            "Querying chat model — please don't deactivate the EMH…"
+        )
+
+        import threading as _th, time as _t
+        from rich.progress import (Progress as _Pr,
+                                     SpinnerColumn as _SC,
+                                     TextColumn as _TC)
+        from .ui import _pick_thinking_spinner
+        spin_name, spin_style = _pick_thinking_spinner()
+
         from .llm import chat as _chat
-        try:
-            with thinking("EMH analysing telemetry", model=mdl):
+        reply = ""
+        err_holder: list[Exception] = []
+
+        def _run_chat():
+            nonlocal reply
+            try:
                 reply = _chat(emh_user, model=mdl, base_url=url,
                                 system=sys_msg, timeout=60.0) or ""
-        except Exception as e:
-            red_alert(f"EMH offline: {type(e).__name__}: {e}")
+            except Exception as e:    # noqa: BLE001
+                err_holder.append(e)
+
+        worker = _th.Thread(target=_run_chat, daemon=True)
+        worker.start()
+
+        with _Pr(_SC(spinner_name=spin_name, style=spin_style),
+                  _TC("[lcars3]{task.description}[/lcars3]"),
+                  transient=True, console=console) as prog:
+            task = prog.add_task(readouts[0], total=None)
+            i = 0
+            while worker.is_alive():
+                worker.join(timeout=1.4)
+                if not worker.is_alive():
+                    break
+                i = (i + 1) % len(readouts)
+                prog.update(task, description=readouts[i])
+        worker.join()
+
+        if err_holder:
+            red_alert(f"EMH offline: {type(err_holder[0]).__name__}: {err_holder[0]}")
             raise typer.Exit(1)
 
-        from rich.panel import Panel as _Panel
         try:
             from .rescue import sanitize_llm_advice as _san
             checked = _san(reply)
@@ -3499,9 +3580,9 @@ def ask(
             pass
         console.print(_Panel(
             reply.strip() or
-                "Please state the nature of the medical emergency. "
-                "(I have no further analysis to offer.)",
-            title="[lcars1]Emergency Medical Hologram[/lcars1]",
+                "(No further analysis to offer — telemetry is "
+                "unremarkable.)",
+            title="[lcars1]EMH · diagnosis[/lcars1]",
             border_style="lcars2", padding=(1, 2),
         ))
         return
