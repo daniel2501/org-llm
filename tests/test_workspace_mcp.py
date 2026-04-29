@@ -242,6 +242,54 @@ class TestOpencodeLaunchMCP:
             "to tui.json."
         )
 
+    def test_agents_md_written_and_referenced_in_instructions(self, cli_org,
+                                                                 monkeypatch):
+        """AGENTS.md is opencode's standard project-context file. Every
+        opencode session that mounts this config should pick it up
+        (auto-loaded via instructions[".opencode/AGENTS.md"]). Pins:
+          1. The file is written to .opencode/AGENTS.md (NOT vault root,
+             where it would clobber any AGENTS.md the user already keeps).
+          2. opencode.json's `instructions` list contains the relative
+             path so opencode loads it as project context.
+          3. The file actually carries the org-llm tool primer — without
+             the search-first rule + MCP cheatsheet, having the file is
+             pointless."""
+        monkeypatch.setattr("org_llm.cli._opencode_bin", lambda: "/usr/bin/true")
+        monkeypatch.setattr(os, "execvp",
+                              lambda p, a: (_ for _ in ()).throw(SystemExit(0)))
+        runner.invoke(app, ["launch"])
+
+        agents_path = Path(cli_org) / ".opencode" / "AGENTS.md"
+        assert agents_path.exists(), (
+            "launch didn't write .opencode/AGENTS.md — opencode's "
+            "standard project-context surface is missing."
+        )
+
+        # Must NOT be at vault root (would clobber user files).
+        assert not (Path(cli_org) / "AGENTS.md").exists(), (
+            "AGENTS.md was written to vault root — that risks "
+            "clobbering an AGENTS.md the user already keeps. "
+            "Write to .opencode/AGENTS.md instead."
+        )
+
+        body = agents_path.read_text()
+        # The primer's load-bearing parts:
+        for needle in ("search_notes", "ask_notes", "MCP",
+                        "org-llm", "proactive_doctor"):
+            assert needle in body, (
+                f"AGENTS.md missing key tool reference {needle!r} — "
+                f"the primer's whole point is teaching the agent which "
+                f"tools to reach for first."
+            )
+
+        # Referenced via instructions so opencode loads it.
+        cfg = json.loads((Path(cli_org) / ".opencode" / "opencode.json").read_text())
+        instr = cfg.get("instructions") or []
+        assert any(isinstance(x, str) and x.endswith("AGENTS.md") for x in instr), (
+            f"opencode.json instructions[] doesn't reference "
+            f"AGENTS.md — opencode won't auto-load it. Got: {instr!r}"
+        )
+
     def test_tui_plugin_auto_opens_dialog_on_mount(self):
         """User asked: cards should APPEAR ON OPEN, not require typing
         /insights. Pin that the plugin source actually calls

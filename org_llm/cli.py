@@ -12457,6 +12457,92 @@ def _opencode_pre_flight_context(session) -> dict:
     }
 
 
+def _opencode_agents_md(workspace: str, n_files: int, n_nodes: int,
+                          n_embedded: int, pct_e: int, org_dir: str,
+                          recent_str: str, top_tags_str: str) -> str:
+    """Return the AGENTS.md body opencode picks up as project context.
+
+    Why a separate file from `_opencode_workspace_prompt`:
+      • opencode auto-loads AGENTS.md on every session in cwd — so any
+        opencode invocation in this directory (not just `org-llm
+        launch`) gets the org-llm tool primer. The big system prompt
+        from _opencode_workspace_prompt only fires through our launch
+        path's `instructions` + `agent.build.prompt`.
+      • AGENTS.md is the standard third-party convention; it's where
+        a new agent looks for project-specific instructions. Keeping
+        it short and tool-discovery-focused keeps it useful as a
+        primer rather than a full persona dump (the heavy theming /
+        worked-examples content stays in the launch system prompt).
+
+    Content goal: in <100 lines, tell the agent what's here, what
+    tools to reach for first, and the cardinal "search before you
+    speculate" rule. The launch flow's full system prompt overrides
+    identity + adds theming on top.
+    """
+    return f"""# org-llm workspace ({workspace})
+
+This directory is an **org-roam knowledge base** with an `org-llm`
+MCP server attached. Before answering any question that could touch
+the user's notes, code, or history — call the MCP tools.
+
+## What's here
+
+- **Vault:** `{org_dir}` — {n_files} files, {n_nodes} nodes
+  ({n_embedded}/{n_nodes} = {pct_e}% embedded for semantic search)
+- **MCP server:** `org-llm` — exposes ~49 tools across notes, code,
+  filesystem discovery, dbt analytics, doctor self-checks, and config
+
+## Cardinal rule: search before you speculate
+
+The user's life is in this vault. NEVER say "I don't have access to
+your personal X" or "I don't recall" — that's a bug in this
+workspace. Any question of the form "have I…", "did I ever…",
+"what do I think about…", "remind me about…", "where am I with…"
+**MUST** start with a `search_notes` or `ask_notes` call.
+
+If the first phrasing misses, try synonyms (Marx → Capital → Das
+Kapital → political economy) before giving up. Only after multiple
+real searches come back empty do you say "I couldn't find anything
+about X — searched: A, B, C. Want a different phrase?"
+
+## Tool cheatsheet (start here)
+
+| Question shape | Reach for |
+|---|---|
+| "have I…" / "did I…" / "what about X" | `search_notes`, then `get_node` on hits |
+| "what's a good answer to…" | `ask_notes` (RAG: search + grounded reply) |
+| "what's been going on lately" | `list_recent_nodes(days=7)` |
+| "anything about tag X" | `list_nodes_by_tag(tag="X")` |
+| "save this thought" | `capture_note(title, body)` |
+| "find that code where…" | `code_search(query, lang?)` |
+| "is something broken" | `doctor_health()` then `proactive_doctor()` |
+| "open repo / read file" | `discover_filesystem`, then `read_file` |
+
+## Recent activity (last 7 days)
+
+{recent_str}
+
+## Top tags
+
+{top_tags_str}
+
+## Self-heal
+
+If a tool errors, you make >3 tool calls without converging, or a
+search comes back empty with no obvious synonyms — call
+`proactive_doctor()`. It probes RAM/model fit + suggests fixes
+(smaller model / cloud routing / larger model) instead of papering
+over the slowdown.
+
+## Out-of-band
+
+For anything not covered by a dedicated tool, use the typed-shell
+escape hatch: `org_llm_run("<command>")`. The CLI runs three layers
+of recovery (shell-quote repair, LLM intent reconstruction, SRE fix)
+before failing — pass mangled intents and let auto-fix land them.
+"""
+
+
 def _opencode_lcars_theme() -> dict:
     """LCARS-themed opencode theme matching the schema at
     https://opencode.ai/theme.json.
@@ -13384,10 +13470,16 @@ def launch(
     # OVERRIDE the identity prompt, we have to use AgentConfig.prompt
     # on the build agent (the default). instructions[] is kept too as
     # a redundant safety net + for any agent that uses the default.
+    # AGENTS.md — opencode's standard project-context file. Lives in
+    # .opencode/ so it doesn't clobber any AGENTS.md the user keeps
+    # in the vault root. Referenced via instructions[] (relative path
+    # against cwd, which we set to org_dir at launch). This is the
+    # "read org-llm everywhere" surface: every opencode session that
+    # mounts this config gets the org-llm tool primer prepended.
     oc_config: dict = {
         "model":        active_model_str,
         "provider":     active_provider_block,
-        "instructions": [instructions],
+        "instructions": [".opencode/AGENTS.md", instructions],
         "agent": {
             "build": {
                 "prompt": instructions,
@@ -13462,6 +13554,7 @@ def launch(
     tui_path     = org_dir / ".opencode" / "tui.json"
     cards_path   = org_dir / ".opencode" / "insight-cards.json"
     theme_path   = org_dir / ".opencode" / "themes"  / "org-llm-lcars.json"
+    agents_path  = org_dir / ".opencode" / "AGENTS.md"
     command_dir  = org_dir / ".opencode" / "command"
 
     slash_cmds = _opencode_slash_commands(workspace) if not no_commands else {}
@@ -13488,6 +13581,7 @@ def launch(
         console.print(Syntax(json.dumps(redacted, indent=2), "json", theme="monokai"))
         console.rule(f"[lcars2]Workspace: {workspace}[/lcars2]")
         on_screen(f"Would write config:   {config_path}")
+        on_screen(f"Would write agents:   {agents_path}")
         on_screen(f"Would write tui:      {tui_path}")
         on_screen(f"Would write cards:    {cards_path} ({len(_cards)} card(s))")
         if not no_theme:
@@ -13510,6 +13604,18 @@ def launch(
     if not no_theme:
         theme_path.parent.mkdir(parents=True, exist_ok=True)
         theme_path.write_text(json.dumps(_opencode_lcars_theme(), indent=2))
+    # AGENTS.md — opencode's standard project-context file. Loaded
+    # via instructions[".opencode/AGENTS.md"] above. Re-rendered on
+    # every launch so vault stats / recent activity / top tags stay
+    # fresh.
+    agents_path.write_text(_opencode_agents_md(
+        workspace=workspace,
+        n_files=ctx["n_files"], n_nodes=ctx["n_nodes"],
+        n_embedded=ctx["n_embedded"], pct_e=ctx["pct_e"],
+        org_dir=ctx["org_dir"],
+        recent_str=ctx["recent_str"],
+        top_tags_str=ctx["top_tags_str"],
+    ))
     # tui.json — proper home for theme + plugin (per opencode's
     # tui-schema.ts). Always written even if no_theme so future
     # plugin registrations have a home.
