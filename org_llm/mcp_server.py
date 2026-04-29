@@ -1458,6 +1458,38 @@ def create_mcp_server():
         except Exception as e:
             perf_lines.append(f"(perf probe failed: {e})")
 
+        # ── Live vital systems via life_support — fresh probe + log + recent
+        # activity-correlations from sensor_log. The MCP-side surface
+        # mirrors what `org-llm doctor` shows in CLI.
+        vitals_block = ""
+        try:
+            from . import life_support as _ls
+            fresh = _ls.probe_all()
+            _ls.record_readings(fresh)
+            vitals_block = "\n\n--- live vital systems ---\n"
+            for r in fresh:
+                vitals_block += (f"  {r.name:<14} {r.label:<24} "
+                                  f"[{r.status}]  {r.message}\n")
+            recent = _ls.recent_readings(since_secs=3600, limit=400)
+            seen: set[str] = set()
+            corr_lines: list[str] = []
+            for v in recent:
+                if v.get("status") not in ("alert", "critical"):
+                    continue
+                ctx = (v.get("context") or "").strip()
+                if not ctx or ctx in seen:
+                    continue
+                seen.add(ctx)
+                corr_lines.append(f"  · {v['probe']} {v['status']} during: {ctx}")
+                if len(corr_lines) >= 5:
+                    break
+            if corr_lines:
+                vitals_block += ("\nactivity correlations (alert/critical "
+                                  "readings + what the user was doing):\n"
+                                  + "\n".join(corr_lines))
+        except Exception as e:
+            vitals_block = f"\n(life-support probe failed: {e})"
+
         actions_block = (
             "\n--- vetted apply actions ---\n"
             "If the user explicitly approves, you may call "
@@ -1476,6 +1508,7 @@ def create_mcp_server():
                 f"{doc_out.strip()}")
         if perf_lines:
             body += "\n\n--- performance baseline ---\n" + "\n".join(perf_lines)
+        body += vitals_block
         body += actions_block
         return _themed("proactive_doctor",
                         "model + ollama + cloud + vault + perf probe", body)

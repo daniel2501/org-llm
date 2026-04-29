@@ -5258,6 +5258,341 @@ def man(
         on_screen(f"[dim]Open it:[/dim] [bold]man -l {target}[/bold]")
 
 
+@app.command(name="life-support", rich_help_panel="Self-care")
+def life_support(
+    interval: Annotated[int, typer.Option("--interval", "-n",
+              help="Poll every N seconds with a live-redrawing panel. "
+                   "0 = single shot (default).")] = 0,
+    once:     Annotated[bool, typer.Option("--once", "-o",
+              help="Single-shot probe + exit (same as default; "
+                   "explicit for scripts).")] = False,
+    no_log:   Annotated[bool, typer.Option("--no-log",
+              help="Don't write the readings to the sensor_log table. "
+                   "Useful for read-only checks.")] = False,
+    analyze:  Annotated[bool, typer.Option("--analyze", "-a",
+              help="After the probe, ask the LLM for concrete model + "
+                   "config optimisations based on the recent sensor_log "
+                   "trend. Subject to a sample-size floor — when there "
+                   "isn't enough history yet, falls back to a "
+                   "deterministic listing.")] = False,
+    window:   Annotated[int, typer.Option("--window", "-w",
+              help="With --analyze: minutes of sensor_log history to "
+                   "feed the model. Defaults to 60.")] = 60,
+    json_:    Annotated[bool, typer.Option("--json",
+              help="Emit a JSON snapshot instead of the rendered panel "
+                   "(for scripted consumers / dashboards).")] = False,
+):
+    """Trek-themed host-system status — battery, CPU, RAM, disk,
+    thermals, network, Ollama daemon, auto-embedder.
+
+    Self-hosted means the laptop is the substrate. When battery
+    drops, RAM tightens, thermals spike, or Ollama wedges, those are
+    the failure modes that turn this tool from helpful to frustrating.
+    Life-support shows the vital systems at a glance.
+
+    Single-shot by default. Pass [bold]--interval N[/bold] for a live
+    polling panel that redraws every N seconds (Ctrl-C to exit). Pass
+    [bold]--analyze[/bold] to also call the chat model for concrete
+    optimisation suggestions grounded in your recent timeseries.
+
+    Every reading writes one row to the [bold]sensor_log[/bold]
+    timeseries table (unless [bold]--no-log[/bold]). dbt analytics +
+    the LLM advice path read from there.
+    """
+    from . import life_support as _ls
+    if json_:
+        import json as _json
+        readings = _ls.probe_all()
+        if not no_log:
+            _ls.record_readings(readings)
+        out = {
+            "ts":      int(time.time()),
+            "overall": _ls.overall_status(readings),
+            "probes":  [{
+                "name":       r.name,
+                "value":      r.value,
+                "normalized": r.normalized,
+                "label":      r.label,
+                "status":     r.status,
+                "message":    r.message,
+            } for r in readings],
+        }
+        print(_json.dumps(out, indent=2))
+        return
+
+    from rich.live import Live
+    from rich.panel import Panel as _P
+    from rich.table import Table as _T
+
+    def _render(readings, overall):
+        t = _T(box=None, pad_edge=False, show_header=True)
+        t.add_column("✓", width=2)
+        t.add_column("System",  style="lcars1", no_wrap=True, width=14)
+        t.add_column("Reading", style="lcars3", no_wrap=True, width=24)
+        t.add_column("Status",  style="lcars2", no_wrap=True, width=10)
+        t.add_column("Message", style="dim",    overflow="fold")
+        glyph = {"nominal": "[green]✓[/green]",
+                  "watch":   "[yellow]•[/yellow]",
+                  "alert":   "[orange1]⚠[/orange1]",
+                  "critical":"[red]✗[/red]"}
+        for r in readings:
+            t.add_row(glyph.get(r.status, "?"),
+                       r.name, r.label, r.status, r.message)
+        title_color = {"nominal": "lcars3", "watch": "lcars2",
+                        "alert": "warn",    "critical": "error"}.get(overall, "lcars1")
+        return _P(t,
+                   title=f"[{title_color}]life-support  · {overall}[/{title_color}]",
+                   border_style="lcars2", padding=(1, 2))
+
+    if interval > 0:
+        try:
+            with Live(_render(_ls.probe_all(), "nominal"),
+                       console=console, refresh_per_second=2,
+                       transient=False) as live:
+                while True:
+                    readings = _ls.probe_all()
+                    overall  = _ls.overall_status(readings)
+                    if not no_log:
+                        _ls.record_readings(readings)
+                    live.update(_render(readings, overall))
+                    time.sleep(max(1, interval))
+        except KeyboardInterrupt:
+            console.print()
+            on_screen("[dim]life-support polling halted by user.[/dim]")
+            return
+
+    # single-shot
+    readings = _ls.probe_all()
+    overall  = _ls.overall_status(readings)
+    if not no_log:
+        n = _ls.record_readings(readings)
+        if n:
+            on_screen(f"[dim]Logged {n} reading(s) to sensor_log.[/dim]")
+    console.print()
+    console.print(_render(readings, overall))
+
+    if analyze:
+        on_screen("")
+        with thinking("Analysing trend"):
+            advice = _ls.llm_optimization_advice(window_secs=window * 60)
+        if advice:
+            console.print(_P(
+                advice,
+                title=f"[lcars1]Optimization advice  · last {window} min[/lcars1]",
+                border_style="lcars2", padding=(1, 2),
+            ))
+        else:
+            on_screen("[dim]Nothing to advise on yet — keep "
+                       "[bold]life-support --interval 30[/bold] running "
+                       "for a few minutes to build a trend.[/dim]")
+
+
+@app.command(name="sensors", rich_help_panel="Self-care")
+def sensors_dashboard(
+    interval: Annotated[int, typer.Option("--interval", "-n",
+              help="Refresh seconds (default 3)")] = 3,
+    drill:    Annotated[str, typer.Option("--drill", "-d",
+              help="Open the dashboard zoomed into ONE probe (battery / "
+                   "cpu / memory / disk / thermal / network / ollama / "
+                   "auto_embedder). Default: overview screen.")] = "",
+    window:   Annotated[int, typer.Option("--window", "-w",
+              help="Minutes of sensor_log history to chart in drill-down "
+                   "view")] = 30,
+    no_log:   Annotated[bool, typer.Option("--no-log",
+              help="Read-only — don't append fresh readings to sensor_log")] = False,
+):
+    """Live LCARS resource-monitor + log dashboard. TUI with drill-in.
+
+    Two views:
+
+    [bold]Overview[/bold] — every probe's current reading + a sparkline
+    of the last `--window` minutes from sensor_log. Use [1]–[8] number
+    keys (or pass [bold]--drill <probe>[/bold]) to zoom into a single
+    probe with its full timeseries, status distribution, and the
+    activity correlations recorded for it.
+
+    [bold]Drill-in[/bold] — full timeseries chart, min/max/mean,
+    status histogram, and the user-activity context recorded at each
+    alert/critical reading. Press [esc] / [q] / Ctrl-C to return to
+    overview (or just exit if invoked with --drill).
+
+    Every refresh writes one new sensor_log row per probe so the
+    timeseries grows while you watch. Pass [bold]--no-log[/bold] for
+    a read-only inspection.
+    """
+    from . import life_support as _ls
+    from rich.live import Live
+    from rich.panel import Panel as _P
+    from rich.table import Table as _T
+    from rich.layout import Layout as _Layout
+    from rich.text import Text as _Text
+
+    # Build a tiny inline sparkline from a series of normalized values.
+    # Eight glyphs from low to high; flat input renders as a row of
+    # mid-height blocks so the user sees "stable" not "missing".
+    _SPARK = "▁▂▃▄▅▆▇█"
+
+    def _sparkline(values: list[float], width: int = 24) -> str:
+        if not values:
+            return "[dim]" + "·" * width + "[/dim]"
+        sub = values[-width:] if len(values) > width else values
+        # Pad short series on the LEFT so the freshest reading is on
+        # the right edge.
+        pad = max(0, width - len(sub))
+        out = " " * pad
+        for v in sub:
+            try:
+                f = max(0.0, min(1.0, float(v)))
+            except Exception:
+                f = 0.5
+            idx = int(f * (len(_SPARK) - 1))
+            out += _SPARK[idx]
+        return out
+
+    def _status_color(status: str) -> str:
+        return {"nominal": "lcars3", "watch": "lcars2",
+                 "alert": "warn", "critical": "error"}.get(status, "lcars1")
+
+    def _overview_panel():
+        readings = _ls.probe_all()
+        if not no_log:
+            _ls.record_readings(readings)
+        recent = _ls.recent_readings(since_secs=window * 60, limit=2000)
+        by_probe: dict[str, list[float]] = {}
+        for v in recent:
+            try:
+                by_probe.setdefault(v["probe"], []).insert(
+                    0, float(v["normalized"] or 0))
+            except Exception:
+                pass
+        t = _T(box=None, pad_edge=False, show_header=True)
+        t.add_column("✓",       width=2)
+        t.add_column("System",  style="lcars1", no_wrap=True, width=14)
+        t.add_column("Reading", style="lcars3", no_wrap=True, width=22)
+        t.add_column("Status",  style="lcars2", no_wrap=True, width=10)
+        t.add_column(f"Trend · {window}min", style="lcars3",
+                       no_wrap=True, width=26)
+        t.add_column("Message", style="dim",    overflow="fold")
+        glyph = {"nominal": "[green]✓[/green]",
+                  "watch":   "[yellow]•[/yellow]",
+                  "alert":   "[orange1]⚠[/orange1]",
+                  "critical":"[red]✗[/red]"}
+        for r in readings:
+            spark = _sparkline(by_probe.get(r.name, []))
+            t.add_row(glyph.get(r.status, "?"), r.name, r.label,
+                        f"[{_status_color(r.status)}]{r.status}"
+                        f"[/{_status_color(r.status)}]",
+                        spark, r.message)
+        overall = _ls.overall_status(readings)
+        return _P(
+            t,
+            title=(f"[{_status_color(overall)}]sensors  · {overall}  · "
+                    f"refresh every {interval}s · drill: --drill <name>"
+                    f"[/{_status_color(overall)}]"),
+            subtitle="[dim]Ctrl-C to exit · pass --drill battery / cpu / mem / disk / thermal / network / ollama / auto_embedder[/dim]",
+            border_style="lcars2", padding=(1, 2),
+        )
+
+    def _drill_panel(probe: str):
+        # Validate name; tolerate "mem"/"memory" ambiguity.
+        canon = {"battery", "cpu", "memory", "disk", "thermal",
+                  "network", "ollama", "auto_embedder"}
+        alias = {"mem": "memory", "ram": "memory",
+                  "net": "network", "embed": "auto_embedder",
+                  "watcher": "auto_embedder", "temp": "thermal"}
+        name = alias.get(probe.lower(), probe.lower())
+        if name not in canon:
+            return _P(
+                _Text(f"unknown probe: {probe!r}\nvalid: {', '.join(sorted(canon))}",
+                      style="error"),
+                title="[error]sensors --drill[/error]",
+                border_style="error", padding=(1, 2),
+            )
+
+        # Fresh probe + record so this view drives logging too.
+        readings = _ls.probe_all()
+        if not no_log:
+            _ls.record_readings(readings)
+        live_for = next((r for r in readings if r.name == name), None)
+        recent = _ls.recent_readings(probe=name, since_secs=window * 60,
+                                        limit=2000)
+        norms: list[float] = []
+        statuses: dict[str, int] = {}
+        for v in reversed(recent):    # oldest → newest for chart
+            try:
+                norms.append(float(v["normalized"] or 0))
+            except Exception:
+                pass
+            statuses[v["status"]] = statuses.get(v["status"], 0) + 1
+
+        # Top section: live reading + summary stats
+        head = _T.grid(padding=(0, 2))
+        head.add_column(); head.add_column()
+        if live_for:
+            head.add_row("[lcars1]Now[/lcars1]",
+                          f"{live_for.label}  [{live_for.status}]  {live_for.message}")
+        if norms:
+            head.add_row("[lcars1]Window[/lcars1]",
+                          f"min {min(norms):.2f}  mean {sum(norms)/len(norms):.2f}  "
+                          f"max {max(norms):.2f}  · {len(norms)} sample(s) "
+                          f"over last {window}min")
+        if statuses:
+            ds = " ".join(f"[{_status_color(k)}]{k}[/{_status_color(k)}]={v}"
+                            for k, v in statuses.items())
+            head.add_row("[lcars1]Status[/lcars1]", ds)
+
+        # Sparkline at full width (~60 chars)
+        spark = _sparkline(norms, width=60)
+        chart_box = _P(_Text(spark, style="lcars3"),
+                         title="[lcars1]trend (oldest left → newest right)[/lcars1]",
+                         border_style="lcars2", padding=(0, 2))
+
+        # Activity correlations table — alert/critical rows + their context
+        corr = _T(box=None, pad_edge=False, show_header=True)
+        corr.add_column("When",    style="dim", no_wrap=True, width=19)
+        corr.add_column("Status",  style="lcars2", no_wrap=True, width=10)
+        corr.add_column("Reading", style="lcars3", no_wrap=True, width=20)
+        corr.add_column("Activity context", style="lcars1", overflow="fold")
+        from datetime import datetime as _dt
+        for v in recent:
+            if v.get("status") not in ("alert", "critical"):
+                continue
+            ts = _dt.fromtimestamp(v["ts"]).strftime("%Y-%m-%d %H:%M:%S")
+            ctx = (v.get("context") or "").strip() or "[dim](no activity recorded)[/dim]"
+            corr.add_row(ts,
+                          f"[{_status_color(v['status'])}]{v['status']}"
+                          f"[/{_status_color(v['status'])}]",
+                          v.get("label") or "?", ctx)
+            if corr.row_count >= 12:
+                break
+        corr_box = _P(corr if corr.row_count else
+                        _Text("No alert/critical readings in this window — "
+                              "everything's been fine.", style="lcars3"),
+                        title="[lcars1]activity correlations  · what the user was doing during alerts[/lcars1]",
+                        border_style="lcars2", padding=(1, 2))
+
+        layout = _Layout()
+        layout.split_column(
+            _Layout(_P(head, title=f"[lcars1]sensors  · drill: {name}[/lcars1]",
+                         border_style="lcars1", padding=(1, 2)), size=7),
+            _Layout(chart_box, size=4),
+            _Layout(corr_box),
+        )
+        return layout
+
+    # Build the renderer once + loop
+    render = (lambda: _drill_panel(drill)) if drill else (lambda: _overview_panel())
+    try:
+        with Live(render(), console=console, refresh_per_second=2,
+                    transient=False) as live:
+            while True:
+                time.sleep(max(1, interval))
+                live.update(render())
+    except KeyboardInterrupt:
+        console.print()
+        on_screen("[dim]sensors dashboard exited.[/dim]")
+
+
 @app.command(name="log", rich_help_panel="Maintenance")
 def log_show(
     kind:    Annotated[str, typer.Option("--kind", "-k",
@@ -7433,20 +7768,69 @@ def _doctor_impl(
             [f"- {w}" for w in warnings]
         ) or "All checks passed — user requested diagnosis anyway."
 
+        # Take a fresh life-support reading + pull recent sensor_log
+        # history so Dr. Crusher's diagnosis is grounded in the actual
+        # current vitals (battery / cpu / mem / disk / thermal /
+        # network / ollama daemon / auto-embedder) and any trends from
+        # the timeseries log. Activity-correlation rows ("CPU pegged
+        # WHILE ask --reason was running") are the highest-signal
+        # optimisation lever; surfacing them here makes diagnoses
+        # actionable instead of generic.
+        sensor_block = ""
+        try:
+            from . import life_support as _ls
+            fresh = _ls.probe_all()
+            _ls.record_readings(fresh)
+            recent = _ls.recent_readings(since_secs=3600, limit=400)
+            sensor_block = "\nLive vital systems (fresh probe):\n"
+            for r in fresh:
+                sensor_block += f"  - {r.name}: {r.label} [{r.status}] {r.message}\n"
+            if recent:
+                # Surface up to 5 unique activity-correlations with
+                # alert/critical readings — same logic as the
+                # life-support analyse path.
+                seen: set[str] = set()
+                lines: list[str] = []
+                for v in recent:
+                    if v.get("status") not in ("alert", "critical"):
+                        continue
+                    ctx = (v.get("context") or "").strip()
+                    if not ctx or ctx in seen:
+                        continue
+                    seen.add(ctx)
+                    lines.append(f"  · {v['probe']} {v['status']} during: {ctx}")
+                    if len(lines) >= 5:
+                        break
+                if lines:
+                    sensor_block += (
+                        "\nRecent activity correlations (last hour):\n"
+                        + "\n".join(lines) + "\n"
+                    )
+        except Exception:
+            pass
+
         system = (
-            "You are an expert assistant for org-llm, a Python CLI tool that indexes org-roam "
-            "notes and provides LLM-powered search and Q&A using Ollama. "
-            "You are given a health-check report. Respond with:\n"
-            "1. A brief plain-English explanation of each failure/warning\n"
-            "2. Ordered fix steps with exact commands\n"
-            "3. Any follow-up checks the user should run after fixing\n"
-            "Be concise, specific, and helpful. Use plain text (no markdown)."
+            "You are Dr. Crusher, the chief medical officer for an "
+            "org-llm starship. You receive a health-check report PLUS "
+            "live vital-system probes (battery / cpu / mem / disk / "
+            "thermal / network / ollama daemon / auto-embedder) and "
+            "any activity-correlations recorded in the recent timeseries "
+            "log. Respond with:\n"
+            "1. A brief plain-English explanation of each failure / "
+            "   warning, citing the specific vital reading or activity "
+            "   correlation when relevant.\n"
+            "2. Ordered fix steps with exact org-llm commands.\n"
+            "3. Any follow-up checks the user should run after fixing.\n"
+            "Stay concise. Plain text (no markdown). Reference the "
+            "live readings when they explain a warning — that's the "
+            "whole point of having sensor data."
         )
         prompt = (
             f"org-llm health check results:\n\n{state_summary}\n\n"
             f"System: Python {sys.version.split()[0]}, Ollama at {url}\n"
             f"DB: {DB_PATH}\n"
             f"Org dir: {org_dir}\n"
+            f"{sensor_block}"
         )
 
         from .llm import chat

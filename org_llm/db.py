@@ -97,6 +97,36 @@ class Config(Base):
     value = Column(Text, nullable=False)
 
 
+class SensorLog(Base):
+    """Timeseries of host-system probes — battery / cpu / mem / disk /
+    thermal / network / ollama / auto-embedder. Written by
+    `org_llm.life_support.record_readings()` on every probe cycle so
+    the LLM advice path + dbt analytics can reason over trends.
+
+    Separate from History (which is for events) because metrics scale
+    differently — a 10-minute polling loop at 1Hz writes 6000 rows per
+    probe; History was tuned for human-readable event volume.
+
+    The `context` column carries a short snapshot of what the user was
+    doing in the seconds before each reading (last few History rows
+    summarised). This lets the LLM advice path correlate resource
+    spikes with the activity that caused them — e.g. "CPU pegged at
+    8.0 while `ask --reason deepseek-r1:7b` ran 240s, consider
+    routing reasoning to cloud" instead of just "your CPU is high".
+    """
+    __tablename__ = "sensor_log"
+
+    id         = Column(Integer, primary_key=True)
+    ts         = Column(Integer, nullable=False)   # unix epoch seconds
+    probe      = Column(Text,    nullable=False)   # battery / cpu / mem / ...
+    value      = Column(Text)                       # raw measurement, str-cast
+    normalized = Column(Text)                       # 0.0..1.0 as text (sqlite friendly)
+    status     = Column(Text)                       # nominal / watch / alert / critical
+    label      = Column(Text)                       # display label snapshot
+    message    = Column(Text)                       # trek-themed message snapshot
+    context    = Column(Text)                       # last-N History rows summary
+
+
 def _load_sqlite_vec(dbapi_conn, _):
     dbapi_conn.enable_load_extension(True)
     sqlite_vec.load(dbapi_conn)
@@ -124,6 +154,14 @@ def _migrate_in_place(engine) -> None:
     insp = inspect(engine)
     if not insp.has_table("nodes"):
         return  # init_db hasn't run yet — create_all will add everything.
+    # New TABLES introduced over time (sensor_log etc.) need to be
+    # created on existing DBs that pre-date them. create_all() is
+    # idempotent — it skips tables that already exist — so calling it
+    # here is safe and gives us additive table support for free.
+    try:
+        Base.metadata.create_all(engine)
+    except Exception:
+        pass
     cols = {c["name"] for c in insp.get_columns("nodes")}
     additions: list[str] = []
     if "auto_tags" not in cols:
@@ -147,6 +185,17 @@ def _migrate_in_place(engine) -> None:
         ):
             if col not in h_cols:
                 additions.append(decl)
+    # ── sensor_log table — life-support timeseries.
+    # `context` carries the user's recent activity at probe time so
+    # the LLM advice path can correlate resource spikes with what
+    # caused them. Added after the initial sensor_log shipped, so
+    # existing DBs may have the table without the column.
+    if insp.has_table("sensor_log"):
+        sl_cols = {c["name"] for c in insp.get_columns("sensor_log")}
+        if "context" not in sl_cols:
+            additions.append(
+                "ALTER TABLE sensor_log ADD COLUMN context TEXT"
+            )
     if not additions:
         return
     with engine.begin() as conn:
