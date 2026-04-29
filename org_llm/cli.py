@@ -10183,20 +10183,25 @@ def tag(
         "You are an org-mode tagger. Output format is RIGID:\n"
         "  - 1 to 5 lowercase tags\n"
         "  - separated by single spaces\n"
-        "  - each tag is a single word, alpha-only or alpha-with-hyphen\n"
+        "  - each tag is a SHORT single word (≤16 chars), alpha-only or alpha-with-hyphen\n"
+        "  - NEVER fuse two concepts into one token — use spaces instead\n"
         "  - NO colons, NO commas, NO quotes, NO backticks\n"
         "  - NO sentences, NO explanation, NO 'these tags', NO 'i've'\n"
         "  - NO preamble, NO postscript\n"
         "\n"
         "WRONG (do NOT do this):\n"
-        "  reading-list books literature these tags cover topics like…\n"
-        "  python,data,analysis (commas)\n"
-        "  :tag1:tag2: (colons)\n"
+        "  reading-list books literature these tags cover topics like…  (prose)\n"
+        "  python,data,analysis                                        (commas)\n"
+        "  :tag1:tag2:                                                 (colons)\n"
+        "  marxismconsciousness                                        (fused — should be: marxism consciousness)\n"
+        "  economicstheory                                             (fused — should be: economics theory)\n"
+        "  softwaredevelopment                                         (fused — should be: software development)\n"
         "\n"
         "RIGHT:\n"
         "  python programming tooling\n"
         "  literature reading-log fiction\n"
         "  marxism economics theory\n"
+        "  ai philosophy ethics\n"
         "\n"
         "Output the tags and NOTHING ELSE."
     )
@@ -10234,12 +10239,71 @@ def tag(
                 continue
             if t in _PROSE_MARKERS:
                 break               # everything past this is prose
-            if not _re_tag.match(r"^[a-z][a-z0-9-]{0,31}$", t):
-                continue            # discard malformed tokens silently
+            # 16-char ceiling. Real tags are short. Phase 11 Day 5
+            # surfaced llama3.2:1b emitting 'marxismconsciousness'
+            # (20), 'economicstheory' (15), 'softwaredevelopment'
+            # (19) — fused multi-word concepts. 16 chars catches the
+            # worst offenders without rejecting legitimate long tags
+            # like 'zettelkasten' (12) or 'phenomenology' (13).
+            if not _re_tag.match(r"^[a-z][a-z0-9-]{0,15}$", t):
+                continue            # discard malformed / fused tokens silently
             cut.append(t)
             if len(cut) >= 5:
                 break
         return " ".join(cut)
+
+    # Batch tagging — Phase 11 Day 5. Single-node loop on llama3.2:1b
+    # ran 50 nodes in ~60-90s. Sending N nodes per LLM call amortizes
+    # the per-call overhead (ollama model warmup, RTT, prefill) and
+    # reduces total wall time substantially. Batch size 8 is a
+    # compromise between throughput and the small model's ability to
+    # keep its place — beyond 10-12 entries gpt-oss/llama variants
+    # start losing track of the numbering and emit fewer/extra lines.
+    _BATCH_SIZE = 8
+
+    def _chunks(seq, n):
+        for i in range(0, len(seq), n):
+            yield seq[i:i + n]
+
+    def _batch_tag(chunk):
+        """Tag N notes in one LLM call. Returns list[str] aligned to
+        chunk order. Empty string at any slot = failed parse for that
+        node. Caller increments `failed` for those slots."""
+        parts = []
+        for i, n in enumerate(chunk, 1):
+            body = (n.body or "")[:300]
+            parts.append(f"{i}. TITLE: {n.title}\nBODY: {body}")
+        user_msg = "\n\n---\n\n".join(parts)
+
+        sys_batch = system + (
+            "\n\nBATCH MODE — you are tagging multiple notes at once.\n"
+            f"Output exactly ONE LINE per input note, numbered to "
+            f"match the input. Format:\n"
+            f"  1. tag1 tag2 tag3\n"
+            f"  2. tag1 tag2 tag3\n"
+            f"  ... (continue for all {len(chunk)} notes)\n"
+            f"Each line: index, a period, a space, then 1-5 tags "
+            f"space-separated. NO commentary, NO headers, NO blank "
+            f"lines. Output exactly {len(chunk)} lines."
+        )
+
+        # Timeout scales with batch size — small models on CPU need
+        # room. 4s/node baseline + 5s overhead.
+        timeout = max(20.0, 4.0 * len(chunk) + 5.0)
+        result = chat(user_msg, model=model, base_url=url,
+                       system=sys_batch, timeout=timeout) or ""
+
+        out = [""] * len(chunk)
+        for line in result.splitlines():
+            m = _re_tag.match(r"^\s*(\d+)[\.\)]?\s+(.*)$", line.strip())
+            if not m:
+                continue
+            idx = int(m.group(1)) - 1
+            if 0 <= idx < len(chunk):
+                tags = _validate_tags(m.group(2))
+                if tags:
+                    out[idx] = tags
+        return out
 
     tagged = 0
     skipped_unchanged = 0
@@ -10247,27 +10311,29 @@ def tag(
     last_error = ""
     with get_session(engine) as session:
         with impulse("Tagging", total=len(nodes)) as (prog, task):
-            for node in nodes:
-                text = f"{node.title}\n{node.body[:500]}"
+            for chunk in _chunks(nodes, _BATCH_SIZE):
                 try:
-                    result = chat(text, model=model, base_url=url, system=system,
-                                  timeout=15.0)
-                    new_tags = _validate_tags(result)
+                    parsed = _batch_tag(chunk)
+                except Exception as e:
+                    session.rollback()
+                    failed += len(chunk)
+                    last_error = (f"batch failed: "
+                                   f"{type(e).__name__}: {e}")
+                    for _ in chunk:
+                        prog.advance(task)
+                    continue
+
+                for node, new_tags in zip(chunk, parsed):
                     if not new_tags:
-                        # Reject prose / empty / malformed output rather
-                        # than writing garbage into the DB. The repair
-                        # mode can re-run these later.
                         failed += 1
-                        last_error = (f"output failed validation "
-                                       f"(node {node.id}): "
-                                       f"{(result or '')[:60]!r}…")
+                        last_error = (f"output failed validation / "
+                                       f"missing line (node {node.id})")
+                        prog.advance(task)
                         continue
                     db_node = session.get(Node, node.id)
                     if db_node:
-                        # In repair/redo modes, no-op when the LLM produces the
-                        # same string we already had — saves a write and helps
-                        # the user see real change counts.
-                        if (redo or repair) and (db_node.auto_tags or "") == new_tags:
+                        if ((redo or repair)
+                                and (db_node.auto_tags or "") == new_tags):
                             skipped_unchanged += 1
                         else:
                             db_node.auto_tags         = new_tags
@@ -10275,11 +10341,7 @@ def tag(
                             db_node.auto_tagger_model = model
                             tagged += 1
                         session.commit()
-                except Exception as e:
-                    session.rollback()
-                    failed += 1
-                    last_error = f"{type(e).__name__}: {e}"
-                prog.advance(task)
+                    prog.advance(task)
 
     # Honest accounting — was: "Tagged 0 nodes." with no reason. Now
     # the user sees successes, no-ops, AND failures with the last LLM
