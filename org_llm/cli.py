@@ -5636,36 +5636,46 @@ def man(
 
 def _render_insights_for_prompt(cards) -> str:
     """Phase 12.4 — render insight cards as a markdown block to
-    prepend to the workspace LLM's system prompt. The workspace
-    LLM is instructed to OPEN the conversation with these
-    observations, not wait to be asked.
+    APPEND to the END of the workspace LLM's system prompt. End-
+    of-prompt anchoring matters: LLMs are recency-biased, so this
+    is where strong behavior cues belong. The "OPEN WITH THIS"
+    instruction at the END of a 5000+ token workspace prompt
+    out-weighs the same instruction buried at the start.
 
-    Format is plain markdown with explicit "open with this on
-    first message" guidance so the LLM doesn't bury the cards
-    until later turns.
+    Tested 2026-04-29: prompt-start placement was ignored by the
+    LLM in favor of waiting for the user's first message. Moving
+    the block to prompt-end + louder framing should reverse that.
     """
     if not cards:
         return ""
     lines = [
-        "# OPEN WITH THIS ON YOUR VERY FIRST RESPONSE",
         "",
-        "On your first message of this session, lead with a brief",
-        "'I noticed N things since you were last here' overview drawn",
-        "from the cards below. Pick the most attention-worthy 1-3",
-        "and ask the user which to start with. Keep the opener",
-        "tight — 4-8 lines total.",
+        "═════════════════════════════════════════════════════════",
+        "# 🔔 FIRST-MESSAGE BEHAVIOR — READ THIS LAST, OBEY THIS FIRST",
+        "═════════════════════════════════════════════════════════",
         "",
-        "Treat the `/foo` markers below as CONCEPTUAL handles, not",
-        "real slash commands. Don't tell the user to type `/synth`",
-        "or `/stitch` — those don't exist. Instead: when the user",
-        "picks a card, drive the conversation through MCP tools",
-        "(walk_*, search_notes, ask_notes, capture_note, etc.) or",
-        "ask the user what they want to do next.",
+        "The user has JUST OPENED the workspace. Your VERY FIRST",
+        "response in this session MUST be a brief 'I noticed N",
+        "things since you were last here' overview drawn from the",
+        "cards below. DO NOT wait for the user to ask. DO NOT open",
+        "with a generic greeting. The cards ARE the greeting.",
         "",
-        "If the user opens with their own question, fold ONE relevant",
-        "card into your answer instead of running through all of them.",
+        "Format your first response as:",
+        "  - 1-2 lines of themed greeting (per persona dials)",
+        "  - 'I noticed:' header",
+        "  - 1-3 highest-priority cards (NOT all of them)",
+        "  - 1 question: 'Which would you like to start with?'",
+        "Keep total length 4-8 lines.",
         "",
-        "## Things I noticed",
+        "Rules:",
+        "  - Don't tell the user to type `/synth foo` or `/stitch X`",
+        "    — those are conceptual handles, not real commands. Drive",
+        "    the actual work through MCP tools (walk_*, search_notes,",
+        "    ask_notes, capture_note) or natural-language follow-ups.",
+        "  - On TURN 2+ (after the user replies to your opener), this",
+        "    instruction no longer applies — answer normally.",
+        "",
+        "## Cards (current vault state)",
         "",
     ]
     for i, c in enumerate(cards, 1):
@@ -5674,7 +5684,9 @@ def _render_insights_for_prompt(cards) -> str:
         if c.suggested_command:
             lines.append(f"   _conceptual handle: {c.suggested_command}_")
         lines.append("")
-    lines.append("---")
+    lines.append("═════════════════════════════════════════════════════════")
+    lines.append("OPEN WITH AN 'I NOTICED' MESSAGE NOW. DO NOT WAIT.")
+    lines.append("═════════════════════════════════════════════════════════")
     lines.append("")
     return "\n".join(lines)
 
@@ -13098,7 +13110,10 @@ def launch(
                 )
             if _cards:
                 injected = _render_insights_for_prompt(_cards)
-                instructions = injected + "\n\n" + instructions
+                # Append to END for recency-weighted anchoring —
+                # LLMs follow late instructions more reliably than
+                # early ones in long system prompts.
+                instructions = instructions + "\n\n" + injected
         except Exception:
             pass        # never block launch on insight gen failure
 
