@@ -5634,6 +5634,40 @@ def man(
         on_screen(f"[dim]Open it:[/dim] [bold]man -l {target}[/bold]")
 
 
+def _render_insights_panel(cards):
+    """Render Phase 12.1 deterministic insight cards as a Rich panel
+    that prints during `org-llm launch`. The actual workspace-side
+    welcome-message injection (Phase 12.4) is separate; this is the
+    user-facing CLI preview of what the LLM will open with.
+    """
+    from rich.panel import Panel as _P
+    from rich.table import Table as _T
+    from rich.text  import Text  as _Text
+    if not cards:
+        return _P(_Text("(no attention-worthy insights right now)",
+                          style="dim"),
+                    title="[lcars1]Things I noticed[/lcars1]",
+                    border_style="lcars2", padding=(1, 2))
+    body = _T.grid(padding=(0, 1))
+    body.add_column(width=3, style="lcars1", no_wrap=True)
+    body.add_column(overflow="fold")
+    for i, c in enumerate(cards, 1):
+        title_line = _Text()
+        title_line.append(c.title, style="bold lcars2")
+        if c.suggested_command:
+            title_line.append(f"   → {c.suggested_command}",
+                                style="dim lcars3")
+        body.add_row(f"{i}.", title_line)
+        # body sits one row below the numbered title for readability
+        body.add_row("", _Text(c.body, style="dim"))
+        body.add_row("", _Text(""))
+    return _P(body,
+                title=f"[lcars1]Things I noticed[/lcars1]  "
+                        f"[dim]({len(cards)} card"
+                        f"{'s' if len(cards) != 1 else ''})[/dim]",
+                border_style="lcars2", padding=(1, 2))
+
+
 def _vitals_panel(readings, overall: str):
     """Shared renderer used by `life-support` AND `doctor` (Dr. Crusher)
     so both surfaces show vitals identically. Lives at module scope so
@@ -12841,6 +12875,25 @@ def launch(
         padding=(1, 2),
     ))
     console.print()
+
+    # Phase 12.1 — insight pre-mount panel. Gated by env flag while
+    # the feature is opt-in. When ON, surface the cards we would
+    # inject into opencode's first message (Phase 12.4 will wire the
+    # actual injection; this just proves the pipeline produces
+    # something attention-worthy).
+    if os.environ.get("ORG_LLM_INSIGHT_PREMOUNT", "").lower() in ("1", "on", "true"):
+        try:
+            from . import insights as _insights
+            with get_session(_engine()) as _s:
+                cards = _insights.cached_gather(
+                    _s, cache_key=f"launch:{workspace}")
+            if cards:
+                console.print(_render_insights_panel(cards))
+                console.print()
+        except Exception as _e:
+            on_screen(f"[dim]insight pre-mount skipped: "
+                      f"{type(_e).__name__}: {_e}[/dim]")
+
     hail("Engaging opencode… (q to quit, Ctrl-C to abort)")
     console.print()
 
