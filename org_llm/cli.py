@@ -10031,22 +10031,40 @@ def capture(
 def _auto_tags_look_bad(auto_tags: str) -> bool:
     """Quality check for `--repair`: flag auto_tags strings that look like a
     weak/malformed model run (single token, suspiciously short, contain
-    obvious non-tags). Conservative — false negatives are fine, false
-    positives waste a re-tag and are mildly annoying."""
+    obvious non-tags, OR are an entire essay's worth of prose dumped into
+    the column). Conservative — false negatives are fine, false positives
+    waste a re-tag and are mildly annoying."""
     s = (auto_tags or "").strip()
     if not s:
         return False  # empty isn't "bad" — it's "untagged" (handled by default mode)
+    # Length sanity. A clean tag list is at most ~5 short tokens; anything
+    # longer than ~120 chars is almost certainly LLM prose dumped in.
+    # Phase 11 Day 5 saw entries 800-1200 chars long with phrases like
+    # "in this interpretation, i've selected five relevant org-mode tags".
+    if len(s) > 120:
+        return True
     toks = s.split()
     if len(toks) < 2:
         return True  # one tag is almost never enough for a real note
+    if len(toks) > 8:
+        return True  # >5 was the cap; allow some slack but anything past 8 is junk
     # Single-character tokens, dupes, or junk markers from sloppy LLM output.
     if any(len(t) <= 1 for t in toks):
         return True
+    if any(len(t) > 32 for t in toks):
+        return True   # one mega-token = LLM jammed a phrase into one slot
     if len(set(toks)) < len(toks):
         return True   # dupes — the LLM repeated itself
     junk = {"none", "n/a", "no_tags", "no_tags_found", "untitled", "tags",
-            "todo", "hmm", "unknown", "tag", "the", "and"}
+            "todo", "hmm", "unknown", "tag", "the", "and", "i've",
+            "in", "this", "that", "these", "those", "interpretation",
+            "selected", "covers", "includes", "various", "common",
+            "relevant", "potential", "according"}
     if any(t in junk for t in toks):
+        return True
+    # Punctuation in any token signals prose: "tags," "tags." "i've"
+    if any(c in s for c in ("'", '"', "`", "(", ")", "[", "]", "{", "}",
+                                ",", ".", "!", "?", ";")):
         return True
     return False
 
@@ -10154,11 +10172,74 @@ def tag(
             raise typer.Exit(1)
 
     hail(f"Auto-tagging {len(nodes)} {mode_label} with [bold]{model}[/bold]")
+    # Phase 11 Day 5: phi3.5 ignored 'no explanation' politeness and
+    # wrote multi-paragraph essays. The prompt now leads with a STRICT
+    # format spec, two NEGATIVE examples, and three positive examples.
+    # The output is also validated below — anything past the first 5
+    # short alpha tokens is dropped, and prose-like responses fail
+    # quality and are rejected entirely (rather than written verbatim
+    # into the org files on --apply).
     system = (
-        "You are an org-mode expert. Given a note title and body, output ONLY a space-separated "
-        "list of lowercase org-mode tags (no colons, no explanation). "
-        "Max 5 tags. Example: python programming tools"
+        "You are an org-mode tagger. Output format is RIGID:\n"
+        "  - 1 to 5 lowercase tags\n"
+        "  - separated by single spaces\n"
+        "  - each tag is a single word, alpha-only or alpha-with-hyphen\n"
+        "  - NO colons, NO commas, NO quotes, NO backticks\n"
+        "  - NO sentences, NO explanation, NO 'these tags', NO 'i've'\n"
+        "  - NO preamble, NO postscript\n"
+        "\n"
+        "WRONG (do NOT do this):\n"
+        "  reading-list books literature these tags cover topics like…\n"
+        "  python,data,analysis (commas)\n"
+        "  :tag1:tag2: (colons)\n"
+        "\n"
+        "RIGHT:\n"
+        "  python programming tooling\n"
+        "  literature reading-log fiction\n"
+        "  marxism economics theory\n"
+        "\n"
+        "Output the tags and NOTHING ELSE."
     )
+
+    # Tokens we'll never accept as a tag — connectors, pronouns,
+    # narrative markers, etc. If a parsed token matches, the whole
+    # response is suspected as prose and we cut at that point.
+    _PROSE_MARKERS = {
+        "the", "a", "an", "of", "for", "to", "in", "on", "and", "or",
+        "but", "as", "by", "with", "about", "from", "into", "out",
+        "this", "that", "these", "those", "i", "i've", "you", "your",
+        "we", "they", "it", "its", "is", "are", "was", "were", "be",
+        "been", "being", "have", "has", "had", "do", "does", "did",
+        "will", "would", "could", "should", "tags", "tag", "keywords",
+        "list", "include", "included", "based", "interpretation",
+        "context", "various", "common", "relevant", "potential",
+        "according", "note", "however", "therefore", "as-well",
+    }
+    import re as _re_tag
+
+    def _validate_tags(raw: str) -> str:
+        """Parse LLM output into clean space-separated tags. Empty
+        string = reject. Reasoning behind the validation: see Phase
+        11 Day 5 in the test session log."""
+        if not raw:
+            return ""
+        # Take only the first non-empty line — the LLM often rambles
+        # on subsequent lines even when constrained.
+        first = raw.strip().splitlines()[0].strip().lower()
+        # Drop anything from the first prose marker onward.
+        cut: list[str] = []
+        for tok in first.split():
+            t = tok.strip(".,;:!?\"'`()[]{}").replace(":", "")
+            if not t:
+                continue
+            if t in _PROSE_MARKERS:
+                break               # everything past this is prose
+            if not _re_tag.match(r"^[a-z][a-z0-9-]{0,31}$", t):
+                continue            # discard malformed tokens silently
+            cut.append(t)
+            if len(cut) >= 5:
+                break
+        return " ".join(cut)
 
     tagged = 0
     skipped_unchanged = 0
@@ -10170,12 +10251,17 @@ def tag(
                 text = f"{node.title}\n{node.body[:500]}"
                 try:
                     result = chat(text, model=model, base_url=url, system=system,
-                                  timeout=30.0)
-                    new_tags = " ".join(
-                        t.strip().lower().replace(":", "")
-                        for t in result.strip().split()
-                        if t.strip()
-                    )
+                                  timeout=15.0)
+                    new_tags = _validate_tags(result)
+                    if not new_tags:
+                        # Reject prose / empty / malformed output rather
+                        # than writing garbage into the DB. The repair
+                        # mode can re-run these later.
+                        failed += 1
+                        last_error = (f"output failed validation "
+                                       f"(node {node.id}): "
+                                       f"{(result or '')[:60]!r}…")
+                        continue
                     db_node = session.get(Node, node.id)
                     if db_node:
                         # In repair/redo modes, no-op when the LLM produces the
