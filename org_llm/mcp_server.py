@@ -239,7 +239,7 @@ def create_mcp_server():
                 try:
                     from .search import vector_search
                     from .llm import embed
-                    qvec    = embed(query, model=model, base_url=url)
+                    qvec    = embed(query, model=model, base_url=url, task="query")
                     results = vector_search(session, qvec, limit=limit)
                 except Exception:
                     from .search import keyword_search
@@ -276,7 +276,7 @@ def create_mcp_server():
             chat_model  = _cfg(session, "chat_model")  or "llama3.2"
             await _report(ctx, 1, 3, f"{label} — embedding query")
             try:
-                qvec    = embed(question, model=embed_model, base_url=url)
+                qvec    = embed(question, model=embed_model, base_url=url, task="query")
             except Exception as e:
                 return f"Search error: {e}"
             await _report(ctx, 2, 3, f"{label} — vector search (top {top_k})")
@@ -1070,7 +1070,7 @@ def create_mcp_server():
             url    = _cfg(session, "ollama_url") or "http://localhost:11434"
             model  = _cfg(session, "embed_model") or "nomic-embed-text"
             try:
-                qvec = _embed(query, model=model, base_url=url)
+                qvec = _embed(query, model=model, base_url=url, task="query")
                 hits = vector_search(session, qvec, limit=limit * 4)
             except Exception as e:
                 return f"Search failed: {e}"

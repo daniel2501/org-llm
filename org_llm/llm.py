@@ -9,9 +9,44 @@ def list_models(base_url: str = "http://localhost:11434") -> list[str]:
     return [m.model for m in client.list().models]
 
 
-def embed(text: str, model: str, base_url: str) -> list[float]:
+def embed(text: str, model: str, base_url: str,
+           task: str = "") -> list[float]:
+    """Embed text via Ollama.
+
+    `task` is the nomic-embed-text-style instruction prefix the
+    embedder should prepend before tokenization:
+
+      - "query"    → "search_query: <text>"     (for ask/search queries)
+      - "document" → "search_document: <text>"  (for indexed corpus rows)
+      - ""         → no prefix (legacy / unknown model — passthrough)
+
+    nomic-embed-text-v1's model card REQUIRES these prefixes for
+    correct retrieval behaviour: queries and documents are mapped
+    into different sub-spaces, and tokenization quirks fall back to
+    a sentinel vector when the input is too short to disambiguate.
+    Phase 11 surfaced the failure mode: every capitalized single-
+    word input ('Kafka', 'Subjects', 'Marx', 'X', 'KAFKA', …)
+    collapsed to the same garbage vector, tying at distance 0 with
+    every other capitalized single-word document in the index.
+
+    For now we only prefix on opt-in (so existing embedded data
+    stays compatible). Callers that pass a `task` get correctness;
+    callers that don't keep the legacy behaviour. A follow-up
+    commit migrates all call sites + adds a `org-llm embed --force`
+    to re-embed under the prefixed scheme.
+    """
     if not text or not text.strip():
         raise ValueError("embed() called with empty text")
+    if task:
+        prefix = {"query": "search_query: ",
+                   "document": "search_document: ",
+                   "classification": "classification: ",
+                   "clustering": "clustering: "}.get(task)
+        if prefix is None:
+            raise ValueError(f"embed() task must be one of "
+                              f"query/document/classification/clustering, "
+                              f"got {task!r}")
+        text = prefix + text
     # Logged via the logbook so dbt + the user can see embedding throughput
     # and failure rates over time. Verbose mode includes the input text;
     # normal stores just the metadata (model, latency, len of input).

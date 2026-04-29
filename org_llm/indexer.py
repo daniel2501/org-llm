@@ -148,7 +148,10 @@ def embed_nodes(
     for i, node in enumerate(nodes, 1):
         text = f"{node.title}\n{node.body}".strip()[:2048]
         try:
-            vec = embed(text, model=model, base_url=base_url)
+            # task='document' adds the 'search_document: ' prefix
+            # required by nomic-embed-text-v1 for correct retrieval.
+            vec = embed(text, model=model, base_url=base_url,
+                          task="document")
             node.embedding = to_blob(vec)
             session.commit()
             embedded += 1

@@ -3272,7 +3272,8 @@ def search(
             else:
                 with warp(TREK_MSGS["search"] + f": {query!r}"):
                     from .llm import embed
-                    qvec = embed(query, model=model, base_url=url)
+                    qvec = embed(query, model=model, base_url=url,
+                                   task="query")
                     # Pass `query_text` so vector_search activates the
                     # title-phrase boost AND _apply_signal_boosts (body
                     # substring / title-word overlap / tag match / path
@@ -3868,7 +3869,7 @@ def ask(
     with warp(TREK_MSGS["ask"] + " — retrieving context"):
         try:
             with get_session(engine) as session:
-                qvec    = embed(query, model=embed_mdl, base_url=url)
+                qvec    = embed(\1, model=\2, base_url=\3, task="query")
                 try:
                     results = list(vector_search(session, qvec, limit=top_k,
                                                   since_mtime=since_mtime,
@@ -3891,7 +3892,7 @@ def ask(
                                 def _t(): prog.advance(task)
                                 embed_nodes(session, model=embed_mdl, base_url=url,
                                             force=True, progress_cb=_t)
-                            qvec = embed(query, model=embed_mdl, base_url=url)
+                            qvec = embed(\1, model=\2, base_url=\3, task="query")
                             results = list(vector_search(session, qvec, limit=top_k,
                                                           since_mtime=since_mtime,
                                                           query_text=query))
@@ -3982,7 +3983,7 @@ def ask(
                 # Retry the search with the freshly-embedded vault
                 with warp(TREK_MSGS["ask"] + " — retrying search after auto-embed"):
                     with get_session(engine) as session:
-                        qvec = embed(query, model=embed_mdl, base_url=url)
+                        qvec = embed(\1, model=\2, base_url=\3, task="query")
                         results = list(vector_search(session, qvec, limit=top_k,
                                                       since_mtime=since_mtime,
                                                       query_text=query))
@@ -10263,7 +10264,7 @@ def _code_generate_impl(
         if context:
             try:
                 with warp("Retrieving org context"):
-                    qvec    = embed(task, model=embed_mdl, base_url=url)
+                    qvec    = embed(task, model=embed_mdl, base_url=url, task="query")
                     results = vector_search(session, qvec, limit=4)
                 if results:
                     ctx_text = "\n\n".join(
@@ -10466,7 +10467,7 @@ def code_search(
         # the vault is dominated by org notes.
         tag_filter = f"code:{lang}" if lang else "code"
         with warp(f"Searching code corpus for {query!r}"):
-            qvec = embed(query, model=embed_mdl, base_url=url)
+            qvec = embed(\1, model=\2, base_url=\3, task="query")
             rows = vector_search(session, qvec, limit=limit,
                                    query_text=query,
                                    tag_filter=tag_filter)
