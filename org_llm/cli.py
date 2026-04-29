@@ -3395,6 +3395,22 @@ def ask(
                 border_style="lcars2", padding=(1, 2)))
             return
 
+        # EMH activates. Print the catchphrase panel FIRST so the
+        # user sees the hologram come online immediately — before
+        # the short-circuit check, before any LLM call. This is the
+        # EMH's signature; it should fire on every non-sparse path
+        # (short-circuit, question mode, diagnose mode all branch
+        # off this).
+        console.print(_Panel(
+            "[lcars3]Please state the nature of the medical "
+            "emergency.[/lcars3]\n"
+            f"[dim]EMH activated — reviewing {len(recent)} reading(s) "
+            f"across {len(by_probe)} probe(s) "
+            f"({emh_window_hours}h window).[/dim]",
+            title="[lcars1]Emergency Medical Hologram[/lcars1]",
+            border_style="lcars2", padding=(1, 2),
+        ))
+
         # Build the EMH prompt: latest reading + status COUNTS per
         # probe + activity correlations for alert/critical events.
         # Deliberately NOT exposing the 0..1 `normalized` health
@@ -3543,21 +3559,7 @@ def ask(
             )
         emh_user += f"\n\n{emh_user_intent}"
 
-        # Stage 1 — EMH activates. Print the catchphrase as a panel
-        # FIRST so the user sees it immediately on invocation, not
-        # buried inside the response. The system prompt above tells
-        # the LLM not to repeat it.
-        console.print(_Panel(
-            "[lcars3]Please state the nature of the medical "
-            "emergency.[/lcars3]\n"
-            f"[dim]EMH activated — reviewing {len(recent)} reading(s) "
-            f"across {len(by_probe)} probe(s) "
-            f"({emh_window_hours}h window).[/dim]",
-            title="[lcars1]Emergency Medical Hologram[/lcars1]",
-            border_style="lcars2", padding=(1, 2),
-        ))
-
-        # Stage 2 — diagnostic readouts. Build a list of probe-
+        # Diagnostic readouts. Build a list of probe-
         # grounded phrases that cycle while the LLM thinks. Beats a
         # static "EMH analysing telemetry" line: the user gets real
         # in-flight context (the probe values being considered) AND
