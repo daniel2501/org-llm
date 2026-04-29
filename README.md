@@ -1633,6 +1633,23 @@ the right shell rc snippet for your `$SHELL` (bash / zsh / fish).
 
 If something doesn't behave the way you expect, this is the short list:
 
+- **Search / ask retrieval feels off after upgrading.** As of
+  2026-04-29, `org-llm` embeds with the nomic-embed-text task-instruction
+  prefixes (`search_query:` / `search_document:`) the model card
+  requires. Older vaults were embedded without those prefixes — search
+  still works but quality is lower. **One-time migration:**
+  ```sh
+  org-llm embed --force
+  ```
+  Re-embeds the whole vault under the prefixed scheme. Takes a few
+  minutes per ~10k nodes on CPU. After that, query and document
+  embeddings live in the same sub-space and ranking sharpens
+  noticeably.
+- **`org-llm tag` finished but my `.org` files don't show tags.**
+  `tag` writes to `nodes.auto_tags` in the DB by default. Run
+  `tag --apply` to merge them into the org files as
+  `:tag1:tag2:` heading suffixes. (`--apply` was a no-op stub
+  until 2026-04-29; ensure you're on trunk past `6242791`.)
 - **`org-llm ask "..."` is slow / hangs.** Your `chat_model` may be
   bigger than your free RAM. Run `org-llm doctor --power-boost` for
   the real number, or `org-llm models --upgrade` to re-pick using a

@@ -8689,18 +8689,25 @@ _TUTOR_STEPS = [
     (
         "tag",
         "[lcars2]org-llm tag[/lcars2] — auto-tag nodes with the fast_model\n\n"
-        "Finds untagged nodes (or all nodes with --force), sends each node's\n"
-        "title + body to the fast_model, and stores the suggested tags in the DB.\n\n"
+        "Two-bucket tag model:\n"
+        "  [bold]nodes.tags[/bold]      — source-of-truth from the org file (rewritten on every index)\n"
+        "  [bold]nodes.auto_tags[/bold] — what THIS verb writes; never touched by the indexer\n\n"
         "[lcars1]Commands:[/lcars1]\n"
         "  [bold]org-llm tag[/bold]              — tag up to 50 untagged nodes\n"
         "  [bold]org-llm tag --limit 200[/bold]  — process more at once\n"
-        "  [bold]org-llm tag --force[/bold]      — re-tag even already-tagged nodes\n\n"
+        "  [bold]org-llm tag --redo[/bold]       — re-tag previously auto-tagged nodes\n"
+        "  [bold]org-llm tag --repair[/bold]     — re-tag only nodes whose auto_tags look low-quality\n"
+        "  [bold]org-llm tag --force[/bold]      — re-tag every node\n"
+        "  [bold]org-llm tag --apply[/bold]      — merge auto_tags into the .org files as :tag1:tag2: heading suffixes\n\n"
         "[lcars1]How it works:[/lcars1]\n"
-        "  The model is asked to output ONLY space-separated lowercase tags.\n"
-        "  Tags are stored in nodes.tags in the DB.\n"
-        "  Use 'org-llm tag --apply' (planned) to write them back to .org files.\n\n"
-        "[lcars1]Check results:[/lcars1]  [bold]org-llm report tags[/bold]\n\n"
-        "[dim]Model used: fast_model (phi4 by default) — fast, low memory.[/dim]\n"
+        "  Nodes are tagged in batches of 8 per LLM call (faster than one-at-a-time).\n"
+        "  Empty-body single-word headings short-circuit to title-as-tag (no LLM).\n"
+        "  Output is validated: prose / fused tokens / >16-char tokens are rejected.\n"
+        "  Heading→file mapping for --apply is by :ID: when present, else heading text.\n\n"
+        "[lcars1]Check results:[/lcars1]  [bold]org-llm report tags[/bold]\n"
+        "[lcars1]Inspect proposals before apply:[/lcars1]\n"
+        "  [bold]sqlite3 ~/.local/share/org-llm/org-llm.db \"SELECT title, auto_tags FROM nodes WHERE auto_tags != '' LIMIT 20\"[/bold]\n\n"
+        "[dim]Model used: fast_model (llama3.2:1b is a solid CPU-only default).[/dim]\n"
         "[dim]Source: org_llm/cli.py → tag()  |  org-llm source cli[/dim]",
     ),
     (
