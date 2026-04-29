@@ -13130,6 +13130,10 @@ def launch(
         pulled = sorted(_pulled_normalized(ollama_url))
     except Exception:
         pulled = []
+    # Filter out embedding-only models (nomic-embed-text, etc.) —
+    # they're not chat-capable and clutter opencode's model picker.
+    # _is_embed_model() is the canonical check used elsewhere in
+    # the doctor / models verbs.
     ollama_models_map = {
         tag: {
             "name":      tag,
@@ -13139,7 +13143,8 @@ def launch(
             # (workspace + tool descriptions + insight cards = 5-8k).
             "options":   {"num_ctx": 32768},
         }
-        for tag in sorted({chat_mdl, *pulled}) if tag
+        for tag in sorted({chat_mdl, *pulled})
+        if tag and not _is_embed_model(tag)
     }
     ollama_provider_block = {
         "npm":     "@ai-sdk/openai-compatible",
