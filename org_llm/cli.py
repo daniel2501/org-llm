@@ -12225,6 +12225,14 @@ def launch(
     slash_cmds = _opencode_slash_commands(workspace) if not no_commands else {}
 
     if dry_run:
+        # Show the same themed splash + solidarity banners that a real
+        # launch would print — the user uses --dry-run partly to
+        # eyeball the launch experience, so it should reflect what
+        # they'd see live. The actual subprocess.run() handoff is the
+        # only thing we suppress.
+        solidarity()
+        console.print()
+        console.print(_render_splash_logo())
         console.print()
         console.rule("[lcars1]opencode config (dry-run)[/lcars1]")
         # Redact any apiKey before rendering — dry-run output may end up in
