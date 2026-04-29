@@ -12876,17 +12876,29 @@ def launch(
     ))
     console.print()
 
-    # Phase 12.1 — insight pre-mount panel. Gated by env flag while
-    # the feature is opt-in. When ON, surface the cards we would
-    # inject into opencode's first message (Phase 12.4 will wire the
-    # actual injection; this just proves the pipeline produces
-    # something attention-worthy).
+    # Phase 12.1+12.2 — insight pre-mount panel. Gated by env flag
+    # while the feature is opt-in. When ON, surface the cards we
+    # would inject into opencode's first message (Phase 12.4 will
+    # wire the actual injection; this just proves the pipeline
+    # produces something attention-worthy). Narration is local-only
+    # in 12.2 (cloud switch lands in 12.3).
     if os.environ.get("ORG_LLM_INSIGHT_PREMOUNT", "").lower() in ("1", "on", "true"):
         try:
             from . import insights as _insights
             with get_session(_engine()) as _s:
+                # Narration model: prefer chat_model, fall back to fast.
+                _narr_model = (_cfg(_s, "chat_model")
+                                or _cfg(_s, "fast_model")
+                                or "llama3.2:1b")
+                _narr_url   = _ollama_url(_s)
                 cards = _insights.cached_gather(
-                    _s, cache_key=f"launch:{workspace}")
+                    _s,
+                    cache_key=f"launch:{workspace}",
+                    narrate=True,
+                    narration_model=_narr_model,
+                    narration_url=_narr_url,
+                    voice="plain",      # playful_level integration: backlog
+                )
             if cards:
                 console.print(_render_insights_panel(cards))
                 console.print()

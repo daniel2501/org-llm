@@ -28,8 +28,10 @@ Phase 12.2-12.6 (next commits) layer on:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
+import os
+import re
 import time
 
 from sqlalchemy import text
@@ -127,18 +129,311 @@ def _gen_new_captures(session: Session, since_ts: int) -> list[InsightCard]:
     return cards
 
 
+# ── LLM narration (Phase 12.2) ────────────────────────────────────────────
+#
+# Takes deterministic cards + re-narrates the bodies via a local LLM.
+# Cloud-first / local-fallback (decision #4) is deferred to 12.3 — for
+# now narration is local-only so we tune the prompt against a single
+# backend without cloud cost noise.
+
+_NARRATION_SYS_PLAIN = (
+    "You re-narrate observation cards from a CLI tool that opens "
+    "an LLM workspace over the user's org-roam vault.\n"
+    "\n"
+    "Each card has structured data attached. Your job: write a "
+    "2-4 sentence body in plain English that names SPECIFIC real "
+    "things from the data — note titles, tag names, file paths, "
+    "counts. Refer to them as the user does, not as internal labels.\n"
+    "\n"
+    "STRICT RULES:\n"
+    "  - When `first_titles` has values, weave 2-3 of those titles "
+    "INTO the body literally. Don't paraphrase them.\n"
+    "  - NEVER use the words 'evidence', 'node_count', "
+    "'first_titles', 'spread_hours', 'card', 'data block', "
+    "'observation' — those are internal labels, never user-facing.\n"
+    "  - Use the EXACT counts from the data. If `node_count: 5`, "
+    "write 'five' or '5', NOT 'six' or 'about five'.\n"
+    "  - NEVER invent titles, tags, IDs, or counts that aren't in "
+    "the data.\n"
+    "  - NO generic flourish ('this could be useful', 'consider "
+    "reviewing'). Just the substantive observation.\n"
+    "  - NO markdown. Plain text only.\n"
+    "  - NO preamble like 'Here's a summary'. Just the body.\n"
+    "\n"
+    "Output exactly one numbered line per input card, in order:\n"
+    "  1. <body for card 1, 2-4 sentences>\n"
+    "  2. <body for card 2>\n"
+    "  ...\n"
+)
+
+_NARRATION_SYS_TREK = (
+    "You re-narrate observation cards as a Starfleet operations "
+    "officer would relay incoming items to the bridge — brief, "
+    "professional, slightly anachronistic. The user is the captain "
+    "returning to their workspace.\n"
+    "\n"
+    "Each card has a deterministic anchor (the EVIDENCE block). "
+    "Your job: write a 2-4 sentence body that names SPECIFIC "
+    "files, tags, IDs, or counts from the evidence in that voice.\n"
+    "\n"
+    "STRICT RULES (same as plain mode):\n"
+    "  - NEVER invent files, tags, IDs, or counts.\n"
+    "  - NEVER editorialize beyond what the evidence supports.\n"
+    "  - NO markdown. Plain text.\n"
+    "\n"
+    "Output exactly one numbered line per input card, in order:\n"
+    "  1. <body for card 1>\n"
+    "  2. <body for card 2>\n"
+)
+
+
+def _build_narration_prompt(cards: list[InsightCard]) -> str:
+    """Compact text representation of all cards for one LLM call."""
+    import json as _json
+    parts = []
+    for i, c in enumerate(cards, 1):
+        # Compact evidence — keep specifics, drop large nested arrays
+        ev = dict(c.evidence)
+        for k, v in list(ev.items()):
+            if isinstance(v, list) and len(v) > 5:
+                ev[k] = v[:5] + [f"…and {len(v) - 5} more"]
+        parts.append(
+            f"Card {i} ({c.kind}):\n"
+            f"  Title:    {c.title}\n"
+            f"  Evidence: {_json.dumps(ev, ensure_ascii=False)}\n"
+        )
+    return "\n".join(parts)
+
+
+def _parse_narrated_lines(raw: str, n_expected: int) -> list[str]:
+    """Pull `1. body / 2. body / ...` lines out of the LLM response.
+
+    Returns a list of length n_expected with empty strings for any
+    line that didn't match. Caller falls back to deterministic body
+    for empty slots.
+    """
+    out = [""] * n_expected
+    if not raw:
+        return out
+    line_re = re.compile(r"^\s*(\d+)[.):]?\s+(.+)$")
+    # Multi-line bodies: collect continuation lines that don't start
+    # with a new "N." marker.
+    cur_idx: int | None = None
+    cur_buf: list[str] = []
+
+    def _flush():
+        nonlocal cur_idx, cur_buf
+        if cur_idx is not None and 0 <= cur_idx < n_expected:
+            out[cur_idx] = " ".join(cur_buf).strip()
+        cur_idx, cur_buf = None, []
+
+    for line in raw.splitlines():
+        m = line_re.match(line)
+        if m:
+            _flush()
+            cur_idx = int(m.group(1)) - 1
+            cur_buf = [m.group(2).strip()]
+        elif line.strip() and cur_idx is not None:
+            cur_buf.append(line.strip())
+    _flush()
+    return out
+
+
+def _evidence_terms(evidence: dict) -> set[str]:
+    """Pull out concrete strings from evidence — the validator
+    checks any quoted-looking name in the narrated body against
+    this set. Strings short enough to be filler ('1', '2h') get
+    skipped."""
+    terms: set[str] = set()
+
+    def _walk(v):
+        if isinstance(v, str):
+            if len(v) >= 4:
+                terms.add(v.lower())
+        elif isinstance(v, dict):
+            for x in v.values():
+                _walk(x)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                _walk(x)
+
+    _walk(evidence)
+    return terms
+
+
+# Words that look "specific" (paths, tags, code-fence-y) and so
+# should be checked against evidence — not generic English. We use
+# a coarse regex: anything ending in .org, anything :tag-shaped:,
+# UUID-shaped chunks, or filename-shaped tokens with hyphens or
+# underscores.
+_SPECIFIC_RE = re.compile(
+    r"""(
+        [A-Za-z0-9_\-./]+\.org      # .org filenames
+      | :[a-z][a-z0-9_-]+:          # :tag: form
+      | [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}   # UUID
+    )""",
+    re.VERBOSE,
+)
+
+
+_METALANGUAGE_TOKENS = {
+    "evidence", "node_count", "node counts", "first_titles",
+    "spread_hours", "card", "cards", "data block", "observation",
+    "observations", "data structure", "structured data",
+    "metadata block",
+}
+
+
+def _validation_safe(narrated: str, evidence: dict) -> bool:
+    """Reject narrations that:
+       (a) name specific files / tags / UUIDs not in evidence, OR
+       (b) contain internal-label metalanguage that the prompt
+           forbids ('evidence', 'node count', etc.) — small models
+           leak prompt vocabulary into output.
+    Generic English is fine; specific tokens get cross-checked.
+    """
+    if not narrated:
+        return False
+    low = narrated.lower()
+    for token in _METALANGUAGE_TOKENS:
+        if token in low:
+            return False                # leaked the prompt's labels
+    terms = _evidence_terms(evidence)
+    for tok in _SPECIFIC_RE.findall(narrated):
+        t = tok.strip(":").lower()
+        if t in terms:
+            continue
+        bare = re.sub(r"\W", " ", t).split()
+        if bare and any(b in terms or any(b in et for et in terms)
+                          for b in bare if len(b) >= 4):
+            continue
+        return False
+    return True
+
+
+def _term_count(body: str, terms: set[str]) -> int:
+    """How many evidence-anchored terms appear in `body`."""
+    if not body or not terms:
+        return 0
+    low = body.lower()
+    return sum(1 for t in terms if t and t in low)
+
+
+def _pick_better_body(
+    deterministic_body: str,
+    narrated:           str,
+    evidence:           dict,
+) -> tuple[str, str]:
+    """Score deterministic vs narrated body and return (winner, source).
+
+    `source` is one of 'deterministic' or 'narrated' for downstream
+    attribution (insight_engagement table in Phase 12.5).
+
+    Heuristic:
+      - Empty narration → deterministic wins.
+      - Narration that fails validation (hallucinated specifics or
+        leaked metalanguage) → deterministic wins.
+      - Otherwise compare evidence-term density. Narrated wins when:
+          (a) it cites at least as many specific terms, AND
+          (b) it's not radically shorter (≥70% of det length) — this
+              rules out the "LLM compressed away the substance" case
+              we saw in 12.2 testing.
+      - If narrated wins on terms-cited even at shorter length, take
+        it (the model picked the BEST anchors and dropped the rest).
+
+    Cheap: one substring sweep per term, no extra LLM call.
+    """
+    if not narrated:
+        return deterministic_body, "deterministic"
+    if not _validation_safe(narrated, evidence):
+        return deterministic_body, "deterministic"
+
+    terms = _evidence_terms(evidence)
+    det_count = _term_count(deterministic_body, terms)
+    nar_count = _term_count(narrated, terms)
+
+    # Strong narrated win: more evidence terms cited.
+    if nar_count > det_count:
+        return narrated, "narrated"
+
+    # Tie on terms-cited: prefer narrated only if it's not a
+    # compression. This is the case Phase 12.2 testing kept hitting:
+    # llama3.2:1b takes a 25-word deterministic line that names 3
+    # titles + a count and rewrites it as a 12-word abstraction.
+    # Stay deterministic in that case.
+    if nar_count == det_count:
+        if len(narrated) >= 0.7 * len(deterministic_body):
+            return narrated, "narrated"
+        return deterministic_body, "deterministic"
+
+    # Fewer terms cited — only take narrated if it's MUCH longer
+    # (added explanation/context that the deterministic version
+    # lacked). Generators with sparse evidence anchors benefit from
+    # this path: e.g. stale_candidates with just IDs.
+    if len(narrated) >= 1.5 * len(deterministic_body):
+        return narrated, "narrated"
+    return deterministic_body, "deterministic"
+
+
+def narrate_via_llm(
+    cards:    list[InsightCard],
+    *,
+    model:    str,
+    base_url: str,
+    voice:    str = "plain",
+) -> list[InsightCard]:
+    """Re-narrate card bodies via local LLM, then SCORE the LLM
+    output against the deterministic baseline. Picks whichever has
+    more evidence-anchored specifics + reasonable length.
+
+    Returns a NEW list. Each card's `.narration_model` is set to
+    the model name when the LLM body won, or stays
+    "deterministic" when the heuristic kept the baseline. That lets
+    Phase 12.5's engagement table attribute card-quality reactions
+    to the path that produced the body.
+
+    `voice` ∈ {"plain", "trek"} maps to playful_level 0 / 2.
+    """
+    if not cards:
+        return cards
+    sys_msg = _NARRATION_SYS_TREK if voice == "trek" else _NARRATION_SYS_PLAIN
+    user_msg = _build_narration_prompt(cards)
+    try:
+        from .llm import chat as _chat
+        raw = _chat(user_msg, model=model, base_url=base_url,
+                     system=sys_msg, timeout=30.0) or ""
+    except Exception:
+        return cards                # network / model error — keep deterministic
+
+    parsed = _parse_narrated_lines(raw, len(cards))
+    out: list[InsightCard] = []
+    for card, narrated in zip(cards, parsed):
+        chosen, source = _pick_better_body(card.body, narrated, card.evidence)
+        if source == "narrated":
+            out.append(replace(card, body=chosen, narration_model=model))
+        else:
+            out.append(card)        # deterministic body, model unchanged
+    return out
+
+
 # ── pipeline entry ────────────────────────────────────────────────────────
 
 def gather_insights(
-    session:    Session,
+    session:        Session,
     *,
-    since_ts:   int | None = None,
-    max_cards:  int        = 5,
+    since_ts:       int | None = None,
+    max_cards:      int        = 5,
+    narrate:        bool       = False,
+    narration_model:str        = "",
+    narration_url:  str        = "",
+    voice:          str        = "plain",
 ) -> list[InsightCard]:
     """Run all card generators, score, dedupe, return top-N.
 
-    Phase 12.1: only `new_captures` is wired. Phase 12.2 adds LLM
-    narration on top; Phase 12.3 wires the rest of the generators.
+    Phase 12.1: only `new_captures` is wired. Phase 12.2 adds the
+    optional `narrate=True` flag that re-writes bodies via LLM.
+    Phase 12.3 wires the rest of the generators + cloud-first
+    narration switching.
 
     `since_ts` defaults to "24 hours ago" — meant to anchor on
     "since the user was last active" but absent that signal, 24h
@@ -154,7 +449,14 @@ def gather_insights(
     # response — caller should mount opencode normally without a
     # welcome message in that case.
     raw.sort(key=lambda c: -c.score)
-    return raw[:max_cards]
+    raw = raw[:max_cards]
+
+    if narrate and raw and narration_model and narration_url:
+        raw = narrate_via_llm(raw,
+                                model=narration_model,
+                                base_url=narration_url,
+                                voice=voice)
+    return raw
 
 
 # ── caching (Phase 12.6 will add real persistence; stub for now) ──────────
@@ -163,7 +465,7 @@ _CACHE: dict[str, tuple[float, list[InsightCard]]] = {}
 _CACHE_TTL = 30 * 60          # 30 minutes per design decision
 
 def cached_gather(session: Session, *, cache_key: str,
-                   **kwargs) -> list[InsightCard]:
+                   **kwargs) -> list[InsightCard]:    # noqa: D401
     """Wrapper around gather_insights that respects a 30-min TTL.
 
     Phase 12.1 uses an in-memory dict — fine for one-shot
