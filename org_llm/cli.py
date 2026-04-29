@@ -5655,19 +5655,33 @@ def _render_insights_for_prompt(cards) -> str:
         "═════════════════════════════════════════════════════════",
         "",
         "The user has JUST OPENED the workspace. Your VERY FIRST",
-        "response in this session MUST be a brief 'I noticed N",
-        "things since you were last here' overview drawn from the",
-        "cards below. DO NOT wait for the user to ask. DO NOT open",
-        "with a generic greeting. The cards ARE the greeting.",
+        "response in this session MUST be a visually-rich 'I noticed'",
+        "panel drawn from the cards below. DO NOT wait for the user",
+        "to ask. DO NOT open with a generic greeting.",
         "",
-        "Format your first response as:",
-        "  - 1-2 lines of themed greeting (per persona dials)",
-        "  - 'I noticed:' header",
-        "  - 1-3 highest-priority cards (NOT all of them)",
-        "  - 1 question: 'Which would you like to start with?'",
-        "Keep total length 4-8 lines.",
+        "Format your first response EXACTLY like this (markdown that",
+        "renders well in opencode's chat surface):",
+        "",
+        "  > ✨ *<themed greeting line, 1-2 sentences max>* 🔔",
+        "  >",
+        "  > **I noticed N things in your vault since you were last here:**",
+        "",
+        "  | # | Card | Why it matters |",
+        "  |---|------|----------------|",
+        "  | 1 | **<card 1 title>** | <one-line summary> |",
+        "  | 2 | **<card 2 title>** | <one-line summary> |",
+        "  | 3 | **<card 3 title>** | <one-line summary> |",
+        "",
+        "  *Which would you like to start with?*",
+        "",
+        "Use the table format. Pick 1-3 highest-priority cards (NOT",
+        "all of them). Keep each row's 'why it matters' to ONE line",
+        "so the table stays visually clean.",
         "",
         "Rules:",
+        "  - The table headers MUST be `# | Card | Why it matters`",
+        "    — opencode's markdown renderer aligns three-column tables",
+        "    cleanly. Don't change the column count or names.",
         "  - Don't tell the user to type `/synth foo` or `/stitch X`",
         "    — those are conceptual handles, not real commands. Drive",
         "    the actual work through MCP tools (walk_*, search_notes,",
@@ -5685,7 +5699,7 @@ def _render_insights_for_prompt(cards) -> str:
             lines.append(f"   _conceptual handle: {c.suggested_command}_")
         lines.append("")
     lines.append("═════════════════════════════════════════════════════════")
-    lines.append("OPEN WITH AN 'I NOTICED' MESSAGE NOW. DO NOT WAIT.")
+    lines.append("OPEN WITH THE 'I NOTICED' TABLE NOW. DO NOT WAIT.")
     lines.append("═════════════════════════════════════════════════════════")
     lines.append("")
     return "\n".join(lines)
@@ -13353,8 +13367,34 @@ def launch(
             }
         },
     }
+    # NOTE: opencode's config.ts deprecates `theme` / `keybinds` /
+    # `tui` keys in opencode.json (Phase 15 audit found the
+    # warning in the source: "tui keys in opencode config are
+    # deprecated; move them to tui.json"). The proper home is
+    # `.opencode/tui.json`. Writing it in BOTH places: opencode.json
+    # for backward-compat with older builds, tui.json for the
+    # current schema. tui.json wins on newer opencode.
     if not no_theme:
         oc_config["theme"] = "org-llm-lcars"
+
+    # tui.json is the new home for theme + plugin + keybind
+    # overrides (per packages/opencode/src/cli/cmd/tui/config/
+    # tui-schema.ts). plugin[] takes TSX plugins that render in
+    # the TUI — Phase 16.1 will land an org-llm-cards plugin
+    # there. For now the theme reference + a placeholder for
+    # plugin-list-to-come.
+    tui_config: dict = {
+        "$schema": "https://opencode.ai/tui.json",
+    }
+    if not no_theme:
+        tui_config["theme"] = "org-llm-lcars"
+    # Phase 16.1 placeholder: when extensions/opencode/dist/index.js
+    # exists in the repo, register it here. Until then this stays
+    # empty so opencode doesn't error on a missing plugin file.
+    _plugin_dist = (Path(__file__).resolve().parent.parent
+                       / "extensions" / "opencode" / "dist" / "index.js")
+    if _plugin_dist.exists():
+        tui_config["plugin"] = [str(_plugin_dist)]
 
     # opencode searches `<cwd>/.opencode/opencode.json` (directory +
     # file), NOT a flat `.opencode.json` dotfile. We were writing the
@@ -13363,6 +13403,7 @@ def launch(
     # (no search_notes, no proactive_doctor, nothing from this app).
     # Real failure mode the user hit during Phase 9.7 walkthrough.
     config_path  = org_dir / ".opencode" / "opencode.json"
+    tui_path     = org_dir / ".opencode" / "tui.json"
     theme_path   = org_dir / ".opencode" / "themes"  / "org-llm-lcars.json"
     command_dir  = org_dir / ".opencode" / "command"
 
@@ -13390,6 +13431,7 @@ def launch(
         console.print(Syntax(json.dumps(redacted, indent=2), "json", theme="monokai"))
         console.rule(f"[lcars2]Workspace: {workspace}[/lcars2]")
         on_screen(f"Would write config:   {config_path}")
+        on_screen(f"Would write tui:      {tui_path}")
         if not no_theme:
             on_screen(f"Would write theme:    {theme_path}")
         if slash_cmds:
@@ -13410,6 +13452,10 @@ def launch(
     if not no_theme:
         theme_path.parent.mkdir(parents=True, exist_ok=True)
         theme_path.write_text(json.dumps(_opencode_lcars_theme(), indent=2))
+    # tui.json — proper home for theme + plugin (per opencode's
+    # tui-schema.ts). Always written even if no_theme so future
+    # plugin registrations have a home.
+    tui_path.write_text(json.dumps(tui_config, indent=2))
     if slash_cmds:
         command_dir.mkdir(parents=True, exist_ok=True)
         for name, body in slash_cmds.items():
