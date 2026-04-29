@@ -250,6 +250,10 @@ def create_mcp_server():
             "                               — pop the most recent save\n"
             "                                  if user says 'actually\n"
             "                                  no' / 'undo that'\n"
+            "  - `walk_remove_fact(line, user_approved=True)`\n"
+            "                               — surgically remove ONE\n"
+            "                                  fact (any save order),\n"
+            "                                  case-sensitive match\n"
             "  - `walk_review_pending`      — list old facts for\n"
             "                                  re-confirmation\n"
             "After saving, ECHO the EXACT lines the save tool returns —\n"
@@ -2637,6 +2641,47 @@ def create_mcp_server():
         for period, meaning in periods.items():
             lines.append(f"  - {period} = {meaning}")
         return "\n".join(lines)
+
+    @server.tool()
+    def walk_remove_fact(line: str, user_approved: bool = False) -> str:
+        """Surgically remove ONE specific fact line from the
+        active-facts block. Use when the user names a fact (or
+        you've quoted one back to them) and they want it gone.
+
+        `line` is the exact fact text WITHOUT the leading '- '.
+        Match is case-sensitive — quote the line as it appears in
+        the file. If you're not sure, call get_context first to see
+        the exact text.
+
+        Different from walk_undo_last_save — that's a LIFO pop of
+        the most recent SAVE. This is targeted removal of any
+        single fact, regardless of when it was saved.
+
+        Use case: a bundled fact ('Work history: A then B then C')
+        got saved earlier in the session. The user has since split
+        it into atoms, and now wants the original bundle removed.
+        walk_undo_last_save can't reach it because newer saves are
+        on top of the stack. walk_remove_fact targets it directly.
+
+        Requires user_approved=True (same permissive contract — the
+        in-workspace LLM can pass approved=True when the user has
+        clearly said which fact to drop).
+        """
+        if not user_approved:
+            return ("REFUSED: walk_remove_fact requires user_approved=True. "
+                    f"Confirm the user wants to remove this fact:\n  "
+                    f"{line!r}")
+        if not line or not line.strip():
+            return "REFUSED: empty line."
+        from . import context as _ctx
+        ok = _ctx.remove_fact(line.strip(),
+                                source="walk-remove:mcp")
+        if ok:
+            return (f"Removed: {line.strip()!r}\n"
+                    f"Audit-trail entry written to history block.")
+        return (f"NOT_FOUND: no fact in active-facts matches "
+                f"{line.strip()!r}. The match is case-sensitive — call "
+                f"get_context to see the exact text, then retry.")
 
     @server.tool()
     def walk_undo_last_save(confirm: bool = False) -> str:

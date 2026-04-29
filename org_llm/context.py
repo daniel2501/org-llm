@@ -536,6 +536,72 @@ def push_walk_undo(lines: list[str]) -> None:
     p.write_text(json.dumps({"saves": saves}, indent=2))
 
 
+def remove_fact(line: str, source: str = "walk-remove") -> bool:
+    """Surgically remove ONE fact line from the active-facts block.
+
+    `line` is the exact fact text (without the leading "- "). Match
+    is case-sensitive — facts are persisted verbatim so users
+    referencing them via the MCP tool know what they're aiming at.
+
+    Returns True if a line was removed, False if no match was found.
+    Logs to the history block for audit trail (so the user can see
+    `[date] removed: <line>` later). Doesn't touch the
+    walk-undo-stack — those are for batch undos; this is a targeted
+    removal.
+
+    Use case: a bundled fact got saved earlier in a session, then
+    the user wants to clean it up after splitting into atoms.
+    walk_undo_last_save would only drop the most recent save which
+    might not be the bundle.
+    """
+    target = (line or "").strip().lstrip("-•").strip()
+    if not target:
+        return False
+
+    p = ensure_context_file_exists()
+    text = p.read_text(errors="replace")
+    text = _normalize_history_runons(text)
+
+    block_re = re.compile(
+        r"(#\+name:\s*active-facts\s*\n#\+begin_src[^\n]*\n)([\s\S]*?)(\n#\+end_src)",
+        re.M)
+    m = block_re.search(text)
+    if not m:
+        return False
+    head, body, tail = m.group(1), m.group(2), m.group(3)
+    body_lines = body.splitlines()
+    removed = False
+    kept: list[str] = []
+    for ln in body_lines:
+        stripped = ln.strip().lstrip("-•").strip()
+        if not removed and stripped == target:
+            removed = True               # only first match (idempotent across dupes)
+            continue
+        kept.append(ln)
+    if not removed:
+        return False
+    new_body = "\n".join(kept) if kept else ""
+    text = text[:m.start()] + head + new_body + tail + text[m.end():]
+
+    # Audit-trail entry in history.
+    today = datetime.now().date().isoformat()
+    history_line = f"- [{today}] removed: {target}  ({source})"
+    hist_re = re.compile(
+        r"(\* Context history[^\n]*\n(?::PROPERTIES:[^\n]*\n(?:[^\n]*\n)*?:END:\s*\n)?)",
+        re.M)
+    hm = hist_re.search(text)
+    if hm:
+        insert_at = hm.end()
+        text = text[:insert_at] + "\n" + history_line + "\n" + text[insert_at:]
+
+    p.write_text(text)
+    try:
+        tangle(p, context_tangle_path())
+    except Exception:
+        pass
+    return True
+
+
 def pop_walk_undo() -> list[str]:
     """Pop the most recent batch of saved fact-lines + remove them
     from the active-facts block. Returns the lines that were
