@@ -1,0 +1,208 @@
+:PROPERTIES:
+:ID:       e3333333-4444-5555-6666-cccccccccccc
+:CREATED:  [2026-04-29]
+:END:
+#+TITLE: Staleness
+#+FILETAGS: :wiki:concept:hygiene:
+#+OPTIONS: toc:nil
+
+[[id:e0000000-1111-2222-3333-eeeeeeeeeeee][← back to wiki index]]
+
+* TL;DR
+
+"Staleness" in =org-llm= refers to *two distinct* phenomena that
+share a word but solve different problems:
+
+- *File-system staleness* — the database has a row for a file that
+  no longer exists on disk (renamed, moved, deleted). A plumbing
+  concern. Fixed by =org-llm index=.
+- *Content staleness* — a note's content reflects an out-of-date
+  understanding the user has since revised. Not wrong-on-disk;
+  out-of-sync with current truth. Fixed by =org-llm stale --apply=
+  + =:stale:= tagging.
+
+Both matter. They're handled by different code paths and serve
+different needs.
+
+* File-system staleness — keeping the index honest
+
+** What it is
+Your DB has a =files= table row for =/home/you/notes/old.org=.
+You then =mv old.org renamed.org= or just =rm old.org=. The DB
+row is now stale — it points at something that doesn't exist.
+
+** Why it matters
+If left in place:
+- =doctor= flags a warning every run ("1 file(s) in DB no longer
+  exist on disk")
+- =search= still returns hits whose =file_path= column is now
+  invalid; clicking through them errors
+- The vault-stats counts overstate reality
+
+** How =org-llm= heals it
+*Phase 11 fix*: =org-llm index= now self-prunes stale file rows on
+every run. Pre-pass:
+
+#+begin_src python
+# in org_llm/indexer.py
+all_files = session.query(_File).all()
+for f in all_files:
+    if not Path(f.path).exists():
+        session.delete(f)        # nodes cascade-delete via FK
+session.commit()
+#+end_src
+
+Before that fix, you needed =index --force= (which wipes
+everything and rebuilds from scratch — heavy-handed). The new
+plain =index= picks up renames automatically.
+
+** Friction we found in testing
+- =index= cleans the DB but doesn't auto-trigger =embed=. After a
+  rename, the renamed file's nodes are present but unembedded
+  until you run =embed=. Run them as a pair:
+  #+begin_src sh
+  org-llm index && org-llm embed
+  #+end_src
+
+- The =auto_embedder= daemon (=org-llm watch=) handles both,
+  amortized across captures. If you have it running, file-system
+  staleness essentially heals itself.
+
+* Content staleness — keeping understanding honest
+
+This is the more interesting one. The phenomenon: you wrote a
+note 6 months ago capturing your thinking at the time. Your
+thinking has since evolved. The note is still on disk, still
+indexed, still retrieved — but reading it gives a misleading
+answer to "what do I currently think?"
+
+** A concrete example
+6 months ago you captured:
+#+begin_example
+* Pomodoro at 50/10 was the lever                  :productivity:
+The 50-minute work / 10-minute break rhythm finally let me
+stay in deep work without burning out. Going to keep this
+indefinitely.
+#+end_example
+
+Today you tell =org-llm=:
+#+begin_src sh
+org-llm context add "Switched to 90-minute deep blocks after \
+the Pomodoro experiment ended week 2 — the timer interrupted \
+flow more than it protected it."
+#+end_src
+
+Now your CURRENT understanding contradicts your OLD note. Both
+are true historically — neither is "wrong." But when you ask
+=ask "what's my current focus rhythm?"=, the OLD note is what
+gets retrieved (the new one is only in =llm-context.org=). You'd
+get the wrong answer.
+
+** How =org-llm= models this
+Three components flow together:
+
+*** The context layer (current truth)
+=org-llm context add 'fact'= writes to =~/org/llm-context.org=
+(or wherever =context_file= points). Every chat call prepends the
+context file's contents to the system prompt. So the LLM
+*always* knows the current truth — but RAG retrieval still
+surfaces the old note as a source.
+
+*** The =:stale:= tag (the marker)
+=org-llm stale --apply= ([[file:../../org_llm/cli.py][cli.py:stale()]]) does an LLM-driven
+pass:
+
+1. Read =llm-context.org= recent additions
+2. Search the vault for notes that contradict any of those facts
+3. Propose them as =:stale:= candidates
+4. User confirms → org file gets edited so the heading line ends
+   =:stale:=
+5. Next =index= picks up the new tag in =nodes.tags=
+
+The note isn't deleted. The user might want to consult it for
+historical context (= "what did I think LAST quarter?"). It just
+gets a marker.
+
+*** The retrieval penalty (downranking)
+=_apply_signal_boosts= in [[file:../../org_llm/search.py][search.py]] adds a +0.6 PENALTY to
+the cosine distance for any node tagged =:stale:= — pushing it
+DOWN the result list:
+
+#+begin_src python
+# Penalties (positive — pushes down rank):
+#   - Tagged :stale:              ─ +0.6 (unless query mentions
+#                                   history / formerly / before /
+#                                   used to)
+if "stale" in tags and not asks_for_history:
+    bonus += 0.6
+#+end_src
+
+The escape hatch: queries containing words like "before",
+"previously", "in the past", "formerly", "originally" toggle
+=asks_for_history= true. So:
+
+- =ask "what's my current rhythm?"= → stale notes downranked,
+  user gets 90-min answer
+- =ask "what did I previously think about Pomodoro?"= → stale
+  notes ranked normally, user gets the historical thread
+
+This is the interesting design move. Information is retained;
+relevance is ranked by intent.
+
+** The full flow, end-to-end
+#+begin_src
+1. capture          → note enters vault
+                     ↓
+2. index + embed     → searchable
+                     ↓
+   (... time passes, user's understanding shifts ...)
+                     ↓
+3. context add       → current truth recorded in llm-context.org
+                     ↓
+4. stale --apply     → LLM finds notes contradicting current truth
+                     ↓
+5. user confirms     → :stale: tag added to those org files
+                     ↓
+6. index             → tags refresh in DB
+                     ↓
+7. ask (general)     → stale notes downranked
+   ask (historical)  → stale notes ranked normally
+#+end_src
+
+** Open problems we know about
+- The contradiction-detection LLM has a non-trivial false-positive
+  rate. We surface candidates for confirmation rather than auto-
+  applying. Acceptable for now; needs better prompt or smaller
+  model with structured output.
+- The +0.6 retrieval penalty is binary — recently-flagged vs
+  decade-old should probably grade differently. Not implemented.
+- =:drift:= is a sibling tag (less-confident than =:stale:=) with
+  the same retrieval penalty +0.3. Used when contradiction is
+  partial.
+
+** How this fits the vision
+The "Claude Code for org-roam" vision says the workspace should
+SURFACE relevant context the user has forgotten. Stale-vs-context
+contradictions are the perfect insight card material:
+
+#+begin_example
+3. *Stale candidate.* Your "Pomodoro at 50/10 was the lever"
+   capture (from 6mo ago) is contradicted by your
+   llm-context fact added 3h ago about 90-minute deep blocks.
+   Mark stale?
+   → /stale promote
+#+end_example
+
+That's [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][Phase 12]]'s =stale_candidates= generator.
+
+* See also
+
+- [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][Embeddings]] — what makes the contradiction-search work in
+  the first place
+- [[id:e4444444-5555-6666-7777-dddddddddddd][Retrieval-Augmented Generation (RAG)]] — where the
+  stale-penalty actually applies
+- [[file:../../org_llm/cli.py][cli.py:stale()]] — the LLM-driven contradiction detector
+- [[file:../../org_llm/search.py][search.py:_apply_signal_boosts]] — the +0.6 penalty
+  application site
+- =~/org/llm-context.org= (your file) — the persistent
+  current-truth overlay

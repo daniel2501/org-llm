@@ -1,0 +1,87 @@
+:PROPERTIES:
+:ID:       e0000000-1111-2222-3333-eeeeeeeeeeee
+:CREATED:  [2026-04-29]
+:END:
+#+TITLE: org-llm wiki — concepts index
+#+AUTHOR: org-llm
+#+FILETAGS: :wiki:index:
+#+OPTIONS: toc:nil num:nil
+
+* What this is
+
+A growing reference for the concepts =org-llm= leans on. Each
+entry is its own org-roam node: small, focused, interlinked.
+Read them in any order — the [[*Concept map][concept map]] below
+shows how they connect.
+
+These files live at =docs/wiki/= in the org-llm repo. To make
+them part of your own vault and have =org-llm= index them, copy
+or symlink the directory into your =org_dir=:
+
+#+begin_src sh
+ln -s ~/repos/org-llm/docs/wiki ~/org/org-llm-wiki
+org-llm index
+org-llm embed
+#+end_src
+
+After that, =ask= queries automatically pull from the wiki when
+they're relevant. The wiki itself becomes a part of your second
+brain.
+
+* Concept map
+
+Foundational substrate (how meaning becomes math):
+- [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][Embeddings]] — turning text into 768-float vectors of meaning
+- [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][Vector similarity & cosine distance]] — the geometry that
+  makes "search by meaning" work
+- [[id:e4444444-5555-6666-7777-dddddddddddd][Retrieval-Augmented Generation (RAG)]] — using
+  embeddings to ground LLM answers in YOUR notes
+
+Knowledge hygiene (keeping the graph honest over time):
+- [[id:e3333333-4444-5555-6666-cccccccccccc][Staleness]] — file-vs-disk drift AND
+  content-vs-current-truth drift; how org-llm flows both
+
+The substrate is what makes search and ask work at all. The
+hygiene is what keeps them USEFUL as your vault grows.
+
+* Source files in this repo
+
+When a wiki entry references a specific implementation, follow
+the link to the source:
+- [[file:../../org_llm/llm.py][org_llm/llm.py]] — the embed() and chat() boundary against Ollama
+- [[file:../../org_llm/indexer.py][org_llm/indexer.py]] — index_directory() and embed_nodes()
+- [[file:../../org_llm/search.py][org_llm/search.py]] — vector_search() and the rerank stack
+- [[file:../../org_llm/insights.py][org_llm/insights.py]] — Phase 12 insight pre-mount
+- [[file:../../org_llm/db.py][org_llm/db.py]] — the SQLAlchemy schema
+
+* External references
+
+- [[https://github.com/asg017/sqlite-vec][sqlite-vec]] — the SQLite extension that gives us
+  =vec_distance_cosine()= and stores 768-float blobs efficiently
+- [[https://huggingface.co/nomic-ai/nomic-embed-text-v1.5][nomic-embed-text-v1.5 model card]] — explains the
+  =search_query:= / =search_document:= prefixes we use
+- [[https://ollama.com][Ollama]] — local model runtime; we hit it via the
+  ollama-python client
+- [[https://www.orgroam.com][org-roam]] — the spec our notes follow
+- [[https://orgmode.org][org-mode]] — the underlying file format
+
+* Status / coverage
+
+| Concept                 | Wiki entry                                    | Depth                |
+|-------------------------+-----------------------------------------------+----------------------|
+| Embeddings              | [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][embeddings.org]]                                | full                 |
+| Vector similarity       | [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][vector-similarity.org]]                         | full                 |
+| Staleness               | [[id:e3333333-4444-5555-6666-cccccccccccc][staleness.org]]                                 | full                 |
+| RAG                     | [[id:e4444444-5555-6666-7777-dddddddddddd][retrieval-augmented-generation.org]]            | full                 |
+| Self-healing stack      | (planned)                                     | TODO                 |
+| Insight pre-mount       | (planned — Phase 12 spec covers it for now)   | TODO                 |
+| Task-instruction prefixes | (planned)                                   | TODO                 |
+| Tangled-code workflow   | (planned — Phase 13 territory)                | TODO                 |
+
+* How to contribute / extend
+
+Add a new entry by copying any existing one, generating a fresh
+=:ID:=, writing the body, and linking it from the [[*Concept map][concept map]]
+above. Keep entries small and focused — link out to other entries
+rather than duplicating. The whole thing is meant to feel like
+walking a graph, not reading a manual.

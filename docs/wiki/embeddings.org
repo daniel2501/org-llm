@@ -1,0 +1,208 @@
+:PROPERTIES:
+:ID:       e1111111-2222-3333-4444-aaaaaaaaaaaa
+:CREATED:  [2026-04-29]
+:END:
+#+TITLE: Embeddings
+#+FILETAGS: :wiki:concept:retrieval:
+#+OPTIONS: toc:nil
+
+[[id:e0000000-1111-2222-3333-eeeeeeeeeeee][← back to wiki index]]
+
+* TL;DR
+
+An embedding is a fixed-length vector of floating-point numbers
+that represents the *meaning* of a piece of text. In =org-llm=,
+every node in your vault gets an embedding — 768 floats, one
+vector per heading. Notes about similar topics land near each
+other in that 768-dimensional space, even when they share no
+literal words. This is what lets =org-llm ask= find a note about
+"bureaucratic absurdity" when you query "Kafka."
+
+* Why we use them
+
+Plain SQL =LIKE '%kafka%'= only finds notes that contain the
+literal word *kafka*. Useful, but brittle:
+
+- A note titled "Re-reading *The Trial*" doesn't say *kafka*
+  anywhere in its body — it'd be invisible to keyword search.
+- A note titled "/dev/null jokes" doesn't say *Linux* but is
+  obviously about Linux.
+- "[[https://example.com/marx-on-alienation][Marx on alienation]]" doesn't say *capitalism* but is obviously
+  about capitalism.
+
+Embeddings catch all three. The model learned, during training,
+that *Kafka* and *bureaucratic absurdity* belong near each other
+in vector space. At search time, your query gets embedded the
+same way and we return the nearest stored vectors.
+
+That's why this project has the line "you ask in your words; we
+search in meaning" — embeddings are the substrate that makes that
+real.
+
+* The model we use
+
+Default: [[https://huggingface.co/nomic-ai/nomic-embed-text-v1.5][nomic-embed-text-v1.5]] via
+[[https://ollama.com][Ollama]]. Configurable through =org-llm config embed_model
+<name>=.
+
+Why nomic-embed-text:
+- Open source (Apache 2.0), runs locally — no data leaves the host
+- 768-dimensional output (compact; 3072 bytes per vector at
+  float32)
+- Strong on retrieval benchmarks (MTEB)
+- Fast on CPU (~30-100ms per node depending on body length)
+
+Trade-off: the model REQUIRES task-instruction prefixes
+(=search_query:= for queries, =search_document:= for documents)
+to perform correctly. We discovered this the hard way in Phase 11
+of testing — see the dedicated entry on [[id:wiki-task-prefix-stub][task-instruction
+prefixes]] (planned) for the saga.
+
+* The full pipeline in =org-llm=
+
+Three steps move text → vectors → query results.
+
+** Step 1: Index — turn .org files into rows
+=org-llm index= ([[file:../../org_llm/indexer.py][indexer.py]]) walks =org_dir=, parses each
+=.org= file, and writes one row per heading into the =nodes=
+table:
+
+#+begin_src
+files       — one row per .org file (path, mtime)
+nodes       — one row per heading (title, body, tags, mtime,
+              embedding [BLOB, initially NULL])
+#+end_src
+
+No vectors yet. Just text in a SQLite database.
+
+** Step 2: Embed — turn rows into vectors
+=org-llm embed= ([[file:../../org_llm/indexer.py][indexer.embed_nodes]]) iterates rows where
+=embedding IS NULL=. For each one:
+
+#+begin_src python
+text = f"{node.title}\n{node.body}".strip()[:2048]
+vec  = embed(text, model=embed_model, base_url=ollama_url,
+              task="document")          # ← Phase 11 fix
+node.embedding = to_blob(vec)            # 3072 bytes (768 × float32)
+#+end_src
+
+The =task="document"= argument prepends =search_document:= to
+the input — required by nomic-embed-text-v1 to put document
+embeddings in the right sub-space. Before this fix, capitalized
+single-word inputs (=Kafka=, =Subjects=, =Marx=) all collapsed to
+the same garbage vector. See [[id:e3333333-4444-5555-6666-cccccccccccc][staleness]] for the related-but-distinct
+"old data is wrong" story; the vector-collapse story is its own.
+
+** Step 3: Search — query vectors against stored vectors
+=org-llm search "X"= ([[file:../../org_llm/search.py][search.py]]) embeds the query the same
+way (with =task="query"= → =search_query:= prefix) and runs:
+
+#+begin_src sql
+SELECT n.node_id, n.title, n.body, f.path,
+       vec_distance_cosine(n.embedding, :qvec) AS score
+FROM nodes n
+JOIN files f ON f.id = n.file_id
+WHERE n.embedding IS NOT NULL
+ORDER BY score ASC
+LIMIT :limit
+#+end_src
+
+=vec_distance_cosine= is provided by the [[https://github.com/asg017/sqlite-vec][sqlite-vec]] extension
+loaded into our DB. See [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][vector similarity & cosine distance]] for
+how the actual numerical comparison works.
+
+** Step 4 (sometimes): Rerank
+Pure cosine misses things — title-substring matches, tag matches,
+file-path hints. =_apply_signal_boosts= ([[file:../../org_llm/search.py][search.py:194]])
+subtracts boosts from the cosine score post-hoc:
+
+| Signal                          | Boost  |
+|---------------------------------+--------|
+| Exact title match               | -1.0   |
+| Title-substring phrase          | -0.5   |
+| Title word-bag overlap          | -0.04 × match (cap -0.3) |
+| File-path segment match         | -0.15 each (cap -0.3) |
+| Body-substring phrase           | -0.05  |
+| Tag matches a query word        | -0.10 each (cap -0.2) |
+| =:stale:= tag (penalty)         | +0.6   |
+
+Lower final score = better match. The reranker turns "the model
+got close" into "the right thing is at the top."
+
+* What an embedding actually IS, geometrically
+
+Imagine 768 dimensions. Each text gets placed at a single point.
+The training process pushed semantically-related text together:
+
+#+begin_example
+                    .  "café" .  "espresso"
+   "philosophy"       .  "coffee"
+        .                  .  "starbucks"
+                .  "Kafka"
+        "The Trial".          .  "tea"
+"bureaucracy"
+                                . "raspberry pi"
+#+end_example
+
+(That's a 2D projection; the real space is 768D.) Cosine distance
+measures the *angle* between two vectors — close vectors point
+in similar directions. See [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][vector similarity & cosine distance]] for
+the math.
+
+We don't compute "meaning" — we hand off to the embedding model
+and trust the geometry. The model was trained on billions of
+text pairs (Wikipedia + filtered web data + paraphrase
+corpora) to push similar text together. We're piggybacking that
+training.
+
+* The cost we pay for this convenience
+
+** Re-embedding is expensive
+Every node requires one Ollama call. A 10k-node vault takes
+5-15 minutes on a laptop CPU. Background-worker mode (=org-llm
+watch=) amortizes this: new captures get embedded within a
+minute or two of being written.
+
+** Embeddings are model-specific
+Switching =embed_model= invalidates every existing vector. You
+have to =org-llm embed --force= to re-embed. Same goes for ANY
+preprocessing change — Phase 11's task-prefix migration was a
+mini version of this: same model, different input convention,
+full re-embed required. See [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][the wiki index]]'s "Common gotchas"
+for the migration command.
+
+** Embeddings drift with model upgrades
+nomic-embed-text v1 → v1.5 is mostly compatible but not
+exactly. A future major version will require re-embedding. dbt
+analytics layer (eventually, Phase 14+) will track per-model
+retrieval quality so we can compare and decide when to migrate.
+
+** Local vs cloud trade-off
+Local embedding (default) is free, private, and ~50-100ms per
+call on CPU. Cloud embedding (OpenAI ada-002, etc.) is faster,
+sometimes higher quality, but each call leaves the host. We
+support cloud paths via [[file:../../org_llm/cloud.py][cloud.py]] but they're opt-in.
+
+* Where embeddings show up in this codebase
+
+Read these in this order if you want to trace the pipeline:
+
+1. [[file:../../org_llm/llm.py][org_llm/llm.py:embed]] — the boundary call into Ollama, with
+   the task-prefix logic
+2. [[file:../../org_llm/indexer.py][org_llm/indexer.py:embed_nodes]] — bulk embedding of
+   indexed nodes
+3. [[file:../../org_llm/search.py][org_llm/search.py:vector_search]] — query-time embed +
+   cosine ranking + rerank
+4. [[file:../../org_llm/db.py][org_llm/db.py]] — the =Node.embedding= column (BLOB)
+5. [[file:../../org_llm/insights.py][org_llm/insights.py]] (Phase 12) — uses embeddings
+   indirectly via the topic-cluster generator
+
+* See also
+
+- [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][Vector similarity & cosine distance]] — the math under the hood
+- [[id:e4444444-5555-6666-7777-dddddddddddd][Retrieval-Augmented Generation (RAG)]] — what we do with
+  embeddings once we have them
+- [[id:e3333333-4444-5555-6666-cccccccccccc][Staleness]] — why "near in vector space" can still mean "out of
+  date in your life"
+- [[https://huggingface.co/blog/intro-to-vector-search][Hugging Face: Intro to vector search]] — gentle background
+- [[https://www.pinecone.io/learn/vector-embeddings/][Pinecone: vector embeddings explained]] — wider context

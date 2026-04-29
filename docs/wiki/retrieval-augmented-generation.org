@@ -1,0 +1,262 @@
+:PROPERTIES:
+:ID:       e4444444-5555-6666-7777-dddddddddddd
+:CREATED:  [2026-04-29]
+:END:
+#+TITLE: Retrieval-Augmented Generation (RAG)
+#+FILETAGS: :wiki:concept:rag:llm:
+#+OPTIONS: toc:nil
+
+[[id:e0000000-1111-2222-3333-eeeeeeeeeeee][← back to wiki index]]
+
+* TL;DR
+
+RAG = "ground the LLM's answer in retrieved documents." Instead
+of asking a chat model from cold ("What did I write about Kafka
+last month?" — the model has no idea), we first SEARCH the
+user's vault using [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][embeddings]] + [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][cosine
+distance]], then INJECT the most relevant notes into the prompt
+as context. The model now has actual material to work from. Less
+hallucination, citable sources.
+
+In =org-llm=, =org-llm ask "..."= is RAG. So is most of what the
+in-opencode workspace LLM does when it reaches for your notes.
+
+* The basic loop
+
+#+begin_example
+       ┌─────────────────────────────────────────┐
+       │  user query                             │
+       │  "what did I write about Kafka?"        │
+       └─────────────────────────────────────────┘
+                        ↓
+       ┌─────────────────────────────────────────┐
+       │  embed the query                         │
+       │  embed("...", task="query")              │
+       │  → 768-float vector                      │
+       └─────────────────────────────────────────┘
+                        ↓
+       ┌─────────────────────────────────────────┐
+       │  cosine-rank against all node embeddings │
+       │  vector_search(...)                      │
+       │  → top-K nodes                           │
+       └─────────────────────────────────────────┘
+                        ↓
+       ┌─────────────────────────────────────────┐
+       │  rerank with structural signals          │
+       │  _apply_signal_boosts(...)               │
+       │  → final ordered top-K                   │
+       └─────────────────────────────────────────┘
+                        ↓
+       ┌─────────────────────────────────────────┐
+       │  build prompt: SYSTEM + CONTEXT + QUERY  │
+       │   - system: "you're org-llm, cite       │
+       │     sources, don't invent..."            │
+       │   - context: top-K node bodies +        │
+       │     llm-context.org overlay             │
+       │   - user: the original query             │
+       └─────────────────────────────────────────┘
+                        ↓
+       ┌─────────────────────────────────────────┐
+       │  chat call → model returns answer       │
+       │  with citations referencing the         │
+       │  retrieved nodes                        │
+       └─────────────────────────────────────────┘
+#+end_example
+
+Five passes over the data, one chat call. The retrieval is fast
+(~50ms total for embed + cosine + rerank). The chat call is the
+slow part (1-30 seconds depending on model + hardware).
+
+* Why this beats "just ask the LLM"
+
+Three reasons RAG works better than cold prompting for vault
+questions:
+
+** 1. Models have no idea what's in YOUR notes
+A general chat model knows nothing about your =Re-reading *The
+Trial* this week= note. It can riff about Kafka generally, but
+it can't answer "what did *I* write?" without seeing what you
+wrote. RAG fills that gap.
+
+** 2. Models hallucinate confidently
+Without grounding, models make plausible-sounding things up. Ask
+"summarize my recent gardening notes" and an ungrounded model
+will write a beautiful summary of gardening notes that don't
+exist. With RAG, the model sees only what you actually wrote.
+
+** 3. Sources are citable
+Because we KNOW which notes were in the prompt, we can show them.
+=org-llm ask --context= surfaces the retrieved nodes alongside
+the answer:
+
+#+begin_src
+Q: what am I currently reading and why?
+
+Retrieved 6 note(s): Re-reading *The Trial* this week...,
+Reference, Subjects...
+
+A: You're re-reading *The Trial* — your note from yesterday
+   says the bureaucratic absurdity reads differently in 2026.
+#+end_src
+
+You can verify the answer against its sources.
+
+* The actual prompt structure
+
+When [[file:../../org_llm/cli.py][cli.py:ask()]] makes the chat call, the prompt has roughly
+this shape:
+
+#+begin_src
+SYSTEM:
+  You are org-llm. Answer the user's question using ONLY the
+  retrieved context below. If the context doesn't contain the
+  answer, say so plainly — do not invent.
+
+  Cite sources as [n] referring to the numbered context items.
+
+  Current truth (from llm-context.org):
+  - Switched to 90-minute deep blocks after week 2
+  - Currently re-reading The Trial
+  - ...
+
+CONTEXT:
+  [1] (file: inbox.org, id: 13ee70f4-...) Re-reading *The Trial*
+      this week. The bureaucratic absurdity reads differently
+      in 2026. See [[id:fe08be9f-...][Franz Kafka]].
+  [2] (file: 20240615143644-kafka-on-trial.org) #+title:
+      franz-kafka
+  [3] ...
+
+USER:
+  what am I currently reading and why?
+#+end_src
+
+Three things to notice:
+
+1. The =llm-context.org= overlay is in the system prompt — it
+   represents CURRENT TRUTH that overrides retrieved-but-stale
+   captures. See [[id:e3333333-4444-5555-6666-cccccccccccc][staleness]] for the full flow.
+2. Each context item is numbered and labeled with file path +
+   node ID, so the model can cite them.
+3. The system prompt explicitly forbids invention. Without that,
+   small models will pad answers with confident-sounding
+   hallucinations.
+
+* What gets retrieved (the K in top-K)
+
+Default: =top_k=6=. Configurable via =--top-k= or
+=ORG_LLM_TOP_K=.
+
+Trade-offs:
+- Too few → model misses relevant material
+- Too many → context overflow OR the chat model loses focus
+  drowning in irrelevant text
+- 6 is a sweet spot for most queries; bump to 12 for broad
+  questions, drop to 3 for specific factual lookups
+
+The retrieval also auto-detects time windows from the query:
+=ask "what did I write last week?"= triggers a =since_mtime=
+filter inside =vector_search= so retrieval is scoped before
+ranking. Same for tag references — =ask "my :phase11: notes"=
+applies a tag filter.
+
+* Where the rerank steps come in
+
+Pure cosine retrieval can drown out high-signal matches. The
+rerank stage in =_apply_signal_boosts= ([[file:../../org_llm/search.py][search.py:194]])
+adjusts scores using non-semantic signals:
+
+| Signal                             | Boost (negative = better) |
+|------------------------------------+---------------------------|
+| Exact title match                  | -1.0                      |
+| Title-substring phrase             | -0.5                      |
+| Title word-bag overlap             | -0.04 × match (cap -0.3)  |
+| File-path segment match            | -0.15 each (cap -0.3)     |
+| Body-substring phrase              | -0.05                     |
+| Tag matches a query word           | -0.10 each (cap -0.2)     |
+| =:stale:= tag                      | +0.6                      |
+| =:drift:= tag                      | +0.3                      |
+| Path under =archive/=              | +0.4                      |
+
+So a query for "dbt Layer Design" finds the note titled "dbt
+Layer Design" even if 30 cosine-similar notes about dbt rank
+higher on raw embedding distance. And a stale note loses 0.6
+score, dropping it down the list unless the query mentions
+history.
+
+* The role of the =llm-context= overlay
+
+This is the "current truth" layer that complements RAG:
+
+- RAG retrieves what you've WRITTEN over time (history)
+- =llm-context.org= holds what you BELIEVE NOW (current truth)
+- The LLM gets BOTH in its prompt; current truth comes first
+
+This separation matters because retrieval doesn't know about time
+preferences. If you have 50 notes about Pomodoro from 2023 and
+ONE context line saying "switched to 90-min in 2026", retrieval
+would surface the 50 historical notes regardless. The context
+overlay tells the LLM "use these 50 as background, but my
+current rhythm is the 90-min thing" — and the system prompt is
+strict enough that the LLM will trust the overlay.
+
+This is also why =:stale:= tags and the +0.6 retrieval penalty
+exist — to push the historical Pomodoro notes BELOW the
+context-aligned current notes during retrieval too. Belt and
+braces.
+
+* Where RAG shows up in this codebase
+
+- [[file:../../org_llm/cli.py][cli.py:ask()]] — the user-facing entry point; assembles
+  query, retrieval, prompt, returns answer
+- [[file:../../org_llm/search.py][search.py:vector_search]] — the embedding+cosine+rerank
+  pipeline
+- [[file:../../org_llm/mcp_server.py][mcp_server.py]] — exposes =search_notes= and =ask_notes=
+  as MCP tools so the in-opencode LLM can call them
+- [[file:../../org_llm/llm.py][llm.py:chat]] — the boundary call to Ollama for the
+  generation step
+- [[file:../../org_llm/context.py][context.py]] — assembles the system prompt with the
+  =llm-context.org= overlay
+
+* Failure modes and mitigations
+
+** Retrieval misses the right note
+Symptoms: model says "I don't have that" but you KNOW you wrote
+it. Causes:
+- Short or generic query (e.g. =ask "Linux"= picks up dozens of
+  Linux-tangential notes; the specific one you want gets buried)
+- The note's body is too short to embed well
+- =:stale:= tag is downranking it inappropriately
+
+Mitigations: bump =--top-k=, reword the query with more specific
+words, drop =:stale:= if it was misapplied.
+
+** Retrieval finds the right note, model ignores it
+Symptoms: relevant note IS in the context, but the model
+answers from training instead. Causes:
+- System prompt isn't strict enough about "use only retrieved
+  context"
+- Note body is short and the model dismisses it
+- Model is too small (1B-class struggles with this discipline)
+
+Mitigations: stronger system prompt with negative examples,
+larger chat_model, =--cloud= routing for tough queries.
+
+** Stale content surfaces despite tags
+Symptoms: =:stale:=-tagged note still appears in answers.
+Causes:
+- Tag wasn't propagated to the DB after editing the org file
+  (run =index= to refresh)
+- Query happens to mention history-words ("formerly", "before"),
+  toggling =asks_for_history= → stale penalty disabled by design
+- The +0.6 wasn't enough to push past a strong cosine match
+
+* See also
+
+- [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][Embeddings]] — the substrate that makes retrieval work
+- [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][Vector similarity & cosine distance]] — the geometry of the
+  retrieval ranking
+- [[id:e3333333-4444-5555-6666-cccccccccccc][Staleness]] — the +0.6 penalty's reason to exist
+- [[https://www.pinecone.io/learn/retrieval-augmented-generation/][Pinecone: RAG explained]] — wider context, vendor-neutral
+- [[https://docs.llamaindex.ai/en/stable/getting_started/concepts/][LlamaIndex: RAG concepts]] — different framework, same
+  pattern

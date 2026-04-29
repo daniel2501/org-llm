@@ -1,0 +1,199 @@
+:PROPERTIES:
+:ID:       e2222222-3333-4444-5555-bbbbbbbbbbbb
+:CREATED:  [2026-04-29]
+:END:
+#+TITLE: Vector similarity & cosine distance
+#+FILETAGS: :wiki:concept:retrieval:math:
+#+OPTIONS: toc:nil
+
+[[id:e0000000-1111-2222-3333-eeeeeeeeeeee][← back to wiki index]]
+
+* TL;DR
+
+Once we have [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][embeddings]] (text → 768-dim vectors), we need a
+way to ask "how similar are these two vectors?". The answer is
+*cosine distance* — a number from 0 (identical direction) to 2
+(opposite direction). Lower is better. =sqlite-vec='s
+=vec_distance_cosine= computes it for us, fast, in SQL.
+
+* Why "cosine" specifically
+
+Two ways to compare vectors:
+
+** Euclidean distance (straight-line)
+The "ruler" version: =sqrt(sum((a - b)^2))=. Sensitive to
+*magnitude*. A vector like =[100, 0, 0]= is "far" from =[1, 0,
+0]= even though both point the same direction.
+
+For text embeddings, magnitude is mostly noise. Two notes
+about the same topic, one short and one long, will have
+embeddings of different magnitude but pointing the same
+direction. We want to count those as similar.
+
+** Cosine distance (angular)
+=1 - cos(θ)=, where θ is the angle between two vectors.
+Magnitude doesn't matter — only direction does. =[100, 0, 0]=
+and =[1, 0, 0]= have cosine distance 0 (identical direction).
+
+For text embeddings, this is what we want. The model puts
+similar meanings in similar *directions*, not at similar
+distances from origin.
+
+* The geometric intuition
+
+Picture two vectors as arrows from the origin:
+
+#+begin_example
+        ↑ A
+       /
+      /  θ        ← the angle between the arrows
+     /‾‾‾→ B
+    /
+   o (origin)
+#+end_example
+
+- =θ = 0°= → arrows point the same way → cosine distance = 0
+- =θ = 90°= → orthogonal (unrelated) → cosine distance = 1
+- =θ = 180°= → opposite directions → cosine distance = 2
+
+For the embeddings we use, almost all real-world text has
+positive cosine similarity (vectors land in roughly the same
+half of 768-space). So practical distances cluster between
+~0.1 (very similar text) and ~0.9 (unrelated text).
+
+* The actual math
+
+For two vectors A and B:
+
+#+begin_src
+                 A · B
+cosine_sim = ───────────────
+              |A| × |B|
+
+cosine_dist = 1 - cosine_sim
+#+end_src
+
+- =A · B= is the dot product: sum of element-wise products
+- =|A|= is the magnitude (Euclidean length): =sqrt(sum(A_i²))=
+- =cosine_sim= ranges -1 (opposite) to 1 (identical)
+- =cosine_dist= ranges 0 (identical) to 2 (opposite)
+
+** A worked example
+Three tiny 3D vectors:
+
+#+begin_src python
+A = [1, 1, 0]   # "kafka"-ish
+B = [2, 2, 0]   # "the trial"-ish — same direction, longer
+C = [1, 0, 1]   # "linux"-ish
+
+# A · B = 1*2 + 1*2 + 0*0 = 4
+# |A|   = sqrt(1+1+0) = sqrt(2)
+# |B|   = sqrt(4+4+0) = sqrt(8)
+# cos(A,B) = 4 / (sqrt(2) * sqrt(8)) = 4 / 4 = 1.0
+# distance(A, B) = 1 - 1.0 = 0  ← identical direction!
+
+# A · C = 1*1 + 1*0 + 0*1 = 1
+# |C|   = sqrt(1+0+1) = sqrt(2)
+# cos(A,C) = 1 / (sqrt(2) * sqrt(2)) = 1 / 2 = 0.5
+# distance(A, C) = 1 - 0.5 = 0.5  ← partially related
+#+end_src
+
+A and B are aligned even though B is twice as long; C is at
+a 60° angle. Real embeddings work the same way, just in 768
+dimensions.
+
+* How this shows up in =org-llm=
+
+Every search query becomes one cosine-distance computation per
+embedded node:
+
+#+begin_src sql
+-- in org_llm/search.py:vector_search
+SELECT n.node_id, n.title, n.body, f.path,
+       vec_distance_cosine(n.embedding, :qvec) AS score
+FROM nodes n
+JOIN files f ON f.id = n.file_id
+WHERE n.embedding IS NOT NULL
+ORDER BY score ASC
+LIMIT :limit;
+#+end_src
+
+The =vec_distance_cosine= function comes from [[https://github.com/asg017/sqlite-vec][sqlite-vec]]. It:
+
+- Reads the BLOB columns as packed float32 arrays
+- Computes the cosine distance in C (fast)
+- Returns a single float per row
+- Lets us =ORDER BY score ASC= to get nearest-first
+
+For a 10k-node vault, the whole query takes well under 100ms
+on a laptop. No special index needed — sqlite-vec brute-forces
+all rows. (Larger vaults benefit from approximate nearest
+neighbor structures, but we're not there yet.)
+
+* Why distances are mostly 0.2-0.6 in practice
+
+You might expect distances to span 0-2 (the theoretical range).
+In practice almost everything lands 0.2-0.6 for nomic-embed-text
+because:
+
+1. The model was trained to keep embeddings on a unit
+   hypersphere — magnitudes are normalized
+2. Real-world text covers a narrow slice of "all possible
+   meaning" — most vectors point in roughly the same hemisphere
+3. The model produces non-zero output for every input, so
+   genuinely-orthogonal text is rare
+
+This is why our score-display format went from =:.3f= to =:.4f=
+during Phase 11 — three decimals were collapsing distinct
+distances into ties at 0.000. The actual gradient is in the
+fourth decimal.
+
+* The =vec_distance_cosine= signature gotcha
+
+sqlite-vec returns DISTANCE not SIMILARITY:
+
+- Distance 0 = identical
+- Distance 1 = orthogonal
+- Distance 2 = opposite (rare in practice)
+
+So =ORDER BY score ASC= in the SQL is correct (lower distance =
+better match). When you see code talking about "score," it
+really means "distance."
+
+* Failure modes worth knowing
+
+** All-zero or near-zero vectors
+If the embedding model produces a degenerate vector for some
+input (very short input, all-whitespace, etc.), cosine distance
+becomes ill-defined (=0/0=). sqlite-vec returns 0 in that case,
+which means "perfect match to anything." Phase 11 saw this:
+single-word capitalized inputs (=Kafka=, =Marx=) all hit a
+sentinel zero-ish vector, so they all "matched" each other at
+distance 0. The fix was task-instruction prefixes (Phase 11
+commit =b604257=).
+
+** Vectors from different sub-spaces
+If you embed queries with one prefix and documents with another,
+they live in different sub-regions of the 768-space and cosine
+between them is less meaningful. nomic-embed-text-v1 specifically
+trained to put queries and documents in COMPATIBLE but
+DIFFERENTIATED sub-spaces — both prefixes need to be applied
+consistently or quality drops.
+
+** Tied scores
+When many short title-only nodes share similar embeddings, they
+all land at roughly the same distance from any query. Phase 11
+fix added =_apply_signal_boosts= to break ties via
+title-substring / tag / path hints — see [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][embeddings]]'s pipeline
+section.
+
+* See also
+
+- [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][Embeddings]] — the upstream concept (how vectors get
+  generated)
+- [[id:e4444444-5555-6666-7777-dddddddddddd][Retrieval-Augmented Generation (RAG)]] — what we do with the
+  ranked rows
+- [[https://github.com/asg017/sqlite-vec][sqlite-vec source]] — the C implementation we link against
+- [[https://en.wikipedia.org/wiki/Cosine_similarity][Wikipedia: Cosine similarity]] — the math, formally
+- [[https://www.pinecone.io/learn/vector-similarity/][Pinecone: vector similarity explained]] — comparison of
+  distance metrics (cosine vs Euclidean vs dot product)

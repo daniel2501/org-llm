@@ -129,6 +129,194 @@ def _gen_new_captures(session: Session, since_ts: int) -> list[InsightCard]:
     return cards
 
 
+def _gen_stale_candidates(session: Session, since_ts: int) -> list[InsightCard]:
+    """Nodes already tagged :stale: or :drift: (set by previous
+    stale-detection runs or by the user). Surfaces them as a single
+    "you have N stale notes" card so the user can decide whether to
+    revisit. Stays passive — doesn't run the stale detector itself.
+    """
+    rows = session.execute(text("""
+        SELECT n.title, n.tags, f.path
+        FROM nodes n
+        JOIN files f ON f.id = n.file_id
+        WHERE n.tags LIKE '%stale%' OR n.tags LIKE '%drift%'
+           OR n.auto_tags LIKE '%stale%' OR n.auto_tags LIKE '%drift%'
+        LIMIT 20
+    """)).fetchall()
+    if not rows:
+        return []
+    # Sparse evidence on purpose — narration will fill in the why.
+    titles = [r.title for r in rows[:5]]
+    return [InsightCard(
+        kind="stale_candidates",
+        title=f"{len(rows)} stale-tagged note(s) pending review",
+        body=(f"{len(rows)} note(s) carry :stale: or :drift: tags. "
+               f"Sample: {', '.join(titles[:3])}."),
+        evidence={"count": len(rows), "first_titles": titles,
+                   "tag_categories": ["stale", "drift"]},
+        suggested_command="/stale review",
+        score=0.6,
+    )]
+
+
+def _gen_topic_cluster(session: Session, since_ts: int) -> list[InsightCard]:
+    """Tags with disproportionate recent activity vs all-time.
+    A tag with 5 captures in the last week and 5 captures all-time
+    is "emerging"; a tag with 5 in the last week and 200 all-time
+    is "ongoing" (less interesting). Surfaces only the emerging ones.
+    """
+    rows = session.execute(text("""
+        SELECT n.tags, n.mtime, n.title
+        FROM nodes n
+        WHERE n.tags IS NOT NULL AND n.tags != ''
+    """)).fetchall()
+    if not rows:
+        return []
+
+    all_count: dict[str, int] = {}
+    recent_count: dict[str, int] = {}
+    for r in rows:
+        for tag in (r.tags or "").split():
+            all_count[tag] = all_count.get(tag, 0) + 1
+            if r.mtime and r.mtime >= since_ts:
+                recent_count[tag] = recent_count.get(tag, 0) + 1
+
+    cards: list[InsightCard] = []
+    # Tag is "emerging" when ≥3 captures since since_ts AND
+    # recent_share ≥ 0.5 (at least half of all uses are recent)
+    for tag, rcount in sorted(recent_count.items(),
+                                  key=lambda kv: -kv[1]):
+        if rcount < 3:
+            break          # rest will be smaller; sorted desc
+        share = rcount / max(1, all_count.get(tag, 1))
+        if share < 0.5:
+            continue
+        cards.append(InsightCard(
+            kind="topic_cluster",
+            title=f"Emerging topic :{tag}: ({rcount} recent / {all_count[tag]} total)",
+            body=(f"Tag :{tag}: has {rcount} captures since the "
+                   f"window started, out of {all_count[tag]} all-time "
+                   f"({share:.0%} recent). Likely an active focus."),
+            evidence={"tag": tag, "recent_count": rcount,
+                       "all_count": all_count[tag], "share": share},
+            suggested_command=f"/explore {tag}",
+            score=min(0.85, 0.4 + 0.1 * rcount + 0.2 * share),
+        ))
+        if len(cards) >= 2:           # cap to top 2 emerging clusters
+            break
+    return cards
+
+
+def _gen_orphan_growth(session: Session, since_ts: int) -> list[InsightCard]:
+    """Files where new headings have no incoming or outgoing links.
+    Catches the case where a user is dumping captures into inbox.org
+    without linking them into the broader graph yet.
+    """
+    rows = session.execute(text("""
+        SELECT f.path, COUNT(n.id) AS new_count
+        FROM nodes n
+        JOIN files f ON f.id = n.file_id
+        WHERE n.mtime >= :since
+          AND (n.body IS NULL OR n.body NOT LIKE '%[[id:%')
+        GROUP BY f.path
+        HAVING new_count >= 3
+        ORDER BY new_count DESC
+        LIMIT 3
+    """), {"since": float(since_ts)}).fetchall()
+    if not rows:
+        return []
+    # Take the worst offender
+    top = rows[0]
+    from pathlib import Path as _P
+    fname = _P(top.path).name
+    return [InsightCard(
+        kind="orphan_growth",
+        title=f"{top.new_count} new headings in {fname} are unlinked",
+        body=(f"{top.new_count} recent capture(s) in {fname} contain "
+               f"no [[id:...]] links to other notes. Stitching them "
+               f"into the graph makes them retrievable from related "
+               f"queries."),
+        evidence={"file": fname, "new_count": top.new_count,
+                   "path": top.path},
+        suggested_command=f"/stitch {fname}",
+        score=min(0.7, 0.35 + 0.05 * top.new_count),
+    )]
+
+
+def _gen_doctor_warnings(session: Session, since_ts: int) -> list[InsightCard]:
+    """Most recent doctor invocation's warnings, surfaced as a single
+    card. Pulls from history; does not run doctor.
+    """
+    rows = session.execute(text("""
+        SELECT timestamp, response, outcome
+        FROM history
+        WHERE kind = 'cli' AND command LIKE 'doctor%'
+        ORDER BY timestamp DESC
+        LIMIT 1
+    """)).fetchall()
+    if not rows:
+        return []
+    last = rows[0]
+    resp = (last.response or "")[:500]
+    # Count "warning" or "⚠" occurrences in the response as a rough
+    # signal. Don't try to re-parse the panel here — narration step
+    # will summarize.
+    n_warn = resp.lower().count("warn") + resp.count("⚠")
+    if n_warn == 0:
+        return []                     # nothing to surface
+    return [InsightCard(
+        kind="doctor_warnings",
+        title=f"{n_warn} unresolved doctor warning(s) since last run",
+        body=(f"Last `org-llm doctor` produced {n_warn} warning marker"
+               f"{'s' if n_warn != 1 else ''}. Re-run doctor for the "
+               f"current state, or fold the fixes via `doctor --fix`."),
+        evidence={"warning_count": n_warn,
+                   "last_run": last.timestamp,
+                   "response_preview": resp[:200]},
+        suggested_command="/doctor --fix",
+        score=min(0.75, 0.4 + 0.04 * n_warn),
+    )]
+
+
+def _gen_sensor_attention(session: Session, since_ts: int) -> list[InsightCard]:
+    """Life-support probes that have tripped non-nominal status
+    recently. Quiet when everything's fine.
+    """
+    rows = session.execute(text("""
+        SELECT probe, status, label, ts
+        FROM sensor_log
+        WHERE ts >= :since AND status != 'nominal'
+        ORDER BY ts DESC
+        LIMIT 20
+    """), {"since": float(since_ts)}).fetchall()
+    if not rows:
+        return []
+    by_probe: dict[str, dict] = {}
+    for r in rows:
+        rec = by_probe.setdefault(r.probe, {"count": 0, "status": r.status,
+                                              "latest_label": r.label})
+        rec["count"] += 1
+    if not by_probe:
+        return []
+    probes_text = ", ".join(
+        f"{p} ({rec['count']}× {rec['status']})"
+        for p, rec in sorted(by_probe.items(),
+                                key=lambda kv: -kv[1]["count"])
+    )
+    return [InsightCard(
+        kind="sensor_attention",
+        title=f"{sum(r['count'] for r in by_probe.values())} non-nominal sensor reading(s)",
+        body=(f"Life-support probes flagged in the last window: "
+               f"{probes_text}. Run `org-llm life-support` for current "
+               f"vitals or `org-llm sensors --drill <probe>` to "
+               f"investigate."),
+        evidence={"probes": dict(by_probe),
+                   "total_events": sum(r['count'] for r in by_probe.values())},
+        suggested_command="/life-support",
+        score=min(0.9, 0.5 + 0.05 * len(by_probe)),
+    )]
+
+
 # ── LLM narration (Phase 12.2) ────────────────────────────────────────────
 #
 # Takes deterministic cards + re-narrates the bodies via a local LLM.
@@ -443,7 +631,19 @@ def gather_insights(
         since_ts = int(time.time()) - 24 * 3600
 
     raw: list[InsightCard] = []
-    raw.extend(_gen_new_captures(session, since_ts))
+    # Each generator is best-effort — a failing query (missing
+    # table, schema drift) shouldn't take the whole pre-mount down.
+    for gen in (_gen_new_captures,
+                  _gen_stale_candidates,
+                  _gen_topic_cluster,
+                  _gen_orphan_growth,
+                  _gen_doctor_warnings,
+                  _gen_sensor_attention):
+        try:
+            raw.extend(gen(session, since_ts))
+        except Exception:
+            session.rollback()
+            continue
 
     # Sort by score desc, cap at max_cards. Empty list is a valid
     # response — caller should mount opencode normally without a
