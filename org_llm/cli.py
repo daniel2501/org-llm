@@ -5437,6 +5437,33 @@ def man(
         on_screen(f"[dim]Open it:[/dim] [bold]man -l {target}[/bold]")
 
 
+def _vitals_panel(readings, overall: str):
+    """Shared renderer used by `life-support` AND `doctor` (Dr. Crusher)
+    so both surfaces show vitals identically. Lives at module scope so
+    callers don't have to redefine it.
+    """
+    from rich.panel import Panel as _P
+    from rich.table import Table as _T
+    t = _T(box=None, pad_edge=False, show_header=True)
+    t.add_column("✓", width=2)
+    t.add_column("System",  style="lcars1", no_wrap=True, width=14)
+    t.add_column("Reading", style="lcars3", no_wrap=True, width=24)
+    t.add_column("Status",  style="lcars2", no_wrap=True, width=10)
+    t.add_column("Message", style="dim",    overflow="fold")
+    glyph = {"nominal": "[green]✓[/green]",
+              "watch":   "[yellow]•[/yellow]",
+              "alert":   "[orange1]⚠[/orange1]",
+              "critical":"[red]✗[/red]"}
+    for r in readings:
+        t.add_row(glyph.get(r.status, "?"),
+                   r.name, r.label, r.status, r.message)
+    title_color = {"nominal": "lcars3", "watch": "lcars2",
+                    "alert":   "warn",   "critical":"error"}.get(overall, "lcars1")
+    return _P(t,
+               title=f"[{title_color}]life-support  · {overall}[/{title_color}]",
+               border_style="lcars2", padding=(1, 2))
+
+
 @app.command(name="life-support", rich_help_panel="Self-care")
 def life_support(
     interval: Annotated[int, typer.Option("--interval", "-n",
@@ -5504,24 +5531,7 @@ def life_support(
     from rich.table import Table as _T
 
     def _render(readings, overall):
-        t = _T(box=None, pad_edge=False, show_header=True)
-        t.add_column("✓", width=2)
-        t.add_column("System",  style="lcars1", no_wrap=True, width=14)
-        t.add_column("Reading", style="lcars3", no_wrap=True, width=24)
-        t.add_column("Status",  style="lcars2", no_wrap=True, width=10)
-        t.add_column("Message", style="dim",    overflow="fold")
-        glyph = {"nominal": "[green]✓[/green]",
-                  "watch":   "[yellow]•[/yellow]",
-                  "alert":   "[orange1]⚠[/orange1]",
-                  "critical":"[red]✗[/red]"}
-        for r in readings:
-            t.add_row(glyph.get(r.status, "?"),
-                       r.name, r.label, r.status, r.message)
-        title_color = {"nominal": "lcars3", "watch": "lcars2",
-                        "alert": "warn",    "critical": "error"}.get(overall, "lcars1")
-        return _P(t,
-                   title=f"[{title_color}]life-support  · {overall}[/{title_color}]",
-                   border_style="lcars2", padding=(1, 2))
+        return _vitals_panel(readings, overall)
 
     if interval > 0:
         try:
@@ -7964,11 +7974,17 @@ def _doctor_impl(
         # WHILE ask --reason was running") are the highest-signal
         # optimisation lever; surfacing them here makes diagnoses
         # actionable instead of generic.
+        #
+        # Render the same vitals panel the user sees from
+        # `org-llm life-support` so they can read what Dr. Crusher
+        # is reading. The prompt below also gets a text version.
         sensor_block = ""
         try:
             from . import life_support as _ls
             fresh = _ls.probe_all()
             _ls.record_readings(fresh)
+            console.print(_vitals_panel(fresh, _ls.overall_status(fresh)))
+            console.print()
             recent = _ls.recent_readings(since_secs=3600, limit=400)
             sensor_block = "\nLive vital systems (fresh probe):\n"
             for r in fresh:
@@ -8003,15 +8019,22 @@ def _doctor_impl(
             "live vital-system probes (battery / cpu / mem / disk / "
             "thermal / network / ollama daemon / auto-embedder) and "
             "any activity-correlations recorded in the recent timeseries "
-            "log. Respond with:\n"
-            "1. A brief plain-English explanation of each failure / "
-            "   warning, citing the specific vital reading or activity "
-            "   correlation when relevant.\n"
-            "2. Ordered fix steps with exact org-llm commands.\n"
-            "3. Any follow-up checks the user should run after fixing.\n"
-            "Stay concise. Plain text (no markdown). Reference the "
-            "live readings when they explain a warning — that's the "
-            "whole point of having sensor data."
+            "log. Respond with EXACTLY these sections, in order:\n"
+            "1. Vital signs: ONE short line stating overall vitals "
+            "   status (e.g. 'All vital systems nominal — battery 99% "
+            "   on AC, CPU idle, thermal headroom 30°C'). If anything "
+            "   is in watch / alert / critical, name it. Always "
+            "   include this section even if everything's fine.\n"
+            "2. Warnings explained: brief plain-English for each "
+            "   warning. Cite the specific vital reading or activity "
+            "   correlation when it explains the warning.\n"
+            "3. Fix steps: ordered list with exact org-llm commands.\n"
+            "4. Follow-up checks: what the user should re-run after "
+            "   the fix.\n"
+            "Stay concise. Plain text (no markdown headers, no "
+            "bold/italic). Do NOT invent vitals beyond what the probe "
+            "data shows. Do NOT interpret `normalized` as utilization "
+            "(it's a 0..1 health score; 1.0 = best)."
         )
         prompt = (
             f"org-llm health check results:\n\n{state_summary}\n\n"
