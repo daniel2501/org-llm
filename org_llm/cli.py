@@ -11167,8 +11167,13 @@ def launch(
                 help="Override chat model (default: chat_model from config)")] = "",
     no_context: Annotated[bool, typer.Option("--no-context", "-N",
                 help="Skip vault context injection into system prompt")] = False,
-    no_theme:   Annotated[bool, typer.Option("--no-theme",   "-T",
-                help="Skip writing LCARS theme to .opencode/themes/")] = False,
+    no_theme:   Annotated[bool, typer.Option("--no-theme/--theme", "-T/-Y",
+                help="Skip writing the LCARS theme to .opencode/themes/. "
+                      "Default ON — opencode crashes on our theme JSON shape "
+                      "(setBackgroundColor TypeError on 'a.buffer'); the JSON "
+                      "schema we generate is missing fields opencode's "
+                      "renderer wants. Pass --theme to opt back in once the "
+                      "schema is fixed.")] = True,
     no_commands:Annotated[bool, typer.Option("--no-commands","-C",
                 help="Skip writing slash-commands to .opencode/command/")] = False,
     cloud:      Annotated[bool, typer.Option("--cloud/--local",
