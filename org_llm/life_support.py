@@ -649,6 +649,22 @@ def llm_optimization_advice(window_secs: int = 3600) -> str:
                 f"analysis. Keep `org-llm life-support --interval 30` "
                 f"running and check back in a few minutes.)")
 
+    # Short-circuit: if NOTHING in the window tripped a non-nominal
+    # status, don't call the LLM. Small chat models hallucinate
+    # problems out of steady-state telemetry (treating `normalized`
+    # as utilization, treating labels as config args, inventing
+    # "battery is steadily draining" from a flat 96% line). Same
+    # lesson as the small-sample floor, applied to the trivial-
+    # input case. This is by far the common path on a healthy host.
+    non_nominal = [v for v in rows if v["status"] != "nominal"]
+    if not non_nominal:
+        n_total = sum(len(v) for v in by_probe.values())
+        return (f"All systems nominal across {len(by_probe)} "
+                f"probe(s), {n_total} sample(s) over the last "
+                f"{window_secs // 60} minute(s). No optimisations "
+                f"to recommend. Advice surfaces automatically when "
+                f"a probe trips watch / alert / critical.")
+
     # Compose a tight prompt: latest reading + min/max/mean per probe.
     summary_lines: list[str] = []
     for probe, vs in sorted(by_probe.items()):
@@ -686,17 +702,32 @@ def llm_optimization_advice(window_secs: int = 3600) -> str:
 
     sys_msg = (
         "You read host-system probe readings from a self-hosted "
-        "second-brain CLI tool and surface ONE OR TWO concrete "
-        "optimisation suggestions. Output STRICTLY 1-3 bullet lines "
-        "starting with `• `, no preamble. Each bullet is one "
-        "actionable suggestion: a specific config / verb / model "
-        "swap. Anchor every suggestion in the actual numbers AND "
-        "the user-activity correlations below. When a resource was "
-        "in alert/critical state DURING a specific verb / model, "
-        "name them — that's the highest-signal optimisation lever "
-        "available. If everything looks stable, say so in one "
-        "bullet — don't invent trends. Never propose installing "
-        "packages outside the org-llm verb surface; never propose "
+        "second-brain CLI tool. The user has at least ONE probe "
+        "in watch / alert / critical state — surface concrete "
+        "optimisation suggestions for THOSE probes only, not the "
+        "nominal ones.\n"
+        "\n"
+        "How to read the data (CRITICAL):\n"
+        "  • `normalized` is a 0..1 HEALTH score. 1.0 = best "
+        "(full headroom), 0.0 = worst (at the critical threshold). "
+        "HIGH normalized = HEALTHY. Do NOT interpret normalized as "
+        "utilization or load.\n"
+        "  • `label` is a human-readable display string (e.g. "
+        "'12 models', 'not running', '76°C / crit 100°C'). It is "
+        "NOT a config value. Do NOT propose 'swap to latest=<label>' "
+        "or treat label fragments as command arguments.\n"
+        "  • Only describe a trend if min and max actually differ "
+        "meaningfully. With a stable range do not invent a "
+        "trajectory ('steadily increasing', 'gradually draining').\n"
+        "\n"
+        "Output STRICTLY 1-3 bullet lines starting with `• `, no "
+        "preamble. Each bullet: ONE actionable suggestion targeting "
+        "a non-nominal probe. Reference the probe name and the "
+        "activity correlation when present (e.g. 'CPU pegged WHILE "
+        "`ask --reason` running'). If the flagged probes look like "
+        "normal load with no clear lever, say so in ONE bullet — "
+        "do not invent problems. Never propose installing packages "
+        "outside the org-llm verb surface; never propose "
         "`pip install`, `curl | sh`, or any open-shell command."
     )
     user_msg = (
