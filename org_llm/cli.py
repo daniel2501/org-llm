@@ -13064,7 +13064,16 @@ def launch(
             "org-llm": {
                 "type":        "local",
                 "command":     [mcp_cmd_bin, "mcp"],
-                "environment": _mcp_inherit_env({"ORG_LLM_DB": str(DB_PATH)}),
+                "environment": _mcp_inherit_env({
+                    # Honor the env override the user (or wrapper
+                    # script) set BEFORE launching, otherwise the
+                    # MCP subprocess hits the default DB instead of
+                    # the corpus DB. Same logic for ORG_LLM_ORG_DIR.
+                    "ORG_LLM_DB": os.environ.get("ORG_LLM_DB",
+                                                    str(DB_PATH)),
+                    "ORG_LLM_ORG_DIR": os.environ.get(
+                        "ORG_LLM_ORG_DIR", str(org_dir)),
+                }),
                 "enabled":     True,
             }
         },
@@ -13347,7 +13356,12 @@ def claude_frontend(
     mcp_entry = {
         "command": mcp_cmd_bin,
         "args": ["mcp"],
-        "env": _mcp_inherit_env({"ORG_LLM_DB": str(DB_PATH)}),
+        "env": _mcp_inherit_env({
+            "ORG_LLM_DB": os.environ.get("ORG_LLM_DB",
+                                            str(DB_PATH)),
+            "ORG_LLM_ORG_DIR": os.environ.get(
+                "ORG_LLM_ORG_DIR", str(org_dir)),
+        }),
     }
     existing_settings.setdefault("mcpServers", {})["org-llm"] = mcp_entry
 
