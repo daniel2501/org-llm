@@ -202,7 +202,23 @@ def create_mcp_server():
             "org-babel workflows), code_search (cross-corpus code), org_llm_run\n"
             "(any allow-listed CLI verb with auto-fix), and the dbt_* tools for\n"
             "the analytics layer. Always search before answering questions about\n"
-            "the user's notes."
+            "the user's notes.\n"
+            "\n"
+            "LAPTOP HEALTH QUESTIONS — different ground truth, different tools:\n"
+            "When the user asks about their LAPTOP (battery, CPU, memory, disk,\n"
+            "thermals, Ollama daemon, the auto-embedder), the answer is in\n"
+            "sensor_log NOT in the vault. Use:\n"
+            "  - `life_support_status`  — fresh probe of all 8 vital systems\n"
+            "  - `life_support_history` — last N minutes of timeseries\n"
+            "  - `life_support_advice`  — LLM optimisation suggestions from\n"
+            "                              the timeseries (deterministic floor)\n"
+            "  - `emh_consult`          — Voyager EMH persona; question mode\n"
+            "                              for historical questions, or\n"
+            "                              diagnose=True for a full systematic\n"
+            "                              check. Cites specific probes +\n"
+            "                              activity correlations.\n"
+            "Use these WHEN the question is about the host system. Don't\n"
+            "search_notes for 'why is my CPU pegged' — that's an EMH job."
         ),
     )
 
@@ -1550,6 +1566,135 @@ def create_mcp_server():
         else:
             lines.append("  (call again with clear=True to mark as read)")
         return "\n".join(lines)
+
+    # ── life_support: vital systems probe + log ──────────────────────────────
+    @server.tool()
+    async def life_support_status(record: bool = True,
+                                    ctx: Context | None = None) -> str:
+        """Probe the host system's vital signs RIGHT NOW: battery, CPU,
+        memory, disk, thermals, network, Ollama daemon, auto-embedder.
+
+        Returns one line per probe with reading + status + a Trek-themed
+        message. Self-hosted means the laptop is the substrate; this is
+        how the in-opencode LLM can observe its own running conditions.
+
+        With record=True (default) the readings are also written to
+        sensor_log so the timeseries grows. Pass record=False for a
+        read-only inspection.
+        """
+        from . import life_support as _ls
+        readings = _ls.probe_all()
+        if record:
+            _ls.record_readings(readings)
+        out = [f"life-support  · {_ls.overall_status(readings)}"]
+        for r in readings:
+            out.append(f"  {r.name:<14} {r.label:<24} "
+                        f"[{r.status}]  {r.message}")
+        return "\n".join(out)
+
+    @server.tool()
+    async def life_support_history(probe: str = "", window_minutes: int = 60,
+                                     limit: int = 50,
+                                     ctx: Context | None = None) -> str:
+        """Pull rows from the sensor_log timeseries.
+
+        `probe=""` returns all probes; pass a specific probe name
+        (battery / cpu / memory / disk / thermal / network / ollama /
+        auto_embedder) to scope. `window_minutes` defaults to one hour.
+
+        Each row carries the user-activity context recorded at probe
+        time, so the LLM can correlate resource spikes with the verbs
+        that caused them. Use this when the user asks "have I been
+        thrashing the CPU lately?" or "was the battery dropping during
+        my last ask?" — the answers are in this table.
+        """
+        from . import life_support as _ls
+        rows = _ls.recent_readings(
+            probe=probe or None,
+            since_secs=max(60, window_minutes * 60),
+            limit=max(1, min(500, limit)),
+        )
+        if not rows:
+            return ("no sensor_log data in window — run "
+                    "`org-llm life-support --interval 30` to seed it")
+        from datetime import datetime as _dt
+        out = [f"sensor_log  · {len(rows)} row(s) over last "
+                f"{window_minutes}min"]
+        for r in rows:
+            ts = _dt.fromtimestamp(r["ts"]).strftime("%H:%M:%S")
+            ctx_s = (r.get("context") or "").strip()
+            ctx_disp = f"  [{ctx_s}]" if ctx_s else ""
+            out.append(f"  [{ts}] {r['probe']:<12} "
+                        f"{r['label']:<22} [{r['status']}]{ctx_disp}")
+        return "\n".join(out)
+
+    @server.tool()
+    async def life_support_advice(window_minutes: int = 60,
+                                    ctx: Context | None = None) -> str:
+        """Ask the chat model for concrete optimisation suggestions
+        based on the recent sensor_log window.
+
+        Subject to the same small-sample-size deterministic floor as
+        the CLI verb — needs ≥12 samples per probe in the window.
+        Below that, returns a message asking the user to seed more
+        data. Above it, returns 1-3 bulleted suggestions anchored in
+        real probe values + activity correlations.
+
+        The LLM output goes through the rescue.sanitize_llm_advice
+        pass so any banned shell pattern (pip install, curl | sh,
+        rm -rf, etc.) is flagged with a [FLAGGED:] prefix.
+        """
+        from . import life_support as _ls
+        return (_ls.llm_optimization_advice(
+                    window_secs=max(60, window_minutes * 60))
+                or "no optimisations to suggest right now — "
+                   "everything looks stable")
+
+    @server.tool()
+    async def emh_consult(question: str,
+                            window_hours: int = 24,
+                            diagnose: bool = False,
+                            ctx: Context | None = None) -> str:
+        """Route a health-of-the-machine question to the Emergency
+        Medical Hologram. Voyager EMH persona; ALWAYS opens with
+        "Please state the nature of the medical emergency." Answers
+        from sensor_log telemetry as ground truth, NOT from the
+        org-roam vault.
+
+        Two modes:
+
+        - *Question mode* (default): pass `question` and the EMH
+          answers using the timeseries. Good for "have my CPU loads
+          been weird lately?", "why is the battery dropping fast?",
+          "was thermal in alert when I ran ask --reason yesterday?"
+
+        - *Diagnostic mode* (`diagnose=True`): EMH walks EVERY
+          probe systematically, gives a finding per probe, ends
+          with a prioritized remediation list. Use when the user
+          says "what's wrong with my laptop?" or "do a full check".
+
+        `window_hours` controls how far back the EMH looks (default
+        24, max 168 = a week). The EMH explicitly handles HISTORICAL
+        questions — point it at the right window and ask.
+
+        Use this for LAPTOP questions. For vault questions use
+        search_notes / ask_notes.
+        """
+        import subprocess
+        cmd = ["org-llm", "ask", "--emh",
+                "--window-hours", str(max(1, min(168, window_hours)))]
+        if diagnose:
+            cmd.append("--diagnose")
+        cmd.append(question)
+        try:
+            proc = subprocess.run(cmd, capture_output=True,
+                                    text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            return ("EMH consult timed out (120s). The chat model is "
+                    "probably overloaded; try again or run "
+                    "`life_support_advice` for a deterministic fallback.")
+        out = (proc.stdout or "") + (proc.stderr or "")
+        return out.strip() or "EMH offline (no output)"
 
     # Token store + helpers shared with proactive_doctor_apply pattern,
     # but for self_rewrite the (action, reason) tuple is (module, intent).

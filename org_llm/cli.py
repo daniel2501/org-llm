@@ -3314,6 +3314,22 @@ def ask(
              help="Route the chat through the configured cloud backend instead of local Ollama")] = False,
     days:    Annotated[int,  typer.Option("--days", "-D",
              help="Restrict retrieval to nodes modified in the last N days (0 = no filter; auto-detected from query phrases like 'last week')")] = 0,
+    emh:     Annotated[bool, typer.Option("--emh", "--medical",
+             help="Route the question to the Emergency Medical Hologram — "
+                  "answers about your laptop's vital signs (battery / cpu / "
+                  "memory / disk / thermal / network / ollama / auto-embedder) "
+                  "using the sensor_log timeseries as ground truth instead of "
+                  "your org-roam vault. Voyager-EMH persona; short, direct, "
+                  "always opens with 'Please state the nature of the medical "
+                  "emergency.'")] = False,
+    emh_window_hours: Annotated[int, typer.Option("--window-hours",
+             help="With --emh: hours of sensor_log history to inspect. "
+                  "Default 24. Use 1 for 'right now', 168 for a week.")] = 24,
+    emh_diagnose: Annotated[bool, typer.Option("--diagnose",
+             help="With --emh: run a SYSTEMATIC check — EMH walks every "
+                  "probe, lists each finding, ends with a prioritized "
+                  "action list. Use when the user's question is "
+                  "'what's wrong with my laptop?'")] = False,
 ):
     """Ask a question answered from your org notes (RAG).
 
@@ -3325,7 +3341,170 @@ def ask(
     Temporal queries: phrases like "last week", "last month", "yesterday",
     "last N days" auto-set --days. Override explicitly with --days N (or
     --days 0 to disable the filter).
+
+    Pass [bold]--emh[/bold] (alias [bold]--medical[/bold]) to route
+    to the Emergency Medical Hologram: same chat path, different
+    persona + grounding. The EMH reads from sensor_log instead of
+    your vault, so questions like "have my CPU loads been weird
+    lately?" or "is the battery profile OK?" answer from real
+    timeseries data. Subject to the same small-sample-size
+    deterministic floor as other LLM-synthesis paths.
     """
+    # EMH branch: route to medical hologram before regular vault RAG.
+    # Sensor_log is the ground truth, not the org vault. Different
+    # persona, different grounding source, same chat path.
+    if emh:
+        from . import life_support as _ls
+        win_secs = max(60, int(emh_window_hours) * 3600)
+        recent = _ls.recent_readings(since_secs=win_secs, limit=4000)
+        if not recent:
+            red_alert("EMH offline — no sensor_log data yet.")
+            on_screen("[dim]Run[/dim] [bold]org-llm life-support "
+                       "--interval 30[/bold] [dim]for a few minutes "
+                       "to seed the timeseries, then try again.[/dim]")
+            raise typer.Exit(1)
+
+        # Same deterministic-floor logic as
+        # life_support.llm_optimization_advice — under the threshold
+        # we list facts; over it we synthesise.
+        by_probe: dict[str, list[dict]] = {}
+        for v in recent:
+            by_probe.setdefault(v["probe"], []).append(v)
+        sparse = {p: len(v) for p, v in by_probe.items() if len(v) < 12}
+        engine = _engine()
+        with get_session(engine) as session:
+            url = _ollama_url(session)
+            mdl = (model
+                    or os.environ.get("ORG_LLM_CHAT_MODEL")
+                    or _cfg(session, "chat_model")
+                    or MODEL_DEFAULTS["chat_model"])
+
+        if sparse:
+            from rich.panel import Panel as _Panel
+            body = (f"Please state the nature of the medical emergency.\n\n"
+                    f"Insufficient telemetry — only "
+                    f"{min(sparse.values())} sample(s) for "
+                    f"{', '.join(sorted(sparse))}. The EMH requires "
+                    f"≥12 readings per probe to draw conclusions.\n\n"
+                    f"Bring the patient (your laptop) in for "
+                    f"continuous observation:\n"
+                    f"  org-llm life-support --interval 30\n\n"
+                    f"Then return for a follow-up.")
+            console.print(_Panel(body,
+                title="[lcars1]Emergency Medical Hologram[/lcars1]",
+                border_style="lcars2", padding=(1, 2)))
+            return
+
+        # Build the EMH prompt: latest reading + window stats per
+        # probe + activity correlations for alert/critical events.
+        summary_lines: list[str] = []
+        for probe, vs in sorted(by_probe.items()):
+            norms = [float(v["normalized"]) for v in vs if v["normalized"]]
+            if not norms:
+                continue
+            latest = vs[0]
+            summary_lines.append(
+                f"  {probe:<14} latest={latest['label']:<22} "
+                f"status={latest['status']:<8} "
+                f"norm-min={min(norms):.2f}  norm-max={max(norms):.2f}  "
+                f"norm-mean={sum(norms)/len(norms):.2f}  n={len(vs)}"
+            )
+        seen: set[str] = set()
+        corr_lines: list[str] = []
+        for v in recent:
+            if v.get("status") not in ("alert", "critical"):
+                continue
+            ctx = (v.get("context") or "").strip()
+            if not ctx or ctx in seen:
+                continue
+            seen.add(ctx)
+            corr_lines.append(
+                f"  · {v['probe']} {v['status']} during: {ctx}"
+            )
+            if len(corr_lines) >= 8:
+                break
+
+        if emh_diagnose:
+            sys_msg = (
+                "You are the Emergency Medical Hologram (Voyager EMH "
+                "persona) for an org-llm host system. The user has "
+                "ordered a SYSTEMATIC EXAMINATION. ALWAYS open with: "
+                "'Please state the nature of the medical emergency.' "
+                "Then walk through EACH probe in the telemetry below "
+                "(battery / cpu / memory / disk / thermal / network "
+                "/ ollama / auto_embedder), give a one-line finding "
+                "for each, and end with a PRIORITIZED action list "
+                "ordered by severity (critical → alert → watch). "
+                "Cite specific values + activity correlations when "
+                "they explain a finding. Stay in EMH voice — "
+                "clinical, terse, occasionally sardonic. Never "
+                "propose pip install / curl | sh / open shell; "
+                "suggest only org-llm verbs."
+            )
+            emh_user_intent = (
+                "DIAGNOSTIC MODE — examine every system, report "
+                "findings probe-by-probe, prioritize remediation."
+            )
+        else:
+            sys_msg = (
+                "You are the Emergency Medical Hologram (Voyager EMH "
+                "persona) for an org-llm host system. ALWAYS open "
+                "with: 'Please state the nature of the medical "
+                "emergency.' Then answer the user's question "
+                "DIRECTLY and TERSELY using only the sensor_log "
+                "telemetry below as ground truth. You CAN answer "
+                "historical questions ('was my CPU pegged "
+                "yesterday afternoon?', 'why is the battery "
+                "dropping?') — the telemetry covers the requested "
+                "window. Cite specific probes, values, and activity "
+                "correlations. If the data doesn't support an "
+                "answer, say so plainly — do not invent trends. "
+                "Stay in EMH voice (clinical, slightly impatient, "
+                "occasionally sardonic about the user's hardware "
+                "abuse). Never propose `pip install`, `curl | sh`, "
+                "or any open-shell command; suggest only org-llm "
+                "verbs."
+            )
+            emh_user_intent = f"User query: {query}"
+        emh_user = (
+            f"Patient telemetry over the last "
+            f"{emh_window_hours} hour(s) "
+            f"({len(recent)} reading(s) total):\n\n"
+            + "\n".join(summary_lines)
+        )
+        if corr_lines:
+            emh_user += (
+                "\n\nActivity correlations during alert/critical readings:\n"
+                + "\n".join(corr_lines)
+            )
+        emh_user += f"\n\n{emh_user_intent}"
+
+        from .llm import chat as _chat
+        try:
+            with thinking("EMH analysing telemetry", model=mdl):
+                reply = _chat(emh_user, model=mdl, base_url=url,
+                                system=sys_msg, timeout=60.0) or ""
+        except Exception as e:
+            red_alert(f"EMH offline: {type(e).__name__}: {e}")
+            raise typer.Exit(1)
+
+        from rich.panel import Panel as _Panel
+        try:
+            from .rescue import sanitize_llm_advice as _san
+            checked = _san(reply)
+            if not checked.safe:
+                flag = "; ".join(checked.flagged)
+                reply = f"[FLAGGED: {flag}]\n\n{reply}"
+        except Exception:
+            pass
+        console.print(_Panel(
+            reply.strip() or
+                "Please state the nature of the medical emergency. "
+                "(I have no further analysis to offer.)",
+            title="[lcars1]Emergency Medical Hologram[/lcars1]",
+            border_style="lcars2", padding=(1, 2),
+        ))
+        return
     # Reject empty / whitespace queries upfront — otherwise the embed
     # call fails deep in the pipeline with a misleading error that
     # implicates Ollama. Catch it here so the recovery message points
