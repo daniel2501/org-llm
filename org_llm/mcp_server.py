@@ -224,22 +224,37 @@ def create_mcp_server():
             "When the user says 'walk me through my notes', 'review my\n"
             "vault', 'what should I think about today?', or asks you to\n"
             "help them tag/organize notes:\n"
-            "  - `walk_pick_targets`     — get N candidate notes worth a\n"
-            "                              walk (orphans / recent /\n"
-            "                              untagged-substantive)\n"
-            "  - For each one, present it + ASK the user about it\n"
-            "  - `walk_extract_facts`    — mine atomic claims from the\n"
-            "                              user's response (no auto-save)\n"
-            "  - SHOW extracted facts to user, get explicit approval\n"
-            "  - `walk_save_facts(user_approved=True)` — persist to the\n"
-            "                              llm-context overlay (refuses\n"
-            "                              without user_approved=True)\n"
-            "  - `walk_review_pending`   — re-walk old facts; user\n"
-            "                              confirms/updates/supersedes\n"
-            "Saved facts flow into ask_notes' system prompt automatically\n"
-            "— so once you've helped the user teach you something, future\n"
-            "questions get the benefit. Periodically (every few sessions)\n"
-            "OFFER to run walk_review_pending to keep context current."
+            "  - `walk_pick_targets`        — N candidate notes worth\n"
+            "                                  a walk\n"
+            "  - `walk_extract_facts`       — mine atomic claims from\n"
+            "                                  the user's response\n"
+            "  - `walk_save_facts(user_approved=True)`\n"
+            "                               — persist to active-facts\n"
+            "                                  (PERMISSIVE: substantive\n"
+            "                                  teaching response IS the\n"
+            "                                  consent; no need to\n"
+            "                                  re-ask 'should I save?')\n"
+            "                                  REJECTS bundled facts\n"
+            "                                  (>180c, 'history:' prefix,\n"
+            "                                  3+ commas + 'then'). Each\n"
+            "                                  fact must be ATOMIC: one\n"
+            "                                  role, one project, one\n"
+            "                                  date.\n"
+            "  - `walk_save_disambiguation(user_approved=True)`\n"
+            "                               — for 'X means Y in period A\n"
+            "                                  but Z in period B' kinds\n"
+            "                                  of context (lands in the\n"
+            "                                  Disambiguations section,\n"
+            "                                  not active-facts)\n"
+            "  - `walk_undo_last_save(confirm=True)`\n"
+            "                               — pop the most recent save\n"
+            "                                  if user says 'actually\n"
+            "                                  no' / 'undo that'\n"
+            "  - `walk_review_pending`      — list old facts for\n"
+            "                                  re-confirmation\n"
+            "After saving, ECHO the EXACT lines the save tool returns —\n"
+            "do NOT paraphrase or beautify into a prettier summary that\n"
+            "diverges from what's actually in the file."
         ),
     )
 
@@ -2484,35 +2499,169 @@ def create_mcp_server():
         Each fact gets one line in the active-facts block; the LLM
         sees them in every future RAG call's system prompt.
 
-        Requires user_approved=True — the in-workspace LLM must
-        explicitly confirm with the user before calling. Without
-        the flag we refuse and surface the proposed facts for
-        explicit approval (same pattern as proactive_doctor_apply).
+        Phase 13.1.1: atomic-fact validator. Facts are rejected if
+        they look like bundled multi-claim sentences (length > 180,
+        contains 'history:' meta-prefix, or 3+ commas with named
+        entities). Caller must split bundles into atoms and retry.
+
+        Permissive UX (per 2026-04-29 design call): user_approved=True
+        is the LLM's signal that the user has, in conversation,
+        consented to saving. The LLM doesn't have to ask 'should I
+        save?' if the user's response itself was substantive
+        teaching. Mistakes are recoverable via walk_undo_last_save.
+
+        Returns the EXACT saved-line text so the LLM can echo
+        reality (not its own beautified summary) back to the user.
         """
         if not user_approved:
             shown = "\n".join(f"  - {f}" for f in facts[:8])
-            return ("REFUSED: walk_save_facts requires user_approved=True.\n"
-                    "Show these facts to the user FIRST and get explicit "
-                    "confirmation:\n\n" + shown +
-                    "\n\nIf they confirm, call this tool again with "
-                    "user_approved=True.")
+            return ("REFUSED: walk_save_facts requires user_approved=True. "
+                    "When the user has clearly consented (substantive "
+                    "teaching response or explicit yes), call again "
+                    "with user_approved=True. Until then, surface these "
+                    "to the user:\n\n" + shown)
         if not facts:
             return "NO_FACTS to save."
-        from . import context as _ctx
-        saved = 0
+
+        # Atomic-fact validator. Reject obvious bundles so the LLM
+        # is forced to split them. Phase 13.1 testing surfaced
+        # examples like "Work history: data engineer at startup
+        # Arkatechture, then manager of BI Platforms at Unum, now
+        # senior data engineer at Idexx (2026)." — three claims
+        # bundled into one line. Should be three atoms.
+        rejected: list[tuple[str, str]] = []
+        accepted: list[str] = []
         for f in facts:
             f = (f or "").strip()
             if not f:
                 continue
+            reasons: list[str] = []
+            if len(f) > 180:
+                reasons.append(f"too long ({len(f)} chars; cap 180)")
+            low = f.lower()
+            for prefix in ("work history:", "employment history:",
+                            "history:", "summary:", "overview:"):
+                if low.startswith(prefix):
+                    reasons.append(f"meta-bundle prefix {prefix!r}")
+                    break
+            n_commas = f.count(",")
+            n_thens  = low.count(" then ") + low.count(", then ")
+            if n_commas >= 3 and n_thens >= 1:
+                reasons.append(f"chain-bundle ({n_commas} commas + "
+                                f"{n_thens} 'then')")
+            if reasons:
+                rejected.append((f, "; ".join(reasons)))
+            else:
+                accepted.append(f)
+
+        if rejected and not accepted:
+            lines = ["REJECTED — these look bundled, split into atoms:"]
+            for f, why in rejected:
+                lines.append(f"  - {f!r}: {why}")
+            lines.append("")
+            lines.append("Each fact should be one atomic claim "
+                          "(one role, one project, one preference). "
+                          "Re-call walk_save_facts with the split atoms.")
+            return "\n".join(lines)
+
+        from . import context as _ctx
+        saved_lines: list[str] = []
+        for f in accepted:
             try:
                 _ctx.add_fact(f, source=source)
-                saved += 1
+                saved_lines.append(f)
             except Exception as e:
-                return (f"saved {saved}/{len(facts)} before error: "
-                        f"{type(e).__name__}: {e}")
-        return (f"Saved {saved} fact(s) to context. They flow into "
-                f"the system prompt on every future chat call. "
-                f"Run `org-llm context show` to inspect.")
+                return (f"saved {len(saved_lines)}/{len(accepted)} "
+                        f"before error: {type(e).__name__}: {e}")
+
+        # Push to undo stack for walk_undo_last_save
+        try:
+            _ctx.push_walk_undo(saved_lines)
+        except Exception:
+            pass
+
+        out = [f"Saved {len(saved_lines)} fact(s) to context. "
+                f"EXACT lines that landed (echo these back to the "
+                f"user, do not paraphrase):"]
+        for line in saved_lines:
+            out.append(f"  - {line}")
+        if rejected:
+            out.append("")
+            out.append(f"REJECTED {len(rejected)} bundled fact(s) "
+                        f"— split and re-call:")
+            for f, why in rejected:
+                out.append(f"  - {f[:80]}{'…' if len(f) > 80 else ''}: {why}")
+        out.append("")
+        out.append("Undo with walk_undo_last_save(confirm=True) if needed.")
+        return "\n".join(out)
+
+    @server.tool()
+    def walk_save_disambiguation(term: str,
+                                    periods: dict,
+                                    source: str = "walk:mcp",
+                                    user_approved: bool = False) -> str:
+        """Save a disambiguation entry — for ambiguous words/phrases
+        that mean different things in different periods. Phase 13.1.1
+        added this affordance after the in-opencode walk surfaced
+        the gap (the user said 'tag for disambiguation' and the LLM
+        had no tool to act on it).
+
+        term: the ambiguous word, e.g. 'the team'
+        periods: {<period clause>: <meaning>, ...}, e.g.
+                  {'before 2026': 'Unum BI Platforms team',
+                   'after 2026':  'Idexx team'}
+
+        Same user_approved=True permissive contract as
+        walk_save_facts. Lands in the * Disambiguations section of
+        llm-context.org and is pulled into the LLM's system prompt
+        alongside the active-facts block.
+        """
+        if not user_approved:
+            return ("REFUSED: walk_save_disambiguation requires "
+                    "user_approved=True. Surface this to the user "
+                    f"first:\n  term: {term!r}\n  periods: {periods!r}")
+        if not term or not term.strip():
+            return "REFUSED: empty term."
+        if not periods or not isinstance(periods, dict):
+            return "REFUSED: periods must be a non-empty dict {clause: meaning}."
+
+        from . import context as _ctx
+        try:
+            _ctx.add_disambiguation(term, dict(periods),
+                                       source=source)
+        except Exception as e:
+            return f"save failed: {type(e).__name__}: {e}"
+
+        lines = [f"Saved disambiguation for {term!r}. "
+                  f"Future RAG calls see:"]
+        for period, meaning in periods.items():
+            lines.append(f"  - {period} = {meaning}")
+        return "\n".join(lines)
+
+    @server.tool()
+    def walk_undo_last_save(confirm: bool = False) -> str:
+        """Pop the most recent walk_save_facts batch and remove
+        those exact lines from the active-facts block. Use when the
+        user says 'undo that' / 'remove those' / 'I changed my
+        mind'. Refuses without confirm=True (small safety to avoid
+        accidental triggering on conversational mention of 'undo').
+
+        Reads from ~/.local/share/org-llm/walk-undo-stack.json which
+        walk_save_facts populates after each successful batch."""
+        if not confirm:
+            return ("REFUSED: walk_undo_last_save requires confirm=True. "
+                    "Confirm the user actually wants to undo the most "
+                    "recent save before retrying.")
+        from . import context as _ctx
+        removed = _ctx.pop_walk_undo()
+        if not removed:
+            return ("Nothing to undo — no recent walk_save_facts batch "
+                    "in the undo stack.")
+        out = [f"Undone — removed {len(removed)} fact(s) from "
+                f"active-facts:"]
+        for line in removed:
+            out.append(f"  - {line}")
+        return "\n".join(out)
 
     @server.tool()
     def walk_review_pending(max_facts: int = 5) -> str:

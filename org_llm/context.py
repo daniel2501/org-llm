@@ -26,6 +26,7 @@ TANGLED output is what gets read into prompts (cheap, no embed needed).
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -365,7 +366,11 @@ def add_fact(fact: str, source: str = "cli") -> Path:
     hm = hist_re.search(text)
     if hm:
         insert_at = hm.end()
-        text = text[:insert_at] + "\n" + history_line + text[insert_at:]
+        # Phase 13.1.1: trailing \n was missing → consecutive inserts
+        # at the same position smushed together: 'H2H1\n' instead of
+        # 'H2\nH1\n'. Add the trailing newline so each entry is its
+        # own line.
+        text = text[:insert_at] + "\n" + history_line + "\n" + text[insert_at:]
     else:
         text += f"\n\n* Context history\n:PROPERTIES:\n:LLM_CONTEXT: history\n:END:\n\n{history_line}\n"
 
@@ -376,6 +381,159 @@ def add_fact(fact: str, source: str = "cli") -> Path:
     except Exception:
         pass
     return p
+
+
+def add_disambiguation(term: str, periods: dict[str, str],
+                          source: str = "cli") -> Path:
+    """Append a disambiguation entry to the * Disambiguations
+    section. Phase 13.1.1: the LLM-led walk needed an explicit
+    affordance for "term X means Y in period A but Z in period B"
+    entries that don't fit the active-facts shape.
+
+    Args:
+      term: the ambiguous word/phrase being disambiguated
+      periods: {"period-clause": "meaning", ...}, e.g.
+               {"before 2026": "Unum BI Platforms team",
+                "after 2026":  "Idexx team"}
+      source: provenance label for the history entry
+
+    Layout produced (one block per call, appended after any
+    existing entries):
+
+        *** the team
+        - before 2026 = Unum BI Platforms team
+        - after 2026 = Idexx team
+
+    Returns the context file path.
+    """
+    if not term or not term.strip():
+        raise ValueError("disambiguation term cannot be empty")
+    if not periods:
+        raise ValueError("disambiguation periods dict cannot be empty")
+    p = ensure_context_file_exists()
+    text = p.read_text(errors="replace")
+
+    block = [f"\n*** {term.strip()}"]
+    for period, meaning in periods.items():
+        block.append(f"- {period.strip()} = {meaning.strip()}")
+    new_block = "\n".join(block) + "\n"
+
+    # Find the * Disambiguations section's :END: drawer; insert the
+    # new sub-heading right after it. If the section is missing,
+    # append a fresh one near the end.
+    sect_re = re.compile(
+        r"(\* Disambiguations[^\n]*\n"
+        r"(?::PROPERTIES:[^\n]*\n(?:[^\n]*\n)*?:END:\s*\n)?)",
+        re.M)
+    m = sect_re.search(text)
+    if m:
+        insert_at = m.end()
+        text = text[:insert_at] + new_block + text[insert_at:]
+    else:
+        text += (f"\n\n* Disambiguations\n"
+                  f":PROPERTIES:\n:LLM_CONTEXT: disambiguations\n:END:\n"
+                  f"{new_block}")
+
+    # Also log to history so the audit trail is consistent with
+    # add_fact entries.
+    today = datetime.now().date().isoformat()
+    history_line = (f"- [{today}] disambiguation: {term.strip()} "
+                     f"({len(periods)} period(s))  ({source})")
+    hist_re = re.compile(
+        r"(\* Context history[^\n]*\n(?::PROPERTIES:[^\n]*\n(?:[^\n]*\n)*?:END:\s*\n)?)",
+        re.M)
+    hm = hist_re.search(text)
+    if hm:
+        insert_at = hm.end()
+        text = text[:insert_at] + "\n" + history_line + "\n" + text[insert_at:]
+
+    p.write_text(text)
+    try:
+        tangle(p, context_tangle_path())
+    except Exception:
+        pass
+    return p
+
+
+# ── Phase 13.1.1: undo stack for walk_save_facts ──────────────────────────
+#
+# When walk_save_facts persists facts via add_fact(), we record the
+# saved-line texts to a sidecar JSON so walk_undo_last_save can pop the
+# most recent batch and remove those exact lines from active-facts.
+#
+# Format: {"saves": [{"ts": <unix>, "lines": [...]}], ...}
+# Bounded to the last 20 batches.
+
+def _walk_undo_stack_path() -> Path:
+    base = os.environ.get("XDG_DATA_HOME") or "~/.local/share"
+    return Path(base).expanduser() / "org-llm" / "walk-undo-stack.json"
+
+
+def push_walk_undo(lines: list[str]) -> None:
+    """Record a batch of just-saved fact-lines for later undo."""
+    if not lines:
+        return
+    p = _walk_undo_stack_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(p.read_text()) if p.exists() else {}
+    except Exception:
+        data = {}
+    saves = list(data.get("saves") or [])
+    saves.append({"ts": int(datetime.now().timestamp()),
+                    "lines": list(lines)})
+    saves = saves[-20:]
+    p.write_text(json.dumps({"saves": saves}, indent=2))
+
+
+def pop_walk_undo() -> list[str]:
+    """Pop the most recent batch of saved fact-lines + remove them
+    from the active-facts block. Returns the lines that were
+    removed (empty list if nothing to undo)."""
+    p = _walk_undo_stack_path()
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text())
+    except Exception:
+        return []
+    saves = list(data.get("saves") or [])
+    if not saves:
+        return []
+    last = saves.pop()
+    lines = list(last.get("lines") or [])
+    if not lines:
+        return []
+
+    # Remove those exact lines from active-facts block.
+    cp = ensure_context_file_exists()
+    text = cp.read_text(errors="replace")
+    block_re = re.compile(
+        r"(#\+name:\s*active-facts\s*\n#\+begin_src[^\n]*\n)([\s\S]*?)(\n#\+end_src)",
+        re.M)
+    m = block_re.search(text)
+    if m:
+        head, body, tail = m.group(1), m.group(2), m.group(3)
+        body_lines = body.splitlines()
+        kept: list[str] = []
+        removed: set[str] = set()
+        for ln in body_lines:
+            stripped = ln.strip().lstrip("-•").strip()
+            if stripped in lines and stripped not in removed:
+                removed.add(stripped)
+                continue           # drop
+            kept.append(ln)
+        new_body = "\n".join(kept)
+        text = text[:m.start()] + head + new_body + tail + text[m.end():]
+        cp.write_text(text)
+
+    # Persist the truncated stack
+    p.write_text(json.dumps({"saves": saves}, indent=2))
+    try:
+        tangle(cp, context_tangle_path())
+    except Exception:
+        pass
+    return lines
 
 
 # ── Shared LLM-JSON helper with retry-on-parse-failure ────────────────────
