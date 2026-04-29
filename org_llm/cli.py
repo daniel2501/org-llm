@@ -3273,7 +3273,20 @@ def search(
                 with warp(TREK_MSGS["search"] + f": {query!r}"):
                     from .llm import embed
                     qvec = embed(query, model=model, base_url=url)
-                    results = vector_search(session, qvec, limit=limit)
+                    # Pass `query_text` so vector_search activates the
+                    # title-phrase boost AND _apply_signal_boosts (body
+                    # substring / title-word overlap / tag match / path
+                    # segment / stale penalty). Without this the bare
+                    # `search` verb runs PURE cosine — which on a vault
+                    # with many short-titled notes drowns substantive
+                    # body matches under empty-bodied headings tied at
+                    # near-zero distance. Phase 11 Day 3 surfaced it:
+                    # `search Kafka` returned 10 reading_list.org
+                    # headings (Subjects, Marx, Dev, …) at score 0.000
+                    # while the Trial note (with Kafka in the body) was
+                    # nowhere to be seen.
+                    results = vector_search(session, qvec, limit=limit,
+                                              query_text=query)
     except Exception as exc:
         msg = str(exc)
         if "Connection" in msg or "refused" in msg.lower():
@@ -3287,13 +3300,17 @@ def search(
         return
 
     table = Table(box=None, pad_edge=False, show_header=True)
-    table.add_column("Score", style="lcars1", width=6, no_wrap=True)
+    # Score column wider so 4-decimal distances fit. Below ~0.001
+    # cosine-distance differences vanished into 0.000 with the
+    # previous :.3f format — meaningful ranking signal hidden from
+    # the user. (Phase 11 Day 3.)
+    table.add_column("Score", style="lcars1", width=8, no_wrap=True)
     table.add_column("Title", style="lcars2")
     table.add_column("Tags",  style="dim", width=20)
     table.add_column("File",  style="dim")
 
     for r in results:
-        score = f"{r.score:.3f}" if not keyword else "—"
+        score = f"{r.score:.4f}" if not keyword else "—"
         fname = Path(r.file_path).name
         table.add_row(score, r.title, r.tags or "—", fname)
 
