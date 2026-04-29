@@ -13139,10 +13139,34 @@ def launch(
     else:
         active_model_str   = f"ollama/{chat_mdl}"
         active_provider_id = "ollama"
+        # Phase 15: opencode's ConfigProvider.Info schema requires
+        # `npm` (which adapter package to load) and a `models` map
+        # for the provider entry to register. Without those, opencode
+        # silently drops our provider definition and falls back to
+        # its bundled big-pickle. Per the opencode docs example,
+        # @ai-sdk/openai-compatible is the right adapter for an
+        # OpenAI-compatible local endpoint (which Ollama exposes
+        # at /v1).
+        from .models import _pulled_normalized
+        try:
+            pulled = sorted(_pulled_normalized(ollama_url))
+        except Exception:
+            pulled = []
+        # Build a models map covering at least the chat model + every
+        # locally-pulled tag so opencode's model picker reflects what
+        # the user actually has on disk.
+        wanted = {chat_mdl}
+        wanted.update(pulled)
+        models_map = {
+            tag: {"name": tag, "tool_call": True}
+            for tag in sorted(wanted) if tag
+        }
         active_provider_block = {
             "ollama": {
-                "name": "Ollama",
+                "npm":     "@ai-sdk/openai-compatible",
+                "name":    "Ollama (local)",
                 "options": {"baseURL": f"{ollama_url.rstrip('/')}/v1"},
+                "models":  models_map,
             }
         }
         active_model_label = f"{chat_mdl}  (Ollama, local)"
