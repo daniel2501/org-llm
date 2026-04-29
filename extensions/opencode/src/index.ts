@@ -195,13 +195,23 @@ export const tui: TuiPlugin = async (api) => {
   ]);
 
   // Flash a toast on plugin load — the visible "I noticed N things"
-  // signal that the chat surface lacks before any user input.
+  // signal that the chat surface lacks before any user input. Stays
+  // as a fallback breadcrumb so if the user dismisses the dialog
+  // (Esc) they still see a hint of what just happened.
   api.ui.toast({
     variant: "info",
     title: "✨ org-llm",
     message: `${cards.length} insight${cards.length === 1 ? "" : "s"} ready — type /insights or Ctrl+P to browse`,
     duration: 8000,
   });
+
+  // Auto-open the dialog so cards APPEAR ON OPEN — the user shouldn't
+  // need to type /insights to discover what was prepared. The dialog
+  // is modal-y but Escape dismisses cleanly and `/insights` re-opens
+  // it from the command palette. setTimeout(..., 0) lets opencode's
+  // own UI mount first; opening synchronously here can race with the
+  // chat-surface paint and produce a flicker.
+  setTimeout(() => openInsightDialog(api, cards), 0);
 };
 
 // opencode's plugin loader checks for both named exports (`tui` /

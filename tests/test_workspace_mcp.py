@@ -242,6 +242,35 @@ class TestOpencodeLaunchMCP:
             "to tui.json."
         )
 
+    def test_tui_plugin_auto_opens_dialog_on_mount(self):
+        """User asked: cards should APPEAR ON OPEN, not require typing
+        /insights. Pin that the plugin source actually calls
+        openInsightDialog(...) at mount time (in addition to the toast)."""
+        plugin_src = (Path(__file__).resolve().parent.parent
+                       / "extensions" / "opencode" / "src" / "index.ts").read_text()
+        # The toast is the breadcrumb fallback; the dialog open is the
+        # primary "appear on open" affordance. Both should be present.
+        assert "api.ui.toast" in plugin_src, (
+            "plugin no longer calls api.ui.toast — losing the "
+            "fallback breadcrumb when the dialog is dismissed."
+        )
+        assert "openInsightDialog" in plugin_src, (
+            "plugin no longer calls openInsightDialog at mount — "
+            "cards won't APPEAR ON OPEN; user has to type /insights."
+        )
+        # The auto-open should fire after the toast (so dismiss → toast
+        # remains visible). Cheap textual check: both calls in the
+        # default `tui` export, dialog AFTER toast.
+        toast_idx = plugin_src.find("api.ui.toast")
+        # find the auto-open INVOCATION (not the helper definition)
+        auto_open_idx = plugin_src.find("openInsightDialog(api, cards)",
+                                           toast_idx)
+        assert auto_open_idx > toast_idx, (
+            "openInsightDialog auto-open call must come AFTER "
+            "api.ui.toast in the mount handler. Got toast at "
+            f"{toast_idx}, auto-open at {auto_open_idx}."
+        )
+
     def test_resolved_mcp_invocation_is_not_uv_directory_trick(self, cli_db,
                                                                  monkeypatch,
                                                                  tmp_path):
