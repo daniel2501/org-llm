@@ -10236,6 +10236,9 @@ def tag(
         "have", "has", "had", "do", "does", "did",
         "will", "would", "could", "should",
         "it", "its", "context",
+        # Prompt-label leakage (the batch prompt mentions
+        # 'TITLE:' / 'BODY:' / 'note'; small models echo these).
+        "title", "body", "note", "notes", "topic", "subject",
     }
     import re as _re_tag
 
@@ -10328,9 +10331,53 @@ def tag(
     skipped_unchanged = 0
     failed = 0
     last_error = ""
+    def _trivial_tag(node) -> str:
+        """For sparse single-word titled notes with no body, the LLM
+        has no signal to do better than the title itself — and on
+        small models often hallucinates a generic category that
+        contradicts the title (Phase 11 Day 5: 'calculus' →
+        'programming', 'zettelkasten' → 'philosophy', 'Dev' →
+        'mathematics'). Short-circuit those cases. Returns "" when
+        the node isn't trivial (caller routes to the LLM).
+        """
+        body = (node.body or "").strip()
+        title = (node.title or "").strip()
+        if body or not title:
+            return ""
+        # Title-only nodes. If the title is already a single short
+        # word, just use it as the tag.
+        toks = title.lower().split()
+        # Strip checkbox markers ([X], [-], [ ]) and similar prefixes
+        toks = [t for t in toks if t not in
+                ("[x]", "[-]", "[ ]", "*", "-", "•")]
+        if len(toks) == 1 and _re_tag.match(r"^[a-z][a-z0-9-]{0,15}$", toks[0]):
+            return toks[0]
+        return ""
+
     with get_session(engine) as session:
         with impulse("Tagging", total=len(nodes)) as (prog, task):
-            for chunk in _chunks(nodes, _BATCH_SIZE):
+            # Short-circuit trivial nodes BEFORE the LLM batch loop —
+            # writes title-as-tag for empty-body single-word titles.
+            llm_nodes: list = []
+            for n in nodes:
+                trivial = _trivial_tag(n)
+                if trivial:
+                    db_n = session.get(Node, n.id)
+                    if db_n:
+                        if ((redo or repair)
+                                and (db_n.auto_tags or "") == trivial):
+                            skipped_unchanged += 1
+                        else:
+                            db_n.auto_tags         = trivial
+                            db_n.auto_tagged_at    = time.time()
+                            db_n.auto_tagger_model = "trivial"
+                            tagged += 1
+                        session.commit()
+                    prog.advance(task)
+                else:
+                    llm_nodes.append(n)
+
+            for chunk in _chunks(llm_nodes, _BATCH_SIZE):
                 try:
                     parsed = _batch_tag(chunk)
                 except Exception as e:
