@@ -10069,6 +10069,112 @@ def _auto_tags_look_bad(auto_tags: str) -> bool:
     return False
 
 
+def _apply_auto_tags_to_files(engine) -> tuple[int, int]:
+    """Write nodes.auto_tags into the actual .org files as
+    :tag1:tag2: suffixes on the heading line. Idempotent: tags
+    already on the heading get preserved; auto_tags get merged in
+    without dupes. Heading→node mapping is by :ID: property — never
+    by title — so colliding titles never get cross-tagged.
+
+    Returns (files_touched, tags_added).
+    """
+    import re as _re_apply
+    from collections import defaultdict
+    from .db import Node, File as _File
+    from sqlalchemy.orm import joinedload
+
+    by_file: dict[str, dict[str, set[str]]] = defaultdict(dict)
+    with get_session(engine) as session:
+        rows = (session.query(Node, _File.path)
+                  .join(_File, _File.id == Node.file_id)
+                  .filter(Node.auto_tags != "")
+                  .filter(Node.auto_tags.isnot(None))
+                  .all())
+        for node, path in rows:
+            tags = set((node.auto_tags or "").split())
+            if not tags:
+                continue
+            if not node.node_id:
+                continue
+            by_file[path][node.node_id] = tags
+
+    if not by_file:
+        return (0, 0)
+
+    head_re = _re_apply.compile(
+        r"^(\*+\s+)(.+?)(\s+:[\w:@-]+:)?\s*$"
+    )
+    id_re   = _re_apply.compile(
+        r"^:ID:\s+([0-9a-fA-F-]+)\s*$"
+    )
+
+    files_touched = 0
+    total_tags    = 0
+
+    for path, id_to_tags in by_file.items():
+        try:
+            content = Path(path).read_text()
+        except (FileNotFoundError, OSError):
+            continue
+        lines = content.splitlines(keepends=True)
+        out = list(lines)
+
+        current_head_line: int | None = None
+        in_props = False
+        modified = False
+
+        for i, line in enumerate(lines):
+            raw = line.rstrip("\n")
+            stripped = raw.strip()
+            m_head = head_re.match(raw)
+            if m_head:
+                current_head_line = i
+                in_props = False
+                continue
+            if stripped == ":PROPERTIES:":
+                in_props = True
+                continue
+            if stripped == ":END:":
+                in_props = False
+                continue
+            if in_props and current_head_line is not None:
+                m_id = id_re.match(stripped)
+                if not m_id:
+                    continue
+                node_id = m_id.group(1)
+                tags_for_node = id_to_tags.get(node_id)
+                if not tags_for_node:
+                    continue
+                head_line = out[current_head_line].rstrip("\n")
+                m = head_re.match(head_line)
+                if not m:
+                    continue
+                prefix         = m.group(1)
+                title          = m.group(2).rstrip()
+                existing_suffix = m.group(3) or ""
+                existing_tags = set()
+                if existing_suffix:
+                    existing_tags = {t for t in
+                                       existing_suffix.strip().strip(":").split(":")
+                                       if t}
+                merged = sorted(existing_tags | tags_for_node)
+                new_suffix = ":" + ":".join(merged) + ":"
+                rebuilt = f"{prefix}{title} {new_suffix}\n"
+                if rebuilt != out[current_head_line]:
+                    out[current_head_line] = rebuilt
+                    modified = True
+                    total_tags += len(tags_for_node - existing_tags)
+
+        if modified:
+            try:
+                Path(path).write_text("".join(out))
+                files_touched += 1
+            except OSError:
+                continue
+
+    return (files_touched, total_tags)
+
+
 @app.command(rich_help_panel="Indexing")
 def tag(
     redo:    Annotated[bool, typer.Option("--redo", "-r",
@@ -10231,6 +10337,8 @@ def tag(
     _PROSE_SKIPS = {
         "the", "a", "an", "of", "for", "to", "in", "on", "and", "or",
         "but", "as", "by", "with", "about", "from", "into", "out",
+        "under", "over", "between", "among", "through", "across",
+        "during", "after", "before", "since", "until",
         "this", "that", "these", "those",
         "is", "are", "was", "were", "be", "been", "being",
         "have", "has", "had", "do", "does", "did",
@@ -10424,7 +10532,23 @@ def tag(
                   f"[bold]org-llm doctor power-boost --apply[/bold] "
                   f"[dim]or[/dim] [bold]ollama pull {model}[/bold]")
     if apply:
-        on_screen("[warn]--apply (write to org files) not yet implemented.[/warn]")
+        # Phase 11 Day 5: was "not yet implemented" no-op. Now writes
+        # auto_tags to the actual org files as :tag1:tag2: suffixes
+        # on heading lines. Hand-curated tags already in the file
+        # are preserved; new auto_tags get merged in. Atomic per
+        # file (read → modify → replace).
+        #
+        # Mapping from heading to node uses the :ID: property so we
+        # never tag the wrong heading even if titles collide.
+        files_touched, tags_added = _apply_auto_tags_to_files(engine)
+        if files_touched > 0:
+            hail(f"Wrote tags to {files_touched} file(s) "
+                 f"(+{tags_added} tag application(s)).")
+            on_screen("[dim]Re-run[/dim] [bold]org-llm index[/bold] "
+                      "[dim]to refresh the in-DB tags column to match.[/dim]")
+        else:
+            on_screen("[dim]No new tags to apply (all up to date or "
+                      "auto_tags empty).[/dim]")
     if tagged > 0:
         try:
             with get_session(engine) as session:
