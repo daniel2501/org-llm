@@ -188,6 +188,12 @@ def vector_search(
                         seen_ids.add(key)
 
         results = _apply_signal_boosts(results, query_text)
+        # Re-sort by final (post-boost) score. The vector pass is sorted
+        # ASC by raw cosine, then title-phrase rows get appended at score=1.0,
+        # then _apply_signal_boosts mutates scores in place. Without this
+        # re-sort the displayed order is the merge order, not the boosted
+        # order — boosts apply but the user sees pre-boost ranking.
+        results.sort(key=lambda r: r.score)
     return results[:limit]
 
 
