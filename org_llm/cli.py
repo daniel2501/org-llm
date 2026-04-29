@@ -3869,7 +3869,7 @@ def ask(
     with warp(TREK_MSGS["ask"] + " — retrieving context"):
         try:
             with get_session(engine) as session:
-                qvec    = embed(\1, model=\2, base_url=\3, task="query")
+                qvec    = embed(query, model=embed_mdl, base_url=url, task="query")
                 try:
                     results = list(vector_search(session, qvec, limit=top_k,
                                                   since_mtime=since_mtime,
@@ -3892,7 +3892,7 @@ def ask(
                                 def _t(): prog.advance(task)
                                 embed_nodes(session, model=embed_mdl, base_url=url,
                                             force=True, progress_cb=_t)
-                            qvec = embed(\1, model=\2, base_url=\3, task="query")
+                            qvec = embed(query, model=embed_mdl, base_url=url, task="query")
                             results = list(vector_search(session, qvec, limit=top_k,
                                                           since_mtime=since_mtime,
                                                           query_text=query))
@@ -3983,7 +3983,7 @@ def ask(
                 # Retry the search with the freshly-embedded vault
                 with warp(TREK_MSGS["ask"] + " — retrying search after auto-embed"):
                     with get_session(engine) as session:
-                        qvec = embed(\1, model=\2, base_url=\3, task="query")
+                        qvec = embed(query, model=embed_mdl, base_url=url, task="query")
                         results = list(vector_search(session, qvec, limit=top_k,
                                                       since_mtime=since_mtime,
                                                       query_text=query))
@@ -10467,7 +10467,7 @@ def code_search(
         # the vault is dominated by org notes.
         tag_filter = f"code:{lang}" if lang else "code"
         with warp(f"Searching code corpus for {query!r}"):
-            qvec = embed(\1, model=\2, base_url=\3, task="query")
+            qvec = embed(query, model=embed_mdl, base_url=url, task="query")
             rows = vector_search(session, qvec, limit=limit,
                                    query_text=query,
                                    tag_filter=tag_filter)
