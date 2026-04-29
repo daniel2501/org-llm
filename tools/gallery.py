@@ -1043,6 +1043,140 @@ def scene_doctor_walkthrough():
     _save(con, "17-doctor-walkthrough", "org-llm doctor --walkthrough")
 
 
+# ── Phase 10: life-support / sensors / EMH / Dr. Crusher with vitals ─────────
+
+def _mock_readings():
+    """Static Reading list for reproducible screenshots — no live probes,
+    so the gallery stays deterministic and doesn't depend on the host's
+    current battery / thermal / CPU state.
+    """
+    from org_llm.life_support import Reading
+    return [
+        Reading("battery",       99,    0.99, "99% ⚡",
+                "nominal", "External power source engaged. Reserves recharging."),
+        Reading("cpu",           0.46,  0.94, "load 0.46 / 8c",
+                "nominal", "Sublight engines idle — capacity to spare."),
+        Reading("memory",        12.5,  0.81, "12.5 / 15.5 GB free",
+                "nominal", "Holodecks online. Plenty of working memory."),
+        Reading("disk",          268.4, 0.60, "268.4 / 449.5 GB",
+                "nominal", "Cargo bays well-stocked."),
+        Reading("thermal",       66.0,  0.71, "66°C / crit 100°C",
+                "nominal", "Coolant flow nominal — plenty of headroom."),
+        Reading("network",       True,  1.0,  "online → 1.1.1.1",
+                "nominal", "Subspace link nominal."),
+        Reading("ollama",        12,    1.0,  "online · 12 models",
+                "nominal", "Local LLM bays online."),
+        Reading("auto_embedder", False, 1.0,  "not running",
+                "nominal", "Auto-embedder dormant (foreground only)."),
+    ]
+
+
+def scene_life_support():
+    """Life-support: 8-probe vital systems panel."""
+    con = _new_console(width=110)
+    from org_llm.cli import _vitals_panel
+    con.print()
+    con.print(_vitals_panel(_mock_readings(), "nominal"))
+    _save(con, "30-life-support", "org-llm life-support")
+
+
+def scene_sensors_drill():
+    """Sensors --drill cpu: deep-dive view with sparkline + window stats."""
+    from rich.table import Table as _T
+    con = _new_console(width=110)
+    head = _T.grid(padding=(0, 2))
+    head.add_column(); head.add_column()
+    head.add_row("[lcars1]Now[/lcars1]",
+                  "load 0.46 / 8c    Sublight engines idle — capacity to spare.")
+    head.add_row("[lcars1]Window[/lcars1]",
+                  "min 0.92  mean 0.96  max 0.99  · 82 sample(s) over last 30min")
+    head.add_row("[lcars1]Status[/lcars1]",
+                  "[green]nominal[/green]=82")
+    con.print()
+    con.print(Panel(head,
+                      title="[lcars1]sensors  · drill: cpu[/lcars1]",
+                      border_style="lcars1", padding=(1, 2)))
+    spark = "▆▆▆▇▇▇▇▇▇▇▇▆▆▇▇▇▇▆▆▇▇▇▇▇▆▆▇▇▆▆▇▇▇▇▆▆▇▆▇▇▇▇▆▇▇▆▇▇▆▇▆▆▇▆▆▇"
+    from rich.text import Text as _Text
+    con.print(Panel(_Text(spark, style="lcars3"),
+                       title="[lcars1]trend (oldest left → newest right)[/lcars1]",
+                       border_style="lcars2", padding=(0, 2)))
+    con.print(Panel(_Text("No alert/critical readings in this window — "
+                              "everything's been fine.", style="lcars3"),
+                       title="[lcars1]activity correlations  · what the user "
+                                "was doing during alerts[/lcars1]",
+                       border_style="lcars2", padding=(1, 2)))
+    _save(con, "31-sensors-drill", "org-llm sensors --drill cpu")
+
+
+def scene_emh_diagnosis():
+    """Emergency Medical Hologram — activation + diagnosis panels."""
+    con = _new_console(width=110)
+    con.print()
+    con.print(Panel(
+        "[lcars3]Please state the nature of the medical emergency.[/lcars3]\n"
+        "[dim]EMH activated — reviewing 679 reading(s) across 8 probe(s) "
+        "(24h window).[/dim]",
+        title="[lcars1]Emergency Medical Hologram[/lcars1]",
+        border_style="lcars2", padding=(1, 2),
+    ))
+    con.print(Panel(
+        "Examination complete. All 8 vital systems nominal across 679 "
+        "reading(s) in the last 24h window.\n\n"
+        "No remediation required. The patient is — for once — in good "
+        "health.",
+        title="[lcars1]EMH · diagnosis[/lcars1]",
+        border_style="lcars2", padding=(1, 2),
+    ))
+    _save(con, "32-emh-diagnosis", "org-llm ask --emh --diagnose")
+
+
+def scene_doctor_with_vitals():
+    """Dr. Crusher: classic doctor warnings + live vitals + LLM diagnosis."""
+    from rich.table import Table
+    from org_llm.cli import _vitals_panel
+    con = _new_console(width=110)
+    rows = [
+        ("",                "[lcars1]Database[/lcars1]", ""),
+        ("[bold green]✓[/]", "DB integrity",     "PRAGMA integrity_check = ok"),
+        ("[bold green]✓[/]", "Index populated",  "643 files / 11340 nodes"),
+        ("[bold yellow]⚠[/]", "Embeddings partial", "11332/11340 (99%) — "
+                                                       "run: org-llm embed"),
+        ("",                "[lcars1]Org Files[/lcars1]", ""),
+        ("[bold green]✓[/]", "org files found",  "547 .org files"),
+        ("[bold yellow]⚠[/]", "Unindexed files", "22 .org file(s) not yet in DB"),
+        ("",                "[lcars1]Ollama[/lcars1]", ""),
+        ("[bold green]✓[/]", "Ollama API",       "http://localhost:11434"),
+        ("[bold green]✓[/]", "  chat_model",     "gemma3:latest"),
+    ]
+    table = Table(box=None, pad_edge=False, show_header=False)
+    table.add_column("St", width=3)
+    table.add_column("Check", style="lcars2")
+    table.add_column("Detail", style="dim")
+    for r in rows:
+        table.add_row(*r)
+    con.print()
+    con.print(Panel(table, title="[lcars1]org-llm doctor[/lcars1]",
+                      border_style="lcars1"))
+    con.print(_vitals_panel(_mock_readings(), "nominal"))
+    diagnosis = (
+        "Vital systems overall status: NOMINAL\n\n"
+        "Warnings explained:\n"
+        "  * Embeddings partial — 8 nodes lack vectors; run [bold]org-llm embed[/bold]\n"
+        "  * Unindexed files — 22 .org files new since last index\n\n"
+        "Fix steps:\n"
+        "  1. org-llm index\n"
+        "  2. org-llm embed\n\n"
+        "Follow-up checks:\n"
+        "  * Re-run org-llm doctor to confirm 100% embedded"
+    )
+    con.print(Panel(diagnosis,
+                      title="[lcars1]LLM Diagnosis (gemma3) · "
+                              "Dr. Crusher[/lcars1]",
+                      border_style="lcars2", padding=(1, 2)))
+    _save(con, "33-doctor-crusher", "org-llm doctor — Dr. Crusher with vitals")
+
+
 SCENES = [
     scene_pride_banner,
     scene_doctor_table,
@@ -1078,6 +1212,11 @@ SCENES = [
     scene_doctor_power_boost,
     scene_self_snapshot,
     scene_pi_status,
+    # Phase 10: life-support / sensors / EMH / Dr. Crusher with vitals.
+    scene_life_support,
+    scene_sensors_drill,
+    scene_emh_diagnosis,
+    scene_doctor_with_vitals,
 ]
 
 

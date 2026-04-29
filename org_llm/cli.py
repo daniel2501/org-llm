@@ -9615,6 +9615,60 @@ _TUTOR_STEPS = [
         "[dim]Source: org_llm/pi_extension/pi-org-llm.ts (compiled at install time)[/dim]",
     ),
     (
+        "life-support",
+        "[lcars2]org-llm life-support[/lcars2] — host telemetry + sensor_log\n\n"
+        "Self-hosting means the laptop is the substrate. Eight probes\n"
+        "measure the moving parts that turn helpful into frustrating:\n"
+        "  battery, cpu, memory, disk, thermal, network, ollama, "
+        "auto_embedder.\n\n"
+        "[lcars1]Commands:[/lcars1]\n"
+        "  [bold]org-llm life-support[/bold]              — single-shot vital systems panel\n"
+        "  [bold]org-llm life-support --json[/bold]       — scriptable snapshot\n"
+        "  [bold]org-llm life-support --interval 5[/bold] — Rich Live polling (Ctrl-C exits)\n"
+        "  [bold]org-llm life-support --analyze[/bold]    — LLM optimisation advice\n"
+        "  [bold]org-llm sensors[/bold]                   — full LCARS dashboard\n"
+        "  [bold]org-llm sensors --drill cpu[/bold]       — per-probe deep dive\n\n"
+        "[lcars1]Why it's separate from doctor:[/lcars1]\n"
+        "  [bold]doctor[/bold] checks the install (DB, models, files). "
+        "[bold]life-support[/bold] checks the\n"
+        "  HOST that runs it. Both can fail independently.\n\n"
+        "Every reading writes one row to [bold]sensor_log[/bold] with the\n"
+        "user-activity context — what verb / model was running at probe\n"
+        "time. dbt analytics + LLM advice paths read from there.\n\n"
+        "[lcars1]Deterministic floors:[/lcars1] when <12 samples/probe OR\n"
+        "every probe is nominal, the LLM is bypassed and a deterministic\n"
+        "summary is returned. Removes the \"hallucinate problems out of\n"
+        "steady-state telemetry\" failure mode for small chat models.\n\n"
+        "[dim]Source: org_llm/life_support.py  |  org-llm source life_support[/dim]",
+    ),
+    (
+        "emh",
+        "[lcars2]org-llm ask --emh[/lcars2] — Voyager Emergency Medical Hologram\n\n"
+        "Routes the question to the EMH persona instead of vault RAG.\n"
+        "Reads from [bold]sensor_log[/bold] (not the org vault) so it can\n"
+        "answer historical questions about the host's vitals.\n\n"
+        "[lcars1]Modes:[/lcars1]\n"
+        "  [bold]ask --emh \"have I been thrashing the CPU?\"[/bold]\n"
+        "    Question mode — direct answer grounded in telemetry.\n\n"
+        "  [bold]ask --emh --diagnose \"do a full health check\"[/bold]\n"
+        "    Diagnose mode — systematic probe-by-probe findings + a\n"
+        "    prioritized remediation list. Short-circuits to a\n"
+        "    deterministic \"examination complete\" panel when every\n"
+        "    probe is nominal.\n\n"
+        "  [bold]ask --emh --window-hours 168 \"any patterns this week?\"[/bold]\n"
+        "    Widen the historical window (default 24h, max 168 = one week).\n\n"
+        "[lcars1]Activation UX:[/lcars1] every invocation opens with the\n"
+        "trademark \"Please state the nature of the medical emergency.\"\n"
+        "panel + window/probe/sample counts. Rotating diagnostic\n"
+        "readouts cycle through actual probe values during inference\n"
+        "(\"Reviewing battery: 99% ⚡ [nominal]\"…) so you can see what\n"
+        "data the EMH is considering, in EMH voice.\n\n"
+        "[lcars1]Companion tool:[/lcars1] [bold]org-llm doctor[/bold] uses\n"
+        "the Dr. Crusher persona — same vital data, different voice,\n"
+        "covers BOTH install health (DB / models / files) and host vitals.\n\n"
+        "[dim]Source: org_llm/cli.py → ask() → emh branch[/dim]",
+    ),
+    (
         "done",
         "[bold lcars1]You're ready to explore your second brain.[/bold lcars1]\n\n"
         "[lcars1]Recommended first flight:[/lcars1]\n\n"

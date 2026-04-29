@@ -273,11 +273,14 @@ candidates listed.
 | `org-llm cloud` | Multi-provider GPU cloud — signup, configure, status, cost, `--quick-start` |
 | `org-llm launch [-w WORKSPACE] [--cloud/--local]` | Open themed opencode TUI: 38+ MCP tools, LCARS theme, 51+ slash commands, auto cloud-or-local routing, stall watcher, optional auto-embedder daemon |
 | `org-llm claude` | Same, but Claude Code (`ANTHROPIC_API_KEY` from `pass`) |
-| `org-llm doctor` | Deep health check + LLM diagnosis; `--install all` bulk-installs FOSS tools |
+| `org-llm doctor` | Deep health check + LLM diagnosis (Dr. Crusher persona, live vitals folded in); `--install all` bulk-installs FOSS tools |
 | `org-llm doctor -w` | LLM-driven self-test: 13 read-only probes + cloud-LLM judgement |
 | `org-llm doctor -r PATH` | Append a structured org-mode report of any doctor run to PATH |
+| `org-llm life-support` | 8-probe host telemetry — battery, CPU, memory, disk, thermal, network, Ollama, auto-embedder. `--interval N` for a live polling panel; `--analyze` for LLM optimisation advice with deterministic floors |
+| `org-llm sensors` | LCARS resource-monitor dashboard with sparklines; `--drill <probe> --window N` for a per-probe deep-dive (timeseries + status histogram + activity correlations) |
+| `org-llm ask --emh "Q"` | Route the question to the Voyager EMH (Emergency Medical Hologram) — answers grounded in `sensor_log`, not the org vault. `--diagnose` for systematic probe-by-probe exam; `--window-hours H` to widen the historical window |
 | `org-llm report` | Rich text reports — overview / tags / recent / orphans / daily |
-| `org-llm tutor` | 35-step interactive tutorial — start with `tutor welcome` |
+| `org-llm tutor` | 45-step interactive tutorial — start with `tutor welcome` |
 | `org-llm db` | Inspect schema, run SELECT queries, full data dictionary |
 | `org-llm source <module>` | Print any module's source (with `--explain`) |
 | `org-llm mcp` | Start the MCP stdio server (used by opencode and claude) |
@@ -358,7 +361,7 @@ copy. See `org-llm tutor creds` for the full setup.
 
 ## MCP integration
 
-`org-llm mcp` runs an MCP stdio server that exposes **49 tools** to any
+`org-llm mcp` runs an MCP stdio server that exposes **56 tools** to any
 MCP-aware client (opencode, Claude Code, …). The toolbox is designed
 to give the LLM in opencode parity with the CLI, not a stripped-down
 subset.
@@ -378,6 +381,13 @@ subset.
 `discover_filesystem`, `doctor_health`, `performance_status`,
 `list_models`, `list_grants`, `request_access`, `read_file`,
 `list_directory`
+
+**Host telemetry (life support):**
+`life_support_status` *(8-probe vitals snapshot)*,
+`life_support_history` *(sensor_log timeseries with activity context)*,
+`life_support_advice` *(deterministic-floor optimisation suggestions)*,
+`emh_consult` *(Voyager EMH persona — query historical telemetry, two
+modes: question + diagnose)*
 
 **Browser (when granted):**
 `open_url`, `browser_command`
@@ -695,6 +705,116 @@ in-opencode LLM has the same probe via the `proactive_doctor` MCP
 tool and is instructed to call it after 3+ non-converging tool calls.
 
 <div align="center"><img src="docs/img/27-doctor-power-boost.svg" alt="org-llm doctor power-boost" width="780" /></div>
+
+---
+
+## Life support — host telemetry + EMH
+
+Self-hosting means the laptop is the substrate. When battery drops,
+RAM tightens, thermals spike, or Ollama wedges, those are the failure
+modes that turn this tool from helpful to frustrating. `life-support`
+puts the eight vital systems on one screen.
+
+```sh
+org-llm life-support                    # single-shot probe + render
+org-llm life-support --json             # scriptable snapshot
+org-llm life-support --interval 5       # Rich Live polling panel (Ctrl-C exits)
+org-llm life-support --analyze          # LLM optimisation advice
+                                        # — with deterministic floor when
+                                        #   <12 samples/probe OR all-nominal
+```
+
+Eight probes — `battery`, `cpu`, `memory`, `disk`, `thermal`,
+`network`, `ollama`, `auto_embedder` — each emits a Trek-themed
+status line and a normalized health score. Per-probe thresholds are
+calibrated to the actual measurement (thermal reads against the
+sensor's own reported critical temp, not a hardcoded curve; disk uses
+% free not absolute GB; etc.).
+
+<div align="center"><img src="docs/img/30-life-support.svg" alt="org-llm life-support" width="780" /></div>
+
+Every reading writes one row to the `sensor_log` timeseries table
+along with the user-activity context — *which org-llm verb / model
+was running at probe time*. That's the highest-signal optimisation
+lever: the LLM gets to say "CPU pegged WHILE `ask --reason` was
+running" instead of "CPU is high."
+
+### Sensors dashboard — drill-in
+
+```sh
+org-llm sensors                         # live LCARS overview
+                                        # — sparklines across all 8 probes
+org-llm sensors --drill cpu --window 30 # one-shot deep dive on a probe
+```
+
+The drill-in view shows current reading, min/mean/max over the window,
+status histogram, and any activity-correlations recorded during
+alert/critical readings.
+
+<div align="center"><img src="docs/img/31-sensors-drill.svg" alt="org-llm sensors --drill cpu" width="780" /></div>
+
+### Dr. Crusher — doctor with live vitals
+
+`org-llm doctor` now folds the same probe data into its diagnosis
+flow. The Dr. Crusher persona reads the live readings + recent
+activity correlations alongside the standard warnings, and the LLM
+output echoes the overall vital-status verdict explicitly (so the
+model can't claim "all nominal" when one probe is flagged).
+
+<div align="center"><img src="docs/img/33-doctor-crusher.svg" alt="org-llm doctor with vitals" width="780" /></div>
+
+### Emergency Medical Hologram — `ask --emh`
+
+```sh
+org-llm ask --emh "have I been thrashing the CPU?"          # question mode
+org-llm ask --emh --diagnose "do a full health check"       # systematic
+org-llm ask --emh --window-hours 168 "any patterns this week?"
+```
+
+The EMH answers historical questions grounded in `sensor_log`, not
+the vault. Activates with the trademark "Please state the nature of
+the medical emergency" panel, then rotating diagnostic readouts during
+inference. Diagnose mode short-circuits to a deterministic
+"examination complete" panel when every probe is nominal, sidestepping
+the small-model failure mode where an LLM invents severities to fill
+a priority list.
+
+<div align="center"><img src="docs/img/32-emh-diagnosis.svg" alt="org-llm ask --emh --diagnose" width="780" /></div>
+
+### Why deterministic floors matter
+
+Three guard rails got codified during the life-support build:
+
+1. **Sample-size floor** — `--analyze` requires ≥12 readings per
+   probe before calling the LLM. Below that, returns a flat status
+   listing.
+2. **All-nominal short-circuit** — when every probe is nominal AND
+   nothing in the window tripped non-nominal, skip the LLM
+   entirely. Small chat models hallucinate problems out of
+   steady-state telemetry; this avoids the entire failure mode.
+3. **No `normalized` exposure to the LLM** — the 0..1 health score
+   is computed deterministically by each probe and never leaks into
+   the prompt. The LLM sees status enums (`nominal` / `watch` /
+   `alert` / `critical`) and human-unit values only. Removes the
+   "0.97 norm-mean means 97% utilization" inversion class entirely.
+
+All three apply to every LLM-using path in this feature:
+`life-support --analyze`, Dr. Crusher's diagnosis, and `ask --emh`.
+
+### MCP exposure
+
+Four MCP tools mirror these surfaces for opencode / Claude Code:
+
+| Tool | Purpose |
+|---|---|
+| `life_support_status` | 8-probe snapshot — same data as `life-support --json` |
+| `life_support_history` | Pull rows from `sensor_log` (filterable by probe + window) |
+| `life_support_advice` | LLM optimisation suggestions with the same deterministic floors |
+| `emh_consult` | Voyager EMH persona — question + diagnose modes, configurable window |
+
+Ask the LLM in opencode "what's my laptop's vital systems status?"
+and it routes to `life_support_status`; ask "have I been thrashing
+the CPU?" and it pulls from `life_support_history` or `emh_consult`.
 
 ---
 
