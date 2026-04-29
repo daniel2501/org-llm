@@ -12264,7 +12264,19 @@ def launch(
             (command_dir / f"{name}.md").write_text(body)
 
     # ── Launch banner ─────────────────────────────────────────────────────────
+    # Order:
+    #   1. solidarity() — commie/queer dial banners (no-op if dials are 0)
+    #   2. _render_splash_logo() — full LCARS readout, knob-themed
+    #      (callsigns, stardate, vault stats, decorative chrome all
+    #      route through theme_studio so synthwave / homelab / pride
+    #      / cottagecore dials reshape it)
+    #   3. workspace facts panel — model / vault / MCP / theme / config
+    # The downstream frontend (opencode / Claude Code) mounts after we
+    # hand off; this is the last "org-llm" frame the user sees, so it's
+    # the right place to land hard on identity + theme.
     solidarity()
+    console.print()
+    console.print(_render_splash_logo())
     console.print()
 
     tbl = Table(box=None, pad_edge=False, show_header=False)
@@ -12575,7 +12587,19 @@ org-roam second brain via org-llm MCP tools.
             )
 
     # ── Launch banner ─────────────────────────────────────────────────────────
+    # Order:
+    #   1. solidarity() — commie/queer dial banners (no-op if dials are 0)
+    #   2. _render_splash_logo() — full LCARS readout, knob-themed
+    #      (callsigns, stardate, vault stats, decorative chrome all
+    #      route through theme_studio so synthwave / homelab / pride
+    #      / cottagecore dials reshape it)
+    #   3. workspace facts panel — model / vault / MCP / theme / config
+    # The downstream frontend (opencode / Claude Code) mounts after we
+    # hand off; this is the last "org-llm" frame the user sees, so it's
+    # the right place to land hard on identity + theme.
     solidarity()
+    console.print()
+    console.print(_render_splash_logo())
     console.print()
 
     tbl = Table(box=None, pad_edge=False, show_header=False)
