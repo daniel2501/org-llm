@@ -191,6 +191,57 @@ class TestOpencodeLaunchMCP:
             "default but spelling it guards against version drift."
         )
 
+    def test_phase_16_1_plugin_lives_in_tui_json_as_dir_uri(self, cli_org,
+                                                              monkeypatch):
+        """Phase 16.1's first attempt registered the TUI plugin as the
+        path to its inner src/index.ts in tui.json. Two stacked bugs
+        kept opencode from loading it (2026-04-29 audit):
+
+          1. opencode wants the package DIRECTORY (so it can read
+             package.json#exports["./tui"]), not the .ts file.
+          2. The path needs the file:// URI scheme — confirmed by
+             running `opencode plugin file://...` and inspecting the
+             tui.json it wrote.
+
+        Pin the fix: tui.json's plugin entry is a file:// URI of the
+        extensions/opencode/ package directory."""
+        monkeypatch.setattr("org_llm.cli._opencode_bin", lambda: "/usr/bin/true")
+        monkeypatch.setattr(os, "execvp",
+                              lambda p, a: (_ for _ in ()).throw(SystemExit(0)))
+        runner.invoke(app, ["launch"])
+        tui_path = Path(cli_org) / ".opencode" / "tui.json"
+        assert tui_path.exists(), "launch didn't write tui.json"
+        tui_cfg = json.loads(tui_path.read_text())
+        plugins = tui_cfg.get("plugin")
+        assert isinstance(plugins, list) and plugins, (
+            "tui.json missing `plugin: [...]` entry. Phase 16.1 "
+            "TUI plugin won't load."
+        )
+        spec = plugins[0]
+        assert spec.startswith("file://"), (
+            f"plugin spec must be a file:// URI (opencode rejected raw "
+            f"paths during the 2026-04-29 audit). Got: {spec!r}"
+        )
+        assert spec.rstrip("/").endswith("extensions/opencode"), (
+            f"plugin spec must point at the package DIR "
+            f"(extensions/opencode/), not the inner src/index.ts file. "
+            f"opencode reads package.json#exports['./tui'] to resolve "
+            f"the entrypoint. Got: {spec!r}"
+        )
+
+        # And opencode.json must NOT carry a plugin field — that loads
+        # SERVER plugins (must export `server`). Our plugin only
+        # exports `tui`; opencode logged "must default export an
+        # object with server() failed to load plugin" when we put it
+        # there.
+        cfg = json.loads((Path(cli_org) / ".opencode" / "opencode.json").read_text())
+        assert "plugin" not in cfg, (
+            "opencode.json has a `plugin` field — opencode treats those "
+            "as SERVER plugins and rejects our TUI-only export with "
+            "'must default export an object with server()'. Move it "
+            "to tui.json."
+        )
+
     def test_resolved_mcp_invocation_is_not_uv_directory_trick(self, cli_db,
                                                                  monkeypatch,
                                                                  tmp_path):

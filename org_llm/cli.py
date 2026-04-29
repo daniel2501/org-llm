@@ -13402,10 +13402,24 @@ def launch(
     # Phase 16.1: register the TUI plugin if its source exists in
     # the repo. opencode's embedded bun runtime loads .ts files
     # directly — no build step needed.
-    _plugin_src = (Path(__file__).resolve().parent.parent
-                      / "extensions" / "opencode" / "src" / "index.ts")
-    if _plugin_src.exists():
-        tui_config["plugin"] = [str(_plugin_src)]
+    #
+    # 2026-04-29 audit found two stacked bugs in the original 16.1
+    # write:
+    #   1. plugin path was the inner .ts FILE; opencode wants the
+    #      package DIRECTORY (so it can read package.json#exports).
+    #   2. plugin was written to opencode.json's `plugin: [...]`,
+    #      which loads SERVER plugins (must export `server`). TUI
+    #      plugins (export `tui`) live in tui.json. opencode's log
+    #      gave the exact error: "must default export an object
+    #      with server() failed to load plugin".
+    # The fix: write the file:// URI of the package directory into
+    # tui.json only. extensions/opencode/package.json now declares
+    # `exports["./tui"]` so opencode's loader resolves the right
+    # entrypoint.
+    _plugin_pkg = (Path(__file__).resolve().parent.parent
+                      / "extensions" / "opencode")
+    if (_plugin_pkg / "src" / "index.ts").exists():
+        tui_config["plugin"] = [_plugin_pkg.as_uri() + "/"]
 
     # opencode searches `<cwd>/.opencode/opencode.json` (directory +
     # file), NOT a flat `.opencode.json` dotfile. We were writing the

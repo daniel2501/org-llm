@@ -7,6 +7,12 @@
   "private": true,
   "type": "module",
   "module": "src/index.ts",
+  "exports": {
+    "./tui": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
+  },
   "scripts": {
     "build":     "echo 'no build step — opencode loads src/index.ts directly via its embedded bun runtime'",
     "test":      "bun test",
