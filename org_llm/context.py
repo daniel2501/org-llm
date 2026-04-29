@@ -323,6 +323,33 @@ def ensure_context_file_exists() -> Path:
     return p
 
 
+def _normalize_history_runons(text: str) -> str:
+    """One-time cleanup of legacy run-on history-block entries.
+
+    Pre-Phase-13.1.1, add_fact's history insertion was missing a
+    trailing \\n, so consecutive saves smushed together:
+        )- [date] X (src)- [date] Y (src)
+    instead of:
+        ) - [date] X (src)
+        ) - [date] Y (src)
+
+    This normalizer splits those run-ons. Idempotent — already-clean
+    entries (with newlines between them) don't match the pattern.
+
+    Two patterns:
+      A. Entry-to-entry boundary: ')- [' becomes ')\\n- ['
+      B. Entry-to-trailing-prose boundary: a closing ')' followed
+         immediately by 'When facts are added' (the auto-history
+         block's intro sentence) gets a newline inserted.
+    """
+    # Boundary A: entry ending in ")" smushed against next entry "- ["
+    text = re.sub(r"\)(- \[\d{4})", r")\n\1", text)
+    # Boundary B: entry ending in ")" smushed against the
+    # known-trailing-prose intro ("When facts are added or updated")
+    text = re.sub(r"\)(When facts are added)", r")\n\n\1", text)
+    return text
+
+
 def add_fact(fact: str, source: str = "cli") -> Path:
     """Append a fact to the active-facts tangle block. Creates file if needed.
 
@@ -331,6 +358,10 @@ def add_fact(fact: str, source: str = "cli") -> Path:
     """
     p = ensure_context_file_exists()
     text = p.read_text(errors="replace")
+    # Auto-clean legacy run-on history entries on every save. Cheap
+    # (two regex passes) and idempotent — already-clean files
+    # are no-ops.
+    text = _normalize_history_runons(text)
 
     fact_line = f"- {fact.strip()}"
     today = datetime.now().date().isoformat()
@@ -412,11 +443,30 @@ def add_disambiguation(term: str, periods: dict[str, str],
         raise ValueError("disambiguation periods dict cannot be empty")
     p = ensure_context_file_exists()
     text = p.read_text(errors="replace")
+    # Same legacy-run-on cleanup as add_fact — idempotent.
+    text = _normalize_history_runons(text)
 
     block = [f"\n*** {term.strip()}"]
     for period, meaning in periods.items():
         block.append(f"- {period.strip()} = {meaning.strip()}")
     new_block = "\n".join(block) + "\n"
+
+    # First-real-entry placeholder cleanup. The Disambiguations
+    # section ships with an explanatory paragraph + a #+begin_quote
+    # example block that's meant as instructional reference text.
+    # Once the user adds a real entry, the placeholder reads weird
+    # (real entry above, example below). Strip the placeholder
+    # paragraph + quote block so real entries replace the
+    # explanation. Only strips when the EXACT placeholder pattern is
+    # detected — preserves any user-authored content there.
+    placeholder_re = re.compile(
+        r"\n\nWhen older notes use a name/word ambiguously, "
+        r"clarify here\. Example:\n\n"
+        r"#\+begin_quote\n"
+        r"- \"the team\" before 2026 = my team at <previous-employer>\n"
+        r"- \"the team\" after 2026 = my team at <current-employer>\n"
+        r"#\+end_quote\n?")
+    text = placeholder_re.sub("\n", text)
 
     # Find the * Disambiguations section's :END: drawer; insert the
     # new sub-heading right after it. If the section is missing,

@@ -12506,6 +12506,16 @@ def _opencode_slash_commands(workspace: str) -> dict:
             "7. If the user changes their mind right after a save, call\n"
             "   `walk_undo_last_save(confirm=True)` to remove the most\n"
             "   recent batch.\n"
+            "8. If the user asks to SPLIT a bundled fact that's already\n"
+            "   saved (e.g. 'split that work history into atoms'), the\n"
+            "   correct sequence is:\n"
+            "     a. `walk_undo_last_save(confirm=True)` — drops the\n"
+            "        bundled save\n"
+            "     b. `walk_save_facts(facts=[atom1, atom2, atom3],\n"
+            "        user_approved=True)` — adds the atoms\n"
+            "   That way the bundle disappears and the file ends up\n"
+            "   with only the atoms. Without the undo step, both the\n"
+            "   bundle AND the atoms coexist (visible inconsistency).\n"
         ),
         "walk-review": (
             "---\n"
