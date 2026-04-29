@@ -10616,50 +10616,113 @@ def _opencode_pre_flight_context(session) -> dict:
 
 
 def _opencode_lcars_theme() -> dict:
-    """LCARS-themed opencode theme using the same palette as the CLI.
+    """LCARS-themed opencode theme matching the schema at
+    https://opencode.ai/theme.json.
 
-    Best-effort: opencode's theme schema is JSON. We provide both light
-    and dark variants so opencode can pick based on its own theme mode.
+    Schema requirements (verified live):
+      • Required theme keys: primary, secondary, accent, text,
+        textMuted, background. Earlier the file was missing
+        text/textMuted/background and opencode's renderer crashed
+        in setBackgroundColor on the missing root-level field
+        ("undefined is not an object (evaluating 'a.buffer')").
+      • additionalProperties: false at the root — any extra key
+        (we previously had a flat `colors:` block) makes the schema
+        validator reject. Removed.
+      • additionalProperties: false inside `theme` — only the
+        keys enumerated in the schema are allowed; unknown keys
+        likewise reject.
+      • Each color value is either a hex string, a 0-255 ANSI int,
+        the literal "none", a name reference, or a `{dark, light}`
+        object. We use `{dark, light}` everywhere so opencode can
+        switch by the user's terminal mode.
     """
     from .ui import DARK_PALETTE, LIGHT_PALETTE
+    from .palettes import palette_overrides as _po
 
-    def _t(p: dict) -> dict:
-        return {
-            "primary":   p["lcars1"],   # signature LCARS orange
-            "secondary": p["lcars2"],   # purple
-            "accent":    p["lcars3"],   # blue
-            "info":      p["lcars3"],
-            "warning":   p["lcars1"],
-            "error":     p.get("pride.red", "#FF4444"),
-            "success":   p.get("pride.green", "#44CC44"),
-        }
+    # Honor the active LCARS palette (classic / red / green / gold /
+    # violet, plus per-channel hex overrides). Without this layer the
+    # opencode theme stayed classic orange even when the user ran
+    # `org-llm palette green` — palette swaps propagated everywhere
+    # in the CLI but not into opencode. Apply the same overrides
+    # ui.PALETTE applies, but to BOTH dark and light variants since
+    # opencode picks per terminal mode.
+    overrides = {}
+    try:
+        overrides = _po()
+    except Exception:
+        pass
+    dark  = {**DARK_PALETTE,  **overrides}
+    light = {**LIGHT_PALETTE, **overrides}
+
+    def _pair(dark_v: str, light_v: str) -> dict:
+        return {"dark": dark_v, "light": light_v}
+
+    def _palette(key: str, dark_default: str, light_default: str) -> dict:
+        """Pull a (dark, light) pair from the palette-overlay-merged
+        copies above. Some palette entries are dotted
+        (pride.red); use defaults when missing so the schema
+        stays well-formed."""
+        return _pair(
+            dark.get(key,  dark_default),
+            light.get(key, light_default),
+        )
 
     return {
         "$schema": "https://opencode.ai/theme.json",
-        "name":    "org-llm-lcars",
-        "description": "LCARS-themed colour scheme matching org-llm CLI",
         "defs": {
-            "lcars1_dark":   DARK_PALETTE["lcars1"],
-            "lcars2_dark":   DARK_PALETTE["lcars2"],
-            "lcars3_dark":   DARK_PALETTE["lcars3"],
-            "lcars1_light":  LIGHT_PALETTE["lcars1"],
-            "lcars2_light":  LIGHT_PALETTE["lcars2"],
-            "lcars3_light":  LIGHT_PALETTE["lcars3"],
+            "lcars1_dark":   dark["lcars1"],
+            "lcars2_dark":   dark["lcars2"],
+            "lcars3_dark":   dark["lcars3"],
+            "lcars1_light":  light["lcars1"],
+            "lcars2_light":  light["lcars2"],
+            "lcars3_light":  light["lcars3"],
         },
         "theme": {
-            "primary":   {"dark": DARK_PALETTE["lcars1"], "light": LIGHT_PALETTE["lcars1"]},
-            "secondary": {"dark": DARK_PALETTE["lcars2"], "light": LIGHT_PALETTE["lcars2"]},
-            "accent":    {"dark": DARK_PALETTE["lcars3"], "light": LIGHT_PALETTE["lcars3"]},
-            "info":      {"dark": DARK_PALETTE["lcars3"], "light": LIGHT_PALETTE["lcars3"]},
-            "warning":   {"dark": DARK_PALETTE["lcars1"], "light": LIGHT_PALETTE["lcars1"]},
-            "error":     {"dark": DARK_PALETTE.get("pride.red",   "#FF4444"),
-                           "light": LIGHT_PALETTE.get("pride.red", "#CC2222")},
-            "success":   {"dark": DARK_PALETTE.get("pride.green", "#44CC44"),
-                           "light": LIGHT_PALETTE.get("pride.green", "#228822")},
+            # ── role colours (required) ───────────────────────────
+            "primary":   _pair(dark["lcars1"], light["lcars1"]),
+            "secondary": _pair(dark["lcars2"], light["lcars2"]),
+            "accent":    _pair(dark["lcars3"], light["lcars3"]),
+            # ── text + background (the previously-missing required ones) ─
+            # LCARS terminals use light text on near-black; flip for
+            # light-mode terminals.
+            "text":              _pair("#F5F5F5", "#0E0E12"),
+            "textMuted":         _pair("#9A9A9A", "#5A5A60"),
+            "background":        _pair("#0E0E12", "#F8F8F8"),
+            "backgroundPanel":   _pair("#15151B", "#F0F0F4"),
+            "backgroundElement": _pair("#1E1E26", "#E6E6EC"),
+            # ── borders — mirror LCARS callsign colour ────────────
+            "border":       _pair("#33333A", "#C2C2CA"),
+            "borderActive": _pair(dark["lcars1"], light["lcars1"]),
+            "borderSubtle": _pair("#22222A", "#D8D8E0"),
+            # ── status (info / warning / error / success) ─────────
+            "info":      _pair(dark["lcars3"], light["lcars3"]),
+            "warning":   _pair(dark["lcars1"], light["lcars1"]),
+            "error":     _palette("pride.red",   "#E40303", "#A00000"),
+            "success":   _palette("pride.green", "#008026", "#006020"),
+            # ── markdown rendering inside chat replies ────────────
+            "markdownText":     _pair("#F5F5F5", "#0E0E12"),
+            "markdownHeading":  _pair(dark["lcars1"], light["lcars1"]),
+            "markdownLink":     _pair(dark["lcars3"], light["lcars3"]),
+            "markdownLinkText": _pair(dark["lcars3"], light["lcars3"]),
+            "markdownCode":     _pair(dark["lcars2"], light["lcars2"]),
+            "markdownBlockQuote": _pair("#9A9A9A", "#5A5A60"),
+            "markdownEmph":     _pair(dark["lcars2"], light["lcars2"]),
+            "markdownStrong":   _pair("#F5F5F5", "#0E0E12"),
+            # ── syntax highlighting in code blocks ────────────────
+            "syntaxComment":     _pair("#7A7A82", "#777783"),
+            "syntaxKeyword":     _pair(dark["lcars2"], light["lcars2"]),
+            "syntaxFunction":    _pair(dark["lcars3"], light["lcars3"]),
+            "syntaxVariable":    _pair("#F5F5F5", "#0E0E12"),
+            "syntaxString":      _palette("pride.green", "#008026", "#006020"),
+            "syntaxNumber":      _palette("pride.orange", "#FF8C00", "#A05000"),
+            "syntaxType":        _pair(dark["lcars1"], light["lcars1"]),
+            "syntaxOperator":    _pair("#F5F5F5", "#0E0E12"),
+            "syntaxPunctuation": _pair("#9A9A9A", "#5A5A60"),
+            # ── diff colours (for /diff and similar) ──────────────
+            "diffAdded":   _palette("pride.green", "#008026", "#006020"),
+            "diffRemoved": _palette("pride.red",   "#E40303", "#A00000"),
+            "diffContext": _pair("#9A9A9A", "#5A5A60"),
         },
-        # Flat fallback in case the consuming opencode build expects a
-        # mode-less map under the same key.
-        "colors": _t(DARK_PALETTE),
     }
 
 
@@ -11167,13 +11230,11 @@ def launch(
                 help="Override chat model (default: chat_model from config)")] = "",
     no_context: Annotated[bool, typer.Option("--no-context", "-N",
                 help="Skip vault context injection into system prompt")] = False,
-    no_theme:   Annotated[bool, typer.Option("--no-theme/--theme", "-T/-Y",
+    no_theme:   Annotated[bool, typer.Option("--no-theme",   "-T",
                 help="Skip writing the LCARS theme to .opencode/themes/. "
-                      "Default ON — opencode crashes on our theme JSON shape "
-                      "(setBackgroundColor TypeError on 'a.buffer'); the JSON "
-                      "schema we generate is missing fields opencode's "
-                      "renderer wants. Pass --theme to opt back in once the "
-                      "schema is fixed.")] = True,
+                      "Default OFF — themed by default. "
+                      "(Schema-validated via tests/test_opencode_theme.py "
+                      "to prevent the setBackgroundColor crash class.)")] = False,
     no_commands:Annotated[bool, typer.Option("--no-commands","-C",
                 help="Skip writing slash-commands to .opencode/command/")] = False,
     cloud:      Annotated[bool, typer.Option("--cloud/--local",
