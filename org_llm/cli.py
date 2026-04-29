@@ -5816,9 +5816,16 @@ def _install_gh(bin_dir: Path) -> Path | None:
     arch = platform.machine().lower()
     arch_slug = "amd64" if arch in ("x86_64", "amd64") else "arm64"
     try:
-        with urllib.request.urlopen(
-            "https://api.github.com/repos/cli/cli/releases/latest", timeout=10
-        ) as r:
+        # Route through cloud._urlopen so distro-specific SSL CA
+        # bundle paths apply (Guix lives under
+        # ~/.guix-home/profile/etc/ssl/...). Bare urllib here used to
+        # fail with CERTIFICATE_VERIFY_FAILED on Guix during install.
+        from .cloud import _urlopen
+        req = urllib.request.Request(
+            "https://api.github.com/repos/cli/cli/releases/latest",
+            headers={"User-Agent": "org-llm/install-tools"},
+        )
+        with _urlopen(req, timeout=10) as r:
             release = json.loads(r.read())
         version = release["tag_name"].lstrip("v")
         url = (
@@ -5827,7 +5834,12 @@ def _install_gh(bin_dir: Path) -> Path | None:
         )
         tmp = Path("/tmp/gh.tar.gz")
         with warp("Downloading gh CLI"):
-            urllib.request.urlretrieve(url, tmp)
+            # urlretrieve also uses bare urllib; route the GET via
+            # _urlopen + write to disk ourselves so the SSL ctx applies.
+            req2 = urllib.request.Request(
+                url, headers={"User-Agent": "org-llm/install-tools"})
+            with _urlopen(req2, timeout=60) as r:
+                tmp.write_bytes(r.read())
         import subprocess, tarfile
         with tarfile.open(tmp) as tf:
             for member in tf.getmembers():

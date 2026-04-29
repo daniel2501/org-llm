@@ -7,11 +7,11 @@
 **Your org-roam vault, augmented by FOSS LLMs — and a whole IDE for the second brain that lives there.**
 
 A self-hosted system that indexes your `~/org/` notes into SQLite + sqlite-vec,
-embeds them locally via [Ollama](https://ollama.com), then surfaces 40+ MCP
+embeds them locally via [Ollama](https://ollama.com), then surfaces 50+ MCP
 tools to [opencode](https://opencode.ai), [Claude Code](https://claude.com/code),
 and [Pi](https://pi.dev/) (via a bundled bridge extension) so any of those
 agents can read, write, search, and reason over your second brain natively.
-When your laptop runs out of VRAM, route through 7+ cloud providers; when
+When your laptop runs out of VRAM, route through 6+ cloud providers; when
 local Ollama gets stuck, the proactive doctor probes RAM fit and proposes a
 downsize/upsize/cloud switch with one-line acceptance. Captain's Log mirrors
 every CLI invocation, LLM call, MCP tool call, and config change to BOTH the
@@ -76,8 +76,8 @@ org-llm palette reset                      # back to classic
 |---|---|
 | 🚀 **Splash menu** — `org-llm` (no args) opens a Doom-Emacs-style LCARS launcher with grouped shortcuts; first-run users see a setup nudge instead | 🔍 **Semantic search** over your full org-roam graph (`sqlite-vec`, no vector DB) |
 | 💬 **RAG Q&A** grounded in your own notes (`org-llm ask "…"`) | 📔 **Askbook** — literate Q/A scratchpad: pose the same question to chat / reason / fast / code / text / cloud / claude / pi backends and see answers side-by-side in `~/org/llm-askbook.org` |
-| 🧠 **Hardware-aware FOSS model catalog** — `org-llm models` dashboard with auto-suggestions; one-shot `--set role=tag` swaps | ☁️ **7+ cloud providers** when you outgrow local — RunPod, Vast, Lambda, Salad, OpenRouter, Groq, HF |
-| 🛡️ **Encrypted credentials** via the standard Unix `pass` manager — never in plaintext | 🤖 **MCP server** with 40+ tools — every capability exposed to opencode + Claude Code (and Pi via the bundled bridge), with themed LCARS-styled output |
+| 🧠 **Hardware-aware FOSS model catalog** — `org-llm models` dashboard with auto-suggestions; `models --benchmark` real tok/s rankings; `models --upgrade` one-shot local + cloud picker | ☁️ **6+ cloud providers** when you outgrow local — RunPod, Vast, Lambda, TensorDock, Salad, Paperspace, CoreWeave, OpenRouter, HuggingFace; auto-refreshing pricing catalog (`cloud --refresh-catalog`) |
+| 🛡️ **Encrypted credentials** via the standard Unix `pass` manager — never in plaintext | 🤖 **MCP server** with 50+ tools — every capability exposed to opencode + Claude Code (and Pi via the bundled bridge), with themed LCARS-styled output |
 | 🐝 **Pi extension bridge** — `org-llm pi --install` auto-installs Pi if missing, copies a TypeScript MCP-bridge extension to `~/.pi/extensions/`, and wires `~/.pi/config.json`; per-turn dynamic system prompts (something opencode can't do) | 📓 **Org-babel skills** — define LLM workflows as `:skill:`-tagged source blocks |
 | 🔬 **Proactive `doctor`** — power-boost probe at launch surfaces upgrades; LLM rescue on every uncaught exception with opt-in self-rewrite + auto-rollback | 🚀 **`launch` / `claude`** — themed workspaces with 51+ slash commands, persona-binding from active dials, stall watcher, optional auto-embedder |
 | 🎨 **FOSS tool installer** — `bat`, `eza`, `delta`, `zellij`, … with LCARS/Doom themes | 📊 **dbt analytics + LLM lessons** — `org-llm dbt build/status/doctor/design/walkthrough/lessons`, mart layer over both notes AND the Captain's Log |
@@ -88,6 +88,46 @@ org-llm palette reset                      # back to classic
 | 🌎 **Env-var override visibility** — every config key has an `ORG_LLM_<KEY>` env tap; `org-llm config` shows the source ([env|config|default]) + env name for every row | 🤖 **LLM copywriting throughout** — Try-it lines, models nudge, doctor closing, tutor recommendation all generated from real state |
 
 ---
+
+## Status: beta
+
+Tested end-to-end on Linux (Guix + standard distros). macOS likely
+works; Windows isn't supported (no `pass`). Mobile is post-beta —
+[Termux port is on the roadmap](#roadmap).
+
+If you hit something broken or weirdly worded, open an issue with
+the output of `org-llm log --kind cli --limit 20` — every CLI
+invocation is logged with timestamps and that's the fastest way for
+me to reproduce.
+
+## First 5 minutes
+
+If you only read one section, this is it:
+
+```sh
+# 1. Install (assumes uv — https://docs.astral.sh/uv)
+uv tool install --reinstall git+https://github.com/daniel2501/org-llm
+
+# 2. Guided setup — installs Ollama, picks models, indexes ~/org/, etc.
+org-llm setup
+
+# 3. Try it — every question is grounded in YOUR notes
+org-llm ask "what did I write about cooperative governance lately?"
+```
+
+Three things the above quietly does that matter:
+
+- **Index + embed your `~/org/` vault** locally (sqlite-vec). No data
+  leaves your machine for the chat side unless you opt into cloud.
+- **Pick the right local LLM** for your hardware via `models --tune`.
+  If you have <4 GB free RAM it'll route through a free-tier cloud
+  provider you connect via `cloud --quick-start openrouter`.
+- **Mirror everything to `~/org/captains-log.org`** so you can search
+  and analyse your own LLM usage from inside your vault.
+
+After step 3 you have a working second-brain CLI. Read on for the
+deeper surfaces (workspaces in opencode/Claude/Pi, dbt analytics,
+self-healing, theming).
 
 ## Install
 
@@ -199,7 +239,7 @@ org-llm ask "what did I write about cooperative governance last month?"
    ┌─────────┐       ┌──────────┐    ┌──────────┐     ┌──────────┐      ┌────────────┐
    │ Ollama  │       │ MCP      │    │ opencode │     │ Claude   │      │ Cloud GPU  │
    │ (local) │       │ stdio    │ ─▶ │ workspace│     │ Code     │      │ (RunPod /  │
-   │ chat    │ ◀──── │ 49 tools │    │          │     │ workspace│      │  Vast / …) │
+   │ chat    │ ◀──── │ 50+ tools│    │          │     │ workspace│      │  Vast / …) │
    │ embed   │       └──────────┘    └──────────┘     └──────────┘      └────────────┘
    └─────────┘
 ```
@@ -212,8 +252,8 @@ source of truth — every Python/SQL/elisp file in this repo is tangled from it.
 ## Commands at a glance
 
 Top-level commands accept the **shortest unique prefix** — `org-llm do` runs
-`doctor`, `org-llm rev` runs `review-emacs`, ambiguous prefixes error with
-candidates.
+`doctor`, `org-llm review` runs `review-emacs`, ambiguous prefixes error with
+candidates listed.
 
 | Command | What it does |
 |---|---|
@@ -288,8 +328,8 @@ org-llm cloud --test               # ping the configured endpoint
 
 Supported: **RunPod**, **Vast.ai**, **Lambda Labs**, **TensorDock**,
 **Salad Cloud**, **Paperspace**, **CoreWeave**, plus per-token APIs
-**OpenRouter** (free Llama 3.1 8B), **Groq** (free LPU tier), and
-**Hugging Face Inference**.
+**OpenRouter** (free Llama 3.1 8B + dozens of paid models, auto-
+refreshing pricing) and **Hugging Face Inference**.
 
 ---
 
@@ -1466,6 +1506,58 @@ org-llm man --output PATH # write to a custom location
 
 When the install dir isn't on `manpath`, the install hint includes
 the right shell rc snippet for your `$SHELL` (bash / zsh / fish).
+
+---
+
+## Common gotchas
+
+If something doesn't behave the way you expect, this is the short list:
+
+- **`org-llm ask "..."` is slow / hangs.** Your `chat_model` may be
+  bigger than your free RAM. Run `org-llm doctor --power-boost` for
+  the real number, or `org-llm models --upgrade` to re-pick using a
+  real `tok/s` benchmark on your hardware. Inline lag warnings
+  appear automatically once enough samples accumulate.
+- **`org-llm launch` opens opencode but the LLM doesn't see org-llm
+  tools.** Check that `~/org/.opencode/opencode.json` exists
+  (the directory + file form, not a flat dotfile). Stale dotfiles
+  from older builds can confuse opencode; remove them.
+- **Cloud calls fail with `CERTIFICATE_VERIFY_FAILED`.**
+  We probe a list of distro CA bundle paths but if yours isn't
+  covered, install `certifi` (`uv pip install --system certifi`)
+  and we'll fall back to it.
+- **The opencode in-chat LLM made up a model name.** Slug
+  validation runs after every catalog refresh; if the LLM still
+  hallucinated something past the validator, the panel renders
+  in yellow with the offending slugs listed. Cross-check with
+  `org-llm cloud --tune` — that table is built from real catalog
+  data only.
+- **`pi --install` errors about Node.** Pi requires Node.js + npm;
+  install them via your package manager first. `pi --reinstall`
+  won't auto-bootstrap Node.
+- **Tests fail under a fresh-install `ORG_LLM_DB`.** The DB is
+  auto-created on first use; the test fixture's setup may take a
+  few seconds to populate. Re-run tests once.
+- **Auto-healing did something I didn't approve.** Check
+  `~/org/captains-log.org` — every action is logged. The MCP
+  `proactive_doctor_apply` tool requires a token-based approval
+  (the LLM can't fake it); CLI auto-fixes are listed in the
+  walkthrough output. Both can be globally suppressed with
+  `org-llm --suppress-proactive-doctor` or
+  `ORG_LLM_PROACTIVE_DOCTOR=off`.
+
+## Roadmap
+
+Currently in beta. Tracked in
+[gap-analysis-alpha-to-beta](https://github.com/daniel2501/org-llm/blob/main/docs/test-session/gap-analysis-alpha-to-beta.org)
+when published; the punch list:
+
+- Cross-platform install validation on macOS + Ubuntu
+- Smoke tests for the few less-walked verbs
+- Performance regressions surfacing proactively in `models` dashboard
+- **Android / Termux port** — needs an arm64 install path, no
+  systemd for the auto-embedder daemon, smaller hardware budget
+  for benchmarks.
 
 ---
 

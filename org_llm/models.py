@@ -337,11 +337,21 @@ PALETTE = _PaletteProxy()
 
 
 def _github_latest(owner: str, repo: str) -> str:
-    """Return latest release tag (without leading v) from GitHub."""
+    """Return latest release tag (without leading v) from GitHub.
+
+    Routes through `cloud._urlopen` so the SSL context probe (which
+    finds Guix's CA bundle and other distro-specific paths) applies.
+    Bare urllib here used to fail on Guix with CERTIFICATE_VERIFY_FAILED
+    during install-tools; same root cause as the
+    cloud --refresh-catalog SSL bug fixed in f61308e.
+    """
     import urllib.request, json
-    with urllib.request.urlopen(
-        f"https://api.github.com/repos/{owner}/{repo}/releases/latest", timeout=8
-    ) as r:
+    from .cloud import _urlopen
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{owner}/{repo}/releases/latest",
+        headers={"User-Agent": "org-llm/install-tools"},
+    )
+    with _urlopen(req, timeout=8) as r:
         return json.loads(r.read())["tag_name"].lstrip("v")
 
 
