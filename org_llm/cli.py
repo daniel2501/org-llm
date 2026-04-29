@@ -3355,6 +3355,7 @@ def ask(
     # persona, different grounding source, same chat path.
     if emh:
         from . import life_support as _ls
+        from rich.panel import Panel as _Panel
         win_secs = max(60, int(emh_window_hours) * 3600)
         recent = _ls.recent_readings(since_secs=win_secs, limit=4000)
         if not recent:
@@ -3380,7 +3381,6 @@ def ask(
                     or MODEL_DEFAULTS["chat_model"])
 
         if sparse:
-            from rich.panel import Panel as _Panel
             body = (f"Please state the nature of the medical emergency.\n\n"
                     f"Insufficient telemetry — only "
                     f"{min(sparse.values())} sample(s) for "
@@ -3403,12 +3403,15 @@ def ask(
         # prompt explicitly defines it. Status enums are unambiguous
         # and the probe already did the health calculation.
         summary_lines: list[str] = []
+        any_non_nominal_in_window = False
         for probe, vs in sorted(by_probe.items()):
             latest = vs[0]
             counts: dict[str, int] = {}
             for v in vs:
                 k = (v.get("status") or "nominal")
                 counts[k] = counts.get(k, 0) + 1
+                if k != "nominal":
+                    any_non_nominal_in_window = True
             counts_text = " ".join(
                 f"{k}={counts.get(k, 0)}"
                 for k in ("nominal", "watch", "alert", "critical")
@@ -3416,8 +3419,32 @@ def ask(
             summary_lines.append(
                 f"  {probe:<14} latest={latest['label']:<22} "
                 f"status_now={latest['status']:<8} "
-                f"window_counts: {counts_text}  n={len(vs)}"
+                f"window_counts: {counts_text}"
             )
+
+        # Diagnose-mode short-circuit: when every reading in the
+        # window is nominal AND the latest probes are all nominal,
+        # skip the LLM. Same lesson as life-support --analyze:
+        # forcing a small model to "walk every probe and produce a
+        # priority action list" on steady-state telemetry just makes
+        # it invent severities. Question mode still calls the LLM
+        # because the user might be asking about steady-state ('no,
+        # CPU has not been thrashing') — that's worth answering.
+        latest_all_nominal = all(
+            (vs[0].get("status") == "nominal") for vs in by_probe.values()
+        )
+        if (emh_diagnose and not any_non_nominal_in_window
+                and latest_all_nominal):
+            console.print(_Panel(
+                f"Examination complete. All {len(by_probe)} vital "
+                f"systems nominal across {len(recent)} reading(s) "
+                f"in the last {emh_window_hours}h window.\n\n"
+                f"No remediation required. The patient is — for "
+                f"once — in good health.",
+                title="[lcars1]EMH · diagnosis[/lcars1]",
+                border_style="lcars2", padding=(1, 2),
+            ))
+            return
         seen: set[str] = set()
         corr_lines: list[str] = []
         for v in recent:
@@ -3449,8 +3476,18 @@ def ask(
                 "ordered by severity (critical → alert → watch). "
                 "Cite specific values + activity correlations when "
                 "they explain a finding. Stay in EMH voice — "
-                "clinical, terse, occasionally sardonic. Never "
-                "propose pip install / curl | sh / open shell; "
+                "clinical, terse, occasionally sardonic.\n"
+                "\n"
+                "PLAIN TEXT only — no markdown. No `**bold**`, no "
+                "asterisks, no escaped underscores, no headers. "
+                "Use simple dashes for bullet lists.\n"
+                "\n"
+                "When all probes are nominal AND `window_counts` "
+                "shows zero in watch/alert/critical for every probe, "
+                "say 'No remediation required' — do NOT invent "
+                "severities to fill the priority list.\n"
+                "\n"
+                "Never propose pip install / curl | sh / open shell; "
                 "suggest only org-llm verbs."
             )
             emh_user_intent = (
@@ -3475,9 +3512,13 @@ def ask(
                 "doesn't support an answer, say so plainly — do "
                 "not invent trends. Stay in EMH voice (clinical, "
                 "slightly impatient, occasionally sardonic about "
-                "the user's hardware abuse). Never propose "
-                "`pip install`, `curl | sh`, or any open-shell "
-                "command; suggest only org-llm verbs."
+                "the user's hardware abuse).\n"
+                "\n"
+                "PLAIN TEXT only — no markdown. No `**bold**`, no "
+                "asterisks, no escaped underscores, no headers.\n"
+                "\n"
+                "Never propose `pip install`, `curl | sh`, or any "
+                "open-shell command; suggest only org-llm verbs."
             )
             emh_user_intent = f"User query: {query}"
         emh_user = (
@@ -3492,8 +3533,6 @@ def ask(
                 + "\n".join(corr_lines)
             )
         emh_user += f"\n\n{emh_user_intent}"
-
-        from rich.panel import Panel as _Panel
 
         # Stage 1 — EMH activates. Print the catchphrase as a panel
         # FIRST so the user sees it immediately on invocation, not
