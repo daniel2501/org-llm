@@ -186,13 +186,21 @@ def probe_memory() -> Reading:
                             "nominal", "Memory probe unavailable.")
     pct_free = free_gb / total_gb if total_gb else 0.0
     norm = pct_free
-    stat = _status_from_norm(norm)
     label = f"{free_gb:.1f} / {total_gb:.1f} GB free"
-    if   norm > 0.5: msg = "Holodecks online. Plenty of working memory."
-    elif norm > 0.3: msg = "Memory banks comfortable."
-    elif norm > 0.15: msg = "Recommend purging unused models or routing to cloud."
-    elif norm > 0.07: msg = "Critical — local LLM may not load. Use --cloud."
-    else:             msg = "RED ALERT — memory exhaustion imminent."
+    # Memory-specific bands aligned to the message thresholds below.
+    # The generic _status_from_norm cliff at 0.7 (== 70% free) was way
+    # too tight — 51% free RAM is plenty on a 16 GB laptop and should
+    # not be tagged "watch" with a message saying "plenty".
+    if   pct_free >= 0.30:
+        stat, msg = "nominal", "Holodecks online. Plenty of working memory."
+    elif pct_free >= 0.15:
+        stat = "watch"
+        msg  = "Recommend purging unused models or routing to cloud."
+    elif pct_free >= 0.07:
+        stat = "alert"
+        msg  = "Memory tight — local LLM may not load. Use --cloud."
+    else:
+        stat, msg = "critical", "RED ALERT — memory exhaustion imminent."
     return Reading("memory", free_gb, norm, label, stat, msg)
 
 

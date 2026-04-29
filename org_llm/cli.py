@@ -7983,10 +7983,17 @@ def _doctor_impl(
             from . import life_support as _ls
             fresh = _ls.probe_all()
             _ls.record_readings(fresh)
-            console.print(_vitals_panel(fresh, _ls.overall_status(fresh)))
+            overall_vitals = _ls.overall_status(fresh)
+            console.print(_vitals_panel(fresh, overall_vitals))
             console.print()
             recent = _ls.recent_readings(since_secs=3600, limit=400)
-            sensor_block = "\nLive vital systems (fresh probe):\n"
+            non_nominal = [r for r in fresh if r.status != "nominal"]
+            sensor_block = (
+                f"\nVital systems overall status: {overall_vitals.upper()}\n"
+                f"Probes flagged non-nominal: "
+                f"{', '.join(r.name + '=' + r.status for r in non_nominal) or 'none'}\n"
+                f"\nLive vital systems (fresh probe):\n"
+            )
             for r in fresh:
                 sensor_block += f"  - {r.name}: {r.label} [{r.status}] {r.message}\n"
             if recent:
@@ -8021,10 +8028,12 @@ def _doctor_impl(
             "any activity-correlations recorded in the recent timeseries "
             "log. Respond with EXACTLY these sections, in order:\n"
             "1. Vital signs: ONE short line stating overall vitals "
-            "   status (e.g. 'All vital systems nominal — battery 99% "
-            "   on AC, CPU idle, thermal headroom 30°C'). If anything "
-            "   is in watch / alert / critical, name it. Always "
-            "   include this section even if everything's fine.\n"
+            "   status. The user gives you an explicit "
+            "   'Vital systems overall status' field — echo that "
+            "   verdict EXACTLY. If overall is WATCH/ALERT/CRITICAL, "
+            "   name the specific probes that tripped (from the "
+            "   'Probes flagged non-nominal' list). Do NOT say "
+            "   'all nominal' unless overall status is NOMINAL.\n"
             "2. Warnings explained: brief plain-English for each "
             "   warning. Cite the specific vital reading or activity "
             "   correlation when it explains the warning.\n"
