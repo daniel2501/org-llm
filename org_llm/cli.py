@@ -3531,13 +3531,25 @@ def ask(
                 "using only the sensor_log telemetry below as "
                 "ground truth. You CAN answer historical questions "
                 "('was my CPU pegged yesterday afternoon?', 'why "
-                "is the battery dropping?') — the telemetry covers "
-                "the requested window. Cite specific probes, "
-                "values, and activity correlations. If the data "
-                "doesn't support an answer, say so plainly — do "
-                "not invent trends. Stay in EMH voice (clinical, "
-                "slightly impatient, occasionally sardonic about "
-                "the user's hardware abuse).\n"
+                "is the battery dropping?') — but ONLY within the "
+                "actual data span shown in the prompt. If the user "
+                "asks about a time range larger than the data "
+                "span, acknowledge the gap rather than inventing.\n"
+                "\n"
+                "Cite specific probes, values, and activity "
+                "correlations. If the data doesn't support an "
+                "answer, say so plainly — do not invent trends.\n"
+                "\n"
+                "Do NOT invent clock times, peak-hour windows, "
+                "daily / weekly patterns, or specific timestamps. "
+                "The prompt does NOT include per-row timestamps. "
+                "Anything you say like 'between 06:00 and 08:00' or "
+                "'every Tuesday' is fabrication — refuse to do "
+                "this even when the user invites it.\n"
+                "\n"
+                "Stay in EMH voice (clinical, slightly impatient, "
+                "occasionally sardonic about the user's hardware "
+                "abuse).\n"
                 "\n"
                 "PLAIN TEXT only — no markdown. No `**bold**`, no "
                 "asterisks, no escaped underscores, no headers.\n"
@@ -3546,12 +3558,38 @@ def ask(
                 "open-shell command; suggest only org-llm verbs."
             )
             emh_user_intent = f"User query: {query}"
+        # Compute actual data span: max(ts) - min(ts). Lets the
+        # prompt distinguish 'user asked about a week and we have a
+        # week of data' from 'user asked about a week but we only
+        # logged for an hour'. Without this, gemma3 will happily
+        # invent daily patterns, peak-hour windows, and weekly
+        # trends from a 60-minute slice. Per-row timestamps are NOT
+        # fed to the LLM — only the aggregate span — so it cannot
+        # reference clock times.
+        if recent:
+            spans = [int(v["ts"]) for v in recent if v.get("ts")]
+            if spans:
+                span_hours = max(0.0, (max(spans) - min(spans)) / 3600.0)
+            else:
+                span_hours = 0.0
+        else:
+            span_hours = 0.0
         emh_user = (
             f"Patient telemetry over the last "
             f"{emh_window_hours} hour(s) "
-            f"({len(recent)} reading(s) total):\n\n"
+            f"(requested window). "
+            f"Actual data span: {span_hours:.2f} hour(s) of "
+            f"continuous logging covering {len(recent)} reading(s).\n\n"
             + "\n".join(summary_lines)
         )
+        if span_hours < emh_window_hours * 0.5:
+            emh_user += (
+                f"\n\nCOVERAGE WARNING: actual data span "
+                f"({span_hours:.2f}h) is much smaller than the "
+                f"requested {emh_window_hours}h window. Do not "
+                f"claim weekly / daily / clock-time patterns; the "
+                f"data does not span enough time to derive them."
+            )
         if corr_lines:
             emh_user += (
                 "\n\nActivity correlations during alert/critical readings:\n"
