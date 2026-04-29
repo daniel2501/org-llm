@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@org-llm/opencode-plugin",
+  "version": "0.1.0",
+  "description": "Soft-fork TypeScript plugins for opencode — themed TUI, custom slash commands beyond the .md format, life-support panel hooks, model-selection guards.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "module": "src/index.ts",
+  "scripts": {
+    "build":     "bun build ./src/index.ts --outdir ./dist --target bun",
+    "test":      "bun test",
+    "test:ci":   "bun test --reporter=junit --reporter-outfile=.artifacts/junit.xml",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}
