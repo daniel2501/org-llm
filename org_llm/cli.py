@@ -10206,19 +10206,36 @@ def tag(
         "Output the tags and NOTHING ELSE."
     )
 
-    # Tokens we'll never accept as a tag — connectors, pronouns,
-    # narrative markers, etc. If a parsed token matches, the whole
-    # response is suspected as prose and we cut at that point.
-    _PROSE_MARKERS = {
+    # Two buckets of non-tag tokens:
+    #
+    # _PROSE_BREAKERS: high-signal narrative markers. Their presence
+    #   means the rest of the line is prose, so we BREAK and discard
+    #   everything from this token onward. Examples: 'tags',
+    #   'interpretation', "i've".
+    #
+    # _PROSE_SKIPS: low-signal connectors that legitimately appear
+    #   between real tags ('marx and history' → keep [marx, history]).
+    #   These get SKIPPED but parsing continues.
+    #
+    # Phase 11 Day 5: an earlier version put 'and' in BREAKERS and
+    # produced single-tag results like 'marx' from a model output of
+    # 'marx and history socialism' — the cut happened at 'and'.
+    _PROSE_BREAKERS = {
+        "i", "i've", "you", "your", "we", "they",
+        "tags", "tag", "keywords",
+        "interpretation", "list", "include", "included",
+        "based", "however", "therefore", "according",
+        "note", "various", "common", "relevant", "potential",
+        "selected", "chosen", "covers", "encompasse",
+    }
+    _PROSE_SKIPS = {
         "the", "a", "an", "of", "for", "to", "in", "on", "and", "or",
         "but", "as", "by", "with", "about", "from", "into", "out",
-        "this", "that", "these", "those", "i", "i've", "you", "your",
-        "we", "they", "it", "its", "is", "are", "was", "were", "be",
-        "been", "being", "have", "has", "had", "do", "does", "did",
-        "will", "would", "could", "should", "tags", "tag", "keywords",
-        "list", "include", "included", "based", "interpretation",
-        "context", "various", "common", "relevant", "potential",
-        "according", "note", "however", "therefore", "as-well",
+        "this", "that", "these", "those",
+        "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did",
+        "will", "would", "could", "should",
+        "it", "its", "context",
     }
     import re as _re_tag
 
@@ -10237,8 +10254,10 @@ def tag(
             t = tok.strip(".,;:!?\"'`()[]{}").replace(":", "")
             if not t:
                 continue
-            if t in _PROSE_MARKERS:
-                break               # everything past this is prose
+            if t in _PROSE_BREAKERS:
+                break               # narrative starts here — discard rest
+            if t in _PROSE_SKIPS:
+                continue            # connector word — keep parsing
             # 16-char ceiling. Real tags are short. Phase 11 Day 5
             # surfaced llama3.2:1b emitting 'marxismconsciousness'
             # (20), 'economicstheory' (15), 'softwaredevelopment'
