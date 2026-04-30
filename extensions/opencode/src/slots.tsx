@@ -65,7 +65,12 @@ export function registerSlots(api: TuiPluginApi): void {
   // override the surfaces the user flagged; everything else falls
   // through to opencode's defaults.
   api.slots.register({
-    order: 100,
+    // opencode's internal slot plugins register at order: 100 (per
+    // the binary's compiled bundle, e.g. internal:home-footer +
+    // internal:sidebar-content). We need to BEAT them for `replace`
+    // mode, so register higher. 1000 leaves room for user plugins
+    // that want to layer above us.
+    order: 1000,
     slots: {
       // home_logo — the prominent landing-page logo. opencode's
       // default reads "opencode"; replace with org-llm wordmark plus

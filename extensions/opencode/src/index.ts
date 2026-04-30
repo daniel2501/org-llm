@@ -239,4 +239,16 @@ export const tui: TuiPlugin = async (api) => {
 // opencode's plugin loader checks for both named exports (`tui` /
 // `server`) and a default export of the same shape. We export both
 // for resilience across opencode versions.
-export default { tui };
+//
+// `id` is REQUIRED for path-loaded (file:// URI) plugins — confirmed
+// 2026-04-30 from a live opencode log:
+//
+//   error: Path plugin file:///…/extensions/opencode/ must export id
+//
+// Without it, opencode rejects the whole plugin (slots, cards, toast
+// — everything fails to load). The TuiPluginModule type marks id as
+// optional, but that's only true for npm-resolved plugins; the path-
+// loader enforces it. Use a stable, namespaced string.
+export const id = "@org-llm/opencode-plugin";
+
+export default { id, tui };

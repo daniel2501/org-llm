@@ -397,6 +397,31 @@ class TestOpencodeLaunchMCP:
             f"cards and stay silent on open."
         )
 
+    def test_tui_plugin_exports_id_for_path_loader(self):
+        """opencode's path-loaded plugin loader (file:// URI) REQUIRES
+        an `id` export. Without it, the live binary rejects the whole
+        plugin with: 'Path plugin file://... must export id'. User
+        relaunched on 2026-04-30 and saw OPENCODE branding still
+        because the plugin had failed to load entirely. Pin the id
+        export so a future refactor can't drop it."""
+        plugin_src = (Path(__file__).resolve().parent.parent
+                       / "extensions" / "opencode" / "src" / "index.ts").read_text()
+        # The id must be a string AND included in the default export.
+        assert "export const id" in plugin_src or "export {id" in plugin_src, (
+            "extensions/opencode/src/index.ts is missing `export const id` "
+            "— opencode's path-plugin loader requires it. The whole plugin "
+            "(slot overrides, cards, toast) silently fails to load without it."
+        )
+        # And the default export should carry id so opencode reads it
+        # whether it picks named or default export.
+        assert ("export default { id," in plugin_src
+                 or "export default {id," in plugin_src
+                 or "export default {\n  id" in plugin_src), (
+            "extensions/opencode/src/index.ts default export must carry "
+            "the id field. opencode reads `module.id` (or `module.default.id`)"
+            " — without it, path-loaded plugins error: 'must export id'."
+        )
+
     def test_tui_plugin_auto_opens_dialog_on_mount(self):
         """User asked: cards should APPEAR ON OPEN, not require typing
         /insights. Pin that the plugin source actually calls
