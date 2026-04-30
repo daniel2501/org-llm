@@ -13,6 +13,8 @@
     "esModuleInterop":              true,
     "lib":                          ["ESNext", "DOM"],
     "types":                        ["bun"],
+    "jsx":                          "preserve",
+    "jsxImportSource":              "solid-js",
     "outDir":                       "dist"
   },
   "include": ["src/**/*"],

@@ -174,6 +174,28 @@ function openInsightDialog(api: TuiPluginApi, cards: InsightCard[]): void {
 }
 
 export const tui: TuiPlugin = async (api) => {
+  // Register slot overrides FIRST — they're independent of insight
+  // cards (the home_logo / sidebar_title surfaces should reflect
+  // org-llm branding even when there are no cards to show). Loaded
+  // lazily so the rest of the plugin works even if the slots module
+  // fails to import (e.g. opentui peer-dep mismatch on older
+  // opencode versions).
+  try {
+    const { registerSlots } = await import("./slots");
+    // The slots module's TuiPluginApi shape is structurally compatible
+    // with what opencode passes here, but TypeScript's nominal typing
+    // for the unused `app`/`route`/etc. fields requires an `as` here.
+    registerSlots(api as unknown as Parameters<typeof registerSlots>[0]);
+  } catch (e) {
+    // Branding override is best-effort; never block plugin load.
+    api.ui?.toast?.({
+      variant: "warning",
+      title: "org-llm",
+      message: `slot override failed (${(e as Error)?.message ?? "unknown"}) — using opencode defaults`,
+      duration: 4000,
+    });
+  }
+
   const directory = api.state.path.directory;
   const cards = await loadCards(directory);
 

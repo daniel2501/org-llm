@@ -31,6 +31,11 @@ function makeApi() {
       dialog: { replace: mock(() => {}), clear: mock(() => {}) },
       DialogSelect: mock(() => ({})),
     },
+    // The plugin registers branding slot overrides (home_logo,
+    // sidebar_title) in addition to the cards UI. Mock just records
+    // the register() call — opencode's real runtime invokes the
+    // slot functions when rendering; in tests we don't render.
+    slots: { register: mock(() => () => {}) },
     state: { path: { state: "", config: "", worktree: "", directory: "" } },
   };
 }
@@ -88,6 +93,30 @@ test("plugin shows toast + registers /insights when cards are present", async ()
 
     expect(api.ui.toast).toHaveBeenCalledTimes(1);
     expect(api.command.register).toHaveBeenCalledTimes(1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("plugin registers slot overrides for branding (home_logo, sidebar_title)", async () => {
+  // User report 2026-04-29: "when opencode opens, it should not read
+  // 'opencode' it should say 'org-llm'". Plugin registers slot
+  // overrides on every mount — independent of insight cards (the
+  // branding should appear even when the vault has no cards).
+  const dir = makeTmpDir();
+  try {
+    const api = makeApi();
+    api.state.path.directory = dir;
+    await tui(api as unknown as Parameters<typeof tui>[0]);
+
+    expect(api.slots.register).toHaveBeenCalledTimes(1);
+    const arg = api.slots.register.mock.calls[0]?.[0] as
+      | { order?: number; slots?: Record<string, unknown> }
+      | undefined;
+    expect(arg).toBeDefined();
+    expect(arg?.slots).toBeDefined();
+    expect(typeof arg?.slots?.home_logo).toBe("function");
+    expect(typeof arg?.slots?.sidebar_title).toBe("function");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

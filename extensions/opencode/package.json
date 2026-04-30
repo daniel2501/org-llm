@@ -14,13 +14,17 @@
     }
   },
   "scripts": {
-    "build":     "echo 'no build step — opencode loads src/index.ts directly via its embedded bun runtime'",
-    "test":      "bun test",
-    "test:ci":   "bun test --reporter=junit --reporter-outfile=.artifacts/junit.xml",
+    "build": "echo 'no build step — opencode loads src/index.ts directly via its embedded bun runtime'",
+    "test": "bun test",
+    "test:ci": "bun test --reporter=junit --reporter-outfile=.artifacts/junit.xml",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@opencode-ai/plugin": "^1.14.30",
+    "@opentui/core": "^0.2.0",
+    "@opentui/solid": "^0.2.0",
     "@types/bun": "latest",
+    "solid-js": "^1.9.12",
     "typescript": "^5.6.0"
   }
 }
