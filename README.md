@@ -442,13 +442,25 @@ spawns it as a subprocess so a daemon thread can watch
 after opencode exits — designed to never false-positive while you're
 just reading.
 
-What gets written into your vault:
+What gets written into your vault under `.opencode/`:
 
-- `.opencode.json` — model, provider, MCP server, instructions, theme reference.
-- `.opencode/themes/org-llm-lcars.json` — LCARS palette (orange /
-  purple / blue) matching the CLI, both light and dark variants.
-- `.opencode/command/<name>.md` — **51+ slash-commands** that mirror
-  the CLI surface, grouped by intent:
+- `opencode.json` — model, provider blocks, MCP server, instructions
+  (referencing AGENTS.md), `default_agent: "org-llm"` + a custom
+  primary `org-llm` agent so the agent picker / status surfaces show
+  "org-llm" instead of the generic "build".
+- `tui.json` — LCARS theme reference + TUI plugin path (a `file://`
+  URI of the `extensions/opencode/` package directory; opencode
+  resolves the entrypoint via `package.json#exports["./tui"]`).
+- `insight-cards.json` — Phase 12 insight cards the TUI plugin renders
+  in the `/insights` dialog. Re-gathered on every launch.
+- `AGENTS.md` — opencode's standard project-context file. ~80-line
+  primer: "this workspace has org-llm; here's the search-first rule
+  and the tool cheatsheet." Loaded via `instructions[]` so every
+  session that mounts this config picks it up.
+- `themes/org-llm-lcars.json` — LCARS palette (orange / purple / blue)
+  matching the CLI, both light and dark variants.
+- `command/<name>.md` — **51+ slash-commands** that mirror the CLI
+  surface, grouped by intent:
   - *Querying* — `/search`, `/ask`, `/capture`, `/context`, `/stale`
   - *Code* — `/code` (search), `/code-gen`, `/code-index`
   - *Indexing* — `/index`, `/embed`, `/tag`, `/report`
@@ -466,6 +478,32 @@ The system prompt also surfaces your **active theme knobs**
 (`trek_level`, `commie_level`, `queer_level`, plus user-defined knobs
 like `dinosaur`) so the in-opencode model matches the energy of your
 CLI.
+
+### TUI plugin & branding
+
+`extensions/opencode/` is a TypeScript plugin opencode loads via its
+embedded bun runtime. It does two things:
+
+1. **Insight cards on open.** Reads `.opencode/insight-cards.json` and
+   pops a `DialogSelect` of cards as soon as the TUI mounts — no need
+   to type `/insights`. Selecting a card prefills the prompt with its
+   suggested question. The dialog is dismissable with Escape; the
+   `/insights` slash command (alias `/i`) re-opens it. A toast acts
+   as a fallback breadcrumb if the dialog is closed.
+2. **Slot overrides for branding.** opencode's TUI is a SolidJS app
+   with `Slot` elements for surfaces like `home_logo` and
+   `sidebar_title`. The plugin registers replacements:
+   - `home_logo` — replaces the welcome-screen "opencode" wordmark
+     with an org-llm ASCII wordmark + LCARS chunk-bar accent.
+   - `sidebar_title` — prepends `org-llm •` to every per-session
+     header so each session is visibly an org-llm session.
+
+Identity in chat is handled separately by the system prompt's
+`IDENTITY` block (in `_opencode_workspace_prompt`) which routes
+through `agent.org-llm.prompt` — opencode's `instructions[]` array is
+append-only, but `agent.<name>.prompt` actually overrides the default
+identity. Combined with `default_agent: "org-llm"`, every visible
+surface (chrome + chat + sidebar + agent picker) reads as "org-llm".
 
 Rule of thumb: if you'd otherwise pipe four CLI commands together,
 opencode is probably the right tool.
