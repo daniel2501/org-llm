@@ -35,10 +35,14 @@ function makeApi() {
       Prompt: mock((props: unknown) => ({ __mock: "Prompt", props })),
     },
     // The plugin registers branding slot overrides (home_logo,
-    // sidebar_title) in addition to the cards UI. Mock just records
-    // the register() call — opencode's real runtime invokes the
-    // slot functions when rendering; in tests we don't render.
+    // home_prompt, sidebar_title) AND a Phase 17 sidebar_content
+    // panel. Mock just records the register() calls — opencode's
+    // real runtime invokes the slot functions when rendering; in
+    // tests we don't.
     slots: { register: mock(() => () => {}) },
+    // Phase 17 sidebar registers a refresh-tick disposer via
+    // api.lifecycle.onDispose. The mock just stores the callback.
+    lifecycle: { onDispose: mock((_fn: () => void) => () => {}) },
     state: { path: { state: "", config: "", worktree: "", directory: "" } },
   };
 }
@@ -101,31 +105,42 @@ test("plugin shows toast + registers /insights when cards are present", async ()
   }
 });
 
-test("plugin registers slot overrides for branding (home_logo, home_prompt, sidebar_title)", async () => {
+test("plugin registers slot overrides for branding + Phase 17 sidebar panel", async () => {
   // User reports across 2026-04-29/30: "should say org-llm not
   // opencode" + contextualize the prompt placeholder + LCARS-vary
-  // the logo. Plugin registers slot overrides on every mount —
-  // independent of insight cards (the branding should appear even
-  // when the vault has no cards).
+  // the logo + (Phase 17) live sidebar status panel with feature
+  // links + sensorlog tail. Plugin registers slot overrides on
+  // every mount — independent of insight cards (the branding +
+  // sidebar should appear even when the vault has no cards).
   const dir = makeTmpDir();
   try {
     const api = makeApi();
     api.state.path.directory = dir;
     await tui(api as unknown as Parameters<typeof tui>[0]);
 
-    expect(api.slots.register).toHaveBeenCalledTimes(1);
-    const arg = api.slots.register.mock.calls[0]?.[0] as
-      | { order?: number; slots?: Record<string, unknown> }
-      | undefined;
-    expect(arg).toBeDefined();
-    expect(arg?.slots).toBeDefined();
-    expect(typeof arg?.slots?.home_logo).toBe("function");
-    expect(typeof arg?.slots?.home_prompt).toBe("function");
-    expect(typeof arg?.slots?.sidebar_title).toBe("function");
-    // Slot order must beat opencode's internal-plugin defaults
-    // (order: 100 per the binary bundle); otherwise our `replace`
-    // doesn't actually replace.
-    expect((arg?.order ?? 0)).toBeGreaterThan(100);
+    // TWO registrations: the branding slots module + the sidebar
+    // panel module. Both register independently so a failure in
+    // one doesn't take down the other.
+    expect(api.slots.register).toHaveBeenCalledTimes(2);
+    type RegArg = { order?: number; slots?: Record<string, unknown> };
+    const args = api.slots.register.mock.calls.map(
+      (c: unknown[]) => c[0] as RegArg,
+    );
+    const allSlotKeys = new Set<string>();
+    for (const a of args) {
+      expect(a?.order ?? 0).toBeGreaterThan(100);
+      for (const k of Object.keys(a?.slots ?? {})) {
+        allSlotKeys.add(k);
+        expect(typeof (a!.slots as Record<string, unknown>)[k])
+          .toBe("function");
+      }
+    }
+    // Branding slots
+    expect(allSlotKeys.has("home_logo")).toBe(true);
+    expect(allSlotKeys.has("home_prompt")).toBe(true);
+    expect(allSlotKeys.has("sidebar_title")).toBe(true);
+    // Phase 17 panel
+    expect(allSlotKeys.has("sidebar_content")).toBe(true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

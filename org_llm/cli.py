@@ -12576,6 +12576,130 @@ Never edit the wiki silently. Always notified is the rule.
 """
 
 
+def _opencode_sidebar_status(session, *, ctx: dict, workspace: str) -> dict:
+    """Phase 17: build the live sidebar status payload that the TUI
+    plugin renders via sidebar_content slot. Snapshot of vault stats,
+    active palette + knobs, MCP info, hardware probe, recent
+    SensorLog alerts, and the common-feature link rows.
+
+    Re-rendered on every launch (and ideally on every auto-embedder
+    cycle — that's the planned refresh path; v1 ships launch-time
+    only). The plugin re-reads this JSON on a tick so a separate
+    auto-embedder process can update the file without coupling to
+    opencode's runtime.
+    """
+    from .db import Config as _Cfg
+    palette = (session.get(_Cfg, "palette").value
+                if session.get(_Cfg, "palette") else "classic")
+
+    # Active knobs: any *_level config row with value != "0".
+    knobs = []
+    try:
+        for row in session.query(_Cfg).all():
+            if not row.key.endswith("_level"):
+                continue
+            try:
+                level = int(row.value or 0)
+            except (TypeError, ValueError):
+                continue
+            if level <= 0:
+                continue
+            knobs.append({"name": row.key.replace("_level", ""),
+                           "level": level})
+    except Exception:
+        pass
+
+    # Hardware probe — same calls doctor uses.
+    hw = {"free_ram_gb": None, "vram_gb": None}
+    try:
+        from .cloud import local_ram_gb, local_vram_gb
+        hw["free_ram_gb"] = round(local_ram_gb(), 1)
+        v = local_vram_gb()
+        hw["vram_gb"] = round(v, 1) if v else None
+    except Exception:
+        pass
+
+    # SensorLog tail — last 5 alert/critical rows in the last 6h.
+    alerts: list[dict] = []
+    try:
+        from .life_support import recent_readings as _rr
+        rows = _rr(since_secs=6 * 3600, limit=200)
+        for r in rows:
+            if (r.get("status") or "") in ("alert", "critical"):
+                alerts.append({
+                    "ts":      r["ts"],
+                    "probe":   r["probe"],
+                    "status":  r["status"],
+                    "message": (r.get("message") or "")[:140],
+                })
+            if len(alerts) >= 5:
+                break
+    except Exception:
+        pass
+
+    # MCP tool count — read from the live module so we don't drift.
+    tool_count = 0
+    try:
+        import org_llm.mcp_server as _ms
+        # Count @server.tool() decorators by scanning module functions.
+        # Fallback: parse the file. Cheap inline read since this runs
+        # once per launch.
+        import inspect
+        src = inspect.getsource(_ms)
+        tool_count = src.count("@server.tool()")
+    except Exception:
+        pass
+
+    # Common feature links — surfaced in the sidebar so the user can
+    # invoke them without typing the slash command. Phase 17 v1: these
+    # are static; future iterations may make them context-aware
+    # (e.g., hide /insights when the cards file is empty).
+    links = [
+        {"name": "doctor",
+          "title": "Doctor — health check",
+          "slash": "/doctor",
+          "hint":  "RAM/model/MCP probe; no LLM under --no-diagnose"},
+        {"name": "library",
+          "title": "Library — recent activity",
+          "slash": "/recent",
+          "hint":  "Last 7d of vault edits"},
+        {"name": "insights",
+          "title": "Insights — cards on tap",
+          "slash": "/insights",
+          "hint":  "Phase 12 cards · re-open the dialog"},
+        {"name": "wiki",
+          "title": "Wiki — concept reference",
+          "slash": "/wiki",
+          "hint":  "docs/wiki/ concept index"},
+    ]
+
+    return {
+        "generated_at": int(time.time()),
+        "workspace":    workspace,
+        "vault": {
+            "n_files":      ctx["n_files"],
+            "n_nodes":      ctx["n_nodes"],
+            "n_embedded":   ctx["n_embedded"],
+            "pct_embedded": ctx["pct_e"],
+            "org_dir":      ctx["org_dir"],
+        },
+        "active": {
+            "palette": palette,
+            "knobs":   knobs,
+        },
+        "mcp": {
+            "server":     "org-llm",
+            "tool_count": tool_count,
+            "configured": True,
+        },
+        "hardware": hw,
+        "sensors": {
+            "recent_alerts": alerts,
+        },
+        "links": links,
+    }
+
+
 def _opencode_lcars_theme() -> dict:
     """LCARS-themed opencode theme matching the schema at
     https://opencode.ai/theme.json.
@@ -13601,6 +13725,7 @@ def launch(
     cards_path   = org_dir / ".opencode" / "insight-cards.json"
     theme_path   = org_dir / ".opencode" / "themes"  / "org-llm-lcars.json"
     agents_path  = org_dir / ".opencode" / "AGENTS.md"
+    sidebar_path = org_dir / ".opencode" / "sidebar-status.json"
     command_dir  = org_dir / ".opencode" / "command"
 
     slash_cmds = _opencode_slash_commands(workspace) if not no_commands else {}
@@ -13628,6 +13753,7 @@ def launch(
         console.rule(f"[lcars2]Workspace: {workspace}[/lcars2]")
         on_screen(f"Would write config:   {config_path}")
         on_screen(f"Would write agents:   {agents_path}")
+        on_screen(f"Would write sidebar:  {sidebar_path}")
         on_screen(f"Would write tui:      {tui_path}")
         on_screen(f"Would write cards:    {cards_path} ({len(_cards)} card(s))")
         if not no_theme:
@@ -13662,6 +13788,31 @@ def launch(
         recent_str=ctx["recent_str"],
         top_tags_str=ctx["top_tags_str"],
     ))
+    # sidebar-status.json — Phase 17. The TUI plugin's
+    # sidebar_content slot override re-reads this on a tick to
+    # refresh vault stats / palette / hardware probe / sensorlog
+    # alerts / common feature links. Written launch-time; future
+    # iterations may have the auto-embedder daemon re-write it on
+    # every cycle so the panel stays live without relaunching.
+    try:
+        with get_session(engine) as _ss:
+            sidebar_payload = _opencode_sidebar_status(
+                _ss, ctx=ctx, workspace=workspace,
+            )
+        sidebar_path.write_text(json.dumps(sidebar_payload, indent=2))
+    except Exception:
+        # Never block launch on sidebar serialisation failure; the
+        # plugin handles a missing/empty file gracefully.
+        sidebar_path.write_text(json.dumps({
+            "generated_at": int(time.time()),
+            "workspace":    workspace,
+            "vault":        {},
+            "active":       {},
+            "mcp":          {},
+            "hardware":     {},
+            "sensors":      {"recent_alerts": []},
+            "links":        [],
+        }, indent=2))
     # tui.json — proper home for theme + plugin (per opencode's
     # tui-schema.ts). Always written even if no_theme so future
     # plugin registrations have a home.

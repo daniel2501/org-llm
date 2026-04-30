@@ -196,6 +196,21 @@ export const tui: TuiPlugin = async (api) => {
     });
   }
 
+  // Phase 17: live sidebar status panel. Independent of cards (the
+  // panel renders even when there are no cards). Same lazy-import
+  // resilience as the slots module.
+  try {
+    const { registerSidebar } = await import("./sidebar");
+    registerSidebar(api as unknown as Parameters<typeof registerSidebar>[0]);
+  } catch (e) {
+    api.ui?.toast?.({
+      variant: "warning",
+      title: "org-llm",
+      message: `sidebar panel failed (${(e as Error)?.message ?? "unknown"}) — using opencode defaults`,
+      duration: 4000,
+    });
+  }
+
   const directory = api.state.path.directory;
   const cards = await loadCards(directory);
 

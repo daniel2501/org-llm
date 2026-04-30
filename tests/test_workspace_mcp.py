@@ -397,6 +397,59 @@ class TestOpencodeLaunchMCP:
             f"cards and stay silent on open."
         )
 
+    def test_phase_17_sidebar_status_json_written(self, cli_org,
+                                                       monkeypatch):
+        """Phase 17: launch writes .opencode/sidebar-status.json
+        which the TUI plugin's sidebar_content slot reads on a
+        15s tick. Pin the file presence + load-bearing shape so a
+        future refactor can't silently drop the channel and leave
+        the panel showing stale (or no) data."""
+        monkeypatch.setattr("org_llm.cli._opencode_bin", lambda: "/usr/bin/true")
+        monkeypatch.setattr(os, "execvp",
+                              lambda p, a: (_ for _ in ()).throw(SystemExit(0)))
+        runner.invoke(app, ["launch"])
+
+        sidebar_path = Path(cli_org) / ".opencode" / "sidebar-status.json"
+        assert sidebar_path.exists(), (
+            "launch didn't write .opencode/sidebar-status.json — "
+            "the Phase 17 sidebar panel will show 'opencode default' "
+            "with no org-llm content."
+        )
+        payload = json.loads(sidebar_path.read_text())
+
+        # Top-level structure must carry the load-bearing keys the
+        # TSX side reads. Missing keys → blank sections in the panel.
+        for key in ("generated_at", "workspace", "vault", "active",
+                     "mcp", "hardware", "sensors", "links"):
+            assert key in payload, (
+                f"sidebar-status.json missing top-level key {key!r} — "
+                f"panel render path expects it. Got keys: "
+                f"{list(payload)}"
+            )
+
+        # Vault block — even on empty test fixture, the keys exist.
+        for key in ("n_files", "n_nodes", "n_embedded", "pct_embedded"):
+            assert key in payload["vault"], (
+                f"sidebar-status.json vault missing {key!r}"
+            )
+
+        # Common feature links — Phase 17 user spec named four:
+        # doctor, library, insights, wiki.
+        link_names = {link.get("name") for link in payload.get("links", [])}
+        for needle in ("doctor", "library", "insights", "wiki"):
+            assert needle in link_names, (
+                f"sidebar-status.json links missing {needle!r} — the "
+                f"common-feature-links row was load-bearing in the "
+                f"Phase 17 spec."
+            )
+
+        # Each link must carry the keys the panel renders.
+        for link in payload["links"]:
+            for k in ("name", "title", "slash", "hint"):
+                assert k in link, (
+                    f"link {link.get('name')!r} missing {k!r}"
+                )
+
     def test_tui_plugin_exports_id_for_path_loader(self):
         """opencode's path-loaded plugin loader (file:// URI) REQUIRES
         an `id` export. Without it, the live binary rejects the whole

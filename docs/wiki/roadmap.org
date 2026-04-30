@@ -304,7 +304,7 @@ alternative to it. Per =extensions/emacs/README.md:40=.
 Scaffolded in =extensions/emacs/org-llm.el= (Phase 16.0). Real
 hooks land here.
 
-* Active — Phase 17: live sidebar status panel               :next:
+* Shipped — Phase 17: live sidebar status panel              :shipped:
 
 The next big feature push. The opencode TUI sidebar currently
 shows opencode's defaults (mcp / lsp / files / todo widgets);
@@ -343,8 +343,12 @@ live, refreshing org-llm panel.
 
 ** Status
 
-Planned. Scoping in this 2026-04-30 session; implementation in
-the next phase landing.
+Shipped 2026-04-30. v1 is launch-time only; the auto-embedder
+re-write hook (so the panel stays live without relaunching) is
+the next iteration. Live data refreshes on a 15s tick reading
+the JSON file, so an external writer (auto-embedder cycle, a
+=doctor= run, etc.) can update the panel without coupling to
+opencode's runtime.
 
 * Planned — Phase 16.4+: extension polish                    :planned:
 

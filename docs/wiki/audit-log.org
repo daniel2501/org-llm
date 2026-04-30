@@ -252,6 +252,34 @@ Roadmap listed =a1f0ff9, 55cb260, 7ba5486, d82b698, 6db6a88,
 db6bbd1, cd4d61a=. Adding =3b9cb0c= (regen_screenshots) and
 =91eeef8= (this docs landing) for completeness.
 
+* 2026-04-30 — Phase 17 landed
+
+Implementation followed the audit; updates to the wiki +
+README:
+
+- Roadmap §Phase 17 flipped from =planned= to =shipped= with
+  the v1 launch-time scope.
+- README "Where we are" updated: latest shipped is Phase 17.
+- New launch artefact: =.opencode/sidebar-status.json= written
+  alongside =insight-cards.json=. Schema: =vault / active /
+  mcp / hardware / sensors / links= top-level blocks.
+- New plugin module: =extensions/opencode/src/sidebar.tsx= —
+  registers =sidebar_content= slot at order 1000; refreshes on
+  a 15s tick by re-reading the JSON.
+- Test pin in =tests/test_workspace_mcp.py=:
+  =test_phase_17_sidebar_status_json_written= asserts file
+  presence + load-bearing keys + the four named feature links
+  (=doctor / library / insights / wiki=).
+
+Deferred for next iteration (logged here for the audit cadence):
+
+| Item                                              | Status   |
+|---------------------------------------------------+----------|
+| Auto-embedder cycle re-writes sidebar-status.json | deferred |
+| Plugin caches palette overrides between ticks      | deferred |
+| =/doctor= / =/library= / =/wiki= slash commands   | deferred |
+| Sensorlog probe → click-to-open detail dialog     | deferred |
+
 * Audit cadence
 
 This page should be re-audited:

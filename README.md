@@ -1787,13 +1787,18 @@ parent theme.
 
 ### Where we are
 
-- **Latest shipped:** Phase 16.2 — opencode TUI plugin fully wired
+- **Latest shipped:** Phase 17 — live sidebar status panel (vault
+  counts, palette, MCP, hardware probe, sensorlog tail, common
+  feature links: `/doctor` `/recent` `/insights` `/wiki`).
+- **Previous:** Phase 16.2 — opencode TUI plugin fully wired
   (insight cards on open, slot overrides for branding, `AGENTS.md`
   primer, custom `org-llm` primary agent).
 - **Active focus:** Phase 16.3 — Emacs companion (`extensions/emacs/`).
-- **In flight planned:** Phase 12.6 (insight-card cache persistence),
-  Phase 12.7 (dbt analytics over engagement), Phase 13.4–13.5 (walk
-  per-slug routing + clarifying questions).
+- **In flight planned:** auto-embedder re-writes
+  `sidebar-status.json` per cycle (live refresh w/o relaunch),
+  Phase 12.6 (insight-card cache persistence), Phase 12.7 (dbt
+  analytics over engagement), Phase 13.4–13.5 (walk per-slug
+  routing + clarifying questions).
 
 ### Beta → 1.0 punch list
 
