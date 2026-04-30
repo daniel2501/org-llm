@@ -55,22 +55,38 @@ org-llm pi --install
 # → registers in ~/.pi/config.json
 #+end_src
 
-The server exposes ~64 tools as of Phase 16.2. Categories:
+The server exposes 64 tools as of Phase 16.2 (count verified
+via =grep -c "@server\.tool" org_llm/mcp_server.py=). Categories:
 
-- *Notes* — =search_notes=, =ask_notes=, =get_node=,
-  =list_recent_nodes=, =list_nodes_by_tag=, =capture_note=
-- *Code* — =code_search=, =index_vault=, =embed_pending=
+- *Notes (RAG + capture)* — =search_notes=, =ask_notes=,
+  =get_node=, =list_recent_nodes=, =list_nodes_by_tag=,
+  =capture_note=, =find_stale_notes=, =get_vault_stats=,
+  =recent_files=, =tangle_file=
+- *Code corpus* — =code_search=, =index_vault=, =embed_pending=
 - *Filesystem (granted)* — =discover_filesystem=, =read_file=,
-  =list_directory=, =request_access=
+  =list_directory=, =request_access=, =list_grants=, =open_url=,
+  =browser_command=
 - *dbt analytics* — =dbt_status=, =dbt_models=, =dbt_run=,
+  =dbt_test=, =dbt_build=, =dbt_compile=, =dbt_doctor=,
   =dbt_design=, =dbt_walkthrough=, =dbt_lessons=
 - *Health + self-heal* — =doctor_health=, =proactive_doctor=,
-  =performance_status=
-- *Insights (Phase 12)* — =insight_card_feedback=,
-  =gather_insights=
-- *Walk (Phase 13)* — =walk_node=, =walk_remove_fact=,
-  =add_disambig=
-- *Config + theming* — =get_config=, =set_config=, =add_theme_knob=
+  =proactive_doctor_apply=, =performance_status=, =self_rewrite=
+- *Life support / EMH* — =emh_consult=, =life_support_advice=,
+  =life_support_history=, =life_support_status=,
+  =recent_perf_alerts=
+- *Insights (Phase 12)* — =insight_card_feedback=
+- *Walk (Phase 13)* — =walk_pick_targets=,
+  =walk_extract_facts=, =walk_save_facts=,
+  =walk_save_disambiguation=, =walk_remove_fact=,
+  =walk_review_pending=, =walk_undo_last_save=
+- *Context overlay* — =add_context=, =get_context=,
+  =refresh_context=
+- *Config + theming* — =get_config=, =set_config=,
+  =search_config=, =add_theme_knob=
+- *Logbook* — =reflect_on_log=, =export_log_to_org=
+- *Skills + tutor* — =list_skills=, =run_skill=,
+  =list_tutor_steps=, =get_tutor_step=
+- *Models* — =list_models=, =list_slash_commands=
 - *Escape hatch* — =org_llm_run= — invoke any allow-listed
   CLI verb with three layers of recovery (shell-quote repair,
   LLM intent reconstruction, SRE fix)

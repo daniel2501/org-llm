@@ -1,122 +1,163 @@
 :PROPERTIES:
 :ID:       47c84cd6-1cba-457d-a947-9c482d392991
 :CREATED:  [2026-04-30]
+:UPDATED:  [2026-04-30]
 :END:
-#+TITLE: Walk — context-graph traversal (Phase 13)
-#+FILETAGS: :wiki:concept:retrieval:walk:phase-13:
+#+TITLE: Walk — LLM-driven knowledge capture (Phase 13)
+#+FILETAGS: :wiki:concept:walk:capture:phase-13:
 #+OPTIONS: toc:nil num:nil
 
 * What walk is
 
-A retrieval mode that *traces a path* through your context graph
-rather than scoring nodes by similarity. Where =ask= retrieves
-the top-N most semantically-similar nodes, =walk= picks a starting
-node and traverses outward through:
+Walk is *not* a retrieval mode. It's a knowledge-capture flow:
+the LLM picks N notes worth attention, surfaces them one by
+one, you explain what they mean to you in your CURRENT life,
+and the LLM extracts atomic factual claims you made — saving
+them to =llm-context.org= so future sessions cite the right
+truth.
 
-1. *org-roam id-links* (=[[id:...]]=) — explicit author intent
-2. *Tag co-occurrence* — nodes sharing N+ tags with the start
-3. *Temporal proximity* — nodes touched within ±N days
-4. *Backlinks* — nodes that link TO the start
-
-The output is a *narrative*, not a list — "you wrote about X on
-date A, then connected it to Y on date B; here's the thread."
+Think of it as "the LLM walking you back through your own vault
+and asking you to teach it which facts still hold."
 
 * When to walk vs ask
 
-| Question shape                         | Reach for |
-|----------------------------------------+-----------|
-| "What do I know about X?"              | =ask=     |
-| "How did I get to thinking X?"         | =walk=    |
-| "Who/what relates to <node title>?"    | =walk=    |
-| "Pull facts about X"                   | =ask=     |
-| "Trace my last week's thinking"        | =walk= --dailies (planned 13.2) |
+| Question shape                                | Reach for      |
+|-----------------------------------------------+----------------|
+| "What do I know about X?"                     | =ask=          |
+| "Pull facts about X from my notes"            | =ask=          |
+| "Which of my old notes still represent me?"   | =walk=         |
+| "Help me update my context.org"               | =walk=         |
+| "Walk me through note Y" (specific)           | =walk --pick=  |
+| "Re-check the facts I told you last month"    | =walk --review=|
 
-Walk is for *origin stories*; ask is for *current state*.
+Walk pairs with [[id:e3333333-4444-5555-6666-cccccccccccc][staleness]]:
+where the staleness sweep tags old notes =:stale:=, walk extracts
+the *current truth* you assert about them and writes it to the
+context overlay so RAG knows what supersedes what.
+
+* The flow
+
+1. =org-llm walk= picks =max_nodes= attention-worthy notes
+   (orphans, recent captures, untagged-but-substantive) within
+   the recent =--window-days=.
+2. For each picked note, the LLM presents it to you and asks
+   what it means TODAY.
+3. You explain in natural language.
+4. The LLM extracts *atomic factual claims you actually made*
+   (skipping things you just paraphrased from the note) and
+   proposes them.
+5. You confirm; confirmed claims append to =llm-context.org=.
+6. Optional disambiguation: if a claim contradicts something
+   already in context, you (or the LLM) flag it via
+   =walk_save_disambiguation=.
+
+* Tracks
+
+The first positional argument picks a *track*:
+
+| Track       | Status                                                    |
+|-------------+-----------------------------------------------------------|
+| =notes=     | shipped (Phase 13.1) — the default                        |
+| =dailies=   | planned (Phase 13.2) — walk a day's nodes; no explicit ID |
+| =projects=  | planned (Phase 13.3) — walk by project tag                |
+
+Other tracks raise =not yet wired= until the relevant
+sub-phase ships.
 
 * Atomic facts + disambiguation
 
-The Phase 13.1 walk landing introduced two related concepts to
-fix a class of bug where walk would surface contradictory facts
-without flagging them:
+Phase 13.1 introduced two related concepts:
 
-- *Atomic facts* — single-claim statements extracted from a
-  node's body. =walk_remove_fact= can target one without
-  rewriting the whole node.
-- *Disambig placeholders* — when a fact contradicts =llm-context.org=
-  current truth, the walk output marks it =[Disambig: see
-  context.org]= instead of asserting it. The placeholder
-  auto-strips on every save (was previously only on
-  =add_disambig=).
+- *Atomic facts* — single-claim statements extracted from your
+  explanation. =walk_remove_fact= MCP tool can target one by
+  slug without rewriting surrounding facts.
+- *Disambig placeholders* — when a fact contradicts something
+  already in =llm-context.org=, the walk pipeline marks it
+  with a placeholder line ("[Disambig: see context.org §X]")
+  so future RAG knows the conflict exists. The placeholder
+  auto-strips on every =context tangle= save.
 
 * Conversational flow inside opencode
 
-The launch flow's slot overrides + system prompt route
-=/walk= as the conversational entry:
+The launch flow's slot overrides + system prompt route walk via
+the =walk_*= MCP tool family:
 
 #+begin_src
-User: where am I with the cloud-commons project?
-Model: → walk_node(title="cloud-commons")
-Model: You started cloud-commons on 2026-02-14 with a Snowflake
-       hosting note. By 2026-03-02 you'd connected it to your
-       personal-database draft. Last touched 2026-04-12 with a
-       :stale: tag — context.org says you've shifted to Snowpark
-       Container Services. Want me to draft the next step?
+User: walk me through what's been on my mind this week
+Model: → walk_pick_targets(window_days=7, max_nodes=5)
+       Returns: 5 candidate notes with titles + last-touched dates
+Model: shows you the first one; asks for context
+User: "I dropped this project; not pursuing it"
+Model: → walk_extract_facts(...)
+       Returns: ["Project X: dropped 2026-04 (formerly active)"]
+Model: confirms; → walk_save_facts(...)
+Model: moves to next note
 #+end_src
 
-The MCP =walk_node= tool encapsulates the traversal; the model
-just calls it.
+The =walk_*= MCP tools are the granular surface; they enable
+opencode-driven walks where the model paces the conversation
+rather than the CLI prompting linearly.
 
 * Phase chronology
 
-| Phase | What landed                                                    |
-|-------+----------------------------------------------------------------|
-| 13    | Initial walk verb + concept wiki                                |
-| 13.1  | =org-llm walk= CLI + opencode surfacing + atomic-fact validator |
-| 13.2  | (planned) Walk =dailies= without explicit start ID              |
-| 13.4  | (planned) Per-slug routing + real edit-in-place fact replacement |
-| 13.5  | (planned) Clarifying questions when start node is ambiguous     |
+| Phase | What landed                                                            |
+|-------+------------------------------------------------------------------------|
+| 13    | Initial walk concept + context-overlay design                          |
+| 13.1  | =org-llm walk= CLI + 7 walk_* MCP tools + atomic-fact validator        |
+| 13.2  | (planned) =dailies= track — walk a date's nodes without explicit start |
+| 13.4  | (planned) Per-slug routing + real edit-in-place fact replacement       |
+| 13.5  | (planned) Clarifying questions when a node is ambiguous                |
 
 * How to configure
 
 ** Env vars
-- =ORG_LLM_DB= / =ORG_LLM_ORG_DIR= — walk respects the same DB +
-  vault overrides as every other verb.
+- =ORG_LLM_DB= / =ORG_LLM_ORG_DIR= — the same overrides as
+  every verb. Walk reads + writes the context overlay tangle.
 
 ** CLI flags
 #+begin_src sh
-org-llm walk "cloud-commons"           # start node by title fuzzy-match
-org-llm walk --id <uuid>               # exact node ID
-org-llm walk --depth 3                 # how far to traverse (default 2)
-org-llm walk --tags-min 1              # min shared tags for tag-edges (default 2)
-org-llm walk --since-days 30           # restrict temporal-proximity edges
-org-llm walk --no-llm                  # raw graph; skip LLM narration
+org-llm walk                                  # default: track=notes, window=7d, max=5
+org-llm walk notes                            # explicit
+org-llm walk --window-days 30 --max-nodes 3   # broader window, smaller batch
+org-llm walk -w 14 -n 10                       # short forms
+
+# Pick specific notes (skip auto-selection)
+org-llm walk --pick "kafka"                   # title fuzzy-match
+org-llm walk --pick "<node-uuid>"             # exact ID
+org-llm walk --pick "kafka" --pick "marx"     # multiple
+
+# Re-walk previously-saved facts to re-confirm
+org-llm walk --review                          # oldest first
+                                               # cannot combine with --pick
+
+# Dry-run: extract facts but don't append to context
+org-llm walk --no-save
 #+end_src
 
 ** Conversational (opencode / claude / pi)
-- =/walk <topic>= — slash command in opencode workspace
-- "Trace my path through X" / "How did I get to thinking about Y?"
-  — natural-language; the model picks =walk_node=
-- =walk_node= MCP tool — direct invocation
 
-** Disambig
-- =org-llm context add-disambig= — record a disambig placeholder
-  manually
-- The model can call =add_disambig()= itself when it spots
-  contradictions during a walk
+The walk_* MCP tool family (in =org_llm/mcp_server.py=):
+
+- =walk_pick_targets= — surface attention-worthy notes
+- =walk_extract_facts= — pull atomic facts from a user explanation
+- =walk_save_facts= — append confirmed facts to context overlay
+- =walk_review_pending= — list facts not yet acted on
+- =walk_save_disambiguation= — record a contradiction marker
+- =walk_remove_fact= — delete a saved fact by slug
+- =walk_undo_last_save= — back out the most-recent save
 
 * Source files
 
-- =org_llm/walk.py= — traversal core
-- =org_llm/cli.py= — =walk= verb wiring
-- =org_llm/mcp_server.py= — =walk_node=, =walk_remove_fact=,
-  =add_disambig= MCP tools
+- =org_llm/walk.py= — picking + extraction + disambiguation core
+- =org_llm/cli.py:walk= — CLI verb wiring
+- =org_llm/mcp_server.py= — the seven =walk_*= MCP tools
 
 * Related
 
-- [[id:e4444444-5555-6666-7777-dddddddddddd][Retrieval-Augmented Generation]] —
-  walk is an alternative retrieval mode to RAG's ask path
-- [[id:e3333333-4444-5555-6666-cccccccccccc][Staleness]] — walk
-  participates in the disambiguation flow when current-truth
-  contradicts older notes
+- [[id:e3333333-4444-5555-6666-cccccccccccc][Staleness]] — walk's
+  output (current-truth claims) feeds the context overlay that
+  staleness's =+0.6= retrieval penalty references
+- [[id:e4444444-5555-6666-7777-dddddddddddd][RAG]] — walk doesn't
+  retrieve; it CAPTURES the facts that downstream RAG calls cite
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 13
-  for the chronology
+  for the chronology + planned 13.2-13.5 work

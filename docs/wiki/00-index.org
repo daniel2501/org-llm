@@ -58,14 +58,28 @@ for the full convention.
   background daemon keeping the index + embeddings fresh
 - [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's Log]] —
   vault-wide event log mirrored to org and SQLite
+- [[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][Doctor & self-heal]] —
+  health checks + LLM rescue + power boost
+- [[id:510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08][Cloud-or-local routing]] —
+  auto-detect + privacy-first fallback
+- [[id:338485eb-1669-4966-82fb-03607f5f0c64][Task-instruction prefixes]] —
+  the nomic-embed gotcha that silently degrades retrieval
 
 ** Surfaces & integrations (how org-llm reaches outside)
 - [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP (Model Context Protocol)]] —
   the bridge to opencode / Claude Code / Pi / Emacs
+- [[id:ddfb74ae-3c16-45e3-b1be-df3c2b03966b][Pi bridge]] —
+  third conversational interface; per-turn dynamic system prompts
 - [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][Insight cards]] —
   the "I noticed N things" headline experience (Phase 12)
 - [[id:001a2e03-30e8-49c5-a813-e774f58b6a0e][Skills]] —
   org-babel-driven LLM workflows you define yourself
+- [[id:ff70047c-6611-4391-857e-f94c14fc1914][Code corpus]] —
+  notes + code in one cross-cutting index
+- [[id:11029de4-2780-4169-9f3b-2fd1a3a73e6a][Granted filesystem access]] —
+  user-controlled allowlist for read/execute paths
+- [[id:39c17d6a-b502-4d9a-adc9-3cf71f776ad2][Tutor]] —
+  23-step interactive walkthrough for first-time users
 
 ** Visual + voice personalization
 - [[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][LCARS theming]] —
@@ -78,6 +92,9 @@ for the full convention.
   detailed phase catalog + project plan
 - [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][Wiki conventions]] —
   the self-updating, always-notified contract
+- [[id:9b012557-f592-4d1e-8dd1-464c2a4250c3][Audit log]] —
+  bidirectional wiki↔reality audits; what's drifted, what's
+  fixed, what's deferred
 
 The substrate makes search and ask work at all. The hygiene
 keeps them USEFUL as your vault grows. The surfaces are how
@@ -132,14 +149,17 @@ the link to the source:
 | Captain's Log             | [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][captains-log.org]] | full       |
 | Roadmap                   | [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] | full       |
 | Wiki conventions          | [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki-conventions.org]] | full       |
-| Cloud-or-local routing    | (planned)                           | TODO       |
-| Doctor + self-heal        | (planned)                           | TODO       |
-| Tutor / onboarding        | (planned)                           | TODO       |
-| Pi bridge                 | (planned)                           | TODO       |
-| Code corpus               | (planned)                           | TODO       |
-| Granted filesystem access | (planned)                           | TODO       |
+| Audit log                 | [[id:9b012557-f592-4d1e-8dd1-464c2a4250c3][audit-log.org]] | full       |
+| Life support / EMH / sensors | (planned)                        | TODO       |
+| Askbook                   | (planned)                           | TODO       |
+| Cloud-or-local routing    | [[id:510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08][cloud-or-local-routing.org]] | full       |
+| Doctor + self-heal        | [[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][doctor-self-heal.org]] | full       |
+| Tutor / onboarding        | [[id:39c17d6a-b502-4d9a-adc9-3cf71f776ad2][tutor.org]] | full       |
+| Pi bridge                 | [[id:ddfb74ae-3c16-45e3-b1be-df3c2b03966b][pi-bridge.org]] | full       |
+| Code corpus               | [[id:ff70047c-6611-4391-857e-f94c14fc1914][code-corpus.org]] | full       |
+| Granted filesystem access | [[id:11029de4-2780-4169-9f3b-2fd1a3a73e6a][granted-filesystem-access.org]] | full       |
+| Task-instruction prefixes | [[id:338485eb-1669-4966-82fb-03607f5f0c64][task-instruction-prefixes.org]] | full       |
 | AGENTS.md primer          | (covered in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] § Phase 16.2) | partial |
-| Task-instruction prefixes | (planned)                           | TODO       |
 
 * How to contribute / extend
 

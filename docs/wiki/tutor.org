@@ -1,0 +1,114 @@
+:PROPERTIES:
+:ID:       39c17d6a-b502-4d9a-adc9-3cf71f776ad2
+:CREATED:  [2026-04-30]
+:UPDATED:  [2026-04-30]
+:END:
+#+TITLE: Tutor — onboarding + walkthrough
+#+FILETAGS: :wiki:concept:onboarding:tutor:
+#+OPTIONS: toc:nil num:nil
+
+* What it is
+
+A 45-step interactive walkthrough that teaches first-time users
+the org-llm flow. Each step is a themed Rich panel printed to
+stdout when the user runs =org-llm tutor <step-name>=.
+
+The tutor is *stateless by design* — there's no completion
+tracking, no resume position, no "next step" pointer. You
+address steps by name; you can read them in any order; you can
+re-read freely. =--all= dumps the whole curriculum.
+
+* Why named, not numbered
+
+Numeric step state would force the user into a single linear
+path through the curriculum. The actual goal is "use the tutor
+as a reference manual" — when the user gets confused about
+=embed=, they run =org-llm tutor embed= and read that step's
+panel. Numbering would imply they should have done =index= and
+=stats= first; named addressing says they don't have to.
+
+The MCP tool surface (=list_tutor_steps=, =get_tutor_step=)
+exposes the same model — the in-opencode LLM picks a step name
+from the list and reads its body when relevant.
+
+* The 45 steps
+
+The full list is in =org_llm/cli.py:_TUTOR_STEPS=. Step names
+spell out a tour:
+
+#+begin_example
+welcome → init → index → embed → search → ask → capture →
+tag → code → config → skills → report → doctor → install →
+dbt → opencode → source → cloud → launch → emacs → claude →
+done
+#+end_example
+
+(Plus ~23 sub-steps interleaved that elaborate specific verbs
+or knobs.)
+
+Each step's body is a themed Rich panel: persona-aware copy
+routed through =theme_studio=, code samples, links to deeper
+material, and a "next try" nudge baked into the prose (not a
+separate LLM call).
+
+* Conversational form (in opencode)
+
+Two MCP tools expose the curriculum to the host LLM:
+
+- =list_tutor_steps()= — return the full list of step names
+- =get_tutor_step(step)= — return the body for a single step
+
+The in-opencode LLM is taught (via the system prompt) to pick a
+step when the user's question maps to one — "how do embeddings
+work?" → =get_tutor_step("embed")= → quote the body inline.
+
+This makes a fresh opencode session double as a guided tutorial.
+The model uses the tutor as its own reference card, the same
+way the [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki conventions]] tell it to use the wiki.
+
+* How to configure
+
+** Env vars
+- =ORG_LLM_DB= / =ORG_LLM_ORG_DIR= — same overrides as everywhere
+
+(There are no env taps for tutor-specific behavior — it's
+stateless and config-free.)
+
+** CLI flags
+#+begin_src sh
+org-llm tutor                    # default step ("welcome")
+org-llm tutor embed              # named step
+org-llm tutor --all              # print every step in one pass
+org-llm tutor -a                 # short form of --all
+#+end_src
+
+The positional argument is the step name; valid names are
+listed in the verb's docstring (and =--help=). Unknown names
+raise =Unknown step=.
+
+** Conversational
+- =list_tutor_steps()= MCP tool
+- =get_tutor_step(step)= MCP tool — model can read a step's
+  body and quote inline
+- "Show me the X tutorial" / "what's the embed step say?" —
+  natural language; the model picks =get_tutor_step=
+
+* Source files
+
+- =org_llm/cli.py:_TUTOR_STEPS= — the curriculum (45-tuple list
+  of =(name, body)= pairs)
+- =org_llm/cli.py:tutor= — the verb implementation
+- =org_llm/mcp_server.py:list_tutor_steps,
+  get_tutor_step= — MCP exposure
+
+* Related
+
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] §
+  Phase 10 — tutor first landed there alongside the README
+  rewrite + gallery
+- [[id:c88b2ddc-33bc-4b58-bd16-993c48b91209][Theme studio]] — tutor
+  step bodies route through =get_themed= so they match the
+  user's knob mix
+- [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][Wiki conventions]] —
+  parallel pattern: model consults a curated reference (tutor
+  for verbs, wiki for concepts)

@@ -22,14 +22,14 @@ skill updates everywhere.
 A minimal skill:
 
 #+begin_src org
-,* Weekly review summary :skill:weekly-review-summary:
+,* Weekly review summary :skill:
 ,:PROPERTIES:
-,:SKILL_INPUT: a free-form description of what to summarize
-,:SKILL_MODEL: chat
+,:SKILL_NAME: weekly-review-summary
+,:SKILL_LANG: python
+,:SKILL_MODEL: chat_model
 ,:END:
 
-,#+name: weekly-review-summary
-,#+begin_src python :tangle ~/org/skills/weekly-review-summary.py
+,#+begin_src python
 import sys
 prompt = f"""
 Summarize this week's notes in 5 bullets, grouped by theme:
@@ -40,9 +40,20 @@ print(prompt)
 ,#+end_src
 #+end_src
 
-The skill name comes from =:skill:<name>:= in the heading tag.
-The =SKILL_*= properties configure routing; the source block IS
-the prompt-building logic.
+The =:skill:= tag on the heading marks the block; the
+=:PROPERTIES:= drawer configures it:
+
+- =SKILL_NAME= — addressable name (defaults to the heading,
+  lowercased + spaces → underscores)
+- =SKILL_LANG= — interpreter (=python= / =sh= / =bash= /
+  =shell=); default =python=
+- =SKILL_MODEL= — config key naming the model to route to
+  (=chat_model= / =fast_model= / =reason_model= / =text_model=
+  / =code_model= / =cloud_model=); default =text_model=
+
+The first =#+begin_src= block under the heading IS the source.
+Trust-on-first-use (below) hashes that source before the first
+run.
 
 * Three roles
 
@@ -67,23 +78,43 @@ the prompt-building logic.
 
 * Skill registry
 
-The =Skill= table caches what =skill-index= scans:
+The =Skill= table caches what =skill-index= scans
+(=org_llm/skills.py:Skill=):
 
-#+begin_src sql
-CREATE TABLE skills (
-    name           TEXT PRIMARY KEY,
-    file           TEXT NOT NULL,    -- which org file
-    heading        TEXT,             -- human label
-    skill_input    TEXT,             -- describes the input
-    skill_model    TEXT,             -- chat / reason / fast / cloud
-    body_path      TEXT,             -- tangled-to path
-    last_indexed   INTEGER
-);
+#+begin_src python
+class Skill(Base):
+    __tablename__ = "skills"
+    id         = Column(Integer, primary_key=True)
+    name       = Column(Text, nullable=False, unique=True)
+    lang       = Column(Text, nullable=False, default="python")
+    model_key  = Column(Text, nullable=False, default="text_model")
+    source     = Column(Text, nullable=False)    # raw src block body
+    file_path  = Column(Text, nullable=False)
+    heading    = Column(Text, nullable=False, default="")
 #+end_src
 
 =list_skills= MCP tool reads this; the workspace prompt
-includes the count ("Skills: weekly-review-summary,
+includes the names ("Skills: weekly-review-summary,
 extract-todos, generate-test-plan").
+
+* Trust-on-first-use safety
+
+Skills execute arbitrary code as the current user. The first
+time a skill source runs, =org-llm skill <name>= prompts the
+user to inspect the source, then records a SHA-256 of the
+source body in =Config.trusted_skills=:
+
+#+begin_example
+trusted_skills = "weekly-review-summary:abc123def4,extract-todos:fa01122334,…"
+#+end_example
+
+Re-runs are silent until the source changes — any edit
+invalidates the trust entry and re-prompts. =--yes= bypasses
+the prompt for scripted use.
+
+This catches the "shared org file ships a hostile skill" attack
+class. Skills landing from someone else's vault force a manual
+review.
 
 * Conversational use
 
@@ -107,19 +138,27 @@ registered skill name.
 
 ** CLI flags
 #+begin_src sh
-org-llm skill-index                    # scan vault, register all :skill: blocks
-org-llm skill <name> --input "..."     # run a skill from the CLI
-org-llm skill <name> -                 # read input from stdin
-org-llm skill --list                   # alias for list_skills
-org-llm skill-new <name>               # scaffold a new skill block in inbox.org
+org-llm skills                              # list registered skills (table)
+org-llm skill-index                         # scan vault, upsert all :skill: blocks
+org-llm skill <name> "<input text>"         # run with positional input
+org-llm skill <name> --node "<node title>"  # use that node's body as input
+org-llm skill <name> --yes                  # skip the trust-on-first-use prompt
+org-llm skill-new                           # scaffold a new skill block (interactive)
+org-llm skill-examples                      # show example skill blocks
 #+end_src
 
 ** Skill-block properties (set in =:PROPERTIES:= drawer)
-- =:SKILL_INPUT:= — describe what input the skill expects
-- =:SKILL_MODEL:= — =chat= / =reason= / =fast= / =code= /
-  =cloud= — picks which model the skill routes to (defaults to
-  =chat_model=)
-- =:SKILL_TIMEOUT:= — override the default LLM call timeout
+- =:SKILL_NAME:= — explicit name (otherwise derived from the
+  heading, lowercased + spaces → underscores)
+- =:SKILL_LANG:= — =python= / =sh= / =bash= / =shell=; default
+  =python=
+- =:SKILL_MODEL:= — config-key name (=text_model= / =chat_model=
+  / =reason_model= / =fast_model= / =code_model= / =cloud_model=);
+  defaults to =text_model=
+
+There is no =SKILL_INPUT= or =SKILL_TIMEOUT= property. The
+input is whatever the caller passes; timeouts are governed at
+the =llm.chat()= layer.
 
 ** Conversational (opencode / claude / pi)
 - =/skills= slash command — list registered skills
@@ -129,8 +168,11 @@ org-llm skill-new <name>               # scaffold a new skill block in inbox.org
 
 * Source files
 
-- =org_llm/skills.py= — =Skill= model + index logic
-- =org_llm/cli.py= — =skill= / =skill-index= / =skill-new= verbs
+- =org_llm/skills.py= — =Skill= model + indexer + =run_skill()=
+  executor
+- =org_llm/cli_skills.py= — =skills= / =skill= / =skill-index= /
+  =skill-examples= / =skill-new= verbs (registered into the
+  main app)
 - =org_llm/mcp_server.py= — =run_skill= / =list_skills= MCP tools
 
 * Related

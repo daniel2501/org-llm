@@ -1,0 +1,133 @@
+:PROPERTIES:
+:ID:       11029de4-2780-4169-9f3b-2fd1a3a73e6a
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Granted filesystem access
+#+FILETAGS: :wiki:concept:permissions:filesystem:
+#+OPTIONS: toc:nil num:nil
+
+* What it is
+
+A user-controlled allowlist of filesystem paths the LLM can
+read or operate on through MCP tools. The model can ask
+("=request_access(path)=") but can't grant. Every grant is
+explicit; the user is the gate.
+
+* Why an allowlist instead of "wide open"
+
+The host LLM's filesystem reach defaults to the user's full
+permissions. That's too much:
+
+- Notes about the user's life (=~/org/=) — yes
+- Repos the user actively works on — sometimes
+- =~/.ssh=, =~/.gnupg=, =~/Documents/taxes/= — never
+
+An allowlist makes "what can the LLM see?" a deliberate
+decision per directory. The default install only grants the
+=org_dir= itself; everything else is request-based.
+
+* The grant model
+
+Two scopes: =read= and =execute= (the latter for browser /
+shell tools that take a path).
+
+| Scope     | What it covers                                    |
+|-----------+---------------------------------------------------|
+| =read=    | =read_file=, =list_directory=, =discover_filesystem= |
+| =execute= | =browser_command=, =open_url=, future shell tools |
+
+A grant entry: =(path, scope, granted_at, granted_by, expires_at?)=.
+
+* The lifecycle
+
+#+begin_example
+Model: I'd like to look at your dotfiles for that question.
+       → request_access(path="~/dotfiles", scope="read",
+                          reason="user asked about shell config")
+        ↓
+User sees the request inline; approves or denies.
+        ↓ approved
+Grant written to Config; model retries the original tool call.
+        ↓ time passes
+User: org-llm grant list             # see what's granted
+User: org-llm grant revoke ~/dotfiles
+        ↓
+Grant deleted; future tool calls hit the deny path.
+#+end_example
+
+** Auto-deny patterns
+Even before a user is asked, the request layer auto-denies
+sensitive paths:
+
+- =~/.ssh=, =~/.gnupg=, =~/.config/pass/=, =~/.aws=, =~/.kube=
+- Anything that contains a key file extension (=.pem=, =.key=,
+  =.p12=)
+
+The user can't approve these via =request_access=; they have to
+explicitly create the grant via CLI (=grant add= with =--force=)
+if they really want to.
+
+* Filesystem discovery
+
+=discover_filesystem= surfaces what dirs *exist* under the user's
+home with their sizes / counts (read-only metadata). It doesn't
+require a grant on the directories it inspects — just stat info.
+The model uses this to *suggest* which dirs it'd be useful to
+have access to, without seeing their contents.
+
+* Audit trail
+
+Every grant + access event writes to History (=kind=config= for
+grants; =kind=mcp= for accesses) so =org-llm log --reflect= can
+spot patterns like "the model has been asking for =~/Documents=
+4 times this week — should you grant it?"
+
+* How to configure
+
+** Env vars
+- =ORG_LLM_GRANT_AUTO_DENY= — comma-separated paths the layer
+  refuses outright (defaults listed above)
+- =ORG_LLM_DB= — grants live in =Config=; the DB override
+  applies
+
+** CLI flags
+#+begin_src sh
+org-llm grant list                                # show all grants
+org-llm grant add ~/dotfiles --scope read         # explicit add
+org-llm grant add ~/scratch --scope execute       # for browser/shell tools
+org-llm grant add ~/sensitive --force             # bypass auto-deny (rare)
+org-llm grant revoke ~/dotfiles                   # remove
+org-llm grant audit                               # recent grant + access events
+#+end_src
+
+** Conversational (in opencode)
+- =request_access(path, scope, reason)= — model asks; user
+  approves inline
+- =list_grants()= — model can introspect what it has access to
+- =discover_filesystem()= — read-only metadata about candidate
+  paths
+
+** Permissions / safety
+- The user's approval is the ONLY gate. The model can't fake a
+  grant; the request flow writes via the user-confirmation
+  channel.
+- Auto-deny patterns are honored even when the user types
+  =grant add= — pass =--force= to override (rare; logged as a
+  CRITICAL audit event).
+
+* Source files
+
+- =org_llm/access.py= — grant model + auto-deny patterns
+- =org_llm/cli.py= — =grant= subcommand
+- =org_llm/mcp_server.py= — =request_access=, =list_grants=,
+  =read_file=, =list_directory=, =discover_filesystem=
+
+* Related
+
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — the granted
+  tools are the read/execute surface the bridge exposes
+- [[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][Doctor + self-heal]] —
+  =doctor= checks granted paths still exist; flags revocation
+  candidates when a grant points at a deleted dir
+- [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's Log]] —
+  every grant change + access event lands in History

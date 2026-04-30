@@ -1,0 +1,148 @@
+:PROPERTIES:
+:ID:       ff70047c-6611-4391-857e-f94c14fc1914
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Code corpus — cross-repo semantic search
+#+FILETAGS: :wiki:concept:code:retrieval:
+#+OPTIONS: toc:nil num:nil
+
+* What it is
+
+A second corpus that lives alongside your notes in the same DB:
+your *code* indexed and embedded so =ask= / =search= can answer
+across notes AND code in one query.
+
+The =code= subgroup is three verbs: =index= your repos, =search=
+across them, =generate= code grounded in your vault.
+
+* Why one DB for notes AND code
+
+Two corpora, one index = cross-cutting questions become free:
+
+- "How does cli.py wire up MCP?" — pure code question; hits =code:python= nodes
+- "What did I write about my dotfiles refactor, and where's the code?" — joins notes + code
+- "Find functions that do X" — code-only with =--lang= filter
+
+The DB schema doesn't distinguish notes from code at the
+storage layer. Code nodes carry =code= and =code:<lang>= tags
+for filtering; titles are derived from =<file>:<symbol>= where
+relevant. Otherwise: same Node table, same vector column, same
+search path.
+
+* The pipeline
+
+** =code index= — walk + register
+=org-llm code index= ([[file:../../org_llm/code_index.py][code_index.py]]) walks each
+configured directory, picks source files, parses for symbols
+(functions, classes, typedefs), writes one Node per symbol or
+per-file (when no parser hit).
+
+Default tree: =~/repos/=. Configurable via =org-llm config
+code_dirs ~/repos,~/.config/doom=.
+
+Skipped directories:
+=.git/=, =node_modules/=, =.venv/=, =target/=, =dist/=, =build/=,
+=__pycache__/=, =.next/=, etc.
+
+Truncates per-file body at 24 KB.
+
+** Embed — auto by default
+After indexing, =code index= calls =embed_pending= for new
+nodes so they're searchable immediately. Pass =--no-embed= to
+skip and run embed manually later.
+
+** =code search= — filtered semantic search
+=org-llm code search "embed function"= runs vector_search but
+filters to nodes tagged =code=. The =--lang= flag adds a
+=code:<lang>= tag filter:
+
+#+begin_src sh
+org-llm code search "lcars" --lang python
+org-llm code search "websocket handler" --lang typescript
+#+end_src
+
+Results show file:line + a snippet of the matched body.
+
+** =code generate= — RAG over the corpus
+=org-llm code generate "a 5-line python sleep"= retrieves relevant
+existing code from your repos as context, then asks the LLM to
+generate fresh code in the same style. The retrieved code is
+passed in the system prompt; the LLM completes the task with
+your idioms instead of generic boilerplate.
+
+* Cross-corpus search
+
+When =org-llm ask= runs, it queries against ALL nodes (no =code=
+tag filter). For a question like "how does cli.py wire up MCP?"
+this lets the model cite both your notes about the architecture
+AND the code itself in one answer.
+
+* Languages currently parsed
+
+The parser registry is in =code_index.py:_PARSERS=. Languages
+with symbol-level parsing:
+
+- Python (functions, classes, methods)
+- TypeScript / JavaScript (functions, classes, exports)
+- Elisp (defun, defmacro, defvar)
+- Bash (functions)
+- Org-mode (already covered by the main indexer)
+
+Other languages fall back to per-file indexing — still
+searchable, just at file granularity rather than symbol.
+
+* How to configure
+
+** Env vars
+- =ORG_LLM_CODE_DIRS= — comma-separated; per-invocation override
+- =ORG_LLM_CODE_MAX_BODY= — bytes; default 24576
+- =ORG_LLM_DB= / =ORG_LLM_ORG_DIR= — same overrides as everywhere
+
+** CLI flags
+#+begin_src sh
+# Index
+org-llm code index                              # default ~/repos
+org-llm code index ~/repos/dotfiles ~/.config/doom
+org-llm code index --no-embed                   # skip auto-embed
+org-llm code index --force                      # re-index even unchanged files
+org-llm config code_dirs ~/repos,~/.config/doom # persistent default
+
+# Search
+org-llm code search "embed function"
+org-llm code search "lcars" --lang python
+org-llm code search "x" --limit 50
+
+# Generate
+org-llm code generate "a 5-line python sleep"
+org-llm code generate "..." --cloud           # route cloud for the gen call
+
+# Cross-corpus
+org-llm ask --cloud "how does cli.py wire up MCP?"
+#+end_src
+
+** Conversational
+- =code_search(query, lang?)= MCP tool — the model can call this
+  directly with a language filter
+- Inside opencode workspace =-w engineer=: =/code= /
+  =/code-gen= / =/code-index= slash commands
+- The engineer workspace's system prompt nudges the model
+  toward =code_search= over =search_notes= for code-shaped
+  questions
+
+* Source files
+
+- =org_llm/code_index.py= — walker, parsers, indexing
+- =org_llm/cli.py= — =code= subcommand group
+- =org_llm/mcp_server.py= — =code_search= MCP tool
+- =org_llm/search.py= — vector_search; the =code= tag filter
+  flows through the same path
+
+* Related
+
+- [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][Embeddings]] — code
+  uses the same embedding model + signal-boost rerank
+- [[id:e4444444-5555-6666-7777-dddddddddddd][RAG]] — =ask= retrieves
+  notes + code in one cross-corpus call
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — code corpus
+  is a Phase 1–3 foundation; tree-sitter parsers are the
+  long-term direction (currently regex-based)

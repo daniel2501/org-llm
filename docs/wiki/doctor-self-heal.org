@@ -1,0 +1,210 @@
+:PROPERTIES:
+:ID:       53c6089c-f9cf-41ad-ad8c-ad07a220ffb6
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Doctor & self-heal
+#+FILETAGS: :wiki:concept:doctor:self-heal:
+#+OPTIONS: toc:nil num:nil
+
+* What this is
+
+Three layered health surfaces that all share a name family but
+do different work:
+
+| Layer            | When it runs                   | What it does                                |
+|------------------+--------------------------------+----------------------------------------------|
+| =doctor=         | User invokes; CI               | Deterministic checks + optional LLM diagnose|
+| =proactive_doctor= | Mid-session, model-driven    | Probe hardware/model fit, suggest fixes    |
+| =LLM rescue=     | Every uncaught exception       | Diagnose + propose code fix, opt-in apply  |
+
+Together: =org-llm= is the substrate that *notices* it's broken,
+*explains* what's broken, and (with permission) *fixes* itself.
+
+* =doctor= — the structured health check
+
+=org-llm doctor= runs ~20 deterministic checks across:
+
+- *Index integrity* — DB exists, schema migration up to date,
+  files table matches disk
+- *Embedding coverage* — what % of nodes have embeddings
+- *Model availability* — Ollama reachable; expected models pulled
+- *Cloud config* — provider set, key in =pass=, endpoint reachable
+- *Filesystem grants* — granted paths still exist
+- *Tool installs* — opencode, claude, gh, pass, fonts
+- *Theme + knob health* — theme cache up to date, knob levels valid
+
+Each check returns =ok= / =watch= / =alert= / =critical=, with a
+short message and a remediation hint. The output is a Rich table;
+critical issues route to =red_alert=.
+
+** =--diagnose= (LLM-driven follow-up)
+
+When deterministic checks find issues OR =--diagnose= is set,
+doctor invokes an LLM ("Dr. Crusher") with the issue list +
+recent History rows + hardware snapshot, asking for an
+integrated diagnosis. The 2026-04-29 stall fix:
+
+- =--no-diagnose= is now respected *strictly* (was running on
+  =issues or diagnose=, ignoring opt-out)
+- 60s timeout (was unbounded)
+- =heartbeat= progress UI with 10s warn (was opaque spinner)
+- Friendly timeout error path: suggests
+  =--no-diagnose= / =models --tune= / =launch --cloud=
+
+** =doctor diagnose-cards= subcommand
+
+Phase 12.5 add. Clusters recent =insight_engagement= rows by
+=(card_kind, narration_model)= and surfaces patterns for the
+insight-card pipeline. Note: this is a SUBCOMMAND
+(=org-llm doctor diagnose-cards=), not a flag on the
+top-level =doctor=. See [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][Insight cards]] § engagement.
+
+** Subcommand structure
+
+Doctor has both flag-driven (legacy) and subcommand-driven
+(new) entry points. Each common operation has a parallel
+subcommand:
+
+| Subcommand                       | Equivalent flag           |
+|----------------------------------+---------------------------|
+| =doctor walkthrough=              | =doctor --walkthrough=    |
+| =doctor fix=                      | =doctor --fix=            |
+| =doctor power-boost=              | =doctor --power-boost=    |
+| =doctor install <tool>=           | =doctor --install <tool>= |
+| =doctor diagnose-cards=           | (subcommand only)         |
+| =doctor benchmark-fixers=         | =doctor --benchmark-fixers= |
+
+* =proactive_doctor= — model-driven self-care
+
+The MCP tool every host LLM is taught to call when *something
+is drifting* mid-session. Trigger conditions baked into the
+system prompt:
+
+- =>3= tool calls without converging on an answer
+- A tool returned an error string (=tool-error=)
+- A search came back empty AND no obvious synonym to try
+  (=search-empty=)
+- Response felt slow (=long-response=)
+- Optimization probe at top of system prompt mentioned an
+  upsize / cloud opportunity (=optimization=)
+
+What it does:
+
+1. Probes hardware (=local_ram_gb=, =local_vram_gb=)
+2. Compares to the active model's footprint
+3. Suggests a fix:
+   - Smaller local model (with hardware-aware ranking)
+   - Cloud routing if available
+   - A bigger fitting model if there's headroom
+
+The user-visible line is themed via =theme_studio=:
+=themed_proactive_doctor_line= — defaults to "Triggering
+proactive doctor — something's drifting." but morphs with the
+active knob mix.
+
+* LLM rescue — every uncaught exception
+
+Wraps the CLI's top-level exception handler. When a verb crashes,
+=llm_rescue=:
+
+1. Captures the traceback + argv + recent History rows
+2. Sends them to a fast model with a "diagnose this Python
+   exception in this CLI invocation" prompt
+3. Renders a themed verdict: what likely went wrong + the
+   smallest-blast-radius fix
+4. (Opt-in) Offers to apply the fix as a code edit with auto-rollback
+
+The opt-in apply path requires a token-based approval (the LLM
+can't fake it). CLI fixes are listed in the walkthrough output.
+
+** Globally suppress
+- =org-llm --suppress-proactive-doctor=
+- =ORG_LLM_PROACTIVE_DOCTOR=off=
+
+* Power boost
+
+The hardware-aware sizing probe that runs on
+=launch=, =setup=, and =models --tune=. Three checks:
+
+1. Does the active =chat_model= fit in *free* RAM with a
+   generous safety margin?
+2. Is a GPU detected with enough VRAM?
+3. Is cloud configured?
+
+Verdicts:
+
+- *OK*: model fits; no action.
+- *Upgrade locally*: there's headroom for a bigger model;
+  surface the next-step pull command.
+- *Downgrade locally*: model doesn't fit; suggest a smaller one.
+- *Route cloud*: nothing locally fits; suggest cloud.
+
+The LLM in opencode mentions the verdict in 1 line on session
+start so the user can opt into the upsize / cloud route without
+explicit complaint.
+
+* How to configure
+
+** Env vars
+- =ORG_LLM_PROACTIVE_DOCTOR= — =off= globally disables the
+  proactive flow
+- =ORG_LLM_DOCTOR_PROACTIVE_MODE= — =auto= (default) / =off= /
+  =strict= (run on every tool call)
+- =ORG_LLM_DOCTOR_STUCK_THRESHOLD= — int, default =3=; how many
+  unconverged tool calls before triggering
+- =ORG_LLM_DOCTOR_INTERVENE_IN= — comma-separated list of
+  intervention kinds to honor (=tool-error,search-empty,...=)
+- =ORG_LLM_DIAG_MODEL= — model used for =--diagnose= (defaults
+  to =fast_model=)
+
+** CLI flags + subcommands
+#+begin_src sh
+# Top-level (legacy flag form)
+org-llm doctor                            # default: deterministic checks + LLM diagnose
+org-llm doctor --no-diagnose              # deterministic only (fast)
+org-llm doctor --diagnose                 # force LLM diagnosis even when clean
+org-llm doctor --fix                      # auto-apply safe fixes
+org-llm doctor --install <toolname>       # install a single FOSS tool by name
+org-llm doctor --list-tools               # list installable tools
+org-llm doctor --walkthrough              # legacy form of `doctor walkthrough`
+org-llm doctor --power-boost              # legacy form of `doctor power-boost`
+org-llm doctor --power-boost --apply      # write the suggested upsize
+org-llm doctor --benchmark-fixers         # score multiple cloud LLMs on fix scenarios
+org-llm doctor --apply-fixer              # apply the chosen fixer
+org-llm doctor --report-to ~/notes/health.org   # append structured org report
+
+# Subcommand form (preferred; tutor steps + Doom bindings address these)
+org-llm doctor walkthrough
+org-llm doctor fix
+org-llm doctor power-boost
+org-llm doctor install <toolname>
+org-llm doctor diagnose-cards             # Phase 12.5 — cluster insight engagement
+#+end_src
+
+** Conversational
+- =doctor_health()= MCP tool — quick health probe
+- =proactive_doctor()= MCP tool — RAM/model fit + fix suggestion
+- =proactive_doctor_apply()= MCP tool — applies the proposed fix
+  (token-gated)
+- =performance_status()= MCP tool — tok/s + tuning data
+
+* Source files
+
+- =org_llm/cli.py:_doctor_impl= — main doctor implementation
+- =org_llm/cli.py:proactive_doctor=,
+  =org_llm/mcp_server.py:proactive_doctor= — model-facing
+  surfaces
+- =org_llm/cli.py:llm_rescue= — top-level exception wrapper
+- =org_llm/cloud.py:local_ram_gb=, =local_vram_gb= — hardware
+  probes
+
+* Related
+
+- [[id:510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08][Cloud-or-local routing]] —
+  power-boost decisions consume routing config
+- [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][Insight cards]] —
+  =--diagnose-cards= is the doctor surface for Phase 12.5
+  engagement analytics
+- [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's Log]] —
+  doctor verdicts log themselves so =--reflect= can spot
+  patterns over time

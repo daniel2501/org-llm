@@ -155,8 +155,9 @@ sessions see the snapshot from launch time.
   TUI plugin command)
 - =insight_card_feedback= MCP tool — model writes engagement
   rows when the user says "that one was useful" / "skip that"
-- =gather_insights= MCP tool — re-gather mid-session without
-  relaunching
+- *(no =gather_insights= MCP tool today)* — gather is launch-time
+  only; relaunch to refresh. A mid-session refresh tool is a
+  Phase 12.6 candidate.
 
 * Source files
 

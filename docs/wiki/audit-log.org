@@ -1,0 +1,287 @@
+:PROPERTIES:
+:ID:       9b012557-f592-4d1e-8dd1-464c2a4250c3
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Wiki ↔ reality audit log
+#+FILETAGS: :wiki:meta:audit:
+#+OPTIONS: toc:2 num:nil
+
+* What this is
+
+A living log of bidirectional audits between the wiki and the
+codebase: where do wiki claims diverge from reality, and what
+code surfaces does the wiki not yet describe?
+
+Every audit pass appends a dated section. Each finding is
+either =fix-applied= (the wiki was corrected in the same commit)
+or =deferred= (parked here pending later work). The =deferred=
+list is the agenda for future sweeps.
+
+* How to run an audit
+
+#+begin_src sh
+# Manual: each wiki page's "Source files" + claims vs the
+# referenced code. Cheap checks first:
+ls $(grep -oE 'org_llm/[a-z_]+\.py' docs/wiki/*.org | cut -d: -f2 | sort -u)
+
+# Codebase → wiki: spot-check helpers and verbs the code names
+# that no wiki page describes:
+grep -nE "^def [a-z_]+\(" org_llm/cli.py | head
+grep -nE "^@app\.command|@.*_app\.command" org_llm/cli.py
+grep -nE "^    @server\.tool\(\)" org_llm/mcp_server.py
+#+end_src
+
+The audit is a manual pass for now; a future pass might
+automate some checks (file paths exist, commit anchors valid,
+phase numbers match git log).
+
+* 2026-04-30 — initial bidirectional audit
+
+First pass after writing the Tier-2 wiki batch (cloud-or-local,
+doctor self-heal, tutor, pi-bridge, code corpus, granted-fs,
+task-prefixes). Found a meaningful number of inaccurate claims
+in the just-written pages — ground-truthed against the actual
+code rather than reasoning from project structure.
+
+** Wiki → reality: claims that didn't match code
+
+*** Pi bridge
+:PROPERTIES:
+:STATUS: fix-applied
+:END:
+
+| Claim                                           | Reality                                          |
+|-------------------------------------------------+--------------------------------------------------|
+| Bridge lives at =extensions/pi/=                | Lives at =org_llm/pi_extension/pi-org-llm.ts=    |
+| Flags: =--install/--uninstall/--status/--update/--logs/--restart= | Actual: =--install/--launch/--show/--status/--reinstall/--npm= |
+| Auto-installs Pi via =npm i -g @pi-cli/pi=     | Pi installer is curl-based; =--npm= flag opts in |
+| Bridge prepends to Pi's system prompt          | Bridge auto-loads via =~/.pi/config.json=        |
+
+*** Tutor
+:PROPERTIES:
+:STATUS: fix-applied
+:END:
+
+| Claim                                | Reality                                           |
+|--------------------------------------+---------------------------------------------------|
+| 23 steps                             | 45 steps                                          |
+| Steps tracked via =Config= keys      | Stateless; address by name (not number)           |
+| Flags: =--list / --reset / --step N= | Actual: =--all / -a= (positional step name)       |
+| LLM recommendation after each step   | Doesn't exist; not in =cli.py:tutor=              |
+| Step groups (4-step buckets)         | Steps are flat (named like welcome/init/index/…)  |
+
+*** Skills
+:PROPERTIES:
+:STATUS: fix-applied
+:END:
+
+| Claim                                       | Reality                                                  |
+|---------------------------------------------+----------------------------------------------------------|
+| Schema: =name(PK), file, heading, skill_input, skill_model, body_path, last_indexed= | =id(PK), name(unique), lang, model_key, source, file_path, heading= |
+| Properties: =SKILL_INPUT, SKILL_MODEL, SKILL_TIMEOUT= | =SKILL_NAME, SKILL_MODEL, SKILL_LANG= (no INPUT or TIMEOUT) |
+| Flags: =--input "..." / --list=             | Positional input + =--node= flag for node-body input; =--yes= for trust |
+| Verbs: =skill / skill-index / skill --list / skill-new= | =skills / skill / skill-index / skill-examples / skill-new= |
+| (missed) Trust-on-first-use SHA gating      | Real; sk SHA → =trusted_skills= config row; first run prompts |
+
+*** Walk
+:PROPERTIES:
+:STATUS: fix-applied
+:END:
+
+The wiki described a graph-traversal model (depth, edges, tag
+co-occurrence). The actual =walk= verb is *not* graph traversal
+— it's an LLM-driven attention picker that surfaces N notes
+worth attention and extracts atomic factual claims for the
+context overlay.
+
+| Claim                                  | Reality                                                |
+|----------------------------------------+--------------------------------------------------------|
+| Traverses by id-link / tag co-occurrence / temporal proximity / backlinks | LLM picks N attention-worthy notes; user explains; LLM extracts atomic facts |
+| Flags: =--id / --depth / --tags-min / --since-days / --no-llm= | =--window-days / -w / --max-nodes / -n / --pick / -p / --review / --no-save= |
+| Output is "narrative through context graph" | Output is "lessons extracted to =llm-context.org=" |
+| MCP tool: =walk_node=                  | Doesn't exist                                          |
+| MCP tool: =add_disambig=               | Doesn't exist; =walk_save_disambiguation= is the real one |
+| Tracks: notes (only one wired)         | =notes= wired; =dailies= + =projects= are Phase 13.2-3 stubs |
+
+The walk page's CONCEPTUAL framing was fundamentally wrong — it
+treated walk as a retrieval mode (alongside ask), but walk is a
+KNOWLEDGE-CAPTURE mode (alongside =context add=). Rewritten.
+
+*** Doctor + self-heal
+:PROPERTIES:
+:STATUS: fix-applied
+:END:
+
+| Claim                                  | Reality                                                |
+|----------------------------------------+--------------------------------------------------------|
+| =--diagnose-cards= flag                | =doctor diagnose-cards= SUBCOMMAND                     |
+| =--install all= flag                   | =--install <toolname>= takes a single tool             |
+| Did not mention =doctor walkthrough / fix / power-boost / install / diagnose-cards= subcommands | All exist as parallel subverbs to the legacy flags |
+| Did not mention =--benchmark-fixers / --apply-fixer= | Both real |
+
+*** MCP page
+:PROPERTIES:
+:STATUS: fix-applied
+:END:
+
+| Claim                          | Reality                                                |
+|--------------------------------+--------------------------------------------------------|
+| ~64 MCP tools                  | Exactly 64 ✓                                           |
+| =walk_node= MCP tool           | Doesn't exist                                          |
+| =add_disambig= MCP tool        | Doesn't exist; =walk_save_disambiguation= is the real one |
+| (missed) =find_stale_notes / get_context / refresh_context / list_models / list_slash_commands / insight_card_feedback / emh_consult / life_support_advice / life_support_history / life_support_status / recent_perf_alerts / self_rewrite= | All real |
+| (missed) Walk tools: =walk_extract_facts / walk_pick_targets / walk_review_pending / walk_save_facts / walk_undo_last_save= | All real |
+
+*** Insight cards
+:PROPERTIES:
+:STATUS: deferred
+:END:
+
+| Claim                                     | Reality                                          |
+|-------------------------------------------+--------------------------------------------------|
+| =gather_insights= MCP tool                | Doesn't appear in =mcp_server.py= (cards gather is launch-time only) |
+| Engagement query example shows =insight_card_feedback= writing rows | Verified — that tool exists                       |
+
+The =gather_insights= claim is wrong; the gather is invoked
+from =launch= directly. Will fix in the next pass; flagged here
+as the only deferred item from the cards page.
+
+** Reality → wiki: code surfaces with no wiki coverage
+
+These are real features the audit surfaced that no wiki page
+yet describes. Most are candidates for new wiki pages; some are
+sub-features of existing pages.
+
+*** Trust-on-first-use for skills
+:PROPERTIES:
+:STATUS: fix-applied
+:END:
+
+The first time a skill source SHA changes, =skill <name>=
+prompts the user to inspect the source before running. The
+SHA gets stored in =Config.trusted_skills=; re-runs are quiet
+until the source changes. This is a real safety property and
+deserves explicit wiki coverage. Added to skills.org.
+
+*** =doctor= subcommand structure
+:PROPERTIES:
+:STATUS: fix-applied
+:END:
+
+The =doctor= verb has both flag-driven (legacy) and
+subcommand-driven (new) entry points: =doctor walkthrough=,
+=doctor fix=, =doctor power-boost=, =doctor install=,
+=doctor diagnose-cards=. Doctor wiki page now mentions both
+forms.
+
+*** =context= subcommands beyond add/from-prompt
+:PROPERTIES:
+:STATUS: deferred
+:END:
+
+The =context= subcommand group has =show / add / from-prompt /
+build / tangle / edit / clear / stale=. Staleness wiki only
+mentioned =add / from-prompt / tangle / show=. The other four
+(=build / edit / clear / stale=) are real and worth covering.
+
+*** Life support / EMH / sensors
+:PROPERTIES:
+:STATUS: deferred
+:END:
+
+MCP tools: =emh_consult=, =life_support_advice=,
+=life_support_history=, =life_support_status=,
+=recent_perf_alerts=. CLI verb: =org-llm life-support=. None
+of these are in the wiki yet. Candidate for a new wiki page
+("Life support — host telemetry + EMH").
+
+*** =self_rewrite= MCP tool
+:PROPERTIES:
+:STATUS: deferred
+:END:
+
+The opt-in self-rewrite-with-rollback feature surfaces as a
+=self_rewrite= MCP tool. Mentioned in the README's "Self-healing"
+section but no dedicated wiki page. Candidate for inclusion in
+=doctor-self-heal.org= (the page already covers the LLM rescue
+flow conceptually).
+
+*** =askbook= / =org-llm-askbook.org=
+:PROPERTIES:
+:STATUS: deferred
+:END:
+
+The literate Q/A scratchpad that pings multiple backends side-
+by-side (chat / reason / fast / code / text / cloud / claude /
+pi). Mentioned in the README's "What you get" panel but no
+wiki page. Candidate.
+
+*** Granted browser / =open_url= / =browser_command=
+:PROPERTIES:
+:STATUS: fix-applied
+:END:
+
+The granted-filesystem-access wiki page now mentions
+=open_url= and =browser_command= under the =execute= scope.
+Originally missed.
+
+*** Phase 17+ planning markers
+:PROPERTIES:
+:STATUS: deferred
+:END:
+
+The roadmap page enumerates Phase 1–16. No code references
+exist for Phase 17+ yet, but the roadmap should track open
+"next-phase" candidates explicitly: live status panel
+(considered in this session), MCP-kind logging, sidebar
+expansion. Add a "Phase 17 — candidates" placeholder section.
+
+** Numerical / commit-anchor fixes
+
+*** Tutor step count
+:PROPERTIES:
+:STATUS: fix-applied
+:END:
+Wiki said 23 steps; reality is 45.
+
+*** Phase 16.2 commit roster
+:PROPERTIES:
+:STATUS: fix-applied
+:END:
+Roadmap listed =a1f0ff9, 55cb260, 7ba5486, d82b698, 6db6a88,
+db6bbd1, cd4d61a=. Adding =3b9cb0c= (regen_screenshots) and
+=91eeef8= (this docs landing) for completeness.
+
+* Audit cadence
+
+This page should be re-audited:
+
+- *Quarterly*: full sweep of every wiki page's claims against
+  current code.
+- *Per phase landing*: when a new phase ships, audit the
+  wiki page that covers it (or the roadmap if no dedicated
+  page exists).
+- *Per LLM-driven wiki edit*: per the [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki conventions]] rule,
+  every LLM-proposed edit should include a one-line "verified
+  against <file>:<line>" claim so future audits can spot-check.
+
+The next scheduled audit is *2026-07-30*. Add a calendar
+reminder.
+
+* Source files this audit touched
+
+- =org_llm/cli.py= — verb signatures + flag enumerations
+- =org_llm/cli_skills.py= — skill subcommand registry
+- =org_llm/mcp_server.py= — =@server.tool()= roster
+- =org_llm/db.py= — schema models
+- =org_llm/skills.py= — Skill model + indexer
+- =org_llm/walk.py= — walk implementation
+
+* Related
+
+- [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][Wiki conventions]] —
+  the self-updating + always-notified rules this audit enforces
+- [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][Wiki index]] — list of
+  pages this audit covered
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — where a
+  "Phase 17 — candidates" section should land

@@ -1,0 +1,148 @@
+:PROPERTIES:
+:ID:       510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Cloud-or-local routing
+#+FILETAGS: :wiki:concept:cloud:routing:
+#+OPTIONS: toc:nil num:nil
+
+* What it is
+
+The decision tree =org-llm= uses to pick *where* an LLM call
+runs: locally via [[https://ollama.com][Ollama]], or remotely via
+a configured cloud provider (RunPod, Vast, Lambda, TensorDock,
+Salad, Paperspace, CoreWeave, OpenRouter, HuggingFace, etc.).
+
+The default is *auto*: cloud when configured AND an API key is
+in =pass=; otherwise local. =--cloud= / =--local= flags override
+per-invocation.
+
+* Why this matters
+
+Local Ollama is private, free, and limited by the host's RAM /
+VRAM. Cloud is fast, sometimes higher quality, but costs and
+sends prompts off-box. The right choice depends on:
+
+- The model the call needs (does it fit locally?)
+- The user's connection + cloud budget
+- Whether the prompt contains sensitive content
+- Whether speed matters for this verb (interactive vs batch)
+
+Auto-routing tries to pick the right one without making the user
+think about it on every command.
+
+* The decision flow
+
+#+begin_example
+launch / ask / chat / etc. invoked
+        │
+        ├── --cloud flag? ──→ require cloud configured + key in pass; route cloud
+        │
+        ├── --local flag? ──→ route local (Ollama)
+        │
+        └── neither (auto):
+             ├── cloud_provider + cloud_model + cloud_endpoint set in Config?
+             │   AND a key exists in pass for that provider?
+             │       └── YES → route cloud
+             │       └── NO  → route local
+             └── verbose probe failures fall back to local
+#+end_example
+
+A "hung opencode is almost always a weak local model timing out"
+— so when cloud is wired up the auto path defaults to using it,
+even though local is the privacy-first identity. =--local= is
+always one flag away.
+
+* Cloud provider catalog
+
+Auto-refreshing pricing catalog at =org-llm cloud --refresh-catalog=
+covers ~9 providers with FOSS / free-tier options. Each provider
+entry stores:
+
+- Endpoint URL pattern
+- Model catalog (which models are available)
+- Pricing tier (free / per-token / per-hour-GPU)
+- Auth pattern (API key, OAuth, etc.)
+
+The user picks one with =org-llm cloud --configure=, which
+prompts for the API key, encrypts it via [[https://www.passwordstore.org][pass]], and writes
+=cloud_provider= / =cloud_model= / =cloud_endpoint_url= to
+=Config=.
+
+** Groq exclusion
+
+[[https://groq.com][Groq]] is deliberately excluded from the
+catalog and providers list. Don't add it.
+
+* Hardware-aware fallback
+
+Even with cloud configured, =org-llm= probes local hardware
+before routing local — RAM check (does the chat model fit in
+free RAM with a generous safety margin?) + VRAM check (is a GPU
+available with enough headroom?). When both checks fail and
+cloud is configured, it routes cloud automatically (=power_boost=).
+
+* Provider config in opencode
+
+The =org-llm launch= flow writes BOTH providers (Ollama + cloud)
+into =.opencode/opencode.json= when cloud is configured. opencode's
+in-session model picker can switch between them without re-launching.
+=use_cloud= only decides which one is the DEFAULT (the top-level
+=model= field).
+
+* How to configure
+
+** Env vars
+- =ORG_LLM_CLOUD_PROVIDER= — override the provider per-invocation
+- =ORG_LLM_CLOUD_MODEL= — override the model
+- =ORG_LLM_CLOUD_ENDPOINT_URL= — override the endpoint
+- =ORG_LLM_PASS_PREFIX= — directory under =pass= for keys
+  (default =org-llm/=)
+
+** CLI flags
+#+begin_src sh
+# Configuration
+org-llm cloud --configure                # interactive picker
+org-llm cloud --providers                # list configured providers
+org-llm cloud --refresh-catalog          # update pricing data
+org-llm cloud --test                     # round-trip ping the configured cloud
+
+# Per-invocation routing
+org-llm ask "..." --cloud                # force cloud
+org-llm ask "..." --local                # force local
+org-llm launch --cloud                   # opencode workspace, cloud-default
+org-llm launch --local                   # privacy-first
+org-llm launch -n                        # dry-run; key is REDACTED in output
+#+end_src
+
+** Conversational
+- Inside opencode: switch the active model via the model picker
+  (Ctrl+M); both providers are listed.
+- Natural language: "switch to cloud" / "use local for this" —
+  the model can call =set_config= against =default_route=
+  (planned; today the user re-launches with the flag).
+
+** Permissions
+- =launch --cloud= writes the API key into
+  =.opencode/opencode.json= which is chmod'd =0600=. Don't
+  commit this file; the launch flow writes it to a vault-relative
+  path that should be in =.gitignore=.
+
+* Source files
+
+- =org_llm/cloud.py= — provider catalog, =cloud_configure=,
+  =local_ram_gb= / =local_vram_gb= probes
+- =org_llm/cli.py= — =cloud= subcommand, =launch= cloud-or-local
+  decision, =--cloud= / =--local= flags
+- =org_llm/creds.py= — =pass= integration
+
+* Related
+
+- [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][Embeddings]] — embed
+  calls also route cloud-or-local; the same logic applies
+- [[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][Doctor + self-heal]] —
+  =proactive_doctor= calls the hardware probes that drive
+  power-boost routing decisions
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — the
+  cloud catalog has been a moving target since Phase 5;
+  Phase 15 added schema-compliant provider blocks for opencode

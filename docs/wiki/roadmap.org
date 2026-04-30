@@ -304,6 +304,48 @@ alternative to it. Per =extensions/emacs/README.md:40=.
 Scaffolded in =extensions/emacs/org-llm.el= (Phase 16.0). Real
 hooks land here.
 
+* Active — Phase 17: live sidebar status panel               :next:
+
+The next big feature push. The opencode TUI sidebar currently
+shows opencode's defaults (mcp / lsp / files / todo widgets);
+the sidebar_title was branded "org-llm •" in Phase 16.2 but the
+content beneath is still default. Phase 17 replaces it with a
+live, refreshing org-llm panel.
+
+** Scope
+
+- *Live status surface* — vault counts (=N nodes · M stale ·
+  last gather Xm ago=), active palette + knob mix, MCP server
+  status, auto-embedder daemon state, hardware probe verdict.
+- *Common feature links* — clickable / keybind-jumpable rows for:
+  - =doctor= — quick health probe
+  - =library= — recent vault activity
+  - =insights= — open the cards dialog (already exists; sidebar surfaces it)
+  - =wiki= — open the wiki index
+- *SensorLog stream* — the existing =sensor_log= table records
+  every probe cycle (battery / CPU / mem / thermal / network /
+  ollama / auto-embedder); surface a rolling tail of recent
+  alerts in the sidebar so anomalies are visible without
+  running =doctor=.
+
+** Implementation surface
+
+- =sidebar_content= slot override (TSX in
+  =extensions/opencode/src/slots.tsx=); same plumbing as the
+  Phase 16.2 =home_logo= override.
+- New launch-time JSON file =.opencode/sidebar-status.json=
+  populated alongside =insight-cards.json=. Plugin reads this
+  on mount and re-reads on a tick.
+- Plugin registers a refresh interval; on each tick re-reads the
+  JSON. (The launch flow's =auto_embedder= daemon already writes
+  current vault stats to the DB; the sidebar JSON is a thin
+  serialisation pass.)
+
+** Status
+
+Planned. Scoping in this 2026-04-30 session; implementation in
+the next phase landing.
+
 * Planned — Phase 16.4+: extension polish                    :planned:
 
 ** Status panel slot

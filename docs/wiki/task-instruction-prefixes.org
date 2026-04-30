@@ -1,0 +1,152 @@
+:PROPERTIES:
+:ID:       338485eb-1669-4966-82fb-03607f5f0c64
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Task-instruction prefixes (the nomic-embed gotcha)
+#+FILETAGS: :wiki:concept:embeddings:gotcha:phase-11:
+#+OPTIONS: toc:nil num:nil
+
+* TL;DR
+
+[[https://huggingface.co/nomic-ai/nomic-embed-text-v1.5][nomic-embed-text-v1.5]],
+the default embedding model, REQUIRES task-instruction
+prefixes to embed text correctly:
+
+- =search_document:= for stored content (notes, code)
+- =search_query:= for query strings
+
+Without these prefixes the model returns plausible-looking
+vectors that don't actually retrieve well. The Phase 11 audit
+caught this — single capitalized words (=Kafka=, =Marx=,
+=Subjects=) were collapsing to the same near-garbage vector.
+
+This page documents what happened, why, and what we do now.
+
+* The bug
+
+Before Phase 11:
+
+#+begin_src python
+# org_llm/llm.py — wrong (this used to be the implementation)
+def embed(text: str) -> list[float]:
+    response = ollama.embeddings(model=embed_model, prompt=text)
+    return response.embedding
+#+end_src
+
+The model would happily produce a vector for =Kafka=, but that
+vector didn't carry the meaning of "Kafka the writer." It
+landed in a generic capitalized-noun cluster, near =Marx=,
+=Hemingway=, =Dickens= — visually plausible but useless for
+retrieval.
+
+Symptom in the wild: =search "kafka"= returned the wrong notes
+or no notes; semantic search felt subtly broken without an
+obvious cause.
+
+* The fix
+
+After Phase 11:
+
+#+begin_src python
+def embed(text: str, *, task: str = "document") -> list[float]:
+    prefix = {
+        "document": "search_document: ",
+        "query":    "search_query: ",
+    }[task]
+    response = ollama.embeddings(model=embed_model,
+                                  prompt=prefix + text)
+    return response.embedding
+#+end_src
+
+Every embed site (indexer, search, code-index) was audited for
+correct =task= argument. The migration:
+
+#+begin_src sh
+# Phase 11 migration: re-embed everything with prefixes
+org-llm embed --force
+#+end_src
+
+A single re-embed pass; idempotent; ~15 min on a 10k-node vault.
+
+* Why it took that long to spot
+
+The bug is silent. =vec_distance_cosine()= returns numbers in
+[-1, 1] either way — there's no error. Search returns *something*
+even with wrong embeddings; it's just *worse*. The fix surfaced
+when one of us noticed every capitalized single-word search
+returned the same N notes regardless of query.
+
+Pinned in =tests/test_embed.py= (look for the prefix-coverage
+test): every embed call site exercises both =task=document= and
+=task=query= and asserts the prefix lands in the prompt.
+
+* What other models need
+
+| Model                          | Prefix needed?                                     |
+|--------------------------------+----------------------------------------------------|
+| nomic-embed-text v1.5          | YES — =search_document:= / =search_query:=         |
+| nomic-embed-text v1            | YES — same prefixes                                |
+| BGE (BAAI)                     | YES — different convention; per-model              |
+| OpenAI ada-002 (cloud)         | NO — model handles task awareness internally       |
+| Sentence-transformers (most)   | NO                                                 |
+| jina-embeddings-v3             | YES — =[Q]= / =[D]= bracket prefixes               |
+
+The =task= argument in =org_llm.llm.embed= is per-call; the
+model name → prefix mapping is in =llm.py:_EMBED_PREFIXES=. Add
+a row when adding a model that needs different prefixes.
+
+* When you swap embed models
+
+If the new model uses different prefixes (or none), update the
+mapping AND re-embed:
+
+#+begin_src sh
+org-llm config embed_model <new-model>
+# update _EMBED_PREFIXES if needed
+org-llm embed --force
+#+end_src
+
+The =--force= is mandatory: stored vectors from the old model's
+prefix-space don't match the new model's query-space, and
+mixing them silently degrades search quality.
+
+* How to configure
+
+** Env vars
+- =ORG_LLM_EMBED_MODEL= — per-invocation override
+- =ORG_LLM_EMBED_PREFIX_DOCUMENT= / =ORG_LLM_EMBED_PREFIX_QUERY= —
+  override the prefixes used for the active model (rare; only
+  needed if upstream changes the convention)
+
+** CLI flags
+#+begin_src sh
+org-llm embed --force                      # re-embed all (after model swap)
+org-llm models --benchmark                 # tok/s + retrieval-quality probe
+org-llm doctor                             # surfaces "embed prefix mismatch"
+                                            # when stored vectors look broken
+#+end_src
+
+** Conversational
+- The host LLM doesn't pick prefixes — the embed call site does.
+  Models calling =embed_pending= MCP get correct prefixes
+  automatically.
+
+* Source files
+
+- =org_llm/llm.py:embed= — the prefix application site
+- =org_llm/llm.py:_EMBED_PREFIXES= — model → prefix mapping
+- =org_llm/indexer.py:embed_nodes= — passes =task="document"=
+- =org_llm/search.py:vector_search= — passes =task="query"=
+- =org_llm/code_index.py= — code embedding uses =task="document"=
+- =tests/test_embed.py= — prefix-coverage regression test
+
+* Related
+
+- [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][Embeddings]] — the
+  general theory; this page is the "watch out" sibling
+- [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][Vector similarity]] —
+  why bad prefixes silently degrade rather than fail loudly
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 11 —
+  the migration's chronology
+- [[https://huggingface.co/nomic-ai/nomic-embed-text-v1.5#usage][nomic-embed-text-v1.5 model card]] — upstream documentation
+  of the prefix requirement
