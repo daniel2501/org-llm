@@ -30,6 +30,9 @@ function makeApi() {
       toast: mock(() => {}),
       dialog: { replace: mock(() => {}), clear: mock(() => {}) },
       DialogSelect: mock(() => ({})),
+      // Prompt is referenced by the home_prompt slot override; in
+      // tests we just record the JSX-element-shaped marker.
+      Prompt: mock((props: unknown) => ({ __mock: "Prompt", props })),
     },
     // The plugin registers branding slot overrides (home_logo,
     // sidebar_title) in addition to the cards UI. Mock just records
@@ -98,11 +101,12 @@ test("plugin shows toast + registers /insights when cards are present", async ()
   }
 });
 
-test("plugin registers slot overrides for branding (home_logo, sidebar_title)", async () => {
-  // User report 2026-04-29: "when opencode opens, it should not read
-  // 'opencode' it should say 'org-llm'". Plugin registers slot
-  // overrides on every mount — independent of insight cards (the
-  // branding should appear even when the vault has no cards).
+test("plugin registers slot overrides for branding (home_logo, home_prompt, sidebar_title)", async () => {
+  // User reports across 2026-04-29/30: "should say org-llm not
+  // opencode" + contextualize the prompt placeholder + LCARS-vary
+  // the logo. Plugin registers slot overrides on every mount —
+  // independent of insight cards (the branding should appear even
+  // when the vault has no cards).
   const dir = makeTmpDir();
   try {
     const api = makeApi();
@@ -116,7 +120,12 @@ test("plugin registers slot overrides for branding (home_logo, sidebar_title)", 
     expect(arg).toBeDefined();
     expect(arg?.slots).toBeDefined();
     expect(typeof arg?.slots?.home_logo).toBe("function");
+    expect(typeof arg?.slots?.home_prompt).toBe("function");
     expect(typeof arg?.slots?.sidebar_title).toBe("function");
+    // Slot order must beat opencode's internal-plugin defaults
+    // (order: 100 per the binary bundle); otherwise our `replace`
+    // doesn't actually replace.
+    expect((arg?.order ?? 0)).toBeGreaterThan(100);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
