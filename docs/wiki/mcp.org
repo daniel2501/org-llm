@@ -1,0 +1,181 @@
+:PROPERTIES:
+:ID:       72c7e988-1a60-4624-8090-fe1f7d9ef6a8
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Model Context Protocol (MCP)
+#+FILETAGS: :wiki:concept:bridge:
+#+OPTIONS: toc:nil num:nil
+
+* What MCP is
+
+[[https://modelcontextprotocol.io][Model Context Protocol]] is an open
+JSON-RPC standard for exposing *tools, resources, and prompts* from a
+host process to an LLM-driven client. The client (e.g. opencode, Claude
+Code, Pi) discovers what's available, calls tools by name, and gets
+typed responses back.
+
+It's the same idea as a function-calling API like OpenAI's
+"tools" parameter, but generalised to a protocol any LLM client
+can speak. The server says "here are the things you can do"; the
+client wires them into its tool-call loop.
+
+** Three roles
+
+| Role     | Who plays it                              | What they do                              |
+|----------+-------------------------------------------+--------------------------------------------|
+| Server   | =org-llm mcp= (this codebase)             | Exposes tools, listens on stdio JSON-RPC   |
+| Host     | opencode / Claude Code / Pi / Emacs       | Spawns the server, wires tools into the model |
+| Client   | The LLM running inside the host            | Picks tools, calls them, reads responses   |
+
+The server doesn't talk to the LLM directly — the host is the
+mediator. That separation is why the same MCP server works
+unchanged across opencode, Claude Code, and Pi.
+
+* How org-llm uses it
+
+=org-llm mcp= is the server. It's started as a subprocess of
+whatever host the user launches:
+
+#+begin_src sh
+# directly (rare — for debugging)
+org-llm mcp
+
+# spawned by opencode (typical)
+org-llm launch
+# → writes .opencode/opencode.json with:
+#     "mcp": { "org-llm": { "type": "local", "command": ["org-llm", "mcp"], ... } }
+# → opencode spawns it on session start
+
+# spawned by Claude Code
+org-llm claude
+# → writes ~/.claude/settings.json with mcpServers entry
+
+# spawned by Pi (custom bridge)
+org-llm pi --install
+# → registers in ~/.pi/config.json
+#+end_src
+
+The server exposes ~64 tools as of Phase 16.2. Categories:
+
+- *Notes* — =search_notes=, =ask_notes=, =get_node=,
+  =list_recent_nodes=, =list_nodes_by_tag=, =capture_note=
+- *Code* — =code_search=, =index_vault=, =embed_pending=
+- *Filesystem (granted)* — =discover_filesystem=, =read_file=,
+  =list_directory=, =request_access=
+- *dbt analytics* — =dbt_status=, =dbt_models=, =dbt_run=,
+  =dbt_design=, =dbt_walkthrough=, =dbt_lessons=
+- *Health + self-heal* — =doctor_health=, =proactive_doctor=,
+  =performance_status=
+- *Insights (Phase 12)* — =insight_card_feedback=,
+  =gather_insights=
+- *Walk (Phase 13)* — =walk_node=, =walk_remove_fact=,
+  =add_disambig=
+- *Config + theming* — =get_config=, =set_config=, =add_theme_knob=
+- *Escape hatch* — =org_llm_run= — invoke any allow-listed
+  CLI verb with three layers of recovery (shell-quote repair,
+  LLM intent reconstruction, SRE fix)
+
+** Why local (stdio) and not HTTP
+
+MCP supports stdio + HTTP transports. =org-llm= uses stdio
+because:
+
+1. *No port management* — the server is a child process, not a
+   network service.
+2. *No auth* — the host inherits the user's filesystem
+   permissions; nothing crosses a network boundary.
+3. *Ephemeral* — the server starts when the host starts and dies
+   when it exits. No daemon to keep alive.
+
+For multi-vault federation (wishlist) we'd need HTTP transport;
+not on the near-term roadmap.
+
+* The recurring class of bug: silent drop
+
+opencode (and Claude Code) treat MCP config like *most* JSON
+config — schema-loose, defaults silently. Three of our biggest
+historical bugs were "the MCP server didn't register, the LLM
+fell back to grep, the user noticed when an answer cited the
+wrong file":
+
+| Phase | Bug                                                         |
+|-------+-------------------------------------------------------------|
+| 7     | =mcpServers= entry pointed at an invocation that didn't start |
+| 7     | Used =env=, not =environment= (per opencode's McpLocalConfig) |
+| 9.7   | Wrote =.opencode.json= dotfile; opencode reads =.opencode/= directory |
+| 16.1  | Plugin spec was the inner =.ts=; opencode wants the package directory |
+| 16.2  | Plugin missing required =id= export for path-loaded plugins  |
+
+Pinned by =tests/test_workspace_mcp.py= — every fix gets a
+regression test there because every miss is *silent*. The
+"functional" tests in that file actually spawn the MCP server
+and send a JSON-RPC =initialize= request to verify the server
+*starts* and *responds*.
+
+* How to configure
+
+** Env vars (server-side)
+- =ORG_LLM_DB= — DB path the MCP server hits when spawned by a host.
+  =launch= forwards this through the =environment= bag so the MCP
+  subprocess inherits it.
+- =ORG_LLM_ORG_DIR= — vault root override; same forwarding.
+
+** CLI flags
+#+begin_src sh
+org-llm mcp                   # start the server on stdio (rare — usually a host spawns it)
+org-llm mcp --tools           # list registered tools without starting
+#+end_src
+
+** Host config
+- =opencode= — =.opencode/opencode.json= =mcp= block (see launch flow below)
+- =Claude Code= — =~/.claude/settings.json= =mcpServers= entry
+- =Pi= — =~/.pi/config.json= via =org-llm pi --install=
+
+The host's MCP entry MUST use the right key for its schema:
+opencode wants =environment=, claude wants =env=. Use =org-llm
+launch= / =org-llm claude= / =org-llm pi --install= so the writer
+gets it right; hand-editing those JSON files is how silent drops
+happen.
+
+** Conversational
+- =list_slash_commands= MCP tool — model can introspect what's
+  available
+- =org_llm_run("<verb>")= — universal escape hatch when no
+  specific tool fits
+
+* The launch flow (Phase 16.x integration)
+
+=org-llm launch= writes a full opencode config that wires:
+
+1. The MCP server (so all 64 tools are available)
+2. =default_agent: "org-llm"= + a custom primary agent (so
+   the agent label says "org-llm")
+3. A TUI plugin (so insight cards render in the UI, not just the
+   prompt)
+4. =.opencode/AGENTS.md= (so opencode auto-loads the org-llm
+   tool primer on every session)
+
+See [[file:roadmap.org][roadmap.org]] § Phase 16.0–16.2 for the full
+landing chronology.
+
+* Source files
+
+- =org_llm/mcp_server.py= — server implementation; one
+  =@server.tool()= per exposed function.
+- =org_llm/cli.py:_opencode_workspace_prompt= — the system prompt
+  the LLM reads before calling any tool.
+- =org_llm/cli.py:_opencode_agents_md= — the AGENTS.md primer
+  that teaches new agents which tools to reach for.
+- =tests/test_workspace_mcp.py= — regression-pin for every silent
+  drop bug we've hit.
+- =extensions/opencode/src/index.ts= — the TUI plugin that
+  surfaces insight cards (a separate channel from MCP tools, but
+  reads MCP-server-generated data).
+
+* Related
+
+- [[file:retrieval-augmented-generation.org][Retrieval-Augmented Generation]] —
+  the model uses =search_notes= / =ask_notes= as the retrieval
+  half of RAG; MCP is how those tools reach the model.
+- [[file:roadmap.org][Roadmap]] — Phase 16.x is the current MCP +
+  TUI plugin landing.

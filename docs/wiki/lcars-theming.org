@@ -1,0 +1,141 @@
+:PROPERTIES:
+:ID:       872c5c33-c912-4605-9bf6-e58e972f4d8a
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: LCARS theming + palette system
+#+FILETAGS: :wiki:concept:visual:lcars:
+#+OPTIONS: toc:nil num:nil
+
+* What LCARS is
+
+LCARS — Library Computer Access Retrieval System — is the visual
+language of Star Trek: TNG-era starship UIs. Asymmetric U-shape
+borders, chunky horizontal bars in a small palette of colours,
+block-letter labels, "elbow" connectors. It's =org-llm='s
+default visual identity.
+
+The =org-llm= LCARS implementation is *honest LCARS*, not just
+"orange-on-black." It picks a tight palette per role, varies bar
+widths, uses ASCII fonts for labels, and renders chrome to
+suggest the asymmetric console layouts.
+
+* Three role colors
+
+| Role        | Default (dark)    | Default (light)   | What it carries                          |
+|-------------+-------------------+-------------------+------------------------------------------|
+| =lcars1=    | orange (#FF8C00)  | orange (#A05000)  | Primary chrome, headlines, callsigns     |
+| =lcars2=    | purple (#9966FF)  | purple (#5A3A9A)  | Secondary panels, themed phrasing        |
+| =lcars3=    | blue (#3399FF)    | blue (#1E5599)    | Accents, links, success                  |
+
+These are exposed in code as the *theme role colors* =primary= /
+=secondary= / =accent=. Slot overrides + the opencode theme JSON
+both reference these by role name so palette swaps propagate
+without hard-coded hex.
+
+* Five palettes
+
+Switchable via =org-llm palette <name>=:
+
+| Palette  | Vibe                                        |
+|----------+---------------------------------------------|
+| classic  | Orange / purple / blue (TNG canon)          |
+| red      | Red / amber / cream (Voyager bridge)        |
+| green    | Green / sage / cream (DS9 Cardassian)       |
+| gold     | Gold / amber / bronze (Federation flagship) |
+| violet   | Violet / pink / magenta (synthwave fusion)  |
+
+Per-channel hex overrides are also supported — set
+=lcars1= / =lcars2= / =lcars3= directly in =Config= for any
+custom mix.
+
+* Where the palette propagates
+
+When the user runs =org-llm palette green= the new palette
+flows into:
+
+| Surface                        | How                                          |
+|--------------------------------+----------------------------------------------|
+| CLI splash + chrome            | =org_llm/ui.py:PALETTE= reads =Config=       |
+| Splash menu, status, panels    | All call =on_screen= / =hail= / =red_alert= which use the palette |
+| =launch= (opencode) theme      | =_opencode_lcars_theme()= writes =.opencode/themes/org-llm-lcars.json= with the active palette |
+| TUI plugin slot overrides      | Slot bodies reference role names ("primary", "secondary"); opencode resolves them against the active theme |
+| =models= dashboard, =doctor=    | Same palette helpers                          |
+
+The palette table in the README's "What you get" section shows
+the swap visually.
+
+* The chunky-bar idiom
+
+Multi-coloured horizontal bars of varied widths are the LCARS
+calling card. =org-llm='s helpers:
+
+- =_render_splash_logo()= in =cli.py= — full LCARS splash with
+  chunky bars, callsigns, stardate, vault stats.
+- =solidarity()= — pre-splash banner driven by =commie_level= /
+  =queer_level= dials (themed knobs, see [[id:c88b2ddc-33bc-4b58-bd16-993c48b91209][Theme studio]]).
+- TUI plugin =home_logo= slot — replaces opencode's wordmark
+  with =<ascii_font text="ORG-LLM" color={LOGO_COLORS}/>= plus
+  four chunk bars in primary/secondary/accent/warning colors.
+
+* Theme dial integration
+
+LCARS coexists with the *theme studio* (see [[id:c88b2ddc-33bc-4b58-bd16-993c48b91209][Theme studio]]):
+
+- LCARS = the *visual* layer (colors, chrome, ASCII chunkiness)
+- Theme studio = the *voice* layer (themed phrasings, persona
+  intros, themed_proactive_doctor_line, etc.)
+
+Both layer over each other — the palette tints chrome while the
+theme studio tints the words coming through it. So =org-llm
+palette green= + =queer_level: 3= = LCARS-Cardassian-bridge in
+maximally-queer-coded persona language.
+
+* How to configure
+
+** Env vars
+- =ORG_LLM_PALETTE= — start in a non-default palette without writing
+  to config. Useful for one-off screenshots / demos.
+- =ORG_LLM_LCARS1= / =ORG_LLM_LCARS2= / =ORG_LLM_LCARS3= — per-channel
+  hex overrides. Surgical alternative to swapping the whole palette.
+
+** CLI flags
+#+begin_src sh
+org-llm palette                          # show active palette
+org-llm palette green                    # swap to green
+org-llm palette red --light              # red, light-mode variant
+org-llm palette --pick                   # interactive picker
+
+# Per-channel overrides
+org-llm config lcars1 "#FF6600"
+org-llm config lcars2 "#9966FF"
+
+# Theme files written by `launch`
+ls .opencode/themes/                     # opencode theme JSON
+#+end_src
+
+** Conversational
+- =/palette= slash command in opencode workspace
+- "Switch to the green palette" / "use red alert colors" — model
+  picks =set_config= against =palette=
+- =add_theme_knob= MCP tool can register a knob that drives
+  palette changes (e.g. =alert_level= 0-3 → classic / amber / red)
+
+* Source files
+
+- =org_llm/ui.py= — =DARK_PALETTE= / =LIGHT_PALETTE= +
+  =PALETTE= helper that reads the active palette from =Config=
+- =org_llm/palettes.py= — palette overlay system (=palette_overrides=)
+- =org_llm/cli.py:_opencode_lcars_theme= — opencode theme JSON
+  writer (light + dark variants)
+- =org_llm/cli.py:_render_splash_logo= — main CLI splash
+- =extensions/opencode/src/slots.tsx= — TUI plugin's branded
+  surfaces (home_logo, sidebar_title, home_prompt)
+- =org_llm/cli.py:palette= — the =org-llm palette <name>=
+  command implementation
+
+* Related
+
+- [[id:c88b2ddc-33bc-4b58-bd16-993c48b91209][Theme studio + knobs]] —
+  the voice layer that pairs with LCARS visuals
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 16.2 —
+  TUI plugin slot overrides that ported LCARS into opencode

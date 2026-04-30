@@ -74,8 +74,8 @@ org-llm palette reset                      # back to classic
 
 | | |
 |---|---|
-| 🚀 **Splash menu** — `org-llm` (no args) opens a Doom-Emacs-style LCARS launcher with grouped shortcuts; first-run users see a setup nudge instead | 🔍 **Semantic search** over your full org-roam graph (`sqlite-vec`, no vector DB) |
-| 💬 **RAG Q&A** grounded in your own notes (`org-llm ask "…"`) | 📔 **Askbook** — literate Q/A scratchpad: pose the same question to chat / reason / fast / code / text / cloud / claude / pi backends and see answers side-by-side in `~/org/llm-askbook.org` |
+| 🚀 **Splash menu** — `org-llm` (no args) opens a Doom-Emacs-style LCARS launcher with grouped shortcuts; first-run users see a setup nudge instead | 🔍 **Semantic search** over your full org-roam graph (`sqlite-vec`, no vector DB) — see [Embeddings](docs/wiki/embeddings.org) + [Vector similarity](docs/wiki/vector-similarity.org) for how it works |
+| 💬 **[RAG Q&A](docs/wiki/retrieval-augmented-generation.org)** grounded in your own notes (`org-llm ask "…"`) | 📔 **Askbook** — literate Q/A scratchpad: pose the same question to chat / reason / fast / code / text / cloud / claude / pi backends and see answers side-by-side in `~/org/llm-askbook.org` |
 | 🧠 **Hardware-aware FOSS model catalog** — `org-llm models` dashboard with auto-suggestions; `models --benchmark` real tok/s rankings; `models --upgrade` one-shot local + cloud picker | ☁️ **6+ cloud providers** when you outgrow local — RunPod, Vast, Lambda, TensorDock, Salad, Paperspace, CoreWeave, OpenRouter, HuggingFace; auto-refreshing pricing catalog (`cloud --refresh-catalog`) |
 | 🛡️ **Encrypted credentials** via the standard Unix `pass` manager — never in plaintext | 🤖 **MCP server** with 50+ tools — every capability exposed to opencode + Claude Code (and Pi via the bundled bridge), with themed LCARS-styled output |
 | 🐝 **Pi extension bridge** — `org-llm pi --install` auto-installs Pi if missing, copies a TypeScript MCP-bridge extension to `~/.pi/extensions/`, and wires `~/.pi/config.json`; per-turn dynamic system prompts (something opencode can't do) | 📓 **Org-babel skills** — define LLM workflows as `:skill:`-tagged source blocks |
@@ -537,8 +537,12 @@ conversational surfaces (opencode · Claude Code · Pi).
 
 ## Smart RAG retrieval
 
-`org-llm ask` does more than pure vector search. It auto-detects three
-intents in your query and adjusts retrieval accordingly:
+> Background reading: [Retrieval-Augmented Generation (RAG)](docs/wiki/retrieval-augmented-generation.org)
+> in the wiki — the substrate everything below leans on.
+
+`org-llm ask` does more than pure [vector similarity search](docs/wiki/vector-similarity.org).
+It auto-detects three intents in your query and adjusts retrieval
+accordingly:
 
 - **Temporal phrases** — `"last week"`, `"past 6 months"`, `"yesterday"`,
   spelled-out numbers (`"last six months"`) — apply an `mtime` filter
@@ -1133,6 +1137,10 @@ Inspect with `org-llm knob list`; tune levels with
 
 ## Context, history, and stale-tagging
 
+> Background reading: [Staleness](docs/wiki/staleness.org) in the wiki —
+> file-vs-disk drift AND content-vs-current-truth drift; how org-llm
+> flows both.
+
 The vault records what was true *when written*. Without overrides, the
 LLM keeps citing stale facts. Three tangle-driven files solve this:
 
@@ -1721,18 +1729,86 @@ If something doesn't behave the way you expect, this is the short list:
   `org-llm --suppress-proactive-doctor` or
   `ORG_LLM_PROACTIVE_DOCTOR=off`.
 
+## Wiki — self-updating reference
+
+`docs/wiki/` is the canonical reference for how org-llm itself
+works: [Embeddings](docs/wiki/embeddings.org),
+[RAG](docs/wiki/retrieval-augmented-generation.org),
+[Vector similarity](docs/wiki/vector-similarity.org),
+[Staleness](docs/wiki/staleness.org),
+[MCP](docs/wiki/mcp.org),
+[Insight cards](docs/wiki/insight-cards.org),
+[Walk](docs/wiki/walk.org),
+[Skills](docs/wiki/skills.org),
+[Auto-embedder](docs/wiki/auto-embedder.org),
+[LCARS theming](docs/wiki/lcars-theming.org),
+[Theme studio + knobs](docs/wiki/theme-studio.org),
+[Captain's Log](docs/wiki/captains-log.org),
+[Roadmap](docs/wiki/roadmap.org).
+
+The wiki is **self-updating**: the LLM in opencode (and the CLI
+`ask` flow) reads it whenever the user asks about org-llm
+itself, quotes the relevant page in the answer, and *proposes
+edits* when it spots a gap or staleness. The rule is enforced
+in two places:
+
+1. `.opencode/AGENTS.md` — the primer opencode auto-loads on
+   every session (written by `org-llm launch`).
+2. `_opencode_workspace_prompt` — the system prompt for the
+   `org-llm` primary agent.
+
+**Always-notified rule:** the LLM never edits the wiki silently.
+Every proposed change appears in the conversation transcript
+with the rationale ("I'm also updating `docs/wiki/X.org`
+because <reason>") before/while it lands. See
+[docs/wiki/wiki-conventions.org](docs/wiki/wiki-conventions.org)
+for the full convention.
+
+To make wiki nodes searchable from your vault, symlink them in:
+
+```sh
+ln -s ~/repos/org-llm/docs/wiki ~/org/org-llm-wiki
+org-llm index && org-llm embed
+```
+
+After that, `ask` queries automatically pull from the wiki when
+relevant, and the LLM cites them by org-roam ID.
+
 ## Roadmap
 
-Currently in beta. Tracked in
-[gap-analysis-alpha-to-beta](https://github.com/daniel2501/org-llm/blob/main/docs/test-session/gap-analysis-alpha-to-beta.org)
-when published; the punch list:
+> Detailed phase catalog + project plan: **[docs/wiki/roadmap.org](docs/wiki/roadmap.org)**
+> — every phase from 1 through 16.x with status, commit anchors, and
+> code references. The wiki page is the source of truth; this section
+> is the overview.
 
-- Cross-platform install validation on macOS + Ubuntu
-- Smoke tests for the few less-walked verbs
-- Performance regressions surfacing proactively in `models` dashboard
+Currently in late beta. Phase numbering is organic — a phase advances
+when a chunk feels done; sub-phases (e.g. `12.4`) ship slices of one
+parent theme.
+
+### Where we are
+
+- **Latest shipped:** Phase 16.2 — opencode TUI plugin fully wired
+  (insight cards on open, slot overrides for branding, `AGENTS.md`
+  primer, custom `org-llm` primary agent).
+- **Active focus:** Phase 16.3 — Emacs companion (`extensions/emacs/`).
+- **In flight planned:** Phase 12.6 (insight-card cache persistence),
+  Phase 12.7 (dbt analytics over engagement), Phase 13.4–13.5 (walk
+  per-slug routing + clarifying questions).
+
+### Beta → 1.0 punch list
+
+- **Cross-platform install validation** on macOS + Ubuntu
+- **Smoke tests** for the few less-walked verbs
+- **Performance regressions** surfacing proactively in `models` dashboard
+- **MCP-kind tool-call logging** uniformly across `mcp_server.py` (foundation
+  for tool-call analytics + AGENTS.md primer-effectiveness audit)
 - **Android / Termux port** — needs an arm64 install path, no
   systemd for the auto-embedder daemon, smaller hardware budget
   for benchmarks.
+
+For the full catalog with status anchors per sub-phase, what's
+shipped vs planned vs wishlist, and how phase numbering works, see
+[docs/wiki/roadmap.org](docs/wiki/roadmap.org).
 
 ---
 

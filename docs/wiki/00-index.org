@@ -1,6 +1,7 @@
 :PROPERTIES:
 :ID:       e0000000-1111-2222-3333-eeeeeeeeeeee
 :CREATED:  [2026-04-29]
+:UPDATED:  [2026-04-30]
 :END:
 #+TITLE: org-llm wiki — concepts index
 #+AUTHOR: org-llm
@@ -28,21 +29,60 @@ After that, =ask= queries automatically pull from the wiki when
 they're relevant. The wiki itself becomes a part of your second
 brain.
 
+** This wiki is self-updating
+
+The LLM running in opencode (and the CLI =ask= flow) reads the
+wiki when answering app-self-questions, quotes the relevant
+page, and *proposes edits* when it spots a gap or staleness.
+The "always notified" rule keeps every wiki edit visible in the
+conversation transcript before/while it lands. See
+[[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki conventions]]
+for the full convention.
+
 * Concept map
 
-Foundational substrate (how meaning becomes math):
+** Foundational substrate (how meaning becomes math)
 - [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][Embeddings]] — turning text into 768-float vectors of meaning
 - [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][Vector similarity & cosine distance]] — the geometry that
   makes "search by meaning" work
 - [[id:e4444444-5555-6666-7777-dddddddddddd][Retrieval-Augmented Generation (RAG)]] — using
   embeddings to ground LLM answers in YOUR notes
+- [[id:47c84cd6-1cba-457d-a947-9c482d392991][Walk]] —
+  alternative retrieval mode: graph traversal instead of
+  similarity ranking
 
-Knowledge hygiene (keeping the graph honest over time):
-- [[id:e3333333-4444-5555-6666-cccccccccccc][Staleness]] — file-vs-disk drift AND
-  content-vs-current-truth drift; how org-llm flows both
+** Knowledge hygiene (keeping the graph honest over time)
+- [[id:e3333333-4444-5555-6666-cccccccccccc][Staleness]] —
+  file-vs-disk drift AND content-vs-current-truth drift
+- [[id:4df57d95-0e31-41cb-b973-5f41706901c0][Auto-embedder]] —
+  background daemon keeping the index + embeddings fresh
+- [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's Log]] —
+  vault-wide event log mirrored to org and SQLite
 
-The substrate is what makes search and ask work at all. The
-hygiene is what keeps them USEFUL as your vault grows.
+** Surfaces & integrations (how org-llm reaches outside)
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP (Model Context Protocol)]] —
+  the bridge to opencode / Claude Code / Pi / Emacs
+- [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][Insight cards]] —
+  the "I noticed N things" headline experience (Phase 12)
+- [[id:001a2e03-30e8-49c5-a813-e774f58b6a0e][Skills]] —
+  org-babel-driven LLM workflows you define yourself
+
+** Visual + voice personalization
+- [[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][LCARS theming]] —
+  the visual language: palettes, chunky bars, ASCII fonts
+- [[id:c88b2ddc-33bc-4b58-bd16-993c48b91209][Theme studio + knobs]] —
+  the voice layer: themed phrasings driven by 0-3 dials
+
+** Meta
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] —
+  detailed phase catalog + project plan
+- [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][Wiki conventions]] —
+  the self-updating, always-notified contract
+
+The substrate makes search and ask work at all. The hygiene
+keeps them USEFUL as your vault grows. The surfaces are how
+that value reaches you (TUI, chat, slash commands). The
+personalization is how it sounds + looks like *yours*.
 
 * Source files in this repo
 
@@ -52,7 +92,13 @@ the link to the source:
 - [[file:../../org_llm/indexer.py][org_llm/indexer.py]] — index_directory() and embed_nodes()
 - [[file:../../org_llm/search.py][org_llm/search.py]] — vector_search() and the rerank stack
 - [[file:../../org_llm/insights.py][org_llm/insights.py]] — Phase 12 insight pre-mount
+- [[file:../../org_llm/walk.py][org_llm/walk.py]] — Phase 13 graph walk
+- [[file:../../org_llm/mcp_server.py][org_llm/mcp_server.py]] — MCP server + ~64 tools
+- [[file:../../org_llm/auto_embedder.py][org_llm/auto_embedder.py]] — background freshness daemon
+- [[file:../../org_llm/theme_studio.py][org_llm/theme_studio.py]] — themed-phrasing cache
 - [[file:../../org_llm/db.py][org_llm/db.py]] — the SQLAlchemy schema
+- [[file:../../extensions/opencode/src/index.ts][extensions/opencode/src/index.ts]] — TUI plugin (insight cards on open + slot overrides)
+- [[file:../../extensions/opencode/src/slots.tsx][extensions/opencode/src/slots.tsx]] — home_logo / home_prompt / sidebar_title overrides
 
 * External references
 
@@ -62,26 +108,49 @@ the link to the source:
   =search_query:= / =search_document:= prefixes we use
 - [[https://ollama.com][Ollama]] — local model runtime; we hit it via the
   ollama-python client
+- [[https://modelcontextprotocol.io][Model Context Protocol]] —
+  the spec the bridges speak
+- [[https://opencode.ai][opencode]] — the primary TUI host
 - [[https://www.orgroam.com][org-roam]] — the spec our notes follow
 - [[https://orgmode.org][org-mode]] — the underlying file format
 
 * Status / coverage
 
-| Concept                 | Wiki entry                                    | Depth                |
-|-------------------------+-----------------------------------------------+----------------------|
-| Embeddings              | [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][embeddings.org]]                                | full                 |
-| Vector similarity       | [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][vector-similarity.org]]                         | full                 |
-| Staleness               | [[id:e3333333-4444-5555-6666-cccccccccccc][staleness.org]]                                 | full                 |
-| RAG                     | [[id:e4444444-5555-6666-7777-dddddddddddd][retrieval-augmented-generation.org]]            | full                 |
-| Self-healing stack      | (planned)                                     | TODO                 |
-| Insight pre-mount       | (planned — Phase 12 spec covers it for now)   | TODO                 |
-| Task-instruction prefixes | (planned)                                   | TODO                 |
-| Tangled-code workflow   | (planned — Phase 13 territory)                | TODO                 |
+| Concept                   | Wiki entry                          | Depth      |
+|---------------------------+-------------------------------------+------------|
+| Embeddings                | [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][embeddings.org]] | full       |
+| Vector similarity         | [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][vector-similarity.org]] | full       |
+| Staleness                 | [[id:e3333333-4444-5555-6666-cccccccccccc][staleness.org]] | full       |
+| RAG                       | [[id:e4444444-5555-6666-7777-dddddddddddd][retrieval-augmented-generation.org]] | full       |
+| MCP                       | [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][mcp.org]] | full       |
+| Insight cards (Phase 12)  | [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][insight-cards.org]] | full       |
+| Walk (Phase 13)           | [[id:47c84cd6-1cba-457d-a947-9c482d392991][walk.org]] | full       |
+| Skills (org-babel)        | [[id:001a2e03-30e8-49c5-a813-e774f58b6a0e][skills.org]] | full       |
+| Auto-embedder             | [[id:4df57d95-0e31-41cb-b973-5f41706901c0][auto-embedder.org]] | full       |
+| LCARS theming             | [[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][lcars-theming.org]] | full       |
+| Theme studio + knobs      | [[id:c88b2ddc-33bc-4b58-bd16-993c48b91209][theme-studio.org]] | full       |
+| Captain's Log             | [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][captains-log.org]] | full       |
+| Roadmap                   | [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] | full       |
+| Wiki conventions          | [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki-conventions.org]] | full       |
+| Cloud-or-local routing    | (planned)                           | TODO       |
+| Doctor + self-heal        | (planned)                           | TODO       |
+| Tutor / onboarding        | (planned)                           | TODO       |
+| Pi bridge                 | (planned)                           | TODO       |
+| Code corpus               | (planned)                           | TODO       |
+| Granted filesystem access | (planned)                           | TODO       |
+| AGENTS.md primer          | (covered in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] § Phase 16.2) | partial |
+| Task-instruction prefixes | (planned)                           | TODO       |
 
 * How to contribute / extend
 
 Add a new entry by copying any existing one, generating a fresh
-=:ID:=, writing the body, and linking it from the [[*Concept map][concept map]]
+=:ID:= (=python3 -c "import uuid; print(uuid.uuid4())"=), writing
+the body, and linking it from the [[*Concept map][concept map]]
 above. Keep entries small and focused — link out to other entries
 rather than duplicating. The whole thing is meant to feel like
 walking a graph, not reading a manual.
+
+The LLM running in opencode can also propose new pages or
+updates as opportunities arise (per [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki conventions]]) — the
+"Status / coverage" table's =TODO= rows are the most-likely
+landing spots.

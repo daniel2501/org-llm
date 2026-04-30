@@ -12550,6 +12550,29 @@ For anything not covered by a dedicated tool, use the typed-shell
 escape hatch: `org_llm_run("<command>")`. The CLI runs three layers
 of recovery (shell-quote repair, LLM intent reconstruction, SRE fix)
 before failing — pass mangled intents and let auto-fix land them.
+
+## Wiki — your reference for org-llm itself
+
+`docs/wiki/` in the org-llm repo is the canonical reference for
+**how org-llm itself works** — embeddings, RAG, MCP, insight
+cards, walk, skills, auto-embedder, LCARS theming, theme studio,
+captain's log, staleness, vector similarity, the roadmap, etc.
+
+When the user asks about the *app* ("how does RAG work here?",
+"what's the auto-embedder?", "where are we on phase X?") — read
+the relevant wiki page FIRST. Quote the load-bearing line, then
+link the file path: `docs/wiki/<page>.org`. Don't paraphrase
+wiki content from memory; the wiki may have been updated.
+
+If you notice a wiki gap or staleness while answering — a concept
+the wiki doesn't cover, a section that's drifted, a missing
+cross-link — propose the edit. Use Edit/Write to apply it,
+**always tell the user explicitly** what you changed:
+
+> "I'm also updating `docs/wiki/X.org` because <reason>. Diff:
+> <one-line summary>."
+
+Never edit the wiki silently. Always notified is the rule.
 """
 
 

@@ -1,0 +1,111 @@
+:PROPERTIES:
+:ID:       4df57d95-0e31-41cb-b973-5f41706901c0
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Auto-embedder — background freshness daemon
+#+FILETAGS: :wiki:concept:daemon:embeddings:
+#+OPTIONS: toc:nil num:nil
+
+* What it is
+
+An opt-in daemon thread that keeps the vault's index +
+embeddings fresh without manual =org-llm index= / =embed= runs.
+Surfaces stats in CLI footers so the user knows it's working.
+
+The CLI is mostly stateless — every verb opens the DB, does its
+thing, closes. The auto-embedder is the one long-running
+substrate, and it's careful about it: opt-in, background-only,
+defers to user-driven I/O, never blocks a CLI invocation.
+
+* Why a daemon?
+
+Without it, captures and edits land in the vault but stay
+unsearchable until the next manual =index + embed= run.
+Symptom: =ask= returns 0 hits even though the user *just* wrote
+the relevant note.
+
+The daemon watches the vault for changes (mtime poll, not
+inotify — keeps it portable to macOS / Termux), runs incremental
+=index + embed_pending= cycles, and writes a stats line every N
+seconds so doctor + the launch panel can show "last cycle: 30s
+ago, 4 nodes refreshed."
+
+* How it stays out of your way
+
+| Concern                    | Strategy                                       |
+|----------------------------+------------------------------------------------|
+| Don't fight CLI commands    | Holds an advisory lock; releases on contention |
+| Don't burn CPU              | Polls every N seconds, skips if no changes     |
+| Don't lose work             | Idempotent — interrupting mid-cycle is safe    |
+| Don't bloat memory          | Streams nodes; one-at-a-time embedding         |
+| Don't steal the GPU         | Defers to active =ask= / =embed= calls         |
+
+The daemon writes a small =sensor_log= row per cycle (probe
+=auto_embedder=) so trends are visible in =org-llm
+performance=.
+
+* CLI footer surface
+
+Every CLI verb that completes successfully prints a one-line
+auto-embedder status if the daemon is running:
+
+#+begin_example
+[auto-embedder] last cycle 30s ago · 4 nodes embedded · 0 errors
+#+end_example
+
+Tells the user the freshness substrate is alive without making
+them ask.
+
+* Honoring env overrides
+
+A 2026-04 fix (=8d34d71=): the daemon now honors =ORG_LLM_ORG_DIR=
+just like the CLI. Previously it watched the default vault dir
+even when the user had pointed everything else at a different
+directory. Now consistent.
+
+* How to configure
+
+** Env vars
+- =ORG_LLM_AUTO_EMBED= — =1=/=on=/=true= to start the daemon at
+  CLI startup
+- =ORG_LLM_ORG_DIR= — vault to watch (must match the indexer's
+  scope)
+- =ORG_LLM_DB= — DB to write to
+
+** CLI flags
+#+begin_src sh
+org-llm auto-embed --start              # start in background
+org-llm auto-embed --stop
+org-llm auto-embed --status             # last cycle, error count, watched dir
+org-llm auto-embed --once               # one cycle, no daemon
+org-llm config auto_embed_interval 60   # seconds between polls
+#+end_src
+
+** Conversational (opencode / claude / pi)
+- =/auto-embed= slash command in opencode (status / control)
+- "Is auto-embedder running?" — model can call =doctor_health=
+  which surfaces the daemon state
+
+** Auto-start at launch
+=org-llm launch= can pass =--auto-embed= to start the daemon
+when entering an opencode workspace. The daemon dies when the
+launch process exits — good for ephemeral sessions, bad for
+long-running freshness. For persistent freshness, run
+=auto-embed --start= in a separate terminal or wire it as a
+systemd user service.
+
+* Source files
+
+- =org_llm/auto_embedder.py= — main daemon loop
+- =org_llm/cli.py= — =auto-embed= verb
+- =org_llm/db.py:100= — =SensorLog= model (stores per-cycle
+  stats)
+
+* Related
+
+- [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][Embeddings]] — what
+  the daemon refreshes
+- [[id:e3333333-4444-5555-6666-cccccccccccc][Staleness]] — file-vs-disk
+  drift; the auto-embedder closes that gap automatically
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § wishlist —
+  inline (per-edit) refresh would supersede polling

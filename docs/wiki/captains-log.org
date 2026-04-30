@@ -1,0 +1,146 @@
+:PROPERTIES:
+:ID:       32f134ee-dc89-41a0-9a7b-930a7cad452a
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Captain's Log — vault-wide event log
+#+FILETAGS: :wiki:concept:logging:observability:
+#+OPTIONS: toc:nil num:nil
+
+* What it is
+
+A vault-wide event log mirrored to two surfaces:
+
+| Surface                  | Role                                             |
+|--------------------------+--------------------------------------------------|
+| =History= table (SQLite) | Source of truth — structured, queryable          |
+| =~/org/captains-log.org= | Human-readable mirror; org headings per event    |
+
+Every CLI invocation, LLM round-trip, MCP tool call, =set_config=
+write, and =doctor= verdict that org-llm chooses to log writes
+ONE row to =History= AND ONE org heading to the log file. Two
+surfaces, one source of truth.
+
+* Why both?
+
+- The SQLite row is for *analytics*: dbt models read it,
+  =/doctor --reflect= clusters patterns, the AGENTS.md primer
+  audit (Phase 16.2) mines it for tool-call frequency.
+- The org file is for *human review*: =org-mode= folds the
+  headings, supports =M-x grep= and =org-ql=, surfaces in the
+  user's daily journal review flow.
+
+The mirror is one-way (DB → org). Editing the org file doesn't
+write back to the DB; the org file is a read surface.
+
+* What gets logged
+
+Every event has these fields:
+
+| Column        | Meaning                                       |
+|---------------+-----------------------------------------------|
+| =timestamp=   | ISO datetime                                  |
+| =command=     | The verb (e.g. ="ask"=, ="search_notes"=)     |
+| =query=       | What the user / model asked                   |
+| =response=    | Result summary (truncated for display)        |
+| =kind=        | =cli= / =llm= / =mcp= / =config= / =doctor=   |
+| =model=       | LLM model name (for llm/mcp events)           |
+| =args=        | JSON-encoded args dict                        |
+| =duration_ms= | Wall time                                     |
+| =outcome=     | =ok= / =error= / =refused= / =timeout=        |
+
+Original schema was just =(timestamp, command, query, response)=.
+The newer columns are additive — see the migration in
+=_migrate_in_place=. Old rows keep working.
+
+* The =--reflect= flow
+
+=org-llm log --reflect= scans the last N events and asks an LLM
+to spot patterns:
+
+#+begin_src sh
+org-llm log --reflect                   # last 50 events
+org-llm log --reflect --window 200      # broader scan
+#+end_src
+
+Patterns it surfaces:
+
+- Recurring failure modes ("=ask= timed out 4 times this week
+  after switching to deepseek-r1; consider reverting")
+- Tool-call ergonomics ("you ran =search_notes='...'= 6 times
+  with single-word queries — try the AskBook for breadth")
+- Drift in vault hygiene ("3 captures last week, 0 the previous
+  4 weeks — capture cadence is dropping")
+
+Reflections write themselves back as a Captain's Log entry
+(=kind=doctor=, =command=log-auto-reflect=) so the loop
+self-documents.
+
+* Integration with insight cards
+
+The =insight_engagement= table (Phase 12.5) is a *separate* table,
+not part of =History= — engagement events have a different shape
+(card_kind, reaction, narration_model). But =reflect= and
+=--diagnose-cards= both feed into the same "what does the user
+do, and is it working?" picture.
+
+The Phase 12.7 dbt layer (planned) will join the two for
+cross-cutting analytics like "card kinds the user clicked AND
+the resulting tool calls succeeded."
+
+* Sparse =kind='mcp'= logging
+
+Today only one MCP tool explicitly logs to =History= with
+=kind=mcp=. The Phase 16.4+ wishlist item "MCP-kind tool-call
+logging" is a small decorator on every =@server.tool()= in
+=mcp_server.py= that fixes this gap. The AGENTS.md primer audit
+script flags this as a best-effort secondary signal because of
+it.
+
+* How to configure
+
+** Env vars
+- =ORG_LLM_LOG_KINDS= (default =cli,llm,mcp,config,doctor,dbt=) —
+  comma-separated list of event kinds to write. Drop kinds you
+  don't want noise from.
+- =ORG_LLM_LOG_DISABLE= (=1=/=on=/=true=) — kill switch; nothing
+  writes to History. Lose analytics; gain privacy on sensitive
+  workflows.
+- =ORG_LLM_DB= / =ORG_LLM_ORG_DIR= — same overrides as everywhere;
+  the captain's-log.org file lives in =org_dir=.
+
+** CLI flags
+#+begin_src sh
+org-llm log                              # tail the latest events
+org-llm log --window 200                 # broader scan
+org-llm log --reflect                    # LLM pattern-spotting over recent events
+org-llm log --reflect --window 500
+org-llm log --kind mcp                   # filter by kind
+org-llm log --since-days 7
+org-llm log --tangle                     # rewrite ~/org/captains-log.org from DB
+#+end_src
+
+** Conversational
+- =reflect_on_log= MCP tool — model can run reflection mid-
+  session ("how have things been going lately?")
+- =export_log_to_org= MCP tool — copy a log slice to a new org
+  file (e.g. for a weekly review)
+- =/log= slash command + variants
+
+* Source files
+
+- =org_llm/db.py:65= — =History= model
+- =org_llm/logbook.py= — =write_event(kind, command, ...)=
+  helper; the only write path
+- =org_llm/cli.py= — =log= verb implementation (=--reflect=,
+  =--list=, etc.)
+- =scripts/audit_agents_md.py= — uses =History.kind='mcp'= to
+  count primer-tool calls
+
+* Related
+
+- [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][Insight cards]] —
+  separate table (=insight_engagement=) but adjacent purpose
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 16.4 —
+  MCP-kind logging is a planned foundation upgrade
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — the future
+  decorator wraps =@server.tool()= to write Captain's Log entries

@@ -197,6 +197,30 @@ Read these in this order if you want to trace the pipeline:
 5. [[file:../../org_llm/insights.py][org_llm/insights.py]] (Phase 12) — uses embeddings
    indirectly via the topic-cluster generator
 
+* How to configure
+
+** Env vars
+- =ORG_LLM_EMBED_MODEL= — override =embed_model= without touching
+  config (per-invocation tweaks)
+- =ORG_LLM_OLLAMA_URL= — point at a remote Ollama if you're not
+  running it locally
+- =ORG_LLM_DB= / =ORG_LLM_ORG_DIR= — vault + DB overrides
+
+** CLI flags
+#+begin_src sh
+org-llm config embed_model nomic-embed-text  # default
+org-llm embed                                # incremental; only NULL embeddings
+org-llm embed --force                        # re-embed all (after model swap)
+org-llm embed --since-days 7                 # recent only
+org-llm models --benchmark                    # tok/s + embed-quality probe
+#+end_src
+
+** Conversational
+- =embed_pending= MCP tool — model can refresh embeddings mid-
+  session
+- =index_vault= MCP tool — re-walk the vault (auto-runs embed
+  for new nodes when =--no-embed= is not passed)
+
 * See also
 
 - [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][Vector similarity & cosine distance]] — the math under the hood
@@ -204,5 +228,9 @@ Read these in this order if you want to trace the pipeline:
   embeddings once we have them
 - [[id:e3333333-4444-5555-6666-cccccccccccc][Staleness]] — why "near in vector space" can still mean "out of
   date in your life"
+- [[id:4df57d95-0e31-41cb-b973-5f41706901c0][Auto-embedder]] — the
+  daemon that keeps embeddings fresh without manual =embed= runs
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — =embed_pending= /
+  =index_vault= are MCP tools the model can call directly
 - [[https://huggingface.co/blog/intro-to-vector-search][Hugging Face: Intro to vector search]] — gentle background
 - [[https://www.pinecone.io/learn/vector-embeddings/][Pinecone: vector embeddings explained]] — wider context

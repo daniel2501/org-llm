@@ -1,0 +1,141 @@
+:PROPERTIES:
+:ID:       001a2e03-30e8-49c5-a813-e774f58b6a0e
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Skills — org-babel-driven LLM workflows
+#+FILETAGS: :wiki:concept:skills:org-babel:
+#+OPTIONS: toc:nil num:nil
+
+* What a skill is
+
+A reusable LLM workflow defined as an =org-babel= source block
+tagged =:skill:=. The block lives in a normal org file in your
+vault; =org-llm= indexes it, registers it as an MCP tool, and
+exposes it as a slash command in opencode.
+
+The pattern: literate config / code as the source of truth, the
+SQLite registry as the cache. Edit the org block, re-tangle, the
+skill updates everywhere.
+
+* Anatomy of a skill
+
+A minimal skill:
+
+#+begin_src org
+,* Weekly review summary :skill:weekly-review-summary:
+,:PROPERTIES:
+,:SKILL_INPUT: a free-form description of what to summarize
+,:SKILL_MODEL: chat
+,:END:
+
+,#+name: weekly-review-summary
+,#+begin_src python :tangle ~/org/skills/weekly-review-summary.py
+import sys
+prompt = f"""
+Summarize this week's notes in 5 bullets, grouped by theme:
+
+{sys.stdin.read()}
+"""
+print(prompt)
+,#+end_src
+#+end_src
+
+The skill name comes from =:skill:<name>:= in the heading tag.
+The =SKILL_*= properties configure routing; the source block IS
+the prompt-building logic.
+
+* Three roles
+
+| Role            | What it does                                          |
+|-----------------+-------------------------------------------------------|
+| Skill builder   | Writes the org block — that's all                     |
+| =skill-index=   | Scans the vault, registers each =:skill:= block       |
+| =run_skill=     | MCP tool that pipes input through the skill, runs it  |
+
+=org-llm skill-index= is idempotent — re-run after editing.
+
+* Why org-babel?
+
+- *Literate*: prompt + code + docs in one place; the org file is
+  the manual.
+- *Tangled*: the skill body extracts to a real script
+  (=:tangle <path>=), so it's executable outside the LLM
+  context too.
+- *Versioned*: lives in your vault git, evolves with you.
+- *Discoverable*: the same vault that holds your knowledge
+  holds your workflows.
+
+* Skill registry
+
+The =Skill= table caches what =skill-index= scans:
+
+#+begin_src sql
+CREATE TABLE skills (
+    name           TEXT PRIMARY KEY,
+    file           TEXT NOT NULL,    -- which org file
+    heading        TEXT,             -- human label
+    skill_input    TEXT,             -- describes the input
+    skill_model    TEXT,             -- chat / reason / fast / cloud
+    body_path      TEXT,             -- tangled-to path
+    last_indexed   INTEGER
+);
+#+end_src
+
+=list_skills= MCP tool reads this; the workspace prompt
+includes the count ("Skills: weekly-review-summary,
+extract-todos, generate-test-plan").
+
+* Conversational use
+
+Inside opencode:
+
+#+begin_src
+User: run my weekly-review-summary on this week's notes
+Model: → run_skill(name="weekly-review-summary",
+                    input=<this week's nodes>)
+Model: <returns the 5-bullet summary>
+#+end_src
+
+The model picks =run_skill= when the user's verb maps to a
+registered skill name.
+
+* How to configure
+
+** Env vars
+- =ORG_LLM_DB= / =ORG_LLM_ORG_DIR= — same as everywhere; the
+  skill index honors the override.
+
+** CLI flags
+#+begin_src sh
+org-llm skill-index                    # scan vault, register all :skill: blocks
+org-llm skill <name> --input "..."     # run a skill from the CLI
+org-llm skill <name> -                 # read input from stdin
+org-llm skill --list                   # alias for list_skills
+org-llm skill-new <name>               # scaffold a new skill block in inbox.org
+#+end_src
+
+** Skill-block properties (set in =:PROPERTIES:= drawer)
+- =:SKILL_INPUT:= — describe what input the skill expects
+- =:SKILL_MODEL:= — =chat= / =reason= / =fast= / =code= /
+  =cloud= — picks which model the skill routes to (defaults to
+  =chat_model=)
+- =:SKILL_TIMEOUT:= — override the default LLM call timeout
+
+** Conversational (opencode / claude / pi)
+- =/skills= slash command — list registered skills
+- =/skill <name>= — invoke
+- Natural language: "run my weekly review skill on the last 7
+  days" — model picks =run_skill=
+
+* Source files
+
+- =org_llm/skills.py= — =Skill= model + index logic
+- =org_llm/cli.py= — =skill= / =skill-index= / =skill-new= verbs
+- =org_llm/mcp_server.py= — =run_skill= / =list_skills= MCP tools
+
+* Related
+
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — skills are a
+  Phase 1–3 foundation; nothing planned to change in the substrate
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — =run_skill=
+  is one of the 64 tools the MCP server exposes

@@ -1,0 +1,396 @@
+:PROPERTIES:
+:ID:       43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Roadmap & project plan
+#+FILETAGS: :wiki:roadmap:planning:
+#+OPTIONS: toc:2 num:nil
+
+* What this is
+
+The detailed phase catalog and forward-looking project plan for
+=org-llm=. The README has a short overview pointing here; this is
+the source of truth for "what's done, what's next, what's
+later."
+
+Phases are organic milestones, not a calendar cadence. A phase
+advances when a chunk of work feels done and the next chunk has
+shape. =Phase X.Y= sub-phases let one parent theme (e.g. "insight
+cards" = Phase 12) ship in slices without renumbering the world.
+
+** How to read this page
+
+- *Status* on each phase: =shipped=, =in progress=, =planned=,
+  =wishlist=. Shipped phases have a commit hash anchor; planned
+  ones reference the code TODO that names them.
+- *Phase numbers can have gaps* (no Phase 4, no Phase 14). When a
+  chunk got absorbed into the previous or next milestone, the
+  number was retired rather than reassigned.
+- *Sub-phases stay open* until the parent retires; a Phase 12.6
+  that's still =planned= doesn't block a Phase 13 that already
+  shipped.
+
+* Status snapshot                                              :snapshot:
+
+- *Currently:* late beta. Core flows (index → embed → ask →
+  capture → launch) are stable. Most active recent surface is
+  Phase 16 (TypeScript / Emacs extensions).
+- *Latest shipped:* Phase 16.2 — opencode TUI plugin fully wired
+  (insight cards on open, slot overrides for branding, AGENTS.md
+  primer, custom =org-llm= primary agent).
+- *Active focus:* Phase 16.2 polish + Phase 16.3 (Emacs companion).
+- *Punch list before 1.0:* cross-platform install validation
+  (macOS / Ubuntu), Termux/Android port, smoke coverage on
+  less-walked verbs, MCP-kind tool-call logging.
+
+* Shipped — pre-beta foundations                             :shipped:
+
+** Phase 1–3: initial implementation
+:PROPERTIES:
+:STATUS: shipped
+:COMMIT: edb917d, 3f40fe9
+:END:
+
+The bedrock. CLI scaffolding, =index= / =embed= / =ask= / =capture=,
+SQLite schema (Files, Nodes, History, Config), ollama integration,
+the first =doctor= verb, the source-of-truth =org-roam.db=, the
+themed splash + LCARS palette plumbing.
+
+** Phase 5: opencode workspace
+:PROPERTIES:
+:STATUS: shipped
+:COMMIT: 134ea74
+:END:
+
+First working =org-llm launch=. Wrote =.opencode.json= with model +
+MCP server entries, registered the org-llm MCP tools so the
+in-opencode model could call =search_notes= et al.
+
+** Phase 7: opencode wiring audit
+:PROPERTIES:
+:STATUS: shipped
+:END:
+
+Manual session surfaced a class of bug: the launch config wrote
+an =mcpServers= entry that didn't actually start when opencode
+spawned it. Model would silently fall back to grep. Fixed +
+pinned with the first =tests/test_workspace_mcp.py= integration
+suite.
+
+** Phase 9.7: =.opencode/= directory vs =.opencode.json= dotfile
+:PROPERTIES:
+:STATUS: shipped
+:END:
+
+Walkthrough discovered opencode searches =<cwd>/.opencode/opencode.json=
+(directory + file), NOT a flat =.opencode.json= dotfile. We had been
+writing the latter — opencode silently ignored it. Switched the
+writer.
+
+** Phase 10: surface polish + tutor + gallery
+:PROPERTIES:
+:STATUS: shipped
+:COMMIT: 75c63a7
+:END:
+
+Tutor system, palette gallery, README rewrite. The "first 5 minutes"
+narrative that lands new users.
+
+** Phase 11: embed migration + tag --apply
+:PROPERTIES:
+:STATUS: shipped
+:COMMIT: 6d4bd57
+:END:
+
+Embedding model migration path, =tag --apply= shipped (was a no-op
+stub before).
+
+* Shipped — Phase 12: insight cards                          :shipped:
+
+The headline "Claude Code for org-roam" experience: workspaces open
+with "I noticed N things since you were last active" instead of a
+blank prompt. Cards are deterministic generators (fast) optionally
+narrated by an LLM (slow); a scorer picks which to narrate.
+
+** 12.1: pre-mount skeleton + first generator
+:PROPERTIES:
+:STATUS: shipped
+:COMMIT: 0b42267
+:END:
+
+Card data model + first deterministic generator (stale candidates).
+
+** 12.2: LLM narration + deterministic-vs-narrated scorer
+:PROPERTIES:
+:STATUS: shipped
+:COMMIT: ff4d805
+:END:
+
+Cards can be rewritten in the user's voice. A scorer picks which
+ones benefit from narration vs which read fine deterministic.
+
+** 12.3: more generators + concept wiki
+:PROPERTIES:
+:STATUS: shipped
+:COMMIT: 98970ce
+:END:
+
+Additional card kinds (drift, dangling links, etc.) + the wiki
+substrate this page lives in.
+
+** 12.4: inject cards into opencode's first message
+:PROPERTIES:
+:STATUS: shipped
+:COMMIT: 1fdf641
+:END:
+
+Cards appended to the system prompt so the model opens with
+"I noticed…" framing. Phase 16.1 supersedes this for the TUI plugin
+(cards now visible in a dialog instead of via prompt injection),
+but the prompt-injection path is still live as a fallback.
+
+** 12.5: engagement table + =doctor --diagnose-cards=
+:PROPERTIES:
+:STATUS: shipped
+:COMMIT: e9901b2
+:END:
+
+Every card the user marks bad / clicks / dismisses writes a row to
+=insight_engagement=. =doctor --diagnose-cards= clusters by
+=(card_kind, narration_model)= and surfaces patterns.
+
+** 12.6: real persistence for cached gather
+:PROPERTIES:
+:STATUS: planned
+:CODE_REF: org_llm/insights.py:662
+:END:
+
+The current cache is in-memory; cold every process. Persist to
+SQLite so launch-after-launch hits the cache.
+
+** 12.7: dbt analytics over engagement
+:PROPERTIES:
+:STATUS: planned
+:CODE_REF: org_llm/db.py:140
+:END:
+
+Per-generator quality view + per-narration-model accept rate via
+=org-llm dbt run= models. Foundation for the AGENTS.md tuning
+loop (see Phase 16.2 audit + remote routine).
+
+* Shipped — Phase 13: walk + opencode surfacing             :shipped:
+
+Walking the context graph: the user can ask "what was I doing
+around X" and =walk= traces from a starting node through
+related-by-id, related-by-tag, related-by-time, and surfaces a
+narrative.
+
+** 13.1: =org-llm walk= + opencode surfacing
+:PROPERTIES:
+:STATUS: shipped
+:COMMIT: 281e0c9
+:END:
+
+The =walk= verb, =/walk= slash command, walk MCP tool. Atomic-fact
+validator + disambiguation tool + permissive UX.
+
+** 13.2: dailies as walk targets
+:PROPERTIES:
+:STATUS: planned
+:CODE_REF: org_llm/walk.py:141
+:END:
+
+Walk a day's nodes (today, yesterday, last weekday) without needing
+an explicit start ID.
+
+** 13.4: per-slug routing + real fact replacement
+:PROPERTIES:
+:STATUS: planned
+:CODE_REF: org_llm/cli.py:10341, 10430
+:END:
+
+Replace "fact removal" with real edit-in-place via slug routing,
+not the current append-with-disambiguation-marker scheme.
+
+** 13.5: follow-up questions in walk
+:PROPERTIES:
+:STATUS: planned
+:CODE_REF: org_llm/walk.py:25
+:END:
+
+Walk currently is one-shot — answer or no-answer. 13.5 lets walk
+ask the user a clarifying question when the start node is
+ambiguous.
+
+* Shipped — Phase 15: provider config audit                  :shipped:
+
+Cloud-or-local routing default-to-auto. Both providers (Ollama +
+cloud) written into the launch config so the in-opencode model
+picker can switch in-session. Schema-compliant provider blocks
+(=npm= + =models= map) so opencode's validator stops silently
+dropping our config.
+
+Key commits: =d84b28a=, =ef7e61a= (num_ctx 32k per-model), =16d2e33=.
+
+* Shipped — Phase 16.0–16.2: extensions                      :shipped:
+
+The TypeScript-and-Emacs era: behavior code that runs *inside*
+opencode's plugin loader instead of trying to express everything
+through JSON config.
+
+** 16.0: scaffolding
+:PROPERTIES:
+:STATUS: shipped
+:COMMIT: 7345c45
+:END:
+
+=extensions/opencode/= bun project, =extensions/emacs/= elisp scaffold,
+no-op plugin that compiles + tests cleanly.
+
+** 16.1: opencode TUI plugin (insight cards)
+:PROPERTIES:
+:STATUS: shipped
+:COMMIT: 3b66a9f
+:END:
+
+First real plugin: reads =.opencode/insight-cards.json=, registers
+=/insights= command, pops a toast on load.
+
+** 16.2: launch wires the plugin + AGENTS.md primer + slot overrides
+:PROPERTIES:
+:STATUS: shipped
+:DATE: 2026-04-30
+:COMMITS: a1f0ff9, 55cb260, 7ba5486, d82b698, 6db6a88, db6bbd1, cd4d61a
+:END:
+
+The big push that landed today (2026-04-30). What was added:
+
+- =.opencode/AGENTS.md= written on every launch — opencode's
+  standard project-context primer. ~80 lines: vault stats,
+  search-first cardinal rule, MCP cheatsheet keyed by question
+  shape, recent activity, top tags, self-heal triggers.
+- Cards visible on open. Removed the =ORG_LLM_INSIGHT_PREMOUNT=
+  env-flag gate from the gather (was a silent default-no). Plugin
+  auto-opens the =DialogSelect= via setTimeout so cards appear
+  without typing =/insights=.
+- Custom =org-llm= primary agent + =default_agent: "org-llm"= so
+  opencode's agent picker / status surfaces show "org-llm" not
+  "build". Sharper IDENTITY block in the system prompt.
+- Slot overrides for =home_logo=, =home_prompt=, =sidebar_title=:
+  multi-color ASCII wordmark via =<ascii_font>=, varied LCARS
+  chunky bars, contextualized prompt placeholders ("Hailing
+  frequencies open. State your query." / "/insights — what
+  org-llm noticed since last time").
+- Plugin-load fix: =export const id= required for path-loaded
+  plugins (caught from a live opencode log error).
+- Companion: =scripts/audit_agents_md.py= + a one-time remote
+  routine firing 2026-05-13 to evaluate primer effectiveness and
+  optionally open a tuning PR (hybrid: local audit, remote PR).
+
+* Active — Phase 16.3: Emacs companion                  :in_progress:
+
+Emacs integration that lives next to opencode rather than as an
+alternative to it. Per =extensions/emacs/README.md:40=.
+
+** Scope
+- =M-x org-llm-ask= / =M-x org-llm-walk= / =M-x org-llm-capture=
+  bindings that talk to the MCP server directly.
+- Live insight cards in a side buffer.
+- =org-roam= integration: when the user's point is on a node,
+  the org-llm advice path can scope to that node.
+
+** Status
+
+Scaffolded in =extensions/emacs/org-llm.el= (Phase 16.0). Real
+hooks land here.
+
+* Planned — Phase 16.4+: extension polish                    :planned:
+
+** Status panel slot
+
+A live =sidebar_content= override showing vault counts, stale
+candidates, last gather time, MCP server status. Refreshes as the
+user works. (Mentioned as a candidate "nice accomplishment" in the
+2026-04-30 working session.)
+
+** MCP-kind tool-call logging
+
+Decorate every =@server.tool()= in =org_llm/mcp_server.py= with a
+uniform =write_event("mcp", tool_name, …)= call so =History= rows
+capture every MCP invocation. Today only one tool logs explicitly;
+the AGENTS.md audit's secondary signal is best-effort because of
+this gap. Foundation for: =/doctor mcp-usage=, tool-call heatmap
+insight cards, and the routine on 2026-05-13 having real data.
+
+** Cover more sidebar surfaces
+
+=sidebar_content= (MCP panel header), =home_footer=, =home_bottom=
+(tip strings) all still leak opencode-flavored chrome. Same TSX
+slot pattern as Phase 16.2's =home_logo= work.
+
+* Punch list — beta → 1.0                                    :planned:
+
+Lifted from the original README roadmap stub:
+
+- *Cross-platform install validation* — macOS + Ubuntu CI.
+- *Smoke tests for less-walked verbs* — currently the integration
+  suite is heavy on =launch= / =claude= / =mcp=, light elsewhere.
+- *Performance regressions surfacing in =models= dashboard* — the
+  =performance= subcommand records tok/s; surface deltas across
+  runs without the user asking.
+- *Android / Termux port* — needs an arm64 install path, no
+  systemd for the auto-embedder daemon, smaller hardware budget
+  for benchmarks.
+
+* Wishlist — no commitment                                   :wishlist:
+
+** Voice / TTS bridge
+A =org-llm voice= subcommand that pipes the chat surface through
+local TTS (e.g. Piper) for hands-free vault interaction.
+
+** Multi-vault federation
+The current data model assumes one vault per install. Federation
+(read across vaults; write to one) opens the door to shared
+team knowledge bases.
+
+** Browser extension
+A capture surface for arbitrary web pages, bookmarklet-style.
+=capture --url= already exists in the CLI; this would be the
+zero-keypress front door.
+
+** Inline embeddings refresh
+Today =auto_embedder= runs as a daemon. Inline (per-edit) refresh
+would make new captures searchable instantly without waiting for
+the next cycle.
+
+* How phases get numbered                                    :process:
+
+- A *Phase X* is a coherent theme that ships in slices.
+- *Phase X.Y* sub-phases are the slices. They land independently;
+  the parent phase isn't "done" until the last slice ships AND no
+  more =planned= slices are outstanding.
+- *Numbers can be skipped or retired* when a chunk gets absorbed
+  into a different theme. Phase 4 was absorbed into Phase 5; Phase
+  14 was absorbed into Phase 15. The retired number doesn't get
+  reassigned.
+- *Commit messages* prefix the phase: =feat(insights): Phase 12.5 —
+  engagement table=. Grep =git log --grep="Phase "= to find every
+  phase landing.
+- *Sub-phase numbering* is loose. 12.6 + 12.7 are reserved for
+  planned work; if a 12.8 idea shows up first, it can take the
+  next available number.
+
+* Source files in this repo
+
+Trace markers for any phase referenced above:
+
+- Code references: =grep -nE "Phase [0-9]+\.?[0-9]*" org_llm/*.py
+  extensions/= surfaces every in-source mention.
+- Commit history: =git log --all --oneline --grep="Phase "=.
+- Test pins: =tests/test_workspace_mcp.py= for the launch-config
+  surface; =extensions/opencode/test/index.test.ts= for the TUI
+  plugin.
+- Architecture deep dive: companion org-roam node
+  =20260429200110-opencode_workspace_architecture.org= (in the
+  user's vault, not in this repo) for the Phase 16.x integration
+  details.

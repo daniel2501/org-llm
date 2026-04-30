@@ -1,0 +1,144 @@
+:PROPERTIES:
+:ID:       d30c177e-5b09-4f52-95bf-bb2d36f663e8
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Wiki conventions — self-updating, always-notified
+#+FILETAGS: :wiki:meta:conventions:
+#+OPTIONS: toc:nil num:nil
+
+* What this page is
+
+The wiki at =docs/wiki/= is *self-updating*: the LLM running in
+opencode (or the CLI =ask= path) reads it when answering questions
+about org-llm itself, and proposes edits when it spots gaps.
+This page documents the rules so the behaviour is predictable
+and the user is never surprised by a silent wiki change.
+
+* The two rules
+
+** Rule 1: Consult the wiki for app-self questions
+
+When the user asks about *org-llm itself* — concepts, features,
+how things work, where a phase is, what a tool does — the LLM
+must:
+
+1. Read the relevant wiki page first (the index at
+   [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][00-index.org]] is the
+   entry point).
+2. Quote the load-bearing line from the wiki in its reply.
+3. Link the file path: =docs/wiki/<page>.org=.
+4. NOT paraphrase wiki content from memory — the wiki is
+   authoritative; pre-trained model knowledge of the project is
+   stale by default.
+
+This applies in both opencode and the CLI's =ask= flow.
+=search_notes= will surface wiki pages naturally if the user
+has symlinked =docs/wiki/= into their =org_dir= (recommended
+in the index page).
+
+** Rule 2: Propose edits — always notified
+
+When the LLM notices a gap or staleness while answering — a
+concept the wiki doesn't cover, a section that's drifted, a
+missing cross-link, an ambiguous explanation — it must:
+
+1. Propose the edit out loud:
+   #+begin_example
+   "I'm also updating `docs/wiki/X.org` because <reason>.
+    Diff: <one-line summary>."
+   #+end_example
+2. Apply the edit using the host's file-edit tools
+   (opencode's =Edit= / =Write=; CLI's =add_context= for the
+   context overlay).
+3. Never edit silently. The user always sees the proposed
+   change before/while it lands.
+
+The "always notified" rule is the hard line. The model can be
+proactive, but it cannot be silent. Every wiki edit must
+appear in the conversation transcript with the rationale.
+
+* What "gap or staleness" looks like
+
+Concrete triggers:
+
+| Trigger                                         | Action                                          |
+|-------------------------------------------------+-------------------------------------------------|
+| User asks about a concept the wiki doesn't cover | Propose a new wiki page; offer to scaffold it  |
+| A wiki page references a phase that's now shipped | Update the page's status + add commit anchor   |
+| A cross-link points at a missing page            | Either drop the link or scaffold the target    |
+| Two pages contradict each other                  | Reconcile; flag for the user before editing    |
+| The wiki is silent on a question coming up often | Propose a FAQ-style entry in the relevant page |
+
+* What's out of scope
+
+The LLM does NOT:
+
+- Delete pages without explicit user confirmation
+- Rewrite the wiki's voice (the conventions are this page's
+  job; persona is set elsewhere)
+- Edit pages outside =docs/wiki/= as part of a "wiki update"
+  (those are separate code-edit decisions)
+- Touch wiki pages while the user is mid-question without a
+  beat to acknowledge the side-quest
+
+* Why this matters
+
+org-llm is a complex project. Without active maintenance, its
+documentation drifts faster than its code. The conventional
+fix — assign a tech writer — doesn't scale to a single-author
+side project. The wiki+LLM loop is the alternative:
+
+- The LLM reads the wiki on every relevant question.
+- When it notices what's missing or wrong, it proposes a fix.
+- The user reviews the proposal in the conversation.
+- The fix lands; the next session reads the updated wiki.
+
+This compounds. After a few months of normal use, the wiki
+should be more current than any human-maintained doc set
+because it's getting touched on every relevant question instead
+of waiting for a doc-day.
+
+* The companion policy: keep README in sync
+
+The wiki and README cross-reference each other. The README's
+"Roadmap" section points at [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]];
+concept mentions in the README link first-definitionally to wiki
+pages. Same Rule 2 applies: when a phase ships or a new wiki
+page lands, the README's roadmap overview gets updated in the
+same commit. See =feedback_keep_wiki_and_readme_in_sync.md= in
+the agent's memory store for the underlying policy.
+
+* How to configure
+
+This is a behavioural rule baked into:
+
+- =org_llm/cli.py:_opencode_agents_md= — written to
+  =.opencode/AGENTS.md= on every launch; opencode auto-loads it
+  as project context.
+- =org_llm/cli.py:_opencode_workspace_prompt= — the system
+  prompt for the org-llm primary agent.
+
+There's no env var or runtime toggle by design — disabling the
+"consult the wiki" rule would defeat the purpose. If you want to
+silence the LLM's edit proposals, that's an opencode permission
+concern (set =Edit= / =Write= to =ask= in opencode's permission
+config), not an org-llm setting.
+
+* Source files
+
+- =org_llm/cli.py:_opencode_agents_md= — primer text the rule
+  is written into
+- =org_llm/cli.py:_opencode_workspace_prompt= — system prompt
+  reinforcement
+- =docs/wiki/00-index.org= — the entry point the LLM consults
+  first
+- =README.md= "## Roadmap" — companion update channel
+
+* Related
+
+- [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][Wiki index]] — the
+  starting point for any consult
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — the most-
+  often-updated wiki page; the prime example of "self-updating"
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — the bridge
+  that gives the LLM file access for proposed edits

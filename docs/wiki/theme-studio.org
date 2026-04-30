@@ -1,0 +1,147 @@
+:PROPERTIES:
+:ID:       c88b2ddc-33bc-4b58-bd16-993c48b91209
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Theme studio + knobs — voice personalization
+#+FILETAGS: :wiki:concept:theming:personalization:
+#+OPTIONS: toc:nil num:nil
+
+* What it is
+
+The *voice* layer of =org-llm= personalization. Where
+[[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][LCARS]] tints the
+visual chrome, theme studio tints the *words* — every prompt,
+greeting, error message, and themed phrasing routes through
+=theme_studio.get_themed(surface_key, default)= so the LLM can
+pre-cache personalized variants per knob configuration.
+
+* The knob model
+
+A *knob* is a named dial with a 0-3 cumulative level:
+
+| Level | Meaning                                        |
+|-------+------------------------------------------------|
+| 0     | Off — no influence on copy                     |
+| 1     | Sparse — one nod per session                   |
+| 2     | Normal — natural integration                   |
+| 3     | Max — every reply colored by the knob         |
+
+Built-in knobs ship with the install:
+
+- =trek_level= — Star Trek phrasing ("Make it so", "Hailing
+  frequencies open", "Number One")
+- =commie_level= — solidarity / labor language
+- =queer_level= — queer-coded persona
+- =synthwave_level= — neon / retrowave aesthetic markers
+- =cottagecore_level= — soft, slow, hand-made vocabulary
+- =homelab_level= — tinkerer / sysadmin pragmatism
+
+User-defined knobs are first-class: =org-llm knob add --llm
+'dinosaur'= scaffolds a new knob the LLM can fill out by
+generating themed phrasings.
+
+* Themed surfaces
+
+When code wants a themed phrase, it calls:
+
+#+begin_src python
+from . import theme_studio as _ts
+greeting = _ts.get_themed(
+    "opencode_greeting",
+    "Hailing frequencies open. Org-llm at your service.",
+)
+#+end_src
+
+If the cache has a generated variant for the user's current
+knob configuration, =get_themed= returns it. If not, it returns
+the default. =org-llm theme-studio regenerate= rebuilds the cache
+with the active knob mix.
+
+Surface keys cover ~30 spots across the codebase: splash
+subtitle, splash slogan, opencode persona intro, opencode
+greeting, proactive_doctor line, no-results line, tool intro,
+done closer, etc.
+
+* The =personalize= flow
+
+=org-llm personalize --apply= scans the user's vault for
+recurring themes (most-used tags, vault names, phrases the user
+has captured repeatedly) and proposes 3-5 new knobs the LLM
+thinks would be a good fit. The user reviews, approves, and the
+new knobs join the regenerate flow.
+
+This is what makes the install feel personal after a few weeks
+of capturing notes — the system reads the vault and learns to
+talk back in the user's vocabulary.
+
+* Theme studio vs LCARS palettes
+
+| Aspect      | LCARS palette                | Theme studio                 |
+|-------------+------------------------------+------------------------------|
+| What        | Colors / chrome              | Words / phrasing             |
+| Configured  | =org-llm palette <name>=     | =org-llm knob set <k> <0-3>= |
+| Resolved at | Render time (every print)    | Generation time (cache)      |
+| Layers      | Below — visual substrate     | On top — voice               |
+
+Both layer over each other independently. =palette green= +
+=queer_level: 3= = green LCARS chrome with maximally-queer-coded
+persona language.
+
+* How to configure
+
+** Env vars
+- Per-knob env taps: =ORG_LLM_TREK_LEVEL=, =ORG_LLM_COMMIE_LEVEL=,
+  etc. — every config key has an env tap (=org-llm config= shows
+  the source).
+- =ORG_LLM_THEME_STUDIO_DISABLE= — bypass cache, always use
+  defaults (useful for screenshots / docs).
+
+** CLI flags
+#+begin_src sh
+# Knob management
+org-llm knob list                          # registered knobs + levels
+org-llm knob set trek_level 3
+org-llm knob add my_dial                   # blank scaffold
+org-llm knob add --llm "dinosaur"          # LLM-generated themed knob
+
+# Theme studio
+org-llm theme-studio regenerate            # rebuild themed cache
+org-llm theme-studio show <surface>        # preview a single surface
+org-llm theme-studio diff                  # compare cached vs default
+
+# Personalization
+org-llm personalize                        # propose knobs from vault
+org-llm personalize --apply                # auto-create them
+org-llm personalize --apply --max-themes 5
+#+end_src
+
+** Conversational (opencode / claude / pi)
+- =add_theme_knob= MCP tool — model can register a knob mid-
+  session ("dial up the cottagecore vibe")
+- =/personalize= slash command
+- =/knob list= / =/knob set= via slash commands
+- Natural language: "make it more queer" / "less Trek" — model
+  picks =set_config= against the right level key
+
+** Knob block in the system prompt
+The launch flow surfaces *active* knobs (level >= 1) in the
+opencode system prompt under "PERSISTENT THEMING" so the model
+knows which voice to use. Knobs at level 0 are not surfaced —
+saves prompt budget.
+
+* Source files
+
+- =org_llm/theme_studio.py= — =get_themed=, regenerate, cache
+- =org_llm/cli.py= — =knob= / =theme-studio= / =personalize=
+  verbs
+- =org_llm/cli.py:_opencode_workspace_prompt= — knob block
+  rendered into system prompt
+- =org_llm/mcp_server.py= — =add_theme_knob=, =get_themed= MCP
+  tools
+
+* Related
+
+- [[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][LCARS theming]] — visual
+  layer that pairs with theme studio's voice layer
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — Phase 1–3
+  foundation; refinements continue but the substrate is stable

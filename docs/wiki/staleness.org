@@ -195,12 +195,51 @@ contradictions are the perfect insight card material:
 
 That's [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][Phase 12]]'s =stale_candidates= generator.
 
+* How to configure
+
+** Env vars
+- =ORG_LLM_DB= / =ORG_LLM_ORG_DIR= — vault + DB overrides; the
+  context overlay tangle path is computed from these.
+
+** CLI flags
+#+begin_src sh
+# Content-staleness sweep
+org-llm stale                            # LLM judges 20 oldest non-stale nodes
+org-llm stale --apply                    # auto-tag without confirm
+org-llm stale --limit 50 --since-days 365
+
+# Context overrides (current truth)
+org-llm context add 'Works at Idexx since 2026-04.' --topic employment
+org-llm context from-prompt 'I no longer work at Unum, now at Idexx.'
+org-llm context tangle                   # rewrite the .txt the LLM reads
+org-llm context show                     # what's currently injected
+
+# History narrative (stale ≠ worthless)
+org-llm history build                    # scans :stale: + 180+ day notes
+org-llm history build --interactive      # 3-question interview first
+
+# File-system staleness
+org-llm index                            # heals renames/deletes via prune-stale-rows
+#+end_src
+
+** Conversational
+- =add_context= MCP tool — model can record current truth from
+  natural language ("I no longer work at X")
+- =stale= verb (no MCP tool today; CLI-only) — deliberate, since
+  bulk auto-tagging is destructive
+- =refresh_context= MCP tool — re-tangle context.org mid-session
+
 * See also
 
 - [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][Embeddings]] — what makes the contradiction-search work in
   the first place
 - [[id:e4444444-5555-6666-7777-dddddddddddd][Retrieval-Augmented Generation (RAG)]] — where the
   stale-penalty actually applies
+- [[id:47c84cd6-1cba-457d-a947-9c482d392991][Walk]] —
+  the disambig-placeholder flow that pairs with stale-tagging
+  during context graph traversal
+- [[id:4df57d95-0e31-41cb-b973-5f41706901c0][Auto-embedder]] —
+  closes file-system staleness automatically as the daemon runs
 - [[file:../../org_llm/cli.py][cli.py:stale()]] — the LLM-driven contradiction detector
 - [[file:../../org_llm/search.py][search.py:_apply_signal_boosts]] — the +0.6 penalty
   application site

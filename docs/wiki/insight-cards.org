@@ -1,0 +1,180 @@
+:PROPERTIES:
+:ID:       902bea52-585b-4a1a-9fe0-1b8c43edcf12
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Insight cards (Phase 12)
+#+FILETAGS: :wiki:concept:insights:phase-12:
+#+OPTIONS: toc:nil num:nil
+
+* What insight cards are
+
+Small, structured "I noticed something" cards generated from the
+vault's current state. Shown to the user when an =org-llm= chat
+surface (opencode, Claude Code, Pi) opens — the headline experience
+is *"workspaces open with 'I noticed N things since you were last
+active' instead of a blank prompt."*
+
+Cards have a uniform shape:
+
+#+begin_src python
+@dataclass
+class InsightCard:
+    kind: str                    # "stale_candidates", "new_captures", "drift", ...
+    title: str                   # short label
+    body: str                    # longer description (deterministic OR LLM-narrated)
+    evidence: dict | None        # raw anchor data (which nodes? which tags?)
+    suggested_command: str = ""  # CLI handle to act on the card
+    suggested_question: str = "" # natural-language question to feed the LLM
+#+end_src
+
+A "card kind" is its source generator (see Phase 12.1+12.3 below).
+
+* The deterministic-vs-narrated split
+
+Cards have two costs:
+
+| Step                | Cost      | When                                           |
+|---------------------+-----------+------------------------------------------------|
+| Deterministic gather | sub-second | Always — pattern-matches the vault             |
+| LLM narration        | 1-30s     | Only when a scorer says it'd improve the card |
+
+The scorer (Phase 12.2) looks at the card's body and decides if
+LLM rewriting would meaningfully improve readability. If the
+deterministic body is already clean, narration skips.
+
+This split is why =org-llm launch= can always populate
+=insight-cards.json= for the TUI plugin — the gather is fast.
+The slow narration is gated separately on
+=ORG_LLM_INSIGHT_PREMOUNT= (only the system-prompt-injection
+path; not the plugin path).
+
+* Phase chronology
+
+| Phase | What landed                                                                    |
+|-------+--------------------------------------------------------------------------------|
+| 12.1  | Pre-mount skeleton + first generator (=stale_candidates=)                      |
+| 12.2  | LLM narration + deterministic-vs-narrated scorer                                |
+| 12.3  | More generators (=drift=, =dangling_links=, =new_captures=) + concept wiki    |
+| 12.4  | Inject cards into opencode's first message via system prompt                  |
+| 12.5  | =insight_engagement= table + =doctor --diagnose-cards=                          |
+| 12.6  | (planned) Real persistence for cached gather (currently in-memory)             |
+| 12.7  | (planned) dbt analytics over engagement data                                    |
+| 16.1  | (separate phase) TUI plugin renders cards in =/insights= dialog                |
+| 16.2  | (separate phase) Cards visible on plugin mount; gather always-on               |
+
+* Two surfacing channels
+
+** System-prompt injection (Phase 12.4)
+
+The launch flow appends rendered cards to the LLM's system prompt:
+
+#+begin_example
+[the regular system prompt …]
+
+# Insight cards prepared for this session
+
+## stale_candidates: 3 nodes
+- "Marx Capital" — last touched 2024, contradicts current truth note
+…
+#+end_example
+
+The model opens the conversation by referencing them: "I noticed
+3 stale candidates since your last session…"
+
+This is the legacy path, gated on =ORG_LLM_INSIGHT_PREMOUNT=
+(opt-in because the prompt-bloat penalty is real). Phase 16.1
+supersedes it for plugin-using clients.
+
+** TUI plugin =/insights= dialog (Phase 16.1+)
+
+The Phase 16.1 TUI plugin reads =.opencode/insight-cards.json=
+on every plugin mount, registers a =/insights= command (alias
+=/i=), pops a load toast, and (Phase 16.2) auto-opens the
+=DialogSelect= so cards APPEAR ON OPEN — no need to type
+=/insights=. Selecting a card prefills the prompt with its
+=suggested_question=.
+
+This is the *canonical* surfacing channel going forward; the
+prompt-injection path is kept as a fallback for clients without
+TUI plugin support (Pi, claude.ai/code).
+
+* The engagement loop (Phase 12.5)
+
+When the user reacts to a card (good / bad / clicked / dismissed),
+=insight_card_feedback= MCP tool writes a row to the
+=insight_engagement= table:
+
+#+begin_src sql
+CREATE TABLE insight_engagement (
+    id              INTEGER PRIMARY KEY,
+    shown_at        INTEGER NOT NULL,
+    card_kind       TEXT    NOT NULL,
+    card_title      TEXT,
+    card_body       TEXT,
+    evidence_json   TEXT,
+    reaction        TEXT    NOT NULL DEFAULT '',
+    reason          TEXT,
+    suggested_cmd   TEXT,
+    narration_model TEXT
+);
+#+end_src
+
+=doctor --diagnose-cards= clusters by =(card_kind,
+narration_model)= and surfaces patterns:
+
+- "All 4 bad cards this week were stale_candidates → contradiction-
+  detection threshold may be too lax"
+- "Cloud-narrated cards have 80% bad-rate vs local at 20% → cloud
+  prompt may have drifted"
+
+The Phase 12.7 dbt layer will turn this into a per-generator
+quality view.
+
+* How to configure
+
+** Env vars
+- =ORG_LLM_INSIGHT_PREMOUNT= (=1=/=on=/=true=) — gate the SLOW
+  paths: LLM narration of card bodies + system-prompt injection
+  of card text. The deterministic gather + plugin path are
+  *always on*; this flag only controls the optional extras.
+- =ORG_LLM_DB= / =ORG_LLM_ORG_DIR= — same overrides as everywhere.
+
+** CLI flags
+#+begin_src sh
+org-llm doctor --diagnose-cards          # cluster engagement reactions
+org-llm doctor --diagnose-cards --window 30  # last 30 days
+#+end_src
+
+** Plugin (opencode)
+=.opencode/insight-cards.json= is rewritten on every =org-llm
+launch=. Cards refresh when the user relaunches; long-running
+sessions see the snapshot from launch time.
+
+** Conversational
+- =/insights= or =/i= — open the dialog mid-session (Phase 16.1
+  TUI plugin command)
+- =insight_card_feedback= MCP tool — model writes engagement
+  rows when the user says "that one was useful" / "skip that"
+- =gather_insights= MCP tool — re-gather mid-session without
+  relaunching
+
+* Source files
+
+- =org_llm/insights.py= — generator + cached_gather + scorer
+- =org_llm/db.py:130= — =InsightEngagement= model
+- =org_llm/cli.py:_doctor_impl= — =--diagnose-cards= flag
+- =org_llm/cli.py= (launch) — gather + write
+  =insight-cards.json=
+- =extensions/opencode/src/index.ts= — TUI plugin's
+  =loadCards()= + =/insights= dialog
+- =scripts/audit_agents_md.py= — audits engagement deltas
+  pre/post AGENTS.md primer landing (companion to the remote
+  routine)
+
+* Related
+
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — § Phase 12 chronology
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] —
+  =insight_card_feedback= is the MCP tool that writes engagement rows
+- [[id:e3333333-4444-5555-6666-cccccccccccc][Staleness]] —
+  =stale_candidates= is one of the highest-engagement card kinds

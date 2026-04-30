@@ -1,0 +1,122 @@
+:PROPERTIES:
+:ID:       47c84cd6-1cba-457d-a947-9c482d392991
+:CREATED:  [2026-04-30]
+:END:
+#+TITLE: Walk — context-graph traversal (Phase 13)
+#+FILETAGS: :wiki:concept:retrieval:walk:phase-13:
+#+OPTIONS: toc:nil num:nil
+
+* What walk is
+
+A retrieval mode that *traces a path* through your context graph
+rather than scoring nodes by similarity. Where =ask= retrieves
+the top-N most semantically-similar nodes, =walk= picks a starting
+node and traverses outward through:
+
+1. *org-roam id-links* (=[[id:...]]=) — explicit author intent
+2. *Tag co-occurrence* — nodes sharing N+ tags with the start
+3. *Temporal proximity* — nodes touched within ±N days
+4. *Backlinks* — nodes that link TO the start
+
+The output is a *narrative*, not a list — "you wrote about X on
+date A, then connected it to Y on date B; here's the thread."
+
+* When to walk vs ask
+
+| Question shape                         | Reach for |
+|----------------------------------------+-----------|
+| "What do I know about X?"              | =ask=     |
+| "How did I get to thinking X?"         | =walk=    |
+| "Who/what relates to <node title>?"    | =walk=    |
+| "Pull facts about X"                   | =ask=     |
+| "Trace my last week's thinking"        | =walk= --dailies (planned 13.2) |
+
+Walk is for *origin stories*; ask is for *current state*.
+
+* Atomic facts + disambiguation
+
+The Phase 13.1 walk landing introduced two related concepts to
+fix a class of bug where walk would surface contradictory facts
+without flagging them:
+
+- *Atomic facts* — single-claim statements extracted from a
+  node's body. =walk_remove_fact= can target one without
+  rewriting the whole node.
+- *Disambig placeholders* — when a fact contradicts =llm-context.org=
+  current truth, the walk output marks it =[Disambig: see
+  context.org]= instead of asserting it. The placeholder
+  auto-strips on every save (was previously only on
+  =add_disambig=).
+
+* Conversational flow inside opencode
+
+The launch flow's slot overrides + system prompt route
+=/walk= as the conversational entry:
+
+#+begin_src
+User: where am I with the cloud-commons project?
+Model: → walk_node(title="cloud-commons")
+Model: You started cloud-commons on 2026-02-14 with a Snowflake
+       hosting note. By 2026-03-02 you'd connected it to your
+       personal-database draft. Last touched 2026-04-12 with a
+       :stale: tag — context.org says you've shifted to Snowpark
+       Container Services. Want me to draft the next step?
+#+end_src
+
+The MCP =walk_node= tool encapsulates the traversal; the model
+just calls it.
+
+* Phase chronology
+
+| Phase | What landed                                                    |
+|-------+----------------------------------------------------------------|
+| 13    | Initial walk verb + concept wiki                                |
+| 13.1  | =org-llm walk= CLI + opencode surfacing + atomic-fact validator |
+| 13.2  | (planned) Walk =dailies= without explicit start ID              |
+| 13.4  | (planned) Per-slug routing + real edit-in-place fact replacement |
+| 13.5  | (planned) Clarifying questions when start node is ambiguous     |
+
+* How to configure
+
+** Env vars
+- =ORG_LLM_DB= / =ORG_LLM_ORG_DIR= — walk respects the same DB +
+  vault overrides as every other verb.
+
+** CLI flags
+#+begin_src sh
+org-llm walk "cloud-commons"           # start node by title fuzzy-match
+org-llm walk --id <uuid>               # exact node ID
+org-llm walk --depth 3                 # how far to traverse (default 2)
+org-llm walk --tags-min 1              # min shared tags for tag-edges (default 2)
+org-llm walk --since-days 30           # restrict temporal-proximity edges
+org-llm walk --no-llm                  # raw graph; skip LLM narration
+#+end_src
+
+** Conversational (opencode / claude / pi)
+- =/walk <topic>= — slash command in opencode workspace
+- "Trace my path through X" / "How did I get to thinking about Y?"
+  — natural-language; the model picks =walk_node=
+- =walk_node= MCP tool — direct invocation
+
+** Disambig
+- =org-llm context add-disambig= — record a disambig placeholder
+  manually
+- The model can call =add_disambig()= itself when it spots
+  contradictions during a walk
+
+* Source files
+
+- =org_llm/walk.py= — traversal core
+- =org_llm/cli.py= — =walk= verb wiring
+- =org_llm/mcp_server.py= — =walk_node=, =walk_remove_fact=,
+  =add_disambig= MCP tools
+
+* Related
+
+- [[id:e4444444-5555-6666-7777-dddddddddddd][Retrieval-Augmented Generation]] —
+  walk is an alternative retrieval mode to RAG's ask path
+- [[id:e3333333-4444-5555-6666-cccccccccccc][Staleness]] — walk
+  participates in the disambiguation flow when current-truth
+  contradicts older notes
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 13
+  for the chronology

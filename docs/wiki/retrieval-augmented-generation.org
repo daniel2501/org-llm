@@ -257,6 +257,12 @@ Causes:
 - [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][Vector similarity & cosine distance]] — the geometry of the
   retrieval ranking
 - [[id:e3333333-4444-5555-6666-cccccccccccc][Staleness]] — the +0.6 penalty's reason to exist
+- [[id:47c84cd6-1cba-457d-a947-9c482d392991][Walk]] — the alternative
+  retrieval mode (graph traversal, not similarity ranking)
+- [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][Insight cards]] — the
+  "I noticed N things" surface RAG retrieval feeds
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — the bridge that
+  exposes =ask_notes= / =search_notes= to opencode + claude + pi
 - [[https://www.pinecone.io/learn/retrieval-augmented-generation/][Pinecone: RAG explained]] — wider context, vendor-neutral
 - [[https://docs.llamaindex.ai/en/stable/getting_started/concepts/][LlamaIndex: RAG concepts]] — different framework, same
   pattern
