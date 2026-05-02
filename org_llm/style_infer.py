@@ -200,25 +200,56 @@ def style_summary(info: dict) -> str:
     cached_marker = " (cached)" if info.get("cached") else ""
 
     if shape == "header_cookie":
-        head = ("Format: HEADERS-WITH-COOKIE — `* [ ] Heading` for "
-                "categories, `** [ ] sub-task` underneath. Cookie box "
-                "states: `[ ]` open, `[X]` done, `[-]` in-progress.")
+        head = (
+            "Format: HEADERS-WITH-COOKIE.\n"
+            "EXACT TEMPLATE — copy this shape verbatim:\n"
+            "  * [ ] Category heading\n"
+            "  ** [ ] Sub-task one\n"
+            "  ** [X] Sub-task already done\n"
+            "  ** [-] Sub-task in progress\n"
+            "RULES:\n"
+            "  - Top-level (`*`) is a CATEGORY with `[ ]` cookie.\n"
+            "  - Sub-tasks are `**` headings, NOT `- [ ]` bullets.\n"
+            "  - States: `[ ]` open / `[X]` done / `[-]` in-progress.\n"
+            "  - DO NOT mix `- [ ]` bullets with `*` headings — pick "
+            "headings.")
     elif shape == "header_todo":
-        head = ("Format: HEADERS-WITH-TODO — `** TODO heading` style. "
-                "Use TODO/DONE/NEXT/WAITING keywords on org headlines.")
+        head = (
+            "Format: HEADERS-WITH-TODO.\n"
+            "EXACT TEMPLATE — copy this shape verbatim:\n"
+            "  * TODO Category heading\n"
+            "  ** TODO Sub-task one\n"
+            "  ** DONE Sub-task already finished\n"
+            "RULES: TODO/DONE/NEXT/WAITING keywords on each headline. "
+            "No `[ ]` cookies — they're redundant with TODO state.")
     elif shape == "bullet_cookie":
-        head = ("Format: CHECKBOX-BULLETS — flat `- [ ] item` list "
-                "under a single heading.")
+        head = (
+            "Format: CHECKBOX-BULLETS — flat list under one heading.\n"
+            "EXACT TEMPLATE:\n"
+            "  * Heading\n"
+            "  - [ ] First item\n"
+            "  - [X] Done item\n"
+            "RULES: ONE top-level heading; items are `-` bullets "
+            "with cookies. No nested `**` sub-headings.")
     elif shape == "plain_bullet":
-        head = ("Format: PLAIN BULLETS — `- item` lines, no cookies "
-                "or TODO state. Used for prose / reference notes.")
+        head = (
+            "Format: PLAIN BULLETS — `- item` lines, no cookies "
+            "or TODO state. Used for prose / reference notes.")
     elif shape == "mixed":
-        head = ("Format: MIXED — multiple shapes coexist. Default to "
-                "header-cookie (`* [ ] Heading` / `** [ ] sub-task`) "
-                "since it's the most expressive.")
+        head = (
+            "Format: MIXED — multiple shapes coexist. Default to "
+            "HEADERS-WITH-COOKIE (`* [ ] Heading` / `** [ ] sub-task`) "
+            "since it's the most expressive.\n"
+            "EXACT TEMPLATE:\n"
+            "  * [ ] Category heading\n"
+            "  ** [ ] Sub-task one")
     else:
-        head = ("Format: UNKNOWN — no samples or no recognisable "
-                "pattern. Fall back to header-cookie style.")
+        head = (
+            "Format: UNKNOWN — no samples or no recognisable pattern. "
+            "Fall back to HEADERS-WITH-COOKIE.\n"
+            "EXACT TEMPLATE:\n"
+            "  * [ ] Category\n"
+            "  ** [ ] Sub-task")
 
     lines = [head + cached_marker]
     if extras_str:

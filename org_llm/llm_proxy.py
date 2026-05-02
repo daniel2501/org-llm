@@ -1121,11 +1121,18 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     # restating this in 13 individual agent prompts.
     if agent_prompt:
         agent_prompt = (
-            "Vault-first: when the answer hinges on the user's "
-            "life/voice/conventions, sample vault files first "
-            "(search_notes, list_dailies, read_file). For explicit "
-            "user confirmations ('save it', 'yes', 'y'), skip "
-            "re-sampling and just do it.\n\n"
+            "Vault-first context (judgment-based):\n"
+            "  When the user asks for content 'based on'/'from'/"
+            "'using' vault files, dailies, captures, or any "
+            "specific source, you MUST actually READ those files "
+            "before drafting. List, then read, then synthesise. "
+            "DO NOT generate generic items from training data when "
+            "the user pointed at specific files — that's "
+            "hallucination, and it's the #1 way scribe gets it "
+            "wrong.\n"
+            "  For explicit user confirmations on a draft you "
+            "already showed ('save it', 'yes', 'y'), skip "
+            "re-sampling — just do the action.\n\n"
             + agent_prompt
         )
     # Phase 20: append FORCE-SOLO marker so the agent's
