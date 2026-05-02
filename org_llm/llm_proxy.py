@@ -667,6 +667,29 @@ def _strip_prefix_from_last_user(parsed: dict, regex) -> None:
         break
 
 
+def _strip_suffix_from_last_user(parsed: dict, regex) -> None:
+    """Helper: strip a trailing regex match from the latest user
+    message's content. Mirrors _strip_prefix_from_last_user but
+    uses re.sub() over the full content (not just match-at-start)
+    since the suffix may have surrounding whitespace. Mutates
+    `parsed` in place."""
+    msgs = parsed.get("messages") or []
+    for i in reversed(range(len(msgs))):
+        msg = msgs[i]
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            msg["content"] = regex.sub("", content).rstrip()
+        elif isinstance(content, list):
+            for part in content:
+                if (isinstance(part, dict)
+                        and part.get("type") == "text"
+                        and isinstance(part.get("text"), str)):
+                    part["text"] = regex.sub("", part["text"]).rstrip()
+        break
+
+
 def _reencode_body(req: ProxyRequest) -> None:
     """Re-serialise req.parsed_json to req.body and drop the stale
     Content-Length header so urllib re-computes it on forward."""
@@ -1071,11 +1094,33 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
         # Non-fatal — overlay write is for sidebar polish only.
         pass
 
-    # Strip the @<name> prefix from the user message.
+    # Strip the @<name> prefix from the user message AND any
+    # task-tool delegation boilerplate opencode appends.
+    #
+    # opencode 1.14.32 sees @<name> in the user text and appends
+    # an instruction to the message body before sending to the
+    # LLM, telling the primary agent to "call the task tool with
+    # subagent: <name>". With our proxy-side swap that hint is
+    # redundant noise — and worse, mixed with scribe's system
+    # prompt the model emits a confused "act like scribe AND
+    # delegate via task tool" response (walkthrough finding:
+    # @scribe hello! got captured to inbox.org instead of just
+    # being a greeting). Strip both, leave only the residual
+    # user query.
     prefix_re = _re_mod.compile(
         rf'^\s*@{_re_mod.escape(agent)}\s+', _re_mod.DOTALL,
     )
     _strip_prefix_from_last_user(parsed, prefix_re)
+    # Strip trailing opencode delegation hint anywhere in the
+    # last user message. Pattern matches the boilerplate opencode
+    # appends; tolerant of casing/whitespace variations.
+    suffix_re = _re_mod.compile(
+        r'\n+\s*Use the above message and context to generate '
+        r'a prompt and call the task tool with subagent:\s*'
+        rf'{_re_mod.escape(agent)}\s*\.?\s*$',
+        _re_mod.DOTALL | _re_mod.IGNORECASE,
+    )
+    _strip_suffix_from_last_user(parsed, suffix_re)
     _reencode_body(req)
     # Fall through — forward path picks up the mutated request.
     # Sidebar-runtime overlay will be updated by the plugin's
