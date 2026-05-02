@@ -238,11 +238,21 @@ surfaces the tail in chat (see
 
 * Roadmap
 
-The next-up interceptor list (skill→slash auto-bridge, prefix cache,
-cloud failover on first-byte timeout, citation post-processor,
-tool-result memoisation, per-turn model routing, auto-summarisation,
-stream-time tool-call repair, provider-failure fallback) lives in
-[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 18.
+The next-up interceptor list lives in
+[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 18; tracked here as TODOs so the proxy
+page is self-contained.
+
+** TODO [#A] Skill→slash auto-bridge
+** DONE Prefix cache
+CLOSED: [2026-05-02]
+** DONE Cloud failover on first-byte timeout
+CLOSED: [2026-05-02]
+** TODO [#B] Citation post-processor
+** TODO [#B] Tool-result memoisation
+** TODO [#B] Per-turn model routing
+** TODO [#C] Auto-summarisation
+** TODO [#B] Stream-time tool-call repair
+** TODO [#B] Provider-failure fallback
 
 * See also
 

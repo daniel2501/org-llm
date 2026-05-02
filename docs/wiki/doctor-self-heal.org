@@ -212,12 +212,12 @@ org-llm doctor diagnose-cards             # Phase 12.5 — cluster insight engag
 
 * Source files
 
-- =org_llm/cli.py:_doctor_impl= — main doctor implementation
-- =org_llm/cli.py:proactive_doctor=,
-  =org_llm/mcp_server.py:proactive_doctor= — model-facing
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]]:=_doctor_impl= — main doctor implementation
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]]:=proactive_doctor=,
+  [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]]:=proactive_doctor= — model-facing
   surfaces
-- =org_llm/cli.py:llm_rescue= — top-level exception wrapper
-- =org_llm/cloud.py:local_ram_gb=, =local_vram_gb= — hardware
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]]:=llm_rescue= — top-level exception wrapper
+- [[file:../../org_llm/cloud.py][=org_llm/cloud.py=]]:=local_ram_gb=, =local_vram_gb= — hardware
   probes
 
 * Related

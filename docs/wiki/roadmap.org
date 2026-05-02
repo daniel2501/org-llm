@@ -49,7 +49,8 @@ cards" = Phase 12) ship in slices without renumbering the world.
 
 * Shipped — pre-beta foundations                             :shipped:
 
-** Phase 1–3: initial implementation
+** DONE Phase 1–3: initial implementation
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :COMMIT: edb917d, 3f40fe9
@@ -60,7 +61,8 @@ SQLite schema (Files, Nodes, History, Config), ollama integration,
 the first =doctor= verb, the source-of-truth =org-roam.db=, the
 themed splash + LCARS palette plumbing.
 
-** Phase 5: opencode workspace
+** DONE Phase 5: opencode workspace
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :COMMIT: 134ea74
@@ -70,7 +72,8 @@ First working =org-llm launch=. Wrote =.opencode.json= with model +
 MCP server entries, registered the org-llm MCP tools so the
 in-opencode model could call =search_notes= et al.
 
-** Phase 7: opencode wiring audit
+** DONE Phase 7: opencode wiring audit
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :END:
@@ -81,7 +84,8 @@ spawned it. Model would silently fall back to grep. Fixed +
 pinned with the first [[file:../../tests/test_workspace_mcp.py][=tests/test_workspace_mcp.py=]] integration
 suite.
 
-** Phase 9.7: =.opencode/= directory vs =.opencode.json= dotfile
+** DONE Phase 9.7: =.opencode/= directory vs =.opencode.json= dotfile
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :END:
@@ -91,7 +95,8 @@ Walkthrough discovered opencode searches =<cwd>/.opencode/opencode.json=
 writing the latter — opencode silently ignored it. Switched the
 writer.
 
-** Phase 10: surface polish + tutor + gallery
+** DONE Phase 10: surface polish + tutor + gallery
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :COMMIT: 75c63a7
@@ -100,7 +105,8 @@ writer.
 Tutor system, palette gallery, README rewrite. The "first 5 minutes"
 narrative that lands new users.
 
-** Phase 11: embed migration + tag --apply
+** DONE Phase 11: embed migration + tag --apply
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :COMMIT: 6d4bd57
@@ -116,7 +122,8 @@ with "I noticed N things since you were last active" instead of a
 blank prompt. Cards are deterministic generators (fast) optionally
 narrated by an LLM (slow); a scorer picks which to narrate.
 
-** 12.1: pre-mount skeleton + first generator
+** DONE 12.1: pre-mount skeleton + first generator
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :COMMIT: 0b42267
@@ -124,7 +131,8 @@ narrated by an LLM (slow); a scorer picks which to narrate.
 
 Card data model + first deterministic generator (stale candidates).
 
-** 12.2: LLM narration + deterministic-vs-narrated scorer
+** DONE 12.2: LLM narration + deterministic-vs-narrated scorer
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :COMMIT: ff4d805
@@ -133,7 +141,8 @@ Card data model + first deterministic generator (stale candidates).
 Cards can be rewritten in the user's voice. A scorer picks which
 ones benefit from narration vs which read fine deterministic.
 
-** 12.3: more generators + concept wiki
+** DONE 12.3: more generators + concept wiki
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :COMMIT: 98970ce
@@ -142,7 +151,8 @@ ones benefit from narration vs which read fine deterministic.
 Additional card kinds (drift, dangling links, etc.) + the wiki
 substrate this page lives in.
 
-** 12.4: inject cards into opencode's first message
+** DONE 12.4: inject cards into opencode's first message
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :COMMIT: 1fdf641
@@ -153,7 +163,8 @@ Cards appended to the system prompt so the model opens with
 (cards now visible in a dialog instead of via prompt injection),
 but the prompt-injection path is still live as a fallback.
 
-** 12.5: engagement table + =doctor --diagnose-cards=
+** DONE 12.5: engagement table + =doctor --diagnose-cards=
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :COMMIT: e9901b2
@@ -163,19 +174,19 @@ Every card the user marks bad / clicks / dismisses writes a row to
 =insight_engagement=. =doctor --diagnose-cards= clusters by
 =(card_kind, narration_model)= and surfaces patterns.
 
-** 12.6: real persistence for cached gather
+** TODO [#B] 12.6: real persistence for cached gather
 :PROPERTIES:
 :STATUS: planned
-:CODE_REF: org_llm/insights.py:662
+:CODE_REF: [[file:../../org_llm/insights.py::662][org_llm/insights.py:662]]
 :END:
 
 The current cache is in-memory; cold every process. Persist to
 SQLite so launch-after-launch hits the cache.
 
-** 12.7: dbt analytics over engagement
+** TODO [#B] 12.7: dbt analytics over engagement
 :PROPERTIES:
 :STATUS: planned
-:CODE_REF: org_llm/db.py:140
+:CODE_REF: [[file:../../org_llm/db.py::140][org_llm/db.py:140]]
 :END:
 
 Per-generator quality view + per-narration-model accept rate via
@@ -189,7 +200,8 @@ around X" and =walk= traces from a starting node through
 related-by-id, related-by-tag, related-by-time, and surfaces a
 narrative.
 
-** 13.1: =org-llm walk= + opencode surfacing
+** DONE 13.1: =org-llm walk= + opencode surfacing
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :COMMIT: 281e0c9
@@ -198,28 +210,28 @@ narrative.
 The =walk= verb, =/walk= slash command, walk MCP tool. Atomic-fact
 validator + disambiguation tool + permissive UX.
 
-** 13.2: dailies as walk targets
+** TODO [#B] 13.2: dailies as walk targets
 :PROPERTIES:
 :STATUS: planned
-:CODE_REF: org_llm/walk.py:141
+:CODE_REF: [[file:../../org_llm/walk.py::141][org_llm/walk.py:141]]
 :END:
 
 Walk a day's nodes (today, yesterday, last weekday) without needing
 an explicit start ID.
 
-** 13.4: per-slug routing + real fact replacement
+** TODO [#B] 13.4: per-slug routing + real fact replacement
 :PROPERTIES:
 :STATUS: planned
-:CODE_REF: org_llm/cli.py:10341, 10430
+:CODE_REF: [[file:../../org_llm/cli.py::10341][org_llm/cli.py:10341]], [[file:../../org_llm/cli.py::10430][:10430]]
 :END:
 
 Replace "fact removal" with real edit-in-place via slug routing,
 not the current append-with-disambiguation-marker scheme.
 
-** 13.5: follow-up questions in walk
+** TODO [#B] 13.5: follow-up questions in walk
 :PROPERTIES:
 :STATUS: planned
-:CODE_REF: org_llm/walk.py:25
+:CODE_REF: [[file:../../org_llm/walk.py::25][org_llm/walk.py:25]]
 :END:
 
 Walk currently is one-shot — answer or no-answer. 13.5 lets walk
@@ -242,7 +254,8 @@ The TypeScript-and-Emacs era: behavior code that runs *inside*
 opencode's plugin loader instead of trying to express everything
 through JSON config.
 
-** 16.0: scaffolding
+** DONE 16.0: scaffolding
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :COMMIT: 7345c45
@@ -251,7 +264,8 @@ through JSON config.
 =extensions/opencode/= bun project, =extensions/emacs/= elisp scaffold,
 no-op plugin that compiles + tests cleanly.
 
-** 16.1: opencode TUI plugin (insight cards)
+** DONE 16.1: opencode TUI plugin (insight cards)
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :COMMIT: 3b66a9f
@@ -260,7 +274,8 @@ no-op plugin that compiles + tests cleanly.
 First real plugin: reads =.opencode/insight-cards.json=, registers
 =/insights= command, pops a toast on load.
 
-** 16.2: launch wires the plugin + AGENTS.md primer + slot overrides
+** DONE 16.2: launch wires the plugin + AGENTS.md primer + slot overrides
+CLOSED: [2026-04-30]
 :PROPERTIES:
 :STATUS: shipped
 :DATE: 2026-04-30
@@ -291,7 +306,7 @@ The big push that landed today (2026-04-30). What was added:
   routine firing 2026-05-13 to evaluate primer effectiveness and
   optionally open a tuning PR (hybrid: local audit, remote PR).
 
-* Active — Phase 16.3: Emacs companion                  :in_progress:
+* NEXT [#A] Active — Phase 16.3: Emacs companion        :in_progress:
 
 Emacs integration that lives next to opencode rather than as an
 alternative to it. Per [[file:../../extensions/emacs/README.md][=extensions/emacs/README.md:40=]].
@@ -308,7 +323,8 @@ alternative to it. Per [[file:../../extensions/emacs/README.md][=extensions/emac
 Scaffolded in [[file:../../extensions/emacs/org-llm.el][=extensions/emacs/org-llm.el=]] (Phase 16.0). Real
 hooks land here.
 
-* Shipped — Phase 17: live sidebar status panel              :shipped:
+* DONE Shipped — Phase 17: live sidebar status panel         :shipped:
+CLOSED: [2026-04-30]
 
 The next big feature push. The opencode TUI sidebar currently
 shows opencode's defaults (mcp / lsp / files / todo widgets);
@@ -354,7 +370,8 @@ the JSON file, so an external writer (auto-embedder cycle, a
 =doctor= run, etc.) can update the panel without coupling to
 opencode's runtime.
 
-* Shipped — Phase 17.1: LCARS panel + LLM proxy + auto-doctor :shipped:
+* DONE Shipped — Phase 17.1: LCARS panel + LLM proxy + auto-doctor :shipped:
+CLOSED: [2026-05-02]
 
 What started as "polish on the Phase 17 sidebar" became a much
 larger refactor that took the launch surface from "opencode with
@@ -467,7 +484,7 @@ post-processing, prefix caching of system prompts, cloud-failover
 on first-byte timeout. Each is a single new interceptor module
 slotting into the existing chain.
 
-* Planned — Phase 16.4+: extension polish                    :planned:
+* TODO [#A] Planned — Phase 16.4+: extension polish          :planned:
 
 ** Status panel slot
 
@@ -515,7 +532,7 @@ The bundled =chat_model= default is already =llama3.2= so fresh
 installs are fine; this is for users who manually overrode it
 without realising the tool-calling implications.
 
-* Planned — Phase 18: proxy expansion                        :planned:
+* TODO [#A] Planned — Phase 18: proxy expansion              :planned:
 
 Phase 17.1 landed [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] with a 13-interceptor
 chain between opencode and ollama. Each interceptor is a standalone
@@ -532,9 +549,11 @@ already runs these without ever calling the LLM. Closes the loop:
 writing a skill in org gives you a tab-completable opencode slash
 for free, with zero ollama wake-up.
 
-** Action bridge (file-based external dispatch)              :shipped:
+** DONE Action bridge (file-based external dispatch)         :shipped:
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
+:COMMIT: fe92e18
 :END:
 
 Shipped 2026-05-02 (commit =fe92e18=, extended in =-iter9=). A
@@ -608,7 +627,8 @@ Future actions (additive; tracked in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][
 - =scheduled-result= — remote agent (e.g. the 5/16 audit
   routine) writes when its work lands
 
-** 18.6: Cloud-first + synth tools + ctx-overflow retries     :shipped:
+** DONE 18.6: Cloud-first + synth tools + ctx-overflow retries :shipped:
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :END:
@@ -651,7 +671,8 @@ Net user-visible impact: a tools-using prompt on RAM-constrained
 hardware dropped from ~40s end-to-end (30s local stall + 10s
 cloud) to ~9.5s direct via cloud-first.
 
-** System-prompt prefix cache                                :shipped:
+** DONE System-prompt prefix cache                           :shipped:
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :END:
@@ -678,7 +699,8 @@ the request always wins. Knobs:
 
 6 new tests in [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]] (56 total).
 
-** FOSS-first segmentation                                   :shipped:
+** DONE FOSS-first segmentation                              :shipped:
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :END:
@@ -706,7 +728,8 @@ Behavior break: existing users will see the cloud_model
 recommendation default to open-weight after upgrade. Opting back
 in is one config flip.
 
-** Cloud failover on first-byte timeout                       :shipped:
+** DONE Cloud failover on first-byte timeout                 :shipped:
+CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
 :END:
@@ -724,7 +747,7 @@ the relaunch round-trip. Audit entries show
 =intercepted_by="cloud_failover"=. 9 new tests in
 [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]] (47 total).
 
-** Citation post-processor
+** TODO [#B] Citation post-processor
 
 After a forwarded =ask_notes= reply streams back, append a
 deterministic source list (=[#node-id]= markers + a footer block)
@@ -732,7 +755,7 @@ keyed on the nodes the proxy saw the LLM retrieve. Removes the
 LLM-cooperation dependency for grounded answers — citations are
 guaranteed even when the model "forgets" to cite.
 
-** Tool-result memoisation
+** TODO [#B] Tool-result memoisation
 
 Same MCP tool call (same args) within a configurable window →
 return the cached result without round-tripping. Saves the local
@@ -740,7 +763,7 @@ model from regenerating the same =search_notes= → =get_node= →
 read response chain when the user asks variations of the same
 question.
 
-** Skill-matching on free-form text
+** TODO [#C] Skill-matching on free-form text
 
 Extend =intercept_md_skills='s fuzzy matcher beyond the current
 hardcoded patterns ("save this thought" → capture). Build an
@@ -749,7 +772,7 @@ route free-form messages to the closest skill instead of the LLM
 when similarity exceeds a threshold. Falls back to the LLM
 cleanly when nothing matches.
 
-** Per-turn model routing
+** TODO [#B] Per-turn model routing
 
 Today =intercept_model_routing= runs at launch and sticks. Move
 the decision per-turn: cheap qwen for "what's 2+2", smart cloud
@@ -757,7 +780,7 @@ for code generation, local-only for vault queries. The proxy
 already sees every request body; the router just needs to rewrite
 =model:= before forwarding.
 
-** Auto-summarisation of long context
+** TODO [#C] Auto-summarisation of long context
 
 When the conversation history exceeds N turns, replace the
 earliest turns with one-line LLM-generated summaries before
@@ -765,7 +788,7 @@ forwarding. Local models re-prefill the entire history every turn;
 this keeps local-only sessions usable past 50+ turns without
 falling off a cliff.
 
-** Stream-time tool-call repair
+** TODO [#B] Stream-time tool-call repair
 
 =intercept_tool_call_repair= currently fixes the request body
 (LLM-emitted bad calls in completions). The streaming-response
@@ -773,14 +796,14 @@ counterpart: many local models emit malformed JSON tool calls
 mid-stream. Repair them on the fly so opencode's tool-use loop
 doesn't error out.
 
-** Provider-failure fallback
+** TODO [#B] Provider-failure fallback
 
 If upstream returns 5xx, connection-reset, or stalls past a
 configurable threshold, transparently retry against the cloud
 provider (or a different local model). Today the user sees
 opencode's raw error UI; the proxy can recover before it bubbles.
 
-* Punch list — beta → 1.0                                    :planned:
+* TODO [#A] Punch list — beta → 1.0                          :planned:
 
 Lifted from the original README roadmap stub:
 
@@ -794,28 +817,29 @@ Lifted from the original README roadmap stub:
   systemd for the auto-embedder daemon, smaller hardware budget
   for benchmarks.
 
-* Wishlist — no commitment                                   :wishlist:
+* TODO [#C] Wishlist — no commitment                         :wishlist:
 
-** Voice / TTS bridge
+** TODO [#C] Voice / TTS bridge
 A =org-llm voice= subcommand that pipes the chat surface through
 local TTS (e.g. Piper) for hands-free vault interaction.
 
-** Multi-vault federation
+** TODO [#C] Multi-vault federation
 The current data model assumes one vault per install. Federation
 (read across vaults; write to one) opens the door to shared
 team knowledge bases.
 
-** Browser extension
+** TODO [#C] Browser extension
 A capture surface for arbitrary web pages, bookmarklet-style.
 =capture --url= already exists in the CLI; this would be the
 zero-keypress front door.
 
-** Inline embeddings refresh
+** TODO [#C] Inline embeddings refresh
 Today =auto_embedder= runs as a daemon. Inline (per-edit) refresh
 would make new captures searchable instantly without waiting for
 the next cycle.
 
-** Co-edit org files (CLI / opencode)
+** TODO [#B] Co-edit org files (CLI / opencode)
+SCHEDULED: <2026-06-13 Sat>
 A surface where the user can ask =org-llm= to open a specific org
 note and *collaborate on edits*: insert/refactor headings, fold
 in captured content, restructure trees, rewrite a section to fit
@@ -834,8 +858,10 @@ Two open questions before this can ship:
    log entry so the trail of "who edited this paragraph and why"
    stays visible.
 
-** Preconfigured agents for org-llm
-Ship a curated set of named agents the user can pick from /agents
+** DONE Preconfigured agents for org-llm
+CLOSED: [2026-05-02]
+Bundled prompt registry shipped this session in
+[[file:../../org_llm/cli.py][=org_llm/cli.py=]]. Ship a curated set of named agents the user can pick from /agents
 in opencode (or invoke from the CLI), each with its own system
 prompt, allowed tool set, and model preference baked in. Reduces
 the cold-start friction of "what should I ask this assistant" and

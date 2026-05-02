@@ -390,7 +390,20 @@ MODEL_DEFAULTS = {
     # (was separate `subsystems` and `life-support` cards). The
     # legacy `model` / `subsystems` / `life-support` tokens still
     # work for users with custom configs.
-    "sidebar_sections":              "vault,active,health,archive,engage",
+    "sidebar_sections":              "vault,active,agent,health,archive,engage",
+    # Per-row visibility within the ACTIVE card. Comma-sep tokens
+    # from {palette, knobs, model, route, agent, failover}. The
+    # default shows everything; users can drop rows they don't
+    # care about (e.g. "model,route" only).
+    "sidebar_active_rows":           "agent,palette,knobs,model,route,failover",
+    # Number of theme-knob rows to surface in the ACTIVE card.
+    # 0 hides them entirely.
+    "sidebar_active_knob_rows":      "2",
+    # Per-section card titles. Default — uppercase canonical
+    # names (VAULT, ACTIVE, etc.). User can rename via `org-llm
+    # config sidebar_section_titles "vault=📚 LIBRARY,..."`. Empty
+    # value or missing entry → use the canonical title.
+    "sidebar_section_titles":        "",
     # Refresh tick in seconds. TS clamps to ≥5s — the file is on
     # local disk so polling is cheap, but more often than 5s is wasted.
     "sidebar_refresh_secs":          "15",
@@ -744,6 +757,16 @@ MODEL_DEFAULTS = {
     # (and your agent persona's tool-call discipline). Pairs with
     # the proxy_local_only and grant_auto_deny gates.
     "proxy_allow_shell_prefix":       "false",
+    # Auto-route bare user prompts to the best preconfigured
+    # agent (Phase 18.7). When true, the proxy runs the keyword
+    # router on the latest user message and prepends `@<agent>`
+    # if the score is at least `proxy_auto_route_min_score`.
+    # Off by default — explicit > implicit.
+    "proxy_auto_route_to_agent":      "false",
+    # Minimum router score required for auto-route to fire.
+    # 1 = any single trigger phrase match. Higher values =
+    # more conservative (only obvious cases auto-routed).
+    "proxy_auto_route_min_score":     "2",
 }
 
 
