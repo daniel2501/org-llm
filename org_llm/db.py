@@ -528,6 +528,23 @@ MODEL_DEFAULTS = {
     # but kept distinct so the kill-switch's "off" isn't confused
     # with a misconfigured threshold of 0.
     "proxy_first_byte_timeout_ms":    "8000",
+    # ── Cloud catalog auto-refresh (Phase 18) ──────────────────────────
+    # Every `org-llm launch` checks for new cloud models in the
+    # background. Without this the bundled catalog drifts behind
+    # OpenRouter's live roster — by the time a new flagship model
+    # ships (Kimi K3, Claude 5, …), the user has no idea it exists
+    # because their catalog was frozen at install time. The refresh
+    # is fire-and-forget on a daemon thread; results land in
+    # ~/.local/share/org-llm/catalog-last-refresh.json + the
+    # captain's log. Network failures never surface to the user.
+    # Set false for offline / pinned-catalog workflows.
+    "cloud_catalog_auto_refresh_enabled":      "true",
+    # TTL between background refreshes (seconds). Default 3600 = 1h.
+    # Rapid relaunches inside this window no-op so OpenRouter doesn't
+    # see a flood of identical /api/v1/models polls. The user can
+    # always force a refresh with `org-llm cloud --refresh-catalog`,
+    # which bypasses the TTL.
+    "cloud_catalog_auto_refresh_interval_secs": "3600",
     # Toast pinning (Phase 17.1s). When true, every toast our
     # plugin emits uses a long duration (1 hour) so messages
     # stay on screen until the user has time to read them. False

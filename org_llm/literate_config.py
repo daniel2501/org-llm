@@ -210,6 +210,18 @@ KEY_DESCRIPTIONS = {
         "master switch off). After the first byte arrives the socket "
         "timeout is extended to 300s so legitimate slow streaming "
         "runs uninterrupted. Tune against the Phase 17 audit's p95.",
+    "cloud_catalog_auto_refresh_enabled":
+        "Background catalog refresh on every launch (Phase 18). True "
+        "(default) spawns a daemon thread that polls OpenRouter for "
+        "new cloud models and merges them into the user cache; the "
+        "user discovers new flagship models without running "
+        "`cloud --refresh-catalog` manually. False = catalog is "
+        "frozen at whatever the bundled JSON ships with.",
+    "cloud_catalog_auto_refresh_interval_secs":
+        "TTL between background catalog refreshes. Rapid relaunches "
+        "inside this window no-op so we don't hammer OpenRouter. "
+        "Default 3600 = once an hour. `cloud --refresh-catalog` "
+        "always bypasses the TTL.",
 }
 
 

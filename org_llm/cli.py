@@ -13979,6 +13979,20 @@ def launch(
                   f"Choose one of: {', '.join(OPENCODE_WORKSPACES)}")
         raise typer.Exit(1)
 
+    # ── Background: refresh cloud catalog ────────────────────────────────────
+    # Fire-and-forget. Spawns a daemon thread that polls OpenRouter
+    # for new models (Kimi, the next flagship, etc.) and merges them
+    # into the user cache, throttled to once per
+    # `cloud_catalog_auto_refresh_interval_secs` (default 1h). Never
+    # blocks launch; result lands in ~/.local/share/org-llm/
+    # catalog-last-refresh.json + the captain's log.
+    if not dry_run:
+        try:
+            from . import cloud as _cloud_mod
+            _cloud_mod.auto_refresh_catalog_async()
+        except Exception:
+            pass
+
     # ── Locate or install opencode ────────────────────────────────────────────
     oc_path = _opencode_bin()
     if not dry_run and oc_path is None:

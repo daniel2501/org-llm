@@ -392,6 +392,158 @@ def catalog_is_stale() -> bool:
     return age > int(CATALOG_META.get("stale_after_days", 90))
 
 
+# ── Auto-refresh on launch ──────────────────────────────────────────────
+#
+# Goal: every `org-llm launch` checks for new cloud models without
+# blocking the user's session. The bundled catalog ships with a
+# version that reflects what existed on the day of the package
+# release; OpenRouter adds models monthly. Without this, a user
+# discovering Kimi K2 (or whatever the next cool model is) would
+# need to know to run `cloud --refresh-catalog` themselves.
+#
+# Design choices:
+#   • Background thread, fire-and-forget. Network failures never
+#     surface to the user — they'll see them in the audit log if
+#     they care to look.
+#   • Sentinel file dedupes rapid relaunches (default 1h TTL). The
+#     sentinel records UTC timestamp + model count delta + status
+#     so /sysrecent and `cloud --status` can show the last result.
+#   • Config-gated. Set `cloud_catalog_auto_refresh_enabled=false`
+#     for offline / restricted / "I'm pinning a known catalog"
+#     setups.
+
+def _auto_refresh_sentinel_path() -> _Path:
+    import os as _os
+    base = _Path(_os.environ.get("XDG_DATA_HOME")
+                  or _os.path.expanduser("~/.local/share"))
+    return base / "org-llm" / "catalog-last-refresh.json"
+
+
+def _read_auto_refresh_sentinel() -> dict | None:
+    return _read_json_safe(_auto_refresh_sentinel_path())
+
+
+def _write_auto_refresh_sentinel(payload: dict) -> None:
+    p = _auto_refresh_sentinel_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(_json.dumps(payload, indent=2))
+    except Exception:
+        # Sentinel writes are best-effort. A failure here just means
+        # the next launch will try again — not a regression.
+        pass
+
+
+def _auto_refresh_settings() -> tuple[bool, int]:
+    """Read (enabled, min_interval_secs) from config. Defaults match
+    db.py MODEL_DEFAULTS (true / 3600). Lazy import to avoid pulling
+    SQLAlchemy at module-import time."""
+    try:
+        from .db import DB_PATH, Config, make_engine
+        from sqlalchemy.orm import Session
+        import os as _os
+        path = _Path(_os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if not path.exists():
+            return True, 3600
+        engine = make_engine(path)
+        with Session(engine) as s:
+            enabled_row  = s.get(Config, "cloud_catalog_auto_refresh_enabled")
+            interval_row = s.get(Config, "cloud_catalog_auto_refresh_interval_secs")
+        enabled = (enabled_row.value if enabled_row else "true").strip().lower() != "false"
+        try:
+            interval = int(interval_row.value) if interval_row else 3600
+        except (ValueError, TypeError):
+            interval = 3600
+        return enabled, max(0, interval)
+    except Exception:
+        return True, 3600
+
+
+def auto_refresh_catalog_async(*, force: bool = False) -> str:
+    """Kick off a background refresh of the cloud catalog if the TTL
+    has elapsed since the last successful run. Returns one of
+    "started" / "skipped:fresh" / "skipped:disabled" / "skipped:error"
+    so callers can log a one-line breadcrumb on launch.
+
+    Never raises; never blocks. Network-touching work happens entirely
+    inside the spawned daemon thread, which itself swallows errors and
+    only updates the sentinel.
+
+    Pass `force=True` to bypass the TTL (used by callers that want a
+    fresh fetch RIGHT NOW — e.g. `cloud --refresh-catalog` itself can
+    call this for the no-op-when-busy guard).
+    """
+    enabled, interval = _auto_refresh_settings()
+    if not enabled:
+        return "skipped:disabled"
+    if not force:
+        sentinel = _read_auto_refresh_sentinel() or {}
+        last_ts = sentinel.get("ts")
+        if isinstance(last_ts, (int, float)):
+            import time as _time
+            if (_time.time() - float(last_ts)) < interval:
+                return "skipped:fresh"
+
+    import threading as _threading
+
+    def _worker() -> None:
+        import time as _time
+        result: dict = {
+            "ts":           int(_time.time()),
+            "status":       "ok",
+            "added":        0,
+            "changed":      0,
+            "carried_over": 0,
+            "purged_stale": 0,
+            "total_rows":   0,
+            "added_sample": [],
+            "error":        "",
+        }
+        try:
+            new_rows, msg = refresh_from_openrouter()
+            if new_rows:
+                merged, summary = merge_refresh(new_rows)
+                providers_meta  = _bundled_provider_meta()
+                write_user_catalog(merged, providers_meta=providers_meta)
+                reload_catalog()
+                # `summary["added"]` and friends are lists of slugs;
+                # we record counts to keep the sentinel + log compact.
+                # The full slug lists are recoverable from a manual
+                # `cloud --refresh-catalog` run if curiosity strikes.
+                added_v   = summary.get("added") or []
+                changed_v = summary.get("changed") or []
+                result["added"]   = (len(added_v)   if isinstance(added_v,   list) else int(added_v   or 0))
+                result["changed"] = (len(changed_v) if isinstance(changed_v, list) else int(changed_v or 0))
+                result["carried_over"] = int(summary.get("carried_over") or 0)
+                result["purged_stale"] = int(summary.get("purged_stale") or 0)
+                result["total_rows"]   = int(summary.get("total")        or len(merged))
+                # Keep the first 5 added slugs for the breadcrumb so a
+                # quick glance at the sentinel reveals what landed.
+                if isinstance(added_v, list):
+                    result["added_sample"] = added_v[:5]
+            else:
+                result["status"] = "noop"
+                result["error"]  = msg or ""
+        except Exception as e:
+            result["status"] = "error"
+            result["error"]  = f"{type(e).__name__}: {e}"
+        _write_auto_refresh_sentinel(result)
+        try:
+            from .logbook import write_event as _we
+            _we("cloud", "catalog-auto-refresh",
+                args=f"interval={interval}s",
+                response=_json.dumps({k: v for k, v in result.items()
+                                        if k != "ts"}, sort_keys=True),
+                outcome=("ok" if result["status"] in ("ok", "noop")
+                         else "error"))
+        except Exception:
+            pass
+
+    _threading.Thread(target=_worker, daemon=True,
+                        name="org-llm-catalog-auto-refresh").start()
+    return "started"
+
+
 # ── Live refresh from provider APIs ──────────────────────────────────────────
 
 # Slugs containing any of these markers are non-chat-compatible model
