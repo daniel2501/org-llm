@@ -5474,6 +5474,195 @@ def performance(
     make_it_so()
 
 
+# ── Screenshot tooling ──────────────────────────────────────────────
+#
+# `org-llm screenshot` captures the current screen / window / Emacs
+# frame via a configurable backend so the user can grab opencode TUI
+# screenshots for docs/img/ without leaving Doom (or wherever they
+# work). Read-only on the proxy/plugin side; this is a pure CLI
+# helper that shells out to the chosen tool.
+#
+# Config knobs (db.MODEL_DEFAULTS):
+#   screenshot_tool   — emacs | grim | maim | scrot | flameshot | custom
+#   screenshot_cmd    — command template when tool=custom; {path} is
+#                       substituted with the output file path
+#   screenshot_dir    — destination directory; defaults to docs/img/
+#                       under the org-llm repo root, falling back to
+#                       ~/org/.opencode/ if not in a checkout
+#
+# Defaults to `emacs` because the dev environment is Doom + vterm —
+# emacsclient -e is the only path that can see what's inside an
+# Emacs vterm buffer (other tools capture the host terminal which
+# may be a Doom frame or a separate terminal entirely).
+
+_SCREENSHOT_BACKENDS = {
+    # Built-in Emacs: x-export-frames, captures the current frame
+    # (or specific window if the doom helper is selected).
+    "emacs":     'emacsclient -e "(org-llm-opencode-screenshot)"',
+    # Wayland region grab; user clicks-and-drags.
+    "grim":      'grim -g "$(slurp)" {path}',
+    # X11 region grab.
+    "maim":      'maim -s {path}',
+    # X11 full-screen.
+    "scrot":     'scrot {path}',
+    # Cross-platform GUI tool with annotation.
+    "flameshot": 'flameshot gui --raw > {path}',
+}
+
+
+def _resolve_screenshot_dir(session) -> Path:
+    """Pick the screenshot destination directory. Prefers the user-
+    configured `screenshot_dir`, falls back to `<repo>/docs/img/`
+    when running from a checkout, then to `~/org/.opencode/`."""
+    explicit = (_cfg(session, "screenshot_dir") or "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    repo_root = Path(__file__).resolve().parent.parent
+    docs_img = repo_root / "docs" / "img"
+    if docs_img.is_dir():
+        return docs_img
+    return Path("~/org/.opencode").expanduser()
+
+
+@app.command(rich_help_panel="Maintenance")
+def screenshot(
+    tool:   Annotated[str,  typer.Option("--tool", "-t",
+            help=f"Override screenshot_tool: one of "
+                 f"{', '.join(sorted(_SCREENSHOT_BACKENDS))}, or 'custom'")] = "",
+    cmd:    Annotated[str,  typer.Option("--cmd",
+            help="Override screenshot_cmd template (used when --tool=custom). "
+                 "Use '{path}' as the output-file placeholder")] = "",
+    label:  Annotated[str,  typer.Option("--label", "-l",
+            help="Filename hint, kebab-cased (e.g. 'opencode-active-card')")] = "screenshot",
+    out:    Annotated[str,  typer.Option("--out", "-o",
+            help="Override output path entirely. Skips screenshot_dir/label.")] = "",
+    list_:  Annotated[bool, typer.Option("--list",
+            help="Show available backends + which are installed")] = False,
+):
+    """Capture a screenshot via the configured backend.
+
+    Default tool is `emacs` (uses `emacsclient -e
+    (org-llm-opencode-screenshot)` — see `doom/org-llm.el`). Other
+    backends shell out to `grim`/`maim`/`scrot`/`flameshot`. Set
+    `--tool custom --cmd '<your-tool> {path}'` for anything else.
+
+    Output goes to `screenshot_dir` (default: docs/img/ in the
+    repo, or ~/org/.opencode/) unless `--out PATH` overrides it.
+    The Emacs backend is special: it picks its own filename inside
+    the configured directory so multiple captures don't collide.
+    """
+    import shutil as _sh
+    if list_:
+        on_screen("[lcars1]Screenshot backends[/lcars1]")
+        for name, template in sorted(_SCREENSHOT_BACKENDS.items()):
+            head = template.split()[0]
+            installed = (name == "emacs"
+                         and _sh.which("emacsclient")) or _sh.which(head)
+            mark = "[green]✓[/green]" if installed else "[dim]✗[/dim]"
+            on_screen(f"  {mark}  {name:12s}  {template}")
+        on_screen("")
+        on_screen("[dim]Pick one:[/dim] "
+                  "[bold]org-llm config screenshot_tool <name>[/bold]")
+        on_screen("[dim]Custom:[/dim]   "
+                  "[bold]org-llm config screenshot_tool custom[/bold] "
+                  "+ [bold]screenshot_cmd '<cmd> {path}'[/bold]")
+        return
+
+    engine = _engine()
+    with get_session(engine) as session:
+        chosen = (tool or _cfg(session, "screenshot_tool") or "emacs").strip()
+        if chosen == "custom":
+            template = (cmd or _cfg(session, "screenshot_cmd") or "").strip()
+            if not template:
+                red_alert("--tool custom needs --cmd or "
+                          "screenshot_cmd config; e.g. "
+                          "'flameshot gui --raw > {path}'")
+                raise typer.Exit(1)
+        else:
+            template = _SCREENSHOT_BACKENDS.get(chosen)
+            if template is None:
+                red_alert(f"Unknown screenshot tool {chosen!r}. "
+                          f"Run [bold]org-llm screenshot --list[/bold] "
+                          f"to see options.")
+                raise typer.Exit(1)
+        ss_dir = _resolve_screenshot_dir(session)
+
+    # Path resolution. The Emacs backend writes its OWN file (the
+    # elisp picks a timestamped name in the buffer's directory or
+    # docs/img/) so we don't pre-compute a path for it — we just
+    # parse the path the elisp echoes back.
+    ts = time.strftime("%Y%m%dT%H%M%S")
+    safe_label = "-".join(label.lower().split()) or "screenshot"
+    target_path = (Path(out).expanduser() if out else
+                    ss_dir / f"{safe_label}-{ts}.svg"
+                    if chosen == "emacs"
+                    else ss_dir / f"{safe_label}-{ts}.png")
+    ss_dir.mkdir(parents=True, exist_ok=True)
+
+    # Emacs backend uses the doom helper, which itself writes the
+    # SVG and prints the path. We just spawn emacsclient and surface
+    # the message.
+    if chosen == "emacs":
+        if not _sh.which("emacsclient"):
+            red_alert("emacsclient not on PATH. Either start "
+                      "an Emacs server (M-x server-start in Doom) "
+                      "or pick a different tool: "
+                      "[bold]org-llm screenshot --list[/bold]")
+            raise typer.Exit(1)
+        # Pass directory + label hint so the elisp can name the
+        # file consistently. The doom helper supports an optional
+        # &rest path-hint; if the running version doesn't, the
+        # fallback name still lands inside docs/img/.
+        elisp = (f'(org-llm-opencode-screenshot nil '
+                 f'"{ss_dir}" "{safe_label}-{ts}")')
+        try:
+            import subprocess
+            r = subprocess.run(
+                ["emacsclient", "-e", elisp],
+                capture_output=True, text=True, timeout=10,
+            )
+            out_text = (r.stdout or "").strip()
+            if r.returncode != 0:
+                red_alert(f"emacsclient returned {r.returncode}: "
+                          f"{(r.stderr or out_text).strip()}")
+                raise typer.Exit(1)
+            on_screen(f"[green]✓[/green] screenshot via emacs: "
+                      f"[bold]{out_text}[/bold]")
+            return
+        except subprocess.TimeoutExpired:
+            red_alert("emacsclient timed out. Is Emacs running with "
+                      "(server-start)?")
+            raise typer.Exit(1)
+
+    # Non-Emacs backends: substitute {path} and exec.
+    if "{path}" not in template:
+        red_alert(f"screenshot_cmd template missing '{{path}}': {template!r}")
+        raise typer.Exit(1)
+    head = template.split()[0]
+    if not _sh.which(head):
+        red_alert(f"Backend {chosen!r} needs '{head}' on PATH "
+                  f"(install via your distro / Guix). "
+                  f"Or pick another: [bold]org-llm screenshot --list[/bold]")
+        raise typer.Exit(1)
+    expanded = template.replace("{path}", str(target_path))
+    try:
+        import subprocess
+        r = subprocess.run(expanded, shell=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        red_alert(f"{chosen} timed out after 120s.")
+        raise typer.Exit(1)
+    if r.returncode != 0:
+        red_alert(f"{chosen} returned {r.returncode}.")
+        raise typer.Exit(1)
+    if target_path.exists() and target_path.stat().st_size > 0:
+        on_screen(f"[green]✓[/green] screenshot via {chosen}: "
+                  f"[bold]{target_path}[/bold]")
+    else:
+        on_screen(f"[yellow]⚠[/yellow] {chosen} returned 0 but "
+                  f"{target_path} is missing — backend may have "
+                  f"been cancelled.")
+
+
 def _config_check_run() -> None:
     """Run a general configuration sanity check.
 

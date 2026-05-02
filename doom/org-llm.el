@@ -337,6 +337,78 @@ its own shutdown. Quit signals must reach the process directly."
       (vterm-send-string "\C-c"))))
 
 
+;;;###autoload
+(defun org-llm-opencode-screenshot (&optional whole-frame dir label)
+  "Capture the opencode vterm window as an SVG screenshot.
+
+Saves to docs/img/opencode-<slug>-<timestamp>.svg under the
+org-llm repo (located via `org-llm-binary' / `org-llm path').
+With prefix arg WHOLE-FRAME, captures the whole Emacs frame
+instead of just the opencode window — useful when the LCARS
+sidebar plus chat plus layout context all matter for the README.
+
+DIR and LABEL are optional hints from the CLI shim
+(`org-llm screenshot --label foo --out /…`) — when provided, the
+file lands at <DIR>/<LABEL>.svg and DIR is created if missing.
+Without them, the function picks docs/img/ + a timestamped name.
+
+Uses Emacs 30's built-in `x-export-frames' (no external tools).
+Idea: one-keystroke screen capture from inside Doom, since
+opentui's SolidJS rendering can't be Rich-captured by
+scripts/regen_screenshots.py."
+  (interactive "P")
+  (unless (fboundp 'x-export-frames)
+    (user-error "x-export-frames missing — Emacs %s lacks SVG export"
+                emacs-version))
+  (let* ((buf (org-llm--opencode-vterm-buffer))
+         (target-window
+          (if (or whole-frame (not buf))
+              nil      ; nil = whole frame
+            (or (get-buffer-window buf t)
+                (user-error
+                 "Opencode buffer %S exists but isn't visible — \
+make it visible first or pass C-u to capture the whole frame"
+                 (buffer-name buf)))))
+         ;; Resolve repo root: ask the CLI where it's installed.
+         (repo-root
+          (string-trim
+           (shell-command-to-string
+            (format "%s path 2>/dev/null"
+                    (shell-quote-argument org-llm-binary)))))
+         (img-dir (cond
+                   ((and dir (not (string-empty-p dir)))
+                    (expand-file-name dir))
+                   ((file-directory-p repo-root)
+                    (expand-file-name "docs/img" repo-root))
+                   (t (expand-file-name "~/org/.opencode"))))
+         (slug (if target-window
+                    (downcase
+                     (replace-regexp-in-string
+                      "[^a-z0-9]+" "-"
+                      (or (buffer-name buf) "opencode")))
+                  "frame"))
+         (ts   (format-time-string "%Y%m%dT%H%M%S"))
+         (file-name (cond
+                     ((and label (not (string-empty-p label)))
+                      (format "%s.svg" label))
+                     (t
+                      (format "opencode-%s-%s.svg" slug ts))))
+         (path (expand-file-name file-name img-dir)))
+    (unless (file-directory-p img-dir)
+      (make-directory img-dir t))
+    ;; If we're capturing a specific window, focus it first so its
+    ;; contents render at full extent on the export.
+    (when target-window
+      (select-window target-window))
+    (let ((data (x-export-frames nil 'svg)))
+      (with-temp-file path
+        (set-buffer-file-coding-system 'utf-8)
+        (insert data)))
+    (message "opencode screenshot → %s" path)
+    (kill-new path)
+    path))
+
+
 ;;; ── interactive commands ─────────────────────────────────────────────────────
 
 ;;;###autoload
@@ -995,6 +1067,7 @@ current selection."
         :desc "Export chat → markdown"   "x" #'org-llm-sys-export
         :desc "Export chat + sidebar"    "X" #'org-llm-sys-export-full
         :desc "Quit opencode (Ctrl-c x2)" "q" #'org-llm-opencode-quit
+        :desc "Screenshot opencode (SVG)" "S" #'org-llm-opencode-screenshot
 
         ;; Phase 18.4-iter9: action-bridge extensions. Same JSON
         ;; channel as scroll/slash; `p`/`P` for prompt fill/submit,

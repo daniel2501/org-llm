@@ -708,6 +708,22 @@ MODEL_DEFAULTS = {
     # surprising the first time it happens — opt out once you've
     # seen it work and want the fully-autonomous behavior.
     "sidebar_slow_llm_confirm":       "true",
+    # Screenshot backend for `org-llm screenshot` and the
+    # /sysscreenshot slash. `emacs` is the default because the
+    # development environment is Doom + vterm (only emacsclient
+    # can see inside an Emacs vterm buffer). Other options:
+    # `grim` (Wayland region), `maim` (X11 region), `scrot`
+    # (X11 full), `flameshot` (cross-platform GUI), or `custom`
+    # (uses screenshot_cmd template). `org-llm screenshot --list`
+    # shows which backends are installed.
+    "screenshot_tool":                "emacs",
+    # Custom command template when screenshot_tool=custom.
+    # `{path}` is substituted with the target file path. Empty
+    # by default — only consulted when tool=custom.
+    "screenshot_cmd":                 "",
+    # Output directory. Empty = auto: docs/img/ when running from
+    # an org-llm checkout, ~/org/.opencode/ otherwise.
+    "screenshot_dir":                 "",
 }
 
 

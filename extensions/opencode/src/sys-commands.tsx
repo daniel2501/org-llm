@@ -1066,6 +1066,12 @@ function matchSysMessage(text: string): { args: string[]; label: string } | null
       return { args: ["discover"], label: "Recent activity" };
     case "/sysreclaim":
       return { args: ["models", "--reclaim"], label: "Reclaim — free RAM" };
+    case "/sysscreenshot":
+      // Capture via the configured screenshot_tool (default emacs).
+      // Output path lands wherever the backend / config decides;
+      // the CLI prints the final path which we inject to chat.
+      return { args: ["screenshot", "--label", "opencode"],
+                label: "Screenshot — opencode TUI" };
     // /syscloud is intentionally NOT in this map — it's not a
     // run-and-inject CLI subcommand, it's a confirm-trigger for
     // the slow-LLM auto-doctor flow. The interceptor handles it
@@ -1340,6 +1346,20 @@ export function registerSysCommands(api: any): void {
         { variant: "info",
           message: "Stops Ollama models not assigned to a role. TAB or Enter to confirm." },
         () => void runAndInject(api, ["models", "--reclaim"], "Reclaim — free RAM")),
+    },
+    {
+      title: "Screenshot — capture opencode TUI as SVG",
+      value: "org-llm.sysscreenshot",
+      description: "Runs `org-llm screenshot --label opencode` "
+        + "(default emacs backend; configure via screenshot_tool).",
+      category: "org-llm",
+      slash: { name: "sysscreenshot" },
+      onSelect: () => {
+        clearPrompt();
+        void runAndInject(api,
+          ["screenshot", "--label", "opencode"],
+          "Screenshot — opencode TUI");
+      },
     },
     // Phase 18.4-iter4: opencode's slash registry rejects hyphens
     // ("Unknown command: /sysscroll-up" when injected via Doom's
