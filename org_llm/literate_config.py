@@ -247,6 +247,21 @@ KEY_DESCRIPTIONS = {
         "useful while card generators still surface captain's-log "
         "self-noise on long-running vaults. True restores the "
         "Phase 16.1 'cards APPEAR ON OPEN' behaviour.",
+    "insights_skip_tags":
+        "CSV of tag names (additive to the org-llm baseline) the "
+        "insight generators should treat as metadata, not topics. "
+        "Excluded from new_captures clustering + topic_cluster "
+        "counts. e.g. `inbox,wip,daily`. Empty default.",
+    "insights_skip_file_patterns":
+        "CSV of filename substrings (additive to baseline) the "
+        "insight generators should skip entirely. Default baseline "
+        "covers captain's-log, llm-history, config tangles, "
+        "insights-cache. Add per-vault patterns here.",
+    "insights_disabled_generators":
+        "CSV of generator NAMES to disable. Names: "
+        "new_captures, stale_candidates, topic_cluster, "
+        "orphan_growth, doctor_warnings, sensor_attention. Empty "
+        "default = all enabled.",
 }
 
 

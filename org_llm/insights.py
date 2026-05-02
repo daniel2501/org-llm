@@ -57,6 +57,122 @@ class InsightCard:
 
 # ── card generators ────────────────────────────────────────────────────────
 
+# Phase 18.5: generators consult these allowlists to skip org-llm's
+# own self-noise. Without this, vaults with the captain's-log enabled
+# (which most of ours are) drown the dialog in artifacts of the event
+# log itself: "16693 new headings in captains-log-…org", "Emerging
+# topic :org-llm: 31710 recent / 48155 total", etc.
+#
+# Both filters are layered: a hardcoded baseline of org-llm-specific
+# noise (captain's-log, :org-llm: tag, etc.) PLUS user-extendable
+# config knobs `insights_skip_tags` and `insights_skip_file_patterns`
+# (CSV, additive to the baseline). Users can also disable whole
+# generator functions via `insights_disabled_generators`.
+#
+# Tag comparison is lower-cased and strips colon delimiters so all
+# of `org-llm`, `:org-llm:`, `ORG-LLM` match. File patterns are
+# case-folded substrings — any filename containing one is skipped.
+# Captain's-log rotates with timestamp suffixes
+# (`captains-log-20260502T000750.org`), so the pattern is the
+# unsuffixed prefix.
+_BASELINE_SYSTEM_TAGS = frozenset({
+    "org-llm", "noexport", "llm-history", "agenda", "todo",
+    "attach", "archive", "drawer",
+})
+
+_BASELINE_SYSTEM_FILE_PATTERNS: tuple[str, ...] = (
+    "captains-log", "org-llm-log", "org-llm-config",
+    "org-llm-context", "org-llm-self-mod", "llm-history",
+    "insights-cache",
+)
+
+# Per-process cache so we don't read Config rows once per node row.
+# `_clear_filter_cache()` is exposed for tests / reload-after-config-change.
+_FILTER_CACHE: dict = {"loaded": False, "tags": None, "files": None,
+                          "disabled": None}
+
+
+def _clear_filter_cache() -> None:
+    _FILTER_CACHE["loaded"]   = False
+    _FILTER_CACHE["tags"]     = None
+    _FILTER_CACHE["files"]    = None
+    _FILTER_CACHE["disabled"] = None
+
+
+def _csv(s: str | None) -> list[str]:
+    return [x.strip() for x in (s or "").split(",") if x.strip()]
+
+
+def _load_filters() -> tuple[frozenset, tuple, frozenset]:
+    """Lazily merge baseline + user-configured filter lists. Returns
+    (system_tags, system_file_patterns, disabled_generators).
+
+    Best-effort: any DB issue falls back to the baseline-only filters
+    so a corrupt config never silences the entire insights surface."""
+    if _FILTER_CACHE["loaded"]:
+        return (_FILTER_CACHE["tags"],
+                _FILTER_CACHE["files"],
+                _FILTER_CACHE["disabled"])
+    extra_tags: list[str]    = []
+    extra_files: list[str]   = []
+    disabled: list[str]      = []
+    try:
+        from .db import DB_PATH, Config, make_engine
+        from sqlalchemy.orm import Session
+        import os as _os
+        from pathlib import Path as _Path
+        path = _Path(_os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if path.exists():
+            engine = make_engine(path)
+            with Session(engine) as s:
+                tags_row = s.get(Config, "insights_skip_tags")
+                if tags_row and tags_row.value:
+                    extra_tags = _csv(tags_row.value)
+                files_row = s.get(Config, "insights_skip_file_patterns")
+                if files_row and files_row.value:
+                    extra_files = _csv(files_row.value)
+                disabled_row = s.get(Config, "insights_disabled_generators")
+                if disabled_row and disabled_row.value:
+                    disabled = _csv(disabled_row.value)
+    except Exception:
+        pass
+    tags  = frozenset(_BASELINE_SYSTEM_TAGS
+                       | {t.lower().strip(":").strip() for t in extra_tags})
+    files = (_BASELINE_SYSTEM_FILE_PATTERNS
+              + tuple(p.lower() for p in extra_files))
+    disabled_set = frozenset(d.strip() for d in disabled)
+    _FILTER_CACHE.update(loaded=True, tags=tags, files=files,
+                            disabled=disabled_set)
+    return tags, files, disabled_set
+
+
+def _is_system_tag(tag: str) -> bool:
+    tags, _, _ = _load_filters()
+    return tag.lower().strip(":").strip() in tags
+
+
+def _is_system_file(path: str | None) -> bool:
+    if not path:
+        return False
+    _, files, _ = _load_filters()
+    name = path.rsplit("/", 1)[-1].lower()
+    return any(p in name for p in files)
+
+
+def _generator_disabled(name: str) -> bool:
+    _, _, disabled = _load_filters()
+    return name in disabled
+
+
+def _user_tags(tag_str: str | None) -> list[str]:
+    """Split a node's tag string and drop system tags. Used wherever
+    a generator clusters or counts by tag — without this, the loudest
+    cluster is always the metadata tag, not the user's actual topic."""
+    if not tag_str:
+        return []
+    return [t for t in tag_str.split() if t and not _is_system_tag(t)]
+
+
 def _gen_new_captures(session: Session, since_ts: int) -> list[InsightCard]:
     """Notes captured since `since_ts`, clustered by tag.
 
@@ -64,22 +180,28 @@ def _gen_new_captures(session: Session, since_ts: int) -> list[InsightCard]:
     Output is a single card unless captures span multiple distinct
     tag-clusters, in which case one card per cluster (capped at 2).
     """
+    # Cap higher than we need so post-filter still leaves enough to
+    # form clusters when most rows are captain's-log entries.
     rows = session.execute(text("""
         SELECT n.title, n.tags, f.path, n.mtime
         FROM nodes n
         JOIN files f ON f.id = n.file_id
         WHERE n.mtime >= :since
         ORDER BY n.mtime DESC
-        LIMIT 50
+        LIMIT 500
     """), {"since": float(since_ts)}).fetchall()
+    # Strip system files BEFORE clustering — the captain's-log file's
+    # row count would otherwise dominate every "new captures" cluster.
+    rows = [r for r in rows if not _is_system_file(r.path)][:50]
     if not rows:
         return []
 
-    # Cluster by primary tag (first tag in the space-separated list)
+    # Cluster by primary USER tag (drops :org-llm:, :noexport:, etc.
+    # so the loud system tags don't always win the cluster).
     by_tag: dict[str, list] = {}
     untagged: list = []
     for r in rows:
-        tags = (r.tags or "").split()
+        tags = _user_tags(r.tags)
         if tags:
             by_tag.setdefault(tags[0], []).append(r)
         else:
@@ -166,8 +288,9 @@ def _gen_topic_cluster(session: Session, since_ts: int) -> list[InsightCard]:
     is "ongoing" (less interesting). Surfaces only the emerging ones.
     """
     rows = session.execute(text("""
-        SELECT n.tags, n.mtime, n.title
+        SELECT n.tags, n.mtime, n.title, f.path
         FROM nodes n
+        JOIN files f ON f.id = n.file_id
         WHERE n.tags IS NOT NULL AND n.tags != ''
     """)).fetchall()
     if not rows:
@@ -176,7 +299,12 @@ def _gen_topic_cluster(session: Session, since_ts: int) -> list[InsightCard]:
     all_count: dict[str, int] = {}
     recent_count: dict[str, int] = {}
     for r in rows:
-        for tag in (r.tags or "").split():
+        # Skip system files — captain's-log entries each carry
+        # :org-llm: + :captains-log: tags and would otherwise saturate
+        # every "emerging topic" count.
+        if _is_system_file(r.path):
+            continue
+        for tag in _user_tags(r.tags):
             all_count[tag] = all_count.get(tag, 0) + 1
             if r.mtime and r.mtime >= since_ts:
                 recent_count[tag] = recent_count.get(tag, 0) + 1
@@ -221,11 +349,14 @@ def _gen_orphan_growth(session: Session, since_ts: int) -> list[InsightCard]:
         GROUP BY f.path
         HAVING new_count >= 3
         ORDER BY new_count DESC
-        LIMIT 3
+        LIMIT 20
     """), {"since": float(since_ts)}).fetchall()
+    # Skip system files BEFORE picking the worst offender — captain's-
+    # log files have thousands of headings without [[id:]] links by
+    # design, and would always crowd out any real user file.
+    rows = [r for r in rows if not _is_system_file(r.path)]
     if not rows:
         return []
-    # Take the worst offender
     top = rows[0]
     from pathlib import Path as _P
     fname = _P(top.path).name
@@ -630,15 +761,27 @@ def gather_insights(
     if since_ts is None:
         since_ts = int(time.time()) - 24 * 3600
 
+    # Reset filter cache once per gather call so a freshly-toggled
+    # config knob (e.g. user just ran `org-llm config insights_skip_tags ...`)
+    # takes effect on the next launch's pre-mount without restart.
+    _clear_filter_cache()
+
     raw: list[InsightCard] = []
     # Each generator is best-effort — a failing query (missing
     # table, schema drift) shouldn't take the whole pre-mount down.
-    for gen in (_gen_new_captures,
-                  _gen_stale_candidates,
-                  _gen_topic_cluster,
-                  _gen_orphan_growth,
-                  _gen_doctor_warnings,
-                  _gen_sensor_attention):
+    # Generator name → callable; the disabled-generators config knob
+    # consults the name (no underscore prefix) to skip wholesale.
+    _GENERATORS = (
+        ("new_captures",     _gen_new_captures),
+        ("stale_candidates", _gen_stale_candidates),
+        ("topic_cluster",    _gen_topic_cluster),
+        ("orphan_growth",    _gen_orphan_growth),
+        ("doctor_warnings",  _gen_doctor_warnings),
+        ("sensor_attention", _gen_sensor_attention),
+    )
+    for name, gen in _GENERATORS:
+        if _generator_disabled(name):
+            continue
         try:
             raw.extend(gen(session, since_ts))
         except Exception:

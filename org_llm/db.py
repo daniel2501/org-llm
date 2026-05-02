@@ -589,6 +589,33 @@ MODEL_DEFAULTS = {
     # no modal. Set true to restore the Phase 16.1 behaviour where
     # the dialog opens automatically.
     "insights_auto_open":             "false",
+    # ── Insight-cards filtering (Phase 18.5) ───────────────────────────
+    # Generators auto-skip a hardcoded baseline of org-llm-specific
+    # noise (`:org-llm:` tag, captain's-log files, etc.) so the
+    # dialog isn't drowned in self-references. These knobs are
+    # ADDITIVE: anything listed here is added to the baseline. Empty
+    # default = baseline-only.
+    #
+    # CSV of additional tag substrings to treat as system tags
+    # (excluded from clustering + counting). Comparison is case-
+    # folded and strips colon delimiters, so `myproj` matches both
+    # `:myproj:` and `MYPROJ`. Useful for project-specific tags
+    # the user uses for tracking but doesn't want surfaced as
+    # "emerging topics" (e.g. `inbox`, `wip`, `daily`).
+    "insights_skip_tags":             "",
+    # CSV of additional filename substrings to skip. Captain's-log,
+    # config tangles, and llm-history files are already in the
+    # baseline. Add anything else that's machine-managed and
+    # shouldn't surface as user content (e.g. `daily-` for daily
+    # journal templates, or `archive` for an archived bucket).
+    "insights_skip_file_patterns":    "",
+    # CSV of generator NAMES to disable entirely. Recognised values:
+    # `new_captures`, `stale_candidates`, `topic_cluster`,
+    # `orphan_growth`, `doctor_warnings`, `sensor_attention`.
+    # Useful when one generator's signal is consistently low-
+    # quality on a particular vault — e.g. orphan_growth on a
+    # vault that intentionally keeps standalone notes.
+    "insights_disabled_generators":   "",
     # Toast pinning (Phase 17.1s). When true, every toast our
     # plugin emits uses a long duration (1 hour) so messages
     # stay on screen until the user has time to read them. False
