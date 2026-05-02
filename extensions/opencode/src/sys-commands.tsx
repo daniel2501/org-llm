@@ -383,11 +383,22 @@ export async function runSwitchLocalModel(
  *
  * Both paths share the same dispatcher to keep behaviour
  * consistent and avoid double-handling logic drift. */
-export function dispatchSysCommand(api: any, text: string): boolean {
+export function dispatchSysCommand(
+  api: any,
+  text: string,
+  fallbackSessionID?: string | null,
+): boolean {
   const trimmed = text.trim();
   if (!trimmed.startsWith("/sys")) return false;
 
-  const sessionID = activeSessionID(api);
+  // Prefer the route's session, but fall back to the explicit
+  // sessionID the caller passed (typically the message.sessionID
+  // from a message.updated event). The route observable can lag
+  // behind on a freshly-created session — at submit time
+  // route.current may still be "home" even though a session has
+  // already been allocated and the user message exists. The
+  // fallback closes that race.
+  const sessionID = activeSessionID(api) ?? fallbackSessionID ?? null;
 
   // Bare /sys with no args → friendly dialog fallback.
   if (trimmed === "/sys") {
@@ -480,18 +491,16 @@ export function dispatchSysCommand(api: any, text: string): boolean {
     return true;
   }
 
-  // /sysexport [sidebar|full|all] — dump current session as markdown.
-  // Bare /sysexport = chat only. Adding "sidebar" / "full" / "all"
-  // appends the sidebar status (vault stats, active model + cloud-
-  // failover indicator, health, archive, engage links) so the
-  // assistant has full context when the user pastes the file back.
-  const exportMatch = trimmed.match(/^\/sysexport(?:\s+(sidebar|full|all))?\s*$/);
-  if (exportMatch) {
-    if (sessionID) {
-      void api.client?.session?.abort?.({ sessionID });
-      const includeSidebar = !!exportMatch[1];
-      void exportChatToFile(api, sessionID, { includeSidebar });
-    }
+  // /sysexport [sidebar|full|all] — handled by the proxy
+  // (intercept_sysexport_command in org_llm/llm_proxy.py). The
+  // proxy writes the file and returns the confirmation + inline
+  // sidebar snapshot as the assistant turn text, so the user sees
+  // the result in chat without any plugin-side chat injection
+  // (which triggers an LLM round-trip on opencode 1.14.32 — see
+  // proxy file for the full incident note). We still return true
+  // here so the dispatch layer doesn't try to do anything else;
+  // the proxy is the source of truth for /sysexport behaviour.
+  if (/^\/sysexport(\s|$)/.test(trimmed)) {
     return true;
   }
 
@@ -642,12 +651,22 @@ async function exportChatToFile(
     }
 
     await Bun.write(path, lines.join("\n"));
-    void injectChatMessage(api, sessionID,
-      `✓ Chat exported · ${msgs.length} message(s)` +
-      (opts.includeSidebar ? ` + sidebar snapshot` : ``) +
-      ` → ${path}\n` +
-      `\n` +
-      `cat the file and paste its contents to share the transcript.`);
+    // Toast only — NEVER inject a chat message for the export
+    // confirmation. session.prompt({noReply:true}) does NOT actually
+    // suppress the LLM call in opencode 1.14.32: tested 2026-05-02,
+    // the model picked up the "✓ Chat exported · /home/.../foo.md"
+    // injection as a normal user turn and wasted 11.6s composing
+    // chatty commentary about the export. Toast is durable enough
+    // (15s) for the user to read the path and switch to the file;
+    // path is also recoverable from `ls -t .opencode/chat-export-*`.
+    showToast(api, {
+      variant: "info",
+      title:   "/sysexport",
+      message: `${msgs.length} message(s)` +
+               (opts.includeSidebar ? ` + sidebar snapshot` : ``) +
+               ` → ${path}`,
+      duration: 15_000,
+    });
   } catch (err) {
     showToast(api, {
       variant: "error",
@@ -1055,9 +1074,26 @@ function matchSysMessage(text: string): { args: string[]; label: string } | null
   return null;
 }
 
-/** Pull text content out of a Message's parts array. */
-function extractMessageText(msg: any): string {
-  const parts = Array.isArray(msg?.parts) ? msg.parts : [];
+/** Pull text content for a Message.
+ *
+ * UserMessage / AssistantMessage in opencode's SDK do NOT carry a
+ * `parts` field on the event payload — parts are stored separately
+ * and looked up via `api.state.part(messageID)`. An earlier
+ * iteration read `msg.parts` directly; that was always undefined,
+ * so every /sys command typed + Enter was silently dropped at
+ * `extractMessageText` (only the slash-registry onSelect path,
+ * which reads from the prompt ref, ever fired). We pass the api
+ * so we can resolve parts via state lookup; if the api isn't
+ * available (older callers), we fall back to whatever parts are
+ * attached directly. */
+function extractMessageText(msg: any, api?: any): string {
+  let parts: any[] = [];
+  const id = msg?.id;
+  if (api && typeof id === "string") {
+    const looked = api.state?.part?.(id);
+    if (Array.isArray(looked)) parts = looked as any[];
+  }
+  if (parts.length === 0 && Array.isArray(msg?.parts)) parts = msg.parts;
   return parts
     .filter((p: any) => p?.type === "text" && typeof p?.text === "string")
     .map((p: any) => p.text)
@@ -1347,16 +1383,26 @@ export function registerSysCommands(api: any): void {
     {
       title: "Export this chat as markdown (+ optional sidebar)",
       value: "org-llm.sysexport",
-      description: "Type /sysexport for chat only, or /sysexport sidebar to include the sidebar snapshot. TAB to run.",
+      description: "Type /sysexport for chat only, or /sysexport sidebar to include the sidebar snapshot. Press Enter to run.",
       category: "org-llm",
       slash: { name: "sysexport" },
+      // Populate the prompt so the user can either Enter immediately
+      // for a chat-only export or type "sidebar" first. Actual
+      // export work happens in the proxy
+      // (intercept_sysexport_command) when the user submits — the
+      // assistant turn returned by the proxy contains the file path
+      // and (if requested) the sidebar markdown, all visible in chat.
       onSelect: () => {
-        const sid = activeSessionID(api);
-        if (!sid) return;
-        const text = readPromptInput().trim();
-        const includeSidebar = /\/sysexport\s+(sidebar|full|all)\b/i.test(text);
-        clearPrompt();
-        void exportChatToFile(api, sid, { includeSidebar });
+        const raw = readPromptInput();
+        if (!raw.trim().startsWith("/sysexport")) {
+          setPromptInput("/sysexport ");
+          showToast(api, {
+            variant: "info",
+            title: "/sysexport",
+            message: "Enter to export chat only.  Type 'sidebar' first to include sidebar snapshot.",
+            duration: 8_000,
+          });
+        }
       },
     },
   ]);
@@ -1377,13 +1423,34 @@ export function registerSysCommands(api: any): void {
   //   • abort was redundant once the proxy started returning a
   //     proper SSE-with-finish-reason response — opencode's loop
   //     ends naturally on receiving stop.
+  // Dedup: opencode publishes message.updated several times per
+  // user message (parts streaming in, summary attached, etc.). The
+  // event has the SAME message.id every time. Without dedup we fire
+  // dispatchSysCommand on each republish — for /sysexport that
+  // wrote two duplicate files per submission. Bound the set so
+  // long-running sessions don't grow it without limit.
+  const dispatchedMsgIDs = new Set<string>();
   api.event?.on?.("message.updated", (e: any) => {
     try {
       const msg = e?.properties?.info;
       if (msg?.role !== "user") return;
-      const text = extractMessageText(msg);
+      const text = extractMessageText(msg, api);
       if (!text.trim().startsWith("/sys")) return;
-      dispatchSysCommand(api, text);
+      const msgID = typeof msg?.id === "string" ? msg.id : "";
+      if (msgID && dispatchedMsgIDs.has(msgID)) return;
+      if (msgID) {
+        dispatchedMsgIDs.add(msgID);
+        if (dispatchedMsgIDs.size > 256) {
+          const oldest = dispatchedMsgIDs.values().next().value;
+          if (oldest) dispatchedMsgIDs.delete(oldest);
+        }
+      }
+      // Pass the message's own sessionID as a fallback — on a
+      // freshly-created session the route observable may not have
+      // propagated yet when this event fires. UserMessage.sessionID
+      // is always populated.
+      const msgSessionID = typeof msg?.sessionID === "string" ? msg.sessionID : null;
+      dispatchSysCommand(api, text, msgSessionID);
     } catch (err) {
       showToast(api, {
         variant: "error",

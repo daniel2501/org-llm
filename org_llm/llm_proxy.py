@@ -80,6 +80,7 @@ class ProxyRequest:
     headers: dict[str, str]
     body: bytes
     parsed_json: Optional[dict] = None     # populated when JSON
+    upstream: Optional[str] = None         # set by _handle so interceptors that need to call upstream directly (e.g. intercept_synth_tool_call) can do so without forwarding the request the normal way
 
 
 Interceptor = Callable[[ProxyRequest], Optional[ProxyResponse]]
@@ -214,6 +215,509 @@ def intercept_sys_commands(req: ProxyRequest) -> Optional[ProxyResponse]:
     streaming = bool(req.parsed_json.get("stream"))
     model     = req.parsed_json.get("model") or "unknown"
     return _empty_assistant_response(model, streaming)
+
+
+# ── /sysexport interceptor ─────────────────────────────────────────
+
+
+# Why the export lives here (not in the plugin):
+#
+# The plugin previously did the export and tried to surface a
+# confirmation in chat via session.prompt({noReply:true}). But:
+#   • noReply: true does NOT actually suppress the LLM in opencode
+#     1.14.32 — the model picks up the injected line as a user turn
+#     and wastes tokens replying to "✓ Chat exported · …" (observed
+#     2026-05-02, 11.6s LLM call hallucinating about the file).
+#   • Toast-only feedback dismisses too quickly to read the path.
+#
+# Doing the export in the proxy fixes both: the proxy already
+# returns the assistant turn for /sys* commands, so we just enrich
+# THAT turn's text with the file path and (optionally) the sidebar
+# snapshot inline. opencode renders the assistant message; no
+# second user-message round-trip; no LLM call; the path stays
+# visible in chat history for as long as the session lives.
+
+_SIDEBAR_FILE_REL = ".opencode/sidebar-status.json"
+
+
+def _format_export_messages(messages: list) -> tuple[list[str], int]:
+    """Render the request's chat history as markdown. Returns
+    (lines, count). Skips system/tool messages — the export is for
+    sharing chat with another assistant, system prompts are noise.
+    Mirrors the format the plugin used to produce so existing
+    consumers keep working."""
+    out: list[str] = []
+    count = 0
+    for msg in messages:
+        role = msg.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        out.append(f"## {role}")
+        content = msg.get("content")
+        if isinstance(content, str):
+            out.append(content)
+        elif isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                ptype = part.get("type")
+                if ptype == "text" and isinstance(part.get("text"), str):
+                    out.append(part["text"])
+                elif ptype == "tool_use":
+                    out.append(f"### tool_call: {part.get('name', '?')}")
+                    out.append("```json")
+                    try:
+                        out.append(json.dumps(part.get("input", {}), indent=2))
+                    except Exception:
+                        out.append(str(part.get("input")))
+                    out.append("```")
+                elif ptype == "tool_result":
+                    out.append("### tool_result")
+                    out.append("```")
+                    res = part.get("content") or part.get("result")
+                    if isinstance(res, str):
+                        out.append(res)
+                    else:
+                        try:
+                            out.append(json.dumps(res, indent=2))
+                        except Exception:
+                            out.append(str(res))
+                    out.append("```")
+        out.append("")
+        count += 1
+    return out, count
+
+
+def _format_sidebar_snapshot(org_dir: Path) -> list[str]:
+    """Read .opencode/sidebar-status.json and render it as markdown
+    matching the layout the plugin used to produce. Returns a
+    bullet block with VAULT / ACTIVE / HEALTH / ARCHIVE sections."""
+    out: list[str] = ["---", "# Sidebar status snapshot", ""]
+    try:
+        path = org_dir / _SIDEBAR_FILE_REL
+        sidebar = json.loads(path.read_text())
+        v   = sidebar.get("vault")    or {}
+        a   = sidebar.get("active")   or {}
+        m   = sidebar.get("model")    or {}
+        h   = sidebar.get("hardware") or {}
+        mcp = sidebar.get("mcp")      or {}
+        acti = sidebar.get("activity") or {}
+        tags = sidebar.get("top_tags") or []
+        vit  = sidebar.get("vitals")   or []
+
+        out.append("## VAULT")
+        out.append(f"- nodes: {v.get('n_nodes', '?')}  "
+                   f"({v.get('n_embedded', '?')} indexed, "
+                   f"{v.get('pct_embedded', '?')}%)")
+        out.append(f"- files: {v.get('n_files', '?')}")
+        out.append(f"- org_dir: `{v.get('org_dir', '?')}`")
+        out.append("")
+
+        out.append("## ACTIVE")
+        out.append(f"- palette: {a.get('palette', '?')}")
+        for k in (a.get("knobs") or []):
+            out.append(f"- {k.get('name', '?')}: {k.get('level', '?')}")
+        out.append(f"- model: {m.get('active', '?')}  "
+                   f"(provider: {m.get('provider', '?')}, "
+                   f"route: {m.get('route', '?')})")
+        out.append("")
+
+        out.append("## HEALTH")
+        for vi in vit:
+            out.append(f"- {vi.get('name', '?')}: {vi.get('label', '?')}  "
+                       f"[{vi.get('status', '?')}]")
+        out.append(f"- mcp: {mcp.get('tool_count', '?')} tools "
+                   f"(configured: {mcp.get('configured', False)})")
+        if h.get("free_ram_gb") is not None:
+            out.append(f"- ram: {h['free_ram_gb']} GB free")
+        if h.get("vram_gb") is not None:
+            out.append(f"- vram: {h['vram_gb']} GB")
+        out.append("")
+
+        out.append("## ARCHIVE")
+        out.append(f"- last {acti.get('window_days', 7)}d: "
+                   f"{acti.get('nodes', 0)} nodes, "
+                   f"{acti.get('files', 0)} files")
+        if tags:
+            out.append("- top tags:")
+            for t in tags:
+                out.append(f"  - #{t.get('name', '?')}  ({t.get('count', 0)})")
+        out.append("")
+    except Exception as e:
+        out.append(f"*(sidebar JSON unavailable: {e})*")
+        out.append("")
+    return out
+
+
+def intercept_sysexport_command(req: ProxyRequest) -> Optional[ProxyResponse]:
+    """Specialised handler for `/sysexport [sidebar|full|all]`.
+    Writes the chat history to a markdown file and returns the
+    file path (and optionally the inline sidebar snapshot) as the
+    assistant turn — visible in chat, no LLM call, no plugin-side
+    chat-injection round-trip. Ordered BEFORE intercept_sys_commands
+    in DEFAULT_INTERCEPTORS so /sysexport hits this handler first
+    and falls through to the generic /sys* noop only if /sysexport
+    isn't matched."""
+    if not req.path.endswith("/chat/completions"):
+        return None
+    if not req.parsed_json:
+        return None
+    text = _last_user_text(req.parsed_json).strip()
+    # `/sysexport`, `/sysexport sidebar`, `/sysexport full`, `/sysexport all`
+    parts = text.split()
+    if not parts or parts[0] != "/sysexport":
+        return None
+    include_sidebar = (
+        len(parts) >= 2 and parts[1].lower() in ("sidebar", "full", "all")
+    )
+
+    org_dir = Path(os.environ.get("ORG_LLM_ORG_DIR")
+                    or (Path.home() / "org"))
+    out_dir = org_dir / ".opencode"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ts = time.strftime("%Y-%m-%dT%H-%M-%S", time.gmtime())
+    out_path = out_dir / f"chat-export-{ts}.md"
+
+    messages = req.parsed_json.get("messages") or []
+    body_lines, msg_count = _format_export_messages(messages)
+    header = [
+        "# org-llm chat export",
+        f"*{ts}Z*",
+        "",
+    ]
+    sidebar_lines: list[str] = []
+    if include_sidebar:
+        sidebar_lines = _format_sidebar_snapshot(org_dir)
+
+    file_lines = header + body_lines + sidebar_lines
+    try:
+        out_path.write_text("\n".join(file_lines))
+    except Exception as e:
+        # On write failure, return an error noop so the user sees
+        # what went wrong instead of silently nothing.
+        streaming = bool(req.parsed_json.get("stream"))
+        model     = req.parsed_json.get("model") or "unknown"
+        return _empty_assistant_response(
+            model, streaming,
+            content=f"✗ /sysexport failed: {e}",
+        )
+
+    # Build the assistant turn text. Always include the confirmation
+    # line. If the user asked for sidebar, also embed the rendered
+    # snapshot inline so it's visible in chat — that's the whole
+    # point of `/sysexport sidebar`.
+    sidebar_blurb = " + sidebar snapshot" if include_sidebar else ""
+    confirm = (
+        f"✓ Chat exported · {msg_count} message(s){sidebar_blurb}\n"
+        f"→ {out_path}"
+    )
+    if include_sidebar:
+        # Embed the same sidebar markdown that's in the file. Two
+        # blank lines between confirmation and snapshot for clean
+        # rendering.
+        confirm = confirm + "\n\n" + "\n".join(sidebar_lines)
+
+    streaming = bool(req.parsed_json.get("stream"))
+    model     = req.parsed_json.get("model") or "unknown"
+    return _empty_assistant_response(model, streaming, content=confirm)
+
+
+# ── Synthetic tool calls for tool-incapable models ──────────────────
+
+
+# Models that don't natively support OpenAI-style tool calling.
+# Mirrors `_NO_TOOL_CALL_STEMS` in cli.py — duplicated here because
+# cli.py imports llm_proxy, not the other way round, and reversing
+# that would force a circular import at startup. Keep them in sync
+# by hand; the lists are short and rarely change.
+_PROXY_NO_TOOL_STEMS = {
+    "gemma", "gemma2", "gemma3",
+    "phi3", "phi3.5",
+    "llava", "bakllava",
+    "deepseek-coder",
+}
+
+# Match a `<tool_call>{...}</tool_call>` block emitted by the model
+# in response to the synthetic-tools system prompt. The JSON inside
+# may span multiple lines (DOTALL) and we want the inner-most match
+# so a model that emits prose-then-tool gets the tool block alone.
+import re as _re                                          # noqa: E402
+
+_TOOL_CALL_BLOCK_RE = _re.compile(
+    r"<tool_call>\s*(\{.*?\})\s*</tool_call>",
+    _re.DOTALL,
+)
+
+
+def _is_no_tool_model(model_id: str) -> bool:
+    """True iff the request's model is on the proxy's deny-list."""
+    if not model_id:
+        return False
+    bare = model_id.split("/")[-1]      # strip provider prefix
+    stem = bare.split(":")[0].lower()   # strip :tag suffix
+    return stem in _PROXY_NO_TOOL_STEMS
+
+
+def _build_synth_tools_prompt(tools: list) -> str:
+    """Render an OpenAI-tools list as a system-prompt block that
+    instructs a non-tool-capable model to emit tool calls as
+    `<tool_call>{...}</tool_call>` blocks. Conservative phrasing —
+    tested on gemma3 to produce a single clean block when a tool
+    is the right answer, plain prose otherwise."""
+    lines = [
+        "You have access to the following tools. To call a tool,",
+        "respond with ONLY this exact format and STOP:",
+        "",
+        "  <tool_call>{\"name\": \"<tool_name>\", \"arguments\": "
+        "{...}}</tool_call>",
+        "",
+        "Do not narrate. Do not explain. Do not add prose around the",
+        "tool_call block. If no tool is needed, answer the user",
+        "directly without the tool_call wrapper.",
+        "",
+        "Available tools:",
+    ]
+    for t in tools:
+        if not isinstance(t, dict):
+            continue
+        fn = t.get("function") if isinstance(t.get("function"), dict) else t
+        name = fn.get("name")
+        if not name:
+            continue
+        desc = (fn.get("description") or "").strip().replace("\n", " ")
+        params = fn.get("parameters") or {}
+        try:
+            params_str = json.dumps(params, separators=(",", ":"))
+        except Exception:
+            params_str = "{}"
+        lines.append(f"- {name}: {desc}")
+        if params_str and params_str != "{}":
+            # Show the JSON-Schema inline so the model sees required
+            # field names. Trimmed at 400 chars to avoid bloating the
+            # context with deep schemas.
+            lines.append(f"  schema: {params_str[:400]}")
+    return "\n".join(lines)
+
+
+def _extract_tool_call(text: str) -> Optional[dict]:
+    """Pull the FIRST `<tool_call>{json}</tool_call>` block out of
+    `text` and return it as a parsed dict. Returns None if no block
+    is found or the JSON inside is malformed. Tolerant of trailing
+    prose — gemma3 sometimes adds a confirmation line after the
+    block, which we just ignore."""
+    if not text:
+        return None
+    match = _TOOL_CALL_BLOCK_RE.search(text)
+    if not match:
+        return None
+    try:
+        obj = json.loads(match.group(1))
+    except Exception:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    return obj
+
+
+def _build_synth_tool_response(
+    model: str, streaming: bool,
+    *, content: str = "",
+    tool_calls: Optional[list] = None,
+) -> ProxyResponse:
+    """Build an assistant-turn response that may include OpenAI-shape
+    tool_calls. Mirrors `_empty_assistant_response` but allows the
+    `message.tool_calls` array (or its delta-equivalent in streaming
+    mode) so opencode picks up the synthesised tool invocation as a
+    real tool call. Used by intercept_synth_tool_call after pulling
+    the tool block out of a non-tool model's reply."""
+    created = int(time.time())
+    chunk_id = f"synth-tool-{created}"
+    if streaming:
+        # opencode tolerates tool_calls in either the message OR the
+        # delta. We emit a single non-streaming-shaped delta block
+        # so the model's "thinking" looks instant — the synth path
+        # already buffered the full response upstream, streaming
+        # the synthesised tool call piecemeal would just be theatre.
+        msg: dict = {"role": "assistant"}
+        if tool_calls:
+            msg["tool_calls"] = tool_calls
+        if content:
+            msg["content"] = content
+        chunks = [
+            ("data: " + json.dumps({
+                "id": chunk_id, "object": "chat.completion.chunk",
+                "created": created, "model": model,
+                "choices": [{"index": 0, "delta": msg,
+                              "finish_reason": None}],
+            }) + "\n\n").encode(),
+            ("data: " + json.dumps({
+                "id": chunk_id, "object": "chat.completion.chunk",
+                "created": created, "model": model,
+                "choices": [{"index": 0, "delta": {},
+                              "finish_reason": "tool_calls" if tool_calls
+                                                              else "stop"}],
+            }) + "\n\n").encode(),
+            b"data: [DONE]\n\n",
+        ]
+        return ProxyResponse(
+            status=200,
+            headers={"Content-Type":  "text/event-stream",
+                     "Cache-Control": "no-cache",
+                     "Connection":    "close"},
+            body_chunks=chunks,
+            streaming=True,
+        )
+    msg2: dict = {"role": "assistant"}
+    if tool_calls:
+        msg2["tool_calls"] = tool_calls
+    if content:
+        msg2["content"] = content
+    payload = {
+        "id": chunk_id, "object": "chat.completion",
+        "created": created, "model": model,
+        "choices": [{
+            "index": 0,
+            "message": msg2,
+            "finish_reason": "tool_calls" if tool_calls else "stop",
+        }],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1,
+                   "total_tokens": 2},
+    }
+    body = json.dumps(payload).encode()
+    return ProxyResponse(
+        status=200,
+        headers={"Content-Type": "application/json",
+                 "Content-Length": str(len(body))},
+        body_chunks=[body],
+        streaming=False,
+    )
+
+
+def intercept_synth_tool_call(req: ProxyRequest) -> Optional[ProxyResponse]:
+    """Approximate tool calling for models that don't natively
+    support it. When the request targets a deny-listed model AND
+    opencode passed `tools`, we:
+      1. Strip `tools` from the request body (Ollama would otherwise
+         silently ignore them for these models).
+      2. Inject a system prompt at the FRONT of `messages` that
+         describes each tool and instructs the model to emit
+         `<tool_call>{...}</tool_call>` when it wants to call one.
+      3. Force `stream: false` so we get a single complete response
+         we can parse — streaming would require buffering plus
+         partial-block detection, which is out of scope for the
+         first cut.
+      4. Issue the upstream call directly (req.upstream is set by
+         the handler).
+      5. Extract any `<tool_call>` block and reshape into proper
+         OpenAI tool_calls.
+      6. Return a ProxyResponse — short-circuiting the normal forward
+         path.
+
+    Caveats: quality varies with the model. gemma3 is the primary
+    target. Single-tool calls work; multi-tool turns may misfire.
+    Falls back to plain-text passthrough when no tool_call block is
+    detected."""
+    if not req.path.endswith("/chat/completions"):
+        return None
+    parsed = req.parsed_json
+    if not parsed:
+        return None
+    model_id = parsed.get("model") or ""
+    if not _is_no_tool_model(model_id):
+        return None
+    tools = parsed.get("tools") or []
+    if not isinstance(tools, list) or not tools:
+        return None
+    if not req.upstream:
+        # No upstream URL set → can't issue our own forward call.
+        # Fall through; opencode will get whatever ollama returns
+        # without the synth prompt (probably plain chat).
+        return None
+
+    # 1+2+3: build mutated request body.
+    sys_prompt = _build_synth_tools_prompt(tools)
+    new_body = {k: v for k, v in parsed.items() if k != "tools"}
+    new_body.pop("tool_choice", None)
+    new_body["stream"] = False
+    msgs = list(new_body.get("messages") or [])
+    new_body["messages"] = [{"role": "system", "content": sys_prompt}] + msgs
+    body_bytes = json.dumps(new_body).encode()
+    streaming = bool(parsed.get("stream"))
+
+    # 4: forward to upstream. Inject /v1 if the upstream is ollama-
+    # shape and the path lacks it (mirrors `_forward`'s logic).
+    upstream = req.upstream
+    path = req.path
+    if (path in ("/chat/completions", "/embeddings", "/models")
+            and "/v1" not in upstream and "/api" not in upstream):
+        path = "/v1" + path
+    url = upstream + path
+    forward_headers = {
+        k: v for k, v in req.headers.items()
+        if k.lower() not in ("host", "content-length", "connection")
+    }
+    forward_headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(
+        url, data=body_bytes, method="POST", headers=forward_headers,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as resp:
+            raw = resp.read()
+    except Exception as e:
+        # Upstream failed — bail and let opencode handle the error
+        # path. Returning None lets the chain fall through to the
+        # normal forward (which will hit the same error and
+        # surface it the usual way).
+        return _empty_assistant_response(
+            model_id, streaming,
+            content=f"(synth-tool upstream error: {e})",
+        )
+
+    # 5: parse upstream response, extract assistant content.
+    try:
+        upstream_obj = json.loads(raw.decode("utf-8", errors="replace"))
+    except Exception:
+        return _empty_assistant_response(
+            model_id, streaming,
+            content="(synth-tool: upstream returned non-JSON)",
+        )
+    choices = upstream_obj.get("choices") or []
+    if not choices or not isinstance(choices[0], dict):
+        return _empty_assistant_response(
+            model_id, streaming,
+            content="(synth-tool: upstream had no choices)",
+        )
+    msg0 = choices[0].get("message") or {}
+    text = msg0.get("content") if isinstance(msg0.get("content"), str) else ""
+
+    tool_call_obj = _extract_tool_call(text or "")
+    if tool_call_obj is None:
+        # No tool block — return the plain text as a normal
+        # assistant turn. opencode treats this as "the model chose
+        # not to call a tool", which is correct.
+        return _build_synth_tool_response(
+            model_id, streaming, content=text or "",
+        )
+
+    # 6: reshape into OpenAI tool_calls structure. opencode expects:
+    #   tool_calls: [{ id, type: "function", function: { name, arguments } }]
+    # Arguments must be a JSON-encoded STRING (per the OpenAI spec),
+    # not an object — opencode parses it back when dispatching.
+    name = tool_call_obj.get("name") or ""
+    args_obj = (tool_call_obj.get("arguments")
+                  or tool_call_obj.get("args") or {})
+    try:
+        args_str = json.dumps(args_obj)
+    except Exception:
+        args_str = "{}"
+    tool_calls = [{
+        "id":   f"call_synth_{int(time.time() * 1000)}",
+        "type": "function",
+        "function": {"name": name, "arguments": args_str},
+    }]
+    return _build_synth_tool_response(
+        model_id, streaming, tool_calls=tool_calls,
+    )
 
 
 # ── Prefix caching (T1.4) ───────────────────────────────────────────
@@ -1379,7 +1883,12 @@ def intercept_local_only(req: ProxyRequest) -> Optional[ProxyResponse]:
 DEFAULT_INTERCEPTORS: list[Interceptor] = [
     # ── Short-circuit interceptors (return early, never forward) ──
     intercept_no_llm_flag,        # T1.5  --no-llm hard-bypass
+    intercept_sysexport_command,  # P18.5 /sysexport — write file + inline sidebar
     intercept_sys_commands,       # T1.0  /sys*
+    # Synthetic tool calls run BEFORE the generic forward but AFTER
+    # the /sys* short-circuits — for /sys* we don't want to engage
+    # the upstream at all, even with rewritten prompts.
+    intercept_synth_tool_call,    # P18.6 gemma-class tool-call synth
     intercept_md_skills,          # T2.1  .md `exec:` → subprocess
     intercept_static_slashes,     # T1.3  /menu /help /config
     intercept_probe_cache,        # T2.0  /api/tags etc cache
@@ -1557,18 +2066,37 @@ def _proxy_cfg_str(key: str, default: str = "") -> str:
 
 
 def _first_byte_timeout_secs() -> float:
-    """Read proxy_first_byte_timeout_ms; clamp to ≥0. 0 = disabled."""
-    raw = _proxy_cfg_str("proxy_first_byte_timeout_ms", "8000")
+    """Read proxy_first_byte_timeout_ms; clamp to ≥0. 0 = disabled.
+    Default 30000ms — covers cold-start prefill on thermal-throttled
+    CPUs with heavy MCP tool context. Lower defaults (we shipped
+    8000 originally) preempt local before it can produce the first
+    byte. See db.py's MODEL_DEFAULTS comment for the rationale."""
+    raw = _proxy_cfg_str("proxy_first_byte_timeout_ms", "30000")
     try:
         ms = int(raw)
     except ValueError:
-        ms = 8000
+        ms = 30000
     return max(0.0, ms / 1000.0)
 
 
 def _cloud_failover_enabled() -> bool:
     return _proxy_cfg_str("proxy_cloud_failover_enabled",
                             "true").strip().lower() != "false"
+
+
+def _cloud_first_enabled() -> bool:
+    """When true, chat completions skip local entirely and go
+    straight to cloud. Default false. Useful when local hardware
+    can't realistically serve the configured chat_model in time
+    (low free RAM, thermal throttling, no GPU) — instead of waiting
+    `proxy_first_byte_timeout_ms` for local to fail over, we route
+    directly to cloud and save the wait. Pairs with the cloud-
+    failover retry chain so context-overflow on cloud still gets
+    a compressed-tools fallback. Toggle via:
+        org-llm config proxy_cloud_first true
+    """
+    return _proxy_cfg_str("proxy_cloud_first",
+                            "false").strip().lower() == "true"
 
 
 def _resolve_cloud_failover_target() -> Optional[dict]:
@@ -1621,6 +2149,75 @@ def _resolve_cloud_failover_target() -> Optional[dict]:
             api_key = ""
     api_key = api_key or db_key
     return {"endpoint": endpoint, "model": model, "api_key": api_key}
+
+
+def _compress_tool_schema(s) -> dict:
+    """Strip descriptions/examples from a JSON-schema fragment,
+    keeping only the type info the model needs to invoke a tool.
+    Used by the cloud-failover compressed-tools retry path so
+    opencode's full 64-tool MCP inventory fits in a 32k context."""
+    if not isinstance(s, dict):
+        return {}
+    t = s.get("type")
+    if t == "object":
+        props = s.get("properties") or {}
+        new_props = {}
+        if isinstance(props, dict):
+            for k, v in props.items():
+                if not isinstance(v, dict):
+                    continue
+                slim: dict = {"type": v.get("type", "string")}
+                # Keep enum (small, critical for valid invocations).
+                if "enum" in v:
+                    slim["enum"] = v["enum"]
+                # Recurse on nested object/array shapes.
+                if v.get("type") in ("object", "array"):
+                    slim = _compress_tool_schema(v) or slim
+                new_props[k] = slim
+        out: dict = {"type": "object", "properties": new_props}
+        if isinstance(s.get("required"), list):
+            out["required"] = s["required"]
+        return out
+    if t == "array":
+        items = s.get("items")
+        if isinstance(items, dict):
+            return {"type": "array", "items": _compress_tool_schema(items)}
+        return {"type": "array"}
+    # Scalars: just keep type + enum.
+    out = {"type": t or "string"}
+    if "enum" in s:
+        out["enum"] = s["enum"]
+    return out
+
+
+def _compress_tools_for_failover(tools: list) -> list:
+    """Compress a tools array so it fits in a smaller context budget.
+    Strategy: trim each tool's description to 80 chars and replace
+    the JSON-schema with a stripped version (type info only, no
+    descriptions/examples/long enum lists). For 64 tools at ~303
+    avg tokens this typically lands ~50 tokens each — total ~3.2k
+    instead of ~19k. The model still knows tool NAMES + arg
+    SHAPES, which is what it needs to call them; opencode handles
+    the actual execution."""
+    out: list = []
+    for t in tools:
+        if not isinstance(t, dict):
+            out.append(t)
+            continue
+        fn = t.get("function")
+        if not isinstance(fn, dict):
+            out.append(t)
+            continue
+        desc = fn.get("description", "")
+        if isinstance(desc, str) and len(desc) > 80:
+            desc = desc[:77] + "…"
+        new_fn = {
+            "name": fn.get("name"),
+            "description": desc,
+            "parameters": _compress_tool_schema(fn.get("parameters")),
+        }
+        out.append({"type": "function", "function": new_fn})
+    return out
 
 
 def _build_cloud_request(orig_body: bytes, parsed: Optional[dict],
@@ -1756,6 +2353,7 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
             headers={k: v for k, v in self.headers.items()},
             body=body,
             parsed_json=parsed,
+            upstream=self.server.upstream,
         )
         # Compute cache key from the ORIGINAL request — before any
         # mutation interceptors (time grounding etc.) touch the
@@ -1851,6 +2449,42 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
 
     def _forward(self, body: bytes) -> None:
         upstream = self.server.upstream
+
+        # Phase 18.6 cloud-first bypass: when the user has
+        # `proxy_cloud_first=true`, skip the local upstream entirely
+        # for chat completions. Sends the request straight to cloud
+        # via the same _failover_to_cloud machinery (so we get the
+        # ctx-overflow → compressed-tools → no-tools retry chain),
+        # saving the full proxy_first_byte_timeout_ms wait.
+        # Use this when local hardware can't realistically serve the
+        # configured chat_model in time — low free RAM, thermal
+        # throttling, no GPU. Toggle:
+        #     org-llm config proxy_cloud_first true
+        chat_eligible_path = (
+            self.command == "POST"
+            and any(self.path.endswith(p) for p in _CHAT_PATHS)
+        )
+        if chat_eligible_path and _cloud_first_enabled():
+            cloud_target = _resolve_cloud_failover_target()
+            if cloud_target is not None:
+                # Set the audit fields the way the wrapper expects.
+                self._last_status    = None
+                self._last_bytes     = 0
+                self._last_error     = None
+                self._last_intercept = "cloud_first"
+                if self._failover_to_cloud(
+                    body, cloud_target,
+                    reason="cloud_first enabled (skipping local)",
+                ):
+                    # Mark as cloud_first in audit (failover_to_cloud
+                    # would otherwise label this as cloud_failover).
+                    self._last_intercept = "cloud_first"
+                    return
+                # _failover_to_cloud failed before writing → fall
+                # through to local as a backup (e.g. cloud creds
+                # broken). Better to attempt local than to 502 the
+                # client; user can always toggle the knob off.
+
         # Phase 18.4-iter10: normalise path against upstream API
         # version. Ollama's OpenAI-compat endpoint is at /v1/...; if
         # opencode sends bare /chat/completions the bare path 404s on
@@ -2100,11 +2734,110 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
             # naming the bad parameter). Earlier we logged just the
             # status code, leaving the user without diagnostic info.
             try:
-                body = (e.read() or b"").decode("utf-8", "replace")[:400]
+                err_body = (e.read() or b"").decode("utf-8", "replace")[:400]
             except Exception:
-                body = ""
+                err_body = ""
+
+            # Phase 18.6: 400 "context length" two-step retry.
+            #
+            # Cloud free-tier models cap at 32k context. opencode's
+            # 64-tool MCP inventory alone is ~19k tokens, plus 11k
+            # conversation + 4k output reservation = >32k easily.
+            # On HTTP 400 with a "context length" message, retry:
+            #
+            #   1. With COMPRESSED tools (descriptions trimmed to
+            #      80 chars, schemas stripped of examples and long
+            #      enums). Drops 64 tools from ~19k → ~3k tokens.
+            #      Model still knows tool names and arg shapes;
+            #      opencode still executes the calls. This is the
+            #      preferred path: real tool use, terser docs.
+            #
+            #   2. With NO tools at all. Last resort. Model can't
+            #      invoke anything but at least returns a chat
+            #      reply. Audit logs as "cloud_failover_no_tools";
+            #      compressed retries log as
+            #      "cloud_failover_compressed_tools".
+            ctx_overflow = (
+                e.code == 400
+                and ("context length" in err_body.lower()
+                     or "maximum context" in err_body.lower()
+                     or "too many tokens" in err_body.lower())
+            )
+
+            def _do_retry(retry_parsed: dict, label: str) -> bool:
+                """Retry the cloud request with a modified parsed
+                body. `label` becomes `_last_intercept` so the
+                audit log reveals which retry path served the
+                response. Returns True iff bytes were committed
+                to the wfile (so the caller knows not to fall
+                through to a 502)."""
+                retry_req = _build_cloud_request(
+                    body, retry_parsed, target, self.path,
+                )
+                with self._cloud_urlopen(retry_req, timeout=300) as resp2:
+                    self._last_status    = resp2.status
+                    self._last_intercept = label
+                    self.send_response(resp2.status)
+                    for k, v in resp2.headers.items():
+                        if k.lower() in ("transfer-encoding",
+                                          "connection",
+                                          "content-length"):
+                            continue
+                        self.send_header(k, v)
+                    self.end_headers()
+                    while True:
+                        chunk = resp2.read(4096)
+                        if not chunk:
+                            break
+                        try:
+                            self.wfile.write(chunk)
+                            self.wfile.flush()
+                            self._last_bytes += len(chunk)
+                        except (BrokenPipeError, ConnectionResetError):
+                            return True
+                    self._last_error = (
+                        f"failover: local stalled ({reason}); "
+                        f"cloud full-tools rejected (ctx overflow); "
+                        f"served via {label} ({target['model']})"
+                    )
+                    _emit_failover_toast(target['model'])
+                    return True
+
+            if ctx_overflow and parsed and parsed.get("tools"):
+                # Step 1: compressed tools.
+                compressed = dict(parsed)
+                compressed["tools"] = _compress_tools_for_failover(
+                    parsed["tools"],
+                )
+                try:
+                    if _do_retry(compressed,
+                                  "cloud_failover_compressed_tools"):
+                        return True
+                except urllib.error.HTTPError:
+                    # Compressed still too big or other 4xx — fall
+                    # through to no-tools.
+                    pass
+                except Exception:
+                    # Network error mid-retry — fall through too.
+                    pass
+
+                # Step 2: no tools.
+                no_tools = dict(parsed)
+                no_tools.pop("tools", None)
+                no_tools.pop("tool_choice", None)
+                try:
+                    if _do_retry(no_tools, "cloud_failover_no_tools"):
+                        return True
+                except Exception as e2:
+                    self._last_error = (
+                        f"failover failed: cloud http {e.code} (ctx "
+                        f"overflow), both retries failed: "
+                        f"{type(e2).__name__}: {e2}"
+                    )
+                    return False
+
             self._last_error = (f"failover failed: cloud http {e.code}"
-                                  + (f" — {body}" if body else "")
+                                  + (f" — {err_body}" if err_body else "")
                                   + f" after {reason}")
             return False
         except Exception as e:

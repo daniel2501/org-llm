@@ -39,7 +39,7 @@ export const SIDEBAR_DEFAULTS = {
   "auto_session_delay_ms": 1500,
   "auto_session_local_model": "llama3.2",
   "auto_session_use_cloud": false,
-  "slow_llm_threshold_ms": 25000,
+  "slow_llm_threshold_ms": 45000,
   "prompt_char": "❯ ",
   "slow_llm_auto_relaunch": true,
   "pin_toasts": false,

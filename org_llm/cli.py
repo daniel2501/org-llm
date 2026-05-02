@@ -142,6 +142,33 @@ def _is_embed_model(name: str) -> bool:
     return any(sub in n for sub in _EMBED_MODEL_SUBSTRINGS)
 
 
+# Stems of local models that DON'T reliably support OpenAI-style
+# tool calling. opencode treats `tool_call: true` in opencode.json
+# as a hard contract — if the model can't actually invoke tools,
+# the request goes through, the model hallucinates a plain-text
+# answer, and the user sees an empty/garbled assistant turn (the
+# gemma case the user just hit). Mark these as tool-incapable so
+# opencode falls back to chat-only mode for them.
+#
+# Sourced from Ollama's model tool-call support matrix and from
+# direct user reports. Conservative — we'd rather mark a model
+# tool-incapable and lose a bit of capability than mark one capable
+# and have it silently fail. Refresh as Ollama adds support.
+_NO_TOOL_CALL_STEMS = {
+    "gemma", "gemma2", "gemma3",         # no native tool calling
+    "phi3", "phi3.5",                    # tool calls unreliable
+    "llava", "bakllava",                 # vision-only
+    "deepseek-coder",                    # base coder, not instruct
+}
+
+
+def _supports_tool_call(tag: str) -> bool:
+    """True iff this Ollama model reliably handles OpenAI-style tool
+    calls. See _NO_TOOL_CALL_STEMS for the deny-list rationale."""
+    stem = (tag or "").split(":")[0].lower()
+    return stem not in _NO_TOOL_CALL_STEMS
+
+
 def _normalize_tag(name: str) -> str:
     """Canonicalize an Ollama model tag for comparison.
 
@@ -1586,6 +1613,56 @@ def setup(
                     on_screen(f"[dim]models --upgrade failed: {e}[/dim]")
                 console.print()
 
+    # 6c. Cloud-first decision. After hardware-fit model tuning,
+    # check whether the user's free RAM can realistically run their
+    # configured chat_model. If not — and cloud is configured —
+    # offer to set proxy_cloud_first=true so opencode skips local
+    # entirely and routes chat completions directly to cloud,
+    # saving the proxy_first_byte_timeout_ms wait per request.
+    if "cloud-first" not in done_set and not skip_models:
+        try:
+            from .cloud import local_ram_gb, model_needs_vram
+            engine_now = _engine()
+            with get_session(engine_now) as session:
+                cur_chat = _cfg(session, "chat_model") or ""
+                cloud_provider_set = bool(_cfg(session, "cloud_provider"))
+                cloud_first_now = (_cfg(session, "proxy_cloud_first")
+                                    or "false").lower() == "true"
+            ram = local_ram_gb()
+            # `model_needs_vram` returns the per-model RAM/VRAM
+            # footprint estimate (also used by the doctor and the
+            # power-boost auto-recommendation). Falls back to None
+            # for unknown models — those skip the recommendation.
+            need = model_needs_vram(cur_chat) if cur_chat else None
+            # Heuristic: "can't realistically run" means free RAM is
+            # under 1.2x the model footprint. The proxy still has
+            # cloud failover as a backup, but at least we won't
+            # waste 30s waiting on local.
+            cant_fit = (need is not None and ram < need * 1.2)
+            if (cant_fit and cloud_provider_set and not cloud_first_now):
+                msg = (f"Your free RAM ({ram:.1f} GB) is below the safe "
+                        f"margin for chat_model {cur_chat!r} (~{need:.1f} GB "
+                        f"resident).  Route chat directly to cloud — skip "
+                        f"the per-request 30s local-stall wait?")
+                if _confirm(msg, default=True):
+                    on_screen("[lcars2]Step 6c/15[/lcars2] cloud-first "
+                              "[dim](sets proxy_cloud_first=true; toggle "
+                              "off any time with: org-llm config "
+                              "proxy_cloud_first false)[/dim]")
+                    try:
+                        _run_with_stall_watch(
+                            ["org-llm", "config", "proxy_cloud_first", "true"],
+                            stall_secs=10.0,
+                            label="config proxy_cloud_first true",
+                        )
+                        _mark_step_done("cloud-first")
+                    except Exception as e:
+                        on_screen(f"[dim]config write failed: {e}[/dim]")
+                    console.print()
+        except Exception:
+            # Soft-fail. Cloud-first is a polish, not load-bearing.
+            pass
+
     # 6+7. index → tag — data-driven prompt
     try:
         from .db import File as _F, Node as _N
@@ -2708,6 +2785,40 @@ _SPLASH_MENU = [
 ]
 
 
+def lcars_panel(
+    title: str,
+    body,
+    border_style: str = "lcars2",
+    title_style: str | None = None,
+    expand: bool = False,
+):
+    """LCARS-style thin rounded panel matching the opencode TUI sidebar
+    cards. Differences from a vanilla rich.Panel:
+      • title rendered as the first content row (`VAULT`, `ACTIVE`),
+        not embedded in the top border. Mirrors `SectionCard` in
+        extensions/opencode/src/panel.tsx.
+      • tighter padding (0, 1) instead of the rich default (0, 1) +
+        a heavier border that visually doubles up.
+      • box.ROUNDED is rich's default for Panel anyway, but the call
+        is explicit so future rich-default churn doesn't drift the
+        CLI away from the TUI.
+
+    Used by the splash menu and prominent doctor/models panels so the
+    CLI and TUI share one visual vocabulary."""
+    from rich import box
+    from rich.console import Group
+    from rich.panel import Panel as _Panel
+    from rich.text import Text
+    ts = title_style or border_style
+    if isinstance(body, str):
+        content = Group(Text.from_markup(f"[bold {ts}]{title}[/bold {ts}]"),
+                        Text.from_markup(body))
+    else:
+        content = Group(Text.from_markup(f"[bold {ts}]{title}[/bold {ts}]"), body)
+    return _Panel(content, box=box.ROUNDED, border_style=border_style,
+                   padding=(0, 1), expand=expand)
+
+
 def _show_splash():
     """LCARS-themed splash menu. Runs by default when `org-llm` is
     invoked with no arguments. Doom Emacs vibe: logo + linked actions
@@ -2741,8 +2852,7 @@ def _show_splash():
             "Already part-commissioned? Re-run — it'll skip completed steps "
             "automatically."
         )
-        console.print(Panel(msg, title=f"[lcars1]{banner_title}[/lcars1]",
-                              border_style="lcars1", padding=(1, 2)))
+        console.print(lcars_panel(banner_title, msg, border_style="lcars1"))
         console.print()
         on_screen("[dim]Or skip the splash entirely:[/dim] "
                   "[bold]org-llm --no-splash[/bold]  for plain --help")
@@ -2764,10 +2874,11 @@ def _show_splash():
                 f"  [lcars1]{key:>2}[/lcars1]  [lcars2]{verb:<22}[/lcars2] "
                 f"[dim]{label}[/dim]"
             )
-        panels.append(Panel(
+        panels.append(lcars_panel(
+            group_name,
             "\n".join(body_lines),
-            title=f"[lcars1]{group_name}[/lcars1]",
-            border_style="lcars2", padding=(0, 1),
+            border_style="lcars2",
+            title_style="lcars1",
         ))
     console.print(Columns(panels, equal=False, expand=False))
     console.print()
@@ -5233,7 +5344,8 @@ def performance(
     else:
         hw_tbl.add_row("GPU",        "[dim]none detected (CPU inference only)[/dim]")
     hw_tbl.add_row("Disk free",  f"{hw.disk_free_gb:.0f} GB (in $HOME)")
-    console.print(Panel(hw_tbl, title="[lcars1]Hardware[/lcars1]", border_style="lcars2"))
+    console.print(lcars_panel("Hardware", hw_tbl,
+                                 border_style="lcars2", title_style="lcars1"))
 
     if quick:
         return
@@ -5265,9 +5377,9 @@ def performance(
     if pulled_norm:
         for p in sorted(pulled_norm):
             pulled_tbl.add_row(p)
-        console.print(Panel(pulled_tbl,
-                            title=f"[lcars1]Local models  ({len(pulled_norm)} pulled)[/lcars1]",
-                            border_style="lcars3"))
+        console.print(lcars_panel(f"Local models  ({len(pulled_norm)} pulled)",
+                                     pulled_tbl, border_style="lcars3",
+                                     title_style="lcars1"))
 
     # ── Optional benchmarks ───────────────────────────────────────────────────
     benchmarks: dict[str, perf.BenchmarkResult] = {}
@@ -5295,8 +5407,8 @@ def performance(
                                    f"{b.latency_ms:.0f} ms",
                                    f"{b.tokens_per_sec:.1f}", "")
         console.print()
-        console.print(Panel(bench_tbl, title="[lcars1]Measured throughput[/lcars1]",
-                            border_style="lcars2"))
+        console.print(lcars_panel("Measured throughput", bench_tbl,
+                                     border_style="lcars2", title_style="lcars1"))
 
     # ── Recommendations ───────────────────────────────────────────────────────
     recs = perf.recommend(
@@ -5327,8 +5439,8 @@ def performance(
             has_changes = True
 
     console.print()
-    console.print(Panel(rec_tbl, title="[lcars1]Recommendations[/lcars1]",
-                        border_style="lcars2"))
+    console.print(lcars_panel("Recommendations", rec_tbl,
+                                 border_style="lcars2", title_style="lcars1"))
     console.print()
 
     if not has_changes:
@@ -12436,6 +12548,55 @@ RIGHT:
     return common_header + focus + behaviour
 
 
+_PREFLIGHT_CACHE_TTL_SECS = 300   # 5 min — stale-but-usable
+_PREFLIGHT_CACHE_PATH = Path(
+    os.environ.get("XDG_CACHE_HOME") or "~/.cache",
+).expanduser() / "org-llm" / "preflight.json"
+
+
+def _opencode_pre_flight_context_cached(session, *, max_age_secs: int = _PREFLIGHT_CACHE_TTL_SECS) -> dict:
+    """Cached wrapper over `_opencode_pre_flight_context`.
+
+    Pre-flight gathering takes ~4s on a 180k-node vault (vault stats,
+    full tags scan, filesystem discover, README sniff, hardware
+    probe, etc.). Most of those values change on the order of
+    minutes-to-hours, not seconds — caching for 5 min cuts repeat-
+    launch overhead from ~4s to <50ms.
+
+    On cache miss / stale, falls through to the live function and
+    overwrites the cache. On read error (corrupt JSON, permission
+    denied, etc.) treats it as a miss and rebuilds. Never raises;
+    the worst case is paying the full pre-flight cost when we
+    could've saved it.
+
+    Cache invalidation is purely time-based — if the user wants a
+    fresh read (e.g. after a big import), `rm ~/.cache/org-llm/
+    preflight.json` or wait 5 min. Tracking content hashes here
+    would defeat the purpose (computing the hash is most of the
+    cost we're trying to avoid)."""
+    import json as _json
+    try:
+        if _PREFLIGHT_CACHE_PATH.exists():
+            age = time.time() - _PREFLIGHT_CACHE_PATH.stat().st_mtime
+            if age < max_age_secs:
+                try:
+                    cached = _json.loads(_PREFLIGHT_CACHE_PATH.read_text())
+                    if isinstance(cached, dict) and cached:
+                        return cached
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    ctx = _opencode_pre_flight_context(session)
+    try:
+        _PREFLIGHT_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _PREFLIGHT_CACHE_PATH.write_text(_json.dumps(ctx, default=str))
+    except Exception:
+        # Cache write is best-effort; ctx is fine to use uncached.
+        pass
+    return ctx
+
+
 def _opencode_pre_flight_context(session) -> dict:
     """Gather rich runtime context for the system prompt."""
     from datetime import datetime, timedelta
@@ -12595,49 +12756,21 @@ def _opencode_pre_flight_context(session) -> dict:
     except Exception:
         pass
 
-    # Today's prompt: a single concrete starter question seeded from the
-    # last 7 days of activity. Cheap LLM call (best-effort) so opencode
-    # always opens with something actionable instead of a blank cursor.
+    # Today's prompt: a single concrete starter question seeded from
+    # the last 7 days of activity. Used to be a synchronous LLM call
+    # with 8s timeout — for cold local models on thermally-throttled
+    # hardware that 8s fired every launch and was the dominant
+    # launch-startup cost (3-8s out of ~7s total). The starter
+    # question is a UI-nicety, not load-bearing.
+    #
+    # New behaviour: skip the LLM call entirely. opencode opens
+    # without a custom starter; placeholders in the prompt slot
+    # already rotate through useful suggestions ("ask_notes",
+    # "search_notes", "/walk", etc.) — those are static and free.
+    # If we want LLM-generated openers later, do it async (write to
+    # sidebar-status.json AFTER opencode is up) instead of blocking
+    # the launch path.
     todays_prompt = ""
-    # Time-box the LLM call hard. This is a UI-nicety prompt — under no
-    # circumstance should it block `launch` from spawning opencode. If
-    # Ollama is overloaded, missing the model, or the configured fast_model
-    # is too big to fit in RAM (the original symptom that started this
-    # whole thread), the user gets an empty starter prompt and moves on.
-    try:
-        if recent and ollama_url:
-            from .llm import chat as _chat
-            recent_titles = [n.title for n in recent[:5] if n.title]
-            top_words = ", ".join(t for t, _ in tag_counts.most_common(5)) \
-                        if tag_counts else "(no tags yet)"
-            chat_mdl = (cfg_rows.get("fast_model")
-                        or cfg_rows.get("chat_model")
-                        or "llama3.2")
-            sys_msg = (
-                "You suggest one short, concrete starter question that helps "
-                "a user re-engage with their org-roam knowledge base. Output "
-                "ONE question only — no preamble, no quotes, no numbering. "
-                "8-18 words."
-            )
-            user_msg = (
-                f"Recent note titles: {recent_titles}\n"
-                f"Top tags: {top_words}\n\n"
-                "Suggest one question they might want to start their session with."
-            )
-            try:
-                resp = _chat(user_msg, model=chat_mdl,
-                             base_url=ollama_url, system=sys_msg,
-                             timeout=8.0)
-                # Take first non-empty line, trim quoting/numbering cruft.
-                for line in (resp or "").splitlines():
-                    line = line.strip(" -–—•\"'").strip()
-                    if 8 <= len(line) <= 200:
-                        todays_prompt = line
-                        break
-            except Exception:
-                pass
-    except Exception:
-        pass
 
     # Persona block — concrete behavioral rules for active dials/knobs.
     # Distinct from `knobs_str` (which just LISTS active dials) — the
@@ -14045,12 +14178,65 @@ def launch(
 
     # ── Gather rich vault + filesystem + theme context ─────────────────────
     engine = _engine()
+    # Promote any stale default config values to their current
+    # defaults (defaults map in db.py only seeds NEW DBs; without
+    # this step, users on a long-running install keep the old
+    # values forever even after we ship better defaults).
+    try:
+        from .db import promote_stale_defaults
+        promoted = promote_stale_defaults(engine)
+        if promoted:
+            for k, (old, new) in promoted.items():
+                on_screen(f"  [dim]promoted default {k}: {old} → {new}[/dim]")
+    except Exception as e:
+        on_screen(f"  [dim]config promotion skipped: {e}[/dim]")
     with get_session(engine) as session:
-        ctx = _opencode_pre_flight_context(session)
+        ctx = _opencode_pre_flight_context_cached(session)
         chat_mdl = model or _cfg(session, "chat_model") or MODEL_DEFAULTS["chat_model"]
         cloud_provider = _cfg(session, "cloud_provider")
         cloud_model    = _cfg(session, "cloud_model")
         cloud_endpoint = _cfg(session, "cloud_endpoint_url")
+        ollama_url_for_warmup = _ollama_url(session)
+
+    # Kick off chat-model warmup in the background. ollama lazy-loads
+    # models on the first request, costing 5-30s on cold disk
+    # (especially on thermally-throttled hardware). Without warmup,
+    # the user's first prompt pays that cost — visible as a 30s+
+    # hang before the proxy gives up on local and fails over to
+    # cloud. The warmup is a tiny "ping" completion that returns
+    # nothing useful but forces ollama to load the model into RAM
+    # so subsequent real requests stream the first byte fast.
+    #
+    # Fire-and-forget on a daemon thread; never blocks launch. If
+    # ollama isn't reachable / model isn't pulled / call errors,
+    # we silently move on — the worst case is the user pays the
+    # cold-load on their first prompt (which is what they would
+    # have anyway).
+    if not dry_run and chat_mdl and ollama_url_for_warmup:
+        def _warmup_chat_model() -> None:
+            try:
+                import urllib.request as _ur
+                import json as _json
+                payload = _json.dumps({
+                    "model": chat_mdl,
+                    "messages": [{"role": "user", "content": "."}],
+                    "stream": False,
+                    "options": {"num_predict": 1, "keep_alive": "24h"},
+                }).encode()
+                req2 = _ur.Request(
+                    f"{ollama_url_for_warmup.rstrip('/')}/v1/chat/completions",
+                    data=payload, method="POST",
+                    headers={"Content-Type": "application/json"},
+                )
+                # 60s ceiling — cold-load on a slow disk + thermally-
+                # throttled CPU can be ~30s for a 4GB model. Worst
+                # case we abort cleanly.
+                with _ur.urlopen(req2, timeout=60) as r:
+                    r.read()
+            except Exception:
+                pass
+        import threading as _th_warm
+        _th_warm.Thread(target=_warmup_chat_model, daemon=True).start()
 
     org_dir     = Path(ctx["org_dir"]).expanduser()
     ollama_url  = ctx["ollama_url"]
@@ -14204,6 +14390,62 @@ def launch(
         _cards = []
         # never block launch on insight gen failure
 
+    # ── Auto-pull any configured local role models that aren't yet
+    # in ollama. Without this, the freshly-built opencode.json
+    # references models the proxy can't satisfy → opencode shows a
+    # picker entry for the model but every chat call to it 404s. The
+    # auto-doctor used to surface a manual "ollama pull X" step;
+    # rolling that into launch removes the manual round-trip and is
+    # the cheapest fix for the staleness the /model picker showed.
+    #
+    # We pull EVERY role model (chat, fast, code, reason, instruct,
+    # text, embed) — embed models won't appear in the opencode picker
+    # (filtered by _is_embed_model below) but org-llm itself needs
+    # them for its semantic-search index, so an unpulled embed_model
+    # is its own kind of broken-launch we can fix here in one pass.
+    try:
+        pulled_pre = _pulled_normalized(ollama_url)
+    except Exception:
+        pulled_pre = set()
+    if not dry_run:
+        try:
+            with get_session(engine) as session2:
+                role_models_raw: list[str] = []
+                for _, key, _ in _TASK_MODEL_KEYS:
+                    v = _cfg(session2, key)
+                    if v:
+                        role_models_raw.append(v)
+            role_models_raw.append(chat_mdl)
+            # De-dupe; drop cloud-prefixed and empty values. Cloud
+            # entries (e.g. "openai/gpt-oss-20b") have a slash;
+            # ollama doesn't, so this is a clean discriminator.
+            role_models = sorted({
+                m for m in role_models_raw
+                if m and "/" not in m
+            })
+            missing = [m for m in role_models if not _is_pulled(m, pulled_pre)]
+            if missing:
+                hail(f"Auto-pulling {len(missing)} missing role "
+                     f"model(s): {', '.join(missing)}")
+                for m in missing:
+                    ok = _ollama_pull(m, stall_secs=180.0)
+                    if ok:
+                        on_screen(f"  ✓ pulled [bold]{m}[/bold]")
+                    else:
+                        on_screen(f"  ✗ failed to pull [bold]{m}[/bold] "
+                                  f"— opencode entry will 404 if "
+                                  f"selected. Pull manually: "
+                                  f"[bold]ollama pull {m}[/bold]")
+                # Re-read pulled tags so the opencode-config block
+                # below sees the just-pulled models in
+                # `ollama_models_map`.
+                try:
+                    pulled_pre = _pulled_normalized(ollama_url)
+                except Exception:
+                    pass
+        except Exception as e:
+            on_screen(f"  [dim]auto-pull skipped: {e}[/dim]")
+
     # ── Build .opencode.json ──────────────────────────────────────────────────
     #
     # Augmented (Phase 15): write BOTH providers (Ollama + cloud) into
@@ -14213,10 +14455,7 @@ def launch(
     # one is the DEFAULT (the top-level `model` field).
     #
     # Ollama provider block (always written if reachable):
-    try:
-        pulled = sorted(_pulled_normalized(ollama_url))
-    except Exception:
-        pulled = []
+    pulled = sorted(pulled_pre)
     # Filter out embedding-only models (nomic-embed-text, etc.) —
     # they're not chat-capable and clutter opencode's model picker.
     # _is_embed_model() is the canonical check used elsewhere in
@@ -14224,7 +14463,7 @@ def launch(
     ollama_models_map = {
         tag: {
             "name":      tag,
-            "tool_call": True,
+            "tool_call": _supports_tool_call(tag),
             # Per-model options for the Ollama backend.
             #
             # `num_ctx`: 16384. Earlier value (32768) was 2× what we

@@ -270,6 +270,35 @@ export const tui: TuiPlugin = async (api) => {
     // subsystem isn't available.
   }
 
+  // Live active-model override: keep the sidebar's ACTIVE/MODEL
+  // cards in sync when the user swaps model mid-session via
+  // opencode's `/model` picker. Without this the cards reflect
+  // whatever model was current at launch time and lie about
+  // which provider just answered.
+  try {
+    const { setActiveModelOverride } = await import("./panel");
+    // api.event is documented in tui.d.ts but `event` is missing from
+    // TuiPluginApi's TS surface in 1.14.32 — cast to access it
+    // (other modules use @ts-nocheck to sidestep this; the cast is
+    // localised here).
+    (api as any).event?.on?.("message.updated", (e: any) => {
+      try {
+        const msg = e?.properties?.info;
+        if (msg?.role !== "assistant") return;
+        const provider = msg?.model?.providerID;
+        const modelID  = msg?.model?.modelID;
+        if (typeof provider === "string" && typeof modelID === "string"
+              && provider && modelID) {
+          setActiveModelOverride(provider, modelID, Date.now());
+        }
+      } catch {
+        // never break the event handler
+      }
+    });
+  } catch {
+    // Best-effort — sidebar override is a polish, not load-bearing.
+  }
+
   const directory = api.state.path.directory;
   const { cards, autoOpen } = await loadCards(directory);
 

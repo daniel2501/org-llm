@@ -452,7 +452,13 @@ MODEL_DEFAULTS = {
     # Set to 0 to disable the watcher entirely. The system-prompt
     # proactive_doctor instructions don't help when the LLM is
     # stuck mid-response; this watches from OUTSIDE the loop.
-    "sidebar_slow_llm_threshold_ms":  "25000",
+    # 45s — bumped from 25s after user reports of cold-start +
+    # tool-heavy + thermally-throttled prefills tripping the
+    # threshold before the first response chunk landed. Once any
+    # part type lands the watcher disarms; this number only
+    # matters for "no activity at all" cases, where 45s is a
+    # better signal of actually-stuck.
+    "sidebar_slow_llm_threshold_ms":  "45000",
     # LCARS prompt sigil — folded into the top-left CORNER of the
     # rounded prompt box (replaces the `╭` glyph). Empty string
     # disables (corner falls back to plain rounded `╭`). The
@@ -527,7 +533,17 @@ MODEL_DEFAULTS = {
     # — equivalent to setting `proxy_cloud_failover_enabled=false`
     # but kept distinct so the kill-switch's "off" isn't confused
     # with a misconfigured threshold of 0.
-    "proxy_first_byte_timeout_ms":    "8000",
+    # 30000 — bumped from 8000 after user reports of cold-start
+    # + tool-heavy + thermally-throttled prefills (gemma3 reached
+    # for 64-tool MCP context) tripping the failover before the
+    # local model could emit its first byte. The popup "switched
+    # to qwen due to slowness" was misleading — local wasn't
+    # broken, it just hadn't started streaming yet. 30s gives
+    # cold-loaded heavy models enough headroom for prefill while
+    # still failing over reasonably fast on actually-stuck local
+    # upstreams (network refused, ollama crashed, etc.). Audit
+    # via `scripts/audit_phase17.py` p95 if you need to tune.
+    "proxy_first_byte_timeout_ms":    "30000",
     # ── Cloud catalog auto-refresh (Phase 18) ──────────────────────────
     # Every `org-llm launch` checks for new cloud models in the
     # background. Without this the bundled catalog drifts behind
@@ -703,6 +719,52 @@ def init_db(engine) -> None:
             if not s.get(Config, k):
                 s.add(Config(key=k, value=v))
         s.commit()
+
+
+# When we change a default value in MODEL_DEFAULTS, existing user
+# DBs keep the old value because init_db only inserts missing keys
+# — so the user doesn't get the upgrade.
+#
+# This map records "we used to default to X, we now default to Y;
+# if a user's DB still has exactly X, promote it to Y." The
+# guardrail is the equality check: if the user hand-tuned the value,
+# their custom value won't equal the old default and we leave it
+# alone. Add an entry whenever you bump a sensitivity or threshold
+# default mid-flight; remove the entry once enough time has passed
+# that most users have migrated.
+_PROMOTED_DEFAULTS = {
+    # 2026-05 — auto-doctor was too eager (cold-start prefill on
+    # thermal-throttled CPUs hit the 25s threshold). 45s gives real
+    # work time to land before suggesting fixes.
+    "sidebar_slow_llm_threshold_ms":  ("25000", "45000"),
+    # 2026-05 — cloud failover was rerouting cold-start gemma3 +
+    # 64 MCP tools mid-prefill at the 8s mark, even though local
+    # was working fine. 30s lets cold heavy models finish prefill
+    # before the failover decision.
+    "proxy_first_byte_timeout_ms":    ("8000",  "30000"),
+}
+
+
+def promote_stale_defaults(engine) -> dict[str, tuple[str, str]]:
+    """For each (key, (old, new)) in _PROMOTED_DEFAULTS, if the DB
+    still holds `old`, update it to `new`. Returns a dict of
+    `{key: (old, new)}` for everything actually promoted, so the
+    caller can surface a one-line "promoted N defaults" summary
+    (or an entry in the captain's log).
+
+    Safe re-run: idempotent — once a key has been promoted (or
+    hand-tuned away from the old default), this is a no-op."""
+    promoted: dict[str, tuple[str, str]] = {}
+    with Session(engine) as s:
+        for key, (old, new) in _PROMOTED_DEFAULTS.items():
+            row = s.get(Config, key)
+            if row is None or row.value != old:
+                continue
+            row.value = new
+            promoted[key] = (old, new)
+        if promoted:
+            s.commit()
+    return promoted
 
 
 def get_session(engine) -> Session:

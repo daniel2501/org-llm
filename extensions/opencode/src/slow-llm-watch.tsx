@@ -30,7 +30,7 @@
  */
 
 import type { SidebarConfig } from "./panel";
-import { getStatus, showToast } from "./panel";
+import { getStatus, showToast, getActiveModelOverride } from "./panel";
 import {
   runOrgLlm, runAndInject, runSwitchLocalModel,
   injectChatMessage, activeSessionID, frame,
@@ -48,6 +48,7 @@ export type ProposalAction =
   | { kind: "reclaim" }
   | { kind: "cloud" }
   | { kind: "sysmodel"; model: string }
+  | { kind: "keep-alive"; value: string }   // proxy_prompt_keep_alive
   | { kind: "info" };          // surfaced but not auto-applicable
 
 export interface Proposal {
@@ -91,6 +92,36 @@ export async function applyProposal(
       return;
     case "sysmodel":
       await runSwitchLocalModel(api, sessionID, a.model);
+      return;
+    case "keep-alive":
+      // Persist proxy_prompt_keep_alive (read by intercept_prompt_cache
+      // in org_llm/llm_proxy.py) — the proxy injects this value into
+      // every local-shape /chat/completions request, telling Ollama to
+      // keep the model warm between commands. No shell-rc surgery
+      // required; the value lives in org-llm config and survives
+      // restarts. Note: this affects opencode-mediated traffic.
+      // Direct `ollama run` calls still need OLLAMA_KEEP_ALIVE in
+      // shell env — but those aren't org-llm's concern.
+      try {
+        const proc = Bun.spawn(
+          ["org-llm", "config", "proxy_prompt_keep_alive", a.value],
+          { stdout: "pipe", stderr: "pipe" },
+        );
+        await proc.exited;
+        const ok = proc.exitCode === 0;
+        await injectChatMessage(api, sessionID,
+          ok
+            ? `  [✓] Persisted proxy_prompt_keep_alive = ${a.value}.  ` +
+              `The proxy will inject this on every local LLM request — ` +
+              `Ollama keeps the model warm between commands.`
+            : `  [✗] Failed to persist proxy_prompt_keep_alive. ` +
+              `Run manually:  org-llm config proxy_prompt_keep_alive ${a.value}`,
+        );
+      } catch (err) {
+        await injectChatMessage(api, sessionID,
+          `  [✗] keep-alive persist threw: ${(err as Error)?.message ?? "unknown"}`,
+        );
+      }
       return;
     case "info":
       await injectChatMessage(api, sessionID,
@@ -240,6 +271,11 @@ function parseDoctorAction(output: string): {
 }
 
 let _lastUserMessageAt = 0;
+// Last user message ID we armed the watcher for. Used to dedupe
+// the multiple `message.updated` events opencode fires per user
+// message (creation → summary attach → metadata refresh) so
+// post-response re-arms don't trigger a phantom auto-doctor.
+let _armedForUserMsgID = "";
 let _lastUserMessageText = "";
 let _aiResponding = false;
 let _toastedThisRound = false;
@@ -275,14 +311,7 @@ export function registerSlowLLMWatch(
   const offMsg = api.event?.on?.("message.updated", (e: any) => {
     const msg = e?.properties?.info;
     // Phase 18.4-iter20: assistant message updates are evidence of
-    // streaming progress — disarm the stopwatch. Earlier we early-
-    // returned on non-user messages, missing the case where the
-    // cloud failover (or any slow-but-streaming model) had been
-    // emitting text-part updates the whole time but the watcher
-    // never noticed because the only "part.updated" events that
-    // arrived were lifecycle markers (step-start, step-finish,
-    // patch) without a "text" type. The MESSAGE-level update with
-    // role=assistant is a more reliable activity signal.
+    // streaming progress — disarm the stopwatch.
     if (msg?.role && msg.role !== "user") {
       _aiResponding = true;
       return;
@@ -291,17 +320,37 @@ export function registerSlowLLMWatch(
     const text = extractUserText(msg);
     // ALWAYS update the cached text so the poll's safety check
     // (below) can detect /sys content even if events arrive out
-    // of order. opencode can fire message.updated multiple times
-    // for the same user message (metadata first, parts later);
-    // an early-return in the /sys path would leave stale state
-    // that the empty-text event then re-armed.
+    // of order.
     _lastUserMessageText = text;
-    _aiResponding        = false;
-    _toastedThisRound    = false;
+
+    // Phase 18.6: dedupe by message ID. opencode fires
+    // `message.updated` repeatedly for the SAME user message —
+    // first on creation (metadata only), then again when the
+    // assistant turn lands and the user message gets a `summary`
+    // diff attached, then again on subsequent metadata changes.
+    // Earlier this code reset `_aiResponding=false` and bumped
+    // `_lastUserMessageAt` on every fire, which re-armed the
+    // watcher AFTER the LLM had already responded — so the
+    // auto-doctor fired against a turn that completed cleanly.
+    // Audit log of the case that surfaced this:
+    //   13:38:16 cloud_failover_no_tools 200 9154ms — real reply
+    //   13:38:25-ish: opencode populates user.summary → fires
+    //                  message.updated for the user msg again
+    //   13:38:25+45s: poll fires doctor on a turn that's done
+    //
+    // Fix: only reset arm-state when the user-message ID is NEW.
+    // Repeated updates for the same ID just refresh text +
+    // return.
+    const msgID = typeof msg?.id === "string" ? msg.id : "";
+    if (msgID && msgID === _armedForUserMsgID) {
+      // Same message, late metadata update. Don't re-arm.
+      return;
+    }
+    _armedForUserMsgID = msgID;
+    _aiResponding      = false;
+    _toastedThisRound  = false;
     if (text.trim().startsWith("/sys")) {
-      // /sys* commands are local subprocess invocations or
-      // direct sidebar actions — never LLM round-trips. Disarm
-      // unconditionally so the auto-doctor can't trip on them.
+      // /sys* commands never round-trip the LLM. Disarm.
       _lastUserMessageAt = 0;
     } else {
       _lastUserMessageAt = Date.now();
@@ -405,28 +454,44 @@ async function runAutoDoctorFlow(
     message: `Local model thinking ${elapsedSec}s. Auto-doctor engaging…`,
   });
 
-  // 1. Abort the stuck LLM call so the user isn't waiting in vain.
-  if (sessionID) {
-    try {
-      await api.client?.session?.abort?.({ sessionID });
-    } catch {
-      // No-op — abort is best-effort.
-    }
-  }
+  // 1. DO NOT abort the LLM call here.
+  //
+  // Earlier iterations called session.abort() to "free the user
+  // from waiting." That decision turned out wrong for the common
+  // case: cold-start + thermal-throttled inference + tool-heavy
+  // prompts can legitimately spend 30-60s in prefill before the
+  // first chunk arrives. Aborting at the threshold means the user
+  // NEVER got the response they were waiting for, AND the
+  // auto-doctor's proposal frame replaces it. They lost work,
+  // didn't gain a fix.
+  //
+  // New contract: auto-doctor SUGGESTS, never INTERRUPTS. We
+  // inject the diagnostic + proposal frames as parallel chat
+  // messages; the LLM keeps streaming whenever it lands. If the
+  // user wants to abandon the in-flight request, they can apply a
+  // proposal that explicitly does so (/syscloud, /sysmodel) — that
+  // path relaunches and replaces the session anyway.
+  //
+  // Bonus: removing the abort fixes the "sidebar didn't update on
+  // model swap" symptom for cold-start prompts. The override is
+  // set on the assistant's first message.updated event; aborting
+  // pre-empted that event from ever firing, leaving the sidebar
+  // stuck on the launch-time model.
 
-  // Pull the actually-running model from the sidebar status — the
-  // doctor reads `chat_model` from the config DB, which can diverge
-  // from what's actually loaded (cli.py overrides chat_model to
-  // sidebar_auto_session_local_model when auto_session_use_cloud is
-  // false, to ensure tool support). Pass it through `--for-model`
-  // so the doctor analyzes the runtime model instead of the
-  // configured one. The "Currently running" line in the chat
-  // injection still surfaces this state explicitly so the user can
-  // verify the doctor and the sidebar agree on what's loaded.
+  // Pull the actually-running model from (a) the live override —
+  // updated on every assistant message.updated, so it reflects
+  // mid-session model swaps via opencode's /model picker — falling
+  // back to (b) the launch-time sidebar status. The doctor reads
+  // `chat_model` from the config DB, which is even more stale, so
+  // we pass `--for-model` with our best-known value to make the
+  // power-boost analysis target the runtime model rather than the
+  // configured one.
   const status = getStatus();
-  const runningModel = status?.model?.active ?? "";
-  const provider     = status?.model?.provider ?? "";
-  const route        = status?.model?.route ?? "local";
+  const ovr = getActiveModelOverride();
+  const runningModel = ovr?.model || status?.model?.active || "";
+  const provider     = ovr?.provider || status?.model?.provider || "";
+  const route        = ovr ? (ovr.provider === "ollama" ? "local" : "cloud")
+                              : (status?.model?.route ?? "local");
   const runningDisplay = runningModel || "(unknown)";
   const runningLine  = provider
     ? `${runningDisplay} via ${provider} · ${route}`
@@ -611,17 +676,21 @@ async function runAutoDoctorFlow(
         action: { kind: "cloud" },
       });
 
-      // Perf tuning — informational, env-var-only for now.
+      // Perf tuning — applyable via org-llm config. The proxy's
+      // intercept_prompt_cache reads `proxy_prompt_keep_alive` and
+      // injects it on every local /chat/completions request, so
+      // setting it here keeps Ollama from unloading the model
+      // between commands without needing the user to edit shell rc.
       proposals.push({
         id: num(),
         emoji: "🔧",
         heading: "Keep model loaded between commands",
         bullets: [
-          "Avoids cold-start on subsequent commands. Run in your shell:",
-          "`export OLLAMA_KEEP_ALIVE=24h`",
+          "Persist proxy_prompt_keep_alive=24h. Avoids Ollama cold-start" +
+            " on subsequent commands.",
         ],
-        slashHint: "(env var, manual)",
-        action: { kind: "info" },
+        slashHint: "/sysapply " + (proposals.length + 1),
+        action: { kind: "keep-alive", value: "24h" },
       });
 
       // Cache so /sysapply can fire actions by number later.
@@ -645,7 +714,16 @@ async function runAutoDoctorFlow(
         }
         if (p.action.kind !== "info") {
           const hint = stripSlash(p.slashHint);
-          body.push(`     Apply:  ${hint}   or:  sysapply ${p.id}`);
+          // De-dup: when slashHint is already "sysapply N" (the
+          // keep-alive proposal does this for lack of a dedicated
+          // slash), don't render "Apply: sysapply N   or: sysapply N".
+          // Compare on the rendered hint (stripSlash already applied).
+          const fallback = `sysapply ${p.id}`;
+          if (hint === fallback) {
+            body.push(`     Apply:  ${fallback}`);
+          } else {
+            body.push(`     Apply:  ${hint}   or:  ${fallback}`);
+          }
         } else {
           body.push(`     ${stripSlash(p.slashHint)}`);
         }

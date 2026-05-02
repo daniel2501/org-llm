@@ -341,6 +341,45 @@ export function setLastFailover(model: string, ts: number): void {
   _lastFailover = { model, ts };
 }
 
+
+// ── Active-model live override ────────────────────────────────────
+//
+// `sidebar-status.json` is stamped by `org-llm launch` and reflects
+// whatever model was active at launch time. Mid-session the user
+// can swap models several ways:
+//   • opencode's `/model` picker
+//   • our `/sysmodel <name>` (which relaunches, so the file is
+//     refreshed — but the user still sees the old model briefly)
+//   • cloud failover (handled separately by _lastFailover)
+//
+// In the first two cases nothing was updating the ACTIVE card's
+// "model …" / "via …" rows, so the sidebar lied about which model
+// would answer the next prompt.
+//
+// `_activeModelOverride` is updated whenever an assistant message
+// fires through message.updated with model info — that's the
+// authoritative "the most recent answer came from THIS model"
+// signal. Cleared via `setActiveModelOverride(null)` on relaunch
+// markers if needed (currently auto-restamped by every assistant
+// turn, so explicit clearing isn't required).
+let _activeModelOverride: {
+  provider: string;
+  model: string;
+  ts: number;
+} | null = null;
+
+export function getActiveModelOverride(): {
+  provider: string; model: string; ts: number;
+} | null {
+  return _activeModelOverride;
+}
+
+export function setActiveModelOverride(
+  provider: string, model: string, ts: number,
+): void {
+  _activeModelOverride = { provider, model, ts };
+}
+
 // Sidebar scrollbox ref, captured by PanelBody's scrollbox `ref`
 // callback. Exposed via setSidebarScrollRef / scrollSidebar so the
 // keybind handler in sidebar.tsx and the /sysup / /sysdown slash
@@ -569,10 +608,16 @@ function SectionActive(props: { s: SidebarStatus; t: any; color: any }) {
   const a = props.s.active ?? {};
   const m = props.s.model ?? {};
   const { t, color } = props;
-  // Truncate cloud model names like "openai/gpt-oss-20b:free" so the
-  // row doesn't overflow narrow sidebars. Show last 17 chars +
-  // ellipsis prefix to keep the recognisable suffix.
-  const modelStr = m.active ?? "";
+  // Prefer the live override (most-recent assistant message's model)
+  // over the launch-time snapshot. The override is updated on every
+  // assistant message.updated event (sidebar.tsx subscribes), so a
+  // mid-session model swap reflects in the ACTIVE card without
+  // re-launching opencode.
+  const ovr = getActiveModelOverride();
+  const modelStr = ovr?.model || m.active || "";
+  const providerStr = ovr?.provider || m.provider || "";
+  const routeStr = ovr ? (ovr.provider === "ollama" ? "local" : "cloud")
+                         : (m.route || "—");
   const modelDisplay = modelStr.length > 18 ? "…" + modelStr.slice(-17) : modelStr;
   return (
     <SectionCard color={color} title="ACTIVE">
@@ -592,13 +637,13 @@ function SectionActive(props: { s: SidebarStatus; t: any; color: any }) {
           <text fg={t.text}>{modelDisplay}</text>
         </box>
       )}
-      {m.provider && (
+      {providerStr && (
         <box flexDirection="row">
           <text fg={t.textMuted}>via     </text>
-          <text fg={t.accent}>{m.provider}</text>
+          <text fg={t.accent}>{providerStr}</text>
           <text fg={t.textMuted}> · </text>
-          <text fg={m.route === "cloud" ? t.warning : t.success}>
-            {m.route ?? "—"}
+          <text fg={routeStr === "cloud" ? t.warning : t.success}>
+            {routeStr}
           </text>
         </box>
       )}
@@ -626,9 +671,12 @@ function SectionActive(props: { s: SidebarStatus; t: any; color: any }) {
 function SectionModel(props: { s: SidebarStatus; t: any; color: any }) {
   const m = props.s.model ?? {};
   const { t, color } = props;
-  // Truncate cloud model names like "openai/gpt-oss-20b:free" so
-  // the card body stays tidy at standard sidebar widths.
-  const model = m.active ?? "—";
+  // Mid-session override (see SectionActive for full rationale).
+  const ovr = getActiveModelOverride();
+  const model = ovr?.model || m.active || "—";
+  const provider = ovr?.provider || m.provider || "—";
+  const route = ovr ? (ovr.provider === "ollama" ? "local" : "cloud")
+                       : (m.route || "—");
   const modelDisplay = model.length > 18
     ? "…" + model.slice(-17)
     : model;
@@ -640,12 +688,12 @@ function SectionModel(props: { s: SidebarStatus; t: any; color: any }) {
       </box>
       <box flexDirection="row">
         <text fg={t.textMuted}>via    </text>
-        <text fg={t.accent}>{m.provider || "—"}</text>
+        <text fg={t.accent}>{provider}</text>
       </box>
       <box flexDirection="row">
         <text fg={t.textMuted}>route  </text>
-        <text fg={m.route === "cloud" ? t.warning : t.success}>
-          {m.route ?? "—"}
+        <text fg={route === "cloud" ? t.warning : t.success}>
+          {route}
         </text>
       </box>
     </SectionCard>

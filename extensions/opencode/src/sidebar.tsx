@@ -20,6 +20,7 @@
 
 import {
   refreshStatus, getStatus, resolveConfig, PanelBody, fmtAge,
+  getActiveModelOverride, setActiveModelOverride,
   scrollSidebar, showToast, setLastFailover,
 } from "./panel";
 import { getPromptRef } from "./auto-session";
@@ -102,6 +103,12 @@ function HomeStatusBanner(props: { theme: any }) {
   if (s.config === undefined) return null;
   const v = s.vault ?? {};
   const m = s.model ?? {};
+  // Live model override: same precedence as SectionActive/Model in
+  // panel.tsx — the most-recent assistant turn's model wins over the
+  // launch-time JSON snapshot.
+  const ovr = getActiveModelOverride();
+  const provider = ovr?.provider || m.provider || "ollama";
+  const active = ovr?.model || m.active || "—";
   return (
     <box flexDirection="row" justifyContent="center" paddingTop={1}>
       <text fg={t.primary}>★ </text>
@@ -109,9 +116,9 @@ function HomeStatusBanner(props: { theme: any }) {
       <text fg={t.textMuted}>  ·  </text>
       <text fg={t.text}>{v.pct_embedded ?? 0}% indexed</text>
       <text fg={t.textMuted}>  ·  </text>
-      <text fg={t.accent}>{m.provider || "ollama"}</text>
+      <text fg={t.accent}>{provider}</text>
       <text fg={t.textMuted}>:</text>
-      <text fg={t.text}>{(m.active || "—").slice(-18)}</text>
+      <text fg={t.text}>{active.slice(-18)}</text>
       <text fg={t.textMuted}>  ·  </text>
       <text fg={t.textMuted}>{fmtAge(s.generated_at)} ago</text>
       <text fg={t.primary}> ★</text>
@@ -320,16 +327,27 @@ export async function registerSidebar(api: any): Promise<void> {
           break;
         }
         case "cloud-failover": {
-          // Phase 18.4-iter15: dual-purpose action emitted by the
-          // proxy when failover succeeds. (1) Toast for immediate
-          // notification. (2) Persistent indicator on the ACTIVE
-          // card via setLastFailover, surfaced by SectionActive
-          // for the next 10 minutes. Closes the visibility gap
-          // where the static "model llama3.2 / via ollama · local"
-          // row gave no clue cloud was actually answering.
+          // Phase 18.4-iter15 + 18.6: triple-purpose action emitted
+          // by the proxy when cloud_failover OR cloud_first wins a
+          // turn.
+          //   (1) Toast for immediate notification.
+          //   (2) Ephemeral ☁ indicator on the ACTIVE card via
+          //       setLastFailover (10-min auto-fade).
+          //   (3) Live model override — relabels the ACTIVE/MODEL
+          //       cards' top rows from "qwen3:4b / route: local" to
+          //       "<cloud-model> / route: cloud". Without this,
+          //       cloud_first turns showed misleading local routing
+          //       on the headline rows even though the proxy was
+          //       quietly redirecting every request.
           const model = (data as any).model;
           if (typeof model === "string" && model) {
             setLastFailover(model, ts);
+            // Use a synthetic provider tag so the route derivation
+            // in panel.tsx (provider==="ollama" → local, else
+            // cloud) reads "cloud". The actual upstream provider
+            // is opaque from the plugin's perspective; what
+            // matters is that the user sees route flipped.
+            setActiveModelOverride("cloud", model, ts);
             showToast(api, {
               variant: "info",
               title:   "☁ cloud failover",
