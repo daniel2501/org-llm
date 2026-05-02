@@ -888,12 +888,49 @@ def intercept_shell(req: ProxyRequest) -> Optional[ProxyResponse]:
     return _empty_assistant_response(model, streaming, content=body)
 
 
+def _known_agents(org_dir: Path) -> set[str]:
+    """Read the agent registry from opencode.json's `agent` block.
+    The launcher writes the resolved set there at launch time
+    (defaults + ~/org/org-llm-agents.org overrides), so this is the
+    canonical source of truth for "which @<name> values are real
+    agents in this session."
+
+    Returns an empty set on any error — caller treats unknown
+    sets as a typo-detection no-op (falls through, opencode does
+    whatever it does with @<name>)."""
+    try:
+        cfg_path = org_dir / ".opencode" / "opencode.json"
+        cfg = json.loads(cfg_path.read_text())
+        agent_block = cfg.get("agent") or {}
+        if isinstance(agent_block, dict):
+            return set(agent_block.keys())
+    except Exception:
+        pass
+    return set()
+
+
 def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
-    """`@<agent> <prompt>` — per-turn agent override. Stub for now;
-    actual agent registry is on the roadmap (Wishlist >
-    Preconfigured agents). Returns a friendly explanation rather
-    than silently ignoring the prefix so the user knows it'll
-    come later."""
+    """`@<agent> <prompt>` — per-turn agent override.
+
+    Behaviour:
+      • Known agent (in opencode.json's `agent` block) → fall through.
+        opencode handles native @-routing; the proxy stays out of the
+        way. The launcher writes 13 preconfigured agents
+        (researcher / scribe / engineer / triager / planner /
+        summarizer / librarian / vision-analyst / extractor /
+        reviewer / writer / translator / analyst) plus the internal
+        org-llm / build / org-llm-greeter; user customisations from
+        ~/org/org-llm-agents.org also land in opencode.json.
+      • Unknown agent (typo or referencing one not in the registry)
+        → return a noop with a helpful error listing the valid
+        names. No LLM contact, no silent failure.
+
+    The earlier version of this interceptor returned the "not yet
+    shipped" stub for ALL @<name> prefixes; that was correct
+    before the Phase 18.7 agent registry landed and incorrect
+    after. Surfaced during walkthrough Step 3b (user typed
+    `@scribe greetings!` and got the stale stub instead of
+    routing to scribe)."""
     if not req.path.endswith("/chat/completions"):
         return None
     parsed = req.parsed_json
@@ -908,15 +945,29 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     if not m:
         return None
     agent = m.group(1)
+
+    # Resolve known agents from opencode.json. Use req.upstream's
+    # adjacent .opencode/ as the lookup directory, falling back to
+    # the env-overridden org_dir.
+    org_dir = Path(os.environ.get("ORG_LLM_ORG_DIR")
+                    or (Path.home() / "org"))
+    known = _known_agents(org_dir)
+    if agent in known:
+        return None   # opencode handles native @-routing; we stay out
+
+    # Unknown agent — typo or unconfigured. Surface available names
+    # so the user can correct without an LLM round-trip.
+    available = ", ".join(sorted(known))[:300] or "(no agents registered)"
     return _empty_assistant_response(
         parsed.get("model") or "unknown",
         bool(parsed.get("stream")),
         content=(
-            f"✗ @{agent} — preconfigured agents aren't shipped yet "
-            f"(see Roadmap > Wishlist > Preconfigured agents).\n\n"
-            f"For now, switch the chat model with:\n"
-            f"  `org-llm config chat_model <model>` + relaunch\n"
-            f"or pin a tool with `:tool <name> <query>`."
+            f"✗ @{agent} — no such agent in this session.\n\n"
+            f"Available agents: {available}\n\n"
+            f"To customise: `org-llm agents --tangle` writes "
+            f"~/org/org-llm-agents.org so you can edit prompts + "
+            f"add new :agent:-tagged headings. Re-launch picks "
+            f"them up."
         ),
     )
 
