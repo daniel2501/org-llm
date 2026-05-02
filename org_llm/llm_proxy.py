@@ -888,49 +888,60 @@ def intercept_shell(req: ProxyRequest) -> Optional[ProxyResponse]:
     return _empty_assistant_response(model, streaming, content=body)
 
 
-def _known_agents(org_dir: Path) -> set[str]:
+def _known_agents(org_dir: Path) -> dict[str, dict]:
     """Read the agent registry from opencode.json's `agent` block.
     The launcher writes the resolved set there at launch time
     (defaults + ~/org/org-llm-agents.org overrides), so this is the
     canonical source of truth for "which @<name> values are real
     agents in this session."
 
-    Returns an empty set on any error — caller treats unknown
-    sets as a typo-detection no-op (falls through, opencode does
-    whatever it does with @<name>)."""
+    Returns a dict keyed by agent name with the full definition
+    so callers can look up the prompt + model + permission set
+    for an agent. Empty dict on any error — caller treats absence
+    as a typo-detection no-op."""
     try:
         cfg_path = org_dir / ".opencode" / "opencode.json"
         cfg = json.loads(cfg_path.read_text())
         agent_block = cfg.get("agent") or {}
         if isinstance(agent_block, dict):
-            return set(agent_block.keys())
+            return {k: v for k, v in agent_block.items()
+                    if isinstance(v, dict)}
     except Exception:
         pass
-    return set()
+    return {}
 
 
 def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
-    """`@<agent> <prompt>` — per-turn agent override.
+    """`@<agent> <prompt>` — per-turn agent swap implemented at
+    the proxy layer.
 
-    Behaviour:
-      • Known agent (in opencode.json's `agent` block) → fall through.
-        opencode handles native @-routing; the proxy stays out of the
-        way. The launcher writes 13 preconfigured agents
-        (researcher / scribe / engineer / triager / planner /
-        summarizer / librarian / vision-analyst / extractor /
-        reviewer / writer / translator / analyst) plus the internal
-        org-llm / build / org-llm-greeter; user customisations from
-        ~/org/org-llm-agents.org also land in opencode.json.
-      • Unknown agent (typo or referencing one not in the registry)
-        → return a noop with a helpful error listing the valid
-        names. No LLM contact, no silent failure.
+    opencode 1.14.32's native @<name> is a HINT to the primary
+    agent to delegate via the `task` tool. With our preconfigured
+    agents set to `mode: "all"`, autocomplete works but the
+    delegation fails because opencode's task tool can't find them
+    as proper subagents — we get the default org-llm persona
+    answering with `task tool unavailable`-style fallback.
 
-    The earlier version of this interceptor returned the "not yet
-    shipped" stub for ALL @<name> prefixes; that was correct
-    before the Phase 18.7 agent registry landed and incorrect
-    after. Surfaced during walkthrough Step 3b (user typed
-    `@scribe greetings!` and got the stale stub instead of
-    routing to scribe)."""
+    What the user actually wants: ONE turn to use scribe's
+    persona + model. We do that here:
+
+      1. Match `@<name>` at the start of the latest user message.
+      2. Look up <name> in opencode.json's agent block.
+      3. Replace the request's system message with the agent's
+         `prompt`. Use the agent's `model` if set (overrides the
+         session's default chat_model for THIS turn).
+      4. Strip the `@<name>` prefix from the user content so the
+         LLM sees only the residual query.
+      5. Fall through to forward — request flows through the
+         normal chain (cloud-first, cloud-failover, prefix cache,
+         etc.).
+
+    Effect: per-turn persona swap. /agents picker still works for
+    session-level identity changes; @<name> is the lighter
+    per-turn override.
+
+    For unknown agent names, returns a noop listing the valid
+    ones so the user catches typos without an LLM round-trip."""
     if not req.path.endswith("/chat/completions"):
         return None
     parsed = req.parsed_json
@@ -946,30 +957,72 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
         return None
     agent = m.group(1)
 
-    # Resolve known agents from opencode.json. Use req.upstream's
-    # adjacent .opencode/ as the lookup directory, falling back to
-    # the env-overridden org_dir.
     org_dir = Path(os.environ.get("ORG_LLM_ORG_DIR")
                     or (Path.home() / "org"))
     known = _known_agents(org_dir)
-    if agent in known:
-        return None   # opencode handles native @-routing; we stay out
 
-    # Unknown agent — typo or unconfigured. Surface available names
-    # so the user can correct without an LLM round-trip.
-    available = ", ".join(sorted(known))[:300] or "(no agents registered)"
-    return _empty_assistant_response(
-        parsed.get("model") or "unknown",
-        bool(parsed.get("stream")),
-        content=(
-            f"✗ @{agent} — no such agent in this session.\n\n"
-            f"Available agents: {available}\n\n"
-            f"To customise: `org-llm agents --tangle` writes "
-            f"~/org/org-llm-agents.org so you can edit prompts + "
-            f"add new :agent:-tagged headings. Re-launch picks "
-            f"them up."
-        ),
+    if agent not in known:
+        # Unknown agent — typo or unconfigured. Surface available
+        # names so the user can correct without an LLM round-trip.
+        available = ", ".join(sorted(known))[:300] or "(no agents registered)"
+        return _empty_assistant_response(
+            parsed.get("model") or "unknown",
+            bool(parsed.get("stream")),
+            content=(
+                f"✗ @{agent} — no such agent in this session.\n\n"
+                f"Available agents: {available}\n\n"
+                f"To customise: `org-llm agents --tangle` writes "
+                f"~/org/org-llm-agents.org so you can edit prompts + "
+                f"add new :agent:-tagged headings. Re-launch picks "
+                f"them up."
+            ),
+        )
+
+    # Agent exists — perform the per-turn swap.
+    agent_def = known[agent]
+    agent_prompt = (agent_def.get("prompt") or "").strip()
+    agent_model  = (agent_def.get("model")  or "").strip()
+    if not agent_prompt:
+        # Agent registered without a prompt (e.g. opencode internals
+        # like `build`, `org-llm-greeter`). Just strip the prefix and
+        # let opencode handle native routing.
+        prefix_re = _re_mod.compile(
+            rf'^\s*@{_re_mod.escape(agent)}\s+', _re_mod.DOTALL,
+        )
+        _strip_prefix_from_last_user(parsed, prefix_re)
+        _reencode_body(req)
+        return None
+
+    # Replace the system message with the agent's prompt.
+    # opencode usually sends ONE system message at index 0; we
+    # overwrite it. If there's no system message, prepend one.
+    msgs = parsed.get("messages") or []
+    new_system = {"role": "system", "content": agent_prompt}
+    if msgs and isinstance(msgs[0], dict) and msgs[0].get("role") == "system":
+        msgs[0] = new_system
+    else:
+        msgs = [new_system] + msgs
+    parsed["messages"] = msgs
+
+    # Swap model if the agent has one declared. Cloud-prefixed
+    # values (provider/slug) keep their shape; bare local stems
+    # already had the provider id prepended at launch-time.
+    if agent_model:
+        parsed["model"] = agent_model
+
+    # Strip the @<name> prefix from the user message.
+    prefix_re = _re_mod.compile(
+        rf'^\s*@{_re_mod.escape(agent)}\s+', _re_mod.DOTALL,
     )
+    _strip_prefix_from_last_user(parsed, prefix_re)
+    _reencode_body(req)
+    # Fall through — forward path picks up the mutated request.
+    # Sidebar-runtime overlay will be updated by the plugin's
+    # message.updated handler with the model that actually
+    # answered (cloud-first / cloud-failover may swap it again).
+    # The agent override stamp also lands there so the sidebar's
+    # ACTIVE card flips its `agent` row.
+    return None
 
 
 # ── Tool-call dialect translation (Phase 18.7) ────────────────────
