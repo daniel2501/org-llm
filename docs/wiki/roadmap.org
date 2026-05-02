@@ -513,13 +513,23 @@ A prefix-keyed cache (system prompt → cached completion fragment)
 cuts time-to-first-token dramatically for repeated identical
 system prompts, especially under cold-start ollama load.
 
-** Cloud failover on first-byte timeout
+** Cloud failover on first-byte timeout                       :shipped:
+:PROPERTIES:
+:STATUS: shipped
+:END:
 
-Already on the proxy's =# Future interceptors= comment block.
-Detect first-byte timeout against local, transparently retry
-against cloud, stream cloud response back to opencode. Pairs
-with =slow-llm-watch.tsx=, which currently failovers AT next
-launch — this would handle it mid-request without a relaunch.
+Shipped 2026-05-02. Detects first-byte timeout against local, aborts
+the local connection, silently re-issues the chat-completions request
+against the configured cloud provider for THIS request only. After
+the first byte arrives the socket timeout is extended to 300s so
+legit slow streaming runs uninterrupted. Knobs:
+=proxy_cloud_failover_enabled= (default true) and
+=proxy_first_byte_timeout_ms= (default 8000; 0 disables). Pairs with
+[[file:../../extensions/opencode/src/slow-llm-watch.tsx][=slow-llm-watch.tsx=]] which handles the session-wide cloud switch
+on relaunch — the failover path covers the one stuck turn without
+the relaunch round-trip. Audit entries show
+=intercepted_by="cloud_failover"=. 9 new tests in
+[[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]] (47 total).
 
 ** Citation post-processor
 

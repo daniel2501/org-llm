@@ -198,6 +198,18 @@ KEY_DESCRIPTIONS = {
         "opencode; the new instance auto-resubmits the stashed "
         "pending prompt via cloud. False keeps the manual flow "
         "(user exits + reruns).",
+    "proxy_cloud_failover_enabled":
+        "Master switch for the proxy's cloud-failover path. When "
+        "true (default), a chat-completions request that stalls "
+        "past `proxy_first_byte_timeout_ms` is silently re-issued "
+        "against the configured cloud provider for this request "
+        "only. False = local stalls surface as a 502 to opencode.",
+    "proxy_first_byte_timeout_ms":
+        "Time-to-first-byte threshold (ms) for cloud failover. "
+        "0 disables failover entirely (equivalent to flipping the "
+        "master switch off). After the first byte arrives the socket "
+        "timeout is extended to 300s so legitimate slow streaming "
+        "runs uninterrupted. Tune against the Phase 17 audit's p95.",
 }
 
 

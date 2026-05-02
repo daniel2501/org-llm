@@ -46,6 +46,7 @@ import hashlib
 import http.server
 import json
 import os
+import socket
 import socketserver
 import threading
 import time
@@ -1346,6 +1347,140 @@ _default_audit = AuditLogger()
 #     mistakes inline before opencode sees them.
 
 
+# ── Cloud failover (Phase 18) ──────────────────────────────────────
+#
+# When the local upstream stops responding before its first byte
+# arrives within `proxy_first_byte_timeout_ms`, fail over to the
+# user's configured cloud provider for THIS request only. The forward
+# path detects the timeout, aborts the local connection, and re-issues
+# the same request body (with `model` swapped) against
+# `cloud_endpoint_url` with the cloud API key.
+#
+# Scope:
+#   • Only fires for POST /v1/chat/completions and /api/chat (the
+#     paths opencode uses for chat). Non-chat probes (GET /api/tags
+#     etc.) keep their default short timeout and do NOT failover —
+#     those should fail fast locally so opencode picks a different
+#     provider.
+#   • Single retry only. If cloud also fails, propagate the original
+#     error to opencode (502 upstream proxy error).
+#   • Only fires when `proxy_cloud_failover_enabled` is true AND the
+#     user has cloud config (cloud_endpoint_url + a resolvable API
+#     key). Without that we fall back to existing behaviour.
+#
+# Knobs:
+#   • proxy_cloud_failover_enabled   (default true)  — kill switch
+#   • proxy_first_byte_timeout_ms    (default 8000)  — TTFB before
+#     we declare the local upstream stalled. 0 disables the timeout
+#     (effectively disables failover).
+
+
+_CHAT_PATHS = ("/v1/chat/completions", "/api/chat")
+
+
+def _proxy_cfg_str(key: str, default: str = "") -> str:
+    """Best-effort read of a single Config row. Returns `default` on
+    any DB issue — proxy startup must not depend on the user having a
+    fully-populated config."""
+    try:
+        from .db import DB_PATH, Config, make_engine
+        from sqlalchemy.orm import Session
+        path = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if not path.exists():
+            return default
+        engine = make_engine(path)
+        with Session(engine) as s:
+            row = s.get(Config, key)
+            return (row.value if row and row.value is not None
+                    else default)
+    except Exception:
+        return default
+
+
+def _first_byte_timeout_secs() -> float:
+    """Read proxy_first_byte_timeout_ms; clamp to ≥0. 0 = disabled."""
+    raw = _proxy_cfg_str("proxy_first_byte_timeout_ms", "8000")
+    try:
+        ms = int(raw)
+    except ValueError:
+        ms = 8000
+    return max(0.0, ms / 1000.0)
+
+
+def _cloud_failover_enabled() -> bool:
+    return _proxy_cfg_str("proxy_cloud_failover_enabled",
+                            "true").strip().lower() != "false"
+
+
+def _resolve_cloud_failover_target() -> Optional[dict]:
+    """Build the (endpoint, headers, model) tuple for a cloud failover
+    or return None if cloud isn't configured / failover disabled.
+
+    Returns dict shape::
+
+        {"endpoint": "https://...", "model": "openai/...",
+         "api_key":  "sk-or-v1-..."}
+
+    Reads `cloud_endpoint_url`, `cloud_provider`, `cloud_model`, and
+    pulls the API key from the credentials store first (preferred —
+    that's where `org-llm cloud --connect` writes it) with the DB
+    `cloud_api_key`/`runpod_api_key` as a backup.
+    """
+    if not _cloud_failover_enabled():
+        return None
+    endpoint = _proxy_cfg_str("cloud_endpoint_url", "").rstrip("/")
+    if not endpoint:
+        return None
+    provider = _proxy_cfg_str("cloud_provider", "")
+    model    = (_proxy_cfg_str("cloud_model", "")
+                or _proxy_cfg_str("chat_model", "")
+                or "openai/gpt-oss-20b:free")
+    db_key   = (_proxy_cfg_str("cloud_api_key", "")
+                or _proxy_cfg_str("runpod_api_key", ""))
+    api_key = ""
+    if provider:
+        try:
+            from . import creds as _creds
+            api_key = _creds.read_secret(_creds.cloud_slug(provider)) or ""
+        except Exception:
+            api_key = ""
+    api_key = api_key or db_key
+    return {"endpoint": endpoint, "model": model, "api_key": api_key}
+
+
+def _build_cloud_request(orig_body: bytes, parsed: Optional[dict],
+                           target: dict, orig_path: str
+                           ) -> urllib.request.Request:
+    """Produce the Request object for the cloud retry. Strategy:
+    swap `model` to the cloud model, drop Ollama-specific fields the
+    OpenAI-compatible cloud endpoints reject (`options`,
+    `keep_alive`), reuse everything else (messages, tools, stream).
+    """
+    if parsed is not None and isinstance(parsed, dict):
+        body_obj = dict(parsed)
+        body_obj["model"] = target["model"]
+        # Drop Ollama-only fields that OpenAI-compatible endpoints
+        # reject. Most cloud providers (OpenRouter, Groq…) treat
+        # extra fields as 400; Anthropic ignores them. Defensive
+        # strip.
+        for key in ("options", "keep_alive", "format"):
+            body_obj.pop(key, None)
+        out_body = json.dumps(body_obj).encode()
+    else:
+        out_body = orig_body
+    headers = {"Content-Type": "application/json",
+                "User-Agent":   "org-llm/proxy-failover"}
+    if target["api_key"]:
+        headers["Authorization"] = f"Bearer {target['api_key']}"
+    # opencode hits `/v1/chat/completions` and `/api/chat`; cloud
+    # providers expect the OpenAI shape on `/chat/completions` (their
+    # base URL usually already ends with `/v1`).
+    cloud_url = f"{target['endpoint']}/chat/completions"
+    return urllib.request.Request(
+        cloud_url, data=out_body, method="POST", headers=headers,
+    )
+
+
 # ── Server ──────────────────────────────────────────────────────────
 
 
@@ -1444,10 +1579,15 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
             # and rely on the forward path to send the new bytes.
             # _forward populates status/bytes_out/error via instance
             # vars so the audit entry can capture them after return.
+            self._parsed_for_audit = parsed
             self._forward(req.body)
             status = getattr(self, "_last_status", None)
             bytes_out = getattr(self, "_last_bytes", 0)
             error_msg = getattr(self, "_last_error", None)
+            # _forward sets _last_intercept = "forward" by default;
+            # the cloud-failover path overwrites it to "cloud_failover".
+            intercepted_by = getattr(self, "_last_intercept",
+                                       intercepted_by) or intercepted_by
         finally:
             audit = self.server.audit
             if audit is not None:
@@ -1501,9 +1641,10 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
         )
         # Audit-stat capture. The handler reads these after
         # _forward returns (see _handle's finally block).
-        self._last_status = None
-        self._last_bytes  = 0
-        self._last_error  = None
+        self._last_status    = None
+        self._last_bytes     = 0
+        self._last_error     = None
+        self._last_intercept = "forward"   # overwritten if cloud takes over
         # Cache-eligibility: only successful, non-streaming
         # /chat/completions responses. Use the ORIGINAL cache key
         # captured before mutators ran — see _handle for context.
@@ -1518,8 +1659,50 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
                 and any(p in self.path for p in
                         ("/api/tags", "/api/show", "/v1/models"))):
             probe_buf = []
+
+        # Cloud-failover eligibility: only chat completions, only
+        # when failover is configured. Chooses the request's read
+        # timeout: tight (TTFB threshold) for chat so we can fail
+        # over fast; permissive (300s) otherwise so probes and
+        # other requests behave as before.
+        chat_eligible = (
+            self.command == "POST"
+            and any(self.path.endswith(p) for p in _CHAT_PATHS)
+        )
+        fb_timeout = _first_byte_timeout_secs() if chat_eligible else 0.0
+        cloud_target = (_resolve_cloud_failover_target()
+                          if chat_eligible and fb_timeout > 0 else None)
+        # urlopen timeout governs both connect AND every read() call;
+        # we extend it after the first byte arrives so legit slow
+        # streaming doesn't trip the failover path.
+        local_timeout = fb_timeout if cloud_target else 300
+
         try:
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req, timeout=local_timeout) as resp:
+                # Try to read the first byte under the failover-tight
+                # timeout. Once we have it we know the local upstream
+                # is alive — extend the socket timeout so subsequent
+                # streaming reads aren't subject to the same threshold.
+                first_chunk = b""
+                try:
+                    first_chunk = resp.read(1)
+                except (socket.timeout, TimeoutError) as e:
+                    if cloud_target is not None:
+                        if self._failover_to_cloud(body,
+                                                     cloud_target,
+                                                     reason=f"first-byte timeout ({fb_timeout:.1f}s)"):
+                            return
+                    raise socket.timeout(str(e)) from e
+                # First byte arrived — relax the socket timeout so
+                # legitimate slow streaming runs uninterrupted. The
+                # private-attribute walk is fragile but it's the only
+                # path urllib gives us; if the layout shifts we just
+                # keep the original tight timeout (graceful degrade).
+                if cloud_target is not None:
+                    try:
+                        resp.fp.raw._sock.settimeout(300.0)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
                 self._last_status = resp.status
                 self.send_response(resp.status)
                 for k, v in resp.headers.items():
@@ -1529,6 +1712,18 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
                     self.send_header(k, v)
                     cache_headers[k] = v
                 self.end_headers()
+                # Flush the byte we already read off the socket.
+                if first_chunk:
+                    try:
+                        self.wfile.write(first_chunk)
+                        self.wfile.flush()
+                        self._last_bytes += len(first_chunk)
+                        if cache_buf is not None:
+                            cache_buf.append(first_chunk)
+                        if probe_buf is not None:
+                            probe_buf.append(first_chunk)
+                    except (BrokenPipeError, ConnectionResetError):
+                        return
                 while True:
                     chunk = resp.read(4096)
                     if not chunk:
@@ -1568,9 +1763,74 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(e.read() or b"")
             except Exception:
                 pass
+        except (urllib.error.URLError, ConnectionError, socket.timeout,
+                  TimeoutError) as e:
+            # Local upstream unreachable / stalled. Try cloud failover
+            # for chat requests when the target is configured. Falls
+            # through to 502 if cloud also fails or isn't an option.
+            if cloud_target is not None and self._failover_to_cloud(
+                    body, cloud_target, reason=f"upstream error: {e}"):
+                return
+            self._last_error = f"upstream: {e}"
+            self.send_error(502, f"upstream proxy error: {e}")
         except Exception as e:
             self._last_error = f"upstream: {e}"
             self.send_error(502, f"upstream proxy error: {e}")
+
+    def _failover_to_cloud(self, body: bytes, target: dict,
+                              *, reason: str) -> bool:
+        """Re-issue the chat request against the configured cloud
+        provider and stream its response back. Returns True iff we
+        committed bytes (status line + body) to the client. Caller
+        must NOT write anything to `self.wfile` after a True return.
+
+        On False, the local error path remains responsible for the
+        502 fallback — typical when cloud also fails before sending
+        any bytes. Best-effort: a partial cloud stream that drops
+        mid-flight returns True (we already wrote headers).
+        """
+        parsed = getattr(self, "_parsed_for_audit", None)
+        if parsed is None:
+            try:
+                parsed = json.loads(body.decode()) if body else None
+            except Exception:
+                parsed = None
+        cloud_req = _build_cloud_request(body, parsed, target, self.path)
+        try:
+            with urllib.request.urlopen(cloud_req, timeout=300) as resp:
+                self._last_status    = resp.status
+                self._last_intercept = "cloud_failover"
+                self.send_response(resp.status)
+                for k, v in resp.headers.items():
+                    if k.lower() in ("transfer-encoding", "connection",
+                                       "content-length"):
+                        continue
+                    self.send_header(k, v)
+                self.end_headers()
+                while True:
+                    chunk = resp.read(4096)
+                    if not chunk:
+                        break
+                    try:
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                        self._last_bytes += len(chunk)
+                    except (BrokenPipeError, ConnectionResetError):
+                        return True
+                self._last_error = (f"failover: local stalled "
+                                     f"({reason}); served via cloud "
+                                     f"({target['model']})")
+                return True
+        except urllib.error.HTTPError as e:
+            # Cloud responded with HTTP error — surface it. We've
+            # not written anything yet; let the caller fall to 502.
+            self._last_error = (f"failover failed: cloud http {e.code} "
+                                  f"after {reason}")
+            return False
+        except Exception as e:
+            self._last_error = (f"failover failed: {type(e).__name__}: "
+                                  f"{e} after {reason}")
+            return False
 
 
 class _ProxyServer(socketserver.ThreadingMixIn,

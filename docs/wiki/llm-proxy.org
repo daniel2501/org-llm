@@ -25,9 +25,8 @@ If any interceptor returns a =ProxyResponse=, the proxy short-circuits
 ollama doesn't even wake up. If every interceptor returns =None=, the
 request forwards transparently and the response streams back.
 
-Phase 17.1 shipped 13 interceptors. New ones are single-file additions
-that compose into the chain at startup; this is the cheapest unit of
-work in the codebase.
+Phase 17.1 shipped 13 interceptors. Phase 18 is adding more, one per
+single-file landing; cloud failover is the first.
 
 * Why it exists
 
@@ -68,7 +67,31 @@ next one does, and the first one to return a =ProxyResponse= wins.
 | 13 | =intercept_local_only=      | Catch-all kill switch (=proxy_local_only=true=) → "no LLM" response      |
 
 The full source with rationale comments is in [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]];
-38 unit tests pin behaviour in [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]].
+47 unit tests pin behaviour in [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]].
+
+** Cloud failover (Phase 18, first interceptor)
+
+The forward path now wraps the local =urlopen= with a tight time-to-
+first-byte timeout (=proxy_first_byte_timeout_ms=, default 8000). When
+the local upstream stalls past that threshold on a chat-completions
+request, the proxy aborts the local connection and silently re-issues
+the same body against the configured cloud provider for THIS request
+only — single retry. Once the first byte arrives the socket timeout is
+extended to 300s so legitimate slow streaming runs uninterrupted.
+
+Pairs with [[file:../../extensions/opencode/src/slow-llm-watch.tsx][=slow-llm-watch.tsx=]]: the watcher nudges the user
+toward a session-wide cloud switch (relaunch); the failover
+interceptor is per-turn cover for the one stuck message — the user
+gets an answer without a relaunch round-trip. Knobs:
+
+- =proxy_cloud_failover_enabled= (default true)
+- =proxy_first_byte_timeout_ms= (default 8000; 0 disables)
+
+The cloud target is the same =cloud_endpoint_url= / =cloud_model= /
+=cloud_provider= the rest of the app uses (see
+[[id:510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08][Cloud-or-local routing]]). Failover
+audit entries show =intercepted_by="cloud_failover"=, distinguishable
+from regular forwards in =scripts/audit_phase17.py='s output.
 
 * Why it matters
 

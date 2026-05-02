@@ -506,6 +506,28 @@ MODEL_DEFAULTS = {
     # on non-/sys queries. Toggle via `org-llm config
     # proxy_local_only true` to lock the proxy down.
     "proxy_local_only":               "false",
+    # ── Cloud failover (Phase 18) ──────────────────────────────────────
+    # When the local upstream stops responding before its first byte
+    # arrives within `proxy_first_byte_timeout_ms`, the proxy silently
+    # retries the chat-completions request against the configured
+    # cloud provider for THIS request only. Single retry; the user's
+    # next message goes through the local model again. Pairs with
+    # `slow-llm-watch.tsx` — that one nudges the user toward a
+    # session-wide cloud switch; this one is in-flight cover for the
+    # one stuck turn.
+    #
+    # Master switch. False keeps the existing behaviour where a
+    # stalled local upstream surfaces as a 502 to opencode.
+    "proxy_cloud_failover_enabled":   "true",
+    # Time-to-first-byte threshold for chat completions (ms). Once
+    # the local upstream emits any byte, the socket timeout is
+    # extended to 300s so legit slow streaming runs through. Tune
+    # against your `proxy_first_byte_timeout_ms` audit (see
+    # scripts/audit_phase17.py p95). 0 disables failover entirely
+    # — equivalent to setting `proxy_cloud_failover_enabled=false`
+    # but kept distinct so the kill-switch's "off" isn't confused
+    # with a misconfigured threshold of 0.
+    "proxy_first_byte_timeout_ms":    "8000",
     # Toast pinning (Phase 17.1s). When true, every toast our
     # plugin emits uses a long duration (1 hour) so messages
     # stay on screen until the user has time to read them. False
