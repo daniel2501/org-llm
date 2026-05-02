@@ -911,14 +911,9 @@ _DEFAULT_AGENT_BASELINES: list[dict] = [
         "applies_to":  "all",
         "sort_order":  10,
         "body":        (
-            "CURRENT TIME: {now} ({day}, {tod}; {weekend_or_weekday}).\n"
-            "  Use this when generating time-sensitive content. "
-            "Don't suggest 'morning routines' in the evening, "
-            "'tomorrow's agenda' on a weekend evening (it's "
-            "Sunday by then), 'this Friday' on a Saturday, etc. "
-            "When the user asks for 'today's' anything, anchor "
-            "to the date above; for 'this weekend', anchor to "
-            "the upcoming Saturday-Sunday relative to today."
+            "TIME: {now} ({day}, {tod}; {weekend_or_weekday}). "
+            "Anchor 'today'/'this weekend'/'tomorrow' to this; "
+            "skip 'morning' suggestions in the evening."
         ),
     },
     {
@@ -926,18 +921,11 @@ _DEFAULT_AGENT_BASELINES: list[dict] = [
         "applies_to": "all",
         "sort_order": 20,
         "body": (
-            "Vault-first context (judgment-based):\n"
-            "  When the user asks for content 'based on'/'from'/"
-            "'using' vault files, dailies, captures, or any "
-            "specific source, you MUST actually READ those files "
-            "before drafting. List, then read, then synthesise. "
-            "DO NOT generate generic items from training data when "
-            "the user pointed at specific files — that's "
-            "hallucination, and it's the #1 way agents get it "
-            "wrong.\n"
-            "  For explicit user confirmations on a draft you "
-            "already showed ('save it', 'yes', 'y'), skip "
-            "re-sampling — just do the action."
+            "VAULT-FIRST: when the user names a source ('based on "
+            "dailies', 'from captures'), READ those files before "
+            "drafting — never substitute training-data items. "
+            "Skip re-reading when the user has explicitly "
+            "confirmed an already-drafted result ('save it', 'y')."
         ),
     },
     {
@@ -945,14 +933,10 @@ _DEFAULT_AGENT_BASELINES: list[dict] = [
         "applies_to": "all",
         "sort_order": 30,
         "body": (
-            "PARALLEL TOOL CALLS — speed lever:\n"
-            "  When you need multiple INDEPENDENT tool calls, emit "
-            "them in ONE assistant turn (a single tool_calls array "
-            "with multiple entries), not sequentially across turns. "
-            "The runtime executes parallel calls concurrently — 3 "
-            "independent read_files in parallel cost ONE cloud "
-            "round-trip, not three. Sequential is correct only when "
-            "later calls DEPEND on earlier results."
+            "PARALLEL: emit INDEPENDENT tool calls in ONE turn "
+            "(multi-entry tool_calls array). 3 read_files in "
+            "parallel = 1 round-trip. Sequential only when later "
+            "calls depend on earlier results."
         ),
     },
     {
@@ -960,12 +944,16 @@ _DEFAULT_AGENT_BASELINES: list[dict] = [
         "applies_to": "all",
         "sort_order": 40,
         "body": (
-            "TOOL NAMESPACE: ALL MCP tools are exposed under the "
-            "`org-llm_` prefix. Call `org-llm_delegate(...)`, "
-            "`org-llm_capture_note(...)`, etc. Bare names "
-            "(`delegate`, `capture_note`) get rejected with "
-            "'Model tried to call unavailable tool'. Use the "
-            "prefix EVERY tool call."
+            "PREFIX: every MCP tool is `org-llm_<name>`. Bare "
+            "names get rejected. Use the prefix every call."
+        ),
+    },
+    {
+        "name":       "vault_style",
+        "applies_to": "all",
+        "sort_order": 45,
+        "body": (
+            "{vault_style}"   # populated dynamically by render_baselines
         ),
     },
     {
@@ -973,19 +961,15 @@ _DEFAULT_AGENT_BASELINES: list[dict] = [
         "applies_to": "specialist",
         "sort_order": 50,
         "body": (
-            "FAST PRE-REPLY REVIEW:\n"
-            "  Before emitting your FINAL user-facing reply on a "
-            "turn that drafted concrete content (a list, a plan, "
-            "a capture body, a code edit), call "
-            "`org-llm_delegate('crew', 'review: <one-line summary "
-            "of what you're about to surface>', "
-            "model_override='qwen/qwen-2.5-7b-instruct')` for a "
-            "fast (~1-3s) sanity check. If crew approves, emit. "
-            "If crew flags an issue, revise once and proceed.\n"
-            "  Skip this for: pure conversational replies "
-            "(greetings, acks, 'ok done'), tool-only turns where "
-            "the next assistant turn will continue, and "
-            "force-solo mode (`@<agent>!`)."
+            "FAST CREW CHECK before final user-facing replies that "
+            "drafted concrete content (lists, plans, edits): call "
+            "`org-llm_delegate('crew', 'review: <one-line>', "
+            "model_override='qwen/qwen-2.5-7b-instruct')` (~1-3s). "
+            "CREW IS AUTHORITATIVE — its verdict overrides yours. "
+            "Approve→emit. Flag→revise (don't argue, don't override, "
+            "don't tell the user crew was wrong). Crew sees the full "
+            "picture; you see your slice. Skip the call only for "
+            "conversational/tool-only/force-solo (`@<agent>!`) turns."
         ),
     },
     {
@@ -993,25 +977,32 @@ _DEFAULT_AGENT_BASELINES: list[dict] = [
         "applies_to": "specialist",
         "sort_order": 60,
         "body": (
-            "NO HALLUCINATION:\n"
-            "  If a tool call returns no results, say so plainly "
-            "and offer to broaden the search. NEVER invent file "
-            "names, dates, titles, or content the user didn't "
-            "share and the tools didn't return. When in doubt, "
-            "call a tool — don't guess."
+            "NO HALLUCINATION: empty tool result → say so, offer "
+            "to broaden. Never invent files, dates, titles, "
+            "content. When in doubt, call a tool."
         ),
     },
 ]
 
 
+_DEV_REFRESH_BASELINES = True   # set False once defaults stabilise
+
+
 def init_baselines(engine) -> None:
-    """Seed the agent_baseline table with default rules. Idempotent
-    by `name` — existing rows are left untouched so user edits
-    survive across launches."""
+    """Seed the agent_baseline table with default rules.
+
+    During development, refresh ALL bodies/scopes/sort_orders from
+    the source defaults. Once the defaults stabilise, flip
+    `_DEV_REFRESH_BASELINES` to False so user edits survive."""
     with Session(engine) as s:
-        existing = {r.name for r in s.query(AgentBaseline).all()}
+        existing = {r.name: r for r in s.query(AgentBaseline).all()}
         for spec in _DEFAULT_AGENT_BASELINES:
             if spec["name"] in existing:
+                if _DEV_REFRESH_BASELINES:
+                    row = existing[spec["name"]]
+                    row.body       = spec["body"]
+                    row.applies_to = spec.get("applies_to", "all")
+                    row.sort_order = spec.get("sort_order", 100)
                 continue
             s.add(AgentBaseline(
                 name=spec["name"],
@@ -1027,8 +1018,11 @@ def render_baselines(agent_name: str, role: str = "specialist") -> str:
     """Build the prompt-fragment block to prepend to an agent's
     body. Reads enabled baselines whose `applies_to` matches the
     agent (by name, role, or 'all'), sorts by sort_order, formats
-    `{now}` / `{day}` / `{tod}` / `{weekend_or_weekday}` placeholders
-    in the current_time row, and joins with blank lines.
+    placeholders, and joins with blank lines.
+
+    Placeholders supported:
+      {now}, {day}, {tod}, {weekend_or_weekday}  — current time
+      {vault_style}                              — daily-dir style hint
 
     Fail-safe: returns "" on any DB error so a broken baselines
     table doesn't break agent dispatch."""
@@ -1043,11 +1037,35 @@ def render_baselines(agent_name: str, role: str = "specialist") -> str:
                 else "evening" if h < 21
                 else "night")
         is_weekend = now.weekday() >= 5
+
+        # Compute vault_style hint by calling the deterministic
+        # inferrer on the user's daily_dir. Cached at the inferrer
+        # layer (mtime-aware) so this is ~free on hot path.
+        vault_style = ""
+        try:
+            from .style_infer import infer_style, style_summary
+            from pathlib import Path
+            with Session(engine) as s:
+                org_dir = Path((s.get(Config, "org_dir")
+                                  or Config(value="~/org")).value
+                                ).expanduser()
+                daily_dir_cfg = (s.get(Config, "daily_dir")
+                                  or Config(value="")).value.strip()
+            daily_dir = (Path(daily_dir_cfg).expanduser()
+                          if daily_dir_cfg
+                          else org_dir / "daily")
+            info = infer_style(str(daily_dir), sample_size=3)
+            vault_style = ("CAPTURE STYLE for "
+                            + str(daily_dir) + ":\n  "
+                            + style_summary(info).replace("\n", "\n  "))
+        except Exception:
+            vault_style = ""
         ph = {
             "now":  now.strftime("%Y-%m-%d %H:%M %Z"),
             "day":  now.strftime("%A"),
             "tod":  tod,
             "weekend_or_weekday": "weekend" if is_weekend else "weekday",
+            "vault_style": vault_style,
         }
         with Session(engine) as s:
             rows = (s.query(AgentBaseline)
@@ -1065,6 +1083,9 @@ def render_baselines(agent_name: str, role: str = "specialist") -> str:
                 body = r.body.format(**ph)
             except (KeyError, IndexError):
                 body = r.body   # body had unrelated braces; keep raw
+            # Skip the vault_style baseline if we couldn't compute it.
+            if r.name == "vault_style" and not vault_style:
+                continue
             out_parts.append(body)
         return "\n\n".join(out_parts)
     except Exception:

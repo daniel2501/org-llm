@@ -3476,8 +3476,12 @@ def _build_cloud_request(orig_body: bytes, parsed: Optional[dict],
         # the configured value is missing or oversized; user can
         # set it lower explicitly.
         mt = body_obj.get("max_tokens")
-        if mt is None or (isinstance(mt, (int, float)) and mt > 4096):
-            body_obj["max_tokens"] = 4096
+        # Phase 20.x: cap at 2048 (down from 4096). Cloud responses
+        # were ballooning to 30-45KB when the LLM had room to
+        # ramble; 2K covers any realistic chat reply or tool-call
+        # turn while halving generation time.
+        if mt is None or (isinstance(mt, (int, float)) and mt > 2048):
+            body_obj["max_tokens"] = 2048
         out_body = json.dumps(body_obj).encode()
     else:
         out_body = orig_body
