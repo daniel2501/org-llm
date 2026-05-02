@@ -16659,6 +16659,17 @@ def launch(
             "sensors":      {"recent_alerts": []},
             "links":        [],
         }, indent=2))
+    # Phase 20.x: clear stale sidebar-runtime.json overlay on each
+    # launch. Otherwise `intent_agent` (and the auto-cloud/manager
+    # overlays) bleed across sessions: a fresh launch shows the
+    # last session's @scribe in the ACTIVE row, intercept_agent_sticky
+    # routes the first unprefixed message to that stale agent, etc.
+    # Preserve nothing — fresh session, fresh state.
+    try:
+        runtime_path = org_dir / ".opencode" / "sidebar-runtime.json"
+        runtime_path.write_text("{}")
+    except Exception:
+        pass
     # tui.json — proper home for theme + plugin (per opencode's
     # tui-schema.ts). Always written even if no_theme so future
     # plugin registrations have a home.
