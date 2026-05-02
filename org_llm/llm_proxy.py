@@ -1659,6 +1659,40 @@ def _build_cloud_request(orig_body: bytes, parsed: Optional[dict],
 # ── Server ──────────────────────────────────────────────────────────
 
 
+def _emit_failover_toast(model: str) -> None:
+    """Write a toast action via the file-action bridge so the user sees
+    that cloud failover just fired. Best-effort — never blocks the
+    response path. The plugin's 250 ms tick picks up the action and
+    showToast()s with the cloud model name + a short hint.
+
+    Discovered need 2026-05-02 during T6 hands-on: opencode's session
+    UI shows the CONFIGURED local model regardless of what actually
+    responded, so a transparent failover looks identical to "local
+    answered slowly" — the user has to grep the audit log to know
+    cloud was used. The toast closes that visibility gap.
+    """
+    try:
+        org_dir = Path(os.environ.get("ORG_LLM_ORG_DIR")
+                        or (Path.home() / "org"))
+        action_path = org_dir / ".opencode" / "sidebar-action.json"
+        action_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "v":       1,
+            "ts":      int(time.time() * 1000),
+            "action":  "toast",
+            "title":   "☁ cloud failover",
+            "message": f"local stalled — served via {model}",
+            "variant": "info",
+        }
+        action_path.write_text(json.dumps(payload))
+    except Exception:
+        # Never block the response. If the action file can't be
+        # written (permissions, disk full, etc.), the user just
+        # doesn't see the toast — they'll spot it in the audit log
+        # if they look.
+        pass
+
+
 class _ProxyHandler(http.server.BaseHTTPRequestHandler):
     # `server` is set by socketserver at request time; we attach
     # `upstream` and `interceptors` to the server instance below.
@@ -2035,6 +2069,13 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
                 self._last_error = (f"failover: local stalled "
                                      f"({reason}); served via cloud "
                                      f"({target['model']})")
+                # Phase 18.4-iter13: notify the user via the file-
+                # action bridge that a cloud failover just happened.
+                # Without this, opencode's "model: llama3.2 / via
+                # ollama · local" sidebar gives no clue the answer
+                # actually came from the cloud — the failover is
+                # transparent but the visibility cost is real.
+                _emit_failover_toast(target['model'])
                 return True
         except urllib.error.HTTPError as e:
             # Cloud responded with HTTP error — surface it. We've
