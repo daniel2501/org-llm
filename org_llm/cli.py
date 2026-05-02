@@ -16097,10 +16097,15 @@ def launch(
                 desc = (sk.heading or "").replace("\n", " ").strip()[:100]
                 if not desc:
                     desc = f"org-babel skill: {sk.name}"
+                # `--yes` skips the trust-on-first-use confirmation
+                # so the slash dispatch stays non-interactive. The
+                # SHA-pinned trust path still kicks in on first run
+                # of an EDITED skill — same UX as a manual
+                # `org-llm skill <name>` call.
                 skill_md_path.write_text(
                     f"---\n"
                     f"description: {desc}\n"
-                    f"exec: org-llm skill run {sk.name} -- $ARGS\n"
+                    f"exec: org-llm skill --yes {sk.name} $ARGS\n"
                     f"---\n"
                     f"Run the org-babel skill `{sk.name}` defined "
                     f"in your vault. Output is captured and "
