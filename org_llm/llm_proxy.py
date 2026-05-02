@@ -507,6 +507,98 @@ def intercept_sysscreenshot_command(req: ProxyRequest) -> Optional[ProxyResponse
     return _empty_assistant_response(model, streaming, content=body)
 
 
+# ── Force-tool-call prefix: `:tool <name> [query]` ─────────────────
+
+
+# Lets the user pin the LLM to a specific tool without negotiating.
+# Typing `:tool search_notes phase 18 notes` rewrites the request
+# to set `tool_choice: {type: "function", function: {name:
+# "search_notes"}}` and strips the `:tool <name>` prefix from the
+# user message so the LLM composes args from "phase 18 notes" alone.
+#
+# Why: the LLM's default "should I call a tool, and if so which?"
+# decision step adds latency AND occasional wrong-tool picks
+# (search when the user wanted code_search, etc.). With the prefix,
+# the model is committed — it MUST call that tool. Useful as a
+# typed shortcut for power users who know which tool fits.
+#
+# This is a MUTATION interceptor — it modifies req.body in place
+# and returns None so the request still forwards (to local or
+# cloud, whichever the chain decides). The cloud-failover and
+# cloud-first paths inherit the pinned tool_choice for free.
+#
+# If the named tool isn't in the request's tools array, returns
+# an error response naming the available tools so the user can
+# correct the typo without the LLM in the loop.
+
+
+def intercept_force_tool_call(req: ProxyRequest) -> Optional[ProxyResponse]:
+    """`:tool <name>` prefix → force `tool_choice` for that function.
+    Mutates req in place; returns None to fall through to the
+    forward path (or an error response if the tool isn't valid)."""
+    if not req.path.endswith("/chat/completions"):
+        return None
+    parsed = req.parsed_json
+    if not parsed:
+        return None
+    import re as _re_mod
+    prefix_re = _re_mod.compile(r'^\s*:tool\s+([A-Za-z_][\w\-]*)\s*')
+    text = _last_user_text(parsed)
+    m = prefix_re.match(text)
+    if not m:
+        return None
+    tool_name = m.group(1)
+
+    # Validate the tool is actually in this request's tools array.
+    tools = parsed.get("tools") or []
+    available = {
+        t.get("function", {}).get("name")
+        for t in tools
+        if isinstance(t, dict) and isinstance(t.get("function"), dict)
+    }
+    available.discard(None)
+    if tool_name not in available:
+        avail_list = ", ".join(sorted(available))[:300] or "(none — request has no tools)"
+        return _empty_assistant_response(
+            parsed.get("model") or "unknown",
+            bool(parsed.get("stream")),
+            content=(
+                f"✗ :tool {tool_name} — not in this session's tools.\n"
+                f"Available: {avail_list}"
+            ),
+        )
+
+    # Mutate: pin tool_choice + strip the prefix from the user's text.
+    parsed["tool_choice"] = {
+        "type": "function",
+        "function": {"name": tool_name},
+    }
+    msgs = parsed.get("messages") or []
+    for i in reversed(range(len(msgs))):
+        msg = msgs[i]
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            msg["content"] = prefix_re.sub("", content, count=1)
+        elif isinstance(content, list):
+            for part in content:
+                if (isinstance(part, dict)
+                        and part.get("type") == "text"
+                        and isinstance(part.get("text"), str)
+                        and prefix_re.match(part["text"])):
+                    part["text"] = prefix_re.sub(
+                        "", part["text"], count=1)
+                    break
+        break
+
+    # Re-encode.
+    req.body = json.dumps(parsed).encode()
+    req.headers = {k: v for k, v in req.headers.items()
+                    if k.lower() != "content-length"}
+    return None  # fall through to forward
+
+
 # ── Synthetic tool calls for tool-incapable models ──────────────────
 
 
@@ -1980,6 +2072,7 @@ DEFAULT_INTERCEPTORS: list[Interceptor] = [
     intercept_probe_cache,        # T2.0  /api/tags etc cache
     intercept_response_cache,     # T1.4  identical-prompt cache
     # ── Mutation interceptors (modify request, fall through) ──
+    intercept_force_tool_call,    # P18.6 `:tool <name>` prefix pins tool_choice
     intercept_pii_redact,         # T3.1  redact secrets to non-localhost
     intercept_time_grounding,     # T3.0  inject current date/time
     intercept_model_routing,      # T2.3  route by content (code → coder)
