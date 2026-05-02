@@ -213,6 +213,27 @@ Calls `org-llm-sys-prompt-submit' under the hood."
     (org-llm-sys-prompt-submit text)))
 
 ;;;###autoload
+(defun org-llm-chat-page-up ()
+  "Scroll opencode chat up one page (sends PgUp to the vterm).
+This is one of the rare cases vterm-send-key actually works for
+opencode — chat scroll is opencode's NATIVE handler, not the
+slash-validation path that rejected the /sys* injections."
+  (interactive)
+  (let ((buf (or (org-llm--opencode-vterm-buffer)
+                 (user-error "No opencode vterm buffer found"))))
+    (with-current-buffer buf
+      (vterm-send-key "<prior>"))))
+
+;;;###autoload
+(defun org-llm-chat-page-down ()
+  "Scroll opencode chat down one page (sends PgDn to the vterm)."
+  (interactive)
+  (let ((buf (or (org-llm--opencode-vterm-buffer)
+                 (user-error "No opencode vterm buffer found"))))
+    (with-current-buffer buf
+      (vterm-send-key "<next>"))))
+
+;;;###autoload
 (defun org-llm-opencode-quit ()
   "Cleanly close the running opencode vterm (Ctrl-c twice).
 This one DOES use vterm-send-string because the action bridge is
@@ -873,6 +894,8 @@ current selection."
         :desc "Sidebar scroll ↑"         "k" #'org-llm-sys-scroll-up
         :desc "Sidebar page ↓"           "J" #'org-llm-sys-page-down
         :desc "Sidebar page ↑"           "K" #'org-llm-sys-page-up
+        :desc "Chat scroll ↑ (PgUp)"     "H" #'org-llm-chat-page-up
+        :desc "Chat scroll ↓ (PgDn)"     "L" #'org-llm-chat-page-down
         :desc "/sysdoctor"               "d" #'org-llm-sys-doctor
         :desc "/sysstats"                "s" #'org-llm-sys-stats
         :desc "/sysrecent"               "r" #'org-llm-sys-recent

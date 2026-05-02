@@ -726,30 +726,53 @@ function buildMenuText(api: any): string {
   const COL = 22;
   const fmtRow = ([name, desc]: [string, string]) =>
     desc ? `${pad(name, COL)}${desc}` : name;
+  // Three-tuple version for /sys* table — emoji bullet + name + desc.
+  // Same alignment math, just one more cell up front (3 cols incl.
+  // trailing space). Keeps the description column flush with the
+  // two-tuple project/builtin sections.
+  const fmtSysRow = ([icon, name, desc]: [string, string, string]) =>
+    desc ? `${icon} ${pad(name, COL)}${desc}` : `${icon} ${name}`;
 
-  const sysCmds: Array<[string, string]> = [
-    ["/sys <args>",         "run any org-llm subcommand"],
-    ["/sysmenu",            "this listing"],
-    ["/sysdoctor",          "system health check"],
-    ["/sysstats",           "vault counts"],
-    ["/sysmodels",          "list configured models"],
-    ["/sysrecent",          "last 7d activity"],
-    ["/syscloud",           "apply auto-doctor cloud fix + relaunch"],
-    ["/sysreclaim",         "stop unused Ollama models (free RAM)"],
-    ["/sysmodel <name>",    "switch local chat_model + relaunch"],
-    ["/sysapply <numbers>", "apply cached auto-doctor proposals"],
-    ["/sysscrollup [N]",     "scroll sidebar up N rows (default 1)"],
-    ["/sysscrolldn [N]",     "scroll sidebar down N rows (default 1)"],
-    ["/sysscrollpgup [N]",   "scroll sidebar up N rows (default 10)"],
-    ["/sysscrollpgdn [N]",   "scroll sidebar down N rows (default 10)"],
+  // Phase 18.4-iter12: per-command emoji bullets give /sysmenu
+  // visual scan-ability that ANSI colours can't (opencode strips
+  // the ESC byte but leaves the parameter chars — the prior
+  // attempt at coloured frames produced literal `[38;2;...m`
+  // garbage in the chat surface). Emoji + varied box-drawing
+  // chars render correctly. Bullet glyphs are picked to suggest
+  // what each command does at a glance.
+  const sysCmds: Array<[string, string, string]> = [
+    ["⚡", "/sys <args>",          "run any org-llm subcommand"],
+    ["📜", "/sysmenu",             "this listing"],
+    ["🩺", "/sysdoctor",           "system health check"],
+    ["📊", "/sysstats",            "vault counts"],
+    ["🤖", "/sysmodels",           "list configured models"],
+    ["🕒", "/sysrecent",           "last 7d activity"],
+    ["☁ ", "/syscloud",            "apply auto-doctor cloud fix + relaunch"],
+    ["🧹", "/sysreclaim",          "stop unused Ollama models (free RAM)"],
+    ["🔄", "/sysmodel <name>",     "switch local chat_model + relaunch"],
+    ["✓ ", "/sysapply <numbers>",  "apply cached auto-doctor proposals"],
+    ["↑ ", "/sysscrollup [N]",     "scroll sidebar up N rows (default 1)"],
+    ["↓ ", "/sysscrolldn [N]",     "scroll sidebar down N rows (default 1)"],
+    ["⇈ ", "/sysscrollpgup [N]",   "scroll sidebar up N rows (default 10)"],
+    ["⇊ ", "/sysscrollpgdn [N]",   "scroll sidebar down N rows (default 10)"],
   ];
 
   const out: string[] = [];
 
-  out.push(...frame("⚡ /sys* — LOCAL SUBPROCESS (no LLM)",
-    sysCmds.map(fmtRow), "PRIMARY"));
+  // Section divider banners between /sys / project / built-in
+  // give the chat output more visual rhythm. The bar uses the
+  // double-line ═ char so it reads as a tier-1 divider, while
+  // the existing frame's rounded ╭─╮ borders read as tier-2
+  // around each section.
+  const divider = (label: string) =>
+    `═════════ ${label} ═══════════════════════════════════════════════`;
+
+  out.push(divider("⚡ /sys* — LOCAL SUBPROCESS · no LLM"));
+  out.push(...frame("/sys* commands",
+    sysCmds.map(fmtSysRow), "PRIMARY"));
   out.push("");
 
+  out.push(divider("📁 PROJECT — .opencode/command/*.md"));
   if (families.size > 0) {
     const families_sorted = [...families.entries()].sort(
       (a, b) => a[0].localeCompare(b[0]),
@@ -757,20 +780,21 @@ function buildMenuText(api: any): string {
     for (const [family, items] of families_sorted) {
       const sortedItems = items.sort((a, b) => a[0].localeCompare(b[0]));
       out.push(...frame(
-        `📁 /${family}-* — PROJECT COMMANDS (${items.length})`,
+        `/${family}-* family · ${items.length} command${items.length === 1 ? "" : "s"}`,
         sortedItems.map(fmtRow),
         "SECONDARY",
       ));
       out.push("");
     }
   } else {
-    out.push(...frame("📁 PROJECT COMMANDS",
+    out.push(...frame("project commands",
       ["(no .opencode/command/*.md files found in this workspace)"],
       "SECONDARY"));
     out.push("");
   }
 
-  out.push(...frame("🛰 OPENCODE BUILT-INS",
+  out.push(divider("🛰 OPENCODE BUILT-INS"));
+  out.push(...frame("opencode native slashes",
     OPENCODE_BUILTIN_SLASHES.map(fmtRow),
     "ACCENT"));
 
