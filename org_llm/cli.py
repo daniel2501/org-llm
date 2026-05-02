@@ -13161,16 +13161,29 @@ def _opencode_sidebar_status(session, *, ctx: dict, workspace: str,
 
     # Top tags — same source as the AGENTS.md primer, but exposed as
     # a structured list so the TUI can render mini meters. Count comes
-    # from sidebar_top_tags_count.
+    # from sidebar_top_tags_count. Phase 18.5: filter system tags
+    # (org-llm, noexport, llm-history, etc.) AND system files
+    # (captains-log etc.) the same way insights generators do, so
+    # the ARCHIVE card doesn't surface "#org-llm 57194" — that's
+    # captain's-log self-noise, not a user topic.
     top_tags: list[dict] = []
     try:
         from collections import Counter as _Ct
+        from .insights import _is_system_tag, _is_system_file
         tag_counts: _Ct = _Ct()
-        for (tags,) in session.query(_N.tags).filter(_N.tags.isnot(None)).all():
+        rows = (session.query(_N.tags, _F.path)
+                .join(_F, _F.id == _N.file_id)
+                .filter(_N.tags.isnot(None)).all())
+        for tags, path in rows:
+            if _is_system_file(path):
+                continue
             for t in (tags or "").split():
                 t = t.strip().lower()
-                if t and t != "code" and not t.startswith("code:"):
-                    tag_counts[t] += 1
+                if not t or t == "code" or t.startswith("code:"):
+                    continue
+                if _is_system_tag(t):
+                    continue
+                tag_counts[t] += 1
         for name, count in tag_counts.most_common(top_tags_count):
             top_tags.append({"name": name, "count": count})
     except Exception:
