@@ -137,7 +137,7 @@ org-llm doctor                             # surfaces "embed prefix mismatch"
 - =org_llm/llm.py:_EMBED_PREFIXES= — model → prefix mapping
 - =org_llm/indexer.py:embed_nodes= — passes =task="document"=
 - =org_llm/search.py:vector_search= — passes =task="query"=
-- =org_llm/code_index.py= — code embedding uses =task="document"=
+- [[file:../../org_llm/code_index.py][=org_llm/code_index.py=]] — code embedding uses =task="document"=
 - =tests/test_embed.py= — prefix-coverage regression test
 
 * Related

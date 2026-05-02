@@ -131,10 +131,10 @@ org-llm ask --cloud "how does cli.py wire up MCP?"
 
 * Source files
 
-- =org_llm/code_index.py= — walker, parsers, indexing
-- =org_llm/cli.py= — =code= subcommand group
-- =org_llm/mcp_server.py= — =code_search= MCP tool
-- =org_llm/search.py= — vector_search; the =code= tag filter
+- [[file:../../org_llm/code_index.py][=org_llm/code_index.py=]] — walker, parsers, indexing
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]] — =code= subcommand group
+- [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] — =code_search= MCP tool
+- [[file:../../org_llm/search.py][=org_llm/search.py=]] — vector_search; the =code= tag filter
   flows through the same path
 
 * Related

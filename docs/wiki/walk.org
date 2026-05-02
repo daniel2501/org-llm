@@ -136,7 +136,7 @@ org-llm walk --no-save
 
 ** Conversational (opencode / claude / pi)
 
-The walk_* MCP tool family (in =org_llm/mcp_server.py=):
+The walk_* MCP tool family (in [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]]):
 
 - =walk_pick_targets= — surface attention-worthy notes
 - =walk_extract_facts= — pull atomic facts from a user explanation
@@ -148,9 +148,9 @@ The walk_* MCP tool family (in =org_llm/mcp_server.py=):
 
 * Source files
 
-- =org_llm/walk.py= — picking + extraction + disambiguation core
+- [[file:../../org_llm/walk.py][=org_llm/walk.py=]] — picking + extraction + disambiguation core
 - =org_llm/cli.py:walk= — CLI verb wiring
-- =org_llm/mcp_server.py= — the seven =walk_*= MCP tools
+- [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] — the seven =walk_*= MCP tools
 
 * Related
 

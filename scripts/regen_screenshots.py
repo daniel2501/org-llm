@@ -119,35 +119,35 @@ def _shot_doctor() -> None:
     flow executes (it prints to the shared console)."""
     from typer.testing import CliRunner
     from org_llm.cli import app
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     runner.invoke(app, ["doctor", "--no-diagnose"], catch_exceptions=False)
 
 
 def _shot_models_discover() -> None:
     from typer.testing import CliRunner
     from org_llm.cli import app
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     runner.invoke(app, ["models", "--discover"], catch_exceptions=False)
 
 
 def _shot_models_dashboard() -> None:
     from typer.testing import CliRunner
     from org_llm.cli import app
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     runner.invoke(app, ["models"], catch_exceptions=False)
 
 
 def _shot_palette_picker() -> None:
     from typer.testing import CliRunner
     from org_llm.cli import app
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     runner.invoke(app, ["palette"], catch_exceptions=False)
 
 
 def _shot_knob_list() -> None:
     from typer.testing import CliRunner
     from org_llm.cli import app
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     runner.invoke(app, ["knob", "list"], catch_exceptions=False)
 
 
@@ -157,28 +157,28 @@ def _shot_launch_dry_run() -> None:
     plugin file:// URI. Worth its own screenshot."""
     from typer.testing import CliRunner
     from org_llm.cli import app
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     runner.invoke(app, ["launch", "--dry-run"], catch_exceptions=False)
 
 
 def _shot_captains_log() -> None:
     from typer.testing import CliRunner
     from org_llm.cli import app
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     runner.invoke(app, ["log", "--limit", "20"], catch_exceptions=False)
 
 
 def _shot_pi_status() -> None:
     from typer.testing import CliRunner
     from org_llm.cli import app
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     runner.invoke(app, ["pi", "--status"], catch_exceptions=False)
 
 
 def _shot_dbt_status() -> None:
     from typer.testing import CliRunner
     from org_llm.cli import app
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     runner.invoke(app, ["dbt", "status"], catch_exceptions=False)
 
 

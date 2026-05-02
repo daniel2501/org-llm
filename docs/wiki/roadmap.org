@@ -35,10 +35,14 @@ cards" = Phase 12) ship in slices without renumbering the world.
 - *Currently:* late beta. Core flows (index → embed → ask →
   capture → launch) are stable. Most active recent surface is
   Phase 16 (TypeScript / Emacs extensions).
-- *Latest shipped:* Phase 16.2 — opencode TUI plugin fully wired
-  (insight cards on open, slot overrides for branding, AGENTS.md
-  primer, custom =org-llm= primary agent).
-- *Active focus:* Phase 16.2 polish + Phase 16.3 (Emacs companion).
+- *Latest shipped:* Phase 17.1 — LCARS sidebar + LLM proxy + auto-doctor
+  (full TNG-styled status panel with 5 cards, =/sys*= slash family that
+  bypasses ollama via the new HTTP proxy shim, slow-LLM watcher that
+  auto-runs =doctor --power-boost= and offers a one-keystroke cloud
+  failover, auto-session opener so the sidebar appears on launch
+  without typing).
+- *Active focus:* Phase 16.3 (Emacs companion) + Phase 16.4 extension
+  polish.
 - *Punch list before 1.0:* cross-platform install validation
   (macOS / Ubuntu), Termux/Android port, smoke coverage on
   less-walked verbs, MCP-kind tool-call logging.
@@ -74,7 +78,7 @@ in-opencode model could call =search_notes= et al.
 Manual session surfaced a class of bug: the launch config wrote
 an =mcpServers= entry that didn't actually start when opencode
 spawned it. Model would silently fall back to grep. Fixed +
-pinned with the first =tests/test_workspace_mcp.py= integration
+pinned with the first [[file:../../tests/test_workspace_mcp.py][=tests/test_workspace_mcp.py=]] integration
 suite.
 
 ** Phase 9.7: =.opencode/= directory vs =.opencode.json= dotfile
@@ -283,14 +287,14 @@ The big push that landed today (2026-04-30). What was added:
   org-llm noticed since last time").
 - Plugin-load fix: =export const id= required for path-loaded
   plugins (caught from a live opencode log error).
-- Companion: =scripts/audit_agents_md.py= + a one-time remote
+- Companion: [[file:../../scripts/audit_agents_md.py][=scripts/audit_agents_md.py=]] + a one-time remote
   routine firing 2026-05-13 to evaluate primer effectiveness and
   optionally open a tuning PR (hybrid: local audit, remote PR).
 
 * Active — Phase 16.3: Emacs companion                  :in_progress:
 
 Emacs integration that lives next to opencode rather than as an
-alternative to it. Per =extensions/emacs/README.md:40=.
+alternative to it. Per [[file:../../extensions/emacs/README.md][=extensions/emacs/README.md:40=]].
 
 ** Scope
 - =M-x org-llm-ask= / =M-x org-llm-walk= / =M-x org-llm-capture=
@@ -301,7 +305,7 @@ alternative to it. Per =extensions/emacs/README.md:40=.
 
 ** Status
 
-Scaffolded in =extensions/emacs/org-llm.el= (Phase 16.0). Real
+Scaffolded in [[file:../../extensions/emacs/org-llm.el][=extensions/emacs/org-llm.el=]] (Phase 16.0). Real
 hooks land here.
 
 * Shipped — Phase 17: live sidebar status panel              :shipped:
@@ -331,7 +335,7 @@ live, refreshing org-llm panel.
 ** Implementation surface
 
 - =sidebar_content= slot override (TSX in
-  =extensions/opencode/src/slots.tsx=); same plumbing as the
+  [[file:../../extensions/opencode/src/slots.tsx][=extensions/opencode/src/slots.tsx=]]); same plumbing as the
   Phase 16.2 =home_logo= override.
 - New launch-time JSON file =.opencode/sidebar-status.json=
   populated alongside =insight-cards.json=. Plugin reads this
@@ -350,6 +354,116 @@ the JSON file, so an external writer (auto-embedder cycle, a
 =doctor= run, etc.) can update the panel without coupling to
 opencode's runtime.
 
+* Shipped — Phase 17.1: LCARS panel + LLM proxy + auto-doctor :shipped:
+
+What started as "polish on the Phase 17 sidebar" became a much
+larger refactor that took the launch surface from "opencode with
+some org-llm decoration" to "an opencode harness where org-llm
+owns the user's LLM-routing decisions." Three pillars:
+
+** 17.1a–m: LCARS panel reorganisation
+- New [[file:../../extensions/opencode/src/panel.tsx][=extensions/opencode/src/panel.tsx=]] shared module: status
+  JSON cache + types + section renderers, used by BOTH the
+  =sidebar_content= slot (in-session, see
+  [[file:../../extensions/opencode/src/sidebar.tsx][=sidebar.tsx=]]) and the =home_bottom= slot (welcome screen,
+  see [[file:../../extensions/opencode/src/slots.tsx][=slots.tsx=]]) so the panel is visible immediately on launch.
+- Section consolidation: 7 cards → 5 cards (=vault=, =active=,
+  =health=, =archive=, =engage=); =active= now folds in model/route
+  info, =health= folds subsystems + vitals + MCP + RAM. Default
+  layout fits most terminal heights without scrolling. Legacy
+  tokens (=model=, =subsystems=, =life-support=) still resolve for
+  custom configs.
+- =MAKE IT SO= footer flipped off by default to save vertical
+  space; stardate header retained.
+
+** 17.1e: auto-session opener
+- New [[file:../../extensions/opencode/src/auto-session.tsx][=extensions/opencode/src/auto-session.tsx=]] — at plugin
+  mount, populate the prompt with a launch-rendered LCARS banner
+  (live stardate + vault stats + a Trek-themed prompt) and call
+  the captured Prompt ref's =submit()=. opencode creates the
+  session, navigates, and the full sidebar mounts — without the
+  user typing. Banner rendering lives in
+  [[file:../../org_llm/cli.py][=org_llm/cli.py=]] (=_render_auto_session_banner=).
+- =sidebar_auto_session_use_cloud= (default false): forces the
+  whole launch into local mode unless explicitly opted in, so the
+  auto-prompt doesn't fire a cloud round-trip.
+- =sidebar_auto_session_local_model= (default =llama3.2=) — picks
+  a known tool-capable model; the user's normal =chat_model= might
+  be a text-only model like =gemma3= that rejects MCP tool calls.
+
+** 17.1j–o: slow-LLM watcher + cloud relaunch
+- New [[file:../../extensions/opencode/src/slow-llm-watch.tsx][=extensions/opencode/src/slow-llm-watch.tsx=]] — watches
+  =message.updated= events from outside the LLM loop. If the AI
+  hasn't started responding within =sidebar_slow_llm_threshold_ms=
+  (default 25s), the plugin aborts the call, runs
+  =org-llm doctor --power-boost --no-diagnose= as a subprocess,
+  and injects the diagnostic into chat as a permanent record.
+- =sidebar_slow_llm_confirm= (default true): plugin waits for
+  =/syscloud= confirmation before applying. Users can flip false
+  to auto-apply once they trust the flow.
+- =sidebar_slow_llm_auto_relaunch= (default true): on apply, the
+  plugin spawns a detached =org-llm launch= and exits the current
+  opencode. The new launch reads the stashed pending prompt and
+  auto-resubmits via cloud — no manual "Ctrl+C twice + rerun."
+
+** 17.1k–s: =/sys*= slash family + LLM proxy
+- New [[file:../../extensions/opencode/src/sys-commands.tsx][=extensions/opencode/src/sys-commands.tsx=]] — implements
+  =/sysdoctor=, =/sysstats=, =/sysmodels=, =/sysrecent=,
+  =/sysreclaim=, =/syscloud=, =/sysmenu=, =/sysmodel <name>=,
+  =/sysapply <numbers>=, =/sysscroll-{up,down,pgup,pgdn}=. Each
+  runs a CLI subcommand or local action and injects the output
+  into chat as a noReply user message — so diagnostics, model
+  lists, and recent activity all live alongside the conversation
+  instead of vanishing in transient toasts.
+- New [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] (~1600 lines,
+  [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]] with 38 cases) — HTTP shim
+  between opencode and ollama. opencode fires the LLM call the
+  moment a message is submitted; there is no plugin-side hook
+  before the request leaves. The proxy intercepts at the HTTP
+  layer with a chain of interceptors that can short-circuit the
+  call entirely. Ships with 13 interceptors:
+  - =intercept_no_llm_flag=, =intercept_sys_commands= — the =/sys*=
+    family + =--no-llm= arg → empty response, ollama untouched.
+  - =intercept_response_cache=, =intercept_probe_cache= — cache
+    exact prompt hits and repeated provider probes.
+  - =intercept_static_slashes= — handwritten responses for =/menu=
+    =/help= =/config= (no-LLM equivalents of opencode's
+    LLM-driven slashes).
+  - =intercept_time_grounding=, =intercept_pii_redact= — inject
+    current date, redact secrets before forwarding.
+  - =intercept_tool_call_repair=, =intercept_qwen3_no_think= —
+    fix common LLM-emitted malformed tool calls; auto-inject
+    =/no_think= for qwen3.
+  - =intercept_model_routing=, =intercept_md_skills= — pick model
+    by query shape; run =.md=-defined slash commands as
+    subprocesses (=exec:= frontmatter or built-in skill names).
+  - =intercept_prompt_slim= — strip the MCP catalog from the
+    system prompt for queries that don't need tools (saves ~22KB
+    per turn against local models).
+  - =intercept_local_only= — catch-all kill switch
+    (=proxy_local_only=true=); short-circuits every chat call so
+    the user can lock the session into "no LLM at all" mode.
+- =inject_args_in_slashes= knob (default false) — proves we can
+  mutate =.opencode/command/*.md= at launch (appends =$ARGS= to
+  static =.md= bodies so user-typed flags reach the proxy).
+
+** Config surface
+- 24 new knobs under the =sidebar_*= and =proxy_*= prefixes,
+  documented in [[file:../../org_llm/db.py][=org_llm/db.py=]]'s =MODEL_DEFAULTS= with full
+  rationale comments and mirrored in
+  [[file:../../org_llm/literate_config.py][=org_llm/literate_config.py=]]'s =KEY_DESCRIPTIONS=.
+  [[file:../../scripts/sync_sidebar_defaults.py][=scripts/sync_sidebar_defaults.py=]] writes
+  [[file:../../extensions/opencode/src/sidebar-defaults.generated.ts][=extensions/opencode/src/sidebar-defaults.generated.ts=]] so
+  the TS plugin defaults stay in lock-step with Python defaults.
+
+** Status
+
+Shipped 2026-05-02. The proxy is the foundation for several
+Phase 18+ ideas: skill→slash auto-bridging, citation
+post-processing, prefix caching of system prompts, cloud-failover
+on first-byte timeout. Each is a single new interceptor module
+slotting into the existing chain.
+
 * Planned — Phase 16.4+: extension polish                    :planned:
 
 ** Status panel slot
@@ -361,7 +475,7 @@ user works. (Mentioned as a candidate "nice accomplishment" in the
 
 ** MCP-kind tool-call logging
 
-Decorate every =@server.tool()= in =org_llm/mcp_server.py= with a
+Decorate every =@server.tool()= in [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] with a
 uniform =write_event("mcp", tool_name, …)= call so =History= rows
 capture every MCP invocation. Today only one tool logs explicitly;
 the AGENTS.md audit's secondary signal is best-effort because of
@@ -373,6 +487,95 @@ insight cards, and the routine on 2026-05-13 having real data.
 =sidebar_content= (MCP panel header), =home_footer=, =home_bottom=
 (tip strings) all still leak opencode-flavored chrome. Same TSX
 slot pattern as Phase 16.2's =home_logo= work.
+
+* Planned — Phase 18: proxy expansion                        :planned:
+
+Phase 17.1 landed [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] with a 13-interceptor
+chain between opencode and ollama. Each interceptor is a standalone
+=req → ProxyResponse | None= function — composing new ones is the
+cheapest unit of work in the codebase. The list below is the
+near-term queue, ordered roughly by user-visible impact.
+
+** Skill→slash auto-bridge
+
+Every =:skill:=-tagged org-babel block in the vault auto-emits a
+=.opencode/command/<skill_name>.md= with frontmatter
+=exec: org-llm skill run <name> -- $ARGS=. =intercept_md_skills=
+already runs these without ever calling the LLM. Closes the loop:
+writing a skill in org gives you a tab-completable opencode slash
+for free, with zero ollama wake-up.
+
+** System-prompt prefix cache
+
+=intercept_response_cache= keys on the entire request body. Most
+of that body is the same 22 KB MCP catalog re-sent every turn.
+A prefix-keyed cache (system prompt → cached completion fragment)
+cuts time-to-first-token dramatically for repeated identical
+system prompts, especially under cold-start ollama load.
+
+** Cloud failover on first-byte timeout
+
+Already on the proxy's =# Future interceptors= comment block.
+Detect first-byte timeout against local, transparently retry
+against cloud, stream cloud response back to opencode. Pairs
+with =slow-llm-watch.tsx=, which currently failovers AT next
+launch — this would handle it mid-request without a relaunch.
+
+** Citation post-processor
+
+After a forwarded =ask_notes= reply streams back, append a
+deterministic source list (=[#node-id]= markers + a footer block)
+keyed on the nodes the proxy saw the LLM retrieve. Removes the
+LLM-cooperation dependency for grounded answers — citations are
+guaranteed even when the model "forgets" to cite.
+
+** Tool-result memoisation
+
+Same MCP tool call (same args) within a configurable window →
+return the cached result without round-tripping. Saves the local
+model from regenerating the same =search_notes= → =get_node= →
+read response chain when the user asks variations of the same
+question.
+
+** Skill-matching on free-form text
+
+Extend =intercept_md_skills='s fuzzy matcher beyond the current
+hardcoded patterns ("save this thought" → capture). Build an
+embedding-keyed index of all registered skills' descriptions and
+route free-form messages to the closest skill instead of the LLM
+when similarity exceeds a threshold. Falls back to the LLM
+cleanly when nothing matches.
+
+** Per-turn model routing
+
+Today =intercept_model_routing= runs at launch and sticks. Move
+the decision per-turn: cheap qwen for "what's 2+2", smart cloud
+for code generation, local-only for vault queries. The proxy
+already sees every request body; the router just needs to rewrite
+=model:= before forwarding.
+
+** Auto-summarisation of long context
+
+When the conversation history exceeds N turns, replace the
+earliest turns with one-line LLM-generated summaries before
+forwarding. Local models re-prefill the entire history every turn;
+this keeps local-only sessions usable past 50+ turns without
+falling off a cliff.
+
+** Stream-time tool-call repair
+
+=intercept_tool_call_repair= currently fixes the request body
+(LLM-emitted bad calls in completions). The streaming-response
+counterpart: many local models emit malformed JSON tool calls
+mid-stream. Repair them on the fly so opencode's tool-use loop
+doesn't error out.
+
+** Provider-failure fallback
+
+If upstream returns 5xx, connection-reset, or stalls past a
+configurable threshold, transparently retry against the cloud
+provider (or a different local model). Today the user sees
+opencode's raw error UI; the proxy can recover before it bubbles.
 
 * Punch list — beta → 1.0                                    :planned:
 
@@ -433,8 +636,8 @@ Trace markers for any phase referenced above:
 - Code references: =grep -nE "Phase [0-9]+\.?[0-9]*" org_llm/*.py
   extensions/= surfaces every in-source mention.
 - Commit history: =git log --all --oneline --grep="Phase "=.
-- Test pins: =tests/test_workspace_mcp.py= for the launch-config
-  surface; =extensions/opencode/test/index.test.ts= for the TUI
+- Test pins: [[file:../../tests/test_workspace_mcp.py][=tests/test_workspace_mcp.py=]] for the launch-config
+  surface; [[file:../../extensions/opencode/test/index.test.ts][=extensions/opencode/test/index.test.ts=]] for the TUI
   plugin.
 - Architecture deep dive: companion org-roam node
   =20260429200110-opencode_workspace_architecture.org= (in the

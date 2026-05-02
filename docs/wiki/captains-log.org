@@ -128,12 +128,12 @@ org-llm log --tangle                     # rewrite ~/org/captains-log.org from D
 
 * Source files
 
-- =org_llm/db.py:65= — =History= model
-- =org_llm/logbook.py= — =write_event(kind, command, ...)=
+- [[file:../../org_llm/db.py][=org_llm/db.py:65=]] — =History= model
+- [[file:../../org_llm/logbook.py][=org_llm/logbook.py=]] — =write_event(kind, command, ...)=
   helper; the only write path
-- =org_llm/cli.py= — =log= verb implementation (=--reflect=,
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]] — =log= verb implementation (=--reflect=,
   =--list=, etc.)
-- =scripts/audit_agents_md.py= — uses =History.kind='mcp'= to
+- [[file:../../scripts/audit_agents_md.py][=scripts/audit_agents_md.py=]] — uses =History.kind='mcp'= to
   count primer-tool calls
 
 * Related

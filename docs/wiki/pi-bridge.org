@@ -42,7 +42,7 @@ system prompt once at session start.
 
 The bridge is a single TypeScript file bundled inside the
 =org_llm= Python package at
-=org_llm/pi_extension/pi-org-llm.ts=. The install command
+[[file:../../org_llm/pi_extension/pi-org-llm.ts][=org_llm/pi_extension/pi-org-llm.ts=]]. The install command
 copies it out of the package; Pi loads the copy from
 =~/.pi/extensions/= without further network access.
 
@@ -115,11 +115,11 @@ flag; remove the bridge file from =~/.pi/extensions/= manually
 
 * Source files
 
-- =org_llm/pi_extension/pi-org-llm.ts= — the TypeScript bridge
+- [[file:../../org_llm/pi_extension/pi-org-llm.ts][=org_llm/pi_extension/pi-org-llm.ts=]] — the TypeScript bridge
   (bundled inside the Python package; copied to
   =~/.pi/extensions/= on install)
 - =org_llm/cli.py:pi= — the install / status / launch verb
-- =org_llm/mcp_server.py= — the same MCP server Pi spawns
+- [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] — the same MCP server Pi spawns
 
 * Related
 

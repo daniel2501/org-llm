@@ -1787,17 +1787,27 @@ parent theme.
 
 ### Where we are
 
-- **Latest shipped:** Phase 17 — live sidebar status panel (vault
-  counts, palette, MCP, hardware probe, sensorlog tail, common
-  feature links: `/doctor` `/recent` `/insights` `/wiki`).
-- **Previous:** Phase 16.2 — opencode TUI plugin fully wired
-  (insight cards on open, slot overrides for branding, `AGENTS.md`
-  primer, custom `org-llm` primary agent).
+- **Latest shipped:** Phase 17.1 — LCARS sidebar + LLM proxy +
+  auto-doctor. Full TNG-styled status panel (5 cards) on both
+  welcome + session views; `/sys*` slash family that bypasses
+  ollama via the new `org_llm/llm_proxy.py` HTTP shim
+  (13 interceptors: `/sys*` short-circuit, response/probe cache,
+  static slash handwrites, time-grounding, PII redact, tool-call
+  repair, model routing, `.md`-skill exec, qwen3 `/no_think`,
+  prompt slim, local-only kill switch); slow-LLM watcher that
+  auto-runs `doctor --power-boost` and offers a one-keystroke
+  `/syscloud` failover (with auto-relaunch); auto-session opener
+  so the sidebar appears on launch without typing.
+- **Previous:** Phase 17 — live sidebar status panel scaffolding
+  (vault counts, palette, MCP, hardware probe, sensorlog tail).
 - **Active focus:** Phase 16.3 — Emacs companion (`extensions/emacs/`).
-- **In flight planned:** auto-embedder re-writes
-  `sidebar-status.json` per cycle (live refresh w/o relaunch),
-  Phase 12.6 (insight-card cache persistence), Phase 12.7 (dbt
-  analytics over engagement), Phase 13.4–13.5 (walk per-slug
+- **In flight planned:** Phase 18 (proxy expansion — skill→slash
+  auto-bridge, system-prompt prefix cache, cloud failover on first-
+  byte timeout, citation post-processor, tool-result memoisation,
+  per-turn model routing); auto-embedder re-writes
+  `sidebar-status.json` per cycle (live refresh w/o relaunch);
+  Phase 12.6 (insight-card cache persistence); Phase 12.7 (dbt
+  analytics over engagement); Phase 13.4–13.5 (walk per-slug
   routing + clarifying questions).
 
 ### Beta → 1.0 punch list

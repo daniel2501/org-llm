@@ -168,12 +168,12 @@ the =llm.chat()= layer.
 
 * Source files
 
-- =org_llm/skills.py= — =Skill= model + indexer + =run_skill()=
+- [[file:../../org_llm/skills.py][=org_llm/skills.py=]] — =Skill= model + indexer + =run_skill()=
   executor
-- =org_llm/cli_skills.py= — =skills= / =skill= / =skill-index= /
+- [[file:../../org_llm/cli_skills.py][=org_llm/cli_skills.py=]] — =skills= / =skill= / =skill-index= /
   =skill-examples= / =skill-new= verbs (registered into the
   main app)
-- =org_llm/mcp_server.py= — =run_skill= / =list_skills= MCP tools
+- [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] — =run_skill= / =list_skills= MCP tools
 
 * Related
 

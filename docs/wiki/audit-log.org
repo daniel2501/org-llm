@@ -52,7 +52,7 @@ code rather than reasoning from project structure.
 
 | Claim                                           | Reality                                          |
 |-------------------------------------------------+--------------------------------------------------|
-| Bridge lives at =extensions/pi/=                | Lives at =org_llm/pi_extension/pi-org-llm.ts=    |
+| Bridge lives at =extensions/pi/=                | Lives at [[file:../../org_llm/pi_extension/pi-org-llm.ts][=org_llm/pi_extension/pi-org-llm.ts=]]    |
 | Flags: =--install/--uninstall/--status/--update/--logs/--restart= | Actual: =--install/--launch/--show/--status/--reinstall/--npm= |
 | Auto-installs Pi via =npm i -g @pi-cli/pi=     | Pi installer is curl-based; =--npm= flag opts in |
 | Bridge prepends to Pi's system prompt          | Bridge auto-loads via =~/.pi/config.json=        |
@@ -263,10 +263,10 @@ README:
 - New launch artefact: =.opencode/sidebar-status.json= written
   alongside =insight-cards.json=. Schema: =vault / active /
   mcp / hardware / sensors / links= top-level blocks.
-- New plugin module: =extensions/opencode/src/sidebar.tsx= —
+- New plugin module: [[file:../../extensions/opencode/src/sidebar.tsx][=extensions/opencode/src/sidebar.tsx=]] —
   registers =sidebar_content= slot at order 1000; refreshes on
   a 15s tick by re-reading the JSON.
-- Test pin in =tests/test_workspace_mcp.py=:
+- Test pin in [[file:../../tests/test_workspace_mcp.py][=tests/test_workspace_mcp.py=]]:
   =test_phase_17_sidebar_status_json_written= asserts file
   presence + load-bearing keys + the four named feature links
   (=doctor / library / insights / wiki=).
@@ -298,12 +298,12 @@ reminder.
 
 * Source files this audit touched
 
-- =org_llm/cli.py= — verb signatures + flag enumerations
-- =org_llm/cli_skills.py= — skill subcommand registry
-- =org_llm/mcp_server.py= — =@server.tool()= roster
-- =org_llm/db.py= — schema models
-- =org_llm/skills.py= — Skill model + indexer
-- =org_llm/walk.py= — walk implementation
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]] — verb signatures + flag enumerations
+- [[file:../../org_llm/cli_skills.py][=org_llm/cli_skills.py=]] — skill subcommand registry
+- [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] — =@server.tool()= roster
+- [[file:../../org_llm/db.py][=org_llm/db.py=]] — schema models
+- [[file:../../org_llm/skills.py][=org_llm/skills.py=]] — Skill model + indexer
+- [[file:../../org_llm/walk.py][=org_llm/walk.py=]] — walk implementation
 
 * Related
 

@@ -36,6 +36,34 @@ This applies in both opencode and the CLI's =ask= flow.
 has symlinked =docs/wiki/= into their =org_dir= (recommended
 in the index page).
 
+** Rule 2a: Link every code-file mention
+
+Whenever a wiki page (or any org file the app generates) mentions a
+file in this repo, render the mention as an org-mode link, not as
+plain verbatim:
+
+#+begin_example
+  GOOD:  [[file:../../org_llm/cli.py][=org_llm/cli.py=]]
+  BAD:   =org_llm/cli.py=
+#+end_example
+
+Reason: agave / org-mode / Emacs all turn the link into a clickable
+jump; verbatim doesn't. Future readers landing on a wiki page should
+be one keystroke away from the source it describes.
+
+There's a helper for code-side use:
+[[file:../../org_llm/logbook.py][=org_llm/logbook.py=]] exports =org_file_link(path)= which formats
+a path correctly with the right relative prefix. Any new org-emitting
+generator should call it instead of hand-formatting the link.
+
+The script [[file:../../scripts/link_wiki_files.py][=scripts/link_wiki_files.py=]] sweeps =docs/wiki/*.org=
+and converts any verbatim mention of an in-repo path into the link
+form. Run it after a bulk wiki edit to catch regressions:
+
+#+begin_src sh
+python scripts/link_wiki_files.py
+#+end_src
+
 ** Rule 2: Propose edits — always notified
 
 When the LLM notices a gap or staleness while answering — a

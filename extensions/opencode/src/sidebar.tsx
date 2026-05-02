@@ -1,217 +1,400 @@
 // @ts-nocheck
 //
-// Same JSX-runtime/types reconciliation note as src/slots.tsx applies:
-// tsconfig sets jsxImportSource: "solid-js" because @opentui/solid 0.2.0
-// ships only types for jsx-runtime. solid-js's IntrinsicElements is
-// DOM-shaped so opentui props (fg, ascii_font) type-error; runtime is
-// fine because opencode's TUI host wires opentui's Solid renderer at
-// launch.
+// Same JSX-runtime/types reconciliation note as src/slots.tsx applies.
 //
 /**
- * @org-llm/opencode-plugin — sidebar status panel (Phase 17).
+ * @org-llm/opencode-plugin — Phase 17.1 sidebar + home-status
+ * registration.
  *
- * Replaces opencode's default `sidebar_content` widget set with a
- * live org-llm panel:
- *   • Vault counts (nodes, embedded %, last gather)
- *   • Active palette + knob mix
- *   • MCP server status + tool count
- *   • Hardware probe (free RAM / VRAM)
- *   • Recent SensorLog alerts (last 5; only alert/critical-level)
- *   • Common feature links: doctor / library / insights / wiki
- *
- * Reads .opencode/sidebar-status.json (written by `org-llm launch`,
- * re-written by the auto-embedder daemon on every cycle so the panel
- * stays fresh without a relaunch).
- *
- * Layout assumes opencode's sidebar width (~30 cols). Long labels
- * truncate at 28 chars; numbers right-align via spacing.
+ * Owns:
+ *   • sidebar_content — full LCARS panel (session view)
+ *   • home_bottom — one-line status banner (welcome view), visible
+ *     immediately on launch without consuming the prompt's vertical
+ *     position. (An earlier iteration mounted the full panel beside
+ *     the logo via home_logo; that pushed the prompt off-screen
+ *     because the panel is ~50 lines tall. The single-line summary
+ *     replaces it: still visible on open, doesn't fight the prompt.)
+ *   • Lifecycle of the shared status cache (initial load + refresh
+ *     tick + dispose handler)
  */
 
-import { createSignal, onCleanup } from "solid-js";
+import {
+  refreshStatus, getStatus, resolveConfig, PanelBody, fmtAge,
+  scrollSidebar, showToast,
+} from "./panel";
+import { getPromptRef } from "./auto-session";
+import { dispatchSysCommand } from "./sys-commands";
 
-interface VaultStats {
-  n_files?: number;
-  n_nodes?: number;
-  n_embedded?: number;
-  pct_embedded?: number;
-  org_dir?: string;
+// Single-line home status banner. Renders below the prompt via
+// the `home_bottom` slot. Pulls live values out of the cached
+// sidebar-status.json so it tracks the same data as the in-session
+// LCARS panel. Centered, separator-pipe style, height: 1 row.
+/** Parsed keybind: a key name plus required modifier state.
+ * Modifiers default to false (must match exactly) — so "up"
+ * (no modifiers) only fires on bare arrow, not ctrl+up. We
+ * may revisit if users want "up matches ANY modifier" semantics,
+ * but exact-match is safer (avoids stealing typed text). */
+interface ParsedKeybind {
+  name:  string;        // opentui key name, lowercase
+  ctrl:  boolean;
+  alt:   boolean;
+  shift: boolean;
+  meta:  boolean;
 }
 
-interface KnobLevel {
-  name: string;
-  level: number;
-}
-
-interface SensorAlert {
-  ts: number;
-  probe: string;
-  status: string;
-  message: string;
-}
-
-interface FeatureLink {
-  name: string;
-  title: string;
-  slash: string;
-  hint: string;
-}
-
-interface SidebarStatus {
-  generated_at?: number;
-  workspace?: string;
-  vault?: VaultStats;
-  active?: { palette?: string; knobs?: KnobLevel[] };
-  mcp?: { server?: string; tool_count?: number; configured?: boolean };
-  hardware?: { free_ram_gb?: number; vram_gb?: number | null };
-  sensors?: { recent_alerts?: SensorAlert[] };
-  links?: FeatureLink[];
-}
-
-const REFRESH_INTERVAL_MS = 15_000;
-
-async function loadStatus(directory: string): Promise<SidebarStatus> {
-  const path = `${directory}/.opencode/sidebar-status.json`;
-  try {
-    const file = Bun.file(path);
-    if (!(await file.exists())) return {};
-    return (await file.json()) as SidebarStatus;
-  } catch {
-    return {};
+/** Parse a CSV of `<modifiers>+<key>` bindings into ParsedKeybind
+ * objects. Tolerant: blank tokens drop, malformed tokens drop.
+ * Modifier aliases recognised: ctrl/control, alt/meta/option,
+ * shift, super/cmd. Key aliases: pgup→pageup, pgdn→pagedown. */
+function parseKeybindCSV(csv: string | undefined): ParsedKeybind[] {
+  if (!csv) return [];
+  const out: ParsedKeybind[] = [];
+  for (const token of csv.split(",").map((s) => s.trim()).filter(Boolean)) {
+    const parts = token.toLowerCase().split("+").map((p) => p.trim()).filter(Boolean);
+    if (parts.length === 0) continue;
+    const key = parts.pop()!;
+    const bind: ParsedKeybind = {
+      name: key === "pgup" ? "pageup" : key === "pgdn" ? "pagedown" : key,
+      ctrl: false, alt: false, shift: false, meta: false,
+    };
+    for (const mod of parts) {
+      if (mod === "ctrl" || mod === "control") bind.ctrl = true;
+      else if (mod === "alt" || mod === "meta" || mod === "option") bind.alt = true;
+      else if (mod === "shift") bind.shift = true;
+      else if (mod === "super" || mod === "cmd") bind.meta = true;
+    }
+    out.push(bind);
   }
+  return out;
 }
 
-function fmtAge(ts: number | undefined): string {
-  if (!ts) return "—";
-  const ageSec = Math.max(0, Math.floor(Date.now() / 1000 - ts));
-  if (ageSec < 60) return `${ageSec}s ago`;
-  if (ageSec < 3600) return `${Math.floor(ageSec / 60)}m ago`;
-  if (ageSec < 86400) return `${Math.floor(ageSec / 3600)}h ago`;
-  return `${Math.floor(ageSec / 86400)}d ago`;
-}
-
-function statusFg(status: string): string {
-  switch (status) {
-    case "critical": return "error";
-    case "alert":    return "warning";
-    case "watch":    return "info";
-    default:          return "textMuted";
+/** Test if an opentui keypress event matches any of the parsed
+ * bindings. opentui's KeyEvent exposes `name`, `ctrl`, `option`
+ * (alt), `shift`, `meta`. We compare exact modifier state — a
+ * binding for "up" only fires on bare arrow, not ctrl+up. The
+ * `name` accepts opentui aliases (pagedown sometimes arrives as
+ * "pagedn" depending on terminal — handled in
+ * parseKeybindCSV's normalisation). */
+function matchKeybind(evt: any, binds: ParsedKeybind[]): boolean {
+  if (!evt) return false;
+  const evtName = (evt.name ?? "").toLowerCase();
+  // Normalise opentui's pagedn alias the same way the parser does.
+  const name = evtName === "pagedn" ? "pagedown" : evtName;
+  const ctrl  = !!evt.ctrl;
+  const alt   = !!(evt.option || evt.meta);   // opentui calls alt "option"
+  const shift = !!evt.shift;
+  // We don't currently distinguish super/cmd separately from "meta"
+  // because opentui rolls them together; treat super in user
+  // bindings as falsy here (rare in practice).
+  for (const b of binds) {
+    if (b.name === name && b.ctrl === ctrl && b.alt === alt && b.shift === shift) {
+      return true;
+    }
   }
+  return false;
 }
 
-export function registerSidebar(api: TuiPluginApi): void {
+function HomeStatusBanner(props: { theme: any }) {
+  const t = props.theme;
+  const s = getStatus();
+  // If the JSON hasn't loaded yet (no `config` key as marker), don't
+  // render anything — avoids a row of "—"s on a fresh checkout.
+  if (s.config === undefined) return null;
+  const v = s.vault ?? {};
+  const m = s.model ?? {};
+  return (
+    <box flexDirection="row" justifyContent="center" paddingTop={1}>
+      <text fg={t.primary}>★ </text>
+      <text fg={t.text}>STARDATE {s.stardate?.toFixed?.(1) ?? "—"}</text>
+      <text fg={t.textMuted}>  ·  </text>
+      <text fg={t.text}>{v.pct_embedded ?? 0}% indexed</text>
+      <text fg={t.textMuted}>  ·  </text>
+      <text fg={t.accent}>{m.provider || "ollama"}</text>
+      <text fg={t.textMuted}>:</text>
+      <text fg={t.text}>{(m.active || "—").slice(-18)}</text>
+      <text fg={t.textMuted}>  ·  </text>
+      <text fg={t.textMuted}>{fmtAge(s.generated_at)} ago</text>
+      <text fg={t.primary}> ★</text>
+    </box>
+  );
+}
+
+export async function registerSidebar(api: any): Promise<void> {
   const directory = api.state.path.directory;
 
-  // Reactive state — Solid signal so JSX re-renders when status
-  // refreshes from the file.
-  const [status, setStatus] = createSignal<SidebarStatus>({});
+  // Read the JSON file once before deciding what to register —
+  // panel_enabled, panel_on_session, refresh_secs, and
+  // replace_internal all need to be known up front. If the file is
+  // missing (first launch / fresh checkout / non-launch invocation)
+  // resolveConfig falls through to DEFAULT_CONFIG.
+  await refreshStatus(directory);
+  const cfg = resolveConfig(getStatus());
 
-  // Initial load + refresh tick. The interval is light (15s) and
-  // only file I/O — opencode's bun runtime handles the async fine.
-  void loadStatus(directory).then(setStatus);
-  const tick = setInterval(() => {
-    void loadStatus(directory).then(setStatus);
-  }, REFRESH_INTERVAL_MS);
+  // Master kill switch. When false, no slots register and no
+  // internal plugins are deactivated — opencode looks exactly like
+  // vanilla opencode (modulo the branding slots in slots.tsx).
+  if (!cfg.panel_enabled) return;
 
-  // Lifecycle: clean up the interval when the plugin disposes
-  // (avoid leaking ticks across opencode reloads). lifecycle.onDispose
-  // exists per @opencode-ai/plugin/tui.d.ts.
+  // Intercept-confirmation toaster. Polls the audit JSONL on a
+  // tick; for every new line that's an interceptor short-circuit
+  // (intercept_sys_commands, intercept_static_slashes), fires a
+  // toast confirming "ollama not contacted." This is the direct
+  // user-visible signal that the LLM was bypassed — paired with
+  // the in-chat "✓ handled locally" marker, double-confirms.
+  // Position is tracked across ticks via a closure-captured
+  // offset; we only read NEW bytes since last poll.
+  void (async () => {
+    const home = process.env.HOME ?? "";
+    const auditPath = `${home}/.local/share/org-llm/llm-audit.jsonl`;
+    let lastPos = 0;
+    try {
+      const stat = await Bun.file(auditPath).size;
+      lastPos = stat ?? 0;   // start at end-of-file → ignore historical entries
+    } catch { /* */ }
+
+    // Set of interceptors that fully short-circuited the LLM
+    // call. When we see one in the audit log we know ollama
+    // wasn't contacted and the auto-doctor stopwatch should
+    // disarm. The intercept_md_skills / intercept_no_llm_flag /
+    // intercept_local_only are ALSO short-circuits and shouldn't
+    // trigger auto-doctor — list them all here.
+    const SHORT_CIRCUIT_INTERCEPTORS = new Set<string>([
+      "intercept_sys_commands",
+      "intercept_static_slashes",
+      "intercept_md_skills",
+      "intercept_no_llm_flag",
+      "intercept_local_only",
+      "intercept_response_cache",
+      "intercept_probe_cache",
+    ]);
+
+    const tickInterval = setInterval(async () => {
+      try {
+        const file = Bun.file(auditPath);
+        const size = file.size;
+        if (size <= lastPos) return;
+        const slice = file.slice(lastPos, size);
+        const text  = await slice.text();
+        lastPos = size;
+        for (const line of text.split("\n")) {
+          if (!line.trim()) continue;
+          let entry: any;
+          try { entry = JSON.parse(line); } catch { continue; }
+          const ib = entry.intercepted_by;
+          if (SHORT_CIRCUIT_INTERCEPTORS.has(ib)) {
+            // Disarm slow-LLM watcher: this request was handled
+            // at the HTTP layer in single-digit ms, so the
+            // auto-doctor's 25s timeout should not fire for it.
+            // Setting the global module state directly (we can't
+            // import slow-llm-watch here without circular dep —
+            // instead, use a global symbol the watcher reads).
+            (globalThis as any).__orgllm_proxy_recent_intercept_at = Date.now();
+
+            const userText = (entry.user_text || "").slice(0, 60);
+            const dur = entry.duration_ms?.toFixed?.(1) ?? "?";
+            showToast(api, {
+              variant: "success",
+              title:   "✓ LLM bypassed",
+              message: `${userText} → ${ib.replace("intercept_", "")} in ${dur}ms. Ollama not contacted.`,
+            });
+          }
+        }
+      } catch { /* best-effort */ }
+    }, 1_500);
+    api.lifecycle?.onDispose?.(() => clearInterval(tickInterval));
+  })();
+
+  // Zombie-reaper notification. cli.py drops a marker file when
+  // it kills orphaned opencode processes from previous launches;
+  // surface that as a toast inside the new opencode session so
+  // the user sees the cleanup happened (the launch banner scrolls
+  // off too quickly). Marker is consumed (deleted) after the
+  // toast fires so we don't re-toast on every plugin reload.
+  void (async () => {
+    try {
+      const home = process.env.HOME ?? "";
+      const marker = `${home}/.local/share/org-llm/zombies-reaped.json`;
+      const file = Bun.file(marker);
+      if (!(await file.exists())) return;
+      const data = await file.json();
+      const count = data?.count ?? 0;
+      const pids  = Array.isArray(data?.pids) ? data.pids : [];
+      const byKind = data?.by_kind ?? {};
+      if (count > 0) {
+        // Build a compact breakdown like "2× opencode, 1× org-llm mcp".
+        const kindParts: string[] = [];
+        for (const [kind, kindPids] of Object.entries(byKind)) {
+          const n = Array.isArray(kindPids) ? kindPids.length : 0;
+          kindParts.push(`${n}× ${kind}`);
+        }
+        const breakdown = kindParts.length > 0 ? kindParts.join(", ") : `${count} processes`;
+        // Force pin — user wants to verify what got cleaned up;
+        // a 6-second toast vanishes before they can read PIDs.
+        showToast(api, {
+          variant:  "success",
+          title:    "Reaped zombies from prior launches",
+          message:  `${breakdown}. PIDs: ${pids.join(", ")}.`,
+          pin:      true,
+        });
+      }
+      // Consume the marker so subsequent plugin loads in this
+      // session don't re-fire the toast.
+      try { await Bun.write(marker, ""); } catch { /* */ }
+      try { await import("node:fs").then(fs => fs.unlinkSync(marker)); } catch { /* */ }
+    } catch {
+      // Best-effort — never block plugin init on this.
+    }
+  })();
+
+  // Refresh tick. Min 5s — local-disk file, faster wastes CPU.
+  const tickMs = Math.max(5_000, cfg.refresh_secs * 1_000);
+  const tick = setInterval(() => { void refreshStatus(directory); }, tickMs);
   api.lifecycle?.onDispose?.(() => clearInterval(tick));
 
-  api.slots.register({
-    order: 1000,
-    slots: {
-      sidebar_content: () => {
-        const s = status();
-        const v = s.vault ?? {};
-        const a = s.active ?? {};
-        const m = s.mcp ?? {};
-        const h = s.hardware ?? {};
-        const alerts = s.sensors?.recent_alerts ?? [];
-        const links = s.links ?? [];
+  // Dynamic re-draw on LLM output (Phase 17.1g). When the user
+  // submits a message and the LLM responds, the chat surface
+  // re-renders, and opencode invokes our sidebar_content slot
+  // function — that gives us a chance to read fresh data. Force
+  // a JSON re-read on every message event so the cached status is
+  // up-to-date by the time the slot fires.
+  //
+  // Note: this only matters when `.opencode/sidebar-status.json`
+  // is being updated externally — by `org-llm launch` (one-off at
+  // startup) or by an auto-embedder daemon (future work). Without
+  // an updater, refreshStatus reads the same content repeatedly.
+  // Wiring the event subscription now means the live update path
+  // is ready when the daemon ships, no plugin change needed.
+  const offMsg = api.event?.on?.("message.updated", () => {
+    void refreshStatus(directory);
+  });
+  const offPart = api.event?.on?.("message.part.updated", () => {
+    void refreshStatus(directory);
+  });
+  api.lifecycle?.onDispose?.(() => { offMsg?.(); offPart?.(); });
 
-        return (
-          <box flexDirection="column" paddingTop={1} paddingLeft={1} paddingRight={1}>
-            {/* ── Vault block ────────────────────────────── */}
-            <text fg="primary">▌ vault</text>
-            <text>
-              <text fg="textMuted">  nodes  </text>
-              <text>{v.n_nodes ?? "—"}</text>
-            </text>
-            <text>
-              <text fg="textMuted">  embed  </text>
-              <text>{v.pct_embedded ?? "—"}%</text>
-              <text fg="textMuted">  ({v.n_embedded ?? "—"}/{v.n_nodes ?? "—"})</text>
-            </text>
-            <text>
-              <text fg="textMuted">  files  </text>
-              <text>{v.n_files ?? "—"}</text>
-            </text>
-            <text>
-              <text fg="textMuted">  fresh  </text>
-              <text fg="info">{fmtAge(s.generated_at)}</text>
-            </text>
+  // Sidebar scroll keybinds — config-driven. Each direction has a
+  // CSV of bindings; we parse once at registration time, then
+  // match every keypress against the parsed list. Reliability of
+  // any specific combo depends on the terminal stack:
+  //   - doom emacs vterm eats alt+arrow as vterm-history
+  //   - tmux/screen can eat shift+pgup
+  //   - bare terminals usually pass everything through
+  // The CSV defaults try ctrl, alt, shift in that order so the
+  // first one to reach us wins. Users can override per-direction
+  // via sidebar_scroll_*_keys config knobs.
+  const upBinds   = parseKeybindCSV(cfg.scroll_up_keys);
+  const downBinds = parseKeybindCSV(cfg.scroll_down_keys);
+  const pgUpBinds = parseKeybindCSV(cfg.scroll_pageup_keys);
+  const pgDnBinds = parseKeybindCSV(cfg.scroll_pagedown_keys);
+  const offKey = api.renderer?.keyInput?.on?.("keypress", (evt: any) => {
+    // Pre-empt Enter on /sys* messages BEFORE opencode's Prompt
+    // processes it. The onSubmit wrapper in slots.tsx isn't a
+    // reliable gate — opencode's Prompt fires submission directly
+    // on its own Enter handler, not via the onSubmit callback.
+    // Hooking keypress with preventDefault + stopPropagation is
+    // the only place we can actually stop the LLM round-trip
+    // from being initiated. opentui's KeyEvent supports both
+    // (see lib/KeyHandler.d.ts).
+    const name = (evt?.name ?? "").toLowerCase();
+    if ((name === "return" || name === "enter") &&
+        !evt?.ctrl && !evt?.option && !evt?.meta && !evt?.shift) {
+      const ref = getPromptRef();
+      const text = ref?.current?.input ?? "";
+      if (text.trim().startsWith("/sys")) {
+        if (dispatchSysCommand(api, text)) {
+          try { ref?.set?.({ input: "", mode: "normal", parts: [] }); } catch { /* */ }
+          evt?.preventDefault?.();
+          evt?.stopPropagation?.();
+          return;
+        }
+      }
+    }
 
-            {/* ── Active block ───────────────────────────── */}
-            <text fg="primary">{"\n"}▌ active</text>
-            <text>
-              <text fg="textMuted">  palette </text>
-              <text fg="secondary">{a.palette ?? "classic"}</text>
-            </text>
-            {(a.knobs ?? []).slice(0, 4).map((k) => (
-              <text>
-                <text fg="textMuted">  {k.name.padEnd(8)}</text>
-                <text fg="accent">{"·".repeat(k.level)}</text>
-                <text fg="textMuted">{"·".repeat(Math.max(0, 3 - k.level))}</text>
-              </text>
-            ))}
+    // Sidebar scroll keybinds.
+    let delta = 0;
+    let unit: "step" | "viewport" = "step";
+    if      (matchKeybind(evt, upBinds))   { delta = -1; unit = "step"; }
+    else if (matchKeybind(evt, downBinds)) { delta = +1; unit = "step"; }
+    else if (matchKeybind(evt, pgUpBinds)) { delta = -1; unit = "viewport"; }
+    else if (matchKeybind(evt, pgDnBinds)) { delta = +1; unit = "viewport"; }
+    else return;
+    scrollSidebar(delta, unit);
+    evt?.preventDefault?.();
+    evt?.stopPropagation?.();
+  });
+  // Only warn when the API surface IS present but subscription
+  // returned falsy — that's a real failure mode worth surfacing.
+  // When api.renderer.keyInput is entirely absent (e.g. in unit
+  // tests with a mock api), stay silent: that's an expected case,
+  // not a bug.
+  if (api.renderer?.keyInput?.on && !offKey) {
+    showToast(api, {
+      variant: "warning",
+      title:   "Sidebar scroll keybinds inactive",
+      message: "keyInput.on returned null. Use /sysup /sysdown.",
+    });
+  }
+  api.lifecycle?.onDispose?.(() => { offKey?.(); });
 
-            {/* ── MCP + Hardware ─────────────────────────── */}
-            <text fg="primary">{"\n"}▌ mcp / hw</text>
-            <text>
-              <text fg="textMuted">  tools  </text>
-              <text fg={m.configured ? "success" : "warning"}>
-                {m.tool_count ?? "—"}
-              </text>
-            </text>
-            {h.free_ram_gb != null && (
-              <text>
-                <text fg="textMuted">  ram    </text>
-                <text>{h.free_ram_gb}gb free</text>
-              </text>
-            )}
-            {h.vram_gb != null && (
-              <text>
-                <text fg="textMuted">  vram   </text>
-                <text>{h.vram_gb}gb</text>
-              </text>
-            )}
+  // Deactivate the internal sidebar plugins the user opted to
+  // replace. cfg.replace_internal carries IDs WITHOUT the
+  // "internal:" prefix (more readable in the literate config csv).
+  for (const id of cfg.replace_internal) {
+    try {
+      void api.plugins?.deactivate?.(`internal:${id}`);
+    } catch {
+      // Best-effort — non-fatal if the plugin manager rejects.
+    }
+  }
 
-            {/* ── Recent sensor alerts ───────────────────── */}
-            {alerts.length > 0 && (
-              <>
-                <text fg="primary">{"\n"}▌ alerts</text>
-                {alerts.slice(0, 3).map((alert) => (
-                  <text>
-                    <text fg={statusFg(alert.status)}>
-                      ▲ {alert.probe.padEnd(8)}
-                    </text>
-                    <text fg="textMuted">{fmtAge(alert.ts)}</text>
-                  </text>
-                ))}
-              </>
-            )}
+  // Compose the slot map based on which surfaces the user enabled.
+  // Each slot's render is wrapped in safeSlot so a JSX/render bug
+  // surfaces as a one-time toast and renders nothing — never
+  // crashes the host TUI.
+  const slots: Record<string, any> = {};
+  if (cfg.panel_on_session) {
+    slots.sidebar_content = safeSlot(api, "sidebar_content",
+      (ctx: any) => (
+        <PanelBody status={getStatus()} theme={ctx.theme.current}
+                    terminalHeight={api.renderer?.terminalHeight ?? 50} />
+      ));
+  }
+  if (cfg.panel_on_home) {
+    slots.home_bottom = safeSlot(api, "home_bottom",
+      (ctx: any) => (
+        <HomeStatusBanner theme={ctx.theme.current} />
+      ));
+  }
+  if (Object.keys(slots).length > 0) {
+    api.slots.register({ order: 1000, slots });
+  }
+}
 
-            {/* ── Common feature links ───────────────────── */}
-            <text fg="primary">{"\n"}▌ jump</text>
-            {links.map((link) => (
-              <text>
-                <text fg="accent">{link.slash.padEnd(11)}</text>
-                <text fg="textMuted">{link.title.split(" — ")[1] ?? link.title}</text>
-              </text>
-            ))}
-          </box>
-        );
-      },
-    },
-  } as unknown as Parameters<typeof api.slots.register>[0]);
+/** Defensive slot wrapper — same pattern as slots.tsx. Inlined
+ * here rather than imported to keep sidebar.tsx self-contained
+ * and avoid a circular import with slots.tsx. */
+function safeSlot<F extends (...args: any[]) => any>(api: any, label: string, fn: F): F {
+  let toasted = false;
+  return ((...args: any[]) => {
+    try {
+      return fn(...args);
+    } catch (e) {
+      if (!toasted) {
+        toasted = true;
+        try {
+          // Force-pin: a slot crash is critical info and the user
+          // needs to see the error message to file/fix.
+          showToast(api, {
+            variant: "error",
+            title:   `slot crash: ${label}`,
+            message: (e as Error)?.message?.slice(0, 200) ?? "unknown error",
+            pin:     true,
+          });
+        } catch {
+          // last-ditch
+        }
+      }
+      return null;
+    }
+  }) as F;
 }

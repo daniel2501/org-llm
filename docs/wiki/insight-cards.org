@@ -161,14 +161,14 @@ sessions see the snapshot from launch time.
 
 * Source files
 
-- =org_llm/insights.py= — generator + cached_gather + scorer
-- =org_llm/db.py:130= — =InsightEngagement= model
+- [[file:../../org_llm/insights.py][=org_llm/insights.py=]] — generator + cached_gather + scorer
+- [[file:../../org_llm/db.py][=org_llm/db.py:130=]] — =InsightEngagement= model
 - =org_llm/cli.py:_doctor_impl= — =--diagnose-cards= flag
-- =org_llm/cli.py= (launch) — gather + write
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]] (launch) — gather + write
   =insight-cards.json=
-- =extensions/opencode/src/index.ts= — TUI plugin's
+- [[file:../../extensions/opencode/src/index.ts][=extensions/opencode/src/index.ts=]] — TUI plugin's
   =loadCards()= + =/insights= dialog
-- =scripts/audit_agents_md.py= — audits engagement deltas
+- [[file:../../scripts/audit_agents_md.py][=scripts/audit_agents_md.py=]] — audits engagement deltas
   pre/post AGENTS.md primer landing (companion to the remote
   routine)
 

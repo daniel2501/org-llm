@@ -122,13 +122,13 @@ ls .opencode/themes/                     # opencode theme JSON
 
 * Source files
 
-- =org_llm/ui.py= — =DARK_PALETTE= / =LIGHT_PALETTE= +
+- [[file:../../org_llm/ui.py][=org_llm/ui.py=]] — =DARK_PALETTE= / =LIGHT_PALETTE= +
   =PALETTE= helper that reads the active palette from =Config=
-- =org_llm/palettes.py= — palette overlay system (=palette_overrides=)
+- [[file:../../org_llm/palettes.py][=org_llm/palettes.py=]] — palette overlay system (=palette_overrides=)
 - =org_llm/cli.py:_opencode_lcars_theme= — opencode theme JSON
   writer (light + dark variants)
 - =org_llm/cli.py:_render_splash_logo= — main CLI splash
-- =extensions/opencode/src/slots.tsx= — TUI plugin's branded
+- [[file:../../extensions/opencode/src/slots.tsx][=extensions/opencode/src/slots.tsx=]] — TUI plugin's branded
   surfaces (home_logo, sidebar_title, home_prompt)
 - =org_llm/cli.py:palette= — the =org-llm palette <name>=
   command implementation

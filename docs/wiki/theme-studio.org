@@ -131,12 +131,12 @@ saves prompt budget.
 
 * Source files
 
-- =org_llm/theme_studio.py= — =get_themed=, regenerate, cache
-- =org_llm/cli.py= — =knob= / =theme-studio= / =personalize=
+- [[file:../../org_llm/theme_studio.py][=org_llm/theme_studio.py=]] — =get_themed=, regenerate, cache
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]] — =knob= / =theme-studio= / =personalize=
   verbs
 - =org_llm/cli.py:_opencode_workspace_prompt= — knob block
   rendered into system prompt
-- =org_llm/mcp_server.py= — =add_theme_knob=, =get_themed= MCP
+- [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] — =add_theme_knob=, =get_themed= MCP
   tools
 
 * Related

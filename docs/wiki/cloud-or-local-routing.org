@@ -130,11 +130,11 @@ org-llm launch -n                        # dry-run; key is REDACTED in output
 
 * Source files
 
-- =org_llm/cloud.py= — provider catalog, =cloud_configure=,
+- [[file:../../org_llm/cloud.py][=org_llm/cloud.py=]] — provider catalog, =cloud_configure=,
   =local_ram_gb= / =local_vram_gb= probes
-- =org_llm/cli.py= — =cloud= subcommand, =launch= cloud-or-local
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]] — =cloud= subcommand, =launch= cloud-or-local
   decision, =--cloud= / =--local= flags
-- =org_llm/creds.py= — =pass= integration
+- [[file:../../org_llm/creds.py][=org_llm/creds.py=]] — =pass= integration
 
 * Related
 

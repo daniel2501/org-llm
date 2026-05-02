@@ -1,0 +1,131 @@
+:PROPERTIES:
+:ID:       47ba2143-c53a-409a-8286-2b3759794608
+:CREATED:  [2026-05-02]
+:END:
+#+TITLE: LLM proxy
+#+FILETAGS: :wiki:proxy:opencode:phase17:
+#+OPTIONS: toc:2 num:nil
+
+* What this is
+
+A small HTTP server, [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]], that sits between
+opencode and the upstream LLM endpoint (ollama, OpenRouter, etc.).
+=org-llm launch= starts it on a free localhost port and rewrites
+opencode's provider config so every chat-completion request flows
+through it.
+
+The proxy runs a chain of *interceptors* against each request:
+
+#+begin_src text
+    interceptor(request_body) -> ProxyResponse | None
+#+end_src
+
+If any interceptor returns a =ProxyResponse=, the proxy short-circuits
+— that response goes back to opencode, the upstream is never touched,
+ollama doesn't even wake up. If every interceptor returns =None=, the
+request forwards transparently and the response streams back.
+
+Phase 17.1 shipped 13 interceptors. New ones are single-file additions
+that compose into the chain at startup; this is the cheapest unit of
+work in the codebase.
+
+* Why it exists
+
+opencode dispatches the user's message to the LLM the moment they
+hit Enter — there is no plugin-side hook that fires *before* the HTTP
+request leaves opencode. For org-llm to short-circuit a request
+(handle =/sys*= locally, return a cached response, swap to cloud,
+strip the MCP catalog from a system prompt, etc.) intercepting at
+the HTTP layer is the only available seam.
+
+The first interceptor that motivated the whole thing was
+=intercept_sys_commands=: when the user types =/sysmenu= or
+=/sysscroll-down=, the work happens entirely in the
+[[file:../../extensions/opencode/src/sys-commands.tsx][TS plugin]] —
+ollama waking up just to return an empty assistant turn was pure
+waste. Now the proxy returns the empty response directly, the plugin
+runs the action, and ollama stays asleep.
+
+* Shipped interceptors (in order)
+
+The order matters: every interceptor sees the request before the
+next one does, and the first one to return a =ProxyResponse= wins.
+
+| # | Interceptor                  | What it catches                                                          |
+|---+------------------------------+--------------------------------------------------------------------------|
+| 1 | =intercept_no_llm_flag=      | =--no-llm= argument anywhere in the message → empty response             |
+| 2 | =intercept_sys_commands=     | =/sys*= prefix in the latest user message → empty response               |
+| 3 | =intercept_response_cache=   | Exact-prompt cache hit → cached response                                 |
+| 4 | =intercept_static_slashes=   | =/menu=, =/help=, =/config= → handwritten markdown response              |
+| 5 | =intercept_probe_cache=      | Repeated provider probes (=GET /api/tags= etc.) → cached body            |
+| 6 | =intercept_time_grounding=   | Inject current date into the system prompt before forwarding             |
+| 7 | =intercept_pii_redact=       | Redact secrets (API keys, tokens) before forwarding                      |
+| 8 | =intercept_tool_call_repair= | Fix common LLM-emitted malformed tool-call schemas                       |
+| 9 | =intercept_model_routing=    | Route by query shape (cheap model for trivia, smart for code)            |
+| 10 | =intercept_md_skills=       | =.md= slash with =exec:= frontmatter → run as subprocess, return stdout |
+| 11 | =intercept_qwen3_no_think=  | Auto-inject =/no_think= for qwen3 models                                 |
+| 12 | =intercept_prompt_slim=     | Strip the MCP catalog (~22 KB) from system prompts that don't need tools |
+| 13 | =intercept_local_only=      | Catch-all kill switch (=proxy_local_only=true=) → "no LLM" response      |
+
+The full source with rationale comments is in [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]];
+38 unit tests pin behaviour in [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]].
+
+* Why it matters
+
+- *Local model stays asleep on UX-only flows.* =/sysmenu= and friends
+  don't burn watts spinning ollama up to return an empty turn.
+- *Token waste drops.* =intercept_prompt_slim= strips the 22 KB MCP
+  catalog from system prompts on plain-chat queries — that's faster
+  TTFT against any model.
+- *Bad tool calls don't fail the user.* =intercept_tool_call_repair=
+  fixes common LLM-emitted JSON schema errors before opencode sees
+  them and aborts the tool-use loop.
+- *Composition over conditionals.* New behaviour = one new
+  =intercept_<thing>= function, register it in =start_proxy='s
+  default chain. No threading conditionals through opencode's request
+  path.
+
+* Auditing & observability
+
+The proxy ships a basic =AuditLogger= that writes a JSONL stream of
+every intercepted/forwarded request to
+=~/.local/share/org-llm/llm-audit.jsonl= when enabled. =/sysrecent=
+surfaces the tail in chat (see
+[[file:../../extensions/opencode/src/sys-commands.tsx][=sys-commands.tsx=]]).
+
+* Where it lives
+
+- [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] — server, request/response types,
+  interceptors, =start_proxy()= bootstrap.
+- [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]] — black-box tests against a live
+  in-process proxy + a fake upstream.
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]] — =launch= wires the proxy in, picks the port,
+  rewrites the provider URL, attaches the audit logger.
+- [[file:../../extensions/opencode/src/sys-commands.tsx][=extensions/opencode/src/sys-commands.tsx=]] — the TS plugin side
+  of the =/sys*= flow that pairs with =intercept_sys_commands=.
+- [[file:../../org_llm/db.py][=org_llm/db.py=]] — =MODEL_DEFAULTS= entries for =proxy_local_only=
+  and the =sidebar_*= knobs that the slow-LLM watcher consults.
+
+* Roadmap
+
+The next-up interceptor list (skill→slash auto-bridge, prefix cache,
+cloud failover on first-byte timeout, citation post-processor,
+tool-result memoisation, per-turn model routing, auto-summarisation,
+stream-time tool-call repair, provider-failure fallback) lives in
+[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 18.
+
+* See also
+
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — the proxy is HTTP-layer; MCP is JSON-RPC inside the
+  conversation. The proxy's =intercept_prompt_slim= operates on the
+  serialised MCP catalog before it reaches the local model.
+- [[id:510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08][Cloud-or-local routing]] — the slow-LLM watcher fires the
+  cloud-failover path; the proxy is what makes the failover instant
+  (no need to reload opencode for it to take effect).
+- [[id:001a2e03-30e8-49c5-a813-e774f58b6a0e][Skills]] — =intercept_md_skills= runs =.md= slashes as
+  subprocesses; Phase 18's skill→slash auto-bridge would generate
+  one =.md= per =:skill:= block.
+- [[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][Doctor & self-heal]] — the slow-LLM watcher in
+  [[file:../../extensions/opencode/src/slow-llm-watch.tsx][=slow-llm-watch.tsx=]] runs =doctor --power-boost= when the
+  proxy notices a stuck request, then injects the diagnostic into
+  chat as a permanent record.

@@ -196,12 +196,14 @@ export const tui: TuiPlugin = async (api) => {
     });
   }
 
-  // Phase 17: live sidebar status panel. Independent of cards (the
-  // panel renders even when there are no cards). Same lazy-import
-  // resilience as the slots module.
+  // Phase 17.1: live LCARS sidebar status panel. Independent of
+  // cards (the panel renders even when there are no cards). Same
+  // lazy-import resilience as the slots module. registerSidebar is
+  // async — it reads the JSON config block before deciding which
+  // slots to register and which internal plugins to deactivate.
   try {
     const { registerSidebar } = await import("./sidebar");
-    registerSidebar(api as unknown as Parameters<typeof registerSidebar>[0]);
+    await registerSidebar(api as unknown as Parameters<typeof registerSidebar>[0]);
   } catch (e) {
     api.ui?.toast?.({
       variant: "warning",
@@ -209,6 +211,54 @@ export const tui: TuiPlugin = async (api) => {
       message: `sidebar panel failed (${(e as Error)?.message ?? "unknown"}) — using opencode defaults`,
       duration: 4000,
     });
+  }
+
+  // Phase 17.1e: auto-session opener. Reads the same JSON config
+  // block, polls for the prompt's ref to be captured (slots.tsx
+  // chains the home_prompt ref callback into auto-session), and
+  // submits a minimal opening prompt. opencode handles session
+  // creation + navigation, the sidebar_content slot mounts, and
+  // the user sees the LCARS panel immediately. Fire-and-forget —
+  // never blocks plugin load.
+  try {
+    const { maybeAutoSubmit } = await import("./auto-session");
+    const { resolveConfig, getStatus } = await import("./panel");
+    const cfg = resolveConfig(getStatus());
+    void maybeAutoSubmit(api, cfg);
+  } catch {
+    // Auto-session is best-effort. The user can always type
+    // manually if it fails.
+  }
+
+  // Phase 17.1j: plugin-side slow-LLM detection + auto-doctor.
+  // The system-prompt proactive_doctor instructions only help
+  // when the LLM can introspect — they do nothing when the LLM
+  // is itself stuck mid-response. This watcher subscribes to
+  // message events and runs `org-llm doctor --power-boost`
+  // automatically if the AI hasn't responded within
+  // sidebar_slow_llm_threshold_ms (default 25s).
+  try {
+    const { registerSlowLLMWatch } = await import("./slow-llm-watch");
+    const { resolveConfig, getStatus } = await import("./panel");
+    const cfg = resolveConfig(getStatus());
+    registerSlowLLMWatch(api, cfg);
+  } catch {
+    // Best-effort — non-fatal if the events subsystem is unavailable.
+  }
+
+  // Phase 17.1k: org-llm CLI subcommand integration. Registers
+  // /sys, /sysdoctor, /sysstats, /sysmodels, /sysrecent slash
+  // commands that run the corresponding org-llm CLI subcommand
+  // via subprocess and inject the output into chat as a noReply
+  // message. Closes the loop between TUI and CLI: any CLI
+  // subcommand becomes accessible from chat without leaving
+  // opencode and without an LLM round-trip.
+  try {
+    const { registerSysCommands } = await import("./sys-commands");
+    registerSysCommands(api);
+  } catch {
+    // Best-effort — slash commands fail silently if the api.command
+    // subsystem isn't available.
   }
 
   const directory = api.state.path.directory;

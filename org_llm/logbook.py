@@ -48,6 +48,56 @@ _ORG_LOG_PATH = Path("~/org/captains-log.org").expanduser()
 _TANGLE_DIR   = Path("~/.local/share/org-llm/log").expanduser()
 _ROTATE_BYTES = 5 * 2**20    # 5 MB — rotate the org file past this size
 
+
+# Anywhere we're emitting an org file that mentions a code/wiki path,
+# wrap it with this helper so it renders as a clickable link in
+# org-mode + agave + the wiki's `file:` convention. Bare verbatim
+# `=path/to/file=` is fine for ad-hoc text inside src blocks (where
+# org-mode wouldn't render the link anyway), but every "*See also*"
+# / "where it lives" / hyperlink-friendly position should use this.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def org_file_link(path, *, label: str = "", relative_to=None) -> str:
+    """Render `path` as an org-mode `[[file:...][=...=]]` link.
+
+    Resolution rules — priority top to bottom:
+      • If `relative_to` is given, link target is `path` relative to it.
+      • Else if `path` is absolute and inside the repo root, target is
+        relative to the repo root with a `../../` prefix (so wiki pages
+        at `docs/wiki/<page>.org` resolve correctly).
+      • Else target is `path` as-is (absolute, or whatever the caller
+        passed — assumed already correct).
+
+    `label` defaults to the verbatim path string in `=...=` style,
+    matching the convention in `docs/wiki/*.org` set in 2026-05-02.
+
+    Best-effort: never raises. Falls back to a plain verbatim
+    `=path=` string if anything goes sideways — that still readably
+    renders.
+    """
+    try:
+        p = Path(path)
+        rel = None
+        if relative_to is not None:
+            try:
+                rel = "../../" + str(p.relative_to(Path(relative_to)))
+            except ValueError:
+                rel = None
+        if rel is None and p.is_absolute():
+            try:
+                rel = "../../" + str(p.relative_to(_REPO_ROOT))
+            except ValueError:
+                rel = None
+        if rel is None and not p.is_absolute():
+            # Caller passed a repo-rooted path (e.g. "org_llm/cli.py").
+            rel = "../../" + str(p)
+        target = rel or str(p)
+        text = label or f"={path}="
+        return f"[[file:{target}][{text}]]"
+    except Exception:
+        return f"={path}="
+
 # Per-kind cap defaults. Override via log_max_rows_per_kind config.
 _DEFAULT_MAX_ROWS_PER_KIND = 1000
 

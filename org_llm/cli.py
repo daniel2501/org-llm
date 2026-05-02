@@ -430,30 +430,103 @@ def _cloud_chat_with_local_fallback(
 
 
 def _suggest_model_tag(bad_tag: str, base_url: str) -> str | None:
-    """Fuzzy-match a typo'd model tag against pulled-locally + catalog."""
+    """Fuzzy-match a typo'd model tag against pulled-locally + catalog.
+
+    Returns None when:
+      • `bad_tag` already exists locally (pulled) — no substitution needed.
+      • `bad_tag` already exists in the catalog — also a known good tag.
+      • The closest fuzzy match doesn't fit the user's available RAM
+        (avoid suggesting a 14B model to a user who only has 5 GB free —
+        that's the bug the original implementation hit when a user typed
+        `qwen3:4b` and got `qwen2.5:14b` as the suggestion).
+
+    The hardware-fit filter uses the same heuristic as
+    `_power_boost_chat_model` — model size + 1 GB headroom must fit
+    in available RAM. When fit-checking can't be done (no psutil,
+    no cataloged size for the suggestion), we err on the side of
+    NOT suggesting rather than suggest-and-trash-the-user's-system.
+    """
     import difflib as _dl
-    candidates: set[str] = set()
+
+    pulled: set[str] = set()
+    catalog_tags: set[str] = set()
+    catalog_size: dict[str, float] = {}
+
     try:
         from .llm import list_models
         for m in list_models(base_url) or []:
-            n = m.get("name") if isinstance(m, dict) else getattr(m, "name", None)
+            # list_models() returns plain str names (e.g. "qwen3:4b").
+            # Older code paths sometimes wrapped them in dicts/objects;
+            # accept all three shapes for robustness.
+            if isinstance(m, str):
+                n = m
+            elif isinstance(m, dict):
+                n = m.get("name") or m.get("model") or ""
+            else:
+                n = getattr(m, "name", None) or getattr(m, "model", None) or ""
             if n:
-                candidates.add(n)
-                # Also add the stem (without :tag suffix) for closer matching
-                candidates.add(n.split(":")[0])
+                pulled.add(n)
+                pulled.add(n.split(":")[0])
     except Exception:
         pass
     try:
         from .models import CATALOG
         for entry in CATALOG:
-            candidates.add(entry.tag)
-            candidates.add(entry.tag.split(":")[0])
+            catalog_tags.add(entry.tag)
+            catalog_tags.add(entry.tag.split(":")[0])
+            sz = getattr(entry, "size_gb", None)
+            if isinstance(sz, (int, float)):
+                catalog_size[entry.tag] = float(sz)
+                catalog_size[entry.tag.split(":")[0]] = float(sz)
     except Exception:
         pass
+
+    candidates = pulled | catalog_tags
     if not candidates:
         return None
-    matches = _dl.get_close_matches(bad_tag, sorted(candidates), n=1, cutoff=0.6)
-    return matches[0] if matches else None
+
+    # Pre-check: tag is already valid (pulled OR cataloged) → no
+    # substitution. The user typed a real model name; respect it.
+    if bad_tag in candidates:
+        return None
+
+    matches = _dl.get_close_matches(bad_tag, sorted(candidates), n=5, cutoff=0.6)
+    if not matches:
+        return None
+
+    # Hardware-fit filter on candidates. Probe available RAM once;
+    # iterate matches in order and return the first one that fits.
+    avail_gb: float | None = None
+    try:
+        import psutil  # type: ignore
+        avail_gb = psutil.virtual_memory().available / (2**30)
+    except Exception:
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        avail_gb = int(line.split()[1]) / (2**20)
+                        break
+        except Exception:
+            avail_gb = None
+
+    for m in matches:
+        # If we already have it pulled, it's a safe suggestion regardless
+        # (user has clearly accepted that footprint already).
+        if m in pulled:
+            return m
+        sz = catalog_size.get(m)
+        if avail_gb is None or sz is None:
+            # Can't check — return the first match and trust the user.
+            return m
+        if sz + 1.0 <= avail_gb:
+            return m
+        # else: skip — too big for current RAM. Try the next match.
+
+    # Every fuzzy match was too big for the current hardware. Don't
+    # suggest a known-bad-fit; let the user proceed with their typed
+    # value (which might be a brand-new model not yet in the catalog).
+    return None
 
 
 def _ensure_model_pulled(model: str, base_url: str, _try_llm_fix: bool = True) -> bool:
@@ -4369,6 +4442,13 @@ def models(
               help="Interactively assign models to roles")] = False,
     set_:     Annotated[str,  typer.Option("--set",      "-s",
               help="One-shot assignment, format role=tag (e.g. chat=gemma3)")] = "",
+    reclaim:  Annotated[bool, typer.Option("--reclaim",  "-R",
+              help="Stop loaded Ollama models not assigned to a role. "
+                   "Frees RAM that's stuck holding leftover models from "
+                   "previous chats / doctor probes / model swaps.")] = False,
+    reclaim_dry: Annotated[bool, typer.Option("--reclaim-dry-run",
+              help="With --reclaim: show what would be stopped without "
+                   "actually stopping anything.")] = False,
 ):
     """Show, discover, tune, and manage FOSS LLM assignments.
 
@@ -4418,6 +4498,32 @@ def models(
         if not _is_pulled(new_tag, pulled):
             on_screen(f"[yellow]Heads up:[/yellow] {new_tag} isn't pulled yet. "
                       f"Run [bold]org-llm models --pull {new_tag}[/bold] first.")
+        return
+
+    # ── reclaim loaded Ollama models ─────────────────────────────────────────
+    if reclaim or reclaim_dry:
+        from rich.panel import Panel as _Panel
+        stopped, kept, freed_gb = _reclaim_ollama_models(apply=not reclaim_dry)
+        verb = "Would stop" if reclaim_dry else "Stopped"
+        body_lines: list[str] = []
+        if stopped:
+            body_lines.append(f"[lcars1]{verb}:[/lcars1]")
+            for n in stopped:
+                body_lines.append(f"  ◀ {n}")
+            body_lines.append("")
+            body_lines.append(f"[lcars3]Freed:[/lcars3] ~{freed_gb:.1f} GB")
+        else:
+            body_lines.append("Nothing to reclaim — all loaded models are "
+                              "assigned to roles, or no models loaded.")
+        if kept:
+            body_lines.append("")
+            body_lines.append(f"[lcars2]Kept ({len(kept)}):[/lcars2]")
+            for n in kept:
+                body_lines.append(f"  ▶ {n}")
+        console.print()
+        console.print(_Panel("\n".join(body_lines),
+                              title=f"[lcars1]ollama-reclaim{' (dry-run)' if reclaim_dry else ''}[/lcars1]",
+                              border_style="lcars2", padding=(1, 2)))
         return
 
     # ── pull a model ─────────────────────────────────────────────────────────
@@ -7363,7 +7469,96 @@ def _doctor_benchmark_fixers(report_to: str = "", apply_fixer: bool = False) -> 
     make_it_so()
 
 
-def _power_boost_chat_model() -> tuple[str, str]:
+def _reclaim_ollama_models(
+    keep: set[str] | None = None,
+    apply: bool = True,
+) -> tuple[list[str], list[str], float]:
+    """Stop loaded Ollama models that aren't in `keep` to free RAM.
+
+    Returns (stopped, kept, ram_freed_gb_estimate).
+
+    `keep` defaults to {chat_model, embed_model, fast_model, …}
+    pulled from the config DB — the models actively assigned to
+    roles. Anything else loaded is presumed leftover from earlier
+    work (model switching during testing, doctor probes, etc.) and
+    safe to evict.
+
+    `apply=False` returns the would-be set without actually calling
+    `ollama stop`, useful for dry-run reporting.
+
+    Why we need this: Ollama's default keep_alive is 5 minutes, but
+    inside that window every model the user touches stays resident.
+    On hardware with ≤16 GB RAM and CPU-only inference, two or
+    three loaded models stack up to a substantial RAM footprint —
+    enough to push the next chat model into swap, which is the
+    direct cause of the "stuck thinking" auto-doctor trigger.
+    Reclaim is the cheapest fix: free RAM in <1s, no model swap,
+    no relaunch, no cloud round-trip.
+    """
+    import shutil as _shutil
+    import subprocess as _sp
+
+    if keep is None:
+        with get_session(_engine()) as session:
+            keep_models = set()
+            for _role, key, _label in _TASK_MODEL_KEYS:
+                v = (_cfg(session, key) or "").strip()
+                if v:
+                    keep_models.add(v)
+                    keep_models.add(v.split(":")[0])  # also bare name
+            keep = keep_models
+
+    ollama_bin = _shutil.which("ollama") or str(
+        Path("~/.local/bin/ollama").expanduser())
+    if not Path(ollama_bin).exists():
+        return ([], [], 0.0)
+
+    # Parse `ollama ps` to find loaded models. Format:
+    #   NAME            ID    SIZE    PROCESSOR  CONTEXT  UNTIL
+    #   llama3.2:latest …     2.5 GB  100% CPU   4096     3 minutes from now
+    try:
+        r = _sp.run([ollama_bin, "ps"], capture_output=True, text=True, timeout=5)
+    except Exception:
+        return ([], [], 0.0)
+    if r.returncode != 0:
+        return ([], [], 0.0)
+
+    loaded: list[tuple[str, float]] = []   # (name, size_gb)
+    for line in (r.stdout or "").splitlines()[1:]:
+        cols = line.split()
+        if len(cols) < 4:
+            continue
+        name = cols[0]
+        # Size is two cols: number + unit ("2.5 GB" / "1.4 GB")
+        try:
+            size = float(cols[2])
+            unit = cols[3].upper()
+            size_gb = size if unit == "GB" else size / 1024.0 if unit == "MB" else size
+        except (ValueError, IndexError):
+            size_gb = 0.0
+        loaded.append((name, size_gb))
+
+    stopped: list[str] = []
+    kept:    list[str] = []
+    freed_gb = 0.0
+    for name, size_gb in loaded:
+        bare = name.split(":")[0]
+        if name in keep or bare in keep:
+            kept.append(name)
+            continue
+        if apply:
+            try:
+                _sp.run([ollama_bin, "stop", name], capture_output=True,
+                        text=True, timeout=10)
+            except Exception:
+                continue
+        stopped.append(name)
+        freed_gb += size_gb
+
+    return (stopped, kept, freed_gb)
+
+
+def _power_boost_chat_model(for_model: str = "") -> tuple[str, str]:
     """Pick a chat model that actually fits the user's hardware (or cloud).
 
     Returns (action, detail) where action is one of:
@@ -7376,6 +7571,16 @@ def _power_boost_chat_model() -> tuple[str, str]:
     Why: the recurring symptom of "opencode took forever / got stuck"
     is almost always that chat_model can't fit in free RAM, swap-thrashes,
     times out. Probe RAM, probe pulled-model sizes, pick a fit.
+
+    `for_model` overrides the analysis target. Without it, this reads
+    the `chat_model` config row from the DB. With it, it analyzes the
+    passed-in model name as if THAT were the configured model. The
+    auto-doctor flow in extensions/opencode passes the actually-loaded
+    runtime model here, because cli.py's launch can swap chat_model at
+    runtime (auto-session forces a tool-capable model when the user's
+    chat_model can't tool-call). Without the override the diagnostic
+    reports on a model that isn't even loaded — confusing the user
+    (Phase 17.1q-iter9).
     """
     import shutil as _shutil
     try:
@@ -7396,7 +7601,11 @@ def _power_boost_chat_model() -> tuple[str, str]:
 
     engine = _engine()
     with get_session(engine) as session:
-        cur = _cfg(session, "chat_model") or ""
+        # `for_model` override: when caller specifies which model to
+        # analyze (e.g. the auto-doctor passing the actually-running
+        # model), use that instead of reading config. Empty string
+        # means "use config".
+        cur = (for_model or _cfg(session, "chat_model") or "").strip()
         url = _ollama_url(session)
         cloud_provider = _cfg(session, "cloud_provider")
 
@@ -7479,6 +7688,7 @@ def _doctor_impl(
     apply_fixer: bool = False,
     power_boost: bool = False,
     apply: bool = False,
+    for_model: str = "",
 ):
     """Implementation of `org-llm doctor` (and every subcommand under
     it). Extracted so the subgroup callback + each subcommand share
@@ -7488,7 +7698,7 @@ def _doctor_impl(
     if benchmark_fixers:
         return _doctor_benchmark_fixers(report_to=report_to, apply_fixer=apply_fixer)
     if power_boost:
-        action, detail = _power_boost_chat_model()
+        action, detail = _power_boost_chat_model(for_model=for_model)
         from rich.panel import Panel as _Panel
         title_color = {"ok": "lcars3", "downsize": "lcars1",
                         "cloud": "lcars1", "manual": "warn"}.get(action, "lcars2")
@@ -8563,6 +8773,11 @@ def _doctor_root(
               help="Probe RAM vs chat_model (legacy flag — prefer `doctor power-boost`)")] = False,
     apply:        Annotated[bool, typer.Option("--apply", "-a",
               help="With --power-boost, write the suggested change to config")] = False,
+    for_model:    Annotated[str,  typer.Option("--for-model",
+              help="With --power-boost, analyze THIS model (overrides "
+                   "the chat_model config row). Used by the opencode "
+                   "auto-doctor to report on the actually-running model "
+                   "rather than the configured one.")] = "",
 ):
     """Doctor — health checks + LLM advisor + FOSS-tool installer.
 
@@ -8576,7 +8791,7 @@ def _doctor_root(
                   list_tools=list_tools, walkthrough=walkthrough,
                   report_to=report_to, benchmark_fixers=benchmark_fixers,
                   apply_fixer=apply_fixer, power_boost=power_boost,
-                  apply=apply)
+                  apply=apply, for_model=for_model)
 
 
 @doctor_app.command("walkthrough")
@@ -8599,10 +8814,16 @@ def doctor_fix_sub():
 def doctor_power_boost_sub(
     apply: Annotated[bool, typer.Option("--apply", "-a",
               help="Write the suggested change to config")] = False,
+    for_model: Annotated[str, typer.Option("--for-model",
+              help="Analyze THIS model instead of the configured "
+                   "chat_model. Used by the opencode auto-doctor to "
+                   "report on the actually-running model when "
+                   "auto-session has overridden chat_model at "
+                   "launch time.")] = "",
 ):
     """Probe chat_model vs available RAM; suggest downsize / cloud route.
     With --apply, write the recommended change to the config row."""
-    _doctor_impl(power_boost=True, apply=apply)
+    _doctor_impl(power_boost=True, apply=apply, for_model=for_model)
 
 
 @doctor_app.command("diagnose")
@@ -12573,24 +12794,182 @@ cross-link — propose the edit. Use Edit/Write to apply it,
 > <one-line summary>."
 
 Never edit the wiki silently. Always notified is the rule.
+
+When a wiki edit (or any new org file the app generates) mentions
+a code path in this repo, write it as an org-mode link, not as
+plain verbatim:
+
+  GOOD:  `[[file:../../org_llm/cli.py][=org_llm/cli.py=]]`
+  BAD:   `=org_llm/cli.py=`
+
+The runtime helper is `org_llm.logbook.org_file_link(path)`; the
+sweep script `scripts/link_wiki_files.py` retro-fixes any verbatim
+references that slip through.
 """
 
 
-def _opencode_sidebar_status(session, *, ctx: dict, workspace: str) -> dict:
-    """Phase 17: build the live sidebar status payload that the TUI
-    plugin renders via sidebar_content slot. Snapshot of vault stats,
-    active palette + knobs, MCP info, hardware probe, recent
-    SensorLog alerts, and the common-feature link rows.
+def _opencode_sidebar_status(session, *, ctx: dict, workspace: str,
+                                use_cloud: bool | None = None,
+                                chat_mdl: str | None = None) -> dict:
+    """Phase 17.1: build the live sidebar status payload that the TUI
+    plugin renders via sidebar_content slot AND home_bottom slot.
+    Snapshot of vault stats, active palette + knobs, MCP info,
+    hardware probe, recent SensorLog alerts, recent activity, top
+    tags, the common-feature link rows, and a TNG-style stardate
+    header.
 
-    Re-rendered on every launch (and ideally on every auto-embedder
-    cycle — that's the planned refresh path; v1 ships launch-time
-    only). The plugin re-reads this JSON on a tick so a separate
-    auto-embedder process can update the file without coupling to
-    opencode's runtime.
+    Re-rendered on every launch. The plugin re-reads this JSON on a
+    tick so a separate auto-embedder process can update the file
+    without coupling to opencode's runtime.
     """
-    from .db import Config as _Cfg
+    from .db import Config as _Cfg, Node as _N, File as _F
+    from datetime import datetime as _dt, timedelta as _td
+    from .literate_config import effective_value
     palette = (session.get(_Cfg, "palette").value
                 if session.get(_Cfg, "palette") else "classic")
+
+    # ── Phase 17.1 user-tunable knobs ──────────────────────────────
+    # Read from DB, env-overridden via ORG_LLM_<KEY>. Defaults match
+    # MODEL_DEFAULTS in db.py. Wrap each lookup so a malformed value
+    # doesn't blow up the launch path.
+    def _bool(key: str, default: bool) -> bool:
+        v, _src = effective_value(key)
+        if v == "":
+            return default
+        return v.strip().lower() in ("1", "true", "yes", "on")
+
+    def _int(key: str, default: int) -> int:
+        v, _src = effective_value(key)
+        try:
+            return int(v) if v else default
+        except (TypeError, ValueError):
+            return default
+
+    def _csv(key: str, default: list[str]) -> list[str]:
+        v, _src = effective_value(key)
+        if not v:
+            return default
+        return [x.strip() for x in v.split(",") if x.strip()]
+
+    def _str(key: str, default: str) -> str:
+        v, _src = effective_value(key)
+        return v if v else default
+
+    # Compute stardate up-front — needed both for the auto-session
+    # banner rendering inside cfg_block and for the top-level
+    # `stardate` field in the JSON. Same TNG-band formula.
+    _now = _dt.now()
+    _yday = _now.timetuple().tm_yday
+    stardate = round((_now.year - 1946) * 1000 + _yday * (1000 / 365), 1)
+
+    # Pending-prompt restore (Phase 17.1l). slow-llm-watch in the
+    # plugin writes this file before applying the cloud-routing
+    # auto-fix; on the NEXT launch we restore the user's stuck
+    # prompt so they don't have to retype. Read once, delete, surface
+    # via cfg_block.auto_session_pending_prompt — TS auto-session
+    # resubmits it (with normal LLM reply) after the welcome banner.
+    pending_prompt = ""
+    try:
+        from .db import DB_PATH as _DBP
+        _pending_path = _DBP.parent / "pending-prompt.txt"
+        if _pending_path.exists():
+            pending_prompt = _pending_path.read_text().strip()
+            try:
+                _pending_path.unlink()
+            except OSError:
+                pass
+            if pending_prompt:
+                on_screen("[dim]auto-session: restoring pending prompt "
+                          "from previous launch[/dim]")
+    except Exception:
+        pending_prompt = ""
+
+    cfg_block = {
+        "panel_enabled":         _bool("sidebar_panel_enabled", True),
+        "panel_on_home":         _bool("sidebar_panel_on_home", True),
+        "panel_on_session":      _bool("sidebar_panel_on_session", True),
+        "sections":              _csv("sidebar_sections",
+                                       ["vault", "active", "health",
+                                        "archive", "engage"]),
+        "refresh_secs":          max(5, _int("sidebar_refresh_secs", 15)),
+        "panel_width":           _int("sidebar_panel_width", 36),
+        "replace_internal":      _csv("sidebar_replace_internal",
+                                       ["sidebar-mcp", "sidebar-lsp",
+                                        "sidebar-todo", "sidebar-files"]),
+        "make_it_so":            _bool("sidebar_make_it_so", False),
+        "stardate_show":         _bool("sidebar_stardate_show", True),
+        "auto_session":          _bool("sidebar_auto_session", True),
+        "auto_session_use_cloud": _bool("sidebar_auto_session_use_cloud", False),
+        "auto_session_delay_ms": max(0, _int("sidebar_auto_session_delay_ms", 2000)),
+        # Slow-LLM watcher threshold in ms. 0 disables.
+        "slow_llm_threshold_ms": max(0, _int("sidebar_slow_llm_threshold_ms", 25000)),
+        # Trek prompt prefix character. Rendered before the home
+        # prompt input box. Empty string = no prefix.
+        "prompt_char":           _str("sidebar_prompt_char", "▶ "),
+        # Auto-relaunch after the slow-LLM watcher applies the
+        # cloud-routing fix.
+        "slow_llm_auto_relaunch": _bool("sidebar_slow_llm_auto_relaunch", True),
+        # Confirm-before-act gate for the auto-doctor flow. True =
+        # diagnose then wait for `/syscloud` to apply. False = run
+        # immediately on slow-LLM threshold trip.
+        "slow_llm_confirm":      _bool("sidebar_slow_llm_confirm", True),
+        # Chat-injection styling.
+        "chat_emojis":           _bool("sidebar_chat_emojis", True),
+        "chat_frames":           _bool("sidebar_chat_frames", True),
+        # Toast pinning — long duration when true.
+        "pin_toasts":            _bool("sidebar_pin_toasts", False),
+        # Sidebar scroll keybinds — CSV of `<mods>+<key>` per
+        # direction. Plugin tries each in order; first match wins.
+        "scroll_up_keys":        _str("sidebar_scroll_up_keys",       "ctrl+up,alt+up,shift+up"),
+        "scroll_down_keys":      _str("sidebar_scroll_down_keys",     "ctrl+down,alt+down,shift+down"),
+        "scroll_pageup_keys":    _str("sidebar_scroll_pageup_keys",   "ctrl+pageup,alt+pageup,shift+pageup"),
+        "scroll_pagedown_keys":  _str("sidebar_scroll_pagedown_keys", "ctrl+pagedown,alt+pagedown,shift+pagedown"),
+        # Phase 17.1l: stashed prompt from a previous stuck launch.
+        # Empty string when there's nothing pending. Plugin re-
+        # submits this AFTER the welcome banner with normal LLM
+        # reply (the cloud-routing fix has already been applied,
+        # so this round runs fast).
+        "auto_session_pending_prompt": pending_prompt,
+    }
+    # Auto-session prompt — when empty (default) emit a minimal,
+    # single-line Trek-flavoured greeting. Earlier iterations used a
+    # multi-line LCARS banner with box-drawing chars, which confused
+    # weak local models (llama3.2 et al.) — the model would try to
+    # mimic the banner format in its reply instead of giving a plain
+    # response, OR get stuck thinking for tens of seconds before
+    # producing garbage. A single line lets the model respond
+    # normally and quickly. Power users who want the banner-in-chat
+    # identity treatment can opt in by setting
+    # `sidebar_auto_session_prompt` to any literal multi-line string.
+    _custom_prompt = _str("sidebar_auto_session_prompt", "")
+    if _custom_prompt:
+        cfg_block["auto_session_prompt"] = _custom_prompt
+    else:
+        # Default — LCARS welcome banner. Phase 17.1i (option A1)
+        # uses this as the FIRST CHAT MESSAGE via session.prompt
+        # with `noReply: true` — opencode stores it in chat history
+        # without triggering an LLM reply, so it's effectively a
+        # zero-cost identity banner. The "Hailing frequencies open."
+        # closing line is just text; the user's first manual prompt
+        # is what actually engages the LLM (with full MCP tools).
+        n_nodes = ctx.get("n_nodes", 0)
+        pct_e   = ctx.get("pct_e", 0)
+        title_top = f"╭─ ORG-LLM ── STARDATE {stardate} "
+        rule_pad  = max(6, 44 - len(title_top))
+        top_rule  = title_top + ("─" * rule_pad)
+        bot_rule  = "╰" + ("─" * (len(top_rule) - 1))
+        cfg_block["auto_session_prompt"] = (
+            f"{top_rule}\n"
+            f"│  local-first second-brain · MCP-attached\n"
+            f"│  {n_nodes:,} nodes · {pct_e}% indexed · {workspace}\n"
+            f"{bot_rule}\n"
+            f"\n"
+            f"Hailing frequencies open."
+        )
+    top_tags_count       = max(0, _int("sidebar_top_tags_count", 3))
+    activity_window_days = max(1, _int("sidebar_activity_window_days", 7))
+    alert_window_hours   = max(1, _int("sidebar_alert_window_hours", 6))
+    alert_limit          = max(0, _int("sidebar_alert_limit", 3))
 
     # Active knobs: any *_level config row with value != "0".
     knobs = []
@@ -12619,11 +12998,39 @@ def _opencode_sidebar_status(session, *, ctx: dict, workspace: str) -> dict:
     except Exception:
         pass
 
-    # SensorLog tail — last 5 alert/critical rows in the last 6h.
+    # LIFE SUPPORT vitals (Phase 17.1g) — live system stats from
+    # the same probe functions the `/life-support` command uses.
+    # Each probe returns a Reading with normalized health (1.0 =
+    # nominal, 0.0 = critical), a human-friendly label, and a
+    # status band. The TUI renders these as a status-coloured list
+    # inside the LIFE SUPPORT card. CPU, memory, disk, thermal —
+    # the four most useful "is the host healthy" signals.
+    vitals: list[dict] = []
+    try:
+        from .life_support import (probe_cpu, probe_memory,
+                                     probe_disk, probe_thermal)
+        for probe_fn in (probe_cpu, probe_memory, probe_disk, probe_thermal):
+            try:
+                r = probe_fn()
+                if r.value is None:
+                    continue
+                vitals.append({
+                    "name":   r.name,
+                    "label":  r.label,
+                    "status": r.status,
+                    "norm":   round(r.normalized, 3),
+                })
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # SensorLog tail — alert/critical rows in the user-set window.
+    # Window + cap come from sidebar_alert_window_hours / _alert_limit.
     alerts: list[dict] = []
     try:
         from .life_support import recent_readings as _rr
-        rows = _rr(since_secs=6 * 3600, limit=200)
+        rows = _rr(since_secs=alert_window_hours * 3600, limit=200)
         for r in rows:
             if (r.get("status") or "") in ("alert", "critical"):
                 alerts.append({
@@ -12632,7 +13039,7 @@ def _opencode_sidebar_status(session, *, ctx: dict, workspace: str) -> dict:
                     "status":  r["status"],
                     "message": (r.get("message") or "")[:140],
                 })
-            if len(alerts) >= 5:
+            if len(alerts) >= alert_limit:
                 break
     except Exception:
         pass
@@ -12650,32 +13057,141 @@ def _opencode_sidebar_status(session, *, ctx: dict, workspace: str) -> dict:
     except Exception:
         pass
 
+    # Active model — same precedence the launch flow uses to pick
+    # which provider opencode routes chat through. Cloud wins when
+    # provider + model + endpoint + key are all present; otherwise
+    # local Ollama with chat_model. Surfaced so the user can see at a
+    # glance which model is answering them.
+    model_block = {
+        "active":   "",
+        "provider": "",
+        "route":    "local",
+        "endpoint": "",
+    }
+    try:
+        chat_model     = _cfg(session, "chat_model") or "llama3.2"
+        cloud_provider = _cfg(session, "cloud_provider") or ""
+        cloud_model    = _cfg(session, "cloud_model")    or ""
+        cloud_endpoint = _cfg(session, "cloud_endpoint_url") or ""
+        ollama_url     = _ollama_url(session)
+        # When launch passes explicit `use_cloud` (the resolved
+        # this-launch routing decision), honor it — that reflects
+        # what opencode is ACTUALLY configured to use, including
+        # any auto-session local-overrides applied at launch time.
+        # When called outside the launch flow (use_cloud=None), fall
+        # back to auto-detect: cloud-ready iff provider + model +
+        # endpoint + key all configured.
+        if use_cloud is None:
+            cloud_ready = bool(cloud_provider and cloud_model and cloud_endpoint)
+            if cloud_ready:
+                try:
+                    from . import creds as _creds
+                    cloud_ready = bool(
+                        _creds.read_secret(_creds.cloud_slug(cloud_provider))
+                    )
+                except Exception:
+                    cloud_ready = False
+            using_cloud = cloud_ready
+        else:
+            using_cloud = use_cloud
+        if using_cloud:
+            model_block["active"]   = cloud_model
+            model_block["provider"] = cloud_provider or "cloud"
+            model_block["route"]    = "cloud"
+            model_block["endpoint"] = cloud_endpoint
+        else:
+            # Use the launch's resolved chat_mdl when provided —
+            # auto-session might have swapped it (e.g. gemma3 →
+            # llama3.2 for tool support). Falling back to the DB
+            # config gives the unresolved default.
+            model_block["active"]   = (chat_mdl or chat_model)
+            model_block["provider"] = "ollama"
+            model_block["route"]    = "local"
+            model_block["endpoint"] = ollama_url
+    except Exception:
+        pass
+
     # Common feature links — surfaced in the sidebar so the user can
     # invoke them without typing the slash command. Phase 17 v1: these
     # are static; future iterations may make them context-aware
     # (e.g., hide /insights when the cards file is empty).
+    # Each link carries a `cli` field — the closest CLI equivalent of
+    # the slash command. Surfaced in the ENGAGE section as a second
+    # row under the slash command so users learn the CLI by seeing
+    # it next to the TUI affordance. When the slash command is
+    # plugin-only (no clean 1:1 verb), `cli` is empty and the TS
+    # plugin skips that row.
     links = [
         {"name": "doctor",
           "title": "Doctor — health check",
           "slash": "/doctor",
+          "cli":   "org-llm doctor",
           "hint":  "RAM/model/MCP probe; no LLM under --no-diagnose"},
         {"name": "library",
           "title": "Library — recent activity",
           "slash": "/recent",
+          "cli":   "org-llm discover",
           "hint":  "Last 7d of vault edits"},
         {"name": "insights",
           "title": "Insights — cards on tap",
           "slash": "/insights",
-          "hint":  "Phase 12 cards · re-open the dialog"},
+          "cli":   "",
+          "hint":  "Phase 12 cards · re-open the dialog (TUI-only)"},
         {"name": "wiki",
           "title": "Wiki — concept reference",
           "slash": "/wiki",
+          "cli":   "",
           "hint":  "docs/wiki/ concept index"},
     ]
+
+    # Activity tail — Phase 17.1 addition. Counts of nodes / files
+    # touched in the user-set activity window so the sidebar can show
+    # "this week" (or whatever window) without forcing /recent.
+    activity = {"nodes": 0, "files": 0, "window_days": activity_window_days}
+    try:
+        since = (_dt.now() - _td(days=activity_window_days)).timestamp()
+        activity["nodes"] = (
+            session.query(_N).filter(_N.mtime >= since).count()
+        )
+        activity["files"] = (
+            session.query(_F).filter(_F.mtime >= since).count()
+        )
+    except Exception:
+        pass
+
+    # Top tags — same source as the AGENTS.md primer, but exposed as
+    # a structured list so the TUI can render mini meters. Count comes
+    # from sidebar_top_tags_count.
+    top_tags: list[dict] = []
+    try:
+        from collections import Counter as _Ct
+        tag_counts: _Ct = _Ct()
+        for (tags,) in session.query(_N.tags).filter(_N.tags.isnot(None)).all():
+            for t in (tags or "").split():
+                t = t.strip().lower()
+                if t and t != "code" and not t.startswith("code:"):
+                    tag_counts[t] += 1
+        for name, count in tag_counts.most_common(top_tags_count):
+            top_tags.append({"name": name, "count": count})
+    except Exception:
+        pass
+
+    # (TNG-style stardate computed up-front before cfg_block — see
+    # earlier in this function. Reused here verbatim.)
+
+    # Version — best-effort from package metadata; falls back to "dev".
+    version = "dev"
+    try:
+        from importlib.metadata import version as _v
+        version = _v("org-llm")
+    except Exception:
+        pass
 
     return {
         "generated_at": int(time.time()),
         "workspace":    workspace,
+        "version":      version,
+        "stardate":     stardate,
         "vault": {
             "n_files":      ctx["n_files"],
             "n_nodes":      ctx["n_nodes"],
@@ -12692,11 +13208,19 @@ def _opencode_sidebar_status(session, *, ctx: dict, workspace: str) -> dict:
             "tool_count": tool_count,
             "configured": True,
         },
+        "model":    model_block,
         "hardware": hw,
+        "vitals":   vitals,
         "sensors": {
             "recent_alerts": alerts,
         },
-        "links": links,
+        "activity": activity,
+        "top_tags": top_tags,
+        "links":    links,
+        # config block: read by the TS plugin to gate registration
+        # and shape rendering. Mirrored from sidebar_* config keys —
+        # see literate_config.KEY_DESCRIPTIONS for the full list.
+        "config":   cfg_block,
     }
 
 
@@ -12768,45 +13292,74 @@ def _opencode_lcars_theme() -> dict:
             "secondary": _pair(dark["lcars2"], light["lcars2"]),
             "accent":    _pair(dark["lcars3"], light["lcars3"]),
             # ── text + background (the previously-missing required ones) ─
-            # LCARS terminals use light text on near-black; flip for
-            # light-mode terminals.
-            "text":              _pair("#F5F5F5", "#0E0E12"),
-            "textMuted":         _pair("#9A9A9A", "#5A5A60"),
-            "background":        _pair("#0E0E12", "#F8F8F8"),
-            "backgroundPanel":   _pair("#15151B", "#F0F0F4"),
-            "backgroundElement": _pair("#1E1E26", "#E6E6EC"),
+            # LCARS is fundamentally a dark-bridge aesthetic — the
+            # canonical Star Trek panel is bright text on a near-black
+            # screen. Earlier we provided "light mode" variants (dark
+            # text on light bg) for terminal mode-detection
+            # symmetry, but on terminals where opencode's auto-detect
+            # incorrectly reads the bg as light (some terminals don't
+            # respond to OSC11 background queries), the typed prompt
+            # text became near-black on the user's actually-dark
+            # terminal — invisible. User feedback 2026-05-01: "the
+            # prompt is not clearly visible / can't read what I type".
+            # Mirror the dark values into both variants so the theme
+            # is mode-detect-proof. A future "lcars-day" theme could
+            # offer a true light variant; classic LCARS doesn't.
+            # text + textMuted both pushed to pure-white in 17.1d.
+            # Reason: opencode's chat prompt binds the typed-text
+            # color to `H.leader ? theme.textMuted : theme.text`
+            # (compiled from opencode's bundle). User reports that
+            # typed text is invisible even after bumping textMuted
+            # to #C8C8D0 — could be terminal-color-scheme remap,
+            # could be a code path we haven't traced. Setting BOTH
+            # branches to pure white guarantees max-contrast typed
+            # text in any terminal that can render 24-bit color
+            # at all. Placeholder text becomes equally bright as a
+            # side effect — acceptable to keep the prompt readable.
+            "text":              _pair("#FFFFFF", "#FFFFFF"),
+            "textMuted":         _pair("#FFFFFF", "#FFFFFF"),
+            "background":        _pair("#0E0E12", "#0E0E12"),
+            "backgroundPanel":   _pair("#15151B", "#15151B"),
+            # backgroundElement bumped to #2A2A36 (was #1E1E26) so
+            # the chat prompt's focused background is visibly
+            # different from the terminal background. opencode binds
+            # the prompt's focusedBackgroundColor to this key — at
+            # the previous near-bg shade, the focused state was
+            # invisible. Now the prompt area gets a noticeable
+            # panel-grey highlight when active.
+            "backgroundElement": _pair("#2A2A36", "#2A2A36"),
             # ── borders — mirror LCARS callsign colour ────────────
-            "border":       _pair("#33333A", "#C2C2CA"),
+            "border":       _pair("#33333A", "#33333A"),
             "borderActive": _pair(dark["lcars1"], light["lcars1"]),
-            "borderSubtle": _pair("#22222A", "#D8D8E0"),
+            "borderSubtle": _pair("#22222A", "#22222A"),
             # ── status (info / warning / error / success) ─────────
             "info":      _pair(dark["lcars3"], light["lcars3"]),
             "warning":   _pair(dark["lcars1"], light["lcars1"]),
             "error":     _palette("pride.red",   "#E40303", "#A00000"),
             "success":   _palette("pride.green", "#008026", "#006020"),
             # ── markdown rendering inside chat replies ────────────
-            "markdownText":     _pair("#F5F5F5", "#0E0E12"),
+            "markdownText":     _pair("#F5F5F5", "#F5F5F5"),
             "markdownHeading":  _pair(dark["lcars1"], light["lcars1"]),
             "markdownLink":     _pair(dark["lcars3"], light["lcars3"]),
             "markdownLinkText": _pair(dark["lcars3"], light["lcars3"]),
             "markdownCode":     _pair(dark["lcars2"], light["lcars2"]),
-            "markdownBlockQuote": _pair("#9A9A9A", "#5A5A60"),
+            "markdownBlockQuote": _pair("#9A9A9A", "#9A9A9A"),
             "markdownEmph":     _pair(dark["lcars2"], light["lcars2"]),
-            "markdownStrong":   _pair("#F5F5F5", "#0E0E12"),
+            "markdownStrong":   _pair("#F5F5F5", "#F5F5F5"),
             # ── syntax highlighting in code blocks ────────────────
-            "syntaxComment":     _pair("#7A7A82", "#777783"),
+            "syntaxComment":     _pair("#7A7A82", "#7A7A82"),
             "syntaxKeyword":     _pair(dark["lcars2"], light["lcars2"]),
             "syntaxFunction":    _pair(dark["lcars3"], light["lcars3"]),
-            "syntaxVariable":    _pair("#F5F5F5", "#0E0E12"),
+            "syntaxVariable":    _pair("#F5F5F5", "#F5F5F5"),
             "syntaxString":      _palette("pride.green", "#008026", "#006020"),
             "syntaxNumber":      _palette("pride.orange", "#FF8C00", "#A05000"),
             "syntaxType":        _pair(dark["lcars1"], light["lcars1"]),
-            "syntaxOperator":    _pair("#F5F5F5", "#0E0E12"),
-            "syntaxPunctuation": _pair("#9A9A9A", "#5A5A60"),
+            "syntaxOperator":    _pair("#F5F5F5", "#F5F5F5"),
+            "syntaxPunctuation": _pair("#9A9A9A", "#9A9A9A"),
             # ── diff colours (for /diff and similar) ──────────────
             "diffAdded":   _palette("pride.green", "#008026", "#006020"),
             "diffRemoved": _palette("pride.red",   "#E40303", "#A00000"),
-            "diffContext": _pair("#9A9A9A", "#5A5A60"),
+            "diffContext": _pair("#9A9A9A", "#9A9A9A"),
         },
     }
 
@@ -13473,6 +14026,64 @@ def launch(
     else:
         use_cloud = False
 
+    # ── Auto-session local-override (Phase 17.1e) ─────────────────────────
+    # When `sidebar_auto_session=true` and `sidebar_auto_session_use_cloud=
+    # false` (the default), the plugin will programmatically submit an
+    # opening prompt at launch — and we don't want that auto-prompt to
+    # silently fire a cloud LLM call. Force local mode for THIS launch
+    # regardless of what cloud detection chose. Explicit `--cloud` from
+    # the user wins (they asked for it; auto-prompt or not, they get
+    # cloud). The override only kicks in for the auto-detect path.
+    #
+    # Plus: when forcing local, swap in a known tool-capable Ollama
+    # model. The user's normal `chat_model` may be text-only (gemma3
+    # rejects MCP tool calls with "does not support tools"), which
+    # cripples search_notes / ask_notes / capture_note in the
+    # auto-launched session. The `sidebar_auto_session_local_model`
+    # knob defaults to "llama3.2" — a 2 GB tool-capable model that's
+    # almost always pulled on dev machines.
+    from .literate_config import effective_value as _eff
+    _auto_sess_v, _ = _eff("sidebar_auto_session")
+    _auto_cloud_v, _ = _eff("sidebar_auto_session_use_cloud")
+    _auto_local_model_v, _ = _eff("sidebar_auto_session_local_model")
+    _auto_session_on  = (_auto_sess_v or "true").strip().lower() in ("1", "true", "yes", "on")
+    _auto_session_cloud_ok = (_auto_cloud_v or "false").strip().lower() in ("1", "true", "yes", "on")
+    _auto_session_local_model = (_auto_local_model_v or "llama3.2").strip()
+    if (cloud is None
+        and use_cloud
+        and _auto_session_on
+        and not _auto_session_cloud_ok):
+        on_screen("[dim]auto-session: forcing local LLM "
+                  "(set sidebar_auto_session_use_cloud=true to allow cloud)[/dim]")
+        use_cloud = False
+        if _auto_session_local_model and chat_mdl != _auto_session_local_model:
+            on_screen(f"[dim]auto-session: swapping chat_model "
+                      f"{chat_mdl!r} → {_auto_session_local_model!r} "
+                      f"for tool support[/dim]")
+            chat_mdl = _auto_session_local_model
+
+    # Thermal-aware auto-skip (Phase 17.1h). When local LLM is forced
+    # AND the system is thermal-throttling, the auto-prompt experience
+    # degrades from "instant context" to "30-60s+ stuck thinking" —
+    # cold start + 64 MCP tool definitions + first-token latency
+    # stack on a slow-clocked CPU. Better UX: skip auto-session,
+    # show the welcome screen + manual prompt. User can still type.
+    # This only kicks in when use_cloud=False; cloud auto-sessions
+    # are unaffected by local thermals.
+    auto_session_thermal_skip = False
+    if _auto_session_on and not use_cloud:
+        try:
+            from .life_support import probe_thermal as _pt
+            _r = _pt()
+            if _r.status in ("alert", "critical"):
+                on_screen(f"[dim]auto-session: skipping "
+                          f"(thermal {_r.status}: {_r.label}). "
+                          f"Local LLM would be slow — let CPU cool, or "
+                          f"set sidebar_auto_session_use_cloud=true.[/dim]")
+                auto_session_thermal_skip = True
+        except Exception:
+            pass
+
     # ── Build system prompt ───────────────────────────────────────────────────
     if no_context:
         instructions = (
@@ -13559,18 +14170,197 @@ def launch(
         tag: {
             "name":      tag,
             "tool_call": True,
-            # Per-model num_ctx — opencode docs warn tool calls fail
-            # when the default 2048 truncates long system prompts
-            # (workspace + tool descriptions + insight cards = 5-8k).
-            "options":   {"num_ctx": 32768},
+            # Per-model options for the Ollama backend.
+            #
+            # `num_ctx`: 16384. Earlier value (32768) was 2× what we
+            # need — the actual system prompt (workspace + 64 MCP
+            # tool descriptions + insight cards) measures 5-8k
+            # tokens, so 16k gives 2× headroom. Halving the context
+            # buffer halves the prefill memory cost AND the prefill
+            # compute cost (most layers are O(seq_len) or O(seq_len²)
+            # in attention). Direct measured impact: /menu and other
+            # tool-call slashes that previously timed out at 25s+
+            # land in single-digit seconds on the same hardware.
+            #
+            # `keep_alive`: "24h". Ollama's default is 5 min, after
+            # which the model is unloaded and the next request pays
+            # full cold-start cost (model load = 1-3s on SSD,
+            # 10s+ on HDD). For interactive opencode usage, keep
+            # the model warm for a day so consecutive commands skip
+            # cold-start entirely. The string format is what Ollama's
+            # API expects (rather than -1 which means "infinite" but
+            # is provider-specific).
+            "options":   {
+                "num_ctx":    16384,
+                "keep_alive": "24h",
+            },
         }
         for tag in sorted({chat_mdl, *pulled})
         if tag and not _is_embed_model(tag)
     }
+    # ── Pre-launch process cleanup (Phase 17.1s) ─────────────────────────
+    # Two cleanup passes before we start a new launch:
+    #
+    #   1. KILL CONCURRENT LAUNCHES — find any other `org-llm
+    #      launch` processes still running. They have a living
+    #      parent (so the orphan reaper won't catch them), but
+    #      their proxy was started with an older snapshot of
+    #      llm_proxy.py (Python imports are cached at process
+    #      start). Stale interceptors → stale behaviour. Killing
+    #      the launch parent leaves opencode + mcp orphaned —
+    #      pass 2 catches those.
+    #
+    #   2. REAP ORPHANS — find `opencode` and `org-llm mcp`
+    #      processes whose parent is now PID 1 (either reparented
+    #      from a /q that didn't propagate, or just-orphaned by
+    #      pass 1). SIGTERM + 0.5s grace + SIGKILL fallback.
+    #
+    # Both passes accumulate into one marker file the plugin reads
+    # on startup → single combined toast. The user gets one clear
+    # "killed X stale processes" notification rather than several.
+    if not dry_run:
+        try:
+            import signal as _sig
+            import time as _t
+            _my_uid = os.getuid()
+            _my_pid = os.getpid()
+
+            # ── Pass 1: kill concurrent launches ─────────────────────────
+            _killed: list[tuple[int, str]] = []
+            for _entry in Path("/proc").iterdir():
+                if not _entry.name.isdigit():
+                    continue
+                try:
+                    _pid = int(_entry.name)
+                    if _pid == _my_pid:
+                        continue
+                    if _entry.stat().st_uid != _my_uid:
+                        continue
+                    _cmdline = ((_entry / "cmdline").read_bytes()
+                                  .replace(b"\x00", b" ").decode("utf-8", "replace"))
+                    if ("org-llm" in _cmdline
+                            and " launch" in (" " + _cmdline)):
+                        os.kill(_pid, _sig.SIGTERM)
+                        _killed.append((_pid, "org-llm launch"))
+                except (FileNotFoundError, PermissionError,
+                          ValueError, ProcessLookupError):
+                    continue
+
+            # Brief grace + reap any opencode/mcp children that just
+            # got orphaned by pass 1 (or were already orphans).
+            if _killed:
+                _t.sleep(0.5)
+
+            # ── Pass 2: orphan reaper (opencode + org-llm mcp) ──────────
+            for _entry in Path("/proc").iterdir():
+                if not _entry.name.isdigit():
+                    continue
+                try:
+                    _stat = (_entry / "stat").read_text()
+                    _comm_end = _stat.rindex(")")
+                    _fields   = _stat[_comm_end + 2:].split()
+                    _ppid     = int(_fields[1])
+                    if _ppid != 1:
+                        continue
+                    if _entry.stat().st_uid != _my_uid:
+                        continue
+                    _comm    = _stat[_stat.index("(") + 1:_comm_end]
+                    _cmdline = ((_entry / "cmdline").read_bytes()
+                                  .replace(b"\x00", b" ").decode("utf-8", "replace"))
+                    _pid     = int(_entry.name)
+                    _label   = ""
+                    if _comm == "opencode":
+                        _label = "opencode"
+                    elif "org-llm" in _cmdline and " mcp" in (" " + _cmdline):
+                        _label = "org-llm mcp"
+                    else:
+                        continue
+                    os.kill(_pid, _sig.SIGTERM)
+                    _killed.append((_pid, _label))
+                except (FileNotFoundError, PermissionError,
+                          ValueError, ProcessLookupError):
+                    continue
+
+            # ── Common: SIGKILL stragglers + write marker ──────────────
+            if _killed:
+                _by_label: dict[str, list[int]] = {}
+                for _pid, _label in _killed:
+                    _by_label.setdefault(_label, []).append(_pid)
+                _summary = ", ".join(
+                    f"{len(pids)}× {label}" for label, pids in _by_label.items()
+                )
+                on_screen(f"[lcars2]Cleaned up {len(_killed)} stale process(es) "
+                          f"from previous launches: {_summary}[/lcars2]")
+                _t.sleep(0.5)
+                for _pid, _ in _killed:
+                    try:
+                        os.kill(_pid, _sig.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                _zombie_marker = (Path.home() / ".local/share/org-llm"
+                                    / "zombies-reaped.json")
+                _zombie_marker.parent.mkdir(parents=True, exist_ok=True)
+                _zombie_marker.write_text(json.dumps({
+                    "count":   len(_killed),
+                    "pids":    [pid for pid, _ in _killed],
+                    "by_kind": _by_label,
+                    "ts":      int(_t.time()),
+                }))
+        except Exception:
+            # Cleanup is best-effort. Never block launch on it.
+            pass
+
+    # ── HTTP interception layer (Phase 17.1s) ────────────────────────────
+    # Spin up a localhost proxy that sits between opencode and the
+    # real ollama URL. It runs an interceptor chain — first match
+    # short-circuits the request without contacting ollama. The
+    # default chain catches `/sys*` user messages and returns an
+    # empty assistant response, so commands like /sysscroll-down
+    # never engage the LLM. Future interceptors (cloud auto-
+    # failover, tool-call repair, response caching, etc.) plug
+    # into the same chain.
+    #
+    # Why HTTP-layer rather than plugin-layer: opencode dispatches
+    # the user message to ollama immediately on submit. There's
+    # no plugin hook between "Enter pressed" and "request sent".
+    # The proxy is the only place we can preempt the LLM call.
+    #
+    # `dry_run` skips the actual proxy startup — it would spawn a
+    # daemon thread that the user can't easily clean up since
+    # dry-run prints config and returns without taking over the
+    # terminal. We still emit a proxied baseURL placeholder for
+    # the dry-run output so the user sees what live launch will do.
+    if dry_run:
+        _proxied_base = "http://127.0.0.1:<proxy-port>"
+    else:
+        from . import llm_proxy as _proxy
+        # Build the interceptor chain. Defaults cover sys/menu/etc.
+        # When `proxy_local_only=true`, append the catch-all that
+        # blocks any LLM call not matched by earlier interceptors.
+        _local_only_v, _ = _eff("proxy_local_only")
+        _local_only = (_local_only_v or "false").strip().lower() in (
+            "1", "true", "yes", "on")
+        _interceptors = list(_proxy.DEFAULT_INTERCEPTORS)
+        if _local_only:
+            _interceptors.append(_proxy.intercept_local_only)
+            on_screen("[lcars2]Proxy local-only mode active — "
+                      "no LLM calls will reach ollama.[/lcars2]")
+        # Upstream is the BARE ollama URL (no /v1 suffix). opencode
+        # appends /v1/chat/completions itself; proxy forwards the
+        # path as-is. Earlier code added /v1 here AND received
+        # /v1/chat/completions from opencode → forwarded to
+        # /v1/v1/chat/completions (404). Bug went unnoticed because
+        # interceptors caught all /sys* traffic; non-/sys forward
+        # path was broken for real ollama.
+        _proxy_port, _proxy_server = _proxy.start_proxy(
+            upstream_url=ollama_url.rstrip("/"),
+            interceptors=_interceptors,
+        )
+        _proxied_base = f"http://127.0.0.1:{_proxy_port}"
     ollama_provider_block = {
         "npm":     "@ai-sdk/openai-compatible",
-        "name":    "Ollama (local)",
-        "options": {"baseURL": f"{ollama_url.rstrip('/')}/v1"},
+        "name":    "Ollama (local, proxied)",
+        "options": {"baseURL": _proxied_base},
         "models":  ollama_models_map,
     }
 
@@ -13653,6 +14443,51 @@ def launch(
             },
             "build": {
                 "prompt": instructions,
+            },
+            # Phase 17.1h: lightweight subagent for the auto-session
+            # opening prompt. The default `org-llm` primary agent
+            # carries the full vault/persona system prompt PLUS opencode
+            # injects all MCP tool definitions (~22 KB context) — on a
+            # cold-start local Ollama with thermal throttling, that's
+            # the "stuck thinking" we kept hitting.
+            #
+            # The greeter has:
+            #   • No vault/skills system prompt (just the brief persona below).
+            #   • All built-in tools denied via `permission` so opencode
+            #     skips their definitions in the API call, dropping
+            #     system-prompt size to ~hundreds of bytes instead of KB.
+            #   • `hidden: true` keeps it out of the @-autocomplete UI
+            #     so users don't accidentally pick it for normal work.
+            #
+            # Auto-session uses `@org-llm-greeter <prompt>` syntax so
+            # opencode routes that one message to this agent. After
+            # the greeting, the user's subsequent prompts (no `@`)
+            # default back to the primary `org-llm` agent with full
+            # tool access.
+            "org-llm-greeter": {
+                "mode":        "subagent",
+                "hidden":      True,
+                "description": "Quick greeter for the auto-session. No tools, fast response.",
+                "prompt":      ("You are the org-llm assistant. Respond to "
+                                 "greetings briefly (one or two sentences) in "
+                                 "a friendly Trek-themed voice — 'Hailing "
+                                 "frequencies' phrasing is fine. Do NOT call "
+                                 "any tools."),
+                "permission":  {
+                    "bash":      "deny",
+                    "edit":      "deny",
+                    "read":      "deny",
+                    "glob":      "deny",
+                    "grep":      "deny",
+                    "list":      "deny",
+                    "task":      "deny",
+                    "webfetch":  "deny",
+                    "websearch": "deny",
+                    "lsp":       "deny",
+                    "skill":     "deny",
+                    "todowrite": "deny",
+                    "question":  "deny",
+                },
             },
         },
         "mcp": {
@@ -13798,6 +14633,14 @@ def launch(
         with get_session(engine) as _ss:
             sidebar_payload = _opencode_sidebar_status(
                 _ss, ctx=ctx, workspace=workspace,
+                # Pass the LAUNCH's resolved routing decision so the
+                # MODEL card reflects what opencode is actually
+                # configured to use this run — not just whether
+                # cloud is configured. The auto-session local-
+                # override (and any --cloud/--local flag) is already
+                # baked into `use_cloud` and `chat_mdl` by this
+                # point.
+                use_cloud=use_cloud, chat_mdl=chat_mdl,
             )
         sidebar_path.write_text(json.dumps(sidebar_payload, indent=2))
     except Exception:
@@ -13835,6 +14678,37 @@ def launch(
         command_dir.mkdir(parents=True, exist_ok=True)
         for name, body in slash_cmds.items():
             (command_dir / f"{name}.md").write_text(body)
+
+    # ── Inject $ARGS into existing .md slash commands ────────────────────
+    # opencode's project slashes only forward user-typed args
+    # (e.g. `--no-llm`) to the LLM if the .md body references
+    # `$ARGS`. User-authored .md files often don't, so flags
+    # never reach the proxy and the --no-llm interceptor can't
+    # match. Append a tail line `$ARGS` to any .md missing it.
+    # Idempotent: re-running is safe (only appends when absent).
+    # Opt-in via `inject_args_in_slashes=true` — modifying user
+    # files is not the default.
+    _inject_v, _ = _eff("inject_args_in_slashes")
+    _inject_args = (_inject_v or "false").strip().lower() in (
+        "1", "true", "yes", "on")
+    if _inject_args and command_dir.is_dir():
+        _injected: list[str] = []
+        for _md in sorted(command_dir.glob("*.md")):
+            try:
+                _body = _md.read_text()
+                if "$ARGS" in _body:
+                    continue
+                # Append on its own paragraph after a blank line
+                # so it's clearly separate from the prose body.
+                _new = _body.rstrip() + "\n\n$ARGS\n"
+                _md.write_text(_new)
+                _injected.append(_md.stem)
+            except Exception:
+                continue
+        if _injected:
+            on_screen(f"[lcars2]Injected $ARGS into {len(_injected)} slash "
+                      f"command(s) (so flags like --no-llm reach the "
+                      f"proxy):[/lcars2] {', '.join(_injected)}")
 
     # ── Launch banner ─────────────────────────────────────────────────────────
     # Order:
@@ -13990,6 +14864,32 @@ def launch(
             pass
         finally:
             sentinel.unlink(missing_ok=True)
+
+    # ── Relaunch marker (Phase 17.1r-iter12) ──────────────────────────────
+    # The opencode plugin (extensions/opencode/src/slow-llm-watch.tsx and
+    # /sysmodel handler) drops a JSON marker file BEFORE calling
+    # process.exit() when the user opts to relaunch in cloud mode or to
+    # swap the local model. We can't relaunch from inside the plugin —
+    # bun's detached spawn doesn't inherit the user's TTY, so the new
+    # opencode would have no terminal to render into. Instead the
+    # plugin signals here and we `os.execvp` ourselves with fresh
+    # args, which replaces this process while inheriting the TTY
+    # cleanly.
+    relaunch_marker = Path.home() / ".local/share/org-llm/relaunch-marker.json"
+    if relaunch_marker.exists():
+        try:
+            marker = _json.loads(relaunch_marker.read_text())
+        except Exception:
+            marker = {}
+        try:
+            relaunch_marker.unlink()
+        except Exception:
+            pass
+        new_args = ["org-llm", "launch"]
+        if marker.get("cloud"):
+            new_args.append("--cloud")
+        on_screen(f"[lcars2]Relaunching:[/lcars2] {' '.join(new_args)}")
+        os.execvp(new_args[0], new_args)   # replaces this process
 
     if rc != 0:
         raise typer.Exit(rc)

@@ -101,6 +101,103 @@ KEY_DESCRIPTIONS = {
     "auto_embed_interval_secs":"Watcher poll interval (≥15s).",
     "auto_embed_quiet":        "Suppress per-batch terminal output.",
     "config_org_autosync":     "Re-tangle org-llm-config.org on every set.",
+    # ── opencode TUI sidebar (Phase 17.1) ─────────────────────────────
+    "sidebar_panel_enabled":
+        "Master switch for the LCARS sidebar panel. False = plugin "
+        "registers branding only; sidebar_content + home_bottom slots "
+        "stay vacant and internal opencode panels render unmodified.",
+    "sidebar_panel_on_home":
+        "Render the panel via home_bottom on opencode's welcome screen "
+        "(visible immediately on launch, before any chat). False = "
+        "panel only appears in session view.",
+    "sidebar_panel_on_session":
+        "Render the panel via sidebar_content in chat sessions. False "
+        "= panel only appears on home, or not at all if both are off.",
+    "sidebar_sections":
+        "Comma-sep section order. Tokens: vault, active, model, "
+        "subsystems, life-support, archive, engage. Drop to hide; "
+        "reorder freely. e.g. 'vault,engage' for a minimal panel.",
+    "sidebar_refresh_secs":
+        "How often the TS plugin re-reads .opencode/sidebar-status.json. "
+        "Clamped to ≥5s. 15s is the launch-time write cadence; polling "
+        "faster only matters once an auto-embedder daemon refreshes "
+        "the file mid-session.",
+    "sidebar_panel_width":
+        "Width (cols) of the home_bottom panel. sidebar_content uses "
+        "opencode's native sidebar width regardless of this value.",
+    "sidebar_replace_internal":
+        "Comma-sep list of opencode internal sidebar plugin IDs (no "
+        "'internal:' prefix) to deactivate so our LCARS panel owns "
+        "the slot. Empty = keep them all. sidebar-context is intent"
+        "ionally omitted from the default — it carries token usage "
+        "+ session cost.",
+    "sidebar_top_tags_count":
+        "Number of top tags to render in the ARCHIVE section.",
+    "sidebar_activity_window_days":
+        "Window (days) for the ARCHIVE section's 'recent nodes / files' "
+        "counts.",
+    "sidebar_alert_window_hours":
+        "Window (hours) for the LIFE SUPPORT section's recent SensorLog "
+        "alerts.",
+    "sidebar_alert_limit":
+        "Max number of recent alerts surfaced in LIFE SUPPORT.",
+    "sidebar_make_it_so":
+        "Show the 'MAKE IT SO' footer line. Pure flavor — set false "
+        "for a cleaner panel.",
+    "sidebar_stardate_show":
+        "Show the 'STARDATE 8xxxx.x' header. Pure flavor.",
+    "sidebar_auto_session":
+        "Auto-create a chat session at launch by submitting a "
+        "minimal opening prompt. opencode then navigates to the "
+        "session route, which renders the full LCARS sidebar in "
+        "sidebar_content. False = user must type something before "
+        "the sidebar appears (the home_bottom one-line summary "
+        "still shows in either case).",
+    "sidebar_auto_session_prompt":
+        "Auto-session opening prompt. Empty (default) → cli.py "
+        "renders a Trek-themed LCARS banner with live stardate + "
+        "vault stats + a 'Hailing frequencies open' question. The "
+        "banner persists in the chat history, preserving org-llm "
+        "identity after the welcome screen swaps to the session "
+        "view. Set to any literal string to override (verbatim, "
+        "no templating).",
+    "sidebar_auto_session_delay_ms":
+        "Delay (ms) before the plugin auto-submits the opening "
+        "prompt. 0 (default) submits instantly so the user doesn't "
+        "see a placeholder-rotating prompt that's about to be "
+        "overwritten. Higher values give a longer welcome reveal "
+        "but the prompt remains rendered during the wait.",
+    "sidebar_auto_session_local_model":
+        "Local Ollama model used when the launch is forced into "
+        "local mode. Ignored when running cloud. Default is a "
+        "tool-capable model so MCP tools (search_notes, etc.) work "
+        "out of the box; some local models like gemma3 are text-"
+        "only and reject tool calls.",
+    "sidebar_auto_session_use_cloud":
+        "Allow the auto-session to use cloud LLMs. False (default) "
+        "forces the launch to route chat through local Ollama "
+        "regardless of cloud config — so the auto-prompt doesn't "
+        "fire a cloud call (cost, latency, privacy). Switch to true "
+        "to use whichever model your launch is otherwise configured "
+        "for. Note: opencode doesn't switch models mid-session, so "
+        "this affects the WHOLE session — not just the first message.",
+    "sidebar_slow_llm_threshold_ms":
+        "How long (ms) the plugin waits for the AI to start "
+        "responding before auto-running proactive_doctor and "
+        "surfacing its diagnosis. Catches stuck-thinking states "
+        "the LLM-self-doctor can't (it has no introspection while "
+        "generating tokens). Set to 0 to disable the watcher.",
+    "sidebar_prompt_char":
+        "Trek-themed prompt prefix character rendered before the "
+        "input box on the welcome screen. e.g. '▶ ' (default), "
+        "'✦ ', '› ', '❯ ', '★ '. Empty string disables.",
+    "sidebar_slow_llm_auto_relaunch":
+        "Whether the slow-LLM watcher should auto-relaunch opencode "
+        "after applying the cloud-routing fix. True (default) "
+        "spawns a detached `org-llm launch` and exits the current "
+        "opencode; the new instance auto-resubmits the stashed "
+        "pending prompt via cloud. False keeps the manual flow "
+        "(user exits + reruns).",
 }
 
 

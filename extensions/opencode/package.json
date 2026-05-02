@@ -15,6 +15,7 @@
   },
   "scripts": {
     "build": "echo 'no build step — opencode loads src/index.ts directly via its embedded bun runtime'",
+    "sync-defaults": "uv run python ../../scripts/sync_sidebar_defaults.py",
     "test": "bun test",
     "test:ci": "bun test --reporter=junit --reporter-outfile=.artifacts/junit.xml",
     "typecheck": "tsc --noEmit"

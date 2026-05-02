@@ -68,6 +68,9 @@ for the full convention.
 ** Surfaces & integrations (how org-llm reaches outside)
 - [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP (Model Context Protocol)]] —
   the bridge to opencode / Claude Code / Pi / Emacs
+- [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] —
+  HTTP shim between opencode and the LLM; the seam where =/sys*=
+  short-circuits, prompts get slimmed, and bad tool calls get repaired
 - [[id:ddfb74ae-3c16-45e3-b1be-df3c2b03966b][Pi bridge]] —
   third conversational interface; per-turn dynamic system prompts
 - [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][Insight cards]] —
@@ -111,6 +114,7 @@ the link to the source:
 - [[file:../../org_llm/insights.py][org_llm/insights.py]] — Phase 12 insight pre-mount
 - [[file:../../org_llm/walk.py][org_llm/walk.py]] — Phase 13 graph walk
 - [[file:../../org_llm/mcp_server.py][org_llm/mcp_server.py]] — MCP server + ~64 tools
+- [[file:../../org_llm/llm_proxy.py][org_llm/llm_proxy.py]] — Phase 17.1 HTTP proxy + 13 interceptors
 - [[file:../../org_llm/auto_embedder.py][org_llm/auto_embedder.py]] — background freshness daemon
 - [[file:../../org_llm/theme_studio.py][org_llm/theme_studio.py]] — themed-phrasing cache
 - [[file:../../org_llm/db.py][org_llm/db.py]] — the SQLAlchemy schema
@@ -140,6 +144,7 @@ the link to the source:
 | Staleness                 | [[id:e3333333-4444-5555-6666-cccccccccccc][staleness.org]] | full       |
 | RAG                       | [[id:e4444444-5555-6666-7777-dddddddddddd][retrieval-augmented-generation.org]] | full       |
 | MCP                       | [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][mcp.org]] | full       |
+| LLM proxy (Phase 17.1)    | [[id:47ba2143-c53a-409a-8286-2b3759794608][llm-proxy.org]] | full       |
 | Insight cards (Phase 12)  | [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][insight-cards.org]] | full       |
 | Walk (Phase 13)           | [[id:47c84cd6-1cba-457d-a947-9c482d392991][walk.org]] | full       |
 | Skills (org-babel)        | [[id:001a2e03-30e8-49c5-a813-e774f58b6a0e][skills.org]] | full       |

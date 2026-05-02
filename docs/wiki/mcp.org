@@ -122,7 +122,7 @@ wrong file":
 | 16.1  | Plugin spec was the inner =.ts=; opencode wants the package directory |
 | 16.2  | Plugin missing required =id= export for path-loaded plugins  |
 
-Pinned by =tests/test_workspace_mcp.py= — every fix gets a
+Pinned by [[file:../../tests/test_workspace_mcp.py][=tests/test_workspace_mcp.py=]] — every fix gets a
 regression test there because every miss is *silent*. The
 "functional" tests in that file actually spawn the MCP server
 and send a JSON-RPC =initialize= request to verify the server
@@ -176,15 +176,15 @@ landing chronology.
 
 * Source files
 
-- =org_llm/mcp_server.py= — server implementation; one
+- [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] — server implementation; one
   =@server.tool()= per exposed function.
 - =org_llm/cli.py:_opencode_workspace_prompt= — the system prompt
   the LLM reads before calling any tool.
 - =org_llm/cli.py:_opencode_agents_md= — the AGENTS.md primer
   that teaches new agents which tools to reach for.
-- =tests/test_workspace_mcp.py= — regression-pin for every silent
+- [[file:../../tests/test_workspace_mcp.py][=tests/test_workspace_mcp.py=]] — regression-pin for every silent
   drop bug we've hit.
-- =extensions/opencode/src/index.ts= — the TUI plugin that
+- [[file:../../extensions/opencode/src/index.ts][=extensions/opencode/src/index.ts=]] — the TUI plugin that
   surfaces insight cards (a separate channel from MCP tools, but
   reads MCP-server-generated data).
 

@@ -357,6 +357,209 @@ MODEL_DEFAULTS = {
     # user may not have created yet. Run `org-llm config --tangle` once
     # to seed it; flip this to true to keep it auto-fresh thereafter.
     "config_org_autosync":     "false",
+    # ── opencode TUI sidebar panel (Phase 17.1) ──────────────────────────
+    # The org-llm sidebar panel renders an LCARS / TNG-styled status
+    # readout (vault counts, palette + knobs, MCP, hardware, alerts,
+    # 7d activity, top tags, jump links) inside opencode. It mounts in
+    # `sidebar_content` (session view) and optionally `home_bottom`
+    # (welcome view). Each knob below is read at launch time, written
+    # into .opencode/sidebar-status.json's `config` block, and applied
+    # by the TypeScript plugin.
+    "sidebar_panel_enabled":         "true",
+    "sidebar_panel_on_home":         "true",
+    "sidebar_panel_on_session":      "true",
+    # Section order + selection. Recognised tokens: vault, active,
+    # health, model, subsystems, life-support, archive, engage.
+    # Default (17.1m) is the consolidated layout: 5 cards instead of
+    # 7, fits on most terminal heights without scrolling. The
+    # `active` card now includes model/route info (was a separate
+    # `model` card), and `health` combines `subsystems` + vitals
+    # (was separate `subsystems` and `life-support` cards). The
+    # legacy `model` / `subsystems` / `life-support` tokens still
+    # work for users with custom configs.
+    "sidebar_sections":              "vault,active,health,archive,engage",
+    # Refresh tick in seconds. TS clamps to ≥5s — the file is on
+    # local disk so polling is cheap, but more often than 5s is wasted.
+    "sidebar_refresh_secs":          "15",
+    # Width (cols) of the home_bottom panel — sidebar_content uses the
+    # opencode sidebar's natural width. 36 fits two columns of label
+    # + small value comfortably without overflowing narrow terminals.
+    "sidebar_panel_width":           "36",
+    # Comma-sep list of opencode internal sidebar plugin IDs (without
+    # the "internal:" prefix) to deactivate so our LCARS panel owns
+    # the surface. Empty string = keep them all (our panel will append
+    # below them, which can cause clutter). Default omits sidebar-context
+    # because it carries token usage + session cost we don't surface.
+    "sidebar_replace_internal":      "sidebar-mcp,sidebar-lsp,sidebar-todo,sidebar-files",
+    # Data-window tunings — applied at generation time in cli.py so the
+    # JSON file already reflects the user's preferred windows.
+    "sidebar_top_tags_count":        "3",
+    "sidebar_activity_window_days":  "7",
+    "sidebar_alert_window_hours":    "6",
+    "sidebar_alert_limit":           "3",
+    # Cosmetic toggles. The "MAKE IT SO" footer and "STARDATE 8xxxx.x"
+    # header are TNG flavor; some users want the data without the
+    # Trek garnish. 17.1m: make_it_so default flipped to false to
+    # save vertical space — set true if you want the footer back.
+    "sidebar_make_it_so":            "false",
+    "sidebar_stardate_show":         "true",
+    # ── Auto-session (Phase 17.1e) ───────────────────────────────────────
+    # The full LCARS sidebar lives in opencode's `sidebar_content` slot,
+    # which only renders inside the session route — not on the welcome
+    # screen. To get the sidebar visible immediately on launch (instead
+    # of after the user manually types something), the plugin can
+    # programmatically populate + submit a minimal opening prompt at
+    # mount time. opencode handles session creation and route navigation
+    # in response, and the sidebar comes up.
+    "sidebar_auto_session":          "true",
+    # Text submitted as the opening prompt. Empty (default) means
+    # cli.py renders a dynamic LCARS banner at launch time — small
+    # ASCII pill containing ORG-LLM identity, live stardate, vault
+    # stats, plus a Trek-themed question line. The banner persists
+    # in the chat history (it's the user's first message) so the
+    # org-llm identity survives the welcome→session transition.
+    # Set this to any literal string to override; verbatim, no
+    # templating happens.
+    "sidebar_auto_session_prompt":   "",
+    # Delay (ms) between plugin mount and auto-submit. With the
+    # 17.1f visibility gate (slots.tsx hides home_prompt during the
+    # auto-session window), a longer delay is no longer confusing —
+    # the user sees the welcome screen + big LCARS logo cleanly
+    # without a prompt flashing. 1500ms is a comfortable reveal.
+    # Set to 0 for instant submit if you want to skip the reveal.
+    "sidebar_auto_session_delay_ms": "1500",
+    # Local Ollama model used when the launch is forced into local
+    # mode (i.e. auto-session is on AND auto_session_use_cloud is
+    # false). Default is a known tool-capable model — your normal
+    # `chat_model` may be a text-only one like gemma3 (which Ollama
+    # rejects with "does not support tools" when MCP tries to call
+    # search_notes, etc.). Setting this guarantees the launched
+    # session can use MCP tools. Ignored when not forcing local.
+    "sidebar_auto_session_local_model": "llama3.2",
+    # Whether the auto-session is allowed to use cloud LLMs. False
+    # means: even if cloud is otherwise configured for this launch,
+    # the chat session is forced to local Ollama for the auto-prompt
+    # (and for the rest of the session — opencode doesn't switch
+    # models mid-session). The user can manually swap to cloud after
+    # via the agent picker if they want. Default false: don't fire
+    # cloud calls on launch unless the user opts in.
+    "sidebar_auto_session_use_cloud": "false",
+    # Slow-LLM watcher threshold (Phase 17.1j). When the user
+    # submits a message and the AI hasn't started responding within
+    # this many milliseconds, the plugin auto-runs the
+    # proactive_doctor diagnostic and surfaces its findings (RAM
+    # vs model fit, cloud routing suggestion, etc.) in a dialog.
+    # Set to 0 to disable the watcher entirely. The system-prompt
+    # proactive_doctor instructions don't help when the LLM is
+    # stuck mid-response; this watches from OUTSIDE the loop.
+    "sidebar_slow_llm_threshold_ms":  "25000",
+    # LCARS prompt sigil — folded into the top-left CORNER of the
+    # rounded prompt box (replaces the `╭` glyph). Empty string
+    # disables (corner falls back to plain rounded `╭`). The
+    # `customBorderChars` slot is one cell wide, so the FIRST
+    # grapheme of this string wins; trailing chars are visual
+    # padding for the legacy sibling-text layout (no longer used
+    # but kept so existing configs are stable).
+    #
+    # IMPORTANT: only single-cell-width chars work cleanly. East
+    # Asian Width "Ambiguous" chars (▶ ★) render as 2 cells in
+    # many terminals but opentui counts them as 1 cell, so the
+    # top border drifts 1 column right and visibly bumps into
+    # adjacent panels. Use Neutral-width chars:
+    #   "❯ " (default, heavy chevron — narrow, terminal-y, LCARS-ish)
+    #   "› " (single angle quote — narrowest)
+    #   "✦ " (four-pointed star — Neutral)
+    # Avoid: "▶ ", "★ ", "◆ ", "◉ " (Ambiguous).
+    "sidebar_prompt_char":            "❯ ",
+    # Auto-relaunch after the slow-LLM watcher applies the cloud
+    # routing fix (Phase 17.1o). When true, the plugin spawns
+    # `org-llm launch` as a detached subprocess (3s delay) and
+    # exits the current opencode — no manual "Ctrl+C twice + run
+    # again" step. The new launch reads the stashed
+    # pending-prompt.txt and auto-resubmits the stuck prompt via
+    # cloud (fast). Set false to keep the manual relaunch flow.
+    "sidebar_slow_llm_auto_relaunch": "true",
+    # Inject $ARGS into existing .md slash command bodies on
+    # launch (Phase 17.1s-iter17). opencode's project slashes
+    # only forward user-typed arguments (e.g. --no-llm) to the
+    # LLM if their .md body references the `$ARGS` placeholder.
+    # Most user-authored .md files are static prose with no
+    # $ARGS. This knob enables a launch-time pass that appends
+    # `$ARGS` to every .md in .opencode/command/ that doesn't
+    # already contain it — so flags like `--no-llm` reach the
+    # proxy and get intercepted.
+    #
+    # Off by default since it MUTATES USER FILES. Set true and
+    # relaunch once when you want the behaviour; can leave on
+    # safely (idempotent — only appends when not present).
+    "inject_args_in_slashes":         "false",
+    # Proxy local-only mode (Phase 17.1s-iter17). When true, the
+    # llm_proxy short-circuits EVERY chat completion that wasn't
+    # already handled by an upstream interceptor (sys/menu/help/
+    # config/cache/--no-llm). The user gets a "no-LLM mode active"
+    # response instead of the request hitting ollama. Use case:
+    # heavy CPU pressure, thermal throttling, or "I'm not in a
+    # state for LLM work right now — just give me my /sys
+    # commands and nothing else."
+    #
+    # Off by default — most users want the LLM to actually work
+    # on non-/sys queries. Toggle via `org-llm config
+    # proxy_local_only true` to lock the proxy down.
+    "proxy_local_only":               "false",
+    # Toast pinning (Phase 17.1s). When true, every toast our
+    # plugin emits uses a long duration (1 hour) so messages
+    # stay on screen until the user has time to read them. False
+    # (default) uses normal short durations (~6s) like vanilla
+    # opencode toasts. Per-call overrides via showToast({pin:true})
+    # are independent of this knob — those force pinning even
+    # when the global knob is off, useful for important state-
+    # change notifications (zombie reap, cloud relaunch, etc.).
+    "sidebar_pin_toasts":             "false",
+    # Chat-injection styling (Phase 17.1r). The plugin emits its
+    # /sys* output and auto-doctor proposals as user-role messages
+    # (the SDK has no API for assistant-role injection), which
+    # opencode displays without markdown rendering. To keep them
+    # visually distinct we use:
+    #
+    #   sidebar_chat_emojis — emoji prefixes in section titles
+    #     (🩺 doctor, 💡 proposes, ☁ cloud, 🔄 swap, 🧹 reclaim,
+    #     etc.). Disable for a strict-ASCII look or when the
+    #     user's terminal font lacks emoji glyphs.
+    #   sidebar_chat_frames — box-drawing frames (╭─╮│╰─╯) with
+    #     embedded ANSI 24-bit color around each panel. Frames
+    #     are LCARS-themed (orange primary, gold accent, peach
+    #     secondary, red warning). Disable for a flat layout.
+    #
+    # Both default true. Either can be flipped independently.
+    "sidebar_chat_emojis":            "true",
+    "sidebar_chat_frames":            "true",
+    # Sidebar scroll keybinds (Phase 17.1r). Each knob is a CSV of
+    # `<modifiers>+<key>` bindings the plugin tries in order — the
+    # FIRST one your terminal passes through wins, and any of them
+    # triggers the scroll. Modifiers: ctrl / alt / shift / meta.
+    # Keys: up / down / pageup / pagedown (or any opentui key
+    # name). Why per-direction CSV rather than one mega-knob: lets
+    # you map weird sequences for ONE direction without rewriting
+    # all four (e.g. `ctrl+j` for down only, vim-style).
+    #
+    # Why these defaults: our experience with doom emacs vterm is
+    # that alt+arrow gets eaten as vterm-history; tmux can eat
+    # shift+pgup; ctrl+arrow is the most reliable across stacks.
+    # The CSV lets us also try the others as fallbacks.
+    "sidebar_scroll_up_keys":         "ctrl+up,alt+up,shift+up",
+    "sidebar_scroll_down_keys":       "ctrl+down,alt+down,shift+down",
+    "sidebar_scroll_pageup_keys":     "ctrl+pageup,alt+pageup,shift+pageup",
+    "sidebar_scroll_pagedown_keys":   "ctrl+pagedown,alt+pagedown,shift+pagedown",
+    # Confirm-before-act gate for the auto-doctor flow (17.1q).
+    # When true (default), the slow-LLM watcher injects the
+    # diagnostic + a list of the commands it WILL run, then waits
+    # for the user to type `/syscloud` to confirm. When false, it
+    # runs the cloud-switch + relaunch immediately as soon as the
+    # slow-LLM threshold trips. Default true because relaunching
+    # the TUI under the user's feet without a green light is
+    # surprising the first time it happens — opt out once you've
+    # seen it work and want the fully-autonomous behavior.
+    "sidebar_slow_llm_confirm":       "true",
 }
 
 

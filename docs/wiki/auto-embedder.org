@@ -96,9 +96,9 @@ systemd user service.
 
 * Source files
 
-- =org_llm/auto_embedder.py= — main daemon loop
-- =org_llm/cli.py= — =auto-embed= verb
-- =org_llm/db.py:100= — =SensorLog= model (stores per-cycle
+- [[file:../../org_llm/auto_embedder.py][=org_llm/auto_embedder.py=]] — main daemon loop
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]] — =auto-embed= verb
+- [[file:../../org_llm/db.py][=org_llm/db.py:100=]] — =SensorLog= model (stores per-cycle
   stats)
 
 * Related

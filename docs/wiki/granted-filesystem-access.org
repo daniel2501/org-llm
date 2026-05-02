@@ -117,9 +117,9 @@ org-llm grant audit                               # recent grant + access events
 
 * Source files
 
-- =org_llm/access.py= — grant model + auto-deny patterns
-- =org_llm/cli.py= — =grant= subcommand
-- =org_llm/mcp_server.py= — =request_access=, =list_grants=,
+- [[file:../../org_llm/access.py][=org_llm/access.py=]] — grant model + auto-deny patterns
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]] — =grant= subcommand
+- [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] — =request_access=, =list_grants=,
   =read_file=, =list_directory=, =discover_filesystem=
 
 * Related
