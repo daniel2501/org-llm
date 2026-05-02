@@ -1678,6 +1678,13 @@ def intercept_synth_tool_call(req: ProxyRequest) -> Optional[ProxyResponse]:
     model_id = parsed.get("model") or ""
     if not _is_no_tool_model(model_id):
         return None
+    # Skip the synth path entirely on cloud-first — cloud's chat
+    # model handles native tool calling, and the synth path's
+    # forced-local upstream call would hang for 120s against a
+    # cold/missing local ollama. Let cloud_first short-circuit
+    # the request to cloud in `_forward` instead.
+    if _cloud_first_enabled():
+        return None
     tools = parsed.get("tools") or []
     if not isinstance(tools, list) or not tools:
         return None
