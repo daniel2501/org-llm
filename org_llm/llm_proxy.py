@@ -1526,7 +1526,15 @@ _default_audit = AuditLogger()
 #     (effectively disables failover).
 
 
-_CHAT_PATHS = ("/v1/chat/completions", "/api/chat")
+# Paths the failover eligibility check matches against `req.path`
+# (i.e. the path opencode SENT to the proxy, before the /v1
+# auto-injection that happens during forwarding). opencode at
+# different versions has sent variants of all three forms — the
+# bare `/chat/completions` was the gap that masked T6 cloud-
+# failover entirely (audit log showed connection-refused errors
+# coming back as plain `forward`, never invoking the failover
+# path).
+_CHAT_PATHS = ("/v1/chat/completions", "/chat/completions", "/api/chat")
 
 
 def _proxy_cfg_str(key: str, default: str = "") -> str:
