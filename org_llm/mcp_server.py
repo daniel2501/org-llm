@@ -476,6 +476,65 @@ def create_mcp_server():
         return _themed("list_recent_nodes",
                         f"{len(nodes)} note(s) modified in last {days}d", body)
 
+    # ── list_dailies ──────────────────────────────────────────────────────────
+    @server.tool()
+    def list_dailies(limit: int = 10, since_days: int = 0) -> str:
+        """List recent daily-log files from the vault's daily directory.
+
+        Daily files live at `<daily_dir>/*.org` (default
+        `<org_dir>/daily/`). Returns the most recent `limit` files,
+        newest first. `since_days=0` means no recency filter.
+
+        Output: one line per file with date, path, and first heading
+        / #+TITLE (when present) so the caller has enough to decide
+        which file(s) to read in full via read_file or get_node."""
+        from datetime import datetime, timedelta
+        from pathlib import Path
+        with get_session(engine) as session:
+            org_dir = Path((_cfg(session, "org_dir") or "~/org")).expanduser()
+            daily_dir_cfg = (_cfg(session, "daily_dir") or "").strip()
+        daily_dir = (Path(daily_dir_cfg).expanduser()
+                     if daily_dir_cfg else (org_dir / "daily"))
+        if not daily_dir.exists():
+            return _themed("list_dailies",
+                            f"daily directory not found: {daily_dir}",
+                            "Create it with `mkdir -p` and start "
+                            "capturing dailies, or set `daily_dir` "
+                            "via `org-llm config daily_dir <path>`.")
+        files = sorted(daily_dir.glob("*.org"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)
+        if since_days > 0:
+            cutoff = (datetime.now() - timedelta(days=since_days)).timestamp()
+            files = [f for f in files if f.stat().st_mtime >= cutoff]
+        files = files[:max(1, limit)]
+        if not files:
+            return _themed("list_dailies",
+                            f"no daily files in {daily_dir}"
+                            + (f" (last {since_days}d)"
+                                if since_days > 0 else ""))
+        rows = []
+        for f in files:
+            mtime = datetime.fromtimestamp(f.stat().st_mtime)
+            title = ""
+            try:
+                head = f.read_text(errors="replace").splitlines()[:8]
+                for line in head:
+                    s = line.strip()
+                    if s.lower().startswith("#+title:"):
+                        title = s.split(":", 1)[1].strip()
+                        break
+                    if s.startswith("* "):
+                        title = s[2:].strip()
+                        break
+            except Exception:
+                pass
+            rows.append(f"- {f.stem}  ({mtime.date().isoformat()})"
+                         f"{'  — ' + title if title else ''}\n  {f}")
+        body = "\n".join(rows)
+        return _themed("list_dailies",
+                        f"{len(files)} daily file(s) in {daily_dir}",
+                        body)
+
     # ── get_vault_stats ───────────────────────────────────────────────────────
     @server.tool()
     def get_vault_stats() -> str:

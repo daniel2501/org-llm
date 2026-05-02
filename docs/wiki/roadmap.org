@@ -532,6 +532,84 @@ The bundled =chat_model= default is already =llama3.2= so fresh
 installs are fine; this is for users who manually overrode it
 without realising the tool-calling implications.
 
+* TODO [#A] Planned — Phase 16.5: Doom config introspection  :planned:
+
+org-llm currently asks the user to set =org_dir=, =daily_dir=,
+and friends by hand, even though Doom Emacs already knows all of
+this (=org-directory=, =org-roam-directory=,
+=org-roam-dailies-directory=, =org-agenda-files=,
+=org-default-notes-file=). Read it from Doom and stop asking.
+
+** 16.5a — =org-llm doom-sync= verb (MVP)
+
+- Probe the running Emacs via =emacsclient --eval= for ~7
+  well-known org-* variables (=org-directory=,
+  =org-roam-directory=, =org-roam-dailies-directory=,
+  =org-default-notes-file=, =org-agenda-files=,
+  =org-tag-alist=, plus =doom-modules= for module diagnostics).
+- Fall back to a static parse of =~/.config/doom/{config,init}.el=
+  when no Emacs server is reachable. Best-effort regex sweep
+  for =(setq …)= / =(setq! …)= / =(after! org …)= forms;
+  flag uncertain values in the diff table.
+- New CLI: =org-llm doom-sync [--yes] [--dry-run]= that prints
+  a diff table — *setting · doom value · current value · action*
+  — and applies confirmed changes to the org-llm config (writes
+  to the =db.Config= table, same surface as =org-llm config <k>
+  <v>=).
+- Authority rule: doom is the source of truth for paths the user
+  ALREADY edits in Emacs (=org-directory=, daily dir, agenda
+  files). org-llm-only knobs (=chat_model=, =proxy_*=) stay
+  untouched. =--yes= skips the prompt; =--dry-run= prints the
+  diff and exits 0.
+- Lives in =org_llm/doom_introspect.py= so the helpers (=_emacs_eval=,
+  =_static_parse=, =gather_doom_config=) are reusable from the
+  daemon, =config --check=, and the doom companion later.
+
+** 16.5b — Daemon recheck on config drift
+
+- Auto-embedder daemon (Phase 19's planned single-flight host)
+  watches mtime on =~/.config/doom/config.el= +
+  =~/.config/doom/init.el= + the live Emacs's
+  =emacs-init-time=.
+- Debounced (60s) =doom-sync --dry-run= when either changes; if
+  the diff is non-empty, drop a sidebar notification: "Doom
+  config changed — 2 settings drifted, run =org-llm doom-sync= to
+  reconcile." No silent writes.
+- Knob: =doom_sync_auto= (default =false= in 16.5a, flipped to
+  =prompt= in 16.5b — never =auto-apply=, since path changes can
+  invalidate the embedding corpus).
+
+** 16.5c — Prompt-on-change UX + extras
+
+- Sidebar gets a =DOOM= row with last-sync time and drift count.
+- =config --check= grows a =doom= row that flags drift.
+- Beyond paths: pull =org-tag-alist= so the auto-tagger prefers
+  the user's curated tags before inventing new ones (closes a
+  long-standing capture-quality issue).
+- Module diagnostics: surface the user's loaded doom modules in
+  =doctor= output so "do you have =:lang org +roam2=?" / "is
+  =:tools magit= loaded?" can be answered without asking.
+
+** Why this is its own phase
+
+Three downstream features depend on knowing the user's real Doom
+state:
+- *org-agenda-agent* — needs =org-agenda-files= or it's just a
+  =find -name '*.org'= guess.
+- *Phase 19 vault git-sync* — =org_dir= drift between doom and
+  org-llm causes "wrong repo synced" footguns.
+- *Auto-tag quality* — =org-tag-alist= is the user's curated
+  taxonomy; the auto-tagger should prefer it over LLM-invented
+  tags.
+
+Open questions:
+1. Spacemacs / vanilla-Emacs equivalent? The same Emacs RPC works
+   for both; only the static-parse fallback would differ. Defer
+   to a follow-up phase.
+2. What about users who run Emacs on a different host (TRAMP /
+   remote)? =emacsclient -s <socket>= covers it but the path
+   resolution gets messy. Out of scope for 16.5a.
+
 * TODO [#A] Planned — Phase 18: proxy expansion              :planned:
 
 Phase 17.1 landed [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] with a 13-interceptor

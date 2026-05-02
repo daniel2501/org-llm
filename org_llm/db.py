@@ -261,6 +261,12 @@ def merged_tags_sql(alias: str = "n") -> str:
 
 MODEL_DEFAULTS = {
     "org_dir":        "~/org",
+    "daily_dir":      "",   # default empty → resolves to <org_dir>/daily/
+    "inbox_path":     "",   # default empty → <org_dir>/inbox.org. Synced from
+                            # Emacs's `org-default-notes-file` via doom-sync.
+    "agenda_files":   "",   # comma-joined paths. Mirrors Emacs's
+                            # `org-agenda-files`; populated by doom-sync.
+                            # Used by org-agenda-agent (Phase 19+).
     "ollama_url":     "http://localhost:11434",
     # Defaults are tuned to fit a laptop CPU/16 GB RAM out of the box. Use
     # `org-llm models --tune` once you've got real hardware to scale up.

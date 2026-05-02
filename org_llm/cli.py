@@ -4433,6 +4433,11 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "defaults:\n"
             "  • Use capture_note for new notes, append_to_note "
             "    for additions to existing nodes.\n"
+            "  • For 'recent dailies' / 'last few daily files' "
+            "    questions, call list_dailies (NOT search_notes). "
+            "    Daily files live at <daily_dir>/*.org with a "
+            "    YYYY-MM-DD.org filename, distinct from "
+            "    captains-log-*.org which live at the vault root.\n"
             "  • Pick tags from the user's existing tag space "
             "    (search_notes is your friend) before inventing "
             "    new ones.\n"
@@ -4440,7 +4445,14 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "    inline links to related notes when search_notes "
             "    surfaces them. Avoid prose paragraphs.\n"
             "  • Mirror the user's voice/tone from their recent "
-            "    captures rather than your default style."
+            "    captures rather than your default style.\n"
+            "GROUND RULE — NO HALLUCINATION:\n"
+            "  If a tool call returns no results, say so plainly "
+            "  (\"I couldn't find any daily files in <path>\") and "
+            "  offer to broaden the search. NEVER invent file "
+            "  names, dates, titles, or content the user didn't "
+            "  share and the tools didn't return. When in doubt, "
+            "  call a tool — don't guess."
         ),
     },
     "engineer": {
@@ -6549,6 +6561,118 @@ def _json_load_safe(b: bytes) -> dict:
         return out if isinstance(out, dict) else {}
     except Exception:
         return {}
+
+
+@app.command(name="doom-sync", rich_help_panel="Maintenance")
+def doom_sync(
+    yes:     Annotated[bool, typer.Option("--yes", "-y",
+             help="Apply detected changes without prompting")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", "-n",
+             help="Show the diff and exit without writing")] = False,
+    doom_dir: Annotated[str,  typer.Option("--doom-dir",
+             help="Override Doom config directory "
+                  "(default: ~/.config/doom)")] = "",
+):
+    """Read Doom Emacs config and reconcile org-llm's path knobs.
+
+    Probes the running Emacs via `emacsclient --eval` for
+    `org-directory`, `org-roam-dailies-directory`,
+    `org-default-notes-file`, and `org-agenda-files`. Falls back to
+    a static parse of `~/.config/doom/{config,init}.el` when no
+    Emacs server is reachable.
+
+    Prints a diff table — *setting · doom value · current value ·
+    action* — and applies confirmed changes. `--yes` skips the
+    prompt; `--dry-run` exits 0 after printing.
+
+    Doom is the source of truth for paths the user already edits in
+    Emacs; org-llm-only knobs (chat_model, proxy_*) are never
+    touched by this command.
+    """
+    from rich.table import Table as _Tbl
+    from rich.panel import Panel as _Pn
+    from .doom_introspect import (
+        gather_doom_config as _gather,
+        _emacsclient_available as _ec_avail,
+    )
+    from .db import Config as _Cfg
+
+    dpath = Path(doom_dir).expanduser() if doom_dir else None
+    info = _gather(dpath)
+    values, source = info["values"], info["source"]
+
+    engine = _engine()
+    with get_session(engine) as session:
+        cur_rows = {r.key: r.value for r in session.query(_Cfg).all()}
+
+    def _norm(v: str) -> str:
+        v = (v or "").strip()
+        if not v or "," in v:    # agenda_files is comma-joined
+            return v
+        return os.path.realpath(os.path.expanduser(os.path.expandvars(v)))
+
+    rows: list[tuple[str, str, str, str, str]] = []  # (key, doom, cur, src, action)
+    for ckey in ("org_dir", "daily_dir", "inbox_path", "agenda_files"):
+        doom_val = values.get(ckey, "")
+        cur_val  = (cur_rows.get(ckey) or "").strip()
+        src      = source.get(ckey, "missing")
+        if not doom_val:
+            action = "[dim]skip[/dim]"
+        elif _norm(cur_val) == _norm(doom_val):
+            action = "[green]match[/green]"
+        elif not cur_val:
+            action = "[yellow]set[/yellow]"
+        else:
+            action = "[yellow]update[/yellow]"
+        rows.append((ckey, doom_val, cur_val, src, action))
+
+    tbl = _Tbl(box=None, pad_edge=False, show_header=True)
+    tbl.add_column("Key",           style="lcars2", no_wrap=True, width=14)
+    tbl.add_column("Doom value",    style="dim",    overflow="fold")
+    tbl.add_column("Current value", style="dim",    overflow="fold")
+    tbl.add_column("Source",        width=8)
+    tbl.add_column("Action",        width=8, no_wrap=True)
+    for r in rows:
+        tbl.add_row(*r)
+    console.print()
+    title = ("[lcars1]doom-sync[/lcars1]"
+             + ("" if _ec_avail()
+                else "  [yellow](no emacsclient — static parse only)[/yellow]"))
+    console.print(_Pn(tbl, title=title, border_style="lcars2",
+                       padding=(1, 1)))
+
+    pending = [(k, dv) for k, dv, cv, _s, _a in rows
+               if dv and _norm(dv) != _norm(cv)]
+    if not pending:
+        on_screen("[green]all keys already match Doom — nothing to do[/green]")
+        raise typer.Exit(0)
+
+    if dry_run:
+        on_screen(f"[dim]dry-run · {len(pending)} change(s) not "
+                  f"applied[/dim]")
+        raise typer.Exit(0)
+
+    if not yes:
+        on_screen(f"\nApply {len(pending)} change(s)? "
+                  "[y/N] ", end="")
+        try:
+            ans = input().strip().lower()
+        except EOFError:
+            ans = ""
+        if ans not in ("y", "yes"):
+            on_screen("[dim]aborted — no changes written[/dim]")
+            raise typer.Exit(0)
+
+    with get_session(engine) as session:
+        for ckey, dv in pending:
+            row = session.query(_Cfg).filter(_Cfg.key == ckey).first()
+            if row:
+                row.value = dv
+            else:
+                session.add(_Cfg(key=ckey, value=dv))
+        session.commit()
+    on_screen(f"[green]✓[/green] applied {len(pending)} change(s) "
+              f"from Doom")
 
 
 @app.command(rich_help_panel="Maintenance")
