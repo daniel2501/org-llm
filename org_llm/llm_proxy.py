@@ -1076,14 +1076,20 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     if not parsed:
         return None
     import re as _re_mod
+    # Phase 20: `@<agent>!` (with trailing `!`) is the FORCE-SOLO
+    # marker — skip crew consultation for this turn. Without `!`
+    # the agent's prompt rule will check in with crew before
+    # persistent actions. Tolerate whitespace around the !.
+    text_for_match = _last_user_text(parsed)
     m = _re_mod.match(
-        r'^\s*@([A-Za-z][\w-]*)\s+(.+)',
-        _last_user_text(parsed),
+        r'^\s*@([A-Za-z][\w-]*)(\!?)\s+(.+)',
+        text_for_match,
         _re_mod.DOTALL,
     )
     if not m:
         return None
     agent = m.group(1)
+    force_solo = bool(m.group(2))
 
     org_dir = Path(os.environ.get("ORG_LLM_ORG_DIR")
                     or (Path.home() / "org"))
@@ -1110,12 +1116,21 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     agent_def = known[agent]
     agent_prompt = (agent_def.get("prompt") or "").strip()
     agent_model  = (agent_def.get("model")  or "").strip()
+    # Phase 20: append FORCE-SOLO marker so the agent's
+    # CONSULT-CREW rule defers to user override THIS turn only.
+    if force_solo and agent_prompt:
+        agent_prompt = (agent_prompt
+                         + f"\n\nFORCE-SOLO MODE — user typed "
+                         + f"`@{agent}!` (with `!`). Skip the "
+                         + "consult-crew rule for THIS turn only. "
+                         + "Act alone and mention briefly that you "
+                         + "did so by user request.")
     if not agent_prompt:
         # Agent registered without a prompt (e.g. opencode internals
         # like `build`, `org-llm-greeter`). Just strip the prefix and
         # let opencode handle native routing.
         prefix_re = _re_mod.compile(
-            rf'^\s*@{_re_mod.escape(agent)}\s+', _re_mod.DOTALL,
+            rf'^\s*@{_re_mod.escape(agent)}\!?\s+', _re_mod.DOTALL,
         )
         _strip_prefix_from_last_user(parsed, prefix_re)
         _reencode_body(req)
