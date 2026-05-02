@@ -77,7 +77,7 @@ test("plugin no-ops insight-cards toast + dialog when insight-cards.json is miss
       },
     );
     expect(cmdNames).not.toContain("insights");
-    expect(cmdNames).toContain("sys");
+    expect(cmdNames).toContain("sysrun");
     expect(cmdNames).toContain("sysdoctor");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -103,7 +103,7 @@ test("plugin no-ops insight-cards behaviors when zero cards (sys-commands still 
       },
     );
     expect(cmdNames).not.toContain("insights");
-    expect(cmdNames).toContain("sys");
+    expect(cmdNames).toContain("sysrun");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -139,7 +139,7 @@ test("plugin shows toast + registers /insights when cards are present", async ()
       },
     );
     expect(cmdNames).toContain("insights");
-    expect(cmdNames).toContain("sys");
+    expect(cmdNames).toContain("sysrun");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

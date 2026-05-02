@@ -456,15 +456,17 @@ export function dispatchSysCommand(api: any, text: string): boolean {
     return true;
   }
 
-  // Scroll slashes — both new (no-hyphen, registry-friendly) and
-  // legacy (hyphenated) spellings. opencode's slash registry rejects
-  // hyphens, but the keypress-hook path that calls us doesn't, so
-  // typed-manually `/sysscroll-up` continues to work while
-  // Doom-injected `/sysup` (the now-canonical form) does too.
-  // Patterns: /sysup, /sysdn, /syspgup, /syspgdn  ←  canonical
-  //           /sysscroll-up, /sysscroll-down, /sysscroll-pgup,
-  //           /sysscroll-pgdn                      ←  legacy
+  // Scroll slashes — match all three spellings:
+  //   /sysscrollup /sysscrolldn /sysscrollpgup /sysscrollpgdn
+  //     ← canonical (registered with opencode's slash registry)
+  //   /sysup /sysdn /syspgup /syspgdn
+  //     ← short alias from the iter4 rename, kept for muscle memory
+  //   /sysscroll-up /sysscroll-down /sysscroll-pgup /sysscroll-pgdn
+  //     ← legacy hyphenated form (typed-manual path only — opencode
+  //        rejects hyphens at the registry layer)
+  // dn / down both accepted in every form.
   const scrollMatch =
+    trimmed.match(/^\/sysscroll(up|dn|down|pgup|pgdn)(?:\s+(\d+))?\s*$/) ||
     trimmed.match(/^\/sys(up|dn|down|pgup|pgdn)(?:\s+(\d+))?\s*$/) ||
     trimmed.match(/^\/sysscroll-(up|down|pgup|pgdn)(?:\s+(\d+))?\s*$/);
   if (scrollMatch) {
@@ -736,10 +738,10 @@ function buildMenuText(api: any): string {
     ["/sysreclaim",         "stop unused Ollama models (free RAM)"],
     ["/sysmodel <name>",    "switch local chat_model + relaunch"],
     ["/sysapply <numbers>", "apply cached auto-doctor proposals"],
-    ["/sysup [N]",           "scroll sidebar up N rows (default 1)"],
-    ["/sysdn [N]",           "scroll sidebar down N rows (default 1)"],
-    ["/syspgup [N]",         "scroll sidebar up N rows (default 10)"],
-    ["/syspgdn [N]",         "scroll sidebar down N rows (default 10)"],
+    ["/sysscrollup [N]",     "scroll sidebar up N rows (default 1)"],
+    ["/sysscrolldn [N]",     "scroll sidebar down N rows (default 1)"],
+    ["/sysscrollpgup [N]",   "scroll sidebar up N rows (default 10)"],
+    ["/sysscrollpgdn [N]",   "scroll sidebar down N rows (default 10)"],
   ];
 
   const out: string[] = [];
@@ -917,16 +919,25 @@ export function registerSysCommands(api: any): void {
   // TAB-select is the recommended path; it's strictly faster.
   api.command?.register?.(() => [
     {
-      title: "/sys <args> — run any org-llm subcommand (no LLM)",
-      value: "org-llm.sys",
-      description: "Type /sys followed by CLI args, then TAB. Output injects into chat.",
+      // Phase 18.4-iter5: renamed from `/sys` → `/sysrun` because
+      // the bare `sys` slash name was prefix-shadowing every
+      // longer /sys* slash (sysdn, sysup, syspgup, syspgdn) in
+      // opencode's slash router. User types /sysdn → router finds
+      // `sys` first (shorter prefix) → fires the bare onSelect
+      // dialog. Dropping the prefix collision entirely.
+      // The keypress / message.updated hooks still match bare
+      // `/sys` typed text via dispatchSysCommand for users with
+      // muscle memory.
+      title: "/sysrun <args> — run any org-llm subcommand (no LLM)",
+      value: "org-llm.sysrun",
+      description: "Type /sysrun followed by CLI args, then TAB. Output injects into chat.",
       category: "org-llm",
-      slash: { name: "sys" },
+      slash: { name: "sysrun", aliases: [] },
       onSelect: () => {
         const text = readPromptInput().trim();
-        const m = text.match(/^\/sys\s+(.+)$/);
+        const m = text.match(/^\/sys(?:run)?\s+(.+)$/);
         if (!m) {
-          setPromptInput("/sys ");
+          setPromptInput("/sysrun ");
           return;
         }
         clearPrompt();
@@ -1107,43 +1118,42 @@ export function registerSysCommands(api: any): void {
     },
     // Phase 18.4-iter4: opencode's slash registry rejects hyphens
     // ("Unknown command: /sysscroll-up" when injected via Doom's
-    // vterm-send-string). The keypress-hook path tolerated them
-    // because it ran BEFORE opencode validated, so manual typing
-    // worked while injection didn't. Canonical names are now
-    // hyphen-free (sysup, sysdn, syspgup, syspgdn). The legacy
-    // hyphenated forms continue to work when typed manually
-    // because dispatchSysCommand below matches both spellings.
+    // vterm-send-string). Canonical names are hyphen-free but keep
+    // "scroll" in them so the autocomplete reads as scroll commands,
+    // not opaque /sysup / /sysdn pairs. Legacy hyphenated forms
+    // continue to work when typed manually because dispatchSysCommand
+    // below matches all spellings.
     {
       title: "Sidebar scroll up — N rows (default 1)",
-      value: "org-llm.sysup",
-      description: "Type /sysup [N] then TAB. Default scrolls 1 row.",
+      value: "org-llm.sysscrollup",
+      description: "Type /sysscrollup [N] then TAB. Default scrolls 1 row.",
       category: "org-llm",
-      slash: { name: "sysup" },
-      onSelect: () => doScrollSlash(api, "/sysup", -1, 1),
+      slash: { name: "sysscrollup" },
+      onSelect: () => doScrollSlash(api, "/sysscrollup", -1, 1),
     },
     {
       title: "Sidebar scroll down — N rows (default 1)",
-      value: "org-llm.sysdn",
-      description: "Type /sysdn [N] then TAB. Default scrolls 1 row.",
+      value: "org-llm.sysscrolldn",
+      description: "Type /sysscrolldn [N] then TAB. Default scrolls 1 row.",
       category: "org-llm",
-      slash: { name: "sysdn" },
-      onSelect: () => doScrollSlash(api, "/sysdn", +1, 1),
+      slash: { name: "sysscrolldn" },
+      onSelect: () => doScrollSlash(api, "/sysscrolldn", +1, 1),
     },
     {
-      title: "Sidebar page up — N rows (default 10)",
-      value: "org-llm.syspgup",
-      description: "Type /syspgup [N] then TAB. Default scrolls 10 rows.",
+      title: "Sidebar scroll page up — N rows (default 10)",
+      value: "org-llm.sysscrollpgup",
+      description: "Type /sysscrollpgup [N] then TAB. Default scrolls 10 rows.",
       category: "org-llm",
-      slash: { name: "syspgup" },
-      onSelect: () => doScrollSlash(api, "/syspgup", -1, 10),
+      slash: { name: "sysscrollpgup" },
+      onSelect: () => doScrollSlash(api, "/sysscrollpgup", -1, 10),
     },
     {
-      title: "Sidebar page down — N rows (default 10)",
-      value: "org-llm.syspgdn",
-      description: "Type /syspgdn [N] then TAB. Default scrolls 10 rows.",
+      title: "Sidebar scroll page down — N rows (default 10)",
+      value: "org-llm.sysscrollpgdn",
+      description: "Type /sysscrollpgdn [N] then TAB. Default scrolls 10 rows.",
       category: "org-llm",
-      slash: { name: "syspgdn" },
-      onSelect: () => doScrollSlash(api, "/syspgdn", +1, 10),
+      slash: { name: "sysscrollpgdn" },
+      onSelect: () => doScrollSlash(api, "/sysscrollpgdn", +1, 10),
     },
   ]);
 
