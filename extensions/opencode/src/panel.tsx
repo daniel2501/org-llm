@@ -423,10 +423,16 @@ export function setActiveAgentOverride(agent: string, ts: number): void {
     const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
     const path = `${orgDir}/.opencode/sidebar-runtime.json`;
     // Read existing overlay to preserve intent_agent (the proxy
-    // wrote it; we shouldn't overwrite). If no existing intent,
-    // just write our serving_agent.
+    // wrote it; we shouldn't overwrite). Bun.file().text() is
+    // async — JSON.parse(Promise) always throws — so use
+    // readFileSync from node:fs for a real sync read. Otherwise
+    // every plugin overlay write clobbers the proxy's
+    // intent_agent stamp from the same turn.
     let existing: any = {};
-    try { existing = JSON.parse(Bun.file(path).text() as any); } catch {}
+    try {
+      const fs = require("node:fs");
+      existing = JSON.parse(fs.readFileSync(path, "utf8"));
+    } catch {}
     const merged = {
       ...existing,
       serving_agent: agent,
