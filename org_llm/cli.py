@@ -12746,23 +12746,36 @@ about X — searched: A, B, C. Want a different phrase?"
 
 ## Tool cheatsheet (start here)
 
-| Question shape | Reach for |
-|---|---|
-| "have I…" / "did I…" / "what about X" | `org-llm_search_notes`, then `org-llm_get_node` on hits |
-| "what's a good answer to…" | `org-llm_ask_notes` (RAG: search + grounded reply) |
-| "what's been going on lately" | `org-llm_list_recent_nodes(days=7)` |
-| "anything about tag X" | `org-llm_list_nodes_by_tag(tag="X")` |
-| "save this thought" | `org-llm_capture_note(title, body)` |
-| "find that code where…" | `org-llm_code_search(query, lang?)` |
-| "is something broken" | `org-llm_doctor_health()` then `org-llm_proactive_doctor()` |
-| "open repo / read file" | `org-llm_discover_filesystem`, then `org-llm_read_file` |
+| Question shape | Reach for | Primary arg |
+|---|---|---|
+| "have I…" / "did I…" / "what about X" | `org-llm_search_notes`, then `org-llm_get_node` | `query="…"` / `id="…"` |
+| "what's a good answer to…" | `org-llm_ask_notes` (RAG-grounded reply) | `question="…"` ← NOT `query` |
+| "what's been going on lately" | `org-llm_list_recent_nodes` | `days=7` |
+| "anything about tag X" | `org-llm_list_nodes_by_tag` | `tag="X"` |
+| "save this thought" | `org-llm_capture_note` | `title="…", body="…"` |
+| "find that code where…" | `org-llm_code_search` | `query="…", lang?="…"` |
+| "is something broken" | `org-llm_doctor_health` then `org-llm_proactive_doctor` | (none) |
+| "open repo / read file" | `org-llm_discover_filesystem`, then `org-llm_read_file` | `path="…"` |
 
-**Tool-name convention:** opencode namespaces every MCP server's tools
-with the server's slug. The MCP server here is `org-llm`, so EVERY
-tool above is callable as `org-llm_<name>` — never the bare name.
-Calling bare `search_notes` returns "Model tried to call unavailable
-tool" and you have to retry, which burns 30+ seconds and trips the
-slow-LLM watcher. Use the prefix on the FIRST try.
+**Two pitfalls that cost 30s each per misfire:**
+
+1. **Tool-name convention.** opencode namespaces every MCP server's
+   tools with the server's slug. The MCP server here is `org-llm`,
+   so EVERY tool above is callable as `org-llm_<name>` — never the
+   bare name. Calling bare `search_notes` returns "Model tried to
+   call unavailable tool" and you have to retry.
+2. **Arg names matter.** `org-llm_ask_notes` takes `question=`, NOT
+   `query=`. `org-llm_search_notes` takes `query=`. Cross-wiring
+   them is the most common retry — read the table column above.
+
+**RAG-vs-LLM-recursion:** `org-llm_ask_notes` makes an LLM round-trip
+internally (search + grounded reply). When YOU are mid-answer to the
+user, calling `ask_notes` queues a second LLM call that fights the
+first for ollama's resources — both stall, the user sees nothing for
+a minute. PREFER `org-llm_search_notes` for grounding (returns raw
+hits, no LLM call), and synthesise the answer yourself from the
+matched node bodies via `org-llm_get_node`. Reserve `ask_notes` for
+when the user explicitly asks "what's a good answer …".
 
 ## Recent activity (last 7 days)
 
