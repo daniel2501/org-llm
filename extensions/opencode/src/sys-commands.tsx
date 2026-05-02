@@ -736,10 +736,10 @@ function buildMenuText(api: any): string {
     ["/sysreclaim",         "stop unused Ollama models (free RAM)"],
     ["/sysmodel <name>",    "switch local chat_model + relaunch"],
     ["/sysapply <numbers>", "apply cached auto-doctor proposals"],
-    ["/sysscroll-up [N]",    "scroll sidebar up N rows (default 1)"],
-    ["/sysscroll-down [N]",  "scroll sidebar down N rows (default 1)"],
-    ["/sysscroll-pgup [N]",  "scroll sidebar up N rows (default 10)"],
-    ["/sysscroll-pgdn [N]",  "scroll sidebar down N rows (default 10)"],
+    ["/sysup [N]",           "scroll sidebar up N rows (default 1)"],
+    ["/sysdn [N]",           "scroll sidebar down N rows (default 1)"],
+    ["/syspgup [N]",         "scroll sidebar up N rows (default 10)"],
+    ["/syspgdn [N]",         "scroll sidebar down N rows (default 10)"],
   ];
 
   const out: string[] = [];

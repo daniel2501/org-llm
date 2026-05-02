@@ -729,7 +729,7 @@ function SectionEngage(props: { s: SidebarStatus; t: any; color: any }) {
       <box flexDirection="row">
         <text fg={t.textMuted}>{"M-↑/↓"}</text>
         <text fg={t.text}> sidebar · </text>
-        <text fg={t.textMuted}>{"/sysscroll-up"}</text>
+        <text fg={t.textMuted}>{"/sysup /sysdn"}</text>
       </box>
       <box flexDirection="row">
         <text fg={t.textMuted}>{"PgUp/Dn"}</text>
@@ -861,7 +861,7 @@ export function PanelBody(props: {
               what the user has actually configured. Empty string
               keys → hide the second line entirely. */}
       <box flexDirection="column">
-        <text fg={t.textMuted}>{"↕ /sysscroll-up/down"}</text>
+        <text fg={t.textMuted}>{"↕ /sysup /sysdn"}</text>
         {(cfg.scroll_up_keys || cfg.scroll_down_keys) && (
           <text fg={t.textMuted}>
             {"  " + formatScrollKeyHint(
