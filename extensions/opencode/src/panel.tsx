@@ -870,6 +870,60 @@ function SectionLifeSupport(props: { s: SidebarStatus; t: any; color: any }) {
   );
 }
 
+function SectionManager(props: { s: SidebarStatus; t: any; color: any }) {
+  // Phase 20: surface what the manager (crew) has been doing on
+  // the user's behalf. Reads `manager_recent` from the runtime
+  // overlay — a list of the most recent 3 crew_log entries written
+  // by db.log_crew_action. For full history use `/sysexport manager`.
+  const { t, color } = props;
+  let entries: any[] = [];
+  try {
+    const fs = require("node:fs");
+    const home = process.env.HOME ?? "";
+    const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
+    const overlay = JSON.parse(fs.readFileSync(
+      `${orgDir}/.opencode/sidebar-runtime.json`, "utf8"));
+    entries = overlay.manager_recent ?? [];
+  } catch { /* no overlay or no manager_recent yet */ }
+  return (
+    <SectionCard color={color} title="MANAGER">
+      {entries.length === 0 ? (
+        <box flexDirection="row">
+          <text fg={t.textMuted}>(idle — no recent actions)</text>
+        </box>
+      ) : entries.slice(0, 3).map((e: any) => {
+        const outcome = e.outcome ?? "?";
+        const outcomeColor = outcome === "ok"      ? t.success :
+                              outcome === "empty"   ? t.warning :
+                              outcome === "timeout" ? t.warning :
+                              outcome === "error"   ? t.danger  :
+                              t.textMuted;
+        const ts = (e.ts ?? "").slice(11, 19);   // HH:MM:SS
+        const dur = e.duration_ms != null
+          ? `${Math.round(e.duration_ms / 100) / 10}s`
+          : "";
+        return (
+          <box flexDirection="column">
+            <box flexDirection="row">
+              <text fg={t.textMuted}>{ts.padEnd(9)}</text>
+              <text fg={t.accent}>{(e.action ?? "?").padEnd(9)}</text>
+              <text fg={outcomeColor}>{outcome}</text>
+            </box>
+            <box flexDirection="row">
+              <text fg={t.textMuted}>  → </text>
+              <text fg={t.warning}>{(e.agent_to ?? "?").padEnd(11)}</text>
+              <text fg={t.textMuted}>{dur}</text>
+            </box>
+          </box>
+        );
+      })}
+      <box flexDirection="row">
+        <text fg={t.textMuted}>full: /sysexport manager</text>
+      </box>
+    </SectionCard>
+  );
+}
+
 function SectionArchive(props: { s: SidebarStatus; t: any; color: any }) {
   const activity = props.s.activity ?? {};
   const topTags = props.s.top_tags ?? [];
@@ -982,6 +1036,7 @@ function SectionHealth(props: { s: SidebarStatus; t: any; color: any }) {
 const SECTION_RENDERERS: Record<string, (p: { s: SidebarStatus; t: any; color: any }) => any> = {
   "vault":        SectionVault,
   "active":       SectionActive,
+  "manager":      SectionManager,
   "health":       SectionHealth,
   "model":        SectionModel,
   "subsystems":   SectionSubsystems,

@@ -288,6 +288,50 @@ def _format_export_messages(messages: list) -> tuple[list[str], int]:
     return out, count
 
 
+def _format_manager_history(limit: int = 200) -> list[str]:
+    """Render the crew_log table as markdown for /sysexport manager.
+
+    Read-only; never raises. Returns a markdown section with the
+    last `limit` entries newest-first, including timestamp, action,
+    drafter→reviewer, model, duration, outcome, and prompt
+    excerpts. Used to give the user full forensic visibility into
+    what the manager has actually been doing on their behalf."""
+    lines: list[str] = ["", "---", "# Manager activity (crew_log)", ""]
+    try:
+        from .db import CrewLog as _CL, make_engine
+        from sqlalchemy.orm import Session
+        engine = make_engine()
+        with Session(engine) as s:
+            rows = (s.query(_CL)
+                     .order_by(_CL.id.desc())
+                     .limit(int(limit)).all())
+        if not rows:
+            lines.append("*(no entries yet — manager hasn't been "
+                         "consulted)*")
+            return lines
+        lines.append(f"*{len(rows)} entries (newest first):*")
+        lines.append("")
+        for r in rows:
+            lines.append(f"## {r.timestamp}  ·  {r.action}  ·  "
+                          f"{r.outcome}")
+            head = []
+            if r.agent_from: head.append(f"from `{r.agent_from}`")
+            if r.agent_to:   head.append(f"to `{r.agent_to}`")
+            if r.model:      head.append(f"model `{r.model}`")
+            if r.duration_ms is not None:
+                head.append(f"{r.duration_ms}ms")
+            if head:
+                lines.append("- " + " · ".join(head))
+            if r.prompt_excerpt:
+                lines.append(f"- prompt: `{r.prompt_excerpt[:200]}`")
+            if r.result_excerpt:
+                lines.append(f"- result: `{r.result_excerpt[:200]}`")
+            lines.append("")
+    except Exception as e:
+        lines.append(f"*(failed to read crew_log: {e})*")
+    return lines
+
+
 def _format_sidebar_snapshot(org_dir: Path) -> list[str]:
     """Read .opencode/sidebar-status.json and render it as markdown
     matching the layout the plugin used to produce. Returns a
@@ -405,9 +449,9 @@ def intercept_sysexport_command(req: ProxyRequest) -> Optional[ProxyResponse]:
     parts = text.split()
     if not parts or parts[0] != "/sysexport":
         return None
-    include_sidebar = (
-        len(parts) >= 2 and parts[1].lower() in ("sidebar", "full", "all")
-    )
+    flavour = parts[1].lower() if len(parts) >= 2 else ""
+    include_sidebar = flavour in ("sidebar", "full", "all")
+    include_manager = flavour in ("manager", "crew", "full", "all")
 
     org_dir = Path(os.environ.get("ORG_LLM_ORG_DIR")
                     or (Path.home() / "org"))
@@ -426,8 +470,11 @@ def intercept_sysexport_command(req: ProxyRequest) -> Optional[ProxyResponse]:
     sidebar_lines: list[str] = []
     if include_sidebar:
         sidebar_lines = _format_sidebar_snapshot(org_dir)
+    manager_lines: list[str] = []
+    if include_manager:
+        manager_lines = _format_manager_history(limit=200)
 
-    file_lines = header + body_lines + sidebar_lines
+    file_lines = header + body_lines + sidebar_lines + manager_lines
     try:
         out_path.write_text("\n".join(file_lines))
     except Exception as e:
