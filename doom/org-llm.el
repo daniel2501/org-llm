@@ -205,6 +205,9 @@ when /proc isn't readable."
 ;;;###autoload
 (defun org-llm-sys-insights     () "Open /insights dialog." (interactive)
        (org-llm--opencode-write-action '((action . "slash") (slash . "/insights"))))
+;;;###autoload
+(defun org-llm-sys-export       () "Export chat as markdown to .opencode/chat-export-*.md." (interactive)
+       (org-llm--opencode-write-action '((action . "slash") (slash . "/sysexport"))))
 
 ;;; ── Action-bridge: prompt + status + notification ──────────────────────────
 ;; Tier-1 actions beyond /sys* dispatch. All use the same JSON
@@ -986,6 +989,7 @@ current selection."
         :desc "/syscloud"                "c" #'org-llm-sys-cloud
         :desc "/sysmenu"                 "M" #'org-llm-sys-menu
         :desc "/insights"                "i" #'org-llm-sys-insights
+        :desc "Export chat → markdown"   "x" #'org-llm-sys-export
         :desc "Quit opencode (Ctrl-c x2)" "q" #'org-llm-opencode-quit
 
         ;; Phase 18.4-iter9: action-bridge extensions. Same JSON
