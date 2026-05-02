@@ -400,6 +400,24 @@ export function getActiveAgentOverride(): {
 export function setActiveAgentOverride(agent: string, ts: number): void {
   if (!agent) return;
   _activeAgentOverride = { agent, ts };
+  // Mirror to disk so the proxy's /sysexport interceptor (which
+  // can't reach into plugin memory) can include the live agent
+  // in its sidebar snapshot. File path is documented in
+  // intercept_sysexport_command's _format_sidebar_snapshot.
+  try {
+    const home = process.env.HOME ?? "";
+    const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
+    const path = `${orgDir}/.opencode/sidebar-runtime.json`;
+    void Bun.write(path, JSON.stringify({
+      agent,
+      ts,
+      model:    _activeModelOverride?.model ?? "",
+      provider: _activeModelOverride?.provider ?? "",
+    }));
+  } catch {
+    // Best-effort. The live TUI sidebar still shows the override
+    // correctly; only the markdown export gap remains if this fails.
+  }
 }
 
 // Sidebar scrollbox ref, captured by PanelBody's scrollbox `ref`

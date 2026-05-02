@@ -291,7 +291,18 @@ def _format_export_messages(messages: list) -> tuple[list[str], int]:
 def _format_sidebar_snapshot(org_dir: Path) -> list[str]:
     """Read .opencode/sidebar-status.json and render it as markdown
     matching the layout the plugin used to produce. Returns a
-    bullet block with VAULT / ACTIVE / HEALTH / ARCHIVE sections."""
+    bullet block with VAULT / ACTIVE / HEALTH / ARCHIVE sections.
+
+    Reads two files:
+      • sidebar-status.json — static, written at launch
+      • sidebar-runtime.json — written by the plugin on every
+        agent/model override (ACTIVE row → see panel.tsx
+        setActiveAgentOverride). Contents merge OVER the static
+        snapshot so the export reflects the LIVE state, not just
+        whatever was current at launch time.
+
+    If the runtime file is missing or stale, falls back cleanly
+    to the static snapshot."""
     out: list[str] = ["---", "# Sidebar status snapshot", ""]
     try:
         path = org_dir / _SIDEBAR_FILE_REL
@@ -305,6 +316,14 @@ def _format_sidebar_snapshot(org_dir: Path) -> list[str]:
         tags = sidebar.get("top_tags") or []
         vit  = sidebar.get("vitals")   or []
 
+        # Live overlay — agent + most-recent model the plugin saw.
+        runtime = {}
+        try:
+            rt_path = org_dir / ".opencode" / "sidebar-runtime.json"
+            runtime = json.loads(rt_path.read_text())
+        except Exception:
+            pass
+
         out.append("## VAULT")
         out.append(f"- nodes: {v.get('n_nodes', '?')}  "
                    f"({v.get('n_embedded', '?')} indexed, "
@@ -313,13 +332,22 @@ def _format_sidebar_snapshot(org_dir: Path) -> list[str]:
         out.append(f"- org_dir: `{v.get('org_dir', '?')}`")
         out.append("")
 
+        # Live model + agent override the plugin captured from the
+        # most-recent assistant message; falls back to the
+        # launch-time snapshot for the cold-start case.
+        live_agent    = (runtime.get("agent") or "").strip()
+        live_model    = (runtime.get("model") or "").strip()
+        live_provider = (runtime.get("provider") or "").strip()
         out.append("## ACTIVE")
+        out.append(f"- agent: {live_agent or 'org-llm'}")
         out.append(f"- palette: {a.get('palette', '?')}")
-        for k in (a.get("knobs") or []):
-            out.append(f"- {k.get('name', '?')}: {k.get('level', '?')}")
-        out.append(f"- model: {m.get('active', '?')}  "
-                   f"(provider: {m.get('provider', '?')}, "
-                   f"route: {m.get('route', '?')})")
+        # Knob rows used to leak into the export ("theme_xref: 2"
+        # etc.) — useful in the live TUI's compact card, noise in a
+        # markdown chat-share. Drop them from the export entirely;
+        # the user can always /sysreflect or check the live sidebar.
+        out.append(f"- model: {live_model or m.get('active', '?')}  "
+                   f"(provider: {live_provider or m.get('provider', '?')}, "
+                   f"route: {('cloud' if live_provider and live_provider != 'ollama' else m.get('route', '?'))})")
         out.append("")
 
         out.append("## HEALTH")

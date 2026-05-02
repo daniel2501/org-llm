@@ -6468,6 +6468,34 @@ def _config_check_run() -> None:
     except Exception as e:
         _add("env", "[dim]-[/dim]", f"env coverage check skipped: {e}")
 
+    # ── hardware fitness for the current chat_model ──────────
+    try:
+        from .cloud import local_ram_gb, model_needs_vram
+        chat_mdl = (cfg_rows.get("chat_model") or "").strip()
+        ram = local_ram_gb()
+        need = model_needs_vram(chat_mdl) if chat_mdl else None
+        cloud_first = (cfg_rows.get("proxy_cloud_first")
+                        or "false").strip().lower() == "true"
+        if need is None or not chat_mdl:
+            _add("hardware", "[dim]-[/dim]",
+                  f"chat_model footprint unknown for {chat_mdl!r}")
+        elif ram < need * 1.2:
+            if cloud_first:
+                _add("hardware", "[green]✓[/green]",
+                      f"free RAM {ram:.1f} GB < 1.2× chat_model "
+                      f"({need:.1f} GB) — cloud_first ON, mitigated")
+            else:
+                _add("hardware", "[yellow]⚠[/yellow]",
+                      f"free RAM {ram:.1f} GB < 1.2× chat_model "
+                      f"({need:.1f} GB). Enable cloud_first: "
+                      f"`org-llm config proxy_cloud_first true`")
+        else:
+            _add("hardware", "[green]✓[/green]",
+                  f"free RAM {ram:.1f} GB ≥ 1.2× chat_model "
+                  f"({need:.1f} GB)")
+    except Exception as e:
+        _add("hardware", "[dim]-[/dim]", f"probe skipped: {e}")
+
     # ── Render ─────────────────────────────────────────────────
     tbl = _Tbl(box=None, pad_edge=False, show_header=True)
     tbl.add_column("Check",   style="lcars2", no_wrap=True, width=10)
