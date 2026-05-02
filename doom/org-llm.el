@@ -212,28 +212,54 @@ Calls `org-llm-sys-prompt-submit' under the hood."
          (text (buffer-substring-no-properties (car bounds) (cdr bounds))))
     (org-llm-sys-prompt-submit text)))
 
+(defun org-llm--vterm-send-key-multi (key-name escape-seq)
+  "Send a special key (like PgUp/PgDn) to the active opencode vterm.
+KEY-NAME is the Emacs key string (e.g. \"<prior>\"); ESCAPE-SEQ
+is the raw terminal escape sequence (e.g. \"\\e[5~\"). Tries
+three primitives in order — vterm-send-key, then a programmatic
+keypress dispatch in the vterm window, then process-send-string
+direct to the pty — because vterm forks differ on which one
+actually reaches opencode's keypress handler."
+  (let* ((buf (or (org-llm--opencode-vterm-buffer)
+                  (user-error "No opencode vterm buffer found")))
+         (win (get-buffer-window buf)))
+    (with-current-buffer buf
+      (cond
+       ;; Path 1: vterm-send-key (modern emacs-libvterm).
+       ((fboundp 'vterm-send-key)
+        (vterm-send-key key-name nil nil nil))
+       ;; Path 2: dispatch the key in the vterm window's local map.
+       ;; Hits whatever vterm's mode-map binds <prior>/<next> to —
+       ;; usually vterm--self-insert which forwards to libvterm.
+       (win
+        (with-selected-window win
+          (let ((cmd (or (lookup-key vterm-mode-map (kbd key-name))
+                          (lookup-key (current-local-map) (kbd key-name)))))
+            (if (commandp cmd)
+                (call-interactively cmd)
+              (vterm-send-string escape-seq)))))
+       ;; Path 3: write the raw escape sequence directly to the
+       ;; vterm subprocess's stdin. Bypasses vterm's send-string
+       ;; abstraction, but only works when there's a live process.
+       ((get-buffer-process buf)
+        (process-send-string (get-buffer-process buf) escape-seq))
+       ;; Path 4: last-resort vterm-send-string with the escape.
+       (t (vterm-send-string escape-seq))))))
+
 ;;;###autoload
 (defun org-llm-chat-page-up ()
   "Scroll opencode chat up one page.
-Sends the raw PgUp escape sequence (\\e[5~) directly. Works in
-opencode because chat scroll is its native handler, NOT the
-slash-validation path that rejected the /sys* injections.
-Used `vterm-send-string` rather than `vterm-send-key' because the
-latter is version-specific in vterm forks."
+Chat scroll is opencode's NATIVE keypress handler, not the
+slash-validation path that rejected the /sys* injections — so
+this is one of the rare places vterm-side dispatch works at all."
   (interactive)
-  (let ((buf (or (org-llm--opencode-vterm-buffer)
-                 (user-error "No opencode vterm buffer found"))))
-    (with-current-buffer buf
-      (vterm-send-string "\e[5~"))))
+  (org-llm--vterm-send-key-multi "<prior>" "\e[5~"))
 
 ;;;###autoload
 (defun org-llm-chat-page-down ()
-  "Scroll opencode chat down one page (sends PgDn escape \\e[6~)."
+  "Scroll opencode chat down one page."
   (interactive)
-  (let ((buf (or (org-llm--opencode-vterm-buffer)
-                 (user-error "No opencode vterm buffer found"))))
-    (with-current-buffer buf
-      (vterm-send-string "\e[6~"))))
+  (org-llm--vterm-send-key-multi "<next>" "\e[6~"))
 
 ;;;###autoload
 (defun org-llm-opencode-quit ()
