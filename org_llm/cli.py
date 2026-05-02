@@ -14700,6 +14700,39 @@ def launch(
         for name, body in slash_cmds.items():
             (command_dir / f"{name}.md").write_text(body)
 
+    # Phase 18.4-iter7: stub `.md` files for the /sys* family.
+    # opencode's submit-time slash validator only recognizes:
+    #   • built-in slashes
+    #   • project .md files in .opencode/command/
+    # Plugin-registered commands (api.command.register) appear in
+    # autocomplete + the command palette but are REJECTED at
+    # submit time with "Unknown command" — verified by the user
+    # typing `/sysscrolldn` directly and seeing the message even
+    # though the autocomplete lists the slash.
+    # Writing tiny .md stubs gives opencode a slash to recognise;
+    # the body just calls the corresponding org-llm subprocess
+    # via $ARGS, but in practice the plugin's onSubmit hook
+    # intercepts the slash via dispatchSysCommand BEFORE
+    # opencode runs the .md body — so the .md is a registration
+    # marker, not the actual handler.
+    command_dir.mkdir(parents=True, exist_ok=True)
+    _SYS_SLASH_NAMES = (
+        "sysrun", "sysdoctor", "sysstats", "sysmodels", "sysrecent",
+        "syscloud", "sysmenu", "sysmodel", "sysapply", "sysreclaim",
+        "sysscrollup", "sysscrolldn", "sysscrollpgup", "sysscrollpgdn",
+    )
+    _stub_body = (
+        "---\n"
+        "description: org-llm /sys* command — handled by the TUI plugin\n"
+        "---\n"
+        "(no-op fallback: handled locally via the plugin's "
+        "onSubmit hook before this body runs)\n\n$ARGS\n"
+    )
+    for _slash in _SYS_SLASH_NAMES:
+        _md_path = command_dir / f"{_slash}.md"
+        if not _md_path.exists():
+            _md_path.write_text(_stub_body)
+
     # ── Inject $ARGS into existing .md slash commands ────────────────────
     # opencode's project slashes only forward user-typed args
     # (e.g. `--no-llm`) to the LLM if the .md body references
