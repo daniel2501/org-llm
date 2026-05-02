@@ -488,6 +488,30 @@ insight cards, and the routine on 2026-05-13 having real data.
 (tip strings) all still leak opencode-flavored chrome. Same TSX
 slot pattern as Phase 16.2's =home_logo= work.
 
+** Tool-call reliability warning for under-spec'd local models
+
+Discovered 2026-05-02: a user query as simple as "count of org
+files?" hung indefinitely on =phi4-mini= because the model spun
+reasoning chains without ever emitting an MCP tool call. The
+slow-LLM watcher caught the hang at 25s and ran
+=doctor --power-boost= (Phase 17.1j working as designed), but
+the user's *first* impression was a hung TUI.
+
+Fix: at launch, check =chat_model= against a known-unreliable
+list (phi4-mini, gemma3:<12b, etc.) and either:
+- emit a yellow toast suggesting a swap to llama3.2 / qwen3:4b
+- pre-flight ping the configured model with a tool-shaped probe
+  ("respond with a tool call to time"), and warn if it
+  reasoning-chains instead of calling
+- doctor's =--power-boost= already recommends upsizing — extend
+  it to ALSO recommend swapping to a smaller-but-tool-reliable
+  model when the current one is tool-unreliable rather than just
+  too big
+
+The bundled =chat_model= default is already =llama3.2= so fresh
+installs are fine; this is for users who manually overrode it
+without realising the tool-calling implications.
+
 * Planned — Phase 18: proxy expansion                        :planned:
 
 Phase 17.1 landed [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] with a 13-interceptor
