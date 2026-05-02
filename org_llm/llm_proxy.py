@@ -1121,21 +1121,11 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     # restating this in 13 individual agent prompts.
     if agent_prompt:
         agent_prompt = (
-            "STANDING PRINCIPLE — vault-first context (use judgment):\n"
-            "  When a question hinges on the user's life / projects / "
-            "  voice / conventions, ground your answer by sampling "
-            "  vault files — `org-llm_search_notes`, "
-            "  `org-llm_ask_notes`, `org-llm_list_dailies`, "
-            "  `org-llm_read_file`. Feel free to read multiple files "
-            "  when the answer benefits.\n"
-            "  BUT keep the hot path snappy: when the user has just "
-            "  given an explicit confirmation ('save it', 'yes', 'do "
-            "  it', 'ship it', 'go ahead', 'y') for a simple action "
-            "  you already drafted, JUST DO IT. Don't re-sample the "
-            "  vault to second-guess what the user already approved. "
-            "  For shape-sensitive NEW captures (first time writing "
-            "  to a surface), sampling once for format is worth it; "
-            "  for follow-on captures of the same shape, skip.\n\n"
+            "Vault-first: when the answer hinges on the user's "
+            "life/voice/conventions, sample vault files first "
+            "(search_notes, list_dailies, read_file). For explicit "
+            "user confirmations ('save it', 'yes', 'y'), skip "
+            "re-sampling and just do it.\n\n"
             + agent_prompt
         )
     # Phase 20: append FORCE-SOLO marker so the agent's

@@ -850,6 +850,7 @@ def create_mcp_server():
         try:
             if use_cloud:
                 import urllib.request as _ur
+                from .cloud import _urlopen as _ssl_urlopen
                 # If model_override doesn't carry a provider prefix
                 # AND we're going to cloud, swap to cloud_model
                 send_model = (model if "/" in model else cloud_model)
@@ -860,7 +861,7 @@ def create_mcp_server():
                         {"role": "user",   "content": user_msg},
                     ],
                     "stream":      False,
-                    "max_tokens":  4096,
+                    "max_tokens":  1024,
                     "temperature": 0.3,
                 }).encode()
                 req = _ur.Request(
@@ -871,7 +872,7 @@ def create_mcp_server():
                         "Authorization": f"Bearer {api_key}",
                         "User-Agent":    "org-llm/delegate",
                     })
-                with _ur.urlopen(req, timeout=timeout_s) as resp:
+                with _ssl_urlopen(req, timeout=timeout_s) as resp:
                     raw = resp.read().decode("utf-8", "replace")
                 obj = json.loads(raw)
                 msg = (obj.get("choices") or [{}])[0].get("message") or {}
