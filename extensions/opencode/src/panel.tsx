@@ -709,6 +709,11 @@ function SectionEngage(props: { s: SidebarStatus; t: any; color: any }) {
   // the default to keep the sidebar dense enough to fit without
   // scrolling. The CLI mapping data is still in the JSON; users
   // who want the dual-row treatment can extend this renderer.
+  // 18.4: added a one-line keybinds hint after the link list so
+  // ctrl+j/k are discoverable inside the TUI instead of buried in
+  // the config file. Chat scrollback uses opencode's native
+  // PageUp/PageDown — also called out so users know which surface
+  // each keybind drives.
   return (
     <SectionCard color={color} title="ENGAGE">
       {links.map((link) => (
@@ -721,6 +726,12 @@ function SectionEngage(props: { s: SidebarStatus; t: any; color: any }) {
           </text>
         </box>
       ))}
+      <box flexDirection="row">
+        <text fg={t.textMuted}>{"^k/^j"}</text>
+        <text fg={t.text}> sidebar  </text>
+        <text fg={t.textMuted}>{"PgUp/Dn"}</text>
+        <text fg={t.text}> chat</text>
+      </box>
     </SectionCard>
   );
 }

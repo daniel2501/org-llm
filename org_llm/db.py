@@ -558,6 +558,28 @@ MODEL_DEFAULTS = {
     # otherwise be relevant: cloud --tune suggestions, the failover
     # target resolver, the `claude` verb's command registration.
     "proprietary_models_enabled":             "false",
+    # ── Prompt-prefix cache (Phase 18) ─────────────────────────────────
+    # Two related optimisations rolled into one interceptor
+    # (`intercept_prompt_cache` in llm_proxy.py):
+    #   • For local Ollama: ensure `options.keep_alive` is set
+    #     generously so the model + KV cache survive between turns.
+    #     Default ollama keep_alive is 5 minutes; a 30-minute window
+    #     covers the typical "user reads response, types follow-up"
+    #     gap so the second turn re-uses the prefix's prefilled KV.
+    #   • For cloud Claude: mark the largest system-message block
+    #     with cache_control={type:"ephemeral"} so Anthropic /
+    #     OpenRouter discounts cached input tokens (~90% off when
+    #     the same system prompt repeats within 5 minutes). opencode
+    #     resends the same 22 KB MCP catalog every turn — that's
+    #     exactly the workload prompt caching is designed for.
+    #
+    # Set false to disable both legs entirely.
+    "proxy_prompt_cache_enabled":     "true",
+    # keep_alive duration injected when leg 1 fires. Accepts ollama's
+    # duration syntax: "30m", "1h", "0" (immediate unload), "-1"
+    # (forever). Skipped when the user already set keep_alive in
+    # their request — explicit user values always win.
+    "proxy_prompt_keep_alive":        "30m",
     # Toast pinning (Phase 17.1s). When true, every toast our
     # plugin emits uses a long duration (1 hour) so messages
     # stay on screen until the user has time to read them. False
@@ -598,10 +620,16 @@ MODEL_DEFAULTS = {
     # that alt+arrow gets eaten as vterm-history; tmux can eat
     # shift+pgup; ctrl+arrow is the most reliable across stacks.
     # The CSV lets us also try the others as fallbacks.
-    "sidebar_scroll_up_keys":         "ctrl+up,alt+up,shift+up",
-    "sidebar_scroll_down_keys":       "ctrl+down,alt+down,shift+down",
-    "sidebar_scroll_pageup_keys":     "ctrl+pageup,alt+pageup,shift+pageup",
-    "sidebar_scroll_pagedown_keys":   "ctrl+pagedown,alt+pagedown,shift+pagedown",
+    # Phase 18.4: vim-style ctrl+k/j as the primary bindings — most
+    # terminal stacks pass them through cleanly, they don't conflict
+    # with opencode's own keymap, and they read naturally to anyone
+    # who's used vim/less/man. Arrow-key combos kept as fallbacks
+    # for users who prefer arrow navigation; the FIRST binding the
+    # user's terminal delivers wins.
+    "sidebar_scroll_up_keys":         "ctrl+k,ctrl+up,alt+up,shift+up",
+    "sidebar_scroll_down_keys":       "ctrl+j,ctrl+down,alt+down,shift+down",
+    "sidebar_scroll_pageup_keys":     "ctrl+u,ctrl+pageup,alt+pageup,shift+pageup",
+    "sidebar_scroll_pagedown_keys":   "ctrl+d,ctrl+pagedown,alt+pagedown,shift+pagedown",
     # Confirm-before-act gate for the auto-doctor flow (17.1q).
     # When true (default), the slow-LLM watcher injects the
     # diagnostic + a list of the commands it WILL run, then waits

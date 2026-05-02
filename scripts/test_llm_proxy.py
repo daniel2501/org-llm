@@ -637,6 +637,90 @@ def main() -> int:
     _cloud.proprietary_models_enabled = saved_prop_gate       # type: ignore[assignment]
     print()
 
+    # Test 11: prompt-prefix cache mutator (keep_alive + cache_control)
+    print("[11] intercept_prompt_cache mutations")
+    upstream_count_before = len(upstream_srv.requests)
+    # Local-shape request (no Authorization, bare model name).
+    post_json(f"{proxy_url}/v1/chat/completions", {
+        "model": "llama3.2", "stream": False,
+        "messages": [
+            {"role": "system", "content": "You are a helpful org-llm assistant."},
+            {"role": "user",   "content": "Unique-prompt-cache-test-A"},
+        ],
+    })
+    last_req = upstream_srv.requests[-1]
+    forwarded = json.loads(last_req["body"])
+    opts = forwarded.get("options") or {}
+    t.check("keep_alive injected on local-shape request",
+            opts.get("keep_alive") == "30m",
+            f"got keep_alive={opts.get('keep_alive')!r}")
+    # Idempotence: user-set keep_alive must NOT be overridden.
+    post_json(f"{proxy_url}/v1/chat/completions", {
+        "model": "llama3.2", "stream": False,
+        "options": {"keep_alive": "5m"},
+        "messages": [
+            {"role": "system", "content": "You are a helpful org-llm assistant."},
+            {"role": "user",   "content": "Unique-prompt-cache-test-B"},
+        ],
+    })
+    last_req = upstream_srv.requests[-1]
+    forwarded = json.loads(last_req["body"])
+    t.check("user-set keep_alive preserved",
+            (forwarded.get("options") or {}).get("keep_alive") == "5m",
+            f"got keep_alive={(forwarded.get('options') or {}).get('keep_alive')!r}")
+    # Claude-shape: cache_control marker landed on the system block.
+    post_json(f"{proxy_url}/v1/chat/completions", {
+        "model": "anthropic/claude-opus-4-7", "stream": False,
+        "messages": [
+            {"role": "system", "content": "Workspace primer A."},
+            {"role": "system", "content": "Workspace primer B (last)."},
+            {"role": "user",   "content": "Unique-prompt-cache-test-C"},
+        ],
+    })
+    last_req = upstream_srv.requests[-1]
+    forwarded = json.loads(last_req["body"])
+    sys_msgs = [m for m in forwarded["messages"] if m["role"] == "system"]
+    t.check("cache_control added to LAST system block on Claude-shape",
+            sys_msgs[-1].get("cache_control") == {"type": "ephemeral"},
+            f"got system messages: {[m.get('cache_control') for m in sys_msgs]}")
+    t.check("cache_control NOT added to earlier system blocks",
+            "cache_control" not in sys_msgs[0],
+            f"got: {sys_msgs[0]}")
+    # Idempotence: a second Claude request that already has cache_control
+    # set must not get a second marker.
+    post_json(f"{proxy_url}/v1/chat/completions", {
+        "model": "anthropic/claude-opus-4-7", "stream": False,
+        "messages": [
+            {"role": "system", "content": "Pre-marked primer.",
+             "cache_control": {"type": "ephemeral"}},
+            {"role": "user",   "content": "Unique-prompt-cache-test-D"},
+        ],
+    })
+    last_req = upstream_srv.requests[-1]
+    forwarded = json.loads(last_req["body"])
+    sys_msgs = [m for m in forwarded["messages"] if m["role"] == "system"]
+    marker_count = sum(1 for m in sys_msgs if m.get("cache_control"))
+    t.check("idempotent: cache_control not double-added",
+            marker_count == 1,
+            f"got {marker_count} markers")
+    # Local model + Claude in slug → still local-only legs (no
+    # cache_control because slug doesn't say claude).
+    post_json(f"{proxy_url}/v1/chat/completions", {
+        "model": "llama3.2", "stream": False,
+        "messages": [
+            {"role": "system", "content": "Plain primer."},
+            {"role": "user",   "content": "Unique-prompt-cache-test-E"},
+        ],
+    })
+    last_req = upstream_srv.requests[-1]
+    forwarded = json.loads(last_req["body"])
+    sys_msgs = [m for m in forwarded["messages"] if m["role"] == "system"]
+    t.check("non-Claude local request gets keep_alive but NOT cache_control",
+            "cache_control" not in sys_msgs[0]
+            and (forwarded.get("options") or {}).get("keep_alive") == "30m",
+            f"sys_msg={sys_msgs[0]}, opts={forwarded.get('options')}")
+    print()
+
     # Cleanup
     proxy_srv.shutdown()
     upstream_srv.shutdown()

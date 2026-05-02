@@ -505,13 +505,32 @@ already runs these without ever calling the LLM. Closes the loop:
 writing a skill in org gives you a tab-completable opencode slash
 for free, with zero ollama wake-up.
 
-** System-prompt prefix cache
+** System-prompt prefix cache                                :shipped:
+:PROPERTIES:
+:STATUS: shipped
+:END:
 
-=intercept_response_cache= keys on the entire request body. Most
-of that body is the same 22 KB MCP catalog re-sent every turn.
-A prefix-keyed cache (system prompt → cached completion fragment)
-cuts time-to-first-token dramatically for repeated identical
-system prompts, especially under cold-start ollama load.
+Shipped 2026-05-02. New interceptor =intercept_prompt_cache= in
+[[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] mutates outgoing chat completions to maximise
+prefix reuse across two backends:
+
+- *Local Ollama:* injects =options.keep_alive= (default
+  =proxy_prompt_keep_alive=, 30m) so the model + KV cache survive
+  between turns. Default ollama keep_alive is 5min; the bump means
+  the second turn re-uses prefilled KV-cache instead of cold-loading.
+- *Cloud Claude (native or via OpenRouter):* marks the largest system
+  message with =cache_control: {type: "ephemeral"}=. Anthropic
+  discounts cached input tokens ~90% when the same system prompt
+  repeats within 5 minutes — opencode's 22 KB MCP catalog every turn
+  is exactly the workload prompt caching is built for.
+
+Both legs idempotent (won't double-add). User-set =keep_alive= in
+the request always wins. Knobs:
+
+- =proxy_prompt_cache_enabled= (default true)
+- =proxy_prompt_keep_alive= (default "30m")
+
+6 new tests in [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]] (56 total).
 
 ** FOSS-first segmentation                                   :shipped:
 :PROPERTIES:

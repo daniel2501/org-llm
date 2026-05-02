@@ -1130,6 +1130,156 @@ def _looks_like_simple_chat(user_text: str) -> bool:
     return True
 
 
+# ── Prompt prefix cache (Phase 18, interceptor #15) ──────────────────
+#
+# Two related optimisations rolled into one mutator:
+#
+#   • For local Ollama: ensure `options.keep_alive` is set generously
+#     so the model + KV cache survive between turns. Ollama's default
+#     keep_alive is 5 minutes; opencode sessions often span longer
+#     gaps where the user reads a response before replying. Bumping
+#     to 30m means the second turn re-uses the prefix's prefilled
+#     KV-cache instead of cold-loading the model.
+#
+#   • For cloud Claude (Anthropic native or via OpenRouter passthrough):
+#     mark the largest system-message block with `cache_control:
+#     {type: "ephemeral"}`. Anthropic's prompt-caching API discounts
+#     cached input tokens by ~90% when the same system prompt repeats
+#     within 5 minutes. opencode resends the same 22 KB MCP catalog +
+#     workspace context every turn — that's exactly the workload
+#     prompt caching is built for.
+#
+# Always returns None: this is a request-mutation interceptor that
+# happens before the forwarder. Idempotent — both legs check before
+# mutating so re-runs (e.g. if interceptors get re-ordered) don't
+# double-add markers or grow keep_alive unboundedly.
+
+
+def _is_local_ollama_request(req: ProxyRequest) -> bool:
+    """Heuristic: an Ollama-shape request that targets local upstream.
+    True when the request's `Authorization` header is missing AND the
+    `options` field exists or the model name lacks an organisation
+    prefix (e.g. `llama3.2` vs `anthropic/claude-opus-4-7`)."""
+    if any(k.lower() == "authorization" for k in (req.headers or {})):
+        return False
+    if not req.parsed_json:
+        return False
+    if "options" in req.parsed_json:
+        return True
+    model = (req.parsed_json.get("model") or "")
+    # An openrouter-shape model has a `/` (provider/slug); local
+    # ollama models are just `llama3.2` / `qwen2.5-coder:7b`.
+    return "/" not in model
+
+
+def _looks_like_anthropic_relay(req: ProxyRequest) -> bool:
+    """True when the request's model is a Claude variant (native
+    Anthropic API or OpenRouter `anthropic/claude-*`). The cache_control
+    marker is harmless on non-Anthropic endpoints — they ignore the
+    field — but adding it only when meaningful keeps the audit log
+    interpretable."""
+    if not req.parsed_json:
+        return False
+    model = (req.parsed_json.get("model") or "").lower()
+    return "claude" in model
+
+
+def _system_prefix_hash(parsed: dict) -> Optional[str]:
+    """SHA256 of the system messages + tools array, ignoring user/
+    assistant turns. Identical across turns of the same session so
+    repeats are easy to count in the audit log."""
+    if not parsed:
+        return None
+    sys_blocks = []
+    for m in (parsed.get("messages") or []):
+        if isinstance(m, dict) and m.get("role") == "system":
+            sys_blocks.append(m.get("content") or "")
+    payload = {
+        "system":  sys_blocks,
+        "tools":   parsed.get("tools") or [],
+        "model":   parsed.get("model")  or "",
+    }
+    canon = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canon.encode()).hexdigest()[:16]
+
+
+def _proxy_keep_alive() -> str:
+    """Read `proxy_prompt_keep_alive` (e.g. "30m"). Default 30 minutes."""
+    return _proxy_cfg_str("proxy_prompt_keep_alive", "30m") or "30m"
+
+
+def _prompt_cache_enabled() -> bool:
+    return _proxy_cfg_str("proxy_prompt_cache_enabled",
+                            "true").strip().lower() != "false"
+
+
+def intercept_prompt_cache(req: ProxyRequest) -> Optional[ProxyResponse]:
+    """Mutate outgoing chat-completions to maximise prefix reuse.
+
+    Two passes — both safe to run on the same request:
+
+    1. *keep_alive injection* (local Ollama only). Ensures the model
+       stays loaded long enough that the next turn can reuse the
+       prefix's KV cache. Skips when the user has explicitly set
+       `keep_alive` (any value, including "0") — respects the user
+       override.
+
+    2. *Anthropic cache_control* (Claude-shape requests only). Marks
+       the LAST system message with `cache_control: {type:"ephemeral"}`
+       so Anthropic / OpenRouter discounts cached input tokens.
+       Idempotent: skips when any system message already has
+       cache_control.
+
+    Always returns None. The forwarder sees the mutated request."""
+    if not _prompt_cache_enabled():
+        return None
+    if not req.path.endswith("/chat/completions"):
+        return None
+    if not req.parsed_json:
+        return None
+    parsed = req.parsed_json
+    mutated = False
+
+    # Leg 1: keep_alive for local ollama.
+    if _is_local_ollama_request(req):
+        opts = parsed.setdefault("options", {})
+        if isinstance(opts, dict) and "keep_alive" not in opts:
+            opts["keep_alive"] = _proxy_keep_alive()
+            mutated = True
+
+    # Leg 2: cache_control for Claude-shape outbound.
+    if _looks_like_anthropic_relay(req):
+        msgs = parsed.get("messages") or []
+        if isinstance(msgs, list):
+            already_marked = any(
+                isinstance(m, dict)
+                and m.get("role") == "system"
+                and (m.get("cache_control")
+                       or (isinstance(m.get("content"), list)
+                            and any(isinstance(p, dict)
+                                      and p.get("cache_control")
+                                      for p in m["content"])))
+                for m in msgs
+            )
+            if not already_marked:
+                # Walk in reverse to find the LAST system message — the
+                # furthest-back cacheable prefix maximises the cached
+                # span while leaving room for per-turn deltas above.
+                for i in range(len(msgs) - 1, -1, -1):
+                    m = msgs[i]
+                    if (isinstance(m, dict)
+                            and m.get("role") == "system"):
+                        m["cache_control"] = {"type": "ephemeral"}
+                        mutated = True
+                        break
+
+    if mutated:
+        req.body = json.dumps(parsed).encode()
+        req.headers = {k: v for k, v in req.headers.items()
+                        if k.lower() != "content-length"}
+    return None
+
+
 def intercept_prompt_slim(req: ProxyRequest) -> Optional[ProxyResponse]:
     """Mutate the request body in place to strip the tools array
     from simple-chat prompts. Returns None always — this isn't a
@@ -1240,6 +1390,7 @@ DEFAULT_INTERCEPTORS: list[Interceptor] = [
     intercept_model_routing,      # T2.3  route by content (code → coder)
     intercept_tool_call_repair,   # T2.2  dedupe tools, fix descriptions
     intercept_qwen3_no_think,     # T1.6  /no_think for qwen3
+    intercept_prompt_cache,       # P18.3 keep_alive + Anthropic cache_control
     intercept_prompt_slim,        # T1.2  strip tools from simple chat
     # NOTE: intercept_local_only is NOT in the default chain. cli.py
     # appends it conditionally based on `proxy_local_only` config.

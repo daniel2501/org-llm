@@ -229,6 +229,18 @@ KEY_DESCRIPTIONS = {
         "and skips registering the `claude` subcommand. Open-weight "
         "models (Llama, Qwen, DeepSeek, Kimi) are unaffected. Set "
         "true to opt in.",
+    "proxy_prompt_cache_enabled":
+        "Phase 18 prefix cache. True (default) injects a generous "
+        "`keep_alive` on local Ollama requests (KV-cache survives "
+        "between turns) AND marks the largest system message with "
+        "`cache_control:ephemeral` on Anthropic-shape outbound "
+        "(Anthropic discounts cached input ~90%). False disables "
+        "both legs.",
+    "proxy_prompt_keep_alive":
+        "Duration injected as `options.keep_alive` on local Ollama "
+        "requests. Accepts `30m` / `1h` / `0` (immediate unload) / "
+        "`-1` (forever). User-set keep_alive in the request always "
+        "wins.",
 }
 
 
