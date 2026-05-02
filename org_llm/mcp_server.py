@@ -366,8 +366,36 @@ def create_mcp_server():
 
     # ── capture_note ──────────────────────────────────────────────────────────
     @server.tool()
-    def capture_note(title: str, body: str, file: str = "inbox.org") -> str:
-        """Capture a new note into the org vault. Returns the node ID for linking."""
+    def capture_note(title: str = "", body: str = "",
+                       file: str = "inbox.org",
+                       note: str = "", content: str = "",
+                       text: str = "") -> str:
+        """Capture a new note into the org vault. Returns the node ID
+        for linking.
+
+        Aliases for `body`: `note`, `content`, `text` (silently
+        accepted; the LLM frequently emits one of these instead of
+        the canonical name). If `title` is omitted, derives it from
+        the first `* heading` in body. If body has no heading,
+        falls back to "Untitled capture".
+
+        For day-shaped captures (today's agenda, weekend todo,
+        journal entries) target `daily/<YYYY-MM-DD>.org` so it
+        lands as the user's daily file rather than inbox.org.
+        """
+        # Accept body-aliases
+        body = body or note or content or text
+        # Title fallback from first heading
+        if not title and body:
+            for line in body.splitlines():
+                stripped = line.lstrip()
+                if stripped.startswith("* "):
+                    title = stripped[2:].strip()
+                    break
+            if not title:
+                title = "Untitled capture"
+        if not title:
+            title = "Untitled capture"
         import uuid
         from datetime import datetime
         with get_session(engine) as session:
@@ -725,6 +753,141 @@ def create_mcp_server():
         from .access import open_url as _open
         ok, msg = _open(url)
         return msg
+
+    @server.tool()
+    def list_agents() -> str:
+        """List the bundled org-llm agents — name, role, model_role.
+
+        Use this BEFORE delegate() so you know who's available and
+        what they're good at. The `crew` agent is the manager; the
+        rest are domain specialists. Users can add/edit agents via
+        ~/org/org-llm-agents.org (`org-llm agents --tangle`)."""
+        from .cli import _PRECONFIGURED_AGENT_PROMPTS as _AP
+        from .db import Config as _Cfg
+        with get_session(engine) as session:
+            cfg = {r.key: r.value for r in session.query(_Cfg).all()}
+        rows = []
+        for name in sorted(_AP.keys()):
+            d = _AP[name]
+            role = d.get("model_role") or "chat_model"
+            resolved = ((cfg.get(role) or cfg.get("chat_model")
+                          or "(unset)").strip())
+            rows.append(f"- {name}  ({role} → {resolved})\n  "
+                         f"{d.get('description', '')}")
+        return _themed("list_agents",
+                        f"{len(rows)} agent(s)", "\n".join(rows))
+
+    @server.tool()
+    def delegate(agent: str, prompt: str, context: str = "",
+                  model_override: str = "", timeout_s: int = 120) -> str:
+        """Consult a specialist agent and return its response.
+
+        The manager pattern: `crew` (the top-level manager agent)
+        uses delegate() to consult domain experts —
+        delegate('classifier', 'filter to routine items: …') returns
+        the classifier's answer as a string. The manager then
+        composes the experts' input into the final reply.
+
+        - agent: name from list_agents() (e.g. 'classifier',
+          'researcher', 'reviewer')
+        - prompt: the focused question for the specialist
+        - context: optional preamble (recent conversation slice,
+          relevant data) appended to the user message
+        - model_override: force a different model (e.g.
+          'qwen2.5:1.5b' for a fast classifier pass) — bypasses
+          the agent's default model_role
+        - timeout_s: bail out after this many seconds; the manager
+          can retry with a smaller model on timeout
+
+        Cloud is preferred when configured (faster + tool-capable);
+        falls back to local ollama otherwise."""
+        from .cli import _PRECONFIGURED_AGENT_PROMPTS as _AP
+        if agent not in _AP:
+            return _themed("delegate",
+                            f"[red]✗[/red] no such agent: {agent}",
+                            f"available: {', '.join(sorted(_AP))}")
+        spec = _AP[agent]
+        sys_prompt = spec.get("prompt", "")
+        role = spec.get("model_role") or "chat_model"
+        with get_session(engine) as session:
+            role_model = (_cfg(session, role)
+                           or _cfg(session, "chat_model")
+                           or "")
+        model = model_override or role_model
+        if not model:
+            return _themed("delegate",
+                            f"[red]✗[/red] could not resolve model "
+                            f"for {agent}")
+        # Compose user prompt
+        user_msg = (f"{context}\n\n{prompt}".strip()
+                     if context else prompt)
+        with get_session(engine) as session:
+            from . import creds as _creds
+            cloud_provider = _cfg(session, "cloud_provider")
+            cloud_endpoint = _cfg(session, "cloud_endpoint_url")
+            cloud_model    = _cfg(session, "cloud_model")
+            ollama_url     = (_cfg(session, "ollama_url")
+                              or "http://localhost:11434")
+            api_key        = ""
+            if cloud_provider:
+                try:
+                    api_key = _creds.read_secret(
+                        _creds.cloud_slug(cloud_provider)) or ""
+                except Exception:
+                    api_key = ""
+        # Cloud path preferred when fully configured
+        use_cloud = bool(cloud_endpoint and api_key
+                          and (cloud_model or "/" in model))
+        try:
+            if use_cloud:
+                import urllib.request as _ur
+                # If model_override doesn't carry a provider prefix
+                # AND we're going to cloud, swap to cloud_model
+                send_model = (model if "/" in model else cloud_model)
+                payload = json.dumps({
+                    "model": send_model,
+                    "messages": [
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user",   "content": user_msg},
+                    ],
+                    "stream":      False,
+                    "max_tokens":  4096,
+                    "temperature": 0.3,
+                }).encode()
+                req = _ur.Request(
+                    cloud_endpoint.rstrip("/") + "/chat/completions",
+                    data=payload, method="POST",
+                    headers={
+                        "Content-Type":  "application/json",
+                        "Authorization": f"Bearer {api_key}",
+                        "User-Agent":    "org-llm/delegate",
+                    })
+                with _ur.urlopen(req, timeout=timeout_s) as resp:
+                    raw = resp.read().decode("utf-8", "replace")
+                obj = json.loads(raw)
+                msg = (obj.get("choices") or [{}])[0].get("message") or {}
+                content = msg.get("content") or ""
+                return _themed("delegate",
+                                f"@{agent} ({send_model}, cloud)",
+                                content.strip()
+                                or "(empty response from cloud)")
+            else:
+                # Local ollama fallback
+                from .llm import chat as _chat
+                bare = (model[len("ollama/"):]
+                        if model.startswith("ollama/") else model)
+                content = _chat(user_msg, bare, ollama_url,
+                                 system=sys_prompt, timeout=timeout_s)
+                return _themed("delegate",
+                                f"@{agent} ({bare}, local)",
+                                content.strip()
+                                or "(empty response from local)")
+        except Exception as e:
+            return _themed("delegate",
+                            f"[red]✗[/red] @{agent} failed: {e}",
+                            f"Manager: consider model_override "
+                            f"(smaller/faster) or proactive_doctor "
+                            f"to diagnose.")
 
     @server.tool()
     def open_in_emacs(path: str, line: int = 0,

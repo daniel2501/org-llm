@@ -1464,11 +1464,15 @@ _TOOL_CALL_PATTERNS: list = [
     # ```search_notes\n{...}\n```
     _re.compile(r"```([a-z][\w]*)\s*\n\s*(\{.*?\})\s*\n\s*```",
                  _re.DOTALL | _re.IGNORECASE),
-    # Bare `tool_name{"...":"..."}` — last resort. Anchored to
-    # require the underscore-or-letter run (so "say {" doesn't
-    # match) AND require the JSON to start with a quoted key.
-    _re.compile(r"\b([a-z][a-z_0-9]{2,})\s*(\{\s*\"[^\"]+\"\s*:.+?\})",
-                 _re.DOTALL),
+    # Bare `tool_name{"...":"..."}` — last resort. Anchored to a
+    # genuine word-start (line start or a non-id character) and
+    # tolerant of hyphens INSIDE the name (opencode prefixes MCP
+    # tools as `<server>_<name>` and `org-llm` is hyphenated). The
+    # JSON must start with a quoted key so "say {" doesn't match.
+    _re.compile(
+        r"(?:^|[^A-Za-z0-9_])([a-z][a-z_0-9-]{2,})\s*"
+        r"(\{\s*\"[^\"]+\"\s*:.+?\})",
+        _re.DOTALL),
 ]
 
 # Kept for backwards-compat with anything in the proxy that still
@@ -3407,6 +3411,95 @@ def _build_cloud_request(orig_body: bytes, parsed: Optional[dict],
 # ── Server ──────────────────────────────────────────────────────────
 
 
+def _sse_collect_content_and_tool_calls(buf: bytes
+                                         ) -> tuple[str, list[dict]]:
+    """Parse an OpenAI-compatible SSE stream buffer; return the
+    accumulated assistant `content` text and any structured
+    `tool_calls` that arrived (combining deltas across chunks).
+
+    Robust to interleaved `[DONE]`, blank lines, and partial JSON.
+    Used by the cloud-failover repair path to decide whether the
+    response that came back is plain prose, a structured tool call,
+    or a *raw-text* tool call that needs reshaping into structured
+    tool_calls before opencode sees it.
+    """
+    content_parts: list[str] = []
+    tool_calls_by_index: dict[int, dict] = {}
+    for line in buf.split(b"\n"):
+        s = line.strip()
+        if not s.startswith(b"data:"):
+            continue
+        payload = s[5:].strip()
+        if payload == b"[DONE]":
+            continue
+        try:
+            obj = json.loads(payload.decode("utf-8", "replace"))
+        except Exception:
+            continue
+        for ch in obj.get("choices") or []:
+            if not isinstance(ch, dict):
+                continue
+            delta = ch.get("delta") or ch.get("message") or {}
+            text = delta.get("content")
+            if isinstance(text, str):
+                content_parts.append(text)
+            for tc in (delta.get("tool_calls") or []):
+                idx = tc.get("index", 0)
+                slot = tool_calls_by_index.setdefault(idx, {
+                    "id": "", "type": "function",
+                    "function": {"name": "", "arguments": ""},
+                })
+                if tc.get("id"):
+                    slot["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                if fn.get("name"):
+                    slot["function"]["name"] = fn["name"]
+                if fn.get("arguments"):
+                    slot["function"]["arguments"] += fn["arguments"]
+    tool_calls = [tool_calls_by_index[i]
+                   for i in sorted(tool_calls_by_index)]
+    return "".join(content_parts), tool_calls
+
+
+# Map of common LLM-confusion arg-name aliases for tools the
+# scribe / capture flow uses heavily. Applied during raw-text
+# tool-call repair AND inside the tool itself, so a tool call with
+# `note` instead of `body` is rewritten BEFORE dispatch instead of
+# 400-ing out.
+_TOOL_ARG_ALIASES: dict[str, dict[str, str]] = {
+    "capture_note":    {"note": "body", "content": "body",
+                         "text": "body", "note_body": "body"},
+    "append_to_note":  {"note": "body", "content": "body",
+                         "text": "body"},
+}
+
+
+def _normalize_tool_args(name: str, args: dict) -> dict:
+    """Rewrite well-known arg-name confusions into the tool's real
+    param names (e.g. capture_note's `note` → `body`). Returns a
+    NEW dict; doesn't mutate the input. For capture_note specifically,
+    also derives a missing `title` from the first `* heading` in the
+    body so a tool call without a title still succeeds."""
+    if not isinstance(args, dict):
+        return args
+    out = dict(args)
+    aliases = _TOOL_ARG_ALIASES.get(name) or {}
+    for src, dst in aliases.items():
+        if src in out and dst not in out:
+            out[dst] = out.pop(src)
+    if name == "capture_note":
+        # Title fallback: extract from first `* heading` of body.
+        if not out.get("title") and isinstance(out.get("body"), str):
+            for line in out["body"].splitlines():
+                stripped = line.lstrip()
+                if stripped.startswith("* "):
+                    out["title"] = stripped[2:].strip()
+                    break
+            else:
+                out["title"] = "Untitled capture"
+    return out
+
+
 def _emit_failover_toast(model: str) -> None:
     """Write a `cloud-failover` action via the file-action bridge so
     the user sees that cloud failover just fired. Best-effort — never
@@ -3844,34 +3937,89 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
             with self._cloud_urlopen(cloud_req, timeout=300) as resp:
                 self._last_status    = resp.status
                 self._last_intercept = "cloud_failover"
-                self.send_response(resp.status)
-                for k, v in resp.headers.items():
-                    if k.lower() in ("transfer-encoding", "connection",
-                                       "content-length"):
-                        continue
-                    self.send_header(k, v)
-                self.end_headers()
+                # Phase 20/repair: buffer the full cloud response so we
+                # can detect raw-text tool calls (where the model emits
+                # `tool_name{...}` as content instead of structured
+                # tool_calls) and reshape them into proper tool_calls.
+                # Trade: slight latency hit on cloud responses (the user
+                # sees no progressive tokens until the stream ends) in
+                # exchange for never silently dropping a capture again.
+                buf = b""
                 while True:
                     chunk = resp.read(4096)
                     if not chunk:
                         break
+                    buf += chunk
+                resp_headers = list(resp.headers.items())
+                resp_status  = resp.status
+            # Inspect: did the model emit a structured tool_calls
+            # array, or raw text that LOOKS like one?
+            content, tool_calls = _sse_collect_content_and_tool_calls(buf)
+            extracted = (None if tool_calls
+                         else _extract_tool_call(content or ""))
+            if extracted:
+                # Repair: reshape raw text into structured tool_calls.
+                name = extracted.get("name") or ""
+                raw_args = (extracted.get("arguments")
+                              or extracted.get("args") or {})
+                if isinstance(raw_args, str):
                     try:
-                        self.wfile.write(chunk)
+                        raw_args = json.loads(raw_args)
+                    except Exception:
+                        raw_args = {}
+                fixed_args = _normalize_tool_args(name, raw_args)
+                tc = [{
+                    "id":   f"call_repair_{int(time.time() * 1000)}",
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps(fixed_args),
+                    },
+                }]
+                streaming = bool(parsed and parsed.get("stream", True))
+                synth = _build_synth_tool_response(
+                    target.get("model", "cloud"), streaming,
+                    tool_calls=tc,
+                )
+                self._last_intercept = "cloud_repair_text_tool_call"
+                self.send_response(synth.status)
+                for k, v in synth.headers.items():
+                    self.send_header(k, v)
+                self.end_headers()
+                for c in (synth.body_chunks or []):
+                    try:
+                        self.wfile.write(c)
                         self.wfile.flush()
-                        self._last_bytes += len(chunk)
+                        self._last_bytes += len(c)
                     except (BrokenPipeError, ConnectionResetError):
                         return True
-                self._last_error = (f"failover: local stalled "
-                                     f"({reason}); served via cloud "
-                                     f"({target['model']})")
-                # Phase 18.4-iter13: notify the user via the file-
-                # action bridge that a cloud failover just happened.
-                # Without this, opencode's "model: llama3.2 / via
-                # ollama · local" sidebar gives no clue the answer
-                # actually came from the cloud — the failover is
-                # transparent but the visibility cost is real.
                 _emit_failover_toast(target['model'])
                 return True
+            # No repair needed — emit the buffered cloud response.
+            self.send_response(resp_status)
+            for k, v in resp_headers:
+                if k.lower() in ("transfer-encoding", "connection",
+                                   "content-length"):
+                    continue
+                self.send_header(k, v)
+            self.end_headers()
+            try:
+                self.wfile.write(buf)
+                self.wfile.flush()
+                self._last_bytes += len(buf)
+            except (BrokenPipeError, ConnectionResetError):
+                return True
+            self._last_error = (f"failover: local stalled "
+                                 f"({reason}); served via cloud "
+                                 f"({target['model']})")
+            # Phase 18.4-iter13: notify the user via the file-action
+            # bridge that a cloud failover just happened. Without this,
+            # opencode's "model: llama3.2 / via ollama · local" sidebar
+            # gives no clue the answer actually came from the cloud —
+            # the failover is transparent but the visibility cost is
+            # real.
+            _emit_failover_toast(target['model'])
+            return True
         except urllib.error.HTTPError as e:
             # Cloud responded with HTTP error — surface it. We've
             # not written anything yet; let the caller fall to 502.
