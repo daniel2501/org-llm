@@ -93,12 +93,14 @@
                      org-llm-org-dir-resolved))
 
 (defun org-llm--opencode-write-action (alist)
-  "Write ALIST as JSON into the plugin's action file with a fresh `ts'."
+  "Write ALIST as JSON into the plugin's action file with a fresh `ts'.
+Includes schema-version `v: 1' so future plugin upgrades can branch
+by version. Best-effort — silent on filesystem errors."
   (require 'json)
   (let* ((path (org-llm--opencode-action-file))
          (dir  (file-name-directory path))
          (ts   (truncate (* 1000 (float-time))))
-         (data (cons (cons 'ts ts) alist)))
+         (data (append `((v . 1) (ts . ,ts)) alist)))
     (condition-case _err
         (progn
           (unless (file-directory-p dir) (make-directory dir t))
@@ -148,6 +150,67 @@
 ;;;###autoload
 (defun org-llm-sys-insights     () "Open /insights dialog." (interactive)
        (org-llm--opencode-write-action '((action . "slash") (slash . "/insights"))))
+
+;;; ── Action-bridge: prompt + status + notification ──────────────────────────
+;; Tier-1 actions beyond /sys* dispatch. All use the same JSON
+;; bridge — the plugin's 250 ms tick reads sidebar-action.json,
+;; dispatches based on `action` field.
+
+;;;###autoload
+(defun org-llm-sys-refresh-status ()
+  "Force the running opencode to re-read sidebar-status.json now.
+Useful after writing the JSON externally (e.g. from a daemon
+that just updated vault counts) to skip the 15s tick."
+  (interactive)
+  (org-llm--opencode-write-action '((action . "refresh-status"))))
+
+;;;###autoload
+(defun org-llm-sys-toast (message &optional title variant)
+  "Surface MESSAGE as a toast in the running opencode TUI.
+Optional TITLE defaults to `org-llm'; VARIANT is one of `info'
+\(default), `success', `warning', `error'."
+  (interactive "sToast message: ")
+  (org-llm--opencode-write-action
+   `((action . "toast")
+     (title  . ,(or title "org-llm"))
+     (message . ,message)
+     (variant . ,(or variant "info")))))
+
+;;;###autoload
+(defun org-llm-sys-prompt-fill (text)
+  "Pre-fill the running opencode's prompt with TEXT (no submit).
+Workflow: highlight text in any Emacs buffer, invoke this — the
+opencode prompt populates, you tweak + submit manually."
+  (interactive
+   (list (if (use-region-p)
+             (buffer-substring-no-properties (region-beginning) (region-end))
+           (read-string "Prefill prompt: "))))
+  (org-llm--opencode-write-action `((action . "prompt-fill") (text . ,text))))
+
+;;;###autoload
+(defun org-llm-sys-prompt-submit (text)
+  "Fill AND submit TEXT to the running opencode.
+Skips the user-review step — the answer arrives in chat without
+a round-trip through the prompt. Workflow: org-babel `:llm'
+blocks, `send region as a question' macros."
+  (interactive
+   (list (if (use-region-p)
+             (buffer-substring-no-properties (region-beginning) (region-end))
+           (read-string "Ask org-llm: "))))
+  (org-llm--opencode-write-action `((action . "prompt-submit") (text . ,text))))
+
+;;;###autoload
+(defun org-llm-sys-send-region ()
+  "Send the active region (or current paragraph) to opencode as a question.
+Calls `org-llm-sys-prompt-submit' under the hood."
+  (interactive)
+  (let* ((bounds (if (use-region-p)
+                     (cons (region-beginning) (region-end))
+                   (let ((p (bounds-of-thing-at-point 'paragraph)))
+                     (or p (cons (line-beginning-position)
+                                  (line-end-position))))))
+         (text (buffer-substring-no-properties (car bounds) (cdr bounds))))
+    (org-llm-sys-prompt-submit text)))
 
 ;;;###autoload
 (defun org-llm-opencode-quit ()
@@ -817,7 +880,17 @@ current selection."
         :desc "/syscloud"                "c" #'org-llm-sys-cloud
         :desc "/sysmenu"                 "M" #'org-llm-sys-menu
         :desc "/insights"                "i" #'org-llm-sys-insights
-        :desc "Quit opencode (Ctrl-c x2)" "q" #'org-llm-opencode-quit)
+        :desc "Quit opencode (Ctrl-c x2)" "q" #'org-llm-opencode-quit
+
+        ;; Phase 18.4-iter9: action-bridge extensions. Same JSON
+        ;; channel as scroll/slash; `p`/`P` for prompt fill/submit,
+        ;; `R` for region-as-question (most common workflow), `=`
+        ;; for force-refresh, `~` for raw toast injection.
+        :desc "Prompt fill (no submit)"  "p" #'org-llm-sys-prompt-fill
+        :desc "Prompt submit (auto)"     "P" #'org-llm-sys-prompt-submit
+        :desc "Send region as question"  "R" #'org-llm-sys-send-region
+        :desc "Refresh sidebar status"   "=" #'org-llm-sys-refresh-status
+        :desc "Toast (notify)"           "~" #'org-llm-sys-toast)
 
        ;; ─── Captain's Log ──────────────────────────────────────────────
        (:prefix ("L" . "log")

@@ -271,24 +271,79 @@ export async function registerSidebar(api: any): Promise<void> {
       const f = Bun.file(actionPath);
       if (!(await f.exists())) return;
       const data = await f.json() as {
+        v?: number;
         ts?: number;
         action?: string;
         direction?: number;
         unit?: "step" | "viewport";
         slash?: string;
+        text?: string;
+        title?: string;
+        message?: string;
+        variant?: "info" | "success" | "warning" | "error";
       };
       const ts = Number(data?.ts) || 0;
       if (!ts || ts <= lastActionTs) return;
       lastActionTs = ts;
-      if (data.action === "scroll") {
-        const dir = Number(data.direction) || 0;
-        const unit = (data.unit === "viewport") ? "viewport" : "step";
-        if (dir !== 0) scrollSidebar(dir, unit);
-      } else if (data.action === "slash" && data.slash) {
-        // Generic /sys* dispatch path — Doom can drive any sys
-        // command through the same JSON channel.
-        const { dispatchSysCommand } = await import("./sys-commands");
-        dispatchSysCommand(api, data.slash);
+      // Schema version. v=1 is the current shape; future additions
+      // should bump v and the plugin can branch by version.
+      const v = Number(data?.v) || 1;
+      if (v !== 1) return;
+      switch (data.action) {
+        case "scroll": {
+          const dir = Number(data.direction) || 0;
+          const unit = (data.unit === "viewport") ? "viewport" : "step";
+          if (dir !== 0) scrollSidebar(dir, unit);
+          break;
+        }
+        case "slash": {
+          if (!data.slash) break;
+          const { dispatchSysCommand } = await import("./sys-commands");
+          dispatchSysCommand(api, data.slash);
+          break;
+        }
+        case "refresh-status": {
+          // Force an immediate re-read of sidebar-status.json. Used
+          // by the auto-embedder daemon and scheduled jobs that
+          // freshen the status JSON between launches.
+          await refreshStatus(directory);
+          break;
+        }
+        case "toast": {
+          // External notification surface — cron jobs / daemons /
+          // Emacs scripts can surface messages into a running TUI.
+          showToast(api, {
+            variant: data.variant ?? "info",
+            title:   data.title ?? "org-llm",
+            message: data.message ?? "",
+          });
+          break;
+        }
+        case "prompt-fill": {
+          // Pre-fill the prompt without submitting. Workflow: user
+          // highlights text in Emacs, runs `SPC l y p` → opencode's
+          // prompt is populated, user reviews + submits manually.
+          if (!data.text) break;
+          const ref = getPromptRef();
+          try { ref?.set?.({ input: data.text, mode: "normal", parts: [] }); } catch { /* */ }
+          break;
+        }
+        case "prompt-submit": {
+          // Pre-fill AND submit. Workflow: org-babel / "send region
+          // as a question" — the answer arrives in chat without
+          // user round-trip through the prompt.
+          if (!data.text) break;
+          const ref = getPromptRef();
+          try {
+            ref?.set?.({ input: data.text, mode: "normal", parts: [] });
+            ref?.submit?.();
+          } catch { /* */ }
+          break;
+        }
+        default:
+          // Unknown actions are best-effort no-ops; future versions
+          // may add types this plugin doesn't recognise.
+          break;
       }
     } catch {
       // Best-effort. A malformed action file shouldn't stall the

@@ -505,6 +505,60 @@ already runs these without ever calling the LLM. Closes the loop:
 writing a skill in org gives you a tab-completable opencode slash
 for free, with zero ollama wake-up.
 
+** Action bridge (file-based external dispatch)              :shipped:
+:PROPERTIES:
+:STATUS: shipped
+:END:
+
+Shipped 2026-05-02 (commit =fe92e18=, extended in =-iter9=). A
+generic JSON-file dispatch channel between any external client and
+the running opencode TUI. The plugin reads
+=<org_dir>/.opencode/sidebar-action.json= on a 250 ms tick and
+dispatches when =ts > last_seen=. Handlers reuse the same code
+paths the in-TUI surface uses, so the only difference between
+"user clicked something" and "Doom wrote a JSON file" is the
+trigger source.
+
+Why it exists: opencode's slash-command validator rejects vterm-
+injected =/sys*= commands at submit time even when the same names
+work when typed manually. After 8 iterations on validator
+workarounds, abandoned the slash-router path entirely. The file
+bridge sidesteps every key conflict, terminal protocol quirk,
+and registry rule.
+
+Schema (=v: 1=):
+
+| =action=          | Fields                            | What it does                          |
+|-------------------+-----------------------------------+---------------------------------------|
+| =scroll=          | =direction= (-1/+1), =unit=       | Sidebar scroll line / page            |
+| =slash=           | =slash= (e.g. =/sysdoctor=)       | Generic /sys* dispatch                |
+| =refresh-status=  | (none)                            | Force re-read of sidebar-status.json  |
+| =toast=           | =title=, =message=, =variant=     | Surface a toast in the TUI            |
+| =prompt-fill=     | =text=                            | Pre-fill prompt; user submits         |
+| =prompt-submit=   | =text=                            | Pre-fill AND submit                   |
+
+Doom bindings under =SPC l y= track the action types:
+
+- =j= / =k= / =J= / =K= — scroll line/page
+- =d= / =s= / =r= / =m= / =c= / =M= / =i= — /sys family
+- =p= / =P= — prompt fill / submit
+- =R= — send region as question
+- ===/=~= — refresh-status / toast (notify)
+- =q= — quit opencode (still vterm-send-string, only path that
+  must reach opencode AFTER the bridge can no longer dispatch)
+
+Future actions (additive; tracked in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 18 follow-ups):
+
+- =set-model= — hot model swap without relaunch
+- =set-palette= / =set-theme= — hot LCARS theme reload
+- =set-config= — flip a config knob (proxy_local_only,
+  insights_auto_open, etc.) and re-render
+- =mcp-call= — invoke an MCP tool without LLM round-trip
+- =auto-embedder-tick= — daemon writes after each cycle so
+  sidebar refreshes immediately
+- =scheduled-result= — remote agent (e.g. the 5/16 audit
+  routine) writes when its work lands
+
 ** System-prompt prefix cache                                :shipped:
 :PROPERTIES:
 :STATUS: shipped
