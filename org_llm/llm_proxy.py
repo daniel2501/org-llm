@@ -1660,16 +1660,19 @@ def _build_cloud_request(orig_body: bytes, parsed: Optional[dict],
 
 
 def _emit_failover_toast(model: str) -> None:
-    """Write a toast action via the file-action bridge so the user sees
-    that cloud failover just fired. Best-effort — never blocks the
-    response path. The plugin's 250 ms tick picks up the action and
-    showToast()s with the cloud model name + a short hint.
+    """Write a `cloud-failover` action via the file-action bridge so
+    the user sees that cloud failover just fired. Best-effort — never
+    blocks the response path. The plugin's 250 ms tick picks up the
+    action, both toasting AND updating the ACTIVE card's persistent
+    failover indicator (auto-fades after 10 minutes).
 
     Discovered need 2026-05-02 during T6 hands-on: opencode's session
     UI shows the CONFIGURED local model regardless of what actually
     responded, so a transparent failover looks identical to "local
-    answered slowly" — the user has to grep the audit log to know
-    cloud was used. The toast closes that visibility gap.
+    answered slowly" — the user had to grep the audit log to know
+    cloud was used. iter13 added a one-off toast (~6s); iter15
+    extends it with a persistent ACTIVE-card row so the indicator
+    stays visible for the next several minutes.
     """
     try:
         org_dir = Path(os.environ.get("ORG_LLM_ORG_DIR")
@@ -1677,12 +1680,10 @@ def _emit_failover_toast(model: str) -> None:
         action_path = org_dir / ".opencode" / "sidebar-action.json"
         action_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "v":       1,
-            "ts":      int(time.time() * 1000),
-            "action":  "toast",
-            "title":   "☁ cloud failover",
-            "message": f"local stalled — served via {model}",
-            "variant": "info",
+            "v":      1,
+            "ts":     int(time.time() * 1000),
+            "action": "cloud-failover",
+            "model":  model,
         }
         action_path.write_text(json.dumps(payload))
     except Exception:
@@ -2013,18 +2014,18 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
         """Open a request to a cloud endpoint with the system CA bundle.
         Mirrors cloud.py's `_urlopen` helper — Guix-shipped Pythons
         don't include certifi, so bare `urllib.request.urlopen` against
-        an HTTPS endpoint hits CERTIFICATE_VERIFY_FAILED. Reusing the
-        same probing logic keeps cloud failover working on the same
-        boxes that already use `org-llm cloud --test` successfully."""
-        try:
-            from .cloud import _urlopen as _cloud_urlopen_helper
-            return _cloud_urlopen_helper(req, timeout=timeout)
-        except Exception:
-            # If the import fails (cloud.py not loadable for some
-            # reason), fall back to default urlopen — at worst we get
-            # the same SSL error and surface it via _last_error so
-            # the user knows what's wrong.
-            return urllib.request.urlopen(req, timeout=timeout)
+        an HTTPS endpoint hits CERTIFICATE_VERIFY_FAILED.
+
+        Phase 18.4-iter17: the previous fallback wrapper swallowed
+        cert errors raised by `cloud._urlopen` itself, then re-tried
+        with bare `urlopen`, which double-failed with the SAME SSL
+        error — masking the real issue (e.g. cloud.py module not
+        seeing the CA bundle in this proxy thread's process state).
+        Now: import + call directly. If the helper raises, the
+        original exception propagates to `_failover_to_cloud`'s
+        catch site so the audit log records the actual cause."""
+        from .cloud import _urlopen as _cloud_urlopen_helper
+        return _cloud_urlopen_helper(req, timeout=timeout)
 
     def _failover_to_cloud(self, body: bytes, target: dict,
                               *, reason: str) -> bool:
