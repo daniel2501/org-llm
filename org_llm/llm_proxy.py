@@ -1975,6 +1975,23 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
             self._last_error = f"upstream: {e}"
             self.send_error(502, f"upstream proxy error: {e}")
 
+    def _cloud_urlopen(self, req: "urllib.request.Request", timeout: float):
+        """Open a request to a cloud endpoint with the system CA bundle.
+        Mirrors cloud.py's `_urlopen` helper — Guix-shipped Pythons
+        don't include certifi, so bare `urllib.request.urlopen` against
+        an HTTPS endpoint hits CERTIFICATE_VERIFY_FAILED. Reusing the
+        same probing logic keeps cloud failover working on the same
+        boxes that already use `org-llm cloud --test` successfully."""
+        try:
+            from .cloud import _urlopen as _cloud_urlopen_helper
+            return _cloud_urlopen_helper(req, timeout=timeout)
+        except Exception:
+            # If the import fails (cloud.py not loadable for some
+            # reason), fall back to default urlopen — at worst we get
+            # the same SSL error and surface it via _last_error so
+            # the user knows what's wrong.
+            return urllib.request.urlopen(req, timeout=timeout)
+
     def _failover_to_cloud(self, body: bytes, target: dict,
                               *, reason: str) -> bool:
         """Re-issue the chat request against the configured cloud
@@ -1995,7 +2012,7 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
                 parsed = None
         cloud_req = _build_cloud_request(body, parsed, target, self.path)
         try:
-            with urllib.request.urlopen(cloud_req, timeout=300) as resp:
+            with self._cloud_urlopen(cloud_req, timeout=300) as resp:
                 self._last_status    = resp.status
                 self._last_intercept = "cloud_failover"
                 self.send_response(resp.status)
