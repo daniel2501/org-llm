@@ -274,6 +274,19 @@ export function registerSlowLLMWatch(
 
   const offMsg = api.event?.on?.("message.updated", (e: any) => {
     const msg = e?.properties?.info;
+    // Phase 18.4-iter20: assistant message updates are evidence of
+    // streaming progress — disarm the stopwatch. Earlier we early-
+    // returned on non-user messages, missing the case where the
+    // cloud failover (or any slow-but-streaming model) had been
+    // emitting text-part updates the whole time but the watcher
+    // never noticed because the only "part.updated" events that
+    // arrived were lifecycle markers (step-start, step-finish,
+    // patch) without a "text" type. The MESSAGE-level update with
+    // role=assistant is a more reliable activity signal.
+    if (msg?.role && msg.role !== "user") {
+      _aiResponding = true;
+      return;
+    }
     if (msg?.role !== "user") return;
     const text = extractUserText(msg);
     // ALWAYS update the cached text so the poll's safety check
@@ -308,8 +321,9 @@ export function registerSlowLLMWatch(
     "text",
     "reasoning", "thinking",      // chain-of-thought (R1, qwq, etc.)
     "tool", "tool-call", "tool-input", "tool-output", "tool-result",
-    "step-start", "step-end",     // model lifecycle markers
+    "step-start", "step-end", "step-finish",  // model lifecycle markers
     "file", "image",              // multimodal output
+    "patch",                       // file writes (Phase 18.4-iter20)
   ]);
   const offPart = api.event?.on?.("message.part.updated", (e: any) => {
     const part = e?.properties?.part;
