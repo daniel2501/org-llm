@@ -20,7 +20,7 @@
 
 import {
   refreshStatus, getStatus, resolveConfig, PanelBody, fmtAge,
-  scrollSidebar, showToast,
+  scrollSidebar, showToast, setLastFailover,
 } from "./panel";
 import { getPromptRef } from "./auto-session";
 import { dispatchSysCommand } from "./sys-commands";
@@ -317,6 +317,25 @@ export async function registerSidebar(api: any): Promise<void> {
             title:   data.title ?? "org-llm",
             message: data.message ?? "",
           });
+          break;
+        }
+        case "cloud-failover": {
+          // Phase 18.4-iter15: dual-purpose action emitted by the
+          // proxy when failover succeeds. (1) Toast for immediate
+          // notification. (2) Persistent indicator on the ACTIVE
+          // card via setLastFailover, surfaced by SectionActive
+          // for the next 10 minutes. Closes the visibility gap
+          // where the static "model llama3.2 / via ollama · local"
+          // row gave no clue cloud was actually answering.
+          const model = (data as any).model;
+          if (typeof model === "string" && model) {
+            setLastFailover(model, ts);
+            showToast(api, {
+              variant: "info",
+              title:   "☁ cloud failover",
+              message: `local stalled — served via ${model}`,
+            });
+          }
           break;
         }
         case "prompt-fill": {

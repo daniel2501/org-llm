@@ -309,6 +309,38 @@ export function formatScrollKeyHint(
   return [lineLR, linePg].filter(Boolean).join(" ");
 }
 
+// ── Cloud-failover state (Phase 18.4-iter15) ──────────────────────
+//
+// When the proxy fails over a chat completion to cloud (because
+// local upstream stalled / refused), it emits a `cloud-failover`
+// action via the file bridge. The plugin's tick handler updates
+// `_lastFailover` here, and SectionActive renders an extra row
+// showing "via failover (model) · Ns ago" so the user can SEE
+// which model actually responded — addresses the visibility gap
+// where the static `model llama3.2 / via ollama · local` row stayed
+// unchanged even when cloud was actually answering.
+//
+// State persists in-memory until the plugin reloads (no disk
+// write — the indicator is meant to be ephemeral, "the model that
+// answered most recently"). Auto-fades after FAILOVER_FRESH_MS.
+
+const FAILOVER_FRESH_MS = 10 * 60 * 1_000;   // 10 minutes
+
+let _lastFailover: { model: string; ts: number } | null = null;
+
+export function getLastFailover(): { model: string; ts: number } | null {
+  if (!_lastFailover) return null;
+  if (Date.now() - _lastFailover.ts > FAILOVER_FRESH_MS) {
+    _lastFailover = null;
+    return null;
+  }
+  return _lastFailover;
+}
+
+export function setLastFailover(model: string, ts: number): void {
+  _lastFailover = { model, ts };
+}
+
 // Sidebar scrollbox ref, captured by PanelBody's scrollbox `ref`
 // callback. Exposed via setSidebarScrollRef / scrollSidebar so the
 // keybind handler in sidebar.tsx and the /sysup / /sysdown slash
@@ -570,6 +602,23 @@ function SectionActive(props: { s: SidebarStatus; t: any; color: any }) {
           </text>
         </box>
       )}
+      {(() => {
+        // Ephemeral failover indicator. Surfaces when the proxy
+        // recently failed over a request to cloud — addresses the
+        // "ACTIVE card says local but cloud actually answered" gap.
+        const f = getLastFailover();
+        if (!f) return null;
+        const since = Math.max(0, Math.floor((Date.now() - f.ts) / 1000));
+        const sinceStr = since < 60 ? `${since}s` : `${Math.floor(since / 60)}m`;
+        const fmodel = f.model.length > 18 ? "…" + f.model.slice(-17) : f.model;
+        return (
+          <box flexDirection="row">
+            <text fg={t.warning}>{"☁ "}</text>
+            <text fg={t.accent}>{fmodel}</text>
+            <text fg={t.textMuted}>{` ${sinceStr} ago`}</text>
+          </box>
+        );
+      })()}
     </SectionCard>
   );
 }
