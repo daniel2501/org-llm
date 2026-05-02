@@ -276,7 +276,7 @@ export const tui: TuiPlugin = async (api) => {
   // whatever model was current at launch time and lie about
   // which provider just answered.
   try {
-    const { setActiveModelOverride } = await import("./panel");
+    const { setActiveModelOverride, setActiveAgentOverride } = await import("./panel");
     // api.event is documented in tui.d.ts but `event` is missing from
     // TuiPluginApi's TS surface in 1.14.32 — cast to access it
     // (other modules use @ts-nocheck to sidestep this; the cast is
@@ -290,6 +290,14 @@ export const tui: TuiPlugin = async (api) => {
         if (typeof provider === "string" && typeof modelID === "string"
               && provider && modelID) {
           setActiveModelOverride(provider, modelID, Date.now());
+        }
+        // Capture the agent name too — opencode tags assistant
+        // messages with `agent` (and `mode`) so we can surface
+        // which preconfigured agent answered the most recent
+        // turn on the sidebar's ACTIVE card.
+        const agentName = msg?.agent || msg?.mode;
+        if (typeof agentName === "string" && agentName) {
+          setActiveAgentOverride(agentName, Date.now());
         }
       } catch {
         // never break the event handler

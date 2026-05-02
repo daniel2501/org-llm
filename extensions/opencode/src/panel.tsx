@@ -380,6 +380,28 @@ export function setActiveModelOverride(
   _activeModelOverride = { provider, model, ts };
 }
 
+
+// ── Active-agent live tracker (Phase 18.7) ────────────────────────
+//
+// Mirrors the model override but for the agent name. Updated on
+// every assistant message.updated where opencode reports
+// msg.agent (or msg.mode). Surfaces in the ACTIVE card so the
+// user can see at a glance which preconfigured agent answered
+// the most recent turn — useful when @-routing turns through
+// researcher / scribe / engineer / etc.
+let _activeAgentOverride: { agent: string; ts: number } | null = null;
+
+export function getActiveAgentOverride(): {
+  agent: string; ts: number;
+} | null {
+  return _activeAgentOverride;
+}
+
+export function setActiveAgentOverride(agent: string, ts: number): void {
+  if (!agent) return;
+  _activeAgentOverride = { agent, ts };
+}
+
 // Sidebar scrollbox ref, captured by PanelBody's scrollbox `ref`
 // callback. Exposed via setSidebarScrollRef / scrollSidebar so the
 // keybind handler in sidebar.tsx and the /sysup / /sysdown slash
@@ -619,8 +641,19 @@ function SectionActive(props: { s: SidebarStatus; t: any; color: any }) {
   const routeStr = ovr ? (ovr.provider === "ollama" ? "local" : "cloud")
                          : (m.route || "—");
   const modelDisplay = modelStr.length > 18 ? "…" + modelStr.slice(-17) : modelStr;
+  // Prominent agent indicator — Phase 18.7. The most-recent
+  // assistant turn's agent (researcher / scribe / engineer / etc.)
+  // shows above the model row so the user can see at a glance
+  // which preconfigured persona is answering. Falls back to the
+  // session default ("org-llm") when nothing has answered yet.
+  const agentOvr = getActiveAgentOverride();
+  const agentDisplay = agentOvr?.agent || "org-llm";
   return (
     <SectionCard color={color} title="ACTIVE">
+      <box flexDirection="row">
+        <text fg={t.primary}>agent   </text>
+        <text fg={t.warning}>{agentDisplay}</text>
+      </box>
       <box flexDirection="row">
         <text fg={t.textMuted}>palette </text>
         <text fg={t.secondary}>{a.palette ?? "classic"}</text>

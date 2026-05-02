@@ -893,6 +893,190 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     )
 
 
+# ── Tool-call dialect translation (Phase 18.7) ────────────────────
+
+
+# Models that emit tool calls in their NATIVE chat-template
+# dialect rather than OpenAI's `tool_calls[]` JSON shape.
+# OpenRouter and similar relays pass these through verbatim, so
+# opencode receives literal markers as message content and
+# chokes. The translator buffers the upstream response, scans
+# for dialect markers, and rewrites into OpenAI shape before
+# returning to opencode.
+#
+# Dialects supported in this first cut:
+#   • Kimi K2 — `<|tool_call_begin|>functions.NAME:ID<|tool_call_argument_begin|>{json}<|tool_call_end|>`
+#
+# Add more dialects by extending `_DIALECT_TRANSLATORS` with a
+# stem-prefix → translator function pair.
+#
+# Streaming caveat: this first cut FORCES `stream: false` on the
+# upstream call so we get a complete response in one piece. opencode
+# still receives a streaming-shaped response (built via
+# `_build_synth_tool_response`). Real streaming translation needs
+# partial-marker buffering — out of scope for the first cut, but
+# the structure here makes it additive.
+
+
+def _translate_kimi_dialect(content: str) -> tuple[str, list[dict]]:
+    """Extract Kimi K2 tool calls from `content` and return
+    (residual_text, tool_calls_list). Each tool call is shaped
+    like OpenAI's `message.tool_calls[]` entry:
+      {id, type: "function", function: {name, arguments}}
+    where arguments is a JSON-encoded STRING (per the OpenAI
+    spec, not an object — opencode parses it back when dispatching).
+
+    If no markers are found, returns (content, []) — content
+    flows through untouched."""
+    import re as _re_mod
+    # Kimi K2's marker shape (as documented by Moonshot AI):
+    #   <|tool_call_begin|>functions.NAME:ID<|tool_call_argument_begin|>{json}<|tool_call_end|>
+    pattern = _re_mod.compile(
+        r'<\|tool_call_begin\|>'
+        r'functions\.([A-Za-z_][\w\-]*)'
+        r'(?::([\w\-]+))?'
+        r'<\|tool_call_argument_begin\|>'
+        r'(\{.*?\})'
+        r'<\|tool_call_end\|>',
+        _re_mod.DOTALL,
+    )
+    tool_calls: list[dict] = []
+    for match in pattern.finditer(content):
+        name, call_id, args_json = match.groups()
+        try:
+            # Re-canonicalise the JSON so trailing whitespace /
+            # encoding inconsistencies don't trip opencode.
+            args_obj = json.loads(args_json)
+            args_str = json.dumps(args_obj)
+        except Exception:
+            args_str = args_json
+        tool_calls.append({
+            "id":   call_id or f"call_kimi_{int(time.time() * 1000)}_{len(tool_calls)}",
+            "type": "function",
+            "function": {"name": name, "arguments": args_str},
+        })
+    if not tool_calls:
+        return content, []
+    # Residual = content with all tool-call blocks stripped + the
+    # surrounding section markers removed. Kimi sometimes wraps
+    # the whole bundle in section markers too; strip those.
+    residual = pattern.sub("", content)
+    residual = residual.replace("<|tool_calls_section_begin|>", "")
+    residual = residual.replace("<|tool_calls_section_end|>", "")
+    return residual.strip(), tool_calls
+
+
+# Map: model stem prefix (lowercase, no provider) → translator.
+# Translator signature: (assistant_content_str) -> (residual_text, tool_calls_list)
+_DIALECT_TRANSLATORS: dict[str, callable] = {
+    "kimi-k2":           _translate_kimi_dialect,
+    "moonshotai/kimi-k2": _translate_kimi_dialect,
+    # Future dialects land here:
+    #   "qwen3":             _translate_qwen3_think_tags,
+    #   "deepseek-r1":       _translate_deepseek_thinking,
+}
+
+
+def _resolve_dialect_translator(model_id: str):
+    """Match `model_id` against known dialect stems. Returns the
+    translator function or None. Lower-cased substring check so
+    cloud slugs like `moonshotai/kimi-k2:free` still match."""
+    if not model_id:
+        return None
+    lowered = model_id.lower()
+    for stem, fn in _DIALECT_TRANSLATORS.items():
+        if stem in lowered:
+            return fn
+    return None
+
+
+def intercept_tool_dialect_translate(req: ProxyRequest) -> Optional[ProxyResponse]:
+    """For models that emit tool calls in non-OpenAI dialect,
+    buffer the upstream response, extract tool calls, repackage
+    as OpenAI shape. Short-circuits with the rewritten response.
+
+    Mirrors `intercept_synth_tool_call`'s structure: forces
+    non-streaming on the upstream call, parses, returns a
+    streaming-shaped ProxyResponse. Falls through to forward
+    when the model has no known dialect."""
+    if not req.path.endswith("/chat/completions"):
+        return None
+    parsed = req.parsed_json
+    if not parsed:
+        return None
+    model_id = parsed.get("model") or ""
+    translator = _resolve_dialect_translator(model_id)
+    if translator is None:
+        return None
+    if not req.upstream:
+        return None
+
+    # Force non-streaming so we get one complete response to
+    # parse. Same pattern as the synth-tool path.
+    new_body = dict(parsed)
+    new_body["stream"] = False
+    body_bytes = json.dumps(new_body).encode()
+    streaming = bool(parsed.get("stream"))
+
+    # Forward to upstream directly.
+    upstream = req.upstream
+    path = req.path
+    if (path in ("/chat/completions", "/embeddings", "/models")
+            and "/v1" not in upstream and "/api" not in upstream):
+        path = "/v1" + path
+    url = upstream + path
+    forward_headers = {
+        k: v for k, v in req.headers.items()
+        if k.lower() not in ("host", "content-length", "connection")
+    }
+    forward_headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(
+        url, data=body_bytes, method="POST", headers=forward_headers,
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as resp:
+            raw = resp.read()
+    except Exception as e:
+        return _empty_assistant_response(
+            model_id, streaming,
+            content=f"(dialect-translate upstream error: {e})",
+        )
+
+    try:
+        upstream_obj = json.loads(raw.decode("utf-8", errors="replace"))
+    except Exception:
+        return _empty_assistant_response(
+            model_id, streaming,
+            content="(dialect-translate: upstream returned non-JSON)",
+        )
+    choices = upstream_obj.get("choices") or []
+    if not choices or not isinstance(choices[0], dict):
+        return _empty_assistant_response(
+            model_id, streaming,
+            content="(dialect-translate: upstream had no choices)",
+        )
+    msg0 = choices[0].get("message") or {}
+    content_str = msg0.get("content") if isinstance(msg0.get("content"), str) else ""
+
+    # Translate.
+    residual, tool_calls = translator(content_str or "")
+    if not tool_calls:
+        # No dialect markers → forward upstream's response shape
+        # unchanged. The fact that we forced non-streaming means
+        # we still need to re-shape into a streaming-looking
+        # response for opencode (which expects what it asked for).
+        return _build_synth_tool_response(
+            model_id, streaming, content=content_str or "",
+        )
+
+    # Reshape into OpenAI tool_calls.
+    return _build_synth_tool_response(
+        model_id, streaming,
+        tool_calls=tool_calls,
+        content=residual,   # any non-tool-call prose stays in content
+    )
+
+
 # ── Synthetic tool calls for tool-incapable models ──────────────────
 
 
@@ -2363,6 +2547,7 @@ DEFAULT_INTERCEPTORS: list[Interceptor] = [
     # the /sys* short-circuits — for /sys* we don't want to engage
     # the upstream at all, even with rewritten prompts.
     intercept_synth_tool_call,    # P18.6 gemma-class tool-call synth
+    intercept_tool_dialect_translate,  # P18.7 Kimi/qwen3 dialect → OpenAI
     intercept_md_skills,          # T2.1  .md `exec:` → subprocess
     intercept_static_slashes,     # T1.3  /menu /help /config
     intercept_probe_cache,        # T2.0  /api/tags etc cache
