@@ -1121,22 +1121,21 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     # restating this in 13 individual agent prompts.
     if agent_prompt:
         agent_prompt = (
-            "STANDING PRINCIPLE — vault-first context:\n"
-            "  Before answering or acting, sample relevant vault "
-            "  files via `org-llm_search_notes`, "
+            "STANDING PRINCIPLE — vault-first context (use judgment):\n"
+            "  When a question hinges on the user's life / projects / "
+            "  voice / conventions, ground your answer by sampling "
+            "  vault files — `org-llm_search_notes`, "
             "  `org-llm_ask_notes`, `org-llm_list_dailies`, "
-            "  `org-llm_read_file`, or `org-llm_list_recent_nodes`. "
-            "  The user's life, projects, voice, and conventions live "
-            "  in those notes.\n"
-            "  FEEL FREE to read across the vault — multiple files, "
-            "  cross-references, sibling captures — whatever grounds "
-            "  your response. The vault is the source of truth; "
-            "  pulling 3-5 sample files to inform a single answer is "
-            "  expected, not excessive. Never answer from training "
-            "  data alone when vault data could ground the response. "
-            "  For shape-sensitive actions (captures, edits), sample "
-            "  the target surface AND a couple of sibling files first "
-            "  and mirror their style.\n\n"
+            "  `org-llm_read_file`. Feel free to read multiple files "
+            "  when the answer benefits.\n"
+            "  BUT keep the hot path snappy: when the user has just "
+            "  given an explicit confirmation ('save it', 'yes', 'do "
+            "  it', 'ship it', 'go ahead', 'y') for a simple action "
+            "  you already drafted, JUST DO IT. Don't re-sample the "
+            "  vault to second-guess what the user already approved. "
+            "  For shape-sensitive NEW captures (first time writing "
+            "  to a surface), sampling once for format is worth it; "
+            "  for follow-on captures of the same shape, skip.\n\n"
             + agent_prompt
         )
     # Phase 20: append FORCE-SOLO marker so the agent's
