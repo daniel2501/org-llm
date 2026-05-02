@@ -130,6 +130,44 @@ from regular forwards in =scripts/audit_phase17.py='s output.
   default chain. No threading conditionals through opencode's request
   path.
 
+** Prefix interceptor family (Phase 18.7)
+
+A small set of typed prefixes lets the user shape a chat request
+without going through the LLM's negotiation step. Each prefix is
+detected at the proxy mutation layer; the prefix itself is stripped
+from what the LLM sees, so the model only gets the residual query.
+
+| Prefix             | Effect                                                                                     |
+|--------------------+--------------------------------------------------------------------------------------------|
+| =:tool <name>=     | Pin =tool_choice= to that function — model commits, no "should I call a tool?" branch     |
+| =??:explain ...=   | Force =tool_choice: "none"= — model can't drift into a tool call, must answer in prose    |
+| =?:cite <claim>=   | Force =search_notes= + system overlay nudging raw verbatim matches (audit-grade citation) |
+| =>raw <model> ...= | Strip system + tools + history; route to the named model with just the bare prompt        |
+| =~<n> [suffix]=    | Replay the Nth-most-recent prior user prompt; optional suffix appends                     |
+| =!shell <cmd>=     | Run =cmd= locally and return stdout as the assistant turn (gated by =proxy_allow_shell_prefix=) |
+| =@<agent> ...=     | Per-turn agent override — stub pending the preconfigured-agents roadmap entry             |
+
+Use cases:
+- =:tool code_search rotation matrix= — skip the model's wrong-
+  tool-pick risk when you know the territory.
+- =??:explain how cloud_first works= — when the model keeps
+  searching the vault but you wanted prose.
+- =?:cite the proxy timeout default= — get the literal note
+  excerpts, no paraphrase.
+- =>raw deepseek-r1 prove pi irrational= — benchmark a model
+  with no MCP tools, no system prompt, no history.
+- =~3 with --no-think= — re-run the prompt 3 turns back with a
+  small variation appended; useful for A/Bing models or knobs.
+- =!shell ls -la ~/org/.opencode= — quick file inspection from
+  chat without leaving opencode (after enabling the gate).
+- =@scribe write today's daily entry= — once preconfigured
+  agents land, scope a single turn to a specific persona.
+
+All seven are mutation/short-circuit interceptors — adding a new
+one is a single function plus an entry in =DEFAULT_INTERCEPTORS=.
+The cloud-failover, cloud-first, and compressed-tools-retry paths
+inherit the prefix-mutated request for free.
+
 ** Synthetic tool calls for tool-incapable models (Phase 18.6)
 
 Some local models — gemma, gemma2, gemma3, phi3, phi3.5, llava,

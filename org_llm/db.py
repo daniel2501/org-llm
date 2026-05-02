@@ -724,6 +724,13 @@ MODEL_DEFAULTS = {
     # Output directory. Empty = auto: docs/img/ when running from
     # an org-llm checkout, ~/org/.opencode/ otherwise.
     "screenshot_dir":                 "",
+    # Gate for `!shell <cmd>` prefix in chat. When false (default)
+    # the prefix is intercepted but returns an error explaining
+    # how to enable. Running shell commands from a chat surface
+    # is a real footgun — opt in only when you trust the surface
+    # (and your agent persona's tool-call discipline). Pairs with
+    # the proxy_local_only and grant_auto_deny gates.
+    "proxy_allow_shell_prefix":       "false",
 }
 
 

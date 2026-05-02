@@ -599,6 +599,300 @@ def intercept_force_tool_call(req: ProxyRequest) -> Optional[ProxyResponse]:
     return None  # fall through to forward
 
 
+# ── Prefix interceptor family ──────────────────────────────────────
+#
+# Each typed-prefix interceptor follows the same shape:
+#   1. Match a leading prefix on the latest user message.
+#   2. Either short-circuit (return ProxyResponse — error / no-LLM
+#      path / pure-local execution) or mutate the request (return
+#      None — request still flows through forward + cloud-failover).
+#   3. Strip the prefix from what the LLM sees, when applicable.
+#
+# Compose freely — adding a prefix is a single function plus an
+# entry in DEFAULT_INTERCEPTORS. Strip-and-mutate prefixes go in
+# the mutation section so cloud-failover / cloud-first / compressed-
+# tools-retry inherit the rewrite for free. Short-circuits go in
+# the early section.
+
+
+def _strip_prefix_from_last_user(parsed: dict, regex) -> None:
+    """Helper: strip a leading regex match from the latest user
+    message's content, supporting both string and list-of-parts
+    shapes. Mutates `parsed` in place. Used by every prefix
+    interceptor that wants the LLM to see only the residual query."""
+    msgs = parsed.get("messages") or []
+    for i in reversed(range(len(msgs))):
+        msg = msgs[i]
+        if not isinstance(msg, dict) or msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            msg["content"] = regex.sub("", content, count=1)
+        elif isinstance(content, list):
+            for part in content:
+                if (isinstance(part, dict)
+                        and part.get("type") == "text"
+                        and isinstance(part.get("text"), str)
+                        and regex.match(part["text"])):
+                    part["text"] = regex.sub("", part["text"], count=1)
+                    break
+        break
+
+
+def _reencode_body(req: ProxyRequest) -> None:
+    """Re-serialise req.parsed_json to req.body and drop the stale
+    Content-Length header so urllib re-computes it on forward."""
+    req.body = json.dumps(req.parsed_json).encode()
+    req.headers = {k: v for k, v in req.headers.items()
+                    if k.lower() != "content-length"}
+
+
+def intercept_explain_prose_only(req: ProxyRequest) -> Optional[ProxyResponse]:
+    """`??:explain <thing>` → force `tool_choice: "none"` so the
+    LLM can't drift into a tool call. Useful when you want a
+    chat answer and the model keeps trying to search the vault.
+    Mutation interceptor — falls through to forward."""
+    if not req.path.endswith("/chat/completions"):
+        return None
+    parsed = req.parsed_json
+    if not parsed:
+        return None
+    import re as _re_mod
+    prefix_re = _re_mod.compile(r'^\s*\?\?:explain\s+', _re_mod.DOTALL)
+    text = _last_user_text(parsed)
+    if not prefix_re.match(text):
+        return None
+    parsed["tool_choice"] = "none"
+    _strip_prefix_from_last_user(parsed, prefix_re)
+    _reencode_body(req)
+    return None
+
+
+def intercept_raw_passthrough(req: ProxyRequest) -> Optional[ProxyResponse]:
+    """`>raw <model> <prompt>` → strip system + tools + history,
+    swap model. Effectively bypasses the entire proxy mutation
+    chain by reducing the request to a single user turn against
+    a chosen model. Useful for benchmarking, debugging the proxy,
+    or A/B-comparing models on the same prompt without context.
+    Mutation interceptor — falls through to forward (which then
+    routes to cloud or local depending on the resolved model)."""
+    if not req.path.endswith("/chat/completions"):
+        return None
+    parsed = req.parsed_json
+    if not parsed:
+        return None
+    import re as _re_mod
+    m = _re_mod.match(
+        r'^\s*>raw\s+(\S+)\s+(.+)',
+        _last_user_text(parsed),
+        _re_mod.DOTALL,
+    )
+    if not m:
+        return None
+    new_model = m.group(1)
+    raw_prompt = m.group(2).strip()
+    parsed["messages"] = [{"role": "user", "content": raw_prompt}]
+    parsed["model"] = new_model
+    parsed.pop("tools", None)
+    parsed.pop("tool_choice", None)
+    parsed.pop("system", None)
+    _reencode_body(req)
+    return None
+
+
+def intercept_replay_history(req: ProxyRequest) -> Optional[ProxyResponse]:
+    """`~<n>` → replay the Nth-most-recent prior user prompt.
+    `~1` re-runs the immediately-previous prompt; `~3` re-runs
+    three turns back. Useful for running the same question
+    against a freshly-swapped model, or for regression checks
+    after a proxy/config change.
+
+    Optional trailing text is appended to the replayed prompt
+    (e.g. `~2 with --no-think` re-runs prompt 2 with that
+    suffix), so simple variations don't require retyping the
+    whole question."""
+    if not req.path.endswith("/chat/completions"):
+        return None
+    parsed = req.parsed_json
+    if not parsed:
+        return None
+    import re as _re_mod
+    text = _last_user_text(parsed).strip()
+    m = _re_mod.match(r'^~(\d+)\s*(.*)$', text, _re_mod.DOTALL)
+    if not m:
+        return None
+    n = int(m.group(1))
+    suffix = (m.group(2) or "").strip()
+    msgs = parsed.get("messages") or []
+    # The CURRENT message is the last user turn; we want the Nth
+    # user turn BEFORE it.
+    user_indices = [
+        i for i, mg in enumerate(msgs[:-1])
+        if isinstance(mg, dict) and mg.get("role") == "user"
+    ]
+    if n < 1 or n > len(user_indices):
+        return _empty_assistant_response(
+            parsed.get("model") or "unknown",
+            bool(parsed.get("stream")),
+            content=(f"✗ ~{n}: only {len(user_indices)} prior user "
+                      f"message(s) in this session"),
+        )
+    target_idx = user_indices[-n]   # n=1 → most recent prior
+    target = msgs[target_idx]
+    target_content = target.get("content")
+    # Materialise as a string we can append the suffix to.
+    if isinstance(target_content, list):
+        text_blob = "\n".join(
+            p.get("text", "") for p in target_content
+            if isinstance(p, dict) and p.get("type") == "text"
+        )
+    else:
+        text_blob = str(target_content or "")
+    if suffix:
+        text_blob = f"{text_blob}\n\n{suffix}"
+    msgs[-1]["content"] = text_blob
+    _reencode_body(req)
+    return None
+
+
+def intercept_cite(req: ProxyRequest) -> Optional[ProxyResponse]:
+    """`?:cite <claim>` → force `search_notes` call + system overlay
+    that nudges the model to surface raw matches without paraphrase.
+    Audit-grade citation path: the LLM gets one shot at composing
+    the search query from the claim; the tool result lands as-is
+    (or near-as-is, depending on the model)."""
+    if not req.path.endswith("/chat/completions"):
+        return None
+    parsed = req.parsed_json
+    if not parsed:
+        return None
+    import re as _re_mod
+    prefix_re = _re_mod.compile(r'^\s*\?:cite\s+', _re_mod.DOTALL)
+    text = _last_user_text(parsed)
+    if not prefix_re.match(text):
+        return None
+    tools = parsed.get("tools") or []
+    if not any(
+        isinstance(t, dict)
+        and isinstance(t.get("function"), dict)
+        and t["function"].get("name") == "search_notes"
+        for t in tools
+    ):
+        return _empty_assistant_response(
+            parsed.get("model") or "unknown",
+            bool(parsed.get("stream")),
+            content=("✗ ?:cite needs `search_notes` in the tools "
+                     "array; this session doesn't have MCP wired."),
+        )
+    parsed["tool_choice"] = {
+        "type": "function",
+        "function": {"name": "search_notes"},
+    }
+    _strip_prefix_from_last_user(parsed, prefix_re)
+    msgs = parsed.get("messages") or []
+    msgs.insert(0, {
+        "role": "system",
+        "content": (
+            "Citation mode. The user's question maps to a "
+            "search_notes call. After the tool returns, surface "
+            "matches VERBATIM with file paths — no paraphrase, no "
+            "summary, no editorial. Format: bullet list of "
+            "`<title> — <path>` lines plus a one-line excerpt. "
+            "If zero matches, say so plainly."
+        ),
+    })
+    parsed["messages"] = msgs
+    _reencode_body(req)
+    return None
+
+
+def intercept_shell(req: ProxyRequest) -> Optional[ProxyResponse]:
+    """`!shell <cmd>` → run `cmd` locally and return its output as
+    the assistant turn. Gated behind `proxy_allow_shell_prefix`
+    (default false) — running arbitrary shell from a chat surface
+    is a real footgun; opt in only when you trust the surface.
+
+    No LLM call, no chat-injection round-trip. Output framed in a
+    code block with the command echoed for context. 60s timeout.
+    Output capped at 4 KB to keep the response render-able."""
+    if not req.path.endswith("/chat/completions"):
+        return None
+    parsed = req.parsed_json
+    if not parsed:
+        return None
+    import re as _re_mod
+    text = _last_user_text(parsed)
+    m = _re_mod.match(r'^\s*!shell\s+(.+)', text, _re_mod.DOTALL)
+    if not m:
+        return None
+    streaming = bool(parsed.get("stream"))
+    model     = parsed.get("model") or "unknown"
+    if (_proxy_cfg_str("proxy_allow_shell_prefix", "false")
+            .strip().lower() != "true"):
+        return _empty_assistant_response(
+            model, streaming,
+            content=("✗ !shell prefix is gated. Enable with: "
+                     "`org-llm config proxy_allow_shell_prefix "
+                     "true`. Until then, run shell commands from "
+                     "your terminal directly."),
+        )
+    cmd = m.group(1).strip()
+    import subprocess as _sp_mod
+    try:
+        r = _sp_mod.run(
+            cmd, shell=True, capture_output=True,
+            text=True, timeout=60,
+        )
+    except _sp_mod.TimeoutExpired:
+        body = (f"```\n$ {cmd}\n(timed out after 60s)\n```")
+    except Exception as e:
+        body = f"```\n$ {cmd}\n(failed to spawn: {e})\n```"
+    else:
+        out_text = (r.stdout or "")[:4000]
+        err_text = (r.stderr or "")[:1000]
+        body_lines = [f"$ {cmd}", out_text]
+        if err_text:
+            body_lines.append("--- stderr ---")
+            body_lines.append(err_text)
+        if r.returncode != 0:
+            body_lines.append(f"(exit {r.returncode})")
+        body = "```\n" + "\n".join(body_lines).rstrip() + "\n```"
+    return _empty_assistant_response(model, streaming, content=body)
+
+
+def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
+    """`@<agent> <prompt>` — per-turn agent override. Stub for now;
+    actual agent registry is on the roadmap (Wishlist >
+    Preconfigured agents). Returns a friendly explanation rather
+    than silently ignoring the prefix so the user knows it'll
+    come later."""
+    if not req.path.endswith("/chat/completions"):
+        return None
+    parsed = req.parsed_json
+    if not parsed:
+        return None
+    import re as _re_mod
+    m = _re_mod.match(
+        r'^\s*@([A-Za-z][\w-]*)\s+(.+)',
+        _last_user_text(parsed),
+        _re_mod.DOTALL,
+    )
+    if not m:
+        return None
+    agent = m.group(1)
+    return _empty_assistant_response(
+        parsed.get("model") or "unknown",
+        bool(parsed.get("stream")),
+        content=(
+            f"✗ @{agent} — preconfigured agents aren't shipped yet "
+            f"(see Roadmap > Wishlist > Preconfigured agents).\n\n"
+            f"For now, switch the chat model with:\n"
+            f"  `org-llm config chat_model <model>` + relaunch\n"
+            f"or pin a tool with `:tool <name> <query>`."
+        ),
+    )
+
+
 # ── Synthetic tool calls for tool-incapable models ──────────────────
 
 
@@ -2062,6 +2356,8 @@ DEFAULT_INTERCEPTORS: list[Interceptor] = [
     intercept_no_llm_flag,        # T1.5  --no-llm hard-bypass
     intercept_sysexport_command,  # P18.5 /sysexport — write file + inline sidebar
     intercept_sysscreenshot_command,  # P18.6 /sysscreenshot — capture via configured backend
+    intercept_shell,              # P18.7 !shell <cmd> — local subprocess (gated)
+    intercept_agent_prefix,       # P18.7 @<agent> — stub pending preconfigured agents
     intercept_sys_commands,       # T1.0  /sys*
     # Synthetic tool calls run BEFORE the generic forward but AFTER
     # the /sys* short-circuits — for /sys* we don't want to engage
@@ -2073,6 +2369,10 @@ DEFAULT_INTERCEPTORS: list[Interceptor] = [
     intercept_response_cache,     # T1.4  identical-prompt cache
     # ── Mutation interceptors (modify request, fall through) ──
     intercept_force_tool_call,    # P18.6 `:tool <name>` prefix pins tool_choice
+    intercept_explain_prose_only, # P18.7 `??:explain` forces tool_choice="none"
+    intercept_cite,               # P18.7 `?:cite` forces search_notes + raw overlay
+    intercept_replay_history,     # P18.7 `~<n>` replays Nth-prior user prompt
+    intercept_raw_passthrough,    # P18.7 `>raw <model>` strips system+tools+history
     intercept_pii_redact,         # T3.1  redact secrets to non-localhost
     intercept_time_grounding,     # T3.0  inject current date/time
     intercept_model_routing,      # T2.3  route by content (code → coder)
