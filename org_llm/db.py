@@ -97,6 +97,69 @@ class Config(Base):
     value = Column(Text, nullable=False)
 
 
+def log_crew_action(action: str, agent_from: str = "crew",
+                     agent_to: str = "", model: str = "",
+                     prompt: str = "", result: str = "",
+                     duration_ms: int = 0, outcome: str = "ok",
+                     session_id: str = "") -> None:
+    """Append one row to the crew_log table — never raises.
+
+    Used by `delegate()` and any future manager actions
+    (proactive_doctor consults, sanity-check rejections, retries
+    with overrides) so the user can audit "what did the manager do
+    on my behalf?" via `org-llm crew-log`."""
+    try:
+        from datetime import datetime
+        from sqlalchemy.orm import Session
+        engine = make_engine()
+        with Session(engine) as s:
+            row = CrewLog(
+                timestamp=datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                session_id=session_id or "",
+                action=action,
+                agent_from=agent_from,
+                agent_to=agent_to,
+                model=model,
+                prompt_excerpt=(prompt or "")[:400],
+                result_excerpt=(result or "")[:400],
+                duration_ms=int(duration_ms),
+                outcome=outcome,
+            )
+            s.add(row)
+            s.commit()
+    except Exception:
+        # Logging must never fail the action it's logging.
+        pass
+
+
+class CrewLog(Base):
+    """Audit trail for the Phase 20 manager pattern.
+
+    Every delegate(), proactive_doctor() consult, sanity-check
+    decision, and retry the manager performs writes a row here so
+    the user can answer "what did the manager actually do?" later.
+    Surfaced via `org-llm crew-log` and the sidebar's MANAGER row.
+
+    Shape mirrors History (one row per event) but specialised for
+    crew interactions — easier to query and slice without grepping
+    History.kind. Schema additive only; migrations in
+    _migrate_in_place backfill on older DBs.
+    """
+    __tablename__ = "crew_log"
+
+    id           = Column(Integer, primary_key=True)
+    timestamp    = Column(Text, nullable=False)         # ISO-8601 UTC
+    session_id   = Column(Text, nullable=False, default="")
+    action       = Column(Text, nullable=False)         # delegate|doctor|sanity|retry|decide
+    agent_from   = Column(Text, nullable=False, default="")  # caller (usually "crew")
+    agent_to     = Column(Text, nullable=False, default="")  # target specialist
+    model        = Column(Text, nullable=False, default="")
+    prompt_excerpt = Column(Text, nullable=False, default="")  # first 400 chars
+    result_excerpt = Column(Text, nullable=False, default="")  # first 400 chars
+    duration_ms  = Column(Integer)
+    outcome      = Column(Text, nullable=False, default="ok")  # ok|empty|timeout|error|rejected
+
+
 class SensorLog(Base):
     """Timeseries of host-system probes — battery / cpu / mem / disk /
     thermal / network / ollama / auto-embedder. Written by

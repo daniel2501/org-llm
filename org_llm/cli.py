@@ -6759,6 +6759,70 @@ def _json_load_safe(b: bytes) -> dict:
         return {}
 
 
+@app.command(name="crew-log", rich_help_panel="Maintenance")
+def crew_log(
+    last: Annotated[int, typer.Option("--last", "-n",
+            help="Show the last N entries (default 20)")] = 20,
+    session: Annotated[str, typer.Option("--session", "-s",
+            help="Filter by session_id substring")] = "",
+    outcome: Annotated[str, typer.Option("--outcome",
+            help="Filter by outcome (ok / empty / timeout / error / "
+                 "rejected)")] = "",
+):
+    """Inspect the manager's audit trail — every delegate(),
+    proactive_doctor() consult, sanity-check, and retry the crew
+    has performed, with timestamps, models, and durations.
+
+    Useful for answering "what did the manager actually do during
+    that turn?" — the export only shows user-facing chat; this
+    surfaces the orchestration that happened underneath."""
+    from rich.table import Table as _Tbl
+    from rich.panel import Panel as _Pn
+    from .db import CrewLog as _CL
+    engine = _engine()
+    with get_session(engine) as session_db:
+        q = session_db.query(_CL).order_by(_CL.id.desc())
+        if session:
+            q = q.filter(_CL.session_id.contains(session))
+        if outcome:
+            q = q.filter(_CL.outcome == outcome)
+        rows = q.limit(last).all()
+    if not rows:
+        on_screen("[dim]no crew_log entries match[/dim]")
+        raise typer.Exit(0)
+    tbl = _Tbl(box=None, pad_edge=False, show_header=True)
+    tbl.add_column("Time",     style="dim",   no_wrap=True, width=10)
+    tbl.add_column("Action",   style="lcars2", width=8)
+    tbl.add_column("Agent",    width=12)
+    tbl.add_column("Model",    style="dim",   width=22, overflow="fold")
+    tbl.add_column("ms",       style="dim",   width=6, no_wrap=True)
+    tbl.add_column("Outcome",  width=8)
+    tbl.add_column("Prompt",   style="dim",   overflow="fold")
+    for r in reversed(rows):  # oldest at top — natural reading order
+        ts = (r.timestamp or "")[-9:-1]   # HH:MM:SSZ → HH:MM:SS
+        outcome_color = {
+            "ok":       "[green]ok[/green]",
+            "empty":    "[yellow]empty[/yellow]",
+            "timeout":  "[red]timeout[/red]",
+            "error":    "[red]error[/red]",
+            "rejected": "[yellow]rejected[/yellow]",
+        }.get(r.outcome, r.outcome or "?")
+        tbl.add_row(
+            ts,
+            r.action,
+            r.agent_to or r.agent_from,
+            r.model or "",
+            str(r.duration_ms or 0),
+            outcome_color,
+            (r.prompt_excerpt or "")[:80],
+        )
+    console.print()
+    console.print(_Pn(tbl,
+                       title=f"[lcars1]crew-log · last {len(rows)}[/lcars1]",
+                       border_style="lcars2",
+                       padding=(1, 1)))
+
+
 @app.command(name="doom-sync", rich_help_panel="Maintenance")
 def doom_sync(
     yes:     Annotated[bool, typer.Option("--yes", "-y",

@@ -986,24 +986,33 @@ def intercept_agent_sticky(req: ProxyRequest) -> Optional[ProxyResponse]:
     org_dir = Path(os.environ.get("ORG_LLM_ORG_DIR")
                     or (Path.home() / "org"))
     rt_path = org_dir / ".opencode" / "sidebar-runtime.json"
-    if not rt_path.exists():
-        return None
-    try:
-        overlay = json.loads(rt_path.read_text()) or {}
-    except Exception:
-        return None
+    overlay: dict = {}
+    if rt_path.exists():
+        try:
+            overlay = json.loads(rt_path.read_text()) or {}
+        except Exception:
+            overlay = {}
     intent = (overlay.get("intent_agent") or "").strip()
-    if not intent:
-        return None
-    # TTL freshness check
+    # TTL freshness check — only applies when intent came from a
+    # prior turn's stamp. Default-agent injection (when overlay is
+    # empty or stale) doesn't need a TTL.
     try:
         ttl_s = int(_proxy_cfg_str("proxy_sticky_agent_ttl_s", "600"))
     except ValueError:
         ttl_s = 600
     stamp_ms = int(overlay.get("ts") or 0)
     age_s = (time.time() * 1000 - stamp_ms) / 1000.0
-    if stamp_ms == 0 or age_s > ttl_s:
-        return None
+    if intent and (stamp_ms == 0 or age_s > ttl_s):
+        intent = ""   # stale — fall through to default-agent
+    # Phase 20: when no recent intent, default to the manager
+    # agent (`crew`) so unprefixed turns get the orchestrator
+    # rather than opencode's flat primary. Knob:
+    # `proxy_default_agent` (default "crew"); set empty string to
+    # disable default-agent injection entirely.
+    if not intent:
+        intent = _proxy_cfg_str("proxy_default_agent", "crew").strip()
+        if not intent:
+            return None
     # Agent still registered?
     known = _known_agents(org_dir)
     if intent not in known:

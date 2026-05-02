@@ -802,7 +802,12 @@ def create_mcp_server():
         Cloud is preferred when configured (faster + tool-capable);
         falls back to local ollama otherwise."""
         from .cli import _PRECONFIGURED_AGENT_PROMPTS as _AP
+        from .db import log_crew_action as _log
+        import time as _t
         if agent not in _AP:
+            _log("delegate", agent_to=agent, prompt=prompt,
+                 outcome="error",
+                 result=f"no such agent: {agent}")
             return _themed("delegate",
                             f"[red]✗[/red] no such agent: {agent}",
                             f"available: {', '.join(sorted(_AP))}")
@@ -815,9 +820,13 @@ def create_mcp_server():
                            or "")
         model = model_override or role_model
         if not model:
+            _log("delegate", agent_to=agent, prompt=prompt,
+                 outcome="error",
+                 result=f"could not resolve model for {agent}")
             return _themed("delegate",
                             f"[red]✗[/red] could not resolve model "
                             f"for {agent}")
+        t0 = _t.monotonic()
         # Compose user prompt
         user_msg = (f"{context}\n\n{prompt}".strip()
                      if context else prompt)
@@ -867,8 +876,13 @@ def create_mcp_server():
                 obj = json.loads(raw)
                 msg = (obj.get("choices") or [{}])[0].get("message") or {}
                 content = msg.get("content") or ""
+                dt_ms = int((_t.monotonic() - t0) * 1000)
+                outcome = "ok" if content.strip() else "empty"
+                _log("delegate", agent_to=agent, model=send_model,
+                     prompt=prompt, result=content,
+                     duration_ms=dt_ms, outcome=outcome)
                 return _themed("delegate",
-                                f"@{agent} ({send_model}, cloud)",
+                                f"@{agent} ({send_model}, cloud, {dt_ms}ms)",
                                 content.strip()
                                 or "(empty response from cloud)")
             else:
@@ -878,11 +892,23 @@ def create_mcp_server():
                         if model.startswith("ollama/") else model)
                 content = _chat(user_msg, bare, ollama_url,
                                  system=sys_prompt, timeout=timeout_s)
+                dt_ms = int((_t.monotonic() - t0) * 1000)
+                outcome = "ok" if content.strip() else "empty"
+                _log("delegate", agent_to=agent, model=bare,
+                     prompt=prompt, result=content,
+                     duration_ms=dt_ms, outcome=outcome)
                 return _themed("delegate",
-                                f"@{agent} ({bare}, local)",
+                                f"@{agent} ({bare}, local, {dt_ms}ms)",
                                 content.strip()
                                 or "(empty response from local)")
         except Exception as e:
+            dt_ms = int((_t.monotonic() - t0) * 1000)
+            err = str(e)
+            outcome = ("timeout" if "timed out" in err.lower()
+                        or "timeout" in err.lower() else "error")
+            _log("delegate", agent_to=agent, model=model,
+                 prompt=prompt, result=err,
+                 duration_ms=dt_ms, outcome=outcome)
             return _themed("delegate",
                             f"[red]✗[/red] @{agent} failed: {e}",
                             f"Manager: consider model_override "
