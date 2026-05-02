@@ -300,7 +300,16 @@ export async function registerSidebar(api: any): Promise<void> {
         !evt?.ctrl && !evt?.option && !evt?.meta && !evt?.shift) {
       const ref = getPromptRef();
       const text = ref?.current?.input ?? "";
+      // 18.4-iter3: surface the Enter-pre-emption state so a silent
+      // miss surfaces in the toast log instead of looking identical
+      // to "the LLM ate my /sys command". Fires only when the user
+      // typed a /sys* prefix — Enter on plain prompts stays quiet.
       if (text.trim().startsWith("/sys")) {
+        showToast(api, {
+          variant: "info",
+          title:   "/sys Enter intercept",
+          message: `name=${name} text="${text.slice(0, 40)}" refOK=${!!ref}`,
+        });
         if (dispatchSysCommand(api, text)) {
           try { ref?.set?.({ input: "", mode: "normal", parts: [] }); } catch { /* */ }
           evt?.preventDefault?.();
