@@ -97,14 +97,20 @@ Signals a clear error when no opencode buffer is alive."
       (vterm-send-string slash)
       (vterm-send-return))))
 
+;; Slash names below match the canonical (no-hyphen) forms registered
+;; with opencode's slash command registry. Earlier hyphenated names
+;; (/sysscroll-up etc.) were rejected by the registry's validator
+;; when injected via vterm-send-string; the new forms register
+;; cleanly AND the plugin's dispatch matcher still accepts the
+;; legacy spellings when typed manually.
 ;;;###autoload
-(defun org-llm-sys-scroll-up    () "Sidebar scroll up by 1."     (interactive) (org-llm--opencode-send-slash "/sysscroll-up"))
+(defun org-llm-sys-scroll-up    () "Sidebar scroll up by 1."     (interactive) (org-llm--opencode-send-slash "/sysup"))
 ;;;###autoload
-(defun org-llm-sys-scroll-down  () "Sidebar scroll down by 1."   (interactive) (org-llm--opencode-send-slash "/sysscroll-down"))
+(defun org-llm-sys-scroll-down  () "Sidebar scroll down by 1."   (interactive) (org-llm--opencode-send-slash "/sysdn"))
 ;;;###autoload
-(defun org-llm-sys-page-up      () "Sidebar page up."            (interactive) (org-llm--opencode-send-slash "/sysscroll-pgup"))
+(defun org-llm-sys-page-up      () "Sidebar page up."            (interactive) (org-llm--opencode-send-slash "/syspgup"))
 ;;;###autoload
-(defun org-llm-sys-page-down    () "Sidebar page down."          (interactive) (org-llm--opencode-send-slash "/sysscroll-pgdn"))
+(defun org-llm-sys-page-down    () "Sidebar page down."          (interactive) (org-llm--opencode-send-slash "/syspgdn"))
 ;;;###autoload
 (defun org-llm-sys-doctor       () "Inject /sysdoctor."          (interactive) (org-llm--opencode-send-slash "/sysdoctor"))
 ;;;###autoload

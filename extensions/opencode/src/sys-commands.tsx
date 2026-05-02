@@ -456,8 +456,17 @@ export function dispatchSysCommand(api: any, text: string): boolean {
     return true;
   }
 
-  // /sysscroll-* [N] → scroll.
-  const scrollMatch = trimmed.match(/^\/sysscroll-(up|down|pgup|pgdn)(?:\s+(\d+))?\s*$/);
+  // Scroll slashes — both new (no-hyphen, registry-friendly) and
+  // legacy (hyphenated) spellings. opencode's slash registry rejects
+  // hyphens, but the keypress-hook path that calls us doesn't, so
+  // typed-manually `/sysscroll-up` continues to work while
+  // Doom-injected `/sysup` (the now-canonical form) does too.
+  // Patterns: /sysup, /sysdn, /syspgup, /syspgdn  ←  canonical
+  //           /sysscroll-up, /sysscroll-down, /sysscroll-pgup,
+  //           /sysscroll-pgdn                      ←  legacy
+  const scrollMatch =
+    trimmed.match(/^\/sys(up|dn|down|pgup|pgdn)(?:\s+(\d+))?\s*$/) ||
+    trimmed.match(/^\/sysscroll-(up|down|pgup|pgdn)(?:\s+(\d+))?\s*$/);
   if (scrollMatch) {
     if (sessionID) void api.client?.session?.abort?.({ sessionID });
     const dir = scrollMatch[1];
@@ -1096,37 +1105,45 @@ export function registerSysCommands(api: any): void {
           message: "Stops Ollama models not assigned to a role. TAB or Enter to confirm." },
         () => void runAndInject(api, ["models", "--reclaim"], "Reclaim — free RAM")),
     },
+    // Phase 18.4-iter4: opencode's slash registry rejects hyphens
+    // ("Unknown command: /sysscroll-up" when injected via Doom's
+    // vterm-send-string). The keypress-hook path tolerated them
+    // because it ran BEFORE opencode validated, so manual typing
+    // worked while injection didn't. Canonical names are now
+    // hyphen-free (sysup, sysdn, syspgup, syspgdn). The legacy
+    // hyphenated forms continue to work when typed manually
+    // because dispatchSysCommand below matches both spellings.
     {
       title: "Sidebar scroll up — N rows (default 1)",
-      value: "org-llm.sysscroll-up",
-      description: "Type /sysscroll-up [N] then TAB. Default scrolls 1 row.",
+      value: "org-llm.sysup",
+      description: "Type /sysup [N] then TAB. Default scrolls 1 row.",
       category: "org-llm",
-      slash: { name: "sysscroll-up" },
-      onSelect: () => doScrollSlash(api, "/sysscroll-up", -1, 1),
+      slash: { name: "sysup" },
+      onSelect: () => doScrollSlash(api, "/sysup", -1, 1),
     },
     {
       title: "Sidebar scroll down — N rows (default 1)",
-      value: "org-llm.sysscroll-down",
-      description: "Type /sysscroll-down [N] then TAB. Default scrolls 1 row.",
+      value: "org-llm.sysdn",
+      description: "Type /sysdn [N] then TAB. Default scrolls 1 row.",
       category: "org-llm",
-      slash: { name: "sysscroll-down" },
-      onSelect: () => doScrollSlash(api, "/sysscroll-down", +1, 1),
+      slash: { name: "sysdn" },
+      onSelect: () => doScrollSlash(api, "/sysdn", +1, 1),
     },
     {
-      title: "Sidebar scroll pgup — N rows (default 10)",
-      value: "org-llm.sysscroll-pgup",
-      description: "Type /sysscroll-pgup [N] then TAB. Default scrolls 10 rows.",
+      title: "Sidebar page up — N rows (default 10)",
+      value: "org-llm.syspgup",
+      description: "Type /syspgup [N] then TAB. Default scrolls 10 rows.",
       category: "org-llm",
-      slash: { name: "sysscroll-pgup" },
-      onSelect: () => doScrollSlash(api, "/sysscroll-pgup", -1, 10),
+      slash: { name: "syspgup" },
+      onSelect: () => doScrollSlash(api, "/syspgup", -1, 10),
     },
     {
-      title: "Sidebar scroll pgdn — N rows (default 10)",
-      value: "org-llm.sysscroll-pgdn",
-      description: "Type /sysscroll-pgdn [N] then TAB. Default scrolls 10 rows.",
+      title: "Sidebar page down — N rows (default 10)",
+      value: "org-llm.syspgdn",
+      description: "Type /syspgdn [N] then TAB. Default scrolls 10 rows.",
       category: "org-llm",
-      slash: { name: "sysscroll-pgdn" },
-      onSelect: () => doScrollSlash(api, "/sysscroll-pgdn", +1, 10),
+      slash: { name: "syspgdn" },
+      onSelect: () => doScrollSlash(api, "/syspgdn", +1, 10),
     },
   ]);
 
