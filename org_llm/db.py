@@ -271,6 +271,19 @@ MODEL_DEFAULTS = {
     "fast_model":     "phi3.5",             # 2.2 GB — tagging, classification
     "instruct_model": "mistral-nemo",       # 7.1 GB — capture, instruction following
     "text_model":     "gemma3",             # 5.4 GB — summarization, text analysis
+    # Phase 18.7 additions — finer-grained role slots so per-agent
+    # model assignment can express what the model is _good at_,
+    # not just "chat or not chat". Empty string = inherit chat_model.
+    # Users opt in via `org-llm config <role>_model <name>` or by
+    # mapping an :agent: to one of these in
+    # ~/org/org-llm-agents.org via the model_role property.
+    "summarize_model": "",                  # text-summary; falls back to text_model
+    "tag_model":       "",                  # auto-tagging; falls back to fast_model
+    "vision_model":    "",                  # multimodal vision (llava, bakllava)
+    "extract_model":   "",                  # NER / fact extraction
+    "review_model":    "",                  # code review / critique
+    "creative_model":  "",                  # persona-heavy / narrative
+    "translate_model": "",                  # translation
     "embed_dim":      "768",
     "theme":          "dark",               # dark | light  (UI color mode)
     # ── LCARS palette + per-channel overrides ─────────────────────────────

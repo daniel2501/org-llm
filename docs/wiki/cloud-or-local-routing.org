@@ -116,6 +116,39 @@ free RAM with a generous safety margin?) + VRAM check (is a GPU
 available with enough headroom?). When both checks fail and
 cloud is configured, it routes cloud automatically (=power_boost=).
 
+* Cloud-first bypass (=proxy_cloud_first=)
+
+When the user knows local hardware can't realistically serve
+their =chat_model= (low free RAM, no GPU, thermal throttling),
+=proxy_cloud_first=true= skips the local upstream entirely on
+chat completions — every request routes directly through the
+cloud-failover machinery. Saves the per-request
+=proxy_first_byte_timeout_ms= wait that would otherwise
+preempt every cold local attempt.
+
+Onboarding step 6c offers this automatically when free RAM
+falls below 1.2× the configured =chat_model='s estimated
+footprint AND a cloud provider is configured. Toggle manually
+any time:
+
+#+begin_src sh
+org-llm config proxy_cloud_first true
+org-llm config proxy_cloud_first false   # back to local-first
+#+end_src
+
+The two cloud paths are distinguishable in the audit log
+(=intercepted_by= field): =cloud_first= for the bypass path,
+=cloud_failover= for the TTFB-triggered retry. Both inherit the
+context-overflow retry chain — when a cloud free-tier model
+rejects with =400 context length=, the proxy retries with
+=cloud_failover_compressed_tools= (descriptions trimmed,
+schemas stripped — drops a 64-tool MCP inventory from ~19k →
+~3k tokens), then falls back to =cloud_failover_no_tools=.
+
+Net user-visible impact on RAM-constrained hardware: a
+tools-using prompt drops from ~40s end-to-end (30s local stall
++ 10s cloud) to ~9.5s direct.
+
 * Provider config in opencode
 
 The =org-llm launch= flow writes BOTH providers (Ollama + cloud)

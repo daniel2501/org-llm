@@ -143,6 +143,28 @@ The LLM in opencode mentions the verdict in 1 line on session
 start so the user can opt into the upsize / cloud route without
 explicit complaint.
 
+** Auto-doctor behaviour: suggest, don't interrupt
+
+The plugin-side slow-LLM watcher (Phase 17.1j, see
+[[file:../../extensions/opencode/src/slow-llm-watch.tsx][=slow-llm-watch.tsx=]]) used to call =session.abort= when the
+threshold tripped — that meant a cold-start prefill on
+thermally-throttled hardware could be killed mid-flight before
+producing its first byte, and the user never saw the response
+they were waiting for. Phase 18.6 reversed this: auto-doctor
+now SUGGESTS proposals (numbered list, =/sysapply <n>= to
+apply) without interrupting the in-flight LLM call. The user's
+turn finishes whenever it lands; the doctor's diagnostic +
+proposal frames sit alongside it as parallel chat injections.
+
+If the user wants to abandon the in-flight request, they can
+apply a proposal that explicitly relaunches (=/syscloud=,
+=/sysmodel=) — that path replaces the session naturally.
+Bonus: removing the abort fixed the "sidebar didn't update on
+model swap" symptom for cold-start prompts. The override is
+set on the assistant's first =message.updated= event;
+aborting was preempting that event from ever firing, leaving
+the sidebar stuck on the launch-time model.
+
 * How to configure
 
 ** Env vars

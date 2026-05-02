@@ -4354,14 +4354,465 @@ def ask(
 
 
 _TASK_MODEL_KEYS = [
-    ("embed",    "embed_model",    "Semantic search embeddings"),
-    ("chat",     "chat_model",     "ask / general Q&A"),
-    ("code",     "code_model",     "Code generation"),
-    ("reason",   "reason_model",   "Planning & complex reasoning"),
-    ("fast",     "fast_model",     "Tagging & classification"),
-    ("instruct", "instruct_model", "Capture & instruction following"),
-    ("text",     "text_model",     "Summarization & text analysis"),
+    ("embed",     "embed_model",     "Semantic search embeddings"),
+    ("chat",      "chat_model",      "ask / general Q&A"),
+    ("code",      "code_model",      "Code generation"),
+    ("reason",    "reason_model",    "Planning & complex reasoning"),
+    ("fast",      "fast_model",      "Tagging & classification"),
+    ("instruct",  "instruct_model",  "Capture & instruction following"),
+    ("text",      "text_model",      "Summarization & text analysis"),
+    # Phase 18.7 — finer-grained roles. Empty default → inherits
+    # the closest base role (e.g. summarize_model falls back to
+    # text_model; tag_model falls back to fast_model). The
+    # auto-pull on launch only fires when a role is set, so a
+    # default-empty role doesn't drag a new model onto the user.
+    ("summarize", "summarize_model", "Text summarisation (long → short)"),
+    ("tag",       "tag_model",       "Auto-tagging captures + retags"),
+    ("vision",    "vision_model",    "Multimodal vision (llava / bakllava)"),
+    ("extract",   "extract_model",   "Named-entity / fact extraction"),
+    ("review",    "review_model",    "Code review / critique"),
+    ("creative",  "creative_model",  "Persona-heavy / narrative output"),
+    ("translate", "translate_model", "Translation between languages"),
 ]
+
+
+# ── Preconfigured agents (Phase 18.7) ────────────────────────────────
+#
+# Four task-flavoured personas the user can target with opencode's
+# native @<name> routing or pick from the /agents picker. Each
+# baked with a focused system prompt + tool-shape preference so
+# the user doesn't burn tokens describing the role each turn.
+#
+# Source-of-truth precedence at launch time:
+#   1. `~/org/org-llm-agents.org` if it exists — :agent:-tagged
+#      headings, body of each is the system prompt; PROPERTIES drawer
+#      :DESCRIPTION: shows up in opencode's /agents picker.
+#   2. The bundled defaults below (this dict) as a fallback.
+#
+# To customise: `org-llm agents --tangle` writes the current set
+# (defaults or user-overridden) to ~/org/org-llm-agents.org. Edit
+# there, save, relaunch — your overrides win on the next launch.
+# Same literate-config round-trip as `org-llm config --tangle`.
+
+_PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
+    "researcher": {
+        "description": "Read-heavy: search, ask, and cite vault notes. No writes.",
+        # `model_role` resolves at launch to the user's configured
+        # model for that role (chat_model, code_model, fast_model,
+        # instruct_model, reason_model, text_model). Empty string
+        # → use the active default model. Setting per-agent models
+        # lets the user route fast scans through a small fast_model
+        # while keeping researcher answers on the bigger chat_model.
+        "model_role":  "chat_model",
+        "prompt": (
+            "You are an org-llm researcher. The user comes to you "
+            "to find, summarise, or compare information already in "
+            "their org-roam vault — not to capture new notes. "
+            "Strong defaults:\n"
+            "  • Always lead with a tool call when the question is "
+            "    about vault content (search_notes, ask_notes, "
+            "    get_node). Cite source paths.\n"
+            "  • Prefer multiple narrow search_notes calls over "
+            "    one broad one when the question has multiple "
+            "    facets.\n"
+            "  • Never write or edit notes. If the user asks for "
+            "    a write, surface the relevant capture command and "
+            "    let them run it manually.\n"
+            "  • If a search returns zero hits, say so plainly + "
+            "    suggest one alternative phrasing — do NOT make "
+            "    up vault content."
+        ),
+    },
+    "scribe": {
+        "description": "Capture-focused: clean org-mode + auto-tagging.",
+        "model_role":  "instruct_model",
+        "prompt": (
+            "You are an org-llm scribe. The user comes to you to "
+            "turn ideas into clean org-mode notes — captured, "
+            "structured, and tagged for later retrieval. Strong "
+            "defaults:\n"
+            "  • Use capture_note for new notes, append_to_note "
+            "    for additions to existing nodes.\n"
+            "  • Pick tags from the user's existing tag space "
+            "    (search_notes is your friend) before inventing "
+            "    new ones.\n"
+            "  • Org structure: short title, bullet-style body, "
+            "    inline links to related notes when search_notes "
+            "    surfaces them. Avoid prose paragraphs.\n"
+            "  • Mirror the user's voice/tone from their recent "
+            "    captures rather than your default style."
+        ),
+    },
+    "engineer": {
+        "description": "Code-corpus + dbt focus: minimal edits, diff previews.",
+        "model_role":  "code_model",
+        "prompt": (
+            "You are an org-llm engineer. The user comes to you to "
+            "navigate, edit, and reason about code — both their "
+            "vault's :code: corpus and the dbt analytics layer. "
+            "Strong defaults:\n"
+            "  • code_search before search_notes for code questions.\n"
+            "  • Edits ship as small, reviewable diffs with "
+            "    explicit before/after — never multi-file rewrites "
+            "    in one turn.\n"
+            "  • Run dbt build / dbt test BEFORE declaring an "
+            "    analytics change done.\n"
+            "  • Prefer questions to assumptions — if the user's "
+            "    intent is ambiguous, ask one clarifying question "
+            "    and stop."
+        ),
+    },
+    "triager": {
+        "description": "Vault hygiene: stale notes, orphans, embeddings, retag.",
+        "model_role":  "fast_model",
+        "prompt": (
+            "You are an org-llm triager. The user comes to you for "
+            "vault hygiene: surfacing stale or orphaned notes, "
+            "rebuilding stale embeddings, retagging miscategorised "
+            "captures, archiving dead daily entries. Strong "
+            "defaults:\n"
+            "  • Lead with a quick scan via stats / discover / "
+            "    list_orphans / find_stale before recommending "
+            "    actions.\n"
+            "  • Batch fixes when possible — don't propose 50 "
+            "    individual retags; group by pattern.\n"
+            "  • Always preview before applying. The user opts in "
+            "    per batch, never globally.\n"
+            "  • If everything looks healthy, say so plainly — "
+            "    don't manufacture work."
+        ),
+    },
+    # Phase 18.7 — one agent per finer-grained role so each
+    # surface is reachable via @<agent>. All baked terse; users
+    # tangle to org and edit prompts to taste.
+    "planner": {
+        "description": "Multi-step planning + complex reasoning. Reason model.",
+        "model_role":  "reason_model",
+        "prompt": (
+            "You are an org-llm planner. Break complex requests "
+            "into sequenced steps before executing. Strong defaults:\n"
+            "  • First message: produce an explicit plan as a "
+            "    bullet list with reasoning. Wait for the user to "
+            "    approve / amend / reject.\n"
+            "  • Identify dependencies between steps; surface the "
+            "    critical path.\n"
+            "  • Flag steps that need tool calls vs. reasoning. "
+            "    Do not call tools until the user signs off on "
+            "    the plan."
+        ),
+    },
+    "summarizer": {
+        "description": "Long-form → short-form summaries. Summarize/text model.",
+        "model_role":  "summarize_model",
+        "prompt": (
+            "You are an org-llm summarizer. Compress without "
+            "losing meaning. Strong defaults:\n"
+            "  • Match the user's requested length exactly. If "
+            "    they say '3 sentences', deliver 3 — not 4.\n"
+            "  • Preserve names, dates, numbers, and direct "
+            "    quotations. Lose stylistic flourish, examples, "
+            "    and meta-commentary.\n"
+            "  • If summarising a tool result (search_notes, "
+            "    captains-log, etc.), cite source paths inline "
+            "    so the user can backtrack."
+        ),
+    },
+    "librarian": {
+        "description": "Tag taxonomy curation + auto-tagging. Tag/fast model.",
+        "model_role":  "tag_model",
+        "prompt": (
+            "You are an org-llm librarian. Curate the user's tag "
+            "taxonomy: surface duplicates, suggest consolidations, "
+            "auto-tag untagged captures. Strong defaults:\n"
+            "  • Pull from EXISTING tags via search_notes before "
+            "    inventing new ones.\n"
+            "  • When proposing a retag, show before/after "
+            "    counts so the user sees the impact.\n"
+            "  • Avoid singleton tags unless they're proper "
+            "    nouns (people, projects, places)."
+        ),
+    },
+    "vision-analyst": {
+        "description": "Multimodal vision: describe + reason about images.",
+        "model_role":  "vision_model",
+        "prompt": (
+            "You are an org-llm vision analyst. The user attaches "
+            "images and asks you to describe, reason about, or "
+            "extract text/data from them. Strong defaults:\n"
+            "  • Describe what's actually visible before "
+            "    interpreting. Concrete first, abstract second.\n"
+            "  • For OCR, transcribe verbatim and flag low-"
+            "    confidence regions explicitly.\n"
+            "  • If no image is attached, say so plainly and "
+            "    suggest the user re-attach."
+        ),
+    },
+    "extractor": {
+        "description": "Named-entity / fact extraction from prose.",
+        "model_role":  "extract_model",
+        "prompt": (
+            "You are an org-llm extractor. Pull structured data "
+            "out of prose — names, dates, places, claims, "
+            "decisions. Strong defaults:\n"
+            "  • Output as a flat list (or JSON if the user asks). "
+            "    No surrounding narrative.\n"
+            "  • One entity per line. Include the source span "
+            "    (verbatim phrase from the input) so the user can "
+            "    audit your extraction.\n"
+            "  • If the input has zero extractable facts, say so."
+        ),
+    },
+    "reviewer": {
+        "description": "Code review: critique a diff, flag risks. Review/code model.",
+        "model_role":  "review_model",
+        "prompt": (
+            "You are an org-llm reviewer. The user shares a diff "
+            "or a snippet and you find what's wrong. Strong defaults:\n"
+            "  • Lead with severity-ranked findings — bug > "
+            "    correctness > maintainability > style.\n"
+            "  • Each finding: 1) what 2) where (line) 3) why "
+            "    it's wrong 4) the smallest fix.\n"
+            "  • If the diff looks clean, say so plainly. Don't "
+            "    manufacture nits."
+        ),
+    },
+    "writer": {
+        "description": "Persona-heavy / narrative output. Creative model.",
+        "model_role":  "creative_model",
+        "prompt": (
+            "You are an org-llm writer. Drafts, narratives, voice. "
+            "Strong defaults:\n"
+            "  • Mirror the user's tone from their recent captures "
+            "    when search_notes surfaces them — don't impose "
+            "    your default voice.\n"
+            "  • Drafts include a one-line summary of what the "
+            "    piece is doing before the body, so the user can "
+            "    redirect early.\n"
+            "  • Surface alternatives only when asked. Default: "
+            "    one strong draft."
+        ),
+    },
+    "translator": {
+        "description": "Translation between languages. Translate model.",
+        "model_role":  "translate_model",
+        "prompt": (
+            "You are an org-llm translator. Translate user-"
+            "supplied text between languages. Strong defaults:\n"
+            "  • Detect source language from the input; if "
+            "    ambiguous, ask once.\n"
+            "  • Preserve formatting (bullets, code blocks, "
+            "    inline emphasis) verbatim.\n"
+            "  • For idioms, render the meaning in the target "
+            "    language and flag the source idiom in a "
+            "    parenthetical so the user sees what shifted."
+        ),
+    },
+    "analyst": {
+        "description": "Summarisation + interpretation of reports. Text model.",
+        "model_role":  "text_model",
+        "prompt": (
+            "You are an org-llm analyst. The user shares a "
+            "report, log, or table; you summarise + interpret. "
+            "Strong defaults:\n"
+            "  • Lead with the headline finding (one sentence), "
+            "    then the supporting numbers, then caveats.\n"
+            "  • Distinguish what the data SHOWS from what it "
+            "    SUGGESTS. Don't conflate.\n"
+            "  • If the data is too thin to support a claim, say "
+            "    so — don't paper over uncertainty."
+        ),
+    },
+}
+
+
+# Fallback chains for the finer-grained Phase 18.7 model roles.
+# When a role's slot is empty, the resolver walks the chain until
+# it finds a populated config key. Keeps `_PRECONFIGURED_AGENT_PROMPTS`
+# decoupled from the user's pull state — agents pin a role; the
+# user pins what each role means; finer-grained roles inherit
+# the closest sensible base role unless explicitly overridden.
+_MODEL_ROLE_FALLBACK = {
+    "summarize_model": ["summarize_model", "text_model",   "chat_model"],
+    "tag_model":       ["tag_model",       "fast_model",   "chat_model"],
+    "vision_model":    ["vision_model",    "chat_model"],
+    "extract_model":   ["extract_model",   "instruct_model", "chat_model"],
+    "review_model":    ["review_model",    "code_model",   "chat_model"],
+    "creative_model":  ["creative_model",  "chat_model"],
+    "translate_model": ["translate_model", "chat_model"],
+    # Base roles fall back to chat_model / themselves.
+    "chat_model":      ["chat_model"],
+    "code_model":      ["code_model",      "chat_model"],
+    "reason_model":    ["reason_model",    "chat_model"],
+    "fast_model":      ["fast_model",      "chat_model"],
+    "instruct_model":  ["instruct_model",  "chat_model"],
+    "text_model":      ["text_model",      "chat_model"],
+}
+
+
+def _resolve_agent_model(model_role: str, cfg_rows: dict,
+                          default_model: str,
+                          provider_id: str) -> Optional[str]:
+    """Resolve an agent's `model_role` → opencode-shape model id
+    (e.g. `ollama/qwen2.5-coder`).
+
+    Walks `_MODEL_ROLE_FALLBACK[role]` until a populated config
+    key is found. Returns None when the role is empty AND no
+    fallback resolves — caller skips the agent's `model` field so
+    opencode falls back to the session's default model.
+
+    Uses the same `<provider>/<model>` shape as active_model_str."""
+    if not model_role:
+        return None
+    chain = _MODEL_ROLE_FALLBACK.get(model_role, [model_role, "chat_model"])
+    for key in chain:
+        raw = (cfg_rows.get(key) or "").strip()
+        if not raw:
+            continue
+        # If the user pinned a cloud model for this role
+        # (provider/slug shape), keep it as-is. Otherwise prepend
+        # the active provider id so opencode resolves it.
+        return raw if "/" in raw else f"{provider_id}/{raw}"
+    return None
+
+
+def _load_agents_from_org(path: Path) -> Optional[dict[str, dict[str, str]]]:
+    """Load agent definitions from a :agent:-tagged org file.
+
+    Schema (one heading per agent, all level-1):
+        * researcher                                          :agent:
+        :PROPERTIES:
+        :DESCRIPTION: Read-heavy ...
+        :END:
+        You are an org-llm researcher. ...
+
+    The heading text is the agent name; the body (after the
+    PROPERTIES drawer, if any) is the system prompt; the
+    DESCRIPTION property is what shows in opencode's /agents picker.
+
+    Returns None if the file doesn't exist or doesn't parse.
+    Returns an empty dict if it parses but contains no :agent:-
+    tagged headings (treated as "user wants no agents" — caller
+    can decide whether to fall back to defaults). On any parse
+    error, returns None so the caller falls through cleanly to
+    the bundled defaults rather than failing the launch."""
+    if not path.exists():
+        return None
+    try:
+        import orgparse
+        org = orgparse.load(str(path))
+    except Exception:
+        return None
+    out: dict[str, dict[str, str]] = {}
+    try:
+        for node in org:
+            tags = list(node.tags or [])
+            if "agent" not in tags:
+                continue
+            name = (node.heading or "").strip()
+            if not name:
+                continue
+            description = (node.get_property("DESCRIPTION") or "").strip()
+            prompt = (node.body or "").strip()
+            if not prompt:
+                continue   # blank body = skip; agent needs a system prompt
+            out[name] = {
+                "description": description or f"org-llm {name} agent",
+                "prompt": prompt,
+            }
+    except Exception:
+        return None
+    return out
+
+
+# ── Agent router (Phase 18.7) ─────────────────────────────────────
+#
+# Lightning-fast keyword router: scores a user prompt against each
+# agent's trigger phrases and returns the best pick + confidence.
+# Pure-Python, no LLM, microsecond latency. Used by:
+#   • `org-llm route "<prompt>"` CLI verb (eyeball the pick)
+#   • The MCP `route_agent` tool (LLM can self-route between turns)
+#   • Optional proxy interceptor (`proxy_auto_route_to_agent=true`)
+#     that auto-prepends @<agent> to bare user messages before the
+#     LLM sees them. Off by default — explicit > implicit.
+#
+# When no trigger matches strongly, returns ("chat", 0) so the
+# caller falls back to the session's default agent.
+
+_AGENT_TRIGGERS: dict[str, list[str]] = {
+    "researcher":     ["search", "find", "look up", "what did i", "what does my",
+                       "ask my notes", "vault", "cite", "source", "where in my",
+                       "any notes about"],
+    "scribe":         ["capture", "save this", "save as note", "note this",
+                       "write down", "record this", "jot down", "log this"],
+    "engineer":       ["code", "function", "diff", "patch", "refactor",
+                       "dbt", "review code", "fix bug", "implement",
+                       "snippet", "compile", "build error"],
+    "triager":        ["stale", "orphan", "cleanup", "hygiene", "untagged",
+                       "duplicate", "dead", "archive", "vault health"],
+    "planner":        ["plan", "step by step", "outline", "break down",
+                       "strategy", "roadmap", "approach"],
+    "summarizer":     ["summary", "summarise", "summarize", "tl;dr", "tldr",
+                       "shorten", "in a sentence", "in three sentences"],
+    "librarian":      ["tag", "retag", "taxonomy", "categori", "tag this"],
+    "vision-analyst": ["image", "screenshot", "picture", "describe this",
+                       "what's in this", "ocr", "transcribe"],
+    "extractor":      ["extract", "list entities", "find dates",
+                       "find names", "pull out", "named entities", "key facts"],
+    "reviewer":       ["review", "critique", "feedback on", "what's wrong",
+                       "code review", "audit"],
+    "writer":         ["draft", "essay", "narrative", "write me",
+                       "write a", "creative", "story", "compose",
+                       "poem", "song", "lyric", "fiction"],
+    "translator":     ["translate", "into spanish", "into french",
+                       "into german", "in spanish", "in french", "in german"],
+    "analyst":        ["interpret", "what does this mean", "trends",
+                       "patterns", "analy", "what stands out"],
+}
+
+
+def route_prompt(text: str, *,
+                  min_score: int = 1) -> tuple[str, int, list[str]]:
+    """Score each agent's triggers against `text` (case-insensitive
+    substring match) and return (agent_name, score, matched_triggers).
+
+    Returns ('chat', 0, []) when no agent scores above `min_score`
+    so callers can fall back to the session default. Score is the
+    count of unique trigger phrases that matched — ties broken by
+    declaration order in `_AGENT_TRIGGERS` (researcher first).
+
+    Microsecond latency on prompts up to a few KB; no LLM contact."""
+    if not text:
+        return ("chat", 0, [])
+    lowered = text.lower()
+    best_name  = "chat"
+    best_score = 0
+    best_hits: list[str] = []
+    for agent, triggers in _AGENT_TRIGGERS.items():
+        hits = [t for t in triggers if t.lower() in lowered]
+        if len(hits) > best_score:
+            best_name  = agent
+            best_score = len(hits)
+            best_hits  = hits
+    if best_score < min_score:
+        return ("chat", 0, [])
+    return (best_name, best_score, best_hits)
+
+
+def _resolve_preconfigured_agents(org_dir: Path) -> dict[str, dict[str, str]]:
+    """Pick the active agent definitions: user override file if
+    present + parseable, else the bundled defaults. Source-of-
+    truth precedence is stable so users editing
+    ~/org/org-llm-agents.org know their changes will land."""
+    user_path = org_dir / "org-llm-agents.org"
+    user_agents = _load_agents_from_org(user_path)
+    if user_agents:
+        # Merge: user entries override defaults by name; defaults
+        # for any agent the user didn't redefine carry over so a
+        # half-customised file doesn't lose the others.
+        merged = dict(_PRECONFIGURED_AGENT_PROMPTS)
+        merged.update(user_agents)
+        return merged
+    return dict(_PRECONFIGURED_AGENT_PROMPTS)
 
 
 def _benchmark_local_models(
@@ -5522,6 +5973,175 @@ def _resolve_screenshot_dir(session) -> Path:
     if docs_img.is_dir():
         return docs_img
     return Path("~/org/.opencode").expanduser()
+
+
+@app.command(rich_help_panel="Querying")
+def route(
+    prompt: Annotated[str, typer.Argument(help="The user prompt to route")],
+    quiet:  Annotated[bool, typer.Option("--quiet", "-q",
+            help="Print only the agent name (machine-readable)")] = False,
+    json_:  Annotated[bool, typer.Option("--json",
+            help="Print {agent, score, triggers} as JSON")] = False,
+):
+    """Route a prompt to the best preconfigured agent (no LLM).
+
+    Lightning-fast keyword scoring against each agent's trigger
+    phrase list. Microsecond latency, zero ollama wake-up.
+    Useful as a building block:
+      • Eyeball: `org-llm route "find phase 18 notes"` → researcher
+      • Pipe: `pick=$(org-llm route "..." -q) && @$pick ...`
+      • From the MCP `route_agent` tool — the LLM can self-route
+        between turns when the user's intent shifts.
+
+    Returns ('chat', 0) when no trigger matches — caller should
+    fall back to the session default.
+    """
+    agent, score, hits = route_prompt(prompt)
+    if json_:
+        import json as _j
+        print(_j.dumps({"agent": agent, "score": score, "triggers": hits}))
+        return
+    if quiet:
+        print(agent)
+        return
+    on_screen(f"[lcars1]{agent}[/lcars1]  "
+              f"[dim]score={score}[/dim]")
+    if hits:
+        on_screen(f"[dim]matched:[/dim] {', '.join(hits)}")
+    else:
+        on_screen("[dim](no triggers matched — falling back to "
+                  "session default)[/dim]")
+
+
+@app.command(rich_help_panel="Maintenance")
+def agents(
+    tangle: Annotated[bool, typer.Option("--tangle", "-T",
+            help="Write ~/org/org-llm-agents.org from the current "
+                 "agent set (defaults + any existing user overrides "
+                 "merged). Edit there to customise — the next launch "
+                 "picks up your changes.")] = False,
+    apply_from_org: Annotated[bool, typer.Option("--apply-from-org", "-A",
+            help="Read ~/org/org-llm-agents.org and report which "
+                 "agents differ from defaults (read-only check; "
+                 "the launcher already auto-loads the file if it "
+                 "exists).")] = False,
+    list_:  Annotated[bool, typer.Option("--list", "-l",
+            help="Show the resolved agent set (defaults + any "
+                 "active user overrides) — same as what the next "
+                 "launch will write to opencode.json")] = False,
+):
+    """Show / round-trip the preconfigured agents (Phase 18.7).
+
+    Source-of-truth precedence:
+      1. ~/org/org-llm-agents.org (user overrides)  — if present
+      2. Bundled _PRECONFIGURED_AGENT_PROMPTS dict  — fallback
+
+    Each :agent:-tagged heading is one agent; heading text is the
+    name; PROPERTIES drawer's :DESCRIPTION: is the picker label;
+    body is the system prompt.
+
+    Workflow:
+      org-llm agents --tangle    # writes the org file
+      $EDITOR ~/org/org-llm-agents.org
+      org-llm launch              # picks up your edits
+    """
+    flags = sum(1 for f in (tangle, apply_from_org, list_) if f)
+    if flags > 1:
+        red_alert("--tangle / --apply-from-org / --list are mutually exclusive.")
+        raise typer.Exit(1)
+    engine = _engine()
+    with get_session(engine) as session:
+        org_dir = _org_dir(session)
+    org_dir = Path(org_dir).expanduser()
+    user_path = org_dir / "org-llm-agents.org"
+
+    if list_ or flags == 0:
+        resolved = _resolve_preconfigured_agents(org_dir)
+        user_present = user_path.exists()
+        on_screen(f"[lcars1]Resolved agents[/lcars1]  "
+                  f"({len(resolved)})  "
+                  f"[dim]source: "
+                  f"{'~/org/org-llm-agents.org' if user_present else 'bundled defaults'}"
+                  f"[/dim]")
+        for name, definition in resolved.items():
+            desc = (definition.get("description") or "").strip()[:80]
+            prompt_words = len((definition.get("prompt") or "").split())
+            on_screen(f"  [lcars2]{name:14s}[/lcars2]  "
+                      f"{desc}  "
+                      f"[dim]({prompt_words}-word prompt)[/dim]")
+        if not user_present:
+            on_screen("")
+            on_screen("[dim]Tangle to org for editing:[/dim]  "
+                      "[bold]org-llm agents --tangle[/bold]")
+        return
+
+    if tangle:
+        resolved = _resolve_preconfigured_agents(org_dir)
+        lines = [
+            "#+TITLE: org-llm preconfigured agents",
+            "#+FILETAGS: :org-llm:agents:literate-config:",
+            "#+OPTIONS: toc:nil num:nil",
+            "",
+            "Generated by [[shell:org-llm agents --tangle][org-llm agents --tangle]].",
+            "Edit the headings below; on the next [[shell:org-llm launch][org-llm launch]] the",
+            "values land in =.opencode/opencode.json= under the =agent= map.",
+            "",
+            "Each =:agent:=-tagged heading is one agent. The heading TEXT is the",
+            "agent name, the =:DESCRIPTION:= property is what shows in opencode's",
+            "/agents picker, and the BODY (everything after the PROPERTIES drawer)",
+            "is the system prompt.",
+            "",
+        ]
+        for name, definition in resolved.items():
+            desc = (definition.get("description") or "").strip()
+            prompt = (definition.get("prompt") or "").rstrip()
+            lines.append(f"* {name}                                                  :agent:")
+            lines.append(":PROPERTIES:")
+            lines.append(f":DESCRIPTION: {desc}")
+            lines.append(":END:")
+            lines.append("")
+            lines.append(prompt)
+            lines.append("")
+        org_dir.mkdir(parents=True, exist_ok=True)
+        user_path.write_text("\n".join(lines))
+        on_screen(f"[green]✓[/green] wrote [bold]{user_path}[/bold]  "
+                  f"({len(resolved)} agent(s))")
+        on_screen("[dim]Edit, then[/dim] [bold]org-llm launch[/bold]"
+                  " [dim]to apply.[/dim]")
+        return
+
+    if apply_from_org:
+        if not user_path.exists():
+            red_alert(f"{user_path} doesn't exist. "
+                      f"Run [bold]org-llm agents --tangle[/bold] first.")
+            raise typer.Exit(1)
+        user_agents = _load_agents_from_org(user_path) or {}
+        if not user_agents:
+            on_screen(f"[yellow]⚠[/yellow] {user_path} parsed but "
+                      f"contains no :agent:-tagged headings.")
+            return
+        defaults = _PRECONFIGURED_AGENT_PROMPTS
+        added    = sorted(set(user_agents) - set(defaults))
+        removed  = sorted(set(defaults) - set(user_agents))
+        modified = sorted(
+            n for n in (set(user_agents) & set(defaults))
+            if user_agents[n]["prompt"] != defaults[n]["prompt"]
+            or user_agents[n].get("description") !=
+                defaults[n].get("description")
+        )
+        if not (added or removed or modified):
+            on_screen(f"[green]✓[/green] {user_path} matches defaults exactly")
+        if added:
+            on_screen(f"[lcars2]+ added:[/lcars2]    {', '.join(added)}")
+        if removed:
+            on_screen(f"[dim]- absent:[/dim]   {', '.join(removed)} "
+                      f"[dim](defaults will be merged in at launch)[/dim]")
+        if modified:
+            on_screen(f"[lcars1]~ modified:[/lcars1] {', '.join(modified)}")
+        on_screen("")
+        on_screen("[dim]The next[/dim] [bold]org-llm launch[/bold] "
+                  "[dim]auto-loads this file. No --apply step needed.[/dim]")
+        return
 
 
 @app.command(rich_help_panel="Maintenance")
@@ -15109,6 +15729,15 @@ def launch(
         active_provider_id = "ollama"
         active_model_label = f"{chat_mdl}  (Ollama, local)"
 
+    # Snapshot the config rows needed by the per-agent model
+    # resolver below. Read once into a plain dict so the comprehension
+    # in the opencode agent block isn't doing N DB queries.
+    from .db import Config as _Cfg_for_agents
+    with get_session(engine) as _s_for_agents:
+        cfg_rows_for_agents = {
+            r.key: r.value for r in _s_for_agents.query(_Cfg_for_agents).all()
+        }
+
     # MCP invocation: was `["uv", "--directory", "<site-packages>",
     # "run", "org-llm", "mcp"]` — that path is fragile (uv looks for a
     # project at PWD, fails to find one in site-packages, exits silent).
@@ -15202,6 +15831,40 @@ def launch(
                     "todowrite": "deny",
                     "question":  "deny",
                 },
+            },
+            # ── Phase 18.7: Preconfigured agents ─────────────────
+            #
+            # Resolved at launch-time from
+            # `~/org/org-llm-agents.org` (if present) or the
+            # bundled `_PRECONFIGURED_AGENT_PROMPTS` defaults.
+            # User edits to the org file override defaults by
+            # agent name. Run `org-llm agents --tangle` to write
+            # the current set to org so you can edit it.
+            #
+            # Each agent's `model_role` resolves to the user's
+            # configured model for that role and lands as the
+            # opencode `model` field on the agent — opencode
+            # routes @<agent> messages to that specific model.
+            # Empty model_role (or unresolvable role) falls back
+            # to the session default.
+            **{
+                _agent_name: {
+                    "mode":        "primary",
+                    "description": _agent_def["description"],
+                    "prompt":      _agent_def["prompt"],
+                    **(
+                        {"model": _resolved_model}
+                        if (_resolved_model := _resolve_agent_model(
+                            _agent_def.get("model_role", ""),
+                            cfg_rows_for_agents,
+                            active_model_str,
+                            active_provider_id,
+                        ))
+                        else {}
+                    ),
+                }
+                for _agent_name, _agent_def in
+                _resolve_preconfigured_agents(org_dir).items()
             },
         },
         "mcp": {
@@ -15399,6 +16062,57 @@ def launch(
         command_dir.mkdir(parents=True, exist_ok=True)
         for name, body in slash_cmds.items():
             (command_dir / f"{name}.md").write_text(body)
+
+    # Skill→slash auto-bridge (Phase 18.7).
+    #
+    # Every :skill:-tagged org-babel block in the vault becomes a
+    # tab-completable opencode slash command for free. The plugin
+    # doesn't need to know about it; opencode finds the .md by
+    # filename, and `intercept_md_skills` in the proxy runs the
+    # `exec:` template via subprocess.
+    #
+    # The user's body of org-babel skills is whatever
+    # `org-llm skill --apply` parsed into the Skill table. They
+    # edit a skill in their org file → re-run skill --apply →
+    # next launch regenerates the .md. Closes the loop: writing a
+    # skill in org gives you a tab-completable slash for free,
+    # zero ollama wake-up.
+    if not no_commands:
+        try:
+            command_dir.mkdir(parents=True, exist_ok=True)
+            from .skills import Skill as _Skill
+            with get_session(engine) as _s_skill_session:
+                _skills_for_slash = list(_s_skill_session.query(_Skill).all())
+            for sk in _skills_for_slash:
+                # Skill name is already underscore-snake-cased
+                # (skills.py lowercase + replace " " "_"); fine to
+                # use directly as filename. Skip if it would shadow
+                # one of our hardcoded slashes (ask, capture, etc).
+                if sk.name in slash_cmds or not sk.name:
+                    continue
+                # Embed a stable description + an exec line that
+                # `intercept_md_skills` will run. $ARGS forwarded
+                # so the user can type `/<skill> some arg list`.
+                skill_md_path = command_dir / f"{sk.name}.md"
+                desc = (sk.heading or "").replace("\n", " ").strip()[:100]
+                if not desc:
+                    desc = f"org-babel skill: {sk.name}"
+                skill_md_path.write_text(
+                    f"---\n"
+                    f"description: {desc}\n"
+                    f"exec: org-llm skill run {sk.name} -- $ARGS\n"
+                    f"---\n"
+                    f"Run the org-babel skill `{sk.name}` defined "
+                    f"in your vault. Output is captured and "
+                    f"returned as the assistant turn — no LLM "
+                    f"call needed.\n"
+                )
+        except Exception as _skill_slash_err:
+            # Skill bridge is best-effort. If the table is missing
+            # or the .md write fails, opencode just won't have
+            # those slashes — fall through cleanly.
+            on_screen(f"  [dim]skill→slash bridge skipped: "
+                      f"{_skill_slash_err}[/dim]")
 
     # Phase 18.4-iter11: NO .md stubs for /sys* slashes.
     # An earlier iteration (iter7, 84d89ea) wrote stubs to make

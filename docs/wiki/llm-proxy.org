@@ -25,7 +25,10 @@ If any interceptor returns a =ProxyResponse=, the proxy short-circuits
 ollama doesn't even wake up. If every interceptor returns =None=, the
 request forwards transparently and the response streams back.
 
-Phase 17.1 shipped 13 interceptors. Phase 18 is adding more, one per
+Phase 17.1 shipped 13 interceptors. Phase 18 has added 10+ more
+(sysexport, sysscreenshot, !shell, @agent, synth_tool_call,
+:tool, ??:explain, ?:cite, ~replay, >raw, prompt_cache).
+Phase 18 is still adding more, one per
 single-file landing; cloud failover is the first.
 
 * Why it exists
@@ -50,24 +53,39 @@ runs the action, and ollama stays asleep.
 The order matters: every interceptor sees the request before the
 next one does, and the first one to return a =ProxyResponse= wins.
 
+Order matches =DEFAULT_INTERCEPTORS= in [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]]; if
+this table drifts again, regenerate by reading that list directly.
+Short-circuiters are #1-13; mutators (modify the request, fall
+through to forward) are #14-23; the conditional kill-switch
+=intercept_local_only= is appended by =cli.py= when the user
+flips =proxy_local_only=.
+
 | # | Interceptor                       | What it catches                                                          |
 |---+-----------------------------------+--------------------------------------------------------------------------|
-| 1 | =intercept_no_llm_flag=           | =--no-llm= argument anywhere in the message → empty response             |
-| 2 | =intercept_sysexport_command=     | =/sysexport [sidebar]= → write chat-export markdown + return path/snapshot |
-| 3 | =intercept_sys_commands=          | =/sys*= prefix in the latest user message → empty response               |
-| 4 | =intercept_synth_tool_call=       | Tool-incapable model (gemma, phi3) + =tools= → prompt-engineered tool calls |
-| 5 | =intercept_response_cache=        | Exact-prompt cache hit → cached response                                 |
-| 6 | =intercept_static_slashes=        | =/menu=, =/help=, =/config= → handwritten markdown response              |
-| 7 | =intercept_probe_cache=           | Repeated provider probes (=GET /api/tags= etc.) → cached body            |
-| 8 | =intercept_time_grounding=        | Inject current date into the system prompt before forwarding             |
-| 9 | =intercept_pii_redact=            | Redact secrets (API keys, tokens) before forwarding                      |
-| 10 | =intercept_tool_call_repair=     | Fix common LLM-emitted malformed tool-call schemas                       |
-| 11 | =intercept_model_routing=        | Route by query shape (cheap model for trivia, smart for code)            |
-| 12 | =intercept_md_skills=            | =.md= slash with =exec:= frontmatter → run as subprocess, return stdout |
-| 13 | =intercept_qwen3_no_think=       | Auto-inject =/no_think= for qwen3 models                                 |
-| 14 | =intercept_prompt_cache=         | Inject =keep_alive= on local Ollama; mark Anthropic =cache_control= on largest system block |
-| 15 | =intercept_prompt_slim=          | Strip the MCP catalog (~22 KB) from system prompts that don't need tools |
-| 16 | =intercept_local_only=           | Catch-all kill switch (=proxy_local_only=true=) → "no LLM" response      |
+|  1 | =intercept_no_llm_flag=          | =--no-llm= argument anywhere in the message → empty response            |
+|  2 | =intercept_sysexport_command=    | =/sysexport [sidebar]= → write chat-export + return path/snapshot       |
+|  3 | =intercept_sysscreenshot_command= | =/sysscreenshot= → run =org-llm screenshot=, return path                |
+|  4 | =intercept_shell=                | =!shell <cmd>= prefix → run cmd locally (gated by =proxy_allow_shell_prefix=) |
+|  5 | =intercept_agent_prefix=         | =@<agent>= prefix → stub pending preconfigured-agents roadmap entry     |
+|  6 | =intercept_sys_commands=         | =/sys*= prefix in the latest user message → empty response              |
+|  7 | =intercept_synth_tool_call=      | Tool-incapable model (gemma, phi3) + =tools= → prompt-engineered tool calls |
+|  8 | =intercept_md_skills=            | =.md= slash with =exec:= frontmatter → run as subprocess, return stdout |
+|  9 | =intercept_static_slashes=       | =/menu=, =/help=, =/config= → handwritten markdown response             |
+| 10 | =intercept_probe_cache=          | Repeated provider probes (=GET /api/tags= etc.) → cached body           |
+| 11 | =intercept_response_cache=       | Exact-prompt cache hit → cached response                                |
+| 12 | =intercept_force_tool_call=      | =:tool <name>= prefix → pin =tool_choice= to that function              |
+| 13 | =intercept_explain_prose_only=   | =??:explain= prefix → force =tool_choice: "none"= (prose only)          |
+| 14 | =intercept_cite=                 | =?:cite <claim>= → force =search_notes= + raw-output system overlay     |
+| 15 | =intercept_replay_history=       | =~<n>= prefix → replay the Nth-prior user prompt, optional suffix       |
+| 16 | =intercept_raw_passthrough=      | =>raw <model> <prompt>= → strip system+tools+history, swap model        |
+| 17 | =intercept_pii_redact=           | Redact secrets (API keys, tokens) before forwarding                     |
+| 18 | =intercept_time_grounding=       | Inject current date into the system prompt before forwarding            |
+| 19 | =intercept_model_routing=        | Route by query shape (cheap model for trivia, smart for code)           |
+| 20 | =intercept_tool_call_repair=     | Fix common LLM-emitted malformed tool-call schemas                      |
+| 21 | =intercept_qwen3_no_think=       | Auto-inject =/no_think= for qwen3 models                                |
+| 22 | =intercept_prompt_cache=         | Inject =keep_alive= on local Ollama; mark Anthropic =cache_control= on largest system block |
+| 23 | =intercept_prompt_slim=          | Strip the MCP catalog (~22 KB) from system prompts that don't need tools |
+|    | =intercept_local_only=           | Catch-all kill switch (=proxy_local_only=true=) — appended only when set |
 
 The full source with rationale comments is in [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]];
 56 unit tests pin behaviour in [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]].

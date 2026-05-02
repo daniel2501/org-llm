@@ -1066,6 +1066,12 @@ function matchSysMessage(text: string): { args: string[]; label: string } | null
       return { args: ["discover"], label: "Recent activity" };
     case "/sysreclaim":
       return { args: ["models", "--reclaim"], label: "Reclaim — free RAM" };
+    case "/sysagents":
+      return { args: ["agents", "--list"], label: "Preconfigured agents" };
+    case "/sysroute":
+      // Special-cased below in dispatchSysCommand because it
+      // needs the rest of the prompt as the routed text.
+      return null;
     // /sysscreenshot is intentionally NOT in this map — it's
     // handled by `intercept_sysscreenshot_command` in the proxy
     // (org_llm/llm_proxy.py). The proxy spawns the screenshot
@@ -1360,6 +1366,46 @@ export function registerSysCommands(api: any): void {
       // proxy's intercept_sysscreenshot_command. See the proxy
       // for the full rationale on why this isn't a runAndInject.
       onSelect: () => clearPrompt(),
+    },
+    {
+      title: "Agents — list preconfigured agents (no LLM)",
+      value: "org-llm.sysagents",
+      description: "Lists researcher, scribe, engineer, triager, "
+        + "planner, summarizer, etc. with their model roles. "
+        + "Pick one with `@<name>` or `/agents`.",
+      category: "org-llm",
+      slash: { name: "sysagents" },
+      onSelect: () => {
+        clearPrompt();
+        void runAndInject(api, ["agents", "--list"],
+                            "Preconfigured agents");
+      },
+    },
+    {
+      title: "Route — pick best agent for a prompt (no LLM)",
+      value: "org-llm.sysroute",
+      description: "Type `/sysroute <prompt>` and TAB. Returns "
+        + "the agent name + matched triggers. Microsecond "
+        + "keyword router; no ollama wake-up.",
+      category: "org-llm",
+      slash: { name: "sysroute" },
+      onSelect: () => {
+        const text = readPromptInput().trim();
+        const m = text.match(/^\/sysroute\s+(.+)/);
+        if (!m) {
+          setPromptInput("/sysroute ");
+          showToast(api, {
+            variant: "info",
+            title: "/sysroute",
+            message: "Type the prompt to route, then TAB.",
+            duration: 6_000,
+          });
+          return;
+        }
+        clearPrompt();
+        void runAndInject(api, ["route", m[1]],
+                            "Routed to agent");
+      },
     },
     // Phase 18.4-iter4: opencode's slash registry rejects hyphens
     // ("Unknown command: /sysscroll-up" when injected via Doom's
