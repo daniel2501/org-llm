@@ -214,24 +214,26 @@ Calls `org-llm-sys-prompt-submit' under the hood."
 
 ;;;###autoload
 (defun org-llm-chat-page-up ()
-  "Scroll opencode chat up one page (sends PgUp to the vterm).
-This is one of the rare cases vterm-send-key actually works for
-opencode — chat scroll is opencode's NATIVE handler, not the
-slash-validation path that rejected the /sys* injections."
+  "Scroll opencode chat up one page.
+Sends the raw PgUp escape sequence (\\e[5~) directly. Works in
+opencode because chat scroll is its native handler, NOT the
+slash-validation path that rejected the /sys* injections.
+Used `vterm-send-string` rather than `vterm-send-key' because the
+latter is version-specific in vterm forks."
   (interactive)
   (let ((buf (or (org-llm--opencode-vterm-buffer)
                  (user-error "No opencode vterm buffer found"))))
     (with-current-buffer buf
-      (vterm-send-key "<prior>"))))
+      (vterm-send-string "\e[5~"))))
 
 ;;;###autoload
 (defun org-llm-chat-page-down ()
-  "Scroll opencode chat down one page (sends PgDn to the vterm)."
+  "Scroll opencode chat down one page (sends PgDn escape \\e[6~)."
   (interactive)
   (let ((buf (or (org-llm--opencode-vterm-buffer)
                  (user-error "No opencode vterm buffer found"))))
     (with-current-buffer buf
-      (vterm-send-key "<next>"))))
+      (vterm-send-string "\e[6~"))))
 
 ;;;###autoload
 (defun org-llm-opencode-quit ()
