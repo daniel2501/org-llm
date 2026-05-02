@@ -71,6 +71,67 @@
   (org-llm--run-display (format "%s %s" org-llm-binary cmd) buf-name))
 
 
+;;; ── opencode-vterm bridge (Phase 18.4) ──────────────────────────────────────
+;; Drives a running opencode TUI from outside vterm by injecting /sys*
+;; slash commands via vterm-send-string. Sidesteps every Ctrl-/Alt-
+;; key conflict in Emacs vterm because Emacs is the dispatcher.
+
+(defun org-llm--opencode-vterm-buffer ()
+  "Return the most recently used opencode vterm buffer, or nil.
+Recognised buffer names: anything containing `org-llm: opencode'
+(written by `org-llm-launch') or `org-llm: claude' / a generic
+`*org-llm*' tag for ad-hoc sessions."
+  (cl-find-if (lambda (b)
+                (and (buffer-live-p b)
+                     (with-current-buffer b
+                       (derived-mode-p 'vterm-mode))
+                     (string-match-p "org-llm" (buffer-name b))))
+              (buffer-list)))
+
+(defun org-llm--opencode-send-slash (slash)
+  "Inject SLASH (e.g. `/sysscroll-up') into the running opencode vterm.
+Signals a clear error when no opencode buffer is alive."
+  (let ((buf (or (org-llm--opencode-vterm-buffer)
+                 (user-error "No opencode vterm buffer found — `SPC l o' to launch first"))))
+    (with-current-buffer buf
+      (vterm-send-string slash)
+      (vterm-send-return))))
+
+;;;###autoload
+(defun org-llm-sys-scroll-up    () "Sidebar scroll up by 1."     (interactive) (org-llm--opencode-send-slash "/sysscroll-up"))
+;;;###autoload
+(defun org-llm-sys-scroll-down  () "Sidebar scroll down by 1."   (interactive) (org-llm--opencode-send-slash "/sysscroll-down"))
+;;;###autoload
+(defun org-llm-sys-page-up      () "Sidebar page up."            (interactive) (org-llm--opencode-send-slash "/sysscroll-pgup"))
+;;;###autoload
+(defun org-llm-sys-page-down    () "Sidebar page down."          (interactive) (org-llm--opencode-send-slash "/sysscroll-pgdn"))
+;;;###autoload
+(defun org-llm-sys-doctor       () "Inject /sysdoctor."          (interactive) (org-llm--opencode-send-slash "/sysdoctor"))
+;;;###autoload
+(defun org-llm-sys-stats        () "Inject /sysstats."           (interactive) (org-llm--opencode-send-slash "/sysstats"))
+;;;###autoload
+(defun org-llm-sys-recent       () "Inject /sysrecent."          (interactive) (org-llm--opencode-send-slash "/sysrecent"))
+;;;###autoload
+(defun org-llm-sys-models       () "Inject /sysmodels."          (interactive) (org-llm--opencode-send-slash "/sysmodels"))
+;;;###autoload
+(defun org-llm-sys-cloud        () "Inject /syscloud."           (interactive) (org-llm--opencode-send-slash "/syscloud"))
+;;;###autoload
+(defun org-llm-sys-menu         () "Inject /sysmenu."            (interactive) (org-llm--opencode-send-slash "/sysmenu"))
+;;;###autoload
+(defun org-llm-sys-insights     () "Inject /insights."           (interactive) (org-llm--opencode-send-slash "/insights"))
+
+;;;###autoload
+(defun org-llm-opencode-quit ()
+  "Cleanly close the running opencode vterm (Ctrl-c twice)."
+  (interactive)
+  (let ((buf (or (org-llm--opencode-vterm-buffer)
+                 (user-error "No opencode vterm buffer found"))))
+    (with-current-buffer buf
+      (vterm-send-string "\C-c")
+      (sit-for 0.1)
+      (vterm-send-string "\C-c"))))
+
+
 ;;; ── interactive commands ─────────────────────────────────────────────────────
 
 ;;;###autoload
@@ -705,6 +766,26 @@ current selection."
        :desc "Splash menu"               "SPC" #'org-llm-splash
        :desc "Askbook (multi-model Q/A)" "k" #'org-llm-askbook
        :desc "Ask dwim"                  "." #'org-llm-ask-dwim
+
+       ;; ─── Opencode-vterm bridge (Phase 18.4) ─────────────────────────
+       ;; Drives a running opencode TUI from outside vterm by injecting
+       ;; /sys* slash commands. Works in Emacs vterm where ctrl-prefix
+       ;; would otherwise be eaten by Emacs commands. Locator pattern
+       ;; matches any vterm buffer with "org-llm" in its name (set by
+       ;; `org-llm-launch' / `org-llm-claude').
+       (:prefix ("y" . "opencode (in-session)")
+        :desc "Sidebar scroll ↓"         "j" #'org-llm-sys-scroll-down
+        :desc "Sidebar scroll ↑"         "k" #'org-llm-sys-scroll-up
+        :desc "Sidebar page ↓"           "J" #'org-llm-sys-page-down
+        :desc "Sidebar page ↑"           "K" #'org-llm-sys-page-up
+        :desc "/sysdoctor"               "d" #'org-llm-sys-doctor
+        :desc "/sysstats"                "s" #'org-llm-sys-stats
+        :desc "/sysrecent"               "r" #'org-llm-sys-recent
+        :desc "/sysmodels"               "m" #'org-llm-sys-models
+        :desc "/syscloud"                "c" #'org-llm-sys-cloud
+        :desc "/sysmenu"                 "M" #'org-llm-sys-menu
+        :desc "/insights"                "i" #'org-llm-sys-insights
+        :desc "Quit opencode (Ctrl-c x2)" "q" #'org-llm-opencode-quit)
 
        ;; ─── Captain's Log ──────────────────────────────────────────────
        (:prefix ("L" . "log")

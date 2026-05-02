@@ -672,10 +672,16 @@ MODEL_DEFAULTS = {
     # surface. The /sysscroll-{up,down,pgup,pgdn} slash commands are
     # the bulletproof escape hatch — text in chat, no key parsing,
     # works in every stack.
+    #
+    # alt+left / alt+right additionally mapped to page-up/down: the
+    # left/right axis isn't otherwise used in the sidebar so it
+    # makes a natural "bigger jump" gesture, and most stacks pass
+    # alt+arrow through cleanly so the page binding gets a second
+    # surface alongside alt+pageup which some terminals omit.
     "sidebar_scroll_up_keys":         "alt+up,shift+up,ctrl+up",
     "sidebar_scroll_down_keys":       "alt+down,shift+down,ctrl+down",
-    "sidebar_scroll_pageup_keys":     "alt+pageup,shift+pageup,ctrl+pageup",
-    "sidebar_scroll_pagedown_keys":   "alt+pagedown,shift+pagedown,ctrl+pagedown",
+    "sidebar_scroll_pageup_keys":     "alt+left,alt+pageup,shift+pageup,ctrl+pageup",
+    "sidebar_scroll_pagedown_keys":   "alt+right,alt+pagedown,shift+pagedown,ctrl+pagedown",
     # Confirm-before-act gate for the auto-doctor flow (17.1q).
     # When true (default), the slow-LLM watcher injects the
     # diagnostic + a list of the commands it WILL run, then waits
