@@ -1640,6 +1640,19 @@ def _build_cloud_request(orig_body: bytes, parsed: Optional[dict],
         # strip.
         for key in ("options", "keep_alive", "format"):
             body_obj.pop(key, None)
+        # Phase 18.4-iter19: cap max_tokens to fit cloud context.
+        # opencode requests max_tokens=32000 by default — fine for
+        # local Ollama (large context) but openrouter free/cheap
+        # models cap at 32k TOTAL (qwen-2.5-72b returned: "you
+        # requested 57006 tokens — 5621 text + 19385 tools + 32000
+        # output"). The output reservation alone can't be 32k
+        # when the input is 25k. 4096 is plenty for chat replies
+        # and leaves room for the tools array. Only override when
+        # the configured value is missing or oversized; user can
+        # set it lower explicitly.
+        mt = body_obj.get("max_tokens")
+        if mt is None or (isinstance(mt, (int, float)) and mt > 4096):
+            body_obj["max_tokens"] = 4096
         out_body = json.dumps(body_obj).encode()
     else:
         out_body = orig_body
