@@ -480,12 +480,17 @@ export function dispatchSysCommand(api: any, text: string): boolean {
     return true;
   }
 
-  // /sysexport — dump current session as markdown to a file user
-  // can cat + paste. Phase 18.4-iter14.
-  if (trimmed === "/sysexport") {
+  // /sysexport [sidebar|full|all] — dump current session as markdown.
+  // Bare /sysexport = chat only. Adding "sidebar" / "full" / "all"
+  // appends the sidebar status (vault stats, active model + cloud-
+  // failover indicator, health, archive, engage links) so the
+  // assistant has full context when the user pastes the file back.
+  const exportMatch = trimmed.match(/^\/sysexport(?:\s+(sidebar|full|all))?\s*$/);
+  if (exportMatch) {
     if (sessionID) {
       void api.client?.session?.abort?.({ sessionID });
-      void exportChatToFile(api, sessionID);
+      const includeSidebar = !!exportMatch[1];
+      void exportChatToFile(api, sessionID, { includeSidebar });
     }
     return true;
   }
@@ -526,7 +531,11 @@ export function dispatchSysCommand(api: any, text: string): boolean {
  *   <output>
  *   ```
  */
-async function exportChatToFile(api: any, sessionID: string): Promise<void> {
+async function exportChatToFile(
+  api: any,
+  sessionID: string,
+  opts: { includeSidebar?: boolean } = {},
+): Promise<void> {
   try {
     const dir   = api.state?.path?.directory ?? ".";
     const ts    = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
@@ -572,9 +581,71 @@ async function exportChatToFile(api: any, sessionID: string): Promise<void> {
       lines.push("");
     }
 
+    if (opts.includeSidebar) {
+      lines.push("---");
+      lines.push("# Sidebar status snapshot");
+      lines.push("");
+      try {
+        const sidebarPath = `${dir}/.opencode/sidebar-status.json`;
+        const sidebar = await Bun.file(sidebarPath).json() as any;
+        // Render the same shape PanelBody renders, in markdown.
+        const v = sidebar.vault   ?? {};
+        const a = sidebar.active  ?? {};
+        const m = sidebar.model   ?? {};
+        const h = sidebar.hardware ?? {};
+        const mcp = sidebar.mcp ?? {};
+        const acti = sidebar.activity ?? {};
+        const tags = sidebar.top_tags ?? [];
+        const vit = sidebar.vitals ?? [];
+        const sa  = sidebar.sensors?.recent_alerts ?? [];
+
+        lines.push(`## VAULT`);
+        lines.push(`- nodes: ${v.n_nodes ?? "?"}  (${v.n_embedded ?? "?"} indexed, ${v.pct_embedded ?? "?"}%)`);
+        lines.push(`- files: ${v.n_files ?? "?"}`);
+        lines.push(`- org_dir: \`${v.org_dir ?? "?"}\``);
+        lines.push("");
+
+        lines.push(`## ACTIVE`);
+        lines.push(`- palette: ${a.palette ?? "?"}`);
+        if (Array.isArray(a.knobs)) {
+          for (const k of a.knobs) lines.push(`- ${k.name}: ${k.level}`);
+        }
+        lines.push(`- model: ${m.active ?? "?"}  (provider: ${m.provider ?? "?"}, route: ${m.route ?? "?"})`);
+        lines.push("");
+
+        lines.push(`## HEALTH`);
+        for (const v of vit) {
+          lines.push(`- ${v.name}: ${v.label}  [${v.status}]`);
+        }
+        lines.push(`- mcp: ${mcp.tool_count ?? "?"} tools (configured: ${mcp.configured ?? false})`);
+        if (h.free_ram_gb != null) lines.push(`- ram: ${h.free_ram_gb} GB free`);
+        if (h.vram_gb != null) lines.push(`- vram: ${h.vram_gb} GB`);
+        lines.push("");
+
+        if (sa.length > 0) {
+          lines.push(`## RECENT SENSOR ALERTS`);
+          for (const x of sa) lines.push(`- [${x.status}] ${x.probe}: ${x.message}`);
+          lines.push("");
+        }
+
+        lines.push(`## ARCHIVE`);
+        lines.push(`- last ${acti.window_days ?? 7}d: ${acti.nodes ?? 0} nodes, ${acti.files ?? 0} files`);
+        if (tags.length > 0) {
+          lines.push(`- top tags:`);
+          for (const t of tags) lines.push(`  - #${t.name}  (${t.count})`);
+        }
+        lines.push("");
+      } catch (e) {
+        lines.push(`*(sidebar JSON unavailable: ${(e as Error)?.message ?? "unknown"})*`);
+        lines.push("");
+      }
+    }
+
     await Bun.write(path, lines.join("\n"));
     void injectChatMessage(api, sessionID,
-      `✓ Chat exported · ${msgs.length} message(s) → ${path}\n` +
+      `✓ Chat exported · ${msgs.length} message(s)` +
+      (opts.includeSidebar ? ` + sidebar snapshot` : ``) +
+      ` → ${path}\n` +
       `\n` +
       `cat the file and paste its contents to share the transcript.`);
   } catch (err) {
@@ -848,7 +919,7 @@ function buildMenuText(api: any): string {
     ["↓ ", "/sysscrolldn [N]",     "scroll sidebar down N rows (default 1)"],
     ["⇈ ", "/sysscrollpgup [N]",   "scroll sidebar up N rows (default 10)"],
     ["⇊ ", "/sysscrollpgdn [N]",   "scroll sidebar down N rows (default 10)"],
-    ["📥", "/sysexport",            "dump this chat as markdown to .opencode/chat-export-*.md"],
+    ["📥", "/sysexport",            "dump chat as markdown (add `sidebar` to include sidebar snapshot)"],
   ];
 
   const out: string[] = [];
@@ -1274,17 +1345,18 @@ export function registerSysCommands(api: any): void {
       onSelect: () => doScrollSlash(api, "/sysscrollpgdn", +1, 10),
     },
     {
-      title: "Export this chat as markdown",
+      title: "Export this chat as markdown (+ optional sidebar)",
       value: "org-llm.sysexport",
-      description: "Dump the current session as markdown to .opencode/chat-export-*.md for sharing.",
+      description: "Type /sysexport for chat only, or /sysexport sidebar to include the sidebar snapshot. TAB to run.",
       category: "org-llm",
       slash: { name: "sysexport" },
       onSelect: () => {
         const sid = activeSessionID(api);
-        if (sid) {
-          clearPrompt();
-          void exportChatToFile(api, sid);
-        }
+        if (!sid) return;
+        const text = readPromptInput().trim();
+        const includeSidebar = /\/sysexport\s+(sidebar|full|all)\b/i.test(text);
+        clearPrompt();
+        void exportChatToFile(api, sid, { includeSidebar });
       },
     },
   ]);
