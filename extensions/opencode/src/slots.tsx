@@ -319,6 +319,27 @@ export function registerSlots(api: any): void {
                 visible={visible}
                 workspaceID={data?.workspace_id}
                 ref={(r: unknown) => { setPromptRef(r); data?.ref?.(r); }}
+                onSubmit={() => {
+                  // Phase 18.4-iter6: parity with session_prompt's
+                  // onSubmit. Without this, /sys* commands typed in
+                  // the welcome prompt (or via Doom vterm injection
+                  // before auto-session has navigated) get caught
+                  // ONLY by the proxy's intercept_sys_commands —
+                  // user sees "✓ handled locally" but the actual
+                  // local action (scroll, doctor, etc.) never fires.
+                  // Catching at onSubmit means dispatchSysCommand
+                  // runs for EVERY submit path, regardless of which
+                  // prompt slot rendered.
+                  const ref = getPromptRef();
+                  const text = ref?.current?.input ?? "";
+                  if (dispatchSysCommand(api, text)) {
+                    try { ref?.set?.({ input: "", mode: "normal", parts: [] }); } catch { /* */ }
+                    return;
+                  }
+                  // home_prompt has no `data.on_submit` callback in
+                  // the SDK type — opencode handles the submit
+                  // internally. Falling through (returning) is fine.
+                }}
                 showPlaceholder={true}
                 placeholders={{
                   normal: PROMPT_PLACEHOLDERS_NORMAL,
