@@ -465,7 +465,16 @@ export function dispatchSysCommand(api: any, text: string): boolean {
     const isPg = (dir === "pgup" || dir === "pgdn");
     const rows = Number.isFinite(argN) && argN > 0 ? argN : (isPg ? 10 : 1);
     const direction: -1 | 1 = (dir === "up" || dir === "pgup") ? -1 : 1;
-    scrollSidebar(direction * rows, "step");
+    // 18.4-iter2: wire debugReport to a toast so when scroll
+    // silently no-ops (ref null, opentui setter rejection) the
+    // user sees WHY instead of just "nothing happened". Toast
+    // surfaces the same line the debug log would show.
+    scrollSidebar(direction * rows, "step",
+      (info) => showToast(api, {
+        variant: "info",
+        title: `/sysscroll-${dir}`,
+        message: info,
+      }));
     return true;
   }
 

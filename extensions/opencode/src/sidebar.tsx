@@ -313,12 +313,21 @@ export async function registerSidebar(api: any): Promise<void> {
     // Sidebar scroll keybinds.
     let delta = 0;
     let unit: "step" | "viewport" = "step";
-    if      (matchKeybind(evt, upBinds))   { delta = -1; unit = "step"; }
-    else if (matchKeybind(evt, downBinds)) { delta = +1; unit = "step"; }
-    else if (matchKeybind(evt, pgUpBinds)) { delta = -1; unit = "viewport"; }
-    else if (matchKeybind(evt, pgDnBinds)) { delta = +1; unit = "viewport"; }
+    let label = "";
+    if      (matchKeybind(evt, upBinds))   { delta = -1; unit = "step";     label = "up";     }
+    else if (matchKeybind(evt, downBinds)) { delta = +1; unit = "step";     label = "down";   }
+    else if (matchKeybind(evt, pgUpBinds)) { delta = -1; unit = "viewport"; label = "pgup";   }
+    else if (matchKeybind(evt, pgDnBinds)) { delta = +1; unit = "viewport"; label = "pgdn";   }
     else return;
-    scrollSidebar(delta, unit);
+    // 18.4-iter2: wire debugReport to a toast so silent no-ops
+    // (ref null, opentui setter rejection) surface WHY instead
+    // of just "nothing happened".
+    scrollSidebar(delta, unit,
+      (info) => showToast(api, {
+        variant: "info",
+        title: `keybind ${label}`,
+        message: info,
+      }));
     evt?.preventDefault?.();
     evt?.stopPropagation?.();
   });
