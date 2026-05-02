@@ -6467,6 +6467,47 @@ def _config_check_run() -> None:
     except Exception as e:
         _add("doom", "[yellow]⚠[/yellow]", f"could not check: {e}")
 
+    # ── doom path drift (path knobs vs Emacs's org-* vars) ──
+    # Phase 16.5: read the running Emacs's view of org-directory,
+    # org-roam-dailies-directory, etc. and flag drift between Doom
+    # and org-llm. Read-only — doesn't write. The user reconciles
+    # via `org-llm doom-sync`.
+    try:
+        from .doom_introspect import (
+            gather_doom_config as _gdoom,
+            _emacsclient_available as _ec_avail,
+        )
+        if not _ec_avail():
+            _add("doom-cfg", "[dim]-[/dim]",
+                  "emacsclient not on PATH — skipped")
+        else:
+            info = _gdoom()
+            doom_vals = info["values"]
+            def _rp(v: str) -> str:
+                if not v or "," in v:
+                    return (v or "").strip()
+                return os.path.realpath(os.path.expanduser(
+                    os.path.expandvars(v)))
+            drifted = []
+            for k in ("org_dir", "daily_dir", "inbox_path", "agenda_files"):
+                dv = doom_vals.get(k, "")
+                cv = (cfg_rows.get(k) or "").strip()
+                if dv and _rp(dv) != _rp(cv):
+                    drifted.append(k)
+            if not doom_vals:
+                _add("doom-cfg", "[dim]-[/dim]",
+                      "no Emacs server reachable")
+            elif drifted:
+                _add("doom-cfg", "[yellow]⚠[/yellow]",
+                      f"drift in {len(drifted)} key(s): "
+                      f"{', '.join(drifted)}  "
+                      f"(reconcile: org-llm doom-sync)")
+            else:
+                _add("doom-cfg", "[green]✓[/green]",
+                      f"{len(doom_vals)} path(s) in lockstep with Doom")
+    except Exception as e:
+        _add("doom-cfg", "[yellow]⚠[/yellow]", f"probe skipped: {e}")
+
     # ── env-var coverage ──────────────────────────────────────
     # Every config key has an ORG_LLM_<KEY>= env-var override per
     # literate_config.env_var_for. Verify each currently-set env
