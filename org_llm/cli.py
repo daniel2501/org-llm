@@ -14916,7 +14916,18 @@ def claude_frontend(
     dry_run:    Annotated[bool, typer.Option("--dry-run",    "-n",
                 help="Print config only, do not launch")] = False,
 ):
-    """Launch Claude Code as an interactive org-roam workspace with vault context and MCP tools."""
+    """Launch Claude Code as an interactive org-roam workspace with vault context and MCP tools.
+
+    Opportunistic integration: Claude Code is a closed-API CLI. This
+    verb is gated behind `proprietary_models_enabled` (default false)
+    so the FOSS-first default doesn't quietly route users into a
+    proprietary surface. Enable with:
+
+      org-llm config proprietary_models_enabled true
+
+    Then re-run. With the gate off, `org-llm launch` (opencode +
+    open-weight models) is the default workspace front door.
+    """
     import json
     import os
     import shutil
@@ -14926,6 +14937,25 @@ def claude_frontend(
     from .db    import Node, File
     from .skills import Skill
     from .ui    import solidarity, trans_stripe
+
+    # ── FOSS-first gate ───────────────────────────────────────────────────────
+    try:
+        from . import cloud as _cloud_mod
+        if not _cloud_mod.proprietary_models_enabled():
+            on_screen(
+                "[yellow]The `claude` verb is gated behind the FOSS-first "
+                "default.[/yellow]\n\n"
+                "Claude Code is a closed-API CLI. To enable this verb, opt "
+                "in:\n\n"
+                "  [bold]org-llm config proprietary_models_enabled true[/bold]\n\n"
+                "Or use [bold]org-llm launch[/bold] for the open-weight "
+                "front door (opencode + Ollama / OpenRouter open models)."
+            )
+            raise typer.Exit(2)
+    except typer.Exit:
+        raise
+    except Exception:
+        pass
 
     # ── Locate or install claude ──────────────────────────────────────────────
     claude_path = _claude_bin()

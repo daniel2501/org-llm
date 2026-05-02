@@ -244,14 +244,63 @@ def get_provider(slug: str) -> ProviderInfo | None:
 # 150=14B-class, 200=70B-class.
 
 class CloudModelInfo(NamedTuple):
-    provider:  str        # provider slug from PROVIDER_MAP
-    slug:      str        # the model identifier the API call uses
-    roles:     tuple      # (chat, fast, code, reason, instruct, text)
-    quality:   int        # quality rank, comparable with local _QUALITY
-    cost_in:   float      # USD per 1M input tokens (0.0 = free tier)
-    cost_out:  float      # USD per 1M output tokens
-    license:   str        # license / openness shorthand
-    note:      str        # one-line description
+    provider:     str        # provider slug from PROVIDER_MAP
+    slug:         str        # the model identifier the API call uses
+    roles:        tuple      # (chat, fast, code, reason, instruct, text)
+    quality:      int        # quality rank, comparable with local _QUALITY
+    cost_in:      float      # USD per 1M input tokens (0.0 = free tier)
+    cost_out:     float      # USD per 1M output tokens
+    license:      str        # license / openness shorthand
+    note:         str        # one-line description
+    license_tier: str = "open_weight"
+    # license_tier: foss | open_weight | proprietary. Drives the
+    # FOSS-first gate (`proprietary_models_enabled`). Inferred from
+    # `license` when not explicit on the row — see _classify_license_tier.
+
+
+# Tier classification — runs against the textual `license` field on a
+# row when `license_tier` isn't set explicitly. Conservative: anything
+# the heuristic isn't sure about gets `proprietary` so the FOSS-first
+# gate doesn't accidentally leak closed models. The bundled catalog
+# rows ship with `license_tier` set explicitly to avoid the heuristic
+# entirely.
+_FOSS_LICENSE_MARKERS = (
+    "apache 2.0", "apache-2.0", "apache2", "mit", "bsd", "mpl",
+    "gpl", "lgpl", "isc", "unlicense", "cc0",
+)
+_OPEN_WEIGHT_LICENSE_MARKERS = (
+    "llama", "qwen", "openrail", "research", "non-commercial",
+    "moonshot", "kimi", "deepseek-license",
+)
+
+
+def _classify_license_tier(license_str: str, slug: str = "") -> str:
+    s = (license_str or "").lower()
+    sl = (slug or "").lower()
+    # Explicit closed signals win regardless of provider/slug shape.
+    if any(m in s for m in ("closed", "proprietary", "anthropic",
+                              "openai tos", "gemini tos")):
+        return "proprietary"
+    if any(m in s for m in _FOSS_LICENSE_MARKERS):
+        return "foss"
+    if any(m in s for m in _OPEN_WEIGHT_LICENSE_MARKERS):
+        return "open_weight"
+    # Slug-based fallback — many OpenRouter rows arrive with empty
+    # license but a recognisable provider prefix.
+    if sl.startswith(("anthropic/", "openai/")):
+        # gpt-oss-* are the OpenAI open-weight releases; everything
+        # else under openai/ is the closed API.
+        if sl.startswith("openai/gpt-oss"):
+            return "foss"
+        return "proprietary"
+    if sl.startswith(("google/gemini",)):
+        return "proprietary"
+    if sl.startswith(("deepseek/", "qwen/", "meta-llama/", "mistralai/",
+                       "moonshotai/", "microsoft/wizard")):
+        return "open_weight"
+    # Unknown — default closed so the FOSS gate stays honest. The
+    # user can promote a model by hand-editing the user catalog.
+    return "proprietary"
 
 
 # ── Catalog loader: bundled JSON + user-cache override ───────────────────────
@@ -308,19 +357,56 @@ def _build_models(rows: list[dict]) -> list[CloudModelInfo]:
     out: list[CloudModelInfo] = []
     for r in rows or []:
         try:
+            slug    = r["slug"]
+            license = r.get("license", "") or ""
+            tier    = (r.get("license_tier", "")
+                       or _classify_license_tier(license, slug))
             out.append(CloudModelInfo(
-                provider = r["provider"],
-                slug     = r["slug"],
-                roles    = tuple(r.get("roles", ("chat",))),
-                quality  = int(r.get("quality", 100)),
-                cost_in  = float(r.get("cost_in", 0.0)),
-                cost_out = float(r.get("cost_out", 0.0)),
-                license  = r.get("license", ""),
-                note     = r.get("note", ""),
+                provider     = r["provider"],
+                slug         = slug,
+                roles        = tuple(r.get("roles", ("chat",))),
+                quality      = int(r.get("quality", 100)),
+                cost_in      = float(r.get("cost_in", 0.0)),
+                cost_out     = float(r.get("cost_out", 0.0)),
+                license      = license,
+                note         = r.get("note", ""),
+                license_tier = tier,
             ))
         except (KeyError, TypeError, ValueError):
             continue
     return out
+
+
+def proprietary_models_enabled() -> bool:
+    """Read the FOSS-first gate from config. Default false: org-llm
+    is FOSS-first; closed-API models stay invisible to suggestions,
+    failover routing, and recommendation surfaces unless the user
+    explicitly opts in via `org-llm config proprietary_models_enabled true`."""
+    try:
+        from .db import DB_PATH, Config, make_engine
+        from sqlalchemy.orm import Session
+        import os as _os
+        path = _Path(_os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+        if not path.exists():
+            return False
+        engine = make_engine(path)
+        with Session(engine) as s:
+            row = s.get(Config, "proprietary_models_enabled")
+        return (row.value if row else "false").strip().lower() == "true"
+    except Exception:
+        return False
+
+
+def filter_by_license_tier(models, *, allow_proprietary: bool):
+    """Return models the FOSS-first gate would surface. With
+    allow_proprietary=False, only foss + open_weight tiers pass."""
+    if allow_proprietary:
+        return list(models)
+    return [m for m in models
+            if (m.license_tier if hasattr(m, "license_tier")
+                else _classify_license_tier(getattr(m, "license", ""),
+                                              getattr(m, "slug", "")))
+            in ("foss", "open_weight")]
 
 
 def _load_catalog() -> None:
@@ -646,14 +732,15 @@ def refresh_from_openrouter(*, timeout: float = 15.0
         if len(note) > 80:
             note = note[:77] + "…"
         rows.append({
-            "provider": "openrouter",
-            "slug":     slug,
-            "roles":    roles,
-            "quality":  quality,
-            "cost_in":  round(cost_in, 4),
-            "cost_out": round(cost_out, 4),
-            "license":  license_,
-            "note":     note,
+            "provider":     "openrouter",
+            "slug":         slug,
+            "roles":        roles,
+            "quality":      quality,
+            "cost_in":      round(cost_in, 4),
+            "cost_out":     round(cost_out, 4),
+            "license":      license_,
+            "note":         note,
+            "license_tier": _classify_license_tier(license_, slug),
         })
     msg = (f"Fetched {len(rows)} model(s) from OpenRouter "
             f"(/api/v1/models).")
@@ -687,15 +774,19 @@ def merge_refresh(new_rows: list[dict], *,
         if slug in by_slug:
             old = by_slug[slug]
             new_row = {
-                "provider": old.provider,
-                "slug":     slug,
-                "roles":    list(old.roles),
-                "quality":  old.quality if preserve_curated_quality
-                              else r.get("quality", old.quality),
-                "cost_in":  r.get("cost_in",  old.cost_in),
-                "cost_out": r.get("cost_out", old.cost_out),
-                "license":  r.get("license") or old.license,
-                "note":     r.get("note")    or old.note,
+                "provider":     old.provider,
+                "slug":         slug,
+                "roles":        list(old.roles),
+                "quality":      old.quality if preserve_curated_quality
+                                  else r.get("quality", old.quality),
+                "cost_in":      r.get("cost_in",  old.cost_in),
+                "cost_out":     r.get("cost_out", old.cost_out),
+                "license":      r.get("license") or old.license,
+                "note":         r.get("note")    or old.note,
+                "license_tier": getattr(old, "license_tier",
+                                          _classify_license_tier(
+                                              r.get("license") or old.license,
+                                              slug)),
             }
             merged.append(new_row)
             if (abs(new_row["cost_out"] - old.cost_out) > 0.001
@@ -726,14 +817,17 @@ def merge_refresh(new_rows: list[dict], *,
             purged_stale += 1
             continue
         merged.append({
-            "provider": m.provider,
-            "slug":     m.slug,
-            "roles":    list(m.roles),
-            "quality":  m.quality,
-            "cost_in":  m.cost_in,
-            "cost_out": m.cost_out,
-            "license":  m.license,
-            "note":     m.note,
+            "provider":     m.provider,
+            "slug":         m.slug,
+            "roles":        list(m.roles),
+            "quality":      m.quality,
+            "cost_in":      m.cost_in,
+            "cost_out":     m.cost_out,
+            "license":      m.license,
+            "note":         m.note,
+            "license_tier": getattr(m, "license_tier",
+                                      _classify_license_tier(m.license,
+                                                                m.slug)),
         })
         carried_over += 1
     summary = {
@@ -891,6 +985,12 @@ def recommend_cloud_models(
     pool = cloud_models_for_provider(provider_slug)
     if not pool:
         return []
+    # FOSS-first gate: hide proprietary models from recommendations
+    # unless the user has opted in. Without this, `cloud --tune`
+    # would recommend Claude Opus the moment a user adds an
+    # OpenRouter key, even though the project's defaults bias
+    # toward open-weight models.
+    pool = filter_by_license_tier(pool, allow_proprietary=proprietary_models_enabled())
     if budget_per_mtok_out is not None:
         pool = [m for m in pool if m.cost_out <= budget_per_mtok_out]
     if not pool:

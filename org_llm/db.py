@@ -545,6 +545,19 @@ MODEL_DEFAULTS = {
     # always force a refresh with `org-llm cloud --refresh-catalog`,
     # which bypasses the TTL.
     "cloud_catalog_auto_refresh_interval_secs": "3600",
+    # ── FOSS-first gate (Phase 18) ─────────────────────────────────────
+    # org-llm is a FOSS project; the default behaviour treats closed-
+    # API models (Claude, GPT, Gemini) as opportunistic — present in
+    # the catalog so opt-in is one flag away, but invisible to
+    # recommendations, cloud failover, and the `claude` subcommand
+    # until the user explicitly enables them. Open-weight models
+    # (Llama, Qwen, DeepSeek, Kimi) ARE included by default — those
+    # are the licensed-but-redistributable middle ground.
+    #
+    # Set true to surface proprietary models everywhere they would
+    # otherwise be relevant: cloud --tune suggestions, the failover
+    # target resolver, the `claude` verb's command registration.
+    "proprietary_models_enabled":             "false",
     # Toast pinning (Phase 17.1s). When true, every toast our
     # plugin emits uses a long duration (1 hour) so messages
     # stay on screen until the user has time to read them. False

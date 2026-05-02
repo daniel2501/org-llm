@@ -334,6 +334,27 @@ Supported: **RunPod**, **Vast.ai**, **Lambda Labs**, **TensorDock**,
 **OpenRouter** (free Llama 3.1 8B + dozens of paid models, auto-
 refreshing pricing) and **Hugging Face Inference**.
 
+### FOSS-first; proprietary models are opt-in
+
+org-llm is FOSS-first. The cloud catalog ships with closed-API models
+(Claude, GPT, Gemini) so opting in is one flag away, but they're
+**hidden by default** from `cloud --tune` recommendations, the proxy's
+cloud-failover routing, and the `claude` subcommand. Open-weight
+models (Llama, Qwen, DeepSeek, Kimi, etc.) are the unfiltered default.
+
+To opt in:
+
+```sh
+org-llm config proprietary_models_enabled true
+```
+
+Each catalog row carries a `license_tier` field — `foss`,
+`open_weight`, or `proprietary`. The auto-refresh on launch
+classifies new OpenRouter rows into the same tiers, so flipping the
+gate is the only step needed to enroll closed models. See
+[docs/wiki/cloud-or-local-routing.org](docs/wiki/cloud-or-local-routing.org)
+for the full rationale.
+
 ---
 
 ## Credentials via `pass`

@@ -1435,6 +1435,22 @@ def _resolve_cloud_failover_target() -> Optional[dict]:
     model    = (_proxy_cfg_str("cloud_model", "")
                 or _proxy_cfg_str("chat_model", "")
                 or "openai/gpt-oss-20b:free")
+    # FOSS-first gate: if the user-configured cloud_model is
+    # proprietary AND `proprietary_models_enabled` is false, refuse
+    # to fail over to it. We don't silently swap to a different model
+    # because that'd surprise the user mid-stream — instead, the
+    # request lands in the legacy 502 path and they see a clear
+    # "cloud failover skipped: proprietary model gated" line in the
+    # captain's log.
+    try:
+        from . import cloud as _cloud_mod
+        if not _cloud_mod.proprietary_models_enabled():
+            tier = _cloud_mod._classify_license_tier(  # type: ignore[attr-defined]
+                "", model)
+            if tier == "proprietary":
+                return None
+    except Exception:
+        pass
     db_key   = (_proxy_cfg_str("cloud_api_key", "")
                 or _proxy_cfg_str("runpod_api_key", ""))
     api_key = ""

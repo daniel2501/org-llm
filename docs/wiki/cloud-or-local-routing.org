@@ -74,6 +74,40 @@ prompts for the API key, encrypts it via [[https://www.passwordstore.org][pass]]
 [[https://groq.com][Groq]] is deliberately excluded from the
 catalog and providers list. Don't add it.
 
+** FOSS-first gate (Phase 18)
+
+Every catalog row carries a =license_tier= field — one of:
+
+- *foss* — Apache 2.0 / MIT / BSD-licensed weights. Truly open.
+  =openai/gpt-oss-*=, =deepseek/deepseek-r1=, =qwen/qwen-2.5-*=.
+- *open_weight* — redistributable weights with use restrictions
+  (Llama 3 community licence, Moonshot K2 licence, etc.). Not OSI-
+  approved but the user can run them locally and keep the code path.
+- *proprietary* — closed-API only. Anthropic Claude, OpenAI GPT-4/5,
+  Google Gemini.
+
+The config knob =proprietary_models_enabled= (default *false*) gates
+whether proprietary rows are visible to:
+
+- =org-llm cloud --tune= recommendations
+- The proxy's cloud-failover target resolver (a closed-API
+  =cloud_model= with the gate off → no failover, request lands in
+  the legacy 502 path)
+- The =org-llm claude= subcommand (refuses to run with a clear
+  message when the gate is off)
+
+Open-weight rows are unaffected. Auto-refresh on launch keeps
+classifying new OpenRouter rows by tier as they land, so users
+opting in via =org-llm config proprietary_models_enabled true=
+immediately see the next-flagship Claude / GPT release without a
+manual refresh.
+
+The catalog still SHIPS proprietary rows and the auto-refresh keeps
+them current — opting in is one flag, not a re-fetch. We considered
+splitting into separate catalog files but the metadata-tag approach
+keeps the data model simple and lets the gate move freely both
+directions.
+
 * Hardware-aware fallback
 
 Even with cloud configured, =org-llm= probes local hardware

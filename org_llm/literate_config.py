@@ -222,6 +222,13 @@ KEY_DESCRIPTIONS = {
         "inside this window no-op so we don't hammer OpenRouter. "
         "Default 3600 = once an hour. `cloud --refresh-catalog` "
         "always bypasses the TTL.",
+    "proprietary_models_enabled":
+        "FOSS-first gate. False (default) hides closed-API models "
+        "(Claude, GPT, Gemini) from cloud --tune suggestions, "
+        "blocks the proxy's cloud failover from routing to them, "
+        "and skips registering the `claude` subcommand. Open-weight "
+        "models (Llama, Qwen, DeepSeek, Kimi) are unaffected. Set "
+        "true to opt in.",
 }
 
 

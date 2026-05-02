@@ -592,6 +592,51 @@ def main() -> int:
     cloud_srv.shutdown()
     print()
 
+    # Test 10: FOSS-first gate on cloud_model resolution
+    print("[10] FOSS-first gate filters proprietary cloud_model")
+    from org_llm import cloud as _cloud
+    # The real resolver consults the DB. Stub the DB-touching helpers
+    # so we can drive the gate purely through booleans + a synthetic
+    # config snapshot.
+    saved_proxy_cfg  = _lp._proxy_cfg_str
+    saved_prop_gate  = _cloud.proprietary_models_enabled
+    cfg = {
+        "cloud_endpoint_url":             "https://router.example",
+        "cloud_provider":                 "openrouter",
+        "cloud_model":                    "anthropic/claude-opus-4-7",
+        "cloud_api_key":                  "sk-fake",
+        "proxy_cloud_failover_enabled":   "true",
+        "proxy_first_byte_timeout_ms":    "1000",
+    }
+    _lp._proxy_cfg_str = lambda k, default="": cfg.get(k, default)  # type: ignore[assignment]
+
+    # Gate OFF: proprietary cloud_model must produce no failover target.
+    _cloud.proprietary_models_enabled = lambda: False  # type: ignore[assignment]
+    target_off = _lp._resolve_cloud_failover_target()
+    t.check("gate off + proprietary model → no target",
+            target_off is None,
+            f"got {target_off}")
+
+    # Gate ON: same proprietary cloud_model resolves normally.
+    _cloud.proprietary_models_enabled = lambda: True  # type: ignore[assignment]
+    target_on = _lp._resolve_cloud_failover_target()
+    t.check("gate on + proprietary model → target resolved",
+            target_on is not None and target_on.get("model") == "anthropic/claude-opus-4-7",
+            f"got {target_on}")
+
+    # Gate OFF + open-weight model: target still resolves (gate only
+    # filters proprietary, not open-weight or foss).
+    _cloud.proprietary_models_enabled = lambda: False  # type: ignore[assignment]
+    cfg["cloud_model"] = "deepseek/deepseek-r1"
+    target_open = _lp._resolve_cloud_failover_target()
+    t.check("gate off + open-weight model → target resolved",
+            target_open is not None and target_open.get("model") == "deepseek/deepseek-r1",
+            f"got {target_open}")
+
+    _lp._proxy_cfg_str             = saved_proxy_cfg          # type: ignore[assignment]
+    _cloud.proprietary_models_enabled = saved_prop_gate       # type: ignore[assignment]
+    print()
+
     # Cleanup
     proxy_srv.shutdown()
     upstream_srv.shutdown()

@@ -513,6 +513,34 @@ A prefix-keyed cache (system prompt → cached completion fragment)
 cuts time-to-first-token dramatically for repeated identical
 system prompts, especially under cold-start ollama load.
 
+** FOSS-first segmentation                                   :shipped:
+:PROPERTIES:
+:STATUS: shipped
+:END:
+
+Shipped 2026-05-02. org-llm is FOSS-first; closed-API models are
+opportunistic. Implementation:
+
+- Every cloud catalog row tagged with =license_tier=
+  (=foss= / =open_weight= / =proprietary=). Bundled v2 catalog
+  ships all rows pre-classified; the heuristic
+  =_classify_license_tier= covers live-fetched OpenRouter rows.
+- New config knob =proprietary_models_enabled= (default *false*)
+  gates =cloud --tune= recommendations, the proxy's cloud-failover
+  resolver, and the =claude= subcommand. The verb itself prints a
+  clear opt-in message and exits.
+- =filter_by_license_tier= helper shared between =recommend_cloud_models=,
+  =cloud --tune=, and =_resolve_cloud_failover_target=.
+- README "FOSS-first; proprietary models are opt-in" section
+  + [[id:510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08][cloud-or-local routing]] wiki updated with full rationale.
+- 3 new tests in [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]] (50 total): proprietary
+  cloud_model + gate-off → no target; gate-on → resolved;
+  open-weight model unaffected by gate.
+
+Behavior break: existing users will see the cloud_model
+recommendation default to open-weight after upgrade. Opting back
+in is one config flip.
+
 ** Cloud failover on first-byte timeout                       :shipped:
 :PROPERTIES:
 :STATUS: shipped
