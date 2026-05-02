@@ -425,6 +425,30 @@ def _format_sidebar_snapshot(org_dir: Path) -> list[str]:
             for t in tags:
                 out.append(f"  - #{t.get('name', '?')}  ({t.get('count', 0)})")
         out.append("")
+
+        # MANAGER section — last 3 crew_log entries, mirroring the
+        # TUI sidebar's MANAGER card. Read from the runtime overlay's
+        # `manager_recent` field (db.log_crew_action keeps it
+        # rolling). For the FULL crew_log table use
+        # `/sysexport manager` — this is the at-a-glance summary.
+        recent = (runtime.get("manager_recent") or []) if isinstance(
+                    runtime, dict) else []
+        out.append("## MANAGER")
+        if not recent:
+            out.append("- (idle — no recent actions)")
+        else:
+            for entry in recent[:3]:
+                ts = (entry.get("ts") or "")[11:19]
+                action = entry.get("action") or "?"
+                target = entry.get("agent_to") or "?"
+                model = entry.get("model") or ""
+                dt_ms = entry.get("duration_ms") or 0
+                outcome = entry.get("outcome") or "?"
+                out.append(f"- {ts}  {action} → {target}  "
+                            f"({model}, {dt_ms}ms, {outcome})")
+        out.append(
+            "- *full history: `/sysexport manager`*")
+        out.append("")
     except Exception as e:
         out.append(f"*(sidebar JSON unavailable: {e})*")
         out.append("")

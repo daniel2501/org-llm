@@ -918,6 +918,7 @@ def create_mcp_server():
         falls back to local ollama otherwise."""
         from .cli import _PRECONFIGURED_AGENT_PROMPTS as _AP
         from .db import log_crew_action as _log
+        from .db import render_baselines as _render_baselines
         import time as _t
         if agent not in _AP:
             _log("delegate", agent_to=agent, prompt=prompt,
@@ -927,7 +928,19 @@ def create_mcp_server():
                             f"[red]✗[/red] no such agent: {agent}",
                             f"available: {', '.join(sorted(_AP))}")
         spec = _AP[agent]
-        sys_prompt = spec.get("prompt", "")
+        # Prepend agent baselines (CURRENT TIME, vault-first,
+        # vault_style, etc.) to the sub-LLM's system prompt so the
+        # delegated specialist gets the same context the proxy
+        # would inject for a direct @-routed turn. Without this
+        # the sub-LLM sees only the bare agent prompt and
+        # hallucinates format (this was the "delegate to scribe →
+        # flat bullets instead of nested headers" gap).
+        role_for_baselines = ("manager" if agent == "crew"
+                               else "specialist")
+        baselines_block = _render_baselines(agent, role_for_baselines)
+        sys_prompt = (spec.get("prompt", "") or "")
+        if baselines_block:
+            sys_prompt = baselines_block + "\n\n" + sys_prompt
         role = spec.get("model_role") or "chat_model"
         with get_session(engine) as session:
             role_model = (_cfg(session, role)
