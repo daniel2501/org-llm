@@ -109,12 +109,21 @@ by version. Best-effort — silent on filesystem errors."
       (error nil))))
 
 (defun org-llm--opencode-vterm-buffer ()
-  "Return the most recently used opencode vterm buffer, or nil."
+  "Return the most recently used org-llm-launched vterm buffer, or nil.
+Matches buffers named `*org-llm: opencode*' or `*org-llm: claude*'
+exactly — these are written by `org-llm-launch' / `org-llm-claude'
+and `org-llm--vterm'.
+
+A previous version used a loose `org-llm' substring match which
+also caught buffers like `*claude-code[org-llm]*' (the
+`claude-code-ide.el' conversation buffer named after the
+workspace), routing chat-scroll keys to the wrong vterm."
   (cl-find-if (lambda (b)
                 (and (buffer-live-p b)
                      (with-current-buffer b
                        (derived-mode-p 'vterm-mode))
-                     (string-match-p "org-llm" (buffer-name b))))
+                     (string-match-p "\\`\\*org-llm: \\(opencode\\|claude\\|vterm\\)"
+                                      (buffer-name b))))
               (buffer-list)))
 
 ;;;###autoload
