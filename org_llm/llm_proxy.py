@@ -1004,11 +1004,51 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
         msgs = [new_system] + msgs
     parsed["messages"] = msgs
 
-    # Swap model if the agent has one declared. Cloud-prefixed
-    # values (provider/slug) keep their shape; bare local stems
-    # already had the provider id prepended at launch-time.
+    # Swap model if the agent has one declared. opencode.json's
+    # agent block stores models with the provider prefix
+    # ("ollama/gemma3:latest") because that's how opencode picks
+    # them. But the wire format opencode actually SENDS to the
+    # proxy is the bare model name — opencode strips the provider
+    # prefix before forwarding. To make the swap behave the same
+    # way, strip the prefix for ollama-shape models. Cloud
+    # provider/slug values are kept as-is (the cloud-failover /
+    # cloud-first paths handle them).
     if agent_model:
-        parsed["model"] = agent_model
+        if agent_model.startswith("ollama/"):
+            parsed["model"] = agent_model[len("ollama/"):]
+        else:
+            parsed["model"] = agent_model
+
+    # Stamp the agent name in the runtime sidebar overlay so the
+    # ACTIVE card's `agent` row reflects the per-turn override.
+    # Without this, opencode tags the assistant message with the
+    # primary agent's name (org-llm) and the override stays
+    # there; the user's @<name> intent is invisible on the
+    # sidebar.
+    try:
+        rt_path = (org_dir / ".opencode" / "sidebar-runtime.json")
+        existing: dict = {}
+        if rt_path.exists():
+            try:
+                existing = json.loads(rt_path.read_text()) or {}
+            except Exception:
+                existing = {}
+        existing.update({
+            "agent":    agent,
+            "model":    parsed.get("model", ""),
+            "provider": (
+                "ollama" if not (agent_model or "").startswith(
+                    ("openai/", "anthropic/", "openrouter/",
+                     "moonshotai/", "deepseek/", "qwen/"))
+                else (agent_model.split("/", 1)[0])
+            ),
+            "ts":       int(time.time() * 1000),
+        })
+        rt_path.parent.mkdir(parents=True, exist_ok=True)
+        rt_path.write_text(json.dumps(existing))
+    except Exception:
+        # Non-fatal — overlay write is for sidebar polish only.
+        pass
 
     # Strip the @<name> prefix from the user message.
     prefix_re = _re_mod.compile(
