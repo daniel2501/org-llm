@@ -755,6 +755,47 @@ def create_mcp_server():
         return msg
 
     @server.tool()
+    def infer_capture_style(dir_path: str = "",
+                              force_refresh: bool = False) -> str:
+        """Detect the dominant org-mode capture style in a directory
+        — DETERMINISTIC, ~10ms, CACHED across calls.
+
+        Reads the 3 most recent .org files in `dir_path` (default
+        `<daily_dir>` or `<org_dir>/daily/`), counts header-cookie
+        (`* [ ] heading`), header-todo (`** TODO heading`),
+        bullet-cookie (`- [ ] item`), and plain-bullet patterns,
+        and returns the dominant shape plus useful adjuncts
+        (priorities, org-roam links).
+
+        Use this BEFORE any list-shaped capture so the new entry
+        mirrors the user's existing convention. Cached by directory
+        path + newest-mtime, so a second call is free until the
+        user edits a file in that directory.
+
+        Replaces the old "read 3 sample dailies and have the LLM
+        infer format" pattern that cost 3 cloud round-trips per
+        turn (~30s)."""
+        from .style_infer import infer_style, style_summary
+        if not dir_path:
+            with get_session(engine) as session:
+                org_dir = (_cfg(session, "org_dir") or "~/org")
+                daily_dir = (_cfg(session, "daily_dir") or "").strip()
+            dir_path = (daily_dir
+                         if daily_dir
+                         else str(Path(org_dir).expanduser() / "daily"))
+        info = infer_style(dir_path, sample_size=3,
+                            force_refresh=force_refresh)
+        summary = style_summary(info)
+        body = (f"{summary}\n\n"
+                f"Samples: {info['samples_examined']} files in "
+                f"{info['dir']}\n"
+                f"Counts: {info['raw_counts']}")
+        return _themed("infer_capture_style",
+                        f"shape={info['dominant_shape']}"
+                        + (" (cached)" if info['cached'] else ""),
+                        body)
+
+    @server.tool()
     def list_agents() -> str:
         """List the bundled org-llm agents — name, role, model_role.
 

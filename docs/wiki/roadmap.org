@@ -1073,6 +1073,94 @@ configurable threshold, transparently retry against the cloud
 provider (or a different local model). Today the user sees
 opencode's raw error UI; the proxy can recover before it bubbles.
 
+* TODO [#A] Planned — Phase 21: deterministic vault inferrers :planned:
+
+Phase 20.x landed a manager pattern that consults specialist LLM
+agents for things the primary doesn't know. But many of the
+"things the LLM doesn't know" about the user's vault are
+*deterministic* — a regex sweep + counts answers them in 10ms,
+not 5-30 seconds of cloud LLM time.
+
+The =infer_capture_style= tool (shipped with Phase 20.x) is the
+first concrete instance. Generalise it: a small library of
+deterministic vault inferrers + an on-disk cache + an MCP-tool
+wrapper for each. Each inferrer answers ONE crisp question about
+the user's vault by scanning samples and counting patterns,
+caches the result keyed by directory + newest-mtime, and
+invalidates only when the underlying files actually change.
+
+** What gets inferred (concrete first list)
+
+| inferrer                | answers                                     |
+|-------------------------+---------------------------------------------|
+| capture_style           | header-cookie / header-todo / bullet-cookie / plain (DONE) |
+| tag_taxonomy            | most-used tags + categories the user prefers |
+| date_format             | YYYY-MM-DD vs ISO vs custom in headlines/filenames |
+| heading_depth           | typical max nesting in this surface         |
+| priority_usage          | does the user use [#A]/[#B]/[#C]? if yes, distribution |
+| scheduling_pattern      | SCHEDULED vs DEADLINE vs neither; common offsets |
+| roam_link_density       | how often the user cross-links via [[id:…]] |
+| filename_convention     | YYYY-MM-DD.org vs YYYYMMDDHHMMSS-slug.org   |
+| capture_section_titles  | recurring level-1 categories (chores, work, …) |
+| voice_register          | sentence-length distribution, formal/casual tells |
+| code_language_mix       | for code corpora — top languages by file count |
+
+Each lives as a function in =org_llm/style_infer.py= (or sibling
+modules), exposed via a single MCP tool family
+=org-llm_infer_<topic>(...)= so agents can call them by name
+without needing to know the internals.
+
+** Why this matters
+
+- *Speed*: replaces "have the LLM read 3 files and infer" loops
+  that cost 15-30s with sub-100ms deterministic calls.
+- *Correctness*: regex+counts beat LLM "general impression" on
+  yes/no pattern questions (e.g. "does the user use [#A]?").
+- *Consistency*: the same inferrer answer is reused across
+  agents and turns, eliminating the "scribe says it's
+  header-cookie, classifier says it's bullet-cookie" drift.
+- *Auditability*: every inferrer's output is just a dict of
+  counts + a verdict. Easy to log to crew_log, easy for the user
+  to sanity-check.
+
+** Roll-out
+
+*** 21.1 — Inferrer infrastructure
+- Common cache path =~/.cache/org-llm/inferrer-cache.json=
+  keyed by =(inferrer_name, dir_path)= → result dict.
+- mtime-aware invalidation: cache entry includes the newest-
+  mtime among the sampled files; mismatch = rerun.
+- TTL ceiling at 24h regardless of mtime stability.
+- Helper =register_inferrer(name, fn)= so adding a new one is
+  a 5-line change.
+- =org-llm inferrer-cache= CLI verb to inspect / clear.
+
+*** 21.2 — Five-inferrer first cut
+- =capture_style= (DONE)
+- =tag_taxonomy=, =priority_usage=, =date_format=,
+  =scheduling_pattern=
+- Wire into existing agents: scribe (style + tags),
+  triager (tags + priorities), planner (scheduling).
+
+*** 21.3 — Aggregate: =vault_profile()=
+- One MCP call returns ALL the inferrer outputs as a dict.
+- Used by the org-llm primary agent's startup sequence so the
+  whole crew has a shared profile of "this user's vault" by
+  the time the first request lands. Refreshed lazily on
+  subsequent calls.
+
+** Open questions
+
+1. Do we need per-directory profiles or one vault-wide profile?
+   Dailies vs notes vs code corpus may have different
+   conventions. Lean: per-directory with a fallback to vault-
+   wide when the dir has no samples.
+2. Should the inferrer cache be in =db.Config= (durable, queryable
+   via dbt) or a flat JSON (faster, simpler)? Lean JSON for
+   speed; dbt analytics over inferrer drift can cron-snapshot
+   into the DB.
+3. How to test? Sample fixtures + golden-file inferrer outputs.
+
 * TODO [#A] Planned — Phase 19: built-in vault git-sync       :planned:
 
 Today users syncing =~/org/= across machines have to run their
