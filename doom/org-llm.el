@@ -108,23 +108,61 @@ by version. Best-effort — silent on filesystem errors."
             (insert (json-encode data))))
       (error nil))))
 
-(defun org-llm--opencode-vterm-buffer ()
-  "Return the most recently used org-llm-launched vterm buffer, or nil.
-Matches buffers named `*org-llm: opencode*' or `*org-llm: claude*'
-exactly — these are written by `org-llm-launch' / `org-llm-claude'
-and `org-llm--vterm'.
+(defun org-llm--read-proc-comm (pid)
+  "Return /proc/PID/comm trimmed, or nil if unreadable."
+  (condition-case nil
+      (with-temp-buffer
+        (insert-file-contents (format "/proc/%d/comm" pid))
+        (string-trim (buffer-string)))
+    (error nil)))
 
-A previous version used a loose `org-llm' substring match which
-also caught buffers like `*claude-code[org-llm]*' (the
-`claude-code-ide.el' conversation buffer named after the
-workspace), routing chat-scroll keys to the wrong vterm."
-  (cl-find-if (lambda (b)
-                (and (buffer-live-p b)
-                     (with-current-buffer b
-                       (derived-mode-p 'vterm-mode))
-                     (string-match-p "\\`\\*org-llm: \\(opencode\\|claude\\|vterm\\)"
-                                      (buffer-name b))))
-              (buffer-list)))
+(defun org-llm--read-proc-children (pid)
+  "Return list of PID children from /proc/PID/task/PID/children, or nil."
+  (condition-case nil
+      (with-temp-buffer
+        (insert-file-contents (format "/proc/%d/task/%d/children" pid pid))
+        (mapcar #'string-to-number
+                (split-string (buffer-string) "[ \t\n]+" t)))
+    (error nil)))
+
+(defun org-llm--proc-has-descendant-named (pid name &optional depth)
+  "True iff any descendant of PID has comm == NAME (within DEPTH=8)."
+  (let ((depth (or depth 8)))
+    (when (and pid (> depth 0))
+      (or (equal (org-llm--read-proc-comm pid) name)
+          (cl-some (lambda (child)
+                     (org-llm--proc-has-descendant-named child name (1- depth)))
+                   (org-llm--read-proc-children pid))))))
+
+(defun org-llm--opencode-vterm-buffer ()
+  "Return the vterm buffer hosting an `opencode' process, or nil.
+Walks the vterm subprocess's process tree (via /proc on Linux)
+looking for a descendant whose comm equals `opencode'. Falls
+back to a buffer-name regex (`*org-llm: opencode/claude/vterm*')
+when /proc isn't readable.
+
+The buffer-name approach alone wasn't enough: users who launch
+opencode from a generic vterm (not via `org-llm-launch') end up
+with buffers like `*vterm*<2>'. Process-tree inspection finds
+opencode regardless of buffer name."
+  (or
+   ;; Path 1: process-tree match (Linux). Most reliable.
+   (cl-find-if
+    (lambda (b)
+      (and (buffer-live-p b)
+           (with-current-buffer b (derived-mode-p 'vterm-mode))
+           (let ((p (get-buffer-process b)))
+             (and p (org-llm--proc-has-descendant-named
+                     (process-id p) "opencode")))))
+    (buffer-list))
+   ;; Path 2: anchored buffer-name match (cross-platform fallback).
+   (cl-find-if
+    (lambda (b)
+      (and (buffer-live-p b)
+           (with-current-buffer b (derived-mode-p 'vterm-mode))
+           (string-match-p "\\`\\*org-llm: \\(opencode\\|claude\\|vterm\\)"
+                            (buffer-name b))))
+    (buffer-list))))
 
 ;;;###autoload
 (defun org-llm-sys-scroll-up    () "Sidebar scroll up by 1." (interactive)
