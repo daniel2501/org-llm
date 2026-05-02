@@ -1159,6 +1159,41 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
             ),
         )
 
+    # Phase 20.x: crew is the always-default orchestrator. Even
+    # when the user names a specialist explicitly (`@scribe …`),
+    # route to crew with a "requested specialist" hint and let
+    # crew decide whether to delegate. Force-solo (`@scribe!`)
+    # bypasses this — goes directly to the specialist as before.
+    requested_specialist = ""
+    if (agent != "crew" and not force_solo
+            and _proxy_cfg_str("proxy_default_agent",
+                                  "crew").strip() == "crew"
+            and "crew" in known):
+        requested_specialist = agent
+        # Prepend a routing hint to the user message so crew sees
+        # who the user named. Crew's prompt teaches it to honor the
+        # hint (delegate to that specialist) unless it has strong
+        # reason to override.
+        msgs = parsed.get("messages") or []
+        for i in range(len(msgs) - 1, -1, -1):
+            mm = msgs[i]
+            if not isinstance(mm, dict) or mm.get("role") != "user":
+                continue
+            content = mm.get("content")
+            hint = (f"[ORCHESTRATION HINT: user requested specialist: "
+                     f"{requested_specialist}]\n")
+            if isinstance(content, str):
+                mm["content"] = hint + content
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        part["text"] = hint + part.get("text", "")
+                        break
+            break
+        # Switch the agent slot to crew for the rest of this
+        # interceptor's logic.
+        agent = "crew"
+
     # Agent exists — perform the per-turn swap.
     agent_def = known[agent]
     agent_prompt = (agent_def.get("prompt") or "").strip()
