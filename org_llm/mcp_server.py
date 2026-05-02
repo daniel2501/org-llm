@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 import asyncio
 import inspect
+import json
 import os
+import subprocess
 
 # Imported at module top so FastMCP can resolve `Context | None` annotations
 # on tool functions via inspect.get_annotations(eval_str=True). Inner-scope
@@ -723,6 +725,123 @@ def create_mcp_server():
         from .access import open_url as _open
         ok, msg = _open(url)
         return msg
+
+    @server.tool()
+    def open_in_emacs(path: str, line: int = 0,
+                       new_frame: bool = True) -> str:
+        """Open `path` in Emacs via emacsclient.
+
+        By default creates a NEW client frame so the user's existing
+        windows aren't disturbed. Pass new_frame=False to open in
+        whatever frame is currently selected.
+
+        line > 0 jumps to that 1-based line after opening. Useful
+        after `capture_note` to drop the cursor on the new heading.
+
+        The path must be inside the MCP file allow-list (same gate
+        as read_file) — refuses otherwise.
+
+        Use this AFTER capture_note succeeds so the user can review /
+        edit / link the new note immediately. Pair with
+        close_emacs_frames when the user is done with the captured
+        note's frame."""
+        from .access import is_allowed
+        import shutil as _sh
+        if not _sh.which("emacsclient"):
+            return _themed("open_in_emacs",
+                            "[red]✗[/red] emacsclient not on PATH")
+        allowed, resolved = is_allowed(path)
+        if not allowed:
+            return _themed("open_in_emacs",
+                            f"[red]✗[/red] access denied: {resolved}",
+                            "Call request_access(parent_dir) first.")
+        if not resolved.exists():
+            return _themed("open_in_emacs",
+                            f"[red]✗[/red] file not found: {resolved}")
+        # Build the elisp form. find-file-other-frame creates a new
+        # FRAME (not just a window), which is what the user wants for
+        # ephemeral note editing — easy to delete-frame later.
+        if new_frame:
+            form = (f'(progn (find-file-other-frame {json.dumps(str(resolved))})'
+                    + (f' (goto-line {int(line)})' if line > 0 else '')
+                    + ' "ok")')
+        else:
+            form = (f'(progn (find-file {json.dumps(str(resolved))})'
+                    + (f' (goto-line {int(line)})' if line > 0 else '')
+                    + ' "ok")')
+        try:
+            r = subprocess.run(
+                ["emacsclient", "--eval", form],
+                capture_output=True, text=True, timeout=5,
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            return _themed("open_in_emacs",
+                            f"[red]✗[/red] emacsclient failed: {e}")
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout or "").strip()[:200]
+            return _themed("open_in_emacs",
+                            f"[red]✗[/red] emacs rejected the call: {err}")
+        return _themed("open_in_emacs",
+                        f"[green]✓[/green] opened {resolved}"
+                        + (f" (line {line})" if line > 0 else "")
+                        + (" in new frame" if new_frame else ""))
+
+    @server.tool()
+    def close_emacs_frames(buffer_pattern: str = "") -> str:
+        """Close Emacs client frames whose selected buffer matches
+        `buffer_pattern` (substring match, case-insensitive).
+
+        With no pattern, closes ALL client frames (frames created via
+        `emacsclient -c`) — leaves the user's primary daemon frame
+        alone. With a pattern like "Weekend To-Do" closes just the
+        frame opened for that note.
+
+        Use this when the user signals they're done with a captured
+        note's frame, or as a "cleanup" step before opening a new
+        ephemeral one."""
+        import shutil as _sh
+        if not _sh.which("emacsclient"):
+            return _themed("close_emacs_frames",
+                            "[red]✗[/red] emacsclient not on PATH")
+        # Build a quoted pattern; empty pattern means "match all".
+        pat_lit = json.dumps(buffer_pattern)
+        form = (
+            f'(let ((pat {pat_lit}) (n 0)) '
+            f'  (dolist (f (frame-list)) '
+            f'    (when (and (frame-parameter f (quote client)) '
+            f'               (let ((b (buffer-name '
+            f'                        (window-buffer '
+            f'                         (frame-selected-window f))))) '
+            f'                 (and b '
+            f'                      (or (string-empty-p pat) '
+            f'                          (string-match-p '
+            f'                           (regexp-quote pat) b))))) '
+            f'      (ignore-errors (delete-frame f t)) '
+            f'      (setq n (1+ n)))) '
+            f'  (format "%d" n))'
+        )
+        try:
+            r = subprocess.run(
+                ["emacsclient", "--eval", form],
+                capture_output=True, text=True, timeout=5,
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            return _themed("close_emacs_frames",
+                            f"[red]✗[/red] emacsclient failed: {e}")
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout or "").strip()[:200]
+            return _themed("close_emacs_frames",
+                            f"[red]✗[/red] emacs rejected the call: {err}")
+        # Output is a quoted string from %d — strip quotes for prose.
+        n = (r.stdout or "").strip().strip('"')
+        if not n or n == "0":
+            return _themed("close_emacs_frames",
+                            f"[dim]no client frames matched "
+                            f"{buffer_pattern!r}[/dim]")
+        return _themed("close_emacs_frames",
+                        f"[green]✓[/green] closed {n} client frame(s)"
+                        + (f" matching {buffer_pattern!r}"
+                            if buffer_pattern else ""))
 
     @server.tool()
     def browser_command(command: str) -> str:
