@@ -675,9 +675,32 @@ def _auto_init_db_if_needed(silent: bool = False) -> bool:
         return False
 
 
+def _cloud_first_active() -> bool:
+    """True iff `proxy_cloud_first` is explicitly enabled. Used to
+    skip Ollama autostart and warmup on cloud-first installs — there
+    we have no need to spin up a local daemon at all."""
+    try:
+        engine = _engine()
+        with get_session(engine) as session:
+            from .db import Config as _Cfg
+            row = session.query(_Cfg).filter(
+                _Cfg.key == "proxy_cloud_first").first()
+            return bool(row and (row.value or "").strip().lower() == "true")
+    except Exception:
+        return False
+
+
 def _auto_start_ollama_if_needed(base_url: str, silent: bool = False) -> bool:
     """Try to start `ollama serve` if it's not reachable. Returns True on success."""
     if _proactive_doctor_off():
+        return False
+    # Cloud-first installs route every chat through cloud; spinning
+    # up Ollama just to have it sit idle is wasted RAM + thermal
+    # budget. Skip silently when proxy_cloud_first=true.
+    if _cloud_first_active():
+        if not silent:
+            on_screen("[dim]proxy_cloud_first=true — skipping "
+                       "Ollama autostart[/dim]")
         return False
     try:
         from .llm import list_models
@@ -15494,7 +15517,8 @@ def launch(
     # we silently move on — the worst case is the user pays the
     # cold-load on their first prompt (which is what they would
     # have anyway).
-    if not dry_run and chat_mdl and ollama_url_for_warmup:
+    if (not dry_run and chat_mdl and ollama_url_for_warmup
+            and not _cloud_first_active()):
         def _warmup_chat_model() -> None:
             try:
                 import urllib.request as _ur

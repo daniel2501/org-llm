@@ -944,6 +944,92 @@ def _known_agents(org_dir: Path) -> dict[str, dict]:
     return {}
 
 
+def intercept_agent_sticky(req: ProxyRequest) -> Optional[ProxyResponse]:
+    """Carry the last @<agent> intent forward when the user's next
+    turn doesn't start with a new @<name>.
+
+    Failure mode this fixes (observed 2026-05-02): user runs
+    `@scribe based on dailies …`; scribe answers with a clarifying
+    question; user follows up with `yes - most recent files`
+    (no @ prefix); opencode reverts to the primary agent
+    (qwen3:4b on ollama, can't tool-call) and the turn dies in 1ms
+    because the model emits the call as text.
+
+    Mechanism: read `intent_agent` from the runtime overlay. If
+    set, the agent still exists, the user message has no @-prefix,
+    and the stamp is fresh (TTL = `proxy_sticky_agent_ttl_s`,
+    default 600s = 10min), prepend `@<intent_agent> ` to the last
+    user message. `intercept_agent_prefix` (which runs immediately
+    after) then performs the actual model + system-prompt swap.
+
+    The user's typed message in opencode's history is unchanged —
+    we only mutate the request body sent to the LLM.
+
+    Knob: `proxy_sticky_agent` (default `true`) gates this
+    entirely."""
+    if not req.path.endswith("/chat/completions"):
+        return None
+    if _proxy_cfg_str("proxy_sticky_agent",
+                       "true").strip().lower() == "false":
+        return None
+    parsed = req.parsed_json
+    if not parsed:
+        return None
+    import re as _re_mod
+    text = _last_user_text(parsed)
+    if not text.strip():
+        return None
+    # Already has an @-prefix? Let intercept_agent_prefix handle.
+    if _re_mod.match(r'^\s*@[A-Za-z][\w-]*\s+', text, _re_mod.DOTALL):
+        return None
+    # Read overlay for the most recent agent intent.
+    org_dir = Path(os.environ.get("ORG_LLM_ORG_DIR")
+                    or (Path.home() / "org"))
+    rt_path = org_dir / ".opencode" / "sidebar-runtime.json"
+    if not rt_path.exists():
+        return None
+    try:
+        overlay = json.loads(rt_path.read_text()) or {}
+    except Exception:
+        return None
+    intent = (overlay.get("intent_agent") or "").strip()
+    if not intent:
+        return None
+    # TTL freshness check
+    try:
+        ttl_s = int(_proxy_cfg_str("proxy_sticky_agent_ttl_s", "600"))
+    except ValueError:
+        ttl_s = 600
+    stamp_ms = int(overlay.get("ts") or 0)
+    age_s = (time.time() * 1000 - stamp_ms) / 1000.0
+    if stamp_ms == 0 or age_s > ttl_s:
+        return None
+    # Agent still registered?
+    known = _known_agents(org_dir)
+    if intent not in known:
+        return None
+    # Prepend @<agent> to the last user message so
+    # intercept_agent_prefix performs the swap uniformly.
+    msgs = parsed.get("messages") or []
+    for i in range(len(msgs) - 1, -1, -1):
+        m = msgs[i]
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        content = m.get("content")
+        if isinstance(content, str):
+            m["content"] = f"@{intent} {content}"
+        elif isinstance(content, list):
+            # Multi-part content (rare in opencode chat); prepend
+            # to the first text part.
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    part["text"] = f"@{intent} {part.get('text', '')}"
+                    break
+        break
+    _reencode_body(req)
+    return None
+
+
 def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     """`@<agent> <prompt>` — per-turn agent swap implemented at
     the proxy layer.
@@ -1346,16 +1432,48 @@ _PROXY_NO_TOOL_STEMS = {
     "deepseek-coder",
 }
 
-# Match a `<tool_call>{...}</tool_call>` block emitted by the model
-# in response to the synthetic-tools system prompt. The JSON inside
-# may span multiple lines (DOTALL) and we want the inner-most match
-# so a model that emits prose-then-tool gets the tool block alone.
+# Tag-specific entries — applied AFTER the stem check fails. These
+# catch small/quantised variants that struggle with native tool
+# calling even when the larger sibling handles them fine. Keys are
+# (stem, tag) tuples after normalisation. Phase 18.8: qwen3:4b
+# observed emitting tool calls as raw text (no <tool_call> wrapper)
+# instead of structured tool_calls; the synth path catches it via
+# the broadened regex.
+_PROXY_NO_TOOL_TAGS: set[tuple[str, str]] = {
+    ("qwen3", "4b"), ("qwen3", "1.7b"), ("qwen3", "0.6b"),
+    ("qwen2.5", "1.5b"), ("qwen2.5", "0.5b"),
+    ("llama3.2", "1b"), ("llama3.2", "3b"),
+    ("smollm", "135m"), ("smollm", "360m"), ("smollm", "1.7b"),
+    ("smollm2", "135m"), ("smollm2", "360m"), ("smollm2", "1.7b"),
+}
+
+# Match the various tool-call shapes a tool-incapable model might
+# emit when given the synth-tools system prompt. Tried in order;
+# the first match wins. All capture the JSON object as group(1).
 import re as _re                                          # noqa: E402
 
-_TOOL_CALL_BLOCK_RE = _re.compile(
-    r"<tool_call>\s*(\{.*?\})\s*</tool_call>",
-    _re.DOTALL,
-)
+_TOOL_CALL_PATTERNS: list = [
+    # Canonical wrapper — what the synth prompt asks for.
+    _re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", _re.DOTALL),
+    # Tool-name-as-tag wrapper: `<search_notes>{...}</search_notes>`.
+    # The closing tag must match the opening; tool names are
+    # alphanumeric + underscore.
+    _re.compile(r"<([a-z][\w]*)>\s*(\{.*?\})\s*</\1>",
+                 _re.DOTALL | _re.IGNORECASE),
+    # Fenced code block tagged with the tool name:
+    # ```search_notes\n{...}\n```
+    _re.compile(r"```([a-z][\w]*)\s*\n\s*(\{.*?\})\s*\n\s*```",
+                 _re.DOTALL | _re.IGNORECASE),
+    # Bare `tool_name{"...":"..."}` — last resort. Anchored to
+    # require the underscore-or-letter run (so "say {" doesn't
+    # match) AND require the JSON to start with a quoted key.
+    _re.compile(r"\b([a-z][a-z_0-9]{2,})\s*(\{\s*\"[^\"]+\"\s*:.+?\})",
+                 _re.DOTALL),
+]
+
+# Kept for backwards-compat with anything in the proxy that still
+# imports the old name.
+_TOOL_CALL_BLOCK_RE = _TOOL_CALL_PATTERNS[0]
 
 
 def _is_no_tool_model(model_id: str) -> bool:
@@ -1363,8 +1481,13 @@ def _is_no_tool_model(model_id: str) -> bool:
     if not model_id:
         return False
     bare = model_id.split("/")[-1]      # strip provider prefix
-    stem = bare.split(":")[0].lower()   # strip :tag suffix
-    return stem in _PROXY_NO_TOOL_STEMS
+    stem_part, _, tag = bare.partition(":")
+    stem = stem_part.lower()
+    if stem in _PROXY_NO_TOOL_STEMS:
+        return True
+    if tag and (stem, tag.lower()) in _PROXY_NO_TOOL_TAGS:
+        return True
+    return False
 
 
 def _build_synth_tools_prompt(tools: list) -> str:
@@ -1409,23 +1532,44 @@ def _build_synth_tools_prompt(tools: list) -> str:
 
 
 def _extract_tool_call(text: str) -> Optional[dict]:
-    """Pull the FIRST `<tool_call>{json}</tool_call>` block out of
-    `text` and return it as a parsed dict. Returns None if no block
-    is found or the JSON inside is malformed. Tolerant of trailing
-    prose — gemma3 sometimes adds a confirmation line after the
-    block, which we just ignore."""
+    """Pull the FIRST tool-call block out of `text` and return it as
+    a parsed dict.
+
+    Tries multiple shapes (`<tool_call>{...}</tool_call>`,
+    `<tool_name>{...}</tool_name>`, fenced code block tagged with
+    the tool name, bare `tool_name{...}`). Returns None when no
+    pattern matches or the JSON inside is malformed.
+
+    For the tool-name-as-tag and fenced shapes the tool name comes
+    from the wrapper, not from a `name` field inside the JSON. This
+    function injects a `name` into the returned dict in that case so
+    callers don't have to special-case it."""
     if not text:
         return None
-    match = _TOOL_CALL_BLOCK_RE.search(text)
-    if not match:
-        return None
-    try:
-        obj = json.loads(match.group(1))
-    except Exception:
-        return None
-    if not isinstance(obj, dict):
-        return None
-    return obj
+    for pat in _TOOL_CALL_PATTERNS:
+        match = pat.search(text)
+        if not match:
+            continue
+        groups = match.groups()
+        # Pattern 0 captures only the JSON; patterns 1-3 capture
+        # (tool_name, json).
+        if len(groups) == 1:
+            json_str = groups[0]
+            wrapper_name = ""
+        else:
+            wrapper_name, json_str = groups[0], groups[1]
+        try:
+            obj = json.loads(json_str)
+        except Exception:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        if wrapper_name and not (obj.get("name")
+                                  or obj.get("tool")
+                                  or obj.get("function")):
+            obj = {"name": wrapper_name, "arguments": obj}
+        return obj
+    return None
 
 
 def _build_synth_tool_response(
@@ -2805,6 +2949,7 @@ DEFAULT_INTERCEPTORS: list[Interceptor] = [
     intercept_sysexport_command,  # P18.5 /sysexport — write file + inline sidebar
     intercept_sysscreenshot_command,  # P18.6 /sysscreenshot — capture via configured backend
     intercept_shell,              # P18.7 !shell <cmd> — local subprocess (gated)
+    intercept_agent_sticky,       # P18.7 carry intent_agent forward to next unprefixed turn
     intercept_agent_prefix,       # P18.7 @<agent> — stub pending preconfigured agents
     intercept_sys_commands,       # T1.0  /sys*
     # Synthetic tool calls run BEFORE the generic forward but AFTER
@@ -3012,6 +3157,49 @@ def _cloud_failover_enabled() -> bool:
                             "true").strip().lower() != "false"
 
 
+# Process-global "local has been slow recently" timestamp. Set by
+# `_failover_to_cloud` when the local upstream timed out or returned
+# a context-overflow / connection-reset / 5xx. Read by
+# `_cloud_first_enabled()` so subsequent requests skip the local
+# attempt entirely until the TTL expires. Resets on launch.
+_LOCAL_SLOW_TS: float = 0.0
+
+
+def _mark_local_slow(reason: str = "") -> None:
+    """Stamp the process-global slow flag. Called from the failover
+    path. The reason is recorded for the sidebar overlay so the user
+    knows why cloud is taking over."""
+    global _LOCAL_SLOW_TS
+    _LOCAL_SLOW_TS = time.time()
+    try:
+        org_dir = Path(os.environ.get("ORG_LLM_ORG_DIR")
+                        or (Path.home() / "org"))
+        rt_path = org_dir / ".opencode" / "sidebar-runtime.json"
+        existing: dict = {}
+        if rt_path.exists():
+            try:
+                existing = json.loads(rt_path.read_text()) or {}
+            except Exception:
+                existing = {}
+        existing.update({
+            "auto_cloud_until_ms": int(
+                (_LOCAL_SLOW_TS + _local_slow_ttl_s()) * 1000),
+            "auto_cloud_reason":   reason,
+        })
+        rt_path.parent.mkdir(parents=True, exist_ok=True)
+        rt_path.write_text(json.dumps(existing))
+    except Exception:
+        pass
+
+
+def _local_slow_ttl_s() -> int:
+    try:
+        return max(60, int(_proxy_cfg_str(
+            "proxy_auto_cloud_slow_ttl_s", "600")))
+    except ValueError:
+        return 600
+
+
 def _cloud_first_enabled() -> bool:
     """When true, chat completions skip local entirely and go
     straight to cloud. Default false. Useful when local hardware
@@ -3022,9 +3210,24 @@ def _cloud_first_enabled() -> bool:
     failover retry chain so context-overflow on cloud still gets
     a compressed-tools fallback. Toggle via:
         org-llm config proxy_cloud_first true
+
+    Phase 18.8: also returns True transiently when the auto-cloud-
+    on-slow path has stamped `_LOCAL_SLOW_TS` within the last
+    `proxy_auto_cloud_slow_ttl_s` (default 600s). Once local is
+    observed slow, the rest of the session routes to cloud directly
+    instead of paying the failover wait every turn. Disable via
+    `proxy_auto_cloud_on_slow false` if you want strict opt-in
+    cloud-first.
     """
-    return _proxy_cfg_str("proxy_cloud_first",
-                            "false").strip().lower() == "true"
+    if _proxy_cfg_str("proxy_cloud_first",
+                       "false").strip().lower() == "true":
+        return True
+    if _proxy_cfg_str("proxy_auto_cloud_on_slow",
+                       "true").strip().lower() == "false":
+        return False
+    if _LOCAL_SLOW_TS <= 0:
+        return False
+    return (time.time() - _LOCAL_SLOW_TS) <= _local_slow_ttl_s()
 
 
 def _resolve_cloud_failover_target() -> Optional[dict]:
@@ -3613,7 +3816,16 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
         502 fallback — typical when cloud also fails before sending
         any bytes. Best-effort: a partial cloud stream that drops
         mid-flight returns True (we already wrote headers).
+
+        Side effect: stamps `_LOCAL_SLOW_TS` so the rest of the
+        session routes directly to cloud (`_cloud_first_enabled()`
+        returns True for `proxy_auto_cloud_slow_ttl_s` seconds).
+        Skipped when `reason` indicates this WAS the cloud-first
+        path itself — no point flagging "local slow" when we
+        never tried local.
         """
+        if "cloud_first" not in (reason or ""):
+            _mark_local_slow(reason)
         parsed = getattr(self, "_parsed_for_audit", None)
         if parsed is None:
             try:
