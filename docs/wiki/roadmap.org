@@ -574,6 +574,16 @@ Doom bindings under =SPC l y= track the action types:
 Future actions (additive; tracked in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 18 follow-ups):
 
 - =set-model= — hot model swap without relaunch
+- *cloud_model validator should consult cloud catalog* — surfaced
+  2026-05-02 during T6 hands-on. =org-llm config cloud_model
+  deepseek/deepseek-r1= rejected the slug as "not pulled" because
+  the validator only checks locally-pulled Ollama models. Cloud-
+  shape slugs (provider/model) need to validate against the cloud
+  catalog (=CLOUD_MODELS_BY_PROVIDER=) instead. Quick fix: when
+  the slug contains a "/", route to the cloud-catalog validator;
+  otherwise keep the Ollama check. Until then, =sqlite3= direct
+  write to =config= table works as a workaround.
+
 - *Tool-call dialect translation* — surfaced 2026-05-02 during T6
   with =cloud_model=moonshotai/kimi-k2=. Kimi emits tool calls via
   its native chat-template syntax (=<|tool_call_argument_begin|>=
