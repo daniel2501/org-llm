@@ -412,25 +412,67 @@ def filter_by_license_tier(models, *, allow_proprietary: bool):
 def _load_catalog() -> None:
     """(Re)populate the module-state CLOUD_MODELS / CATALOG_META.
 
-    User cache wins when present + valid; bundled JSON is the
-    authoritative fallback. Called at import time and again on
-    explicit refresh.
+    Two-source loader — bundled JSON is the curated metadata source
+    (quality, license_tier, roles, note, license), user cache is the
+    live data source (cost_in, cost_out, slugs returned by the last
+    refresh). When a slug appears in both, bundled curation wins for
+    curated fields and user cache wins for pricing fields. This keeps
+    community PRs to bundled landing automatically — without it, the
+    first user that ever auto-refreshed would be locked into whatever
+    quality the heuristic guessed for new rows (110 for everything).
+
+    When the user cache doesn't exist yet, bundled IS the source.
+    Called at import time and again on explicit refresh.
     """
     global CLOUD_MODELS, CLOUD_MODELS_BY_PROVIDER, CATALOG_META
 
     bundled = _read_json_safe(_bundled_catalog_path()) or {}
     user    = _read_json_safe(_user_catalog_path()) or {}
-    if user and isinstance(user.get("cloud_models"), list):
-        # User cache present + has the right shape — use it as source.
-        CLOUD_MODELS = _build_models(user.get("cloud_models", []))
+    bundled_rows = bundled.get("cloud_models") or []
+    user_rows    = user.get("cloud_models")    or []
+
+    if user and isinstance(user_rows, list) and user_rows:
+        bundled_by_slug = {r["slug"]: r for r in bundled_rows
+                            if isinstance(r, dict) and r.get("slug")}
+        merged_rows: list[dict] = []
+        for r in user_rows:
+            if not isinstance(r, dict):
+                continue
+            slug = r.get("slug")
+            if not slug:
+                continue
+            b = bundled_by_slug.get(slug)
+            if b is not None:
+                # Overlay: bundled wins on curated, user cache wins
+                # on live pricing. user-cache `note` survives only
+                # if bundled left it empty.
+                merged = dict(r)
+                for k in ("quality", "license_tier", "license",
+                            "roles"):
+                    if b.get(k) is not None:
+                        merged[k] = b[k]
+                if b.get("note"):
+                    merged["note"] = b["note"]
+                merged_rows.append(merged)
+            else:
+                merged_rows.append(r)
+            bundled_by_slug.pop(slug, None)
+        # Bundled-only slugs (community PR adds a new curated row,
+        # not yet seen by an OpenRouter refresh) join the merged
+        # list verbatim — they're authoritative until the user
+        # actually pulls live pricing.
+        for r in bundled_by_slug.values():
+            merged_rows.append(r)
+
+        CLOUD_MODELS = _build_models(merged_rows)
         CATALOG_META = {
             "version":          user.get("version", 1),
             "updated_at":       user.get("updated_at", ""),
             "stale_after_days": user.get("stale_after_days", 90),
-            "source":           "user_cache",
+            "source":           "user_cache+bundled",
         }
     else:
-        CLOUD_MODELS = _build_models(bundled.get("cloud_models", []))
+        CLOUD_MODELS = _build_models(bundled_rows)
         CATALOG_META = {
             "version":          bundled.get("version", 1),
             "updated_at":       bundled.get("updated_at", ""),

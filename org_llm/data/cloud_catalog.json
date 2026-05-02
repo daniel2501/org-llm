@@ -112,6 +112,36 @@
     },
     {
       "provider": "openrouter",
+      "slug": "moonshotai/kimi-k2",
+      "roles": [
+        "chat",
+        "instruct",
+        "text",
+        "reason"
+      ],
+      "quality": 215,
+      "cost_in": 0.57,
+      "cost_out": 2.3,
+      "license": "Modified MIT (Moonshot)",
+      "note": "Moonshot Kimi K2; 1T MoE / 32B active, strong tool-use",
+      "license_tier": "open_weight"
+    },
+    {
+      "provider": "openrouter",
+      "slug": "moonshotai/kimi-k2-thinking",
+      "roles": [
+        "reason",
+        "chat"
+      ],
+      "quality": 210,
+      "cost_in": 0.6,
+      "cost_out": 2.5,
+      "license": "Modified MIT (Moonshot)",
+      "note": "Kimi K2 reasoning-tuned variant; chain-of-thought",
+      "license_tier": "open_weight"
+    },
+    {
+      "provider": "openrouter",
       "slug": "google/gemini-2.0-flash-exp:free",
       "roles": [
         "chat",
