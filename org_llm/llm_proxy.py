@@ -2081,8 +2081,18 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
         except urllib.error.HTTPError as e:
             # Cloud responded with HTTP error — surface it. We've
             # not written anything yet; let the caller fall to 502.
-            self._last_error = (f"failover failed: cloud http {e.code} "
-                                  f"after {reason}")
+            # Phase 18.4-iter18: capture the FIRST 400 chars of the
+            # response body so the audit log explains WHY (cloud
+            # provider error JSON usually includes a 'message' field
+            # naming the bad parameter). Earlier we logged just the
+            # status code, leaving the user without diagnostic info.
+            try:
+                body = (e.read() or b"").decode("utf-8", "replace")[:400]
+            except Exception:
+                body = ""
+            self._last_error = (f"failover failed: cloud http {e.code}"
+                                  + (f" — {body}" if body else "")
+                                  + f" after {reason}")
             return False
         except Exception as e:
             self._last_error = (f"failover failed: {type(e).__name__}: "

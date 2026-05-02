@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import http.server
 import json
+import os
 import socketserver
 import sys
 import tempfile
@@ -474,6 +475,17 @@ def main() -> int:
     # DB; override for hermetic tests.
     saved_resolver = _lp._resolve_cloud_failover_target
     saved_timeout  = _lp._first_byte_timeout_secs
+
+    # Redirect ORG_LLM_ORG_DIR to a tempdir for the test window so
+    # the proxy's `_emit_failover_toast` writes its action file
+    # there instead of leaking 'fake-cloud-model' into the user's
+    # real ~/org/.opencode/sidebar-action.json — observed in live
+    # debug 2026-05-02 where a running plugin showed
+    # "☁ fake-cloud-model 1m ago" in the ACTIVE card after the
+    # test suite ran.
+    saved_org_dir_env = os.environ.get("ORG_LLM_ORG_DIR")
+    test_org_dir = Path(tempfile.mkdtemp(prefix="t6-org-"))
+    os.environ["ORG_LLM_ORG_DIR"] = str(test_org_dir)
     _lp._resolve_cloud_failover_target = lambda: {  # type: ignore[assignment]
         "endpoint": f"http://127.0.0.1:{cloud_port}",
         "model":    "fake-cloud-model",
@@ -587,6 +599,15 @@ def main() -> int:
     # Restore real resolver + timeout for any later tests.
     _lp._resolve_cloud_failover_target = saved_resolver  # type: ignore[assignment]
     _lp._first_byte_timeout_secs       = saved_timeout   # type: ignore[assignment]
+    if saved_org_dir_env is None:
+        os.environ.pop("ORG_LLM_ORG_DIR", None)
+    else:
+        os.environ["ORG_LLM_ORG_DIR"] = saved_org_dir_env
+    try:
+        import shutil
+        shutil.rmtree(test_org_dir, ignore_errors=True)
+    except Exception:
+        pass
     proxy3_srv.shutdown()
     stalling_srv.shutdown()
     cloud_srv.shutdown()
