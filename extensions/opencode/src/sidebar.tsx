@@ -251,6 +251,52 @@ export async function registerSidebar(api: any): Promise<void> {
   const tick = setInterval(() => { void refreshStatus(directory); }, tickMs);
   api.lifecycle?.onDispose?.(() => clearInterval(tick));
 
+  // Phase 18.4-iter8: file-based action bridge. opencode's slash
+  // router rejects vterm-injected /sys* commands at submit time
+  // (autocomplete shows them; submit-validator says "Unknown
+  // command" — registry lookup runs against a different list). The
+  // .md-stub workaround didn't move the needle either.
+  //
+  // Solution: skip opencode entirely. Doom (or any external client)
+  // writes a tiny JSON file at .opencode/sidebar-action.json with a
+  // monotonically-increasing `ts`. Plugin polls it on a fast tick
+  // and dispatches the action when ts > last_seen. No vterm, no
+  // slash registry, no submit handler. The pipe is a 4-line JSON
+  // file — robust by design.
+  let lastActionTs = 0;
+  const actionPath = `${directory}/.opencode/sidebar-action.json`;
+  const actionTickMs = 250;   // 4 polls/sec; cheap (local file stat)
+  const actionTick = setInterval(async () => {
+    try {
+      const f = Bun.file(actionPath);
+      if (!(await f.exists())) return;
+      const data = await f.json() as {
+        ts?: number;
+        action?: string;
+        direction?: number;
+        unit?: "step" | "viewport";
+        slash?: string;
+      };
+      const ts = Number(data?.ts) || 0;
+      if (!ts || ts <= lastActionTs) return;
+      lastActionTs = ts;
+      if (data.action === "scroll") {
+        const dir = Number(data.direction) || 0;
+        const unit = (data.unit === "viewport") ? "viewport" : "step";
+        if (dir !== 0) scrollSidebar(dir, unit);
+      } else if (data.action === "slash" && data.slash) {
+        // Generic /sys* dispatch path — Doom can drive any sys
+        // command through the same JSON channel.
+        const { dispatchSysCommand } = await import("./sys-commands");
+        dispatchSysCommand(api, data.slash);
+      }
+    } catch {
+      // Best-effort. A malformed action file shouldn't stall the
+      // tick; skip and try again next interval.
+    }
+  }, actionTickMs);
+  api.lifecycle?.onDispose?.(() => clearInterval(actionTick));
+
   // Dynamic re-draw on LLM output (Phase 17.1g). When the user
   // submits a message and the LLM responds, the chat surface
   // re-renders, and opencode invokes our sidebar_content slot

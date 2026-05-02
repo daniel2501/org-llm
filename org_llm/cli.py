@@ -14734,12 +14734,17 @@ def launch(
         "syscloud", "sysmenu", "sysmodel", "sysapply", "sysreclaim",
         "sysscrollup", "sysscrolldn", "sysscrollpgup", "sysscrollpgdn",
     )
+    # Body is intentionally minimal — when a /sys* slash is typed
+    # and the plugin's onSubmit hook clears the prompt, opencode
+    # never runs this body. If the body DOES run (race condition,
+    # plugin not loaded, etc.), opencode will pass it to the LLM as
+    # a user message; keeping it empty + zero-width prevents the
+    # leak. (Empty .md is rejected by opencode's frontmatter parser
+    # so we keep the description but nothing else.)
     _stub_body = (
         "---\n"
-        "description: org-llm /sys* command — handled by the TUI plugin\n"
+        "description: org-llm /sys* command (handled by the plugin; this body never runs)\n"
         "---\n"
-        "(no-op fallback: handled locally via the plugin's "
-        "onSubmit hook before this body runs)\n\n$ARGS\n"
     )
     for _slash in _SYS_SLASH_NAMES:
         _md_path = command_dir / f"{_slash}.md"

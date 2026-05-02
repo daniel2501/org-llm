@@ -71,16 +71,43 @@
   (org-llm--run-display (format "%s %s" org-llm-binary cmd) buf-name))
 
 
-;;; ── opencode-vterm bridge (Phase 18.4) ──────────────────────────────────────
-;; Drives a running opencode TUI from outside vterm by injecting /sys*
-;; slash commands via vterm-send-string. Sidesteps every Ctrl-/Alt-
-;; key conflict in Emacs vterm because Emacs is the dispatcher.
+;;; ── opencode action bridge (Phase 18.4-iter8) ──────────────────────────────
+;; Drives a running opencode TUI by writing a JSON action file that
+;; the plugin polls on a 250ms tick. Sidesteps every vterm key
+;; conflict AND opencode's slash registry validator (which rejected
+;; vterm-injected /sys* commands as "Unknown command" even when the
+;; same names worked when typed manually).
+;;
+;; The plugin reads `<org_dir>/.opencode/sidebar-action.json` and
+;; dispatches when `ts` exceeds the last-seen timestamp.
+
+(defcustom org-llm-org-dir-resolved
+  (or (and (boundp 'org-llm-org-dir) org-llm-org-dir)
+      (expand-file-name "~/org"))
+  "Directory the opencode plugin reads its action file from."
+  :type 'directory
+  :group 'org-llm)
+
+(defun org-llm--opencode-action-file ()
+  (expand-file-name ".opencode/sidebar-action.json"
+                     org-llm-org-dir-resolved))
+
+(defun org-llm--opencode-write-action (alist)
+  "Write ALIST as JSON into the plugin's action file with a fresh `ts'."
+  (require 'json)
+  (let* ((path (org-llm--opencode-action-file))
+         (dir  (file-name-directory path))
+         (ts   (truncate (* 1000 (float-time))))
+         (data (cons (cons 'ts ts) alist)))
+    (condition-case _err
+        (progn
+          (unless (file-directory-p dir) (make-directory dir t))
+          (with-temp-file path
+            (insert (json-encode data))))
+      (error nil))))
 
 (defun org-llm--opencode-vterm-buffer ()
-  "Return the most recently used opencode vterm buffer, or nil.
-Recognised buffer names: anything containing `org-llm: opencode'
-(written by `org-llm-launch') or `org-llm: claude' / a generic
-`*org-llm*' tag for ad-hoc sessions."
+  "Return the most recently used opencode vterm buffer, or nil."
   (cl-find-if (lambda (b)
                 (and (buffer-live-p b)
                      (with-current-buffer b
@@ -88,47 +115,46 @@ Recognised buffer names: anything containing `org-llm: opencode'
                      (string-match-p "org-llm" (buffer-name b))))
               (buffer-list)))
 
-(defun org-llm--opencode-send-slash (slash)
-  "Inject SLASH (e.g. `/sysscroll-up') into the running opencode vterm.
-Signals a clear error when no opencode buffer is alive."
-  (let ((buf (or (org-llm--opencode-vterm-buffer)
-                 (user-error "No opencode vterm buffer found — `SPC l o' to launch first"))))
-    (with-current-buffer buf
-      (vterm-send-string slash)
-      (vterm-send-return))))
-
-;; Slash names below match the canonical (no-hyphen) forms registered
-;; with opencode's slash command registry. Earlier hyphenated names
-;; (/sysscroll-up etc.) were rejected by the registry's validator
-;; when injected via vterm-send-string; the new forms register
-;; cleanly AND the plugin's dispatch matcher still accepts the
-;; legacy spellings when typed manually.
 ;;;###autoload
-(defun org-llm-sys-scroll-up    () "Sidebar scroll up by 1."     (interactive) (org-llm--opencode-send-slash "/sysscrollup"))
+(defun org-llm-sys-scroll-up    () "Sidebar scroll up by 1." (interactive)
+       (org-llm--opencode-write-action '((action . "scroll") (direction . -1) (unit . "step"))))
 ;;;###autoload
-(defun org-llm-sys-scroll-down  () "Sidebar scroll down by 1."   (interactive) (org-llm--opencode-send-slash "/sysscrolldn"))
+(defun org-llm-sys-scroll-down  () "Sidebar scroll down by 1." (interactive)
+       (org-llm--opencode-write-action '((action . "scroll") (direction . 1)  (unit . "step"))))
 ;;;###autoload
-(defun org-llm-sys-page-up      () "Sidebar page up."            (interactive) (org-llm--opencode-send-slash "/sysscrollpgup"))
+(defun org-llm-sys-page-up      () "Sidebar page up." (interactive)
+       (org-llm--opencode-write-action '((action . "scroll") (direction . -1) (unit . "viewport"))))
 ;;;###autoload
-(defun org-llm-sys-page-down    () "Sidebar page down."          (interactive) (org-llm--opencode-send-slash "/sysscrollpgdn"))
+(defun org-llm-sys-page-down    () "Sidebar page down." (interactive)
+       (org-llm--opencode-write-action '((action . "scroll") (direction . 1)  (unit . "viewport"))))
 ;;;###autoload
-(defun org-llm-sys-doctor       () "Inject /sysdoctor."          (interactive) (org-llm--opencode-send-slash "/sysdoctor"))
+(defun org-llm-sys-doctor       () "Run /sysdoctor." (interactive)
+       (org-llm--opencode-write-action '((action . "slash") (slash . "/sysdoctor"))))
 ;;;###autoload
-(defun org-llm-sys-stats        () "Inject /sysstats."           (interactive) (org-llm--opencode-send-slash "/sysstats"))
+(defun org-llm-sys-stats        () "Run /sysstats." (interactive)
+       (org-llm--opencode-write-action '((action . "slash") (slash . "/sysstats"))))
 ;;;###autoload
-(defun org-llm-sys-recent       () "Inject /sysrecent."          (interactive) (org-llm--opencode-send-slash "/sysrecent"))
+(defun org-llm-sys-recent       () "Run /sysrecent." (interactive)
+       (org-llm--opencode-write-action '((action . "slash") (slash . "/sysrecent"))))
 ;;;###autoload
-(defun org-llm-sys-models       () "Inject /sysmodels."          (interactive) (org-llm--opencode-send-slash "/sysmodels"))
+(defun org-llm-sys-models       () "Run /sysmodels." (interactive)
+       (org-llm--opencode-write-action '((action . "slash") (slash . "/sysmodels"))))
 ;;;###autoload
-(defun org-llm-sys-cloud        () "Inject /syscloud."           (interactive) (org-llm--opencode-send-slash "/syscloud"))
+(defun org-llm-sys-cloud        () "Run /syscloud." (interactive)
+       (org-llm--opencode-write-action '((action . "slash") (slash . "/syscloud"))))
 ;;;###autoload
-(defun org-llm-sys-menu         () "Inject /sysmenu."            (interactive) (org-llm--opencode-send-slash "/sysmenu"))
+(defun org-llm-sys-menu         () "Run /sysmenu." (interactive)
+       (org-llm--opencode-write-action '((action . "slash") (slash . "/sysmenu"))))
 ;;;###autoload
-(defun org-llm-sys-insights     () "Inject /insights."           (interactive) (org-llm--opencode-send-slash "/insights"))
+(defun org-llm-sys-insights     () "Open /insights dialog." (interactive)
+       (org-llm--opencode-write-action '((action . "slash") (slash . "/insights"))))
 
 ;;;###autoload
 (defun org-llm-opencode-quit ()
-  "Cleanly close the running opencode vterm (Ctrl-c twice)."
+  "Cleanly close the running opencode vterm (Ctrl-c twice).
+This one DOES use vterm-send-string because the action bridge is
+inside opencode — once opencode dies, the plugin can't dispatch
+its own shutdown. Quit signals must reach the process directly."
   (interactive)
   (let ((buf (or (org-llm--opencode-vterm-buffer)
                  (user-error "No opencode vterm buffer found"))))
