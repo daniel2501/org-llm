@@ -712,6 +712,76 @@ this (=org-directory=, =org-roam-directory=,
   =doctor= output so "do you have =:lang org +roam2=?" / "is
   =:tools magit= loaded?" can be answered without asking.
 
+** 16.5d — Capture-template authoring (scribe writes to Doom)
+
+When @scribe is asked to capture a recurring shape — weekend
+todo, meeting notes, daily reflection, side-project log — and no
+matching =org-capture-template= exists in the user's Doom
+config, scribe should *offer to draft and persist one* instead
+of just one-shotting the capture into a flat file.
+
+User flow:
+1. User: "@scribe save this as my standard meeting-notes shape."
+2. Scribe inspects =org-capture-templates= via emacsclient.
+3. No matching template found. Scribe drafts elisp:
+
+   #+begin_src elisp
+   (after! org
+     (add-to-list 'org-capture-templates
+       '("m" "Meeting notes" entry
+         (file+headline "~/org/meetings.org" "Inbox")
+         "* %^{Topic}\n  :PROPERTIES:\n  :DATE: %U\n  :ATTENDEES: %^{Attendees}\n  :END:\n  %?\n")))
+   #+end_src
+
+4. Diff preview surfaced inline: "Add 'm — Meeting notes' to
+   your capture templates? Will append to
+   =~/.config/doom/config.el= under an =(after! org …)= block."
+5. On confirm, write the snippet (idempotent — skip if the key
+   already exists), then call =doom-sync= or
+   =server-eval-at= to reload =org-capture-templates= live.
+6. Scribe captures THIS turn's content using the new template
+   for the rest of the conversation.
+
+Why this matters:
+- The user's =org-capture-templates= is *the* canonical place
+  for "how I want recurring captures shaped." Today scribe
+  bypasses it (uses =capture_note= which is a flat append),
+  which means each scribe-driven capture has a slightly
+  different shape than the user's hand-typed ones.
+- Once the template exists, =C-c c m= from anywhere in Emacs
+  uses it too — scribe's contribution becomes part of the
+  user's permanent toolkit rather than session-scoped behavior.
+- Pairs with the *coder reviewer* from Phase 20: any elisp
+  scribe drafts goes through coder for safety/idiomatic review
+  before it's written to disk.
+
+Implementation surface:
+- New MCP tool =list_capture_templates()= reads
+  =org-capture-templates= via emacsclient.
+- New MCP tool =append_capture_template(elisp_block, name)=
+  with a strict validator: must be a single =add-to-list= form,
+  must target =org-capture-templates=, must include a unique
+  key. Writes to =~/.config/doom/config.el= under a section
+  marker (=;; --- org-llm: scribe-authored capture templates
+  ---=) so future updates land in the same place.
+- Diff preview goes through the existing review flow (Phase 20
+  coder reviewer if available, raw text diff otherwise).
+- =doom-sync --reload-org= triggers the live reload.
+
+Open questions:
+1. Where to write — a dedicated =~/.doom.d/scribe-templates.el=
+   that =config.el= sources, or directly into =config.el=? The
+   dedicated file is cleaner for revert; =config.el= is what
+   most users expect to grep for their config. Lean toward
+   dedicated file with a one-line =(load …)= insertion in
+   =config.el= on first use.
+2. Vanilla Emacs / Spacemacs equivalent — same elisp, different
+   target file. Defer like 16.5a.
+3. Multiple captures of the same shape across a session — once
+   the template lands, future captures should use =org-capture=
+   directly (via emacsclient) rather than =capture_note=. That
+   needs a new tool wrapper, =run_capture_template(key, body)=.
+
 ** Why this is its own phase
 
 Three downstream features depend on knowing the user's real Doom
