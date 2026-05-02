@@ -1959,7 +1959,17 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
             if cloud_target is not None and self._failover_to_cloud(
                     body, cloud_target, reason=f"upstream error: {e}"):
                 return
-            self._last_error = f"upstream: {e}"
+            # If cloud failover was attempted (cloud_target was set)
+            # but failed, _failover_to_cloud has already populated
+            # _last_error with "failover failed: …". Preserve it.
+            # When no cloud_target, surface the local upstream error
+            # plainly. Either way diagnostic info reaches the audit.
+            local_msg = f"upstream: {e}"
+            cloud_msg = getattr(self, "_last_error", None)
+            if cloud_target is not None and cloud_msg and cloud_msg.startswith("failover failed"):
+                self._last_error = f"{cloud_msg}; {local_msg}"
+            else:
+                self._last_error = local_msg
             self.send_error(502, f"upstream proxy error: {e}")
         except Exception as e:
             self._last_error = f"upstream: {e}"
