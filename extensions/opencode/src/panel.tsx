@@ -545,8 +545,26 @@ export async function loadStatus(directory: string): Promise<SidebarStatus> {
   }
 }
 
+// Phase 20.x: include runtime-overlay mtime in _cachedStatus so any
+// overlay change (intent_agent, manager_recent, etc.) invalidates
+// the cache and triggers a sidebar re-render. Without this, the
+// slot only re-runs when sidebar-status.json changes (every 5s
+// at most), and overlay updates are invisible until the next
+// status-file write — which is why the live TUI sidebar lagged
+// the /sysexport markdown output by minutes.
 export async function refreshStatus(directory: string): Promise<SidebarStatus> {
-  _cachedStatus = await loadStatus(directory);
+  const status = await loadStatus(directory);
+  let runtimeMtime = 0;
+  try {
+    const fs = require("node:fs");
+    runtimeMtime = fs.statSync(
+      `${directory}/.opencode/sidebar-runtime.json`).mtimeMs ?? 0;
+  } catch { /* no overlay yet */ }
+  // Stash the mtime under a private key so it's part of the cached
+  // value's identity; SectionActive / SectionManager still read
+  // the overlay file fresh on every render.
+  (status as any)._runtime_mtime = runtimeMtime;
+  _cachedStatus = status;
   return _cachedStatus;
 }
 

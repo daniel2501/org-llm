@@ -253,8 +253,11 @@ export async function registerSidebar(api: any): Promise<void> {
     }
   })();
 
-  // Refresh tick. Min 5s — local-disk file, faster wastes CPU.
-  const tickMs = Math.max(5_000, cfg.refresh_secs * 1_000);
+  // Refresh tick. Min 2s — local-disk file reads are cheap and
+  // we now also use this tick to pick up sidebar-runtime.json
+  // overlay changes (intent_agent, manager_recent). 5s lag was
+  // visible to the user on @-routed turns.
+  const tickMs = Math.max(2_000, cfg.refresh_secs * 1_000);
   const tick = setInterval(() => { void refreshStatus(directory); }, tickMs);
   api.lifecycle?.onDispose?.(() => clearInterval(tick));
 
