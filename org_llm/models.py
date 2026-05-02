@@ -373,7 +373,15 @@ def _install_binary_from_github(
         ver = _github_latest(owner, repo)
         url = asset_pattern.format(ver=ver, arch=_arch_slug())
         with tempfile.NamedTemporaryFile(suffix=url.rsplit(".", 1)[-1]) as tmp:
-            urllib.request.urlretrieve(url, tmp.name)
+            # Route through cloud._urlopen so distro-specific SSL
+            # CA bundle paths apply (Guix, Arch + certifi-only,
+            # macOS keychain). Bare urlretrieve was the last
+            # straggler from the test-session backlog [#A] item.
+            from .cloud import _urlopen as _ssl_urlopen
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "org-llm/install-tools"})
+            with _ssl_urlopen(req, timeout=120) as r:
+                Path(tmp.name).write_bytes(r.read())
             if url.endswith(".tar.gz") or url.endswith(".tgz"):
                 with tarfile.open(tmp.name) as tf:
                     for m in tf.getmembers():

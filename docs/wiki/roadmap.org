@@ -803,6 +803,101 @@ configurable threshold, transparently retry against the cloud
 provider (or a different local model). Today the user sees
 opencode's raw error UI; the proxy can recover before it bubbles.
 
+* TODO [#A] Planned — Phase 19: built-in vault git-sync       :planned:
+
+Today users syncing =~/org/= across machines have to run their
+own git wrapper (cron, magit, =git auto-commit-mode=, etc.). Make
+this a first-class org-llm capability: pull on launch, commit +
+push on quiescence, surface conflicts in the sidebar. Load-bearing
+for the cross-machine flow, the Routines integration (=Weekly GTD
+review= can only safely commit if local sync is the source of
+truth), and the *org-agenda-agent* (which needs a stable on-disk
+agenda to reason against).
+
+** Roll-out in three slices
+
+*** 19.1 — =org-llm sync= verb + launch/shutdown hooks (MVP)
+- New CLI: =org-llm sync= runs =git pull --rebase= then
+  =git add -A && git commit -m "auto: <slug>" && git push=
+  against the configured remote/branch. =--dry-run= prints the
+  diff. =--no-push= for read-only sync.
+- =launch= grows a pre-flight pull (configurable via
+  =git_sync_pull_on_launch=) so a freshly-opened TUI starts on
+  the latest revision.
+- TUI exit hook commits + pushes pending changes (configurable
+  via =git_sync_push_on_exit=). Crash-safe: orphaned changes
+  picked up on next launch's quiescence pass.
+- Auth: reuses whatever the existing =~/org= remote uses (SSH /
+  HTTPS+token / GitHub CLI). No new credential surface.
+
+*** 19.2 — Auto-embedder daemon piggyback (steady state)
+- Daemon already inspects mtimes; add a =git_sync= cycle that
+  fires after N seconds of quiescence (default 30s).
+- Single-flight lock: one sync at a time, no overlap with the
+  embedder's own writes (the daemon DOES write the SQLite db,
+  but never the org files themselves — distinct paths).
+- Squash window: =git_sync_squash_within_minutes= (default 5)
+  amends the most recent auto-commit instead of stacking, so the
+  history stays readable.
+- Backoff: rebase failures bump the next attempt by 2× up to a
+  ceiling, then surface to the sidebar.
+
+*** 19.3 — Conflict surfacing + recovery UX
+- Sidebar gains a =SYNC= row: =✓ clean=, =⏳ pulling=,
+  =⚠ N pending=, =✗ conflict in <path>=.
+- On =CONFLICT (content)= during rebase: abort the rebase, leave
+  the working tree untouched, and write a captain's-log entry +
+  notify via the sidebar. The user resolves manually; sync
+  resumes on the next clean pass.
+- =org-llm sync --resolve= helper that opens the conflicted file
+  in the user's editor (=$EDITOR= or =doom= bridge) and runs
+  =git rebase --continue= on save. Optional: LLM-assisted
+  three-way merge for prose-only conflicts (org headlines), gated
+  by a knob.
+
+** Config surface
+
+| key                                | default | meaning                                                    |
+|------------------------------------+---------+------------------------------------------------------------|
+| =git_sync_enabled=                 | false   | master switch; off until 19.1 lands                        |
+| =git_sync_remote=                  | origin  | remote name                                                |
+| =git_sync_branch=                  | main    | branch                                                     |
+| =git_sync_pull_on_launch=          | true    | =launch= runs =git pull --rebase= first                    |
+| =git_sync_push_on_exit=            | true    | TUI exit commits + pushes                                  |
+| =git_sync_daemon_quiescence_s=     | 30      | seconds of no-changes before the daemon syncs              |
+| =git_sync_squash_within_minutes=   | 5       | amend window for stacked auto-commits                      |
+| =git_sync_policy=                  | auto    | =auto= (commit+push) / =prompt= (ask) / =off= (read-only)  |
+| =git_sync_commit_template=         | "auto: {slug}" | message template; =\{slug\}=, =\{n_files\}=, =\{date\}= placeholders |
+
+** Open questions
+
+1. *Embedder corpus DB* — =~/org/.cache/= and =sqlite= live
+   alongside the .org files. Auto-add to =.gitignore= on first
+   sync, or refuse to sync if they're tracked? (Leaning: refuse,
+   with a one-shot =org-llm sync --gitignore-cache= helper.)
+2. *Two-machine race* — both machines edit the same file inside
+   the squash window; one wins, the other rebases. Acceptable?
+   The 19.3 conflict UX should make the loser's path visible.
+3. *Initial onboarding* — first-time users without a remote get a
+   no-op =git_sync_enabled=false=. Walk them through =gh repo
+   create --private daniel-org= during =install-tools=, or wait
+   for the user to ask?
+4. *opencode-write conflict* — when the LLM writes to a file
+   (Phase 16.x co-edit) and the daemon syncs mid-write. Lock the
+   file during LLM writes; the daemon already needs single-flight
+   anyway.
+
+** Why this is Phase 19, not a wishlist item
+
+Three downstream features can't ship cleanly without it:
+- *org-agenda-agent* (above) needs a stable on-disk agenda;
+  without sync, the remote routine reads stale state.
+- *Co-edit org files* (=#B=, below) wants to write back to the
+  vault — sync makes those writes durable across machines without
+  the user thinking about it.
+- *Multi-vault federation* (wishlist) is unbuildable without
+  a working single-vault sync first.
+
 * TODO [#A] Punch list — beta → 1.0                          :planned:
 
 Lifted from the original README roadmap stub:
@@ -857,6 +952,66 @@ Two open questions before this can ship:
 2. Tool-call audit log: every applied diff lands as a captain's-
    log entry so the trail of "who edited this paragraph and why"
    stays visible.
+
+** TODO [#B] org-agenda-agent — scheduling + GTD over org agenda
+A new preconfigured agent specialised for daily/weekly planning
+on top of =org-agenda=. Treats the agenda as the source of truth
+for what's open, scheduled, deadlined, and stalled, and helps the
+user reason about it the way a GTD coach would.
+
+*Lives inside org-llm* — ships as another entry in the bundled
+=_PRECONFIGURED_AGENT_PROMPTS= registry, not as a separate
+project. Invoked locally (=org-llm agent org-agenda …= or
+=@org-agenda= / =/agenda= in opencode), with full read access to
+the user's =~/org/= files via the existing tools.
+
+*Depends on Phase 19 (vault git-sync)* — once sync ships, the
+agent can also run as a remote weekly routine that commits its
+review back to =~/org/= via the same git-sync surface.
+
+Capabilities (sketch):
+- *Agenda read* — call into Emacs (via the existing companion
+  bridge) or parse the on-disk agenda files directly to get the
+  current TODO/SCHEDULED/DEADLINE state. =org-agenda-files= is the
+  canonical list.
+- *Triage assistance* — "what's stale?", "what's overdue?",
+  "what's blocked on me vs. waiting?". The agent groups items by
+  GTD context (=@phone=, =@errand=, =@deepwork=, etc.) and surfaces
+  the next likely action.
+- *Schedule proposals* — given a free block ("I have 2 hours
+  Wednesday morning"), the agent picks 1-3 candidate items and
+  proposes =SCHEDULED= timestamps. User confirms before any
+  write. Pairs with the *Co-edit org files* entry below for the
+  diff-preview-then-write path.
+- *Weekly review prompts* — walks the user through a Friday
+  GTD-style review: completed this week, slipped from last week,
+  empty inboxes, project next-actions. Output lands as a
+  captain's-log entry under =~/org/dailies/=.
+- *Deadline pressure model* — flags items where the gap between
+  =DEADLINE= and =SCHEDULED= is incompatible with the user's
+  recent throughput on similar tasks (uses the engagement /
+  activity tables under Phase 12).
+
+Implementation notes:
+- Lives alongside the other preconfigured agents in
+  =_PRECONFIGURED_AGENT_PROMPTS= in [[file:../../org_llm/cli.py][=org_llm/cli.py=]].
+- New tool: =list_agenda(context=)= that returns the parsed
+  agenda. Backed by either an Emacs RPC (preferred — matches the
+  structured-element view the user already sees) or a Python
+  parse of the headlines + properties.
+- Model role: =plan_model= (new) — defaults to the chat model.
+  Can route to a smarter cloud model for weekly reviews.
+- Slash entry: =/agenda= for agenda surface invoked from anywhere,
+  plus =@planner= as the routing alias (the existing =planner= agent
+  may be merged into or composed with this one).
+
+Open questions:
+1. Read-only first pass, or include the SCHEDULED-write path from
+   day one? (Leaning read-only first; writes via the Co-edit
+   surface once it lands.)
+2. Should the agent also run as a recurring routine (daily 7am
+   "here's your day")? That's the Routines integration —
+   probably a v2.
 
 ** DONE Preconfigured agents for org-llm
 CLOSED: [2026-05-02]

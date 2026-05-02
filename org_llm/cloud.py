@@ -27,6 +27,8 @@ def _ssl_context() -> ssl.SSLContext | None:
         "/etc/ssl/certs/ca-certificates.crt",   # Debian/Ubuntu/Arch/Guix System
         "/etc/pki/tls/certs/ca-bundle.crt",     # Fedora/RHEL
         "/etc/ssl/cert.pem",                    # BSD/macOS
+        "/opt/homebrew/etc/ca-certificates/cert.pem",  # macOS Apple Silicon Homebrew
+        "/usr/local/etc/ca-certificates/cert.pem",     # macOS Intel Homebrew
         str(Path.home() / ".guix-profile/etc/ssl/certs/ca-certificates.crt"),
         str(Path.home() / ".guix-home/profile/etc/ssl/certs/ca-certificates.crt"),
     ):
@@ -45,9 +47,27 @@ _SSL_CONTEXT = _ssl_context()
 
 def _urlopen(req, timeout: float = 30):
     """urlopen wrapper that injects our resolved SSL context."""
-    if _SSL_CONTEXT is not None and req.full_url.startswith("https://"):
+    url = req.full_url if hasattr(req, "full_url") else str(req)
+    if _SSL_CONTEXT is not None and url.startswith("https://"):
         return urllib.request.urlopen(req, timeout=timeout, context=_SSL_CONTEXT)
     return urllib.request.urlopen(req, timeout=timeout)
+
+
+def ssl_diagnostics() -> str:
+    """Human-readable summary of where the SSL context resolved from, or
+    an actionable hint when no CA bundle was found. Used by `org-llm
+    config --check` and surfaced when an HTTPS call raises
+    SSLCertVerificationError."""
+    if _SSL_CONTEXT is not None:
+        return "SSL CA bundle: resolved (see cloud._ssl_context for path order)."
+    return (
+        "SSL CA bundle: NOT FOUND. HTTPS calls will fail.\n"
+        "  Guix:    guix install nss-certs   (or: pip install certifi)\n"
+        "  Debian:  sudo apt install ca-certificates\n"
+        "  Arch:    sudo pacman -S ca-certificates\n"
+        "  Fedora:  sudo dnf install ca-certificates\n"
+        "  Any:     pip install certifi      (universal fallback)\n"
+    )
 
 
 # ── Provider registry ──────────────────────────────────────────────────────────

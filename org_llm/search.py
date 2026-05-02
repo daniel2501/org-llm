@@ -81,7 +81,7 @@ def _extract_title_phrases(query: str) -> list[str]:
     cleaned = _re.sub(rf"\s+(?:{TRAILING})\b\s*[.?!,]?\s*$", "",
                        cleaned, flags=_re.I)
     cleaned = cleaned.strip(" ?.!,'\"")
-    if cleaned and 2 <= len(cleaned.split()) <= 8 and len(cleaned) <= 80:
+    if cleaned and 1 <= len(cleaned.split()) <= 8 and len(cleaned) <= 80:
         _push(cleaned)
         # Also push contiguous N-grams of length 2..min(5, words) of the
         # cleaned query so partial matches still surface relevant titles.
@@ -170,9 +170,20 @@ def vector_search(
                 phrase_params["tagpat_phrase"] = f"% {tag_filter} %"
             for i, p in enumerate(phrases):
                 phrase_params[f"p{i}"] = f"%{p}%"
+                # Score 0.0 — best possible in cosine space — so
+                # the title-match bonus in _apply_signal_boosts
+                # actually moves these to the top. Earlier this
+                # was 1.0 (worst possible), so the −0.5 substring-
+                # bonus only got it to 0.5, and pure-cosine results
+                # at ~0.23 still beat it. Straggler from the
+                # test-session backlog: "search for 'Kafka' returns
+                # cosine matches; 'Kafka on the Shore' falls out of
+                # top-10 after re-sort." With 0.0 + bonus, phrase
+                # rows land at -0.5 (substring) or -1.0 (exact),
+                # comfortably ahead of cosine results.
                 phrase_rows = session.execute(text(f"""
                     SELECT n.node_id, n.title, n.body, n.tags, f.path,
-                           1.0 AS score
+                           0.0 AS score
                     FROM nodes n
                     JOIN files f ON f.id = n.file_id
                     WHERE LOWER(n.title) LIKE LOWER(:p{i})
@@ -315,7 +326,19 @@ def _apply_signal_boosts(results: list[SearchResult],
 
         return r.score + bonus
 
-    return sorted(results, key=_score)
+    # Return NEW SearchResult instances with the boosted score
+    # in `r.score`. SearchResult is a NamedTuple (immutable); the
+    # earlier version returned `sorted(results, key=_score)`
+    # which used _score as a SORT KEY only — the rows themselves
+    # kept their raw cosine scores. The caller then re-sorted by
+    # `r.score`, undoing all the boost work. Visible symptom:
+    # title-phrase rows fell out of the top-N because the
+    # injected score (was 1.0, now 0.0 — see vector_search) lost
+    # to cosine matches at ~0.23. Persisted bug from the
+    # test-session backlog [#A]. Use _replace so the bonus rides
+    # in r.score and downstream sorts agree.
+    boosted = [r._replace(score=_score(r)) for r in results]
+    return sorted(boosted, key=lambda r: r.score)
 
 
 def recent_nodes(

@@ -6358,6 +6358,22 @@ def _config_check_run() -> None:
         _add("org_dir", "[red]✗[/red]",
               f"{org_dir} missing or not a directory")
 
+    # ── ssl ca bundle ─────────────────────────────────────────
+    # HTTPS to cloud providers fails on Guix and minimal containers
+    # without a discoverable CA bundle. We probe known paths and fall
+    # back to certifi; this surfaces the result so users see a hint
+    # before the first SSL error.
+    try:
+        from .cloud import _SSL_CONTEXT as _ssl_ctx
+        if _ssl_ctx is not None:
+            _add("ssl", "[green]✓[/green]", "CA bundle resolved")
+        else:
+            _add("ssl", "[red]✗[/red]",
+                  "no CA bundle found — `pip install certifi` "
+                  "(or distro `ca-certificates`/`nss-certs`)")
+    except Exception as e:
+        _add("ssl", "[dim]-[/dim]", f"probe skipped: {e}")
+
     # ── cloud config sanity ───────────────────────────────────
     cloud_prov = cfg_rows.get("cloud_provider", "")
     cloud_endpoint = cfg_rows.get("cloud_endpoint_url", "")
@@ -8058,7 +8074,18 @@ def install_tools(
             )
             hail(f"Downloading Ollama ({arch_slug}) → {ollama_bin}")
             with warp("Beaming Ollama aboard"):
-                urllib.request.urlretrieve(url, ollama_bin)
+                # Route through cloud._urlopen so distro-specific
+                # SSL CA paths apply (Guix puts the bundle under
+                # ~/.guix-home/profile/etc/ssl/, certifi-only
+                # platforms route via certifi.where()). Bare
+                # urlretrieve here used to fail with
+                # CERTIFICATE_VERIFY_FAILED on Guix during install
+                # — straggler from the test-session backlog.
+                from .cloud import _urlopen
+                req = urllib.request.Request(
+                    url, headers={"User-Agent": "org-llm/install-tools"})
+                with _urlopen(req, timeout=120) as r:
+                    ollama_bin.write_bytes(r.read())
             ollama_bin.chmod(0o755)
             hail(f"Ollama installed at {ollama_bin}")
 
@@ -8116,7 +8143,15 @@ def install_tools(
         else:
             hail(f"Downloading {font_name} Nerd Font…")
             with warp("Transporting font data"):
-                urllib.request.urlretrieve(font_url, font_zip)
+                # Same SSL-context routing as the Ollama download
+                # above — bare urlretrieve fails on Guix without
+                # certifi.
+                from .cloud import _urlopen
+                req = urllib.request.Request(
+                    font_url,
+                    headers={"User-Agent": "org-llm/install-tools"})
+                with _urlopen(req, timeout=120) as r:
+                    font_zip.write_bytes(r.read())
             subprocess.run(
                 ["tar", "-xf", str(font_zip), "-C", str(font_dir)],
                 check=True,
