@@ -15877,7 +15877,14 @@ def launch(
             # to the session default.
             **{
                 _agent_name: {
-                    "mode":        "primary",
+                    # mode: "all" surfaces the agent in BOTH the
+                    # /agents picker (primary slot) AND the @<name>
+                    # autocomplete + routing (subagent slot). With
+                    # mode: "primary" the agent only appeared in
+                    # /agents — typing @scribe was literal text,
+                    # opencode never routed. SDK ref: tui.d.ts:1030
+                    # (=AgentConfig.mode: "subagent" | "primary" | "all"=).
+                    "mode":        "all",
                     "description": _agent_def["description"],
                     "prompt":      _agent_def["prompt"],
                     **(
