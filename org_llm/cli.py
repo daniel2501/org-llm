@@ -14677,11 +14677,18 @@ def launch(
     # insight-cards.json — Phase 16.1. The TUI plugin reads this
     # to render the /insights dialog + on-load toast. Always
     # written (even empty) so the plugin can detect "no cards"
-    # vs "cards file missing" cleanly.
+    # vs "cards file missing" cleanly. Phase 18.5: stamp the
+    # `auto_open` flag from config so the plugin knows whether
+    # to pop the modal at launch (default off — see config knob
+    # `insights_auto_open`).
     from dataclasses import asdict, is_dataclass
+    with get_session(_engine()) as _s:
+        _auto_open = (_cfg(_s, "insights_auto_open") or "false"
+                       ).strip().lower() == "true"
     _cards_payload = {
         "generated_at": int(time.time()),
         "count":        len(_cards),
+        "auto_open":    _auto_open,
         "cards": [
             asdict(c) if is_dataclass(c) else dict(c)
             for c in _cards

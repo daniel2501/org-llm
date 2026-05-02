@@ -241,6 +241,12 @@ KEY_DESCRIPTIONS = {
         "requests. Accepts `30m` / `1h` / `0` (immediate unload) / "
         "`-1` (forever). User-set keep_alive in the request always "
         "wins.",
+    "insights_auto_open":
+        "Auto-pop the /insights dialog at launch. False (default) "
+        "shows the toast + /insights slash but skips the modal — "
+        "useful while card generators still surface captain's-log "
+        "self-noise on long-running vaults. True restores the "
+        "Phase 16.1 'cards APPEAR ON OPEN' behaviour.",
 }
 
 

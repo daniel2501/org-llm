@@ -580,6 +580,15 @@ MODEL_DEFAULTS = {
     # (forever). Skipped when the user already set keep_alive in
     # their request — explicit user values always win.
     "proxy_prompt_keep_alive":        "30m",
+    # Auto-open the insight-cards dialog at launch (Phase 18.5).
+    # False (default): plugin shows a toast + /insights slash so the
+    # cards are reachable on demand, but does NOT pop a modal that
+    # the user must Esc to dismiss every launch. The card generators
+    # currently surface noisy captain's-log artifacts on long-running
+    # vaults — auto-popping a modal full of self-noise was worse than
+    # no modal. Set true to restore the Phase 16.1 behaviour where
+    # the dialog opens automatically.
+    "insights_auto_open":             "false",
     # Toast pinning (Phase 17.1s). When true, every toast our
     # plugin emits uses a long duration (1 hour) so messages
     # stay on screen until the user has time to read them. False

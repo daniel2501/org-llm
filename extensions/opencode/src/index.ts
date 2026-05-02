@@ -109,19 +109,28 @@ interface InsightCardsFile {
   generated_at?: string;
   count?: number;
   cards: InsightCard[];
+  // Phase 18.5: cli.py stamps this from `insights_auto_open` config
+  // (default false). Absent / false → plugin shows the toast +
+  // /insights slash but does NOT pop the modal at launch.
+  auto_open?: boolean;
 }
 
 // ── Plugin implementation ────────────────────────────────────────
 
-async function loadCards(directory: string): Promise<InsightCard[]> {
+async function loadCards(
+  directory: string,
+): Promise<{ cards: InsightCard[]; autoOpen: boolean }> {
   const path = `${directory}/.opencode/insight-cards.json`;
   try {
     const file = Bun.file(path);
-    if (!(await file.exists())) return [];
+    if (!(await file.exists())) return { cards: [], autoOpen: false };
     const data = (await file.json()) as InsightCardsFile;
-    return Array.isArray(data?.cards) ? data.cards : [];
+    return {
+      cards:    Array.isArray(data?.cards) ? data.cards : [],
+      autoOpen: data?.auto_open === true,
+    };
   } catch {
-    return [];
+    return { cards: [], autoOpen: false };
   }
 }
 
@@ -262,7 +271,7 @@ export const tui: TuiPlugin = async (api) => {
   }
 
   const directory = api.state.path.directory;
-  const cards = await loadCards(directory);
+  const { cards, autoOpen } = await loadCards(directory);
 
   if (cards.length === 0) return;
 
@@ -292,13 +301,20 @@ export const tui: TuiPlugin = async (api) => {
     duration: 8000,
   });
 
-  // Auto-open the dialog so cards APPEAR ON OPEN — the user shouldn't
-  // need to type /insights to discover what was prepared. The dialog
-  // is modal-y but Escape dismisses cleanly and `/insights` re-opens
-  // it from the command palette. setTimeout(..., 0) lets opencode's
-  // own UI mount first; opening synchronously here can race with the
-  // chat-surface paint and produce a flicker.
-  setTimeout(() => openInsightDialog(api, cards), 0);
+  // Phase 18.5: auto-opening the dialog at launch is OFF by default.
+  // Earlier iterations forced the modal so users would discover the
+  // feature (Phase 16.1's "cards APPEAR ON OPEN" goal), but the
+  // generators currently surface noisy captain's-log artifacts on
+  // long-running vaults — a modal that interrupts every launch with
+  // self-referential noise is worse than no modal. The toast above
+  // and the /insights slash + Ctrl+P palette entry remain so users
+  // who want the dialog can summon it. Flip
+  // insights_auto_open=true to restore the auto-modal — the value
+  // lives on the insight-cards.json itself (cli.py reads the config
+  // and stamps the file at launch).
+  if (autoOpen === true) {
+    setTimeout(() => openInsightDialog(api, cards), 0);
+  }
 };
 
 // opencode's plugin loader checks for both named exports (`tui` /

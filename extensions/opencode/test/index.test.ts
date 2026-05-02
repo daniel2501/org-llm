@@ -341,7 +341,7 @@ test("config.replace_internal flows through to plugins.deactivate (with internal
   }
 });
 
-test("plugin AUTO-OPENS the dialog on mount (cards appear on open)", async () => {
+test("plugin auto-opens the dialog on mount only when auto_open=true", async () => {
   // The user's request: insight cards must appear on open without the
   // user having to type /insights. The plugin schedules the dialog
   // open via setTimeout(..., 0) so opencode's UI mounts first; this
@@ -349,9 +349,13 @@ test("plugin AUTO-OPENS the dialog on mount (cards appear on open)", async () =>
   const dir = makeTmpDir();
   try {
     mkdirSync(join(dir, ".opencode"));
+    // Phase 18.5: auto-open is opt-in. With auto_open=true the
+    // plugin pops the modal; default (false / absent) → no modal,
+    // toast-only.
     writeFileSync(
       join(dir, ".opencode", "insight-cards.json"),
       JSON.stringify({
+        auto_open: true,
         cards: [
           { kind: "stale", title: "3 stale notes", body: "look at me" },
         ],
@@ -364,6 +368,21 @@ test("plugin AUTO-OPENS the dialog on mount (cards appear on open)", async () =>
     await new Promise((r) => setTimeout(r, 10));
 
     expect(api.ui.dialog.replace).toHaveBeenCalledTimes(1);
+
+    // Now with auto_open absent (= default false) — no modal.
+    writeFileSync(
+      join(dir, ".opencode", "insight-cards.json"),
+      JSON.stringify({
+        cards: [
+          { kind: "stale", title: "3 stale notes", body: "look at me" },
+        ],
+      }),
+    );
+    const api2 = makeApi();
+    api2.state.path.directory = dir;
+    await tui(api2 as unknown as Parameters<typeof tui>[0]);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(api2.ui.dialog.replace).not.toHaveBeenCalled();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
