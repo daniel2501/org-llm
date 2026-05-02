@@ -295,9 +295,25 @@ export function registerSlowLLMWatch(
     }
   });
 
+  // Phase 18.4-iter16: count ANY assistant-produced part type as
+  // "AI is responding," not just text. Earlier we only looked for
+  // type="text" — that misses reasoning models (DeepSeek-R1's
+  // <thinking> tokens arrive as type="reasoning") and tool-call
+  // streams (type="tool", "tool-call", etc.). Both produce
+  // visible activity that means the LLM is doing real work; both
+  // should disarm the stopwatch. User report: deepseek-r1
+  // failover responses got interrupted by auto-doctor at 25s
+  // even though R1 was actively streaming reasoning the whole time.
+  const PROGRESS_PART_TYPES = new Set([
+    "text",
+    "reasoning", "thinking",      // chain-of-thought (R1, qwq, etc.)
+    "tool", "tool-call", "tool-input", "tool-output", "tool-result",
+    "step-start", "step-end",     // model lifecycle markers
+    "file", "image",              // multimodal output
+  ]);
   const offPart = api.event?.on?.("message.part.updated", (e: any) => {
     const part = e?.properties?.part;
-    if (part?.type === "text") {
+    if (part?.type && PROGRESS_PART_TYPES.has(part.type)) {
       _aiResponding = true;
     }
   });
