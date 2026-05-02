@@ -480,6 +480,16 @@ export function dispatchSysCommand(api: any, text: string): boolean {
     return true;
   }
 
+  // /sysexport — dump current session as markdown to a file user
+  // can cat + paste. Phase 18.4-iter14.
+  if (trimmed === "/sysexport") {
+    if (sessionID) {
+      void api.client?.session?.abort?.({ sessionID });
+      void exportChatToFile(api, sessionID);
+    }
+    return true;
+  }
+
   // matchSysMessage covers /sysdoctor /sysstats /sysmodels /sysrecent
   // /sysreclaim — single-shot CLI subcommands that inject output.
   const m = matchSysMessage(trimmed);
@@ -492,6 +502,89 @@ export function dispatchSysCommand(api: any, text: string): boolean {
   }
 
   return false;
+}
+
+/** Render the current session's messages as plain markdown and write
+ * it to a file under the workspace's `.opencode/chat-export-*.md`.
+ * The user can then `cat` the file and paste the content back to
+ * an external assistant — replaces fragile screenshot pastes.
+ *
+ * Format mirrors a chat transcript:
+ *   ## user
+ *   <text>
+ *
+ *   ## assistant
+ *   <text>
+ *
+ *   ## tool_call: org-llm_search_notes
+ *   ```json
+ *   { args }
+ *   ```
+ *
+ *   ## tool_result
+ *   ```
+ *   <output>
+ *   ```
+ */
+async function exportChatToFile(api: any, sessionID: string): Promise<void> {
+  try {
+    const dir   = api.state?.path?.directory ?? ".";
+    const ts    = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const path  = `${dir}/.opencode/chat-export-${ts}.md`;
+
+    const msgs = api.state?.session?.messages?.(sessionID) ?? [];
+    const lines: string[] = [
+      `# org-llm chat export`,
+      `*session ${sessionID} · ${new Date().toISOString()}*`,
+      ``,
+    ];
+    for (const m of msgs) {
+      const role = (m as any).role ?? "?";
+      const id   = (m as any).id ?? "";
+      lines.push(`## ${role}`);
+      const parts = (api.state?.part?.(id) ?? []) as any[];
+      for (const p of parts) {
+        const kind = p?.type ?? "?";
+        if (kind === "text" && typeof p?.text === "string") {
+          lines.push(p.text);
+        } else if (kind === "tool" || kind === "tool-call") {
+          const name = p?.name ?? p?.toolName ?? "?";
+          const args = p?.args ?? p?.input ?? {};
+          lines.push(`### tool_call: ${name}`);
+          lines.push("```json");
+          try { lines.push(JSON.stringify(args, null, 2)); }
+          catch { lines.push(String(args)); }
+          lines.push("```");
+          if (p?.output ?? p?.result) {
+            lines.push(`### tool_result`);
+            lines.push("```");
+            const out = p.output ?? p.result;
+            lines.push(typeof out === "string" ? out : JSON.stringify(out, null, 2));
+            lines.push("```");
+          }
+        } else {
+          // Unknown part type — dump compactly. Best-effort, not pretty.
+          lines.push(`<!-- part type=${kind} -->`);
+          try { lines.push("```json\n" + JSON.stringify(p, null, 2) + "\n```"); }
+          catch { /* skip */ }
+        }
+      }
+      lines.push("");
+    }
+
+    await Bun.write(path, lines.join("\n"));
+    void injectChatMessage(api, sessionID,
+      `✓ Chat exported · ${msgs.length} message(s) → ${path}\n` +
+      `\n` +
+      `cat the file and paste its contents to share the transcript.`);
+  } catch (err) {
+    showToast(api, {
+      variant: "error",
+      title:   "/sysexport",
+      message: `failed: ${(err as Error)?.message ?? "unknown"}`,
+      duration: 6_000,
+    });
+  }
 }
 
 /** Two-stage TAB helper for destructive/state-changing commands.
@@ -755,6 +848,7 @@ function buildMenuText(api: any): string {
     ["↓ ", "/sysscrolldn [N]",     "scroll sidebar down N rows (default 1)"],
     ["⇈ ", "/sysscrollpgup [N]",   "scroll sidebar up N rows (default 10)"],
     ["⇊ ", "/sysscrollpgdn [N]",   "scroll sidebar down N rows (default 10)"],
+    ["📥", "/sysexport",            "dump this chat as markdown to .opencode/chat-export-*.md"],
   ];
 
   const out: string[] = [];
@@ -1178,6 +1272,20 @@ export function registerSysCommands(api: any): void {
       category: "org-llm",
       slash: { name: "sysscrollpgdn" },
       onSelect: () => doScrollSlash(api, "/sysscrollpgdn", +1, 10),
+    },
+    {
+      title: "Export this chat as markdown",
+      value: "org-llm.sysexport",
+      description: "Dump the current session as markdown to .opencode/chat-export-*.md for sharing.",
+      category: "org-llm",
+      slash: { name: "sysexport" },
+      onSelect: () => {
+        const sid = activeSessionID(api);
+        if (sid) {
+          clearPrompt();
+          void exportChatToFile(api, sid);
+        }
+      },
     },
   ]);
 
