@@ -1167,7 +1167,26 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     # grounds itself in the user's vault before acting. Avoids
     # restating this in 13 individual agent prompts.
     if agent_prompt:
+        import datetime as _dt
+        _now = _dt.datetime.now().astimezone()
+        _hour = _now.hour
+        _tod = ("late-night"  if _hour < 5
+                else "morning"  if _hour < 12
+                else "afternoon" if _hour < 17
+                else "evening"   if _hour < 21
+                else "night")
+        _is_weekend = _now.weekday() >= 5
         agent_prompt = (
+            f"CURRENT TIME: {_now.strftime('%Y-%m-%d %H:%M %Z')} "
+            f"({_now.strftime('%A')}, {_tod}"
+            f"{'; weekend' if _is_weekend else '; weekday'}).\n"
+            "  Use this when generating time-sensitive content. "
+            "  Don't suggest 'morning routines' in the evening, "
+            "  'tomorrow's agenda' on a weekend evening (it's "
+            "  Sunday by then), 'this Friday' on a Saturday, etc. "
+            "  When the user asks for 'today's' anything, anchor "
+            "  to the date above; for 'this weekend', anchor to "
+            "  the upcoming Saturday-Sunday relative to today.\n"
             "Vault-first context (judgment-based):\n"
             "  When the user asks for content 'based on'/'from'/"
             "'using' vault files, dailies, captures, or any "
