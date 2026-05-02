@@ -171,6 +171,17 @@ def auto_grant_roots() -> list[Path]:
             out.append(Path(entry).expanduser().resolve())
         except Exception:
             continue
+    # Implicit default: the user's vault. The user has already pointed
+    # org-llm at `org_dir` — granting the LLM read-access to its own
+    # vault by default removes the "ask the user to run 7 grant
+    # commands" failure mode. Sensitive deny-list still applies, so
+    # things like ~/org/.gnupg or ~/org/.ssh still get refused.
+    if not out:
+        org_dir = _read_config_value("org_dir") or "~/org"
+        try:
+            out.append(Path(org_dir).expanduser().resolve())
+        except Exception:
+            pass
     return out
 
 
@@ -324,12 +335,17 @@ def _denial_message(path: Path) -> str:
     grants = allowlist()
     summary = (", ".join(str(g) for g in grants[:5])
                + (" + more" if len(grants) > 5 else "")) if grants else "(none)"
+    parent = path.parent if path.is_file() else path
     return (
         f"Access denied: {path}\n"
         f"This path is not in the org-llm MCP allow-list.\n"
         f"Currently granted prefixes: {summary}\n"
-        f"Ask the user to run:  org-llm grant {path}\n"
-        "to authorise this path. Then retry."
+        f"BEFORE asking the user to run shell commands: try "
+        f"`request_access({parent!r}, reason='…')` — granting the "
+        f"parent directory covers all files inside it in one call.\n"
+        f"If self-grant is refused, suggest ONE consolidated "
+        f"command to the user:  `org-llm grant {parent}`  "
+        f"(directory grant covers every descendant)."
     )
 
 

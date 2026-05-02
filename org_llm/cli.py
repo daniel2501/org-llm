@@ -4452,7 +4452,21 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "  offer to broaden the search. NEVER invent file "
             "  names, dates, titles, or content the user didn't "
             "  share and the tools didn't return. When in doubt, "
-            "  call a tool — don't guess."
+            "  call a tool — don't guess.\n"
+            "GROUND RULE — SELF-GRANT, DON'T DELEGATE SHELL WORK:\n"
+            "  When read_file / list_directory returns 'Access "
+            "  denied: <path>', call request_access(<parent_dir>, "
+            "  reason='...') ONCE for the whole batch, not per "
+            "  file. The vault's auto-grant root covers ~/org/* by "
+            "  default, so this almost always succeeds silently. "
+            "  Then proceed with the original task — don't tell the "
+            "  user the grant happened unless they ask. If "
+            "  request_access REFUSES (path outside auto-grant "
+            "  roots), present ONE consolidated grant line "
+            "  (`org-llm grant <parent_dir>`) and the once-and-done "
+            "  alternative (`org-llm grant-root <prefix>`) — never "
+            "  list 5+ individual `org-llm grant <file>` commands. "
+            "  Wildcards work: `org-llm grant '~/org/daily/*.org'`."
         ),
     },
     "engineer": {
@@ -18288,31 +18302,90 @@ def pi(
 
 @app.command(rich_help_panel="LLM Auth (MCP)")
 def grant(
-    path: Annotated[str, typer.Argument(help="Filesystem path to authorise the LLM to read")],
+    paths: Annotated[list[str], typer.Argument(
+        help="One or more paths or glob patterns to authorise. "
+             "Quote globs to prevent shell expansion: "
+             "`org-llm grant '~/org/daily/*.org'`")] = None,
 ):
     """Authorise the MCP server (and any LLM connected to it) to read files
-    under PATH. Adds an entry to the `mcp_file_allowlist` config row.
+    under each PATH. Adds entries to the `mcp_file_allowlist` config row.
 
-    The LLM can then use the `read_file` and `list_directory` MCP tools on
-    any descendant. Revoke with `org-llm revoke <path>`. Inspect with
-    `org-llm grants`.
+    Accepts:
+      • Single path:    `org-llm grant ~/org`
+      • Multiple paths: `org-llm grant ~/org ~/notes ~/journal`
+      • Glob pattern:   `org-llm grant '~/org/daily/*.org'`  (quoted!)
+
+    Tip: a directory grant covers every file under it, so you usually
+    want `org-llm grant ~/org/daily/` rather than expanding a glob.
+
+    Revoke with `org-llm revoke <path>`. Inspect with `org-llm grants`.
     """
     from . import access
-    p = Path(path).expanduser().resolve()
-    if not p.exists():
-        red_alert(f"Path does not exist: {p}")
-        on_screen("Grant the path anyway? It must exist when the LLM tries to read it.")
-        if not typer.confirm("Add to allow-list anyway?", default=False):
-            raise typer.Exit(1)
-    if access.grant(str(p)):
-        hail(f"Granted: {p}")
-        if p.is_dir():
-            on_screen("LLM can now read any file under this directory.")
-        on_screen("Inspect with: [bold]org-llm grants[/bold]")
-        make_it_so()
-    else:
-        red_alert("Failed to write allow-list. Is the DB initialised?")
+    import glob as _glob
+    if not paths:
+        red_alert("grant: at least one PATH required")
+        raise typer.Exit(2)
+
+    # Expand globs that the shell didn't expand (because they were
+    # quoted) and flatten to a unique resolved list.
+    expanded: list[Path] = []
+    seen: set[str] = set()
+    glob_chars = set("*?[")
+    for raw in paths:
+        if any(c in raw for c in glob_chars):
+            matches = _glob.glob(os.path.expanduser(raw))
+            if not matches:
+                red_alert(f"glob matched nothing: {raw}")
+                continue
+            for m in matches:
+                p = Path(m).resolve()
+                if str(p) not in seen:
+                    seen.add(str(p))
+                    expanded.append(p)
+        else:
+            p = Path(raw).expanduser().resolve()
+            if str(p) not in seen:
+                seen.add(str(p))
+                expanded.append(p)
+
+    # Auto-collapse: if every expanded path shares a common parent
+    # AND that parent is a directory, grant the parent instead. Saves
+    # 7 allow-list rows for `~/org/daily/*.org` cases.
+    common_parent: Path | None = None
+    if len(expanded) > 1 and all(p.is_file() for p in expanded):
+        try:
+            cp = Path(os.path.commonpath([str(p) for p in expanded]))
+            if cp.is_dir() and cp != Path("/"):
+                common_parent = cp
+        except ValueError:
+            common_parent = None
+    if common_parent is not None:
+        on_screen(f"[dim]All {len(expanded)} paths share parent "
+                  f"{common_parent} — granting the directory instead "
+                  f"(covers all {len(expanded)} files + future "
+                  f"additions).[/dim]")
+        expanded = [common_parent]
+
+    granted: list[Path] = []
+    for p in expanded:
+        if not p.exists():
+            red_alert(f"Path does not exist: {p}")
+            if not typer.confirm("Add to allow-list anyway?", default=False):
+                continue
+        if access.grant(str(p)):
+            granted.append(p)
+        else:
+            red_alert(f"Failed to grant: {p}")
+
+    if not granted:
+        red_alert("No paths granted.")
         raise typer.Exit(1)
+    for p in granted:
+        hail(f"Granted: {p}"
+              + ("  (directory — covers all descendants)"
+                  if p.is_dir() else ""))
+    on_screen("Inspect with: [bold]org-llm grants[/bold]")
+    make_it_so()
 
 
 @app.command(rich_help_panel="LLM Auth (MCP)")

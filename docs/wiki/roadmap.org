@@ -532,6 +532,128 @@ The bundled =chat_model= default is already =llama3.2= so fresh
 installs are fine; this is for users who manually overrode it
 without realising the tool-calling implications.
 
+* TODO [#A] Planned — Phase 20: Agent crew (manager + specialists) :planned:
+
+Today the 13 preconfigured agents are independent specialists —
+the user picks one via =@scribe= / =@engineer= / etc. and the
+chosen agent answers in isolation. Phase 20 turns the registry
+into a *crew* with a manager that orchestrates the others, plus
+peer-review hand-offs so a draft from one specialist passes
+through another's review before reaching the user.
+
+** What the crew gives you that solo agents don't
+
+- *Manager / orchestrator agent (=@crew= or default)* — the front
+  door. Routes to specialists, holds the conversation state, and
+  composes results when a task spans multiple domains
+  ("plan + implement + review" is one crew turn, not three solo
+  turns the user has to chain).
+- *Peer review hand-off* — when a specialist drafts something
+  with downstream impact, the manager runs it past the relevant
+  reviewer before surfacing it. The *coder-as-any-language-reviewer*
+  is the canonical pattern: any time another agent produces code
+  in any language (bash, SQL, Python, regex, JSON-with-jq, elisp,
+  Dockerfiles, …), the coder reviewer gets a pass at it before
+  the user does. Concrete examples:
+  - =researcher= drafts a =find ... -exec rm= recommendation;
+    coder flags the missing =-i= and suggests =fd ... | xargs -I
+    {} rm -i {}= as safer. User sees the reviewed version, with
+    drafter + reviewer named.
+  - =analyst= drafts a SQL query that does =SELECT *= on a
+    fact table; coder flags the full-table-scan and proposes a
+    column list + index-friendly =WHERE=.
+  - =scribe= drafts an org-babel block with a regex; coder
+    flags the catastrophic-backtracking pattern.
+  The reviewer is *language-agnostic* — same agent for shell,
+  SQL, Python, regex, etc. — driven by detect-language-then-
+  apply-rule rather than by 8 per-language reviewers.
+- *Specialist tool subsets* — each agent gets *only* the MCP
+  tools it should use (researcher: read tools; scribe: capture
+  tools; engineer: code + dbt tools). Stops the "scribe runs
+  =dbt build=" failure mode. Manager has a routing tool that
+  invokes each specialist instead of the full toolbox.
+- *Per-role model preferences* — already partially shipped as
+  =model_role= slots (=summarize_model=, =review_model=, etc.).
+  Phase 20 finishes the wiring so each crew member's model is
+  independently configurable in =~/org/org-llm-agents.org=.
+
+** The default crew
+
+Working name → role → typical reviewers (suggested defaults):
+
+| agent      | role                          | reviewed by      |
+|------------+-------------------------------+------------------|
+| crew       | Manager / dispatcher          | (none — top)     |
+| researcher | Vault read-only Q&A           | scribe (citation) |
+| scribe     | Capture + structure           | librarian (tags)  |
+| engineer   | Code + dbt                    | coder (review)   |
+| coder      | Code review (any language)    | (terminal)       |
+| planner    | Multi-step decomposition      | engineer (deps)  |
+| triager    | Vault hygiene                 | (auto-approved)  |
+| reviewer   | Critique / lint / safety      | (terminal)       |
+| writer     | Long-form prose               | scribe (style)   |
+| translator | Multilingual                  | (terminal)       |
+| analyst    | Data + metrics                | engineer (sql)   |
+| librarian  | Tag taxonomy                  | (terminal)       |
+| extractor  | NER / fact extraction         | scribe (capture) |
+| summarizer | TL;DR / abstracts             | (terminal)       |
+| vision     | Image understanding           | (terminal)       |
+
+The user customises the table — adds their own specialists,
+removes ones they don't use, swaps reviewers — by editing
+=~/org/org-llm-agents.org=. The literate-config round-trip
+already exists; Phase 20 extends the schema to express the
+=reviewed_by= column and =allowed_tools= per agent.
+
+** Roll-out
+
+*** 20.1 — Manager agent (=@crew=) + tool-subset enforcement
+- New preconfigured agent =crew= that defaults to =primary=
+  mode in opencode and is the agent users hit when they don't
+  type =@anything=.
+- Per-agent =allowed_tools= column in the agents table; manager
+  has a single =delegate(agent, prompt)= tool that runs the
+  specialist with its own subset.
+- Existing solo invocation pattern (=@scribe ...=) keeps working
+  — just bypasses the manager.
+
+*** 20.2 — Peer review pipeline
+- =reviewed_by= column expressed as one or more reviewer names.
+- When the manager assembles a final answer, it runs each
+  draft through its declared reviewer first. Reviewer either
+  approves verbatim, edits, or rejects (manager re-runs the
+  drafter with the rejection note).
+- *Concrete first use case*: any agent that emits code (in any
+  language — bash, SQL, Python, regex, jq, elisp, Dockerfile,
+  …) routes through the =coder= reviewer first. The reviewer
+  does language-detection then applies the rule set for that
+  language: bash → flag missing =--dry-run= / unsafe =rm -rf=;
+  SQL → flag full-table-scans / unparameterised input; regex →
+  flag catastrophic-backtracking; etc. User only sees the
+  reviewed, hardened version with both drafter and reviewer
+  named in the response.
+
+*** 20.3 — Crew-level memory + composition
+- Cross-agent memory: when the manager dispatches to multiple
+  specialists in one turn, they share a per-turn scratchpad so
+  the planner's output is visible to the engineer and the
+  reviewer. Avoids "tell me again what you decided" loops.
+- Crew composition for common workflows: =/walk-review= becomes
+  a saved crew turn (researcher → reviewer → scribe), shippable
+  as a slash command.
+
+** Open questions
+
+1. *Cost*: every reviewed draft is 2× LLM calls. Default to
+   review-on-bash-and-sql-only? Make =reviewed_by= empty for
+   most agents and require opt-in?
+2. *Loop guard*: =coder= reviews =engineer= reviews =coder= ...
+   need a max-depth (probably 1).
+3. *Manager model*: the manager doesn't draft, just routes —
+   it can run on a much smaller / faster model than the
+   specialists. Add a =manager_model= role slot? (Likely yes;
+   defaults to =fast_model=.)
+
 * TODO [#A] Planned — Phase 16.5: Doom config introspection  :planned:
 
 org-llm currently asks the user to set =org_dir=, =daily_dir=,
