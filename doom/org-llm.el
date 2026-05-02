@@ -134,23 +134,30 @@ by version. Best-effort — silent on filesystem errors."
                      (org-llm--proc-has-descendant-named child name (1- depth)))
                    (org-llm--read-proc-children pid))))))
 
+(defun org-llm--vterm-buffer-disqualified-p (buf)
+  "True when BUF is a vterm we should NOT route opencode keys to.
+Specifically the `claude-code-ide.el' conversation buffers
+named `*claude-code[…]*'. Such buffers OFTEN host opencode
+indirectly (Claude Code can spawn `org-llm launch` as a tool
+call) — but the user's keystrokes belong to the *direct*
+opencode session, not the agent-driven one."
+  (string-match-p "\\`\\*claude-code\\[" (buffer-name buf)))
+
 (defun org-llm--opencode-vterm-buffer ()
   "Return the vterm buffer hosting an `opencode' process, or nil.
 Walks the vterm subprocess's process tree (via /proc on Linux)
-looking for a descendant whose comm equals `opencode'. Falls
-back to a buffer-name regex (`*org-llm: opencode/claude/vterm*')
-when /proc isn't readable.
-
-The buffer-name approach alone wasn't enough: users who launch
-opencode from a generic vterm (not via `org-llm-launch') end up
-with buffers like `*vterm*<2>'. Process-tree inspection finds
-opencode regardless of buffer name."
+looking for a descendant whose comm equals `opencode'. Skips
+claude-code-ide.el conversation buffers (which often host
+opencode indirectly when an agent spawns it as a tool). Falls
+back to anchored buffer-name match (`*org-llm: opencode/claude/vterm*')
+when /proc isn't readable."
   (or
    ;; Path 1: process-tree match (Linux). Most reliable.
    (cl-find-if
     (lambda (b)
       (and (buffer-live-p b)
            (with-current-buffer b (derived-mode-p 'vterm-mode))
+           (not (org-llm--vterm-buffer-disqualified-p b))
            (let ((p (get-buffer-process b)))
              (and p (org-llm--proc-has-descendant-named
                      (process-id p) "opencode")))))
@@ -160,6 +167,7 @@ opencode regardless of buffer name."
     (lambda (b)
       (and (buffer-live-p b)
            (with-current-buffer b (derived-mode-p 'vterm-mode))
+           (not (org-llm--vterm-buffer-disqualified-p b))
            (string-match-p "\\`\\*org-llm: \\(opencode\\|claude\\|vterm\\)"
                             (buffer-name b))))
     (buffer-list))))
