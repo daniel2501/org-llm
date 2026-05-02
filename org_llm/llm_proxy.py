@@ -1795,7 +1795,20 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
 
     def _forward(self, body: bytes) -> None:
         upstream = self.server.upstream
-        url = f"{upstream}{self.path}"
+        # Phase 18.4-iter10: normalise path against upstream API
+        # version. Ollama's OpenAI-compat endpoint is at /v1/...; if
+        # opencode sends bare /chat/completions the bare path 404s on
+        # ollama (verified via curl). opencode's behavior has shifted
+        # at least once between sending /v1/... and bare /...; instead
+        # of chasing the moving target, the proxy auto-injects /v1
+        # when the path lacks it AND the upstream is ollama-shape
+        # (localhost / no /api/ prefix already).
+        path = self.path
+        if (path in ("/chat/completions", "/embeddings", "/models")
+                and "/v1" not in upstream
+                and "/api" not in upstream):
+            path = "/v1" + path
+        url = f"{upstream}{path}"
         # Strip headers urllib will set itself or that don't make
         # sense to forward (Host, Content-Length).
         forward_headers = {
