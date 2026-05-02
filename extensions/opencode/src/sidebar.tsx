@@ -305,11 +305,6 @@ export async function registerSidebar(api: any): Promise<void> {
       // to "the LLM ate my /sys command". Fires only when the user
       // typed a /sys* prefix — Enter on plain prompts stays quiet.
       if (text.trim().startsWith("/sys")) {
-        showToast(api, {
-          variant: "info",
-          title:   "/sys Enter intercept",
-          message: `name=${name} text="${text.slice(0, 40)}" refOK=${!!ref}`,
-        });
         if (dispatchSysCommand(api, text)) {
           try { ref?.set?.({ input: "", mode: "normal", parts: [] }); } catch { /* */ }
           evt?.preventDefault?.();
@@ -322,21 +317,12 @@ export async function registerSidebar(api: any): Promise<void> {
     // Sidebar scroll keybinds.
     let delta = 0;
     let unit: "step" | "viewport" = "step";
-    let label = "";
-    if      (matchKeybind(evt, upBinds))   { delta = -1; unit = "step";     label = "up";     }
-    else if (matchKeybind(evt, downBinds)) { delta = +1; unit = "step";     label = "down";   }
-    else if (matchKeybind(evt, pgUpBinds)) { delta = -1; unit = "viewport"; label = "pgup";   }
-    else if (matchKeybind(evt, pgDnBinds)) { delta = +1; unit = "viewport"; label = "pgdn";   }
+    if      (matchKeybind(evt, upBinds))   { delta = -1; unit = "step";     }
+    else if (matchKeybind(evt, downBinds)) { delta = +1; unit = "step";     }
+    else if (matchKeybind(evt, pgUpBinds)) { delta = -1; unit = "viewport"; }
+    else if (matchKeybind(evt, pgDnBinds)) { delta = +1; unit = "viewport"; }
     else return;
-    // 18.4-iter2: wire debugReport to a toast so silent no-ops
-    // (ref null, opentui setter rejection) surface WHY instead
-    // of just "nothing happened".
-    scrollSidebar(delta, unit,
-      (info) => showToast(api, {
-        variant: "info",
-        title: `keybind ${label}`,
-        message: info,
-      }));
+    scrollSidebar(delta, unit);
     evt?.preventDefault?.();
     evt?.stopPropagation?.();
   });

@@ -47,7 +47,7 @@ export const SIDEBAR_DEFAULTS = {
   "chat_frames": true,
   "scroll_up_keys": "alt+up,shift+up,ctrl+up",
   "scroll_down_keys": "alt+down,shift+down,ctrl+down",
-  "scroll_pageup_keys": "alt+pageup,shift+pageup,ctrl+pageup",
-  "scroll_pagedown_keys": "alt+pagedown,shift+pagedown,ctrl+pagedown",
+  "scroll_pageup_keys": "alt+left,alt+pageup,shift+pageup,ctrl+pageup",
+  "scroll_pagedown_keys": "alt+right,alt+pagedown,shift+pagedown,ctrl+pagedown",
   "slow_llm_confirm": true
 } as const;
