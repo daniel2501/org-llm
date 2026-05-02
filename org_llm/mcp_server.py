@@ -755,6 +755,80 @@ def create_mcp_server():
         return msg
 
     @server.tool()
+    def export_manager_history(limit: int = 200,
+                                 out_path: str = "") -> str:
+        """Write the manager (crew_log) audit trail to a markdown
+        file. Use this when the user asks to see what the manager
+        has been doing, or to bundle a forensic record of the crew's
+        actions for a specific session.
+
+        - limit: max entries (newest first). Default 200.
+        - out_path: where to write. Default
+          `<org_dir>/.opencode/manager-history-<timestamp>.md`.
+
+        Returns the absolute path of the written file. Pairs with
+        the sidebar's MANAGER row (live last-3) and the
+        `org-llm crew-log` CLI verb (terminal inspection)."""
+        import time as _t
+        from pathlib import Path
+        from .llm_proxy import _format_manager_history
+        with get_session(engine) as session:
+            org_dir = Path(_cfg(session, "org_dir") or "~/org").expanduser()
+        if not out_path:
+            ts = _t.strftime("%Y-%m-%dT%H-%M-%S", _t.gmtime())
+            out_dir = org_dir / ".opencode"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = str(out_dir / f"manager-history-{ts}.md")
+        else:
+            out_path = str(Path(out_path).expanduser())
+        lines = _format_manager_history(limit=limit)
+        try:
+            Path(out_path).write_text("\n".join(lines))
+        except Exception as e:
+            return _themed("export_manager_history",
+                            f"[red]✗[/red] write failed: {e}",
+                            f"target: {out_path}")
+        return _themed("export_manager_history",
+                        f"[green]✓[/green] wrote {limit} entries",
+                        f"path: {out_path}")
+
+    @server.tool()
+    def export_sidebar_snapshot(out_path: str = "") -> str:
+        """Write the current sidebar state (VAULT / ACTIVE / HEALTH /
+        ARCHIVE plus MANAGER recent activity) to a markdown file.
+
+        Use this when the user asks 'export the sidebar' or wants a
+        snapshot of the current operational state. Returns the
+        absolute path of the written file."""
+        import time as _t
+        from pathlib import Path
+        from .llm_proxy import (_format_sidebar_snapshot,
+                                  _format_manager_history)
+        with get_session(engine) as session:
+            org_dir = Path(_cfg(session, "org_dir") or "~/org").expanduser()
+        if not out_path:
+            ts = _t.strftime("%Y-%m-%dT%H-%M-%S", _t.gmtime())
+            out_dir = org_dir / ".opencode"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = str(out_dir / f"sidebar-snapshot-{ts}.md")
+        else:
+            out_path = str(Path(out_path).expanduser())
+        lines = ["# org-llm sidebar snapshot",
+                  f"*{_t.strftime('%Y-%m-%dT%H-%M-%SZ', _t.gmtime())}*",
+                  ""]
+        lines += _format_sidebar_snapshot(org_dir)
+        lines += _format_manager_history(limit=10)
+        try:
+            Path(out_path).write_text("\n".join(lines))
+        except Exception as e:
+            return _themed("export_sidebar_snapshot",
+                            f"[red]✗[/red] write failed: {e}",
+                            f"target: {out_path}")
+        return _themed("export_sidebar_snapshot",
+                        f"[green]✓[/green] sidebar exported",
+                        f"path: {out_path}")
+
+    @server.tool()
     def infer_capture_style(dir_path: str = "",
                               force_refresh: bool = False) -> str:
         """Detect the dominant org-mode capture style in a directory

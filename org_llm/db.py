@@ -908,6 +908,13 @@ _PROMOTED_DEFAULTS = {
     # was working fine. 30s lets cold heavy models finish prefill
     # before the failover decision.
     "proxy_first_byte_timeout_ms":    ("8000",  "30000"),
+    # Phase 20 — added MANAGER row to the sidebar showing recent
+    # crew_log entries. Promote existing users from the old
+    # section list to the one that includes "manager".
+    "sidebar_sections":               (
+        "vault,active,agent,health,archive,engage",
+        "vault,active,manager,agent,health,archive,engage",
+    ),
 }
 
 

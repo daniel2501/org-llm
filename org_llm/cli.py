@@ -4482,10 +4482,19 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "        unnecessarily.\n"
             "      - Skip your own consultation when the task is "
             "        obviously simple AND the user has confirmed.\n"
-            "  • TOOLS YOU OWN: list_agents, delegate, proactive_doctor, "
-            "    plus all the specialists' read tools. You don't capture, "
-            "    edit, or run shells directly — delegate to scribe / "
+            "  • TOOLS YOU OWN: `org-llm_list_agents`, "
+            "    `org-llm_delegate`, `org-llm_proactive_doctor`, "
+            "    `org-llm_export_manager_history`, "
+            "    `org-llm_export_sidebar_snapshot`, plus all the "
+            "    specialists' read tools. You don't capture, edit, "
+            "    or run shells directly — delegate to scribe / "
             "    engineer / coder for those.\n"
+            "  • EXPORT REQUESTS: when the user asks to export the "
+            "    sidebar, manager history, or 'what have you been "
+            "    doing', call `org-llm_export_sidebar_snapshot` or "
+            "    `org-llm_export_manager_history` directly — these "
+            "    are tools, no delegation needed. Surface the path "
+            "    of the written file in your reply.\n"
         ),
     },
     "classifier": {
