@@ -691,8 +691,27 @@ function SectionActive(props: { s: SidebarStatus; t: any; color: any }) {
   // shows above the model row so the user can see at a glance
   // which preconfigured persona is answering. Falls back to the
   // session default ("org-llm") when nothing has answered yet.
+  // Prefer the user-intent agent from the runtime overlay
+  // (the proxy's intercept_agent_prefix writes intent_agent
+  // when @<name> swap fires) over the in-memory
+  // _activeAgentOverride (which holds whatever opencode tagged
+  // the assistant turn with — always primary in our config).
+  // Without this, the live TUI showed `agent: org-llm` even
+  // after a successful @scribe swap because the plugin's own
+  // message.updated handler kept stamping "org-llm" on every
+  // assistant event. The overlay file is the cross-process
+  // truth-source the proxy wrote during the swap.
+  let intentAgent = "";
+  try {
+    const fs = require("node:fs");
+    const home = process.env.HOME ?? "";
+    const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
+    const overlay = JSON.parse(fs.readFileSync(
+      `${orgDir}/.opencode/sidebar-runtime.json`, "utf8"));
+    intentAgent = (overlay.intent_agent || "").trim();
+  } catch { /* no overlay — fine, fall through */ }
   const agentOvr = getActiveAgentOverride();
-  const agentDisplay = agentOvr?.agent || "org-llm";
+  const agentDisplay = intentAgent || agentOvr?.agent || "org-llm";
   return (
     <SectionCard color={color} title="ACTIVE">
       <box flexDirection="row">
