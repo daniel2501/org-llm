@@ -1010,14 +1010,35 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     # them. But the wire format opencode actually SENDS to the
     # proxy is the bare model name — opencode strips the provider
     # prefix before forwarding. To make the swap behave the same
-    # way, strip the prefix for ollama-shape models. Cloud
-    # provider/slug values are kept as-is (the cloud-failover /
-    # cloud-first paths handle them).
+    # way, strip the prefix for ollama-shape models.
+    #
+    # Phase 18.7 escalation: skip the model swap entirely when
+    # `proxy_cloud_first=true`. Cloud-first sends every chat
+    # request to cloud regardless of `model`, so swapping to
+    # gemma3:latest just hands the request to
+    # `intercept_synth_tool_call` (gemma is on the deny-list)
+    # which serves it locally and slowly. With cloud-first ON,
+    # leave model alone — cloud serves with the agent's prompt
+    # via the user's existing cloud_model. (Walkthrough finding:
+    # @scribe hello! took 120s on gemma3 cold-load when
+    # cloud_first would have answered in ~10s.)
     if agent_model:
-        if agent_model.startswith("ollama/"):
-            parsed["model"] = agent_model[len("ollama/"):]
+        bare = (
+            agent_model[len("ollama/"):]
+            if agent_model.startswith("ollama/")
+            else agent_model
+        )
+        # Will the swap target a synth-tool deny-list model that
+        # would force a slow local path even when cloud is
+        # available? If yes, and cloud_first is on, skip the swap.
+        on_deny_list = "/" not in bare and any(
+            bare.split(":")[0].lower() == stem
+            for stem in _PROXY_NO_TOOL_STEMS
+        )
+        if on_deny_list and _cloud_first_enabled():
+            pass  # leave parsed["model"] alone — cloud_first wins
         else:
-            parsed["model"] = agent_model
+            parsed["model"] = bare
 
     # Stamp the agent name in the runtime sidebar overlay so the
     # ACTIVE card's `agent` row reflects the per-turn override.
