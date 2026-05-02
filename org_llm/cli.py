@@ -14713,43 +14713,49 @@ def launch(
         for name, body in slash_cmds.items():
             (command_dir / f"{name}.md").write_text(body)
 
-    # Phase 18.4-iter7: stub `.md` files for the /sys* family.
-    # opencode's submit-time slash validator only recognizes:
-    #   • built-in slashes
-    #   • project .md files in .opencode/command/
-    # Plugin-registered commands (api.command.register) appear in
-    # autocomplete + the command palette but are REJECTED at
-    # submit time with "Unknown command" — verified by the user
-    # typing `/sysscrolldn` directly and seeing the message even
-    # though the autocomplete lists the slash.
-    # Writing tiny .md stubs gives opencode a slash to recognise;
-    # the body just calls the corresponding org-llm subprocess
-    # via $ARGS, but in practice the plugin's onSubmit hook
-    # intercepts the slash via dispatchSysCommand BEFORE
-    # opencode runs the .md body — so the .md is a registration
-    # marker, not the actual handler.
-    command_dir.mkdir(parents=True, exist_ok=True)
+    # Phase 18.4-iter11: NO .md stubs for /sys* slashes.
+    # An earlier iteration (iter7, 84d89ea) wrote stubs to make
+    # Doom-injected slashes pass opencode's submit-time validator.
+    # That path was abandoned in iter8 (fe92e18) for the JSON file-
+    # action bridge — Doom no longer touches opencode's slash
+    # router. The leftover .md stubs then BROKE manual typing of
+    # /sysmenu et al.: opencode found the .md FIRST, ran its
+    # (empty) body, and submitted empty/garbage content to the LLM
+    # which choked.
+    #
+    # Plugin's onSubmit hook handles typed /sys* commands without
+    # an .md present (proven by /sysdoctor which never had one).
+    # Active cleanup: remove any stale stubs we wrote in iter7 so
+    # users who upgrade aren't stuck with the broken state.
     _SYS_SLASH_NAMES = (
         "sysrun", "sysdoctor", "sysstats", "sysmodels", "sysrecent",
         "syscloud", "sysmenu", "sysmodel", "sysapply", "sysreclaim",
         "sysscrollup", "sysscrolldn", "sysscrollpgup", "sysscrollpgdn",
+        # legacy iter4 short forms — also stubs we'd written
+        "sysup", "sysdn", "syspgup", "syspgdn",
     )
-    # Body is intentionally minimal — when a /sys* slash is typed
-    # and the plugin's onSubmit hook clears the prompt, opencode
-    # never runs this body. If the body DOES run (race condition,
-    # plugin not loaded, etc.), opencode will pass it to the LLM as
-    # a user message; keeping it empty + zero-width prevents the
-    # leak. (Empty .md is rejected by opencode's frontmatter parser
-    # so we keep the description but nothing else.)
-    _stub_body = (
-        "---\n"
-        "description: org-llm /sys* command (handled by the plugin; this body never runs)\n"
-        "---\n"
+    # Match both iter7 ("handled locally via the plugin's onSubmit
+    # hook before this body runs") and iter9 ("handled by the plugin;
+    # this body never runs") marker text. Either marker = stub we
+    # wrote, safe to delete. User-authored .md with the same name
+    # would have different wording and stays put.
+    import re as _re
+    _stub_pattern = _re.compile(
+        r"handled (locally via the plugin|by the plugin; this body never runs)"
     )
     for _slash in _SYS_SLASH_NAMES:
         _md_path = command_dir / f"{_slash}.md"
         if not _md_path.exists():
-            _md_path.write_text(_stub_body)
+            continue
+        try:
+            _existing = _md_path.read_text()
+        except Exception:
+            continue
+        if _stub_pattern.search(_existing):
+            try:
+                _md_path.unlink()
+            except Exception:
+                pass
 
     # ── Inject $ARGS into existing .md slash commands ────────────────────
     # opencode's project slashes only forward user-typed args
