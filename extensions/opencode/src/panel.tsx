@@ -727,10 +727,13 @@ function SectionEngage(props: { s: SidebarStatus; t: any; color: any }) {
         </box>
       ))}
       <box flexDirection="row">
-        <text fg={t.textMuted}>{"^k/^j"}</text>
-        <text fg={t.text}> sidebar  </text>
+        <text fg={t.textMuted}>{"M-↑/↓"}</text>
+        <text fg={t.text}> sidebar · </text>
+        <text fg={t.textMuted}>{"/sysscroll-up"}</text>
+      </box>
+      <box flexDirection="row">
         <text fg={t.textMuted}>{"PgUp/Dn"}</text>
-        <text fg={t.text}> chat</text>
+        <text fg={t.text}> chat (opencode)</text>
       </box>
     </SectionCard>
   );

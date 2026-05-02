@@ -656,16 +656,26 @@ MODEL_DEFAULTS = {
     # that alt+arrow gets eaten as vterm-history; tmux can eat
     # shift+pgup; ctrl+arrow is the most reliable across stacks.
     # The CSV lets us also try the others as fallbacks.
-    # Phase 18.4: vim-style ctrl+k/j as the primary bindings — most
-    # terminal stacks pass them through cleanly, they don't conflict
-    # with opencode's own keymap, and they read naturally to anyone
-    # who's used vim/less/man. Arrow-key combos kept as fallbacks
-    # for users who prefer arrow navigation; the FIRST binding the
-    # user's terminal delivers wins.
-    "sidebar_scroll_up_keys":         "ctrl+k,ctrl+up,alt+up,shift+up",
-    "sidebar_scroll_down_keys":       "ctrl+j,ctrl+down,alt+down,shift+down",
-    "sidebar_scroll_pageup_keys":     "ctrl+u,ctrl+pageup,alt+pageup,shift+pageup",
-    "sidebar_scroll_pagedown_keys":   "ctrl+d,ctrl+pagedown,alt+pagedown,shift+pagedown",
+    # Phase 18.4 (re-revised): alt-prefix as primary because Ctrl-
+    # prefix collides too aggressively in Emacs vterm and most
+    # terminals. The casualties:
+    #   • Ctrl+d  → EOF (force-quits opencode by closing stdin)
+    #   • Ctrl+c  → SIGINT
+    #   • Ctrl+u  → kill-to-beginning (readline / shell)
+    #   • Ctrl+l  → clear screen
+    #   • Ctrl+j  → electric-newline-and-maybe-indent (Emacs)
+    #   • Ctrl+k  → kill-line (Emacs / readline)
+    # Alt-prefix (Meta in Emacs) gets forwarded by vterm as ESC-
+    # prefixed escape sequences which opentui parses cleanly. ctrl+
+    # combos stay in the CSV as best-effort fallbacks for plain-
+    # terminal users where they're free, but they're NOT the primary
+    # surface. The /sysscroll-{up,down,pgup,pgdn} slash commands are
+    # the bulletproof escape hatch — text in chat, no key parsing,
+    # works in every stack.
+    "sidebar_scroll_up_keys":         "alt+up,shift+up,ctrl+up",
+    "sidebar_scroll_down_keys":       "alt+down,shift+down,ctrl+down",
+    "sidebar_scroll_pageup_keys":     "alt+pageup,shift+pageup,ctrl+pageup",
+    "sidebar_scroll_pagedown_keys":   "alt+pagedown,shift+pagedown,ctrl+pagedown",
     # Confirm-before-act gate for the auto-doctor flow (17.1q).
     # When true (default), the slow-LLM watcher injects the
     # diagnostic + a list of the commands it WILL run, then waits

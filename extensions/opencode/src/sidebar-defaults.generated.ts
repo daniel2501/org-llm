@@ -45,9 +45,9 @@ export const SIDEBAR_DEFAULTS = {
   "pin_toasts": false,
   "chat_emojis": true,
   "chat_frames": true,
-  "scroll_up_keys": "ctrl+up,alt+up,shift+up",
-  "scroll_down_keys": "ctrl+down,alt+down,shift+down",
-  "scroll_pageup_keys": "ctrl+pageup,alt+pageup,shift+pageup",
-  "scroll_pagedown_keys": "ctrl+pagedown,alt+pagedown,shift+pagedown",
+  "scroll_up_keys": "alt+up,shift+up,ctrl+up",
+  "scroll_down_keys": "alt+down,shift+down,ctrl+down",
+  "scroll_pageup_keys": "alt+pageup,shift+pageup,ctrl+pageup",
+  "scroll_pagedown_keys": "alt+pagedown,shift+pagedown,ctrl+pagedown",
   "slow_llm_confirm": true
 } as const;
