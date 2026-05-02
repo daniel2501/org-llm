@@ -1132,7 +1132,22 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
             "wrong.\n"
             "  For explicit user confirmations on a draft you "
             "already showed ('save it', 'yes', 'y'), skip "
-            "re-sampling — just do the action.\n\n"
+            "re-sampling — just do the action.\n"
+            "PARALLEL TOOL CALLS — speed lever:\n"
+            "  When you need multiple INDEPENDENT tool calls, emit "
+            "them in ONE assistant turn (a single tool_calls array "
+            "with multiple entries), not sequentially across "
+            "turns. The runtime executes parallel calls "
+            "concurrently — 3 independent read_files in parallel "
+            "cost ONE cloud round-trip, not three. Examples that "
+            "should always parallelise:\n"
+            "  - `list_dailies` + `infer_capture_style` (both gather "
+            "    setup info; independent)\n"
+            "  - Multiple `read_file` calls on different paths\n"
+            "  - `search_notes` queries with different terms\n"
+            "  Sequential is correct only when later calls "
+            "  DEPEND on earlier results (e.g. read_file paths "
+            "  come from list_dailies output).\n\n"
             + agent_prompt
         )
     # Phase 20: append FORCE-SOLO marker so the agent's

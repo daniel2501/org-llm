@@ -873,12 +873,13 @@ def create_mcp_server():
                      if context else prompt)
         with get_session(engine) as session:
             from . import creds as _creds
-            cloud_provider = _cfg(session, "cloud_provider")
-            cloud_endpoint = _cfg(session, "cloud_endpoint_url")
-            cloud_model    = _cfg(session, "cloud_model")
-            ollama_url     = (_cfg(session, "ollama_url")
-                              or "http://localhost:11434")
-            api_key        = ""
+            cloud_provider   = _cfg(session, "cloud_provider")
+            cloud_endpoint   = _cfg(session, "cloud_endpoint_url")
+            cloud_model      = _cfg(session, "cloud_model")
+            cloud_fast_model = _cfg(session, "cloud_fast_model")
+            ollama_url       = (_cfg(session, "ollama_url")
+                                or "http://localhost:11434")
+            api_key          = ""
             if cloud_provider:
                 try:
                     api_key = _creds.read_secret(
@@ -893,8 +894,18 @@ def create_mcp_server():
                 import urllib.request as _ur
                 from .cloud import _urlopen as _ssl_urlopen
                 # If model_override doesn't carry a provider prefix
-                # AND we're going to cloud, swap to cloud_model
-                send_model = (model if "/" in model else cloud_model)
+                # AND we're going to cloud, swap to a cloud model.
+                # Fast-role agents (classifier, tag, summarize) get
+                # `cloud_fast_model` when configured — saves 5-10s
+                # per delegate call vs the full chat model.
+                _FAST_ROLES = {"fast_model", "tag_model",
+                                "summarize_model"}
+                if "/" in model:
+                    send_model = model
+                elif role in _FAST_ROLES and cloud_fast_model:
+                    send_model = cloud_fast_model
+                else:
+                    send_model = cloud_model
                 payload = json.dumps({
                     "model": send_model,
                     "messages": [

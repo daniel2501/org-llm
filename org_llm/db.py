@@ -333,6 +333,12 @@ MODEL_DEFAULTS = {
     "ollama_url":     "http://localhost:11434",
     # Defaults are tuned to fit a laptop CPU/16 GB RAM out of the box. Use
     # `org-llm models --tune` once you've got real hardware to scale up.
+    "cloud_fast_model": "",                 # cheap/fast cloud model used by
+                                            # delegate() for fast-role agents
+                                            # (classifier, tag, summarize).
+                                            # Empty → falls back to cloud_model.
+                                            # Suggested: qwen/qwen-2.5-7b-instruct
+                                            # or anthropic/claude-haiku-4.5.
     "embed_model":    "nomic-embed-text",   # 137 MB — semantic search
     "chat_model":     "llama3.2",           # 2.0 GB — ask / Q&A (first-flight friendly)
     "code_model":     "qwen2.5-coder",      # 4.7 GB — code generation
