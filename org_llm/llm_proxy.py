@@ -1116,6 +1116,29 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     agent_def = known[agent]
     agent_prompt = (agent_def.get("prompt") or "").strip()
     agent_model  = (agent_def.get("model")  or "").strip()
+    # Phase 20: prepend a STANDING PRINCIPLE — every specialist
+    # grounds itself in the user's vault before acting. Avoids
+    # restating this in 13 individual agent prompts.
+    if agent_prompt:
+        agent_prompt = (
+            "STANDING PRINCIPLE — vault-first context:\n"
+            "  Before answering or acting, sample relevant vault "
+            "  files via `org-llm_search_notes`, "
+            "  `org-llm_ask_notes`, `org-llm_list_dailies`, "
+            "  `org-llm_read_file`, or `org-llm_list_recent_nodes`. "
+            "  The user's life, projects, voice, and conventions live "
+            "  in those notes.\n"
+            "  FEEL FREE to read across the vault — multiple files, "
+            "  cross-references, sibling captures — whatever grounds "
+            "  your response. The vault is the source of truth; "
+            "  pulling 3-5 sample files to inform a single answer is "
+            "  expected, not excessive. Never answer from training "
+            "  data alone when vault data could ground the response. "
+            "  For shape-sensitive actions (captures, edits), sample "
+            "  the target surface AND a couple of sibling files first "
+            "  and mirror their style.\n\n"
+            + agent_prompt
+        )
     # Phase 20: append FORCE-SOLO marker so the agent's
     # CONSULT-CREW rule defers to user override THIS turn only.
     if force_solo and agent_prompt:
