@@ -332,10 +332,20 @@ def _format_sidebar_snapshot(org_dir: Path) -> list[str]:
         out.append(f"- org_dir: `{v.get('org_dir', '?')}`")
         out.append("")
 
-        # Live model + agent override the plugin captured from the
-        # most-recent assistant message; falls back to the
-        # launch-time snapshot for the cold-start case.
-        live_agent    = (runtime.get("agent") or "").strip()
+        # Live model + agent override. Prefer the user-intent
+        # signal (`intent_agent` — set by intercept_agent_prefix
+        # when an @<name> swap fires) over the assistant-turn
+        # signal (`serving_agent` — set by the plugin's
+        # message.updated handler with whatever opencode tagged
+        # the response with, always the session primary). Final
+        # fallback: legacy `agent` field for backward compat,
+        # then "org-llm".
+        live_agent    = (
+            runtime.get("intent_agent")
+            or runtime.get("serving_agent")
+            or runtime.get("agent")   # legacy
+            or ""
+        ).strip()
         live_model    = (runtime.get("model") or "").strip()
         live_provider = (runtime.get("provider") or "").strip()
         out.append("## ACTIVE")
@@ -1063,12 +1073,13 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
         else:
             parsed["model"] = bare
 
-    # Stamp the agent name in the runtime sidebar overlay so the
-    # ACTIVE card's `agent` row reflects the per-turn override.
-    # Without this, opencode tags the assistant message with the
-    # primary agent's name (org-llm) and the override stays
-    # there; the user's @<name> intent is invisible on the
-    # sidebar.
+    # Stamp the agent NAME in the runtime sidebar overlay's
+    # `intent_agent` slot so the ACTIVE card's `agent` row
+    # reflects the per-turn user intent. The plugin writes
+    # `serving_agent` separately (the agent name opencode tagged
+    # the assistant turn with — always the session's primary
+    # agent regardless of @<name> intent). Sidebar export prefers
+    # intent_agent so the user sees what THEY asked for.
     try:
         rt_path = (org_dir / ".opencode" / "sidebar-runtime.json")
         existing: dict = {}
@@ -1078,15 +1089,15 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
             except Exception:
                 existing = {}
         existing.update({
-            "agent":    agent,
-            "model":    parsed.get("model", ""),
+            "intent_agent": agent,
+            "model":        parsed.get("model", ""),
             "provider": (
                 "ollama" if not (agent_model or "").startswith(
                     ("openai/", "anthropic/", "openrouter/",
                      "moonshotai/", "deepseek/", "qwen/"))
                 else (agent_model.split("/", 1)[0])
             ),
-            "ts":       int(time.time() * 1000),
+            "ts":           int(time.time() * 1000),
         })
         rt_path.parent.mkdir(parents=True, exist_ok=True)
         rt_path.write_text(json.dumps(existing))
@@ -2438,6 +2449,16 @@ def intercept_qwen3_no_think(req: ProxyRequest) -> Optional[ProxyResponse]:
         return None
     model = (req.parsed_json.get("model") or "").lower()
     if "qwen3" not in model:
+        return None
+    # Phase 18.7: when proxy_cloud_first is on, the actual upstream
+    # is the cloud_model (qwen/qwen-2.5-72b-instruct or similar) —
+    # not qwen3. Adding /no_think here puts directive noise in the
+    # user message that the cloud model can't act on. Skip the
+    # injection in that case. Same logic for cloud_failover, but
+    # that path is decided dynamically in _forward — we'd be
+    # over-eager skipping for failover; the worst case is
+    # "/no_think" appears as a harmless suffix in the cloud reply.
+    if _cloud_first_enabled():
         return None
 
     messages = req.parsed_json.get("messages") or []

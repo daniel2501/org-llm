@@ -402,18 +402,39 @@ export function setActiveAgentOverride(agent: string, ts: number): void {
   _activeAgentOverride = { agent, ts };
   // Mirror to disk so the proxy's /sysexport interceptor (which
   // can't reach into plugin memory) can include the live agent
-  // in its sidebar snapshot. File path is documented in
-  // intercept_sysexport_command's _format_sidebar_snapshot.
+  // in its sidebar snapshot. Two channels in the overlay JSON:
+  //
+  //   intent_agent  — what the user typed (`@scribe`); the proxy's
+  //                   intercept_agent_prefix writes this when an
+  //                   @<name> swap happens. Per-turn user intent.
+  //
+  //   serving_agent — what opencode tagged the assistant turn
+  //                   with (always the session's primary agent —
+  //                   "org-llm" in our default config — even when
+  //                   the user @-targeted a different one).
+  //
+  // The proxy's _format_sidebar_snapshot prefers intent_agent for
+  // the ACTIVE card so per-turn @<agent> intent shows on the
+  // sidebar; falls back to serving_agent, then to "org-llm".
+  // Without this split, every assistant turn's overrides
+  // clobbered the proxy's per-turn intent stamp.
   try {
     const home = process.env.HOME ?? "";
     const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
     const path = `${orgDir}/.opencode/sidebar-runtime.json`;
-    void Bun.write(path, JSON.stringify({
-      agent,
+    // Read existing overlay to preserve intent_agent (the proxy
+    // wrote it; we shouldn't overwrite). If no existing intent,
+    // just write our serving_agent.
+    let existing: any = {};
+    try { existing = JSON.parse(Bun.file(path).text() as any); } catch {}
+    const merged = {
+      ...existing,
+      serving_agent: agent,
       ts,
-      model:    _activeModelOverride?.model ?? "",
-      provider: _activeModelOverride?.provider ?? "",
-    }));
+      model:    _activeModelOverride?.model    ?? existing.model    ?? "",
+      provider: _activeModelOverride?.provider ?? existing.provider ?? "",
+    };
+    void Bun.write(path, JSON.stringify(merged));
   } catch {
     // Best-effort. The live TUI sidebar still shows the override
     // correctly; only the markdown export gap remains if this fails.
