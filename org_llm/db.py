@@ -164,6 +164,34 @@ def log_crew_action(action: str, agent_from: str = "crew",
         pass
 
 
+class AgentBaseline(Base):
+    """Central registry for the prompt fragments every agent
+    inherits — time awareness, vault-first context, parallel tool
+    calls, no-hallucination rule, etc.
+
+    Replaces hardcoded preambles in intercept_agent_prefix. Each
+    row is one rule, with an `applies_to` field for scoping:
+
+      - "all"        → injected into every agent's prompt
+      - "specialist" → all specialists (anything except `crew`)
+      - "manager"    → just the crew (manager) agent
+      - "<name>,..." → comma-list of specific agent names
+
+    Plus an `enabled` flag to disable a rule globally and a
+    `sort_order` so the order of injection is predictable.
+
+    Round-trips to ~/org/org-llm-baselines.org via the same
+    literate-config pattern as agents and config knobs."""
+    __tablename__ = "agent_baseline"
+
+    id          = Column(Integer, primary_key=True)
+    name        = Column(Text, nullable=False, unique=True)
+    body        = Column(Text, nullable=False, default="")
+    applies_to  = Column(Text, nullable=False, default="all")
+    enabled     = Column(Integer, nullable=False, default=1)   # 0/1
+    sort_order  = Column(Integer, nullable=False, default=100)
+
+
 class CrewLog(Base):
     """Audit trail for the Phase 20 manager pattern.
 
@@ -877,6 +905,172 @@ MODEL_DEFAULTS = {
 }
 
 
+_DEFAULT_AGENT_BASELINES: list[dict] = [
+    {
+        "name":        "current_time",
+        "applies_to":  "all",
+        "sort_order":  10,
+        "body":        (
+            "CURRENT TIME: {now} ({day}, {tod}; {weekend_or_weekday}).\n"
+            "  Use this when generating time-sensitive content. "
+            "Don't suggest 'morning routines' in the evening, "
+            "'tomorrow's agenda' on a weekend evening (it's "
+            "Sunday by then), 'this Friday' on a Saturday, etc. "
+            "When the user asks for 'today's' anything, anchor "
+            "to the date above; for 'this weekend', anchor to "
+            "the upcoming Saturday-Sunday relative to today."
+        ),
+    },
+    {
+        "name":       "vault_first",
+        "applies_to": "all",
+        "sort_order": 20,
+        "body": (
+            "Vault-first context (judgment-based):\n"
+            "  When the user asks for content 'based on'/'from'/"
+            "'using' vault files, dailies, captures, or any "
+            "specific source, you MUST actually READ those files "
+            "before drafting. List, then read, then synthesise. "
+            "DO NOT generate generic items from training data when "
+            "the user pointed at specific files — that's "
+            "hallucination, and it's the #1 way agents get it "
+            "wrong.\n"
+            "  For explicit user confirmations on a draft you "
+            "already showed ('save it', 'yes', 'y'), skip "
+            "re-sampling — just do the action."
+        ),
+    },
+    {
+        "name":       "parallel_tool_calls",
+        "applies_to": "all",
+        "sort_order": 30,
+        "body": (
+            "PARALLEL TOOL CALLS — speed lever:\n"
+            "  When you need multiple INDEPENDENT tool calls, emit "
+            "them in ONE assistant turn (a single tool_calls array "
+            "with multiple entries), not sequentially across turns. "
+            "The runtime executes parallel calls concurrently — 3 "
+            "independent read_files in parallel cost ONE cloud "
+            "round-trip, not three. Sequential is correct only when "
+            "later calls DEPEND on earlier results."
+        ),
+    },
+    {
+        "name":       "tool_namespace",
+        "applies_to": "all",
+        "sort_order": 40,
+        "body": (
+            "TOOL NAMESPACE: ALL MCP tools are exposed under the "
+            "`org-llm_` prefix. Call `org-llm_delegate(...)`, "
+            "`org-llm_capture_note(...)`, etc. Bare names "
+            "(`delegate`, `capture_note`) get rejected with "
+            "'Model tried to call unavailable tool'. Use the "
+            "prefix EVERY tool call."
+        ),
+    },
+    {
+        "name":       "final_review_with_crew",
+        "applies_to": "specialist",
+        "sort_order": 50,
+        "body": (
+            "FAST PRE-REPLY REVIEW:\n"
+            "  Before emitting your FINAL user-facing reply on a "
+            "turn that drafted concrete content (a list, a plan, "
+            "a capture body, a code edit), call "
+            "`org-llm_delegate('crew', 'review: <one-line summary "
+            "of what you're about to surface>', "
+            "model_override='qwen/qwen-2.5-7b-instruct')` for a "
+            "fast (~1-3s) sanity check. If crew approves, emit. "
+            "If crew flags an issue, revise once and proceed.\n"
+            "  Skip this for: pure conversational replies "
+            "(greetings, acks, 'ok done'), tool-only turns where "
+            "the next assistant turn will continue, and "
+            "force-solo mode (`@<agent>!`)."
+        ),
+    },
+    {
+        "name":       "no_hallucination",
+        "applies_to": "specialist",
+        "sort_order": 60,
+        "body": (
+            "NO HALLUCINATION:\n"
+            "  If a tool call returns no results, say so plainly "
+            "and offer to broaden the search. NEVER invent file "
+            "names, dates, titles, or content the user didn't "
+            "share and the tools didn't return. When in doubt, "
+            "call a tool — don't guess."
+        ),
+    },
+]
+
+
+def init_baselines(engine) -> None:
+    """Seed the agent_baseline table with default rules. Idempotent
+    by `name` — existing rows are left untouched so user edits
+    survive across launches."""
+    with Session(engine) as s:
+        existing = {r.name for r in s.query(AgentBaseline).all()}
+        for spec in _DEFAULT_AGENT_BASELINES:
+            if spec["name"] in existing:
+                continue
+            s.add(AgentBaseline(
+                name=spec["name"],
+                body=spec["body"],
+                applies_to=spec.get("applies_to", "all"),
+                enabled=1,
+                sort_order=spec.get("sort_order", 100),
+            ))
+        s.commit()
+
+
+def render_baselines(agent_name: str, role: str = "specialist") -> str:
+    """Build the prompt-fragment block to prepend to an agent's
+    body. Reads enabled baselines whose `applies_to` matches the
+    agent (by name, role, or 'all'), sorts by sort_order, formats
+    `{now}` / `{day}` / `{tod}` / `{weekend_or_weekday}` placeholders
+    in the current_time row, and joins with blank lines.
+
+    Fail-safe: returns "" on any DB error so a broken baselines
+    table doesn't break agent dispatch."""
+    try:
+        import datetime as _dt
+        engine = make_engine()
+        now = _dt.datetime.now().astimezone()
+        h = now.hour
+        tod = ("late-night" if h < 5
+                else "morning" if h < 12
+                else "afternoon" if h < 17
+                else "evening" if h < 21
+                else "night")
+        is_weekend = now.weekday() >= 5
+        ph = {
+            "now":  now.strftime("%Y-%m-%d %H:%M %Z"),
+            "day":  now.strftime("%A"),
+            "tod":  tod,
+            "weekend_or_weekday": "weekend" if is_weekend else "weekday",
+        }
+        with Session(engine) as s:
+            rows = (s.query(AgentBaseline)
+                     .filter(AgentBaseline.enabled == 1)
+                     .order_by(AgentBaseline.sort_order)
+                     .all())
+        out_parts: list[str] = []
+        for r in rows:
+            scope = (r.applies_to or "all").lower()
+            scope_set = {p.strip() for p in scope.split(",") if p.strip()}
+            if "all" not in scope_set:
+                if not (agent_name in scope_set or role in scope_set):
+                    continue
+            try:
+                body = r.body.format(**ph)
+            except (KeyError, IndexError):
+                body = r.body   # body had unrelated braces; keep raw
+            out_parts.append(body)
+        return "\n\n".join(out_parts)
+    except Exception:
+        return ""
+
+
 def init_db(engine) -> None:
     from org_llm.skills import Skill  # ensure table is registered before create_all
     Base.metadata.create_all(engine)
@@ -885,6 +1079,7 @@ def init_db(engine) -> None:
             if not s.get(Config, k):
                 s.add(Config(key=k, value=v))
         s.commit()
+    init_baselines(engine)
 
 
 # When we change a default value in MODEL_DEFAULTS, existing user

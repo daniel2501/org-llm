@@ -1163,59 +1163,21 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     agent_def = known[agent]
     agent_prompt = (agent_def.get("prompt") or "").strip()
     agent_model  = (agent_def.get("model")  or "").strip()
-    # Phase 20: prepend a STANDING PRINCIPLE — every specialist
-    # grounds itself in the user's vault before acting. Avoids
-    # restating this in 13 individual agent prompts.
+    # Phase 20.x: read baselines from the AgentBaseline DB table.
+    # This replaces ~80 lines of hardcoded preamble with a query.
+    # User can edit/disable/add baselines via the table directly
+    # (or the planned `org-llm baselines` CLI verb) without
+    # touching Python.
     if agent_prompt:
-        import datetime as _dt
-        _now = _dt.datetime.now().astimezone()
-        _hour = _now.hour
-        _tod = ("late-night"  if _hour < 5
-                else "morning"  if _hour < 12
-                else "afternoon" if _hour < 17
-                else "evening"   if _hour < 21
-                else "night")
-        _is_weekend = _now.weekday() >= 5
-        agent_prompt = (
-            f"CURRENT TIME: {_now.strftime('%Y-%m-%d %H:%M %Z')} "
-            f"({_now.strftime('%A')}, {_tod}"
-            f"{'; weekend' if _is_weekend else '; weekday'}).\n"
-            "  Use this when generating time-sensitive content. "
-            "  Don't suggest 'morning routines' in the evening, "
-            "  'tomorrow's agenda' on a weekend evening (it's "
-            "  Sunday by then), 'this Friday' on a Saturday, etc. "
-            "  When the user asks for 'today's' anything, anchor "
-            "  to the date above; for 'this weekend', anchor to "
-            "  the upcoming Saturday-Sunday relative to today.\n"
-            "Vault-first context (judgment-based):\n"
-            "  When the user asks for content 'based on'/'from'/"
-            "'using' vault files, dailies, captures, or any "
-            "specific source, you MUST actually READ those files "
-            "before drafting. List, then read, then synthesise. "
-            "DO NOT generate generic items from training data when "
-            "the user pointed at specific files — that's "
-            "hallucination, and it's the #1 way scribe gets it "
-            "wrong.\n"
-            "  For explicit user confirmations on a draft you "
-            "already showed ('save it', 'yes', 'y'), skip "
-            "re-sampling — just do the action.\n"
-            "PARALLEL TOOL CALLS — speed lever:\n"
-            "  When you need multiple INDEPENDENT tool calls, emit "
-            "them in ONE assistant turn (a single tool_calls array "
-            "with multiple entries), not sequentially across "
-            "turns. The runtime executes parallel calls "
-            "concurrently — 3 independent read_files in parallel "
-            "cost ONE cloud round-trip, not three. Examples that "
-            "should always parallelise:\n"
-            "  - `list_dailies` + `infer_capture_style` (both gather "
-            "    setup info; independent)\n"
-            "  - Multiple `read_file` calls on different paths\n"
-            "  - `search_notes` queries with different terms\n"
-            "  Sequential is correct only when later calls "
-            "  DEPEND on earlier results (e.g. read_file paths "
-            "  come from list_dailies output).\n\n"
-            + agent_prompt
-        )
+        try:
+            from .db import render_baselines as _render_baselines
+            role = ("manager" if agent == "crew" else "specialist")
+            preamble = _render_baselines(agent, role)
+            if preamble:
+                agent_prompt = preamble + "\n\n" + agent_prompt
+        except Exception:
+            # Don't break agent dispatch if baselines query fails.
+            pass
     # Phase 20: append FORCE-SOLO marker so the agent's
     # CONSULT-CREW rule defers to user override THIS turn only.
     if force_solo and agent_prompt:

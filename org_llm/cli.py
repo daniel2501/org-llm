@@ -6856,6 +6856,80 @@ def _json_load_safe(b: bytes) -> dict:
         return {}
 
 
+@app.command(name="baselines", rich_help_panel="Maintenance")
+def baselines(
+    name:    Annotated[str,  typer.Argument(help="Baseline name to "
+             "show/edit/toggle (omit to list all)")] = "",
+    show:    Annotated[bool, typer.Option("--show",
+             help="Print the full body of NAME")] = False,
+    enable:  Annotated[bool, typer.Option("--enable",
+             help="Enable baseline NAME")] = False,
+    disable: Annotated[bool, typer.Option("--disable",
+             help="Disable baseline NAME (skipped at injection)")] = False,
+):
+    """Inspect and manage the agent_baseline table — the prompt
+    fragments every agent inherits (time awareness, vault-first,
+    parallel tool calls, no-hallucination, fast crew review).
+
+    Without arguments: list all baselines with name, scope,
+    enabled flag, sort order, body length.
+
+    `org-llm baselines time_awareness --show` prints the full
+    body. `--disable`/`--enable` toggle injection without removing
+    the row (so you can flip behaviours without losing the body)."""
+    from rich.table import Table as _Tbl
+    from rich.panel import Panel as _Pn
+    from .db import AgentBaseline as _AB
+    engine = _engine()
+    with get_session(engine) as s:
+        if name and (enable or disable):
+            row = s.query(_AB).filter(_AB.name == name).first()
+            if not row:
+                red_alert(f"no such baseline: {name}")
+                raise typer.Exit(1)
+            row.enabled = 0 if disable else 1
+            s.commit()
+            on_screen(f"[green]✓[/green] {name} → "
+                      f"{'enabled' if row.enabled else 'disabled'}")
+            raise typer.Exit(0)
+        if name and show:
+            row = s.query(_AB).filter(_AB.name == name).first()
+            if not row:
+                red_alert(f"no such baseline: {name}")
+                raise typer.Exit(1)
+            on_screen(f"[lcars1]baseline · {row.name}[/lcars1]")
+            on_screen(f"  scope:    {row.applies_to}")
+            on_screen(f"  enabled:  {bool(row.enabled)}")
+            on_screen(f"  order:    {row.sort_order}")
+            on_screen(f"  body ({len(row.body)} chars):")
+            on_screen(f"\n{row.body}\n")
+            raise typer.Exit(0)
+        rows = (s.query(_AB).order_by(_AB.sort_order).all())
+        if not rows:
+            on_screen("[dim]no baselines registered (run launch to "
+                      "seed defaults)[/dim]")
+            raise typer.Exit(0)
+        tbl = _Tbl(box=None, pad_edge=False, show_header=True)
+        tbl.add_column("Name",     style="lcars2", no_wrap=True, width=22)
+        tbl.add_column("Scope",    style="dim",   width=18, overflow="fold")
+        tbl.add_column("Order",    style="dim",   width=5)
+        tbl.add_column("Status",   width=8)
+        tbl.add_column("Body chars", style="dim", width=10)
+        for r in rows:
+            status = ("[green]on[/green]" if r.enabled
+                      else "[dim]off[/dim]")
+            tbl.add_row(r.name, r.applies_to, str(r.sort_order),
+                         status, str(len(r.body or "")))
+        console.print()
+        console.print(_Pn(tbl,
+                           title=f"[lcars1]agent baselines · "
+                                 f"{len(rows)}[/lcars1]",
+                           border_style="lcars2",
+                           padding=(1, 1)))
+        on_screen("[dim]inspect: org-llm baselines <name> --show"
+                  "    toggle: --enable / --disable[/dim]")
+
+
 @app.command(name="crew-log", rich_help_panel="Maintenance")
 def crew_log(
     last: Annotated[int, typer.Option("--last", "-n",
