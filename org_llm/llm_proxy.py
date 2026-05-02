@@ -422,6 +422,91 @@ def intercept_sysexport_command(req: ProxyRequest) -> Optional[ProxyResponse]:
     return _empty_assistant_response(model, streaming, content=confirm)
 
 
+# ── /sysscreenshot interceptor ─────────────────────────────────────
+
+
+# Like intercept_sysexport_command, this short-circuits the
+# /sysscreenshot user command at the proxy layer so:
+#   • The local LLM is never engaged (intercept_sys_commands above
+#     catches it too, but this one runs FIRST and returns the
+#     screenshot path as the assistant content).
+#   • The plugin doesn't have to inject anything via session.prompt
+#     — that path triggers an LLM follow-up on opencode 1.14.32
+#     even with noReply: true, so injected output paths used to
+#     generate spurious "I see you took a screenshot at /path"
+#     follow-up turns from the model.
+#
+# Architectural pattern: any /sys* command that needs to surface
+# OUTPUT (vs. just trigger a side-effect with no useful return)
+# should follow this shape — handle it in the proxy, return the
+# output as the assistant turn. The plugin's runAndInject path is
+# fine for commands the user can stomach a chatty LLM follow-up on
+# (sysdoctor, sysstats, sysmodels, sysrecent — long output the LLM
+# may helpfully summarise) but that's not a guarantee anyone
+# should rely on.
+
+
+def intercept_sysscreenshot_command(req: ProxyRequest) -> Optional[ProxyResponse]:
+    """Handle /sysscreenshot fully on the proxy side. Spawns
+    `org-llm screenshot --label opencode` (which honours the
+    user's screenshot_tool config), captures the resulting path,
+    and returns it as the assistant turn — no LLM call, no chat
+    injection round-trip."""
+    if not req.path.endswith("/chat/completions"):
+        return None
+    if not req.parsed_json:
+        return None
+    text = _last_user_text(req.parsed_json).strip()
+    parts = text.split()
+    if not parts or parts[0] != "/sysscreenshot":
+        return None
+
+    streaming = bool(req.parsed_json.get("stream"))
+    model     = req.parsed_json.get("model") or "unknown"
+
+    # Allow optional --label or --tool overrides typed inline.
+    extra_args = parts[1:]
+    cmd = ["org-llm", "screenshot"]
+    if "--label" not in extra_args and "-l" not in extra_args:
+        cmd.extend(["--label", "opencode"])
+    cmd.extend(extra_args)
+
+    import subprocess as _sp
+    try:
+        result = _sp.run(cmd, capture_output=True, text=True, timeout=30)
+    except _sp.TimeoutExpired:
+        return _empty_assistant_response(
+            model, streaming,
+            content="✗ /sysscreenshot timed out after 30s. "
+                     "If using the emacs backend, make sure "
+                     "(server-start) is running in your Emacs.",
+        )
+    except Exception as e:
+        return _empty_assistant_response(
+            model, streaming,
+            content=f"✗ /sysscreenshot failed to spawn: {e}",
+        )
+
+    # `org-llm screenshot` prints "✓ screenshot via X: <path>" or
+    # an error line on failure. Surface stdout (with `▶` prefix
+    # markers stripped — those are CLI on_screen() decorators) as
+    # the assistant content so the user sees the result inline.
+    out = (result.stdout or "").strip()
+    err = (result.stderr or "").strip()
+    if result.returncode != 0:
+        body = (f"✗ /sysscreenshot exited {result.returncode}. "
+                f"{err or out or '(no output)'}")
+    else:
+        # Strip the leading `▶` indent that on_screen() adds.
+        cleaned = "\n".join(
+            line.lstrip("▶").lstrip()
+            for line in out.splitlines()
+        ) if out else "✓ screenshot captured."
+        body = cleaned
+
+    return _empty_assistant_response(model, streaming, content=body)
+
+
 # ── Synthetic tool calls for tool-incapable models ──────────────────
 
 
@@ -1884,6 +1969,7 @@ DEFAULT_INTERCEPTORS: list[Interceptor] = [
     # ── Short-circuit interceptors (return early, never forward) ──
     intercept_no_llm_flag,        # T1.5  --no-llm hard-bypass
     intercept_sysexport_command,  # P18.5 /sysexport — write file + inline sidebar
+    intercept_sysscreenshot_command,  # P18.6 /sysscreenshot — capture via configured backend
     intercept_sys_commands,       # T1.0  /sys*
     # Synthetic tool calls run BEFORE the generic forward but AFTER
     # the /sys* short-circuits — for /sys* we don't want to engage

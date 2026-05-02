@@ -1066,12 +1066,13 @@ function matchSysMessage(text: string): { args: string[]; label: string } | null
       return { args: ["discover"], label: "Recent activity" };
     case "/sysreclaim":
       return { args: ["models", "--reclaim"], label: "Reclaim — free RAM" };
-    case "/sysscreenshot":
-      // Capture via the configured screenshot_tool (default emacs).
-      // Output path lands wherever the backend / config decides;
-      // the CLI prints the final path which we inject to chat.
-      return { args: ["screenshot", "--label", "opencode"],
-                label: "Screenshot — opencode TUI" };
+    // /sysscreenshot is intentionally NOT in this map — it's
+    // handled by `intercept_sysscreenshot_command` in the proxy
+    // (org_llm/llm_proxy.py). The proxy spawns the screenshot
+    // command directly and returns the path as the assistant turn,
+    // sidestepping the runAndInject → session.prompt → noReply
+    // path that opencode 1.14.32 doesn't honor (would trigger an
+    // LLM follow-up on the injected output).
     // /syscloud is intentionally NOT in this map — it's not a
     // run-and-inject CLI subcommand, it's a confirm-trigger for
     // the slow-LLM auto-doctor flow. The interceptor handles it
@@ -1350,16 +1351,15 @@ export function registerSysCommands(api: any): void {
     {
       title: "Screenshot — capture opencode TUI as SVG",
       value: "org-llm.sysscreenshot",
-      description: "Runs `org-llm screenshot --label opencode` "
-        + "(default emacs backend; configure via screenshot_tool).",
+      description: "Capture via the configured screenshot_tool "
+        + "(default emacs). Path returned as the assistant turn — "
+        + "no LLM call, no chat-injection round-trip.",
       category: "org-llm",
       slash: { name: "sysscreenshot" },
-      onSelect: () => {
-        clearPrompt();
-        void runAndInject(api,
-          ["screenshot", "--label", "opencode"],
-          "Screenshot — opencode TUI");
-      },
+      // Just clear the prompt; the actual work happens in the
+      // proxy's intercept_sysscreenshot_command. See the proxy
+      // for the full rationale on why this isn't a runAndInject.
+      onSelect: () => clearPrompt(),
     },
     // Phase 18.4-iter4: opencode's slash registry rejects hyphens
     // ("Unknown command: /sysscroll-up" when injected via Doom's
