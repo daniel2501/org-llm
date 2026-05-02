@@ -389,7 +389,10 @@ owns the user's LLM-routing decisions." Three pillars:
   auto-prompt doesn't fire a cloud round-trip.
 - =sidebar_auto_session_local_model= (default =llama3.2=) — picks
   a known tool-capable model; the user's normal =chat_model= might
-  be a text-only model like =gemma3= that rejects MCP tool calls.
+  be a model like =gemma3= that lacks native tool calling. (Phase
+  18.6 added =intercept_synth_tool_call= so gemma /can/ now call
+  tools via prompt-engineered synthesis, but =llama3.2= remains
+  the safer default for the auto-session opener.)
 
 ** 17.1j–o: slow-LLM watcher + cloud relaunch
 - New [[file:../../extensions/opencode/src/slow-llm-watch.tsx][=extensions/opencode/src/slow-llm-watch.tsx=]] — watches
@@ -605,6 +608,49 @@ Future actions (additive; tracked in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][
 - =scheduled-result= — remote agent (e.g. the 5/16 audit
   routine) writes when its work lands
 
+** 18.6: Cloud-first + synth tools + ctx-overflow retries     :shipped:
+:PROPERTIES:
+:STATUS: shipped
+:END:
+
+Shipped 2026-05-02. Three proxy-side fixes for low-RAM/thermally-
+throttled hardware that turned the cloud failover path from a
+fallback into a primary route:
+
+- *=intercept_synth_tool_call= (synthetic tool calls).* Models on
+  =_PROXY_NO_TOOL_STEMS= (gemma, gemma2, gemma3, phi3, phi3.5,
+  llava, deepseek-coder) lack native tool calling. The proxy now
+  strips =tools= from the request, injects a system prompt
+  describing each tool with a =<tool_call>{...}</tool_call>=
+  contract, calls upstream non-streaming, parses any tool block
+  out of the reply, and reshapes into proper OpenAI =tool_calls=.
+  Gemma users get full MCP/RAG with ~70-80% accuracy on simple
+  single-tool calls.
+- *Cloud-first bypass (=proxy_cloud_first=true=).* Skip the local
+  upstream entirely on chat completions; route directly through
+  =_failover_to_cloud=. Saves =proxy_first_byte_timeout_ms= per
+  request when local hardware can't deliver. Onboarding step 6c
+  offers it automatically when free RAM falls below 1.2× the
+  configured =chat_model='s footprint.
+- *Context-overflow retry chain.* Cloud free-tier models cap at
+  32k; opencode's 64-tool MCP inventory alone is ~19k tokens.
+  When cloud returns 400 with "context length" / "maximum
+  context", the proxy retries first with =_compress_tools_for_failover=
+  (descriptions trimmed to 80 chars, schemas stripped of examples
+  and long fields — drops 64 tools from ~19k → ~3k tokens; model
+  still knows tool names + arg shapes), then with =tools= removed
+  entirely. Audit labels: =cloud_failover_compressed_tools=,
+  =cloud_failover_no_tools=.
+
+Default-bumps that landed in the same wave (auto-promoted on
+existing DBs by =db.promote_stale_defaults=):
+- =proxy_first_byte_timeout_ms=: 8000 → 30000
+- =sidebar_slow_llm_threshold_ms=: 25000 → 45000
+
+Net user-visible impact: a tools-using prompt on RAM-constrained
+hardware dropped from ~40s end-to-end (30s local stall + 10s
+cloud) to ~9.5s direct via cloud-first.
+
 ** System-prompt prefix cache                                :shipped:
 :PROPERTIES:
 :STATUS: shipped
@@ -768,6 +814,53 @@ zero-keypress front door.
 Today =auto_embedder= runs as a daemon. Inline (per-edit) refresh
 would make new captures searchable instantly without waiting for
 the next cycle.
+
+** Co-edit org files (CLI / opencode)
+A surface where the user can ask =org-llm= to open a specific org
+note and *collaborate on edits*: insert/refactor headings, fold
+in captured content, restructure trees, rewrite a section to fit
+a new style — all confirmed by the user before the file is
+saved. Two natural delivery surfaces:
+- *opencode side* — a slash like =/edit-note <slug>= that opens
+  the note inside opencode's chat, runs an LLM-driven diff against
+  the current state, and applies on confirm.
+- *CLI side* — =org-llm edit <id-or-slug> "<intent>"= that prints
+  a unified-diff preview, asks =[a]pply / [s]kip / [e]dit/= per
+  hunk, and writes after explicit consent.
+Two open questions before this can ship:
+1. Conflict surface for files the user opened in another editor —
+   =git diff= the on-disk version against our intended write.
+2. Tool-call audit log: every applied diff lands as a captain's-
+   log entry so the trail of "who edited this paragraph and why"
+   stays visible.
+
+** Preconfigured agents for org-llm
+Ship a curated set of named agents the user can pick from /agents
+in opencode (or invoke from the CLI), each with its own system
+prompt, allowed tool set, and model preference baked in. Reduces
+the cold-start friction of "what should I ask this assistant" and
+keeps tool-calling behaviour consistent across sessions. Initial
+sketch:
+- *researcher* — read-heavy: =search_notes=, =ask_notes=,
+  =get_node=, =list_models=. No write tools. System prompt
+  emphasises citation-grounded answers.
+- *scribe* — capture-heavy: =capture_note=, =append_to_note=,
+  =list_files=. Light read tools. System prompt emphasises clean
+  org-mode structure + auto-tagging.
+- *engineer* — code-corpus focus: =code_search=, =read_code=,
+  =run_dbt=, =get_node=. System prompt emphasises minimal
+  edits + diff previews.
+- *triager* — vault hygiene: =find_stale=, =list_orphans=,
+  =rescore_embeddings=, =auto_tag=. Periodic-maintenance flavour.
+Each agent ships as a =.opencode/agents/<name>.json= file the
+launcher writes alongside =opencode.json=. CLI parity via
+=org-llm agent <name> "<prompt>"= which spawns the agent with
+its baked context. Open questions:
+1. Do agents share the user's vault context (recent notes, top
+   tags, knobs) or is that re-derived per agent?
+2. How does the agent registry interact with the existing
+   =workspace= flag (=launch --workspace researcher= already exists
+   — agents may be the per-prompt finer-grained version).
 
 * How phases get numbered                                    :process:
 

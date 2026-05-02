@@ -50,29 +50,44 @@ runs the action, and ollama stays asleep.
 The order matters: every interceptor sees the request before the
 next one does, and the first one to return a =ProxyResponse= wins.
 
-| # | Interceptor                  | What it catches                                                          |
-|---+------------------------------+--------------------------------------------------------------------------|
-| 1 | =intercept_no_llm_flag=      | =--no-llm= argument anywhere in the message → empty response             |
-| 2 | =intercept_sys_commands=     | =/sys*= prefix in the latest user message → empty response               |
-| 3 | =intercept_response_cache=   | Exact-prompt cache hit → cached response                                 |
-| 4 | =intercept_static_slashes=   | =/menu=, =/help=, =/config= → handwritten markdown response              |
-| 5 | =intercept_probe_cache=      | Repeated provider probes (=GET /api/tags= etc.) → cached body            |
-| 6 | =intercept_time_grounding=   | Inject current date into the system prompt before forwarding             |
-| 7 | =intercept_pii_redact=       | Redact secrets (API keys, tokens) before forwarding                      |
-| 8 | =intercept_tool_call_repair= | Fix common LLM-emitted malformed tool-call schemas                       |
-| 9 | =intercept_model_routing=    | Route by query shape (cheap model for trivia, smart for code)            |
-| 10 | =intercept_md_skills=       | =.md= slash with =exec:= frontmatter → run as subprocess, return stdout |
-| 11 | =intercept_qwen3_no_think=  | Auto-inject =/no_think= for qwen3 models                                 |
-| 12 | =intercept_prompt_slim=     | Strip the MCP catalog (~22 KB) from system prompts that don't need tools |
-| 13 | =intercept_local_only=      | Catch-all kill switch (=proxy_local_only=true=) → "no LLM" response      |
+| # | Interceptor                       | What it catches                                                          |
+|---+-----------------------------------+--------------------------------------------------------------------------|
+| 1 | =intercept_no_llm_flag=           | =--no-llm= argument anywhere in the message → empty response             |
+| 2 | =intercept_sysexport_command=     | =/sysexport [sidebar]= → write chat-export markdown + return path/snapshot |
+| 3 | =intercept_sys_commands=          | =/sys*= prefix in the latest user message → empty response               |
+| 4 | =intercept_synth_tool_call=       | Tool-incapable model (gemma, phi3) + =tools= → prompt-engineered tool calls |
+| 5 | =intercept_response_cache=        | Exact-prompt cache hit → cached response                                 |
+| 6 | =intercept_static_slashes=        | =/menu=, =/help=, =/config= → handwritten markdown response              |
+| 7 | =intercept_probe_cache=           | Repeated provider probes (=GET /api/tags= etc.) → cached body            |
+| 8 | =intercept_time_grounding=        | Inject current date into the system prompt before forwarding             |
+| 9 | =intercept_pii_redact=            | Redact secrets (API keys, tokens) before forwarding                      |
+| 10 | =intercept_tool_call_repair=     | Fix common LLM-emitted malformed tool-call schemas                       |
+| 11 | =intercept_model_routing=        | Route by query shape (cheap model for trivia, smart for code)            |
+| 12 | =intercept_md_skills=            | =.md= slash with =exec:= frontmatter → run as subprocess, return stdout |
+| 13 | =intercept_qwen3_no_think=       | Auto-inject =/no_think= for qwen3 models                                 |
+| 14 | =intercept_prompt_cache=         | Inject =keep_alive= on local Ollama; mark Anthropic =cache_control= on largest system block |
+| 15 | =intercept_prompt_slim=          | Strip the MCP catalog (~22 KB) from system prompts that don't need tools |
+| 16 | =intercept_local_only=           | Catch-all kill switch (=proxy_local_only=true=) → "no LLM" response      |
 
 The full source with rationale comments is in [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]];
-47 unit tests pin behaviour in [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]].
+56 unit tests pin behaviour in [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]].
+
+Two short-circuits aren't in the chain table because they fire from
+inside =_forward= rather than the interceptor list:
+- *cloud-first bypass* (=proxy_cloud_first=true=) — chat completions
+  skip the local upstream and route directly through the same
+  =_failover_to_cloud= machinery. Audit label =cloud_first=.
+- *cloud failover on TTFB timeout* — local stalls past
+  =proxy_first_byte_timeout_ms= → re-issue the request against
+  cloud for THIS turn only. Audit label =cloud_failover=. On
+  context-overflow (32k caps + a 64-tool MCP inventory) two
+  retries follow: =cloud_failover_compressed_tools= (descriptions
+  trimmed, schemas stripped) then =cloud_failover_no_tools=.
 
 ** Cloud failover (Phase 18, first interceptor)
 
 The forward path now wraps the local =urlopen= with a tight time-to-
-first-byte timeout (=proxy_first_byte_timeout_ms=, default 8000). When
+first-byte timeout (=proxy_first_byte_timeout_ms=, default 30000). When
 the local upstream stalls past that threshold on a chat-completions
 request, the proxy aborts the local connection and silently re-issues
 the same body against the configured cloud provider for THIS request
@@ -85,7 +100,14 @@ interceptor is per-turn cover for the one stuck message — the user
 gets an answer without a relaunch round-trip. Knobs:
 
 - =proxy_cloud_failover_enabled= (default true)
-- =proxy_first_byte_timeout_ms= (default 8000; 0 disables)
+- =proxy_first_byte_timeout_ms= (default 30000; bumped from 8000 in
+  Phase 18.6 — cold-start prefill on thermally-throttled CPUs with
+  heavy MCP tool inventories needed real headroom; 0 disables)
+- =proxy_cloud_first= (default false) — when true, chat completions
+  skip local entirely and route directly through =_failover_to_cloud=,
+  saving the per-request 30s wait. Onboarding step 6c offers this
+  automatically when free RAM falls below 1.2× the configured
+  =chat_model='s footprint.
 
 The cloud target is the same =cloud_endpoint_url= / =cloud_model= /
 =cloud_provider= the rest of the app uses (see
@@ -107,6 +129,35 @@ from regular forwards in =scripts/audit_phase17.py='s output.
   =intercept_<thing>= function, register it in =start_proxy='s
   default chain. No threading conditionals through opencode's request
   path.
+
+** Synthetic tool calls for tool-incapable models (Phase 18.6)
+
+Some local models — gemma, gemma2, gemma3, phi3, phi3.5, llava,
+deepseek-coder — don't natively support OpenAI-style tool calling.
+The launcher writes =tool_call: false= for them in =opencode.json=
+so opencode doesn't even offer them tool schemas, but that means
+the user loses MCP/RAG when they pick gemma. =intercept_synth_tool_call=
+closes that gap in the proxy:
+
+1. Detect a request whose =model= is on =_PROXY_NO_TOOL_STEMS= AND
+   carries a =tools= array.
+2. Strip =tools= and =tool_choice= from the body.
+3. Inject a synthetic system prompt at the front of =messages=
+   describing each tool with this contract:
+   ~<tool_call>{"name": "...", "arguments": {...}}</tool_call>~
+4. Force =stream: false= so we get one complete reply to parse.
+5. Forward to the upstream directly (the interceptor short-
+   circuits, calling =urlopen= itself with =req.upstream=).
+6. Post-parse the reply for a =<tool_call>{...}</tool_call>= block;
+   reshape into proper OpenAI =tool_calls= structure for opencode.
+7. If no block is found, return the plain text — model chose not
+   to call a tool.
+
+Quality varies; gemma3 hits ~70-80% accuracy on simple single-tool
+calls. Audit label =synth_tool_call=. Tools with verbose descriptions
+get compressed via =_compress_tools_for_failover= (also reused on
+cloud failover when the request would exceed the cloud model's
+context window — see =cloud_failover_compressed_tools= path).
 
 * Auditing & observability
 

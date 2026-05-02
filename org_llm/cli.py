@@ -5474,6 +5474,230 @@ def performance(
     make_it_so()
 
 
+def _config_check_run() -> None:
+    """Run a general configuration sanity check.
+
+    Prints findings as a status table — one row per check, marked
+    [✓] / [⚠] / [✗] / [-] (skipped). Exits 0 if no errors, 1 if any
+    [✗] hits. Warnings don't fail the exit code (they're advisory).
+
+    Categories:
+      • models  — every role model is pulled in ollama (or cloud-prefixed)
+      • ollama  — daemon reachable on configured URL
+      • cloud   — provider/endpoint/key present if cloud_provider is set
+      • org_dir — exists, is a directory
+      • opencode — .opencode/ structure intact (config + theme + commands)
+      • doom    — doom/org-llm.el slash references match plugin slashes
+      • env     — knobs referenced via ORG_LLM_* env vars are documented
+    """
+    from rich.table import Table as _Tbl
+    from rich.panel import Panel as _Pn
+    from .db import Config as _Cfg
+    rows: list[tuple[str, str, str]] = []   # (check, status, detail)
+
+    def _add(name: str, status: str, detail: str) -> None:
+        rows.append((name, status, detail))
+
+    engine = _engine()
+    with get_session(engine) as session:
+        cfg_rows = {r.key: r.value for r in session.query(_Cfg).all()}
+        org_dir = _org_dir(session)
+        ollama_url = _ollama_url(session)
+
+    # ── ollama reachability ────────────────────────────────────
+    try:
+        import urllib.request as _ur
+        with _ur.urlopen(f"{ollama_url.rstrip('/')}/api/tags", timeout=2) as r:
+            data = _json_load_safe(r.read())
+        n_pulled = len(data.get("models", []) if isinstance(data, dict) else [])
+        _add("ollama", "[green]✓[/green]",
+              f"reachable @ {ollama_url}  ({n_pulled} pulled)")
+        try:
+            pulled = {_normalize_tag(m.get("name", ""))
+                      for m in data.get("models", [])}
+        except Exception:
+            pulled = set()
+    except Exception as e:
+        _add("ollama", "[red]✗[/red]",
+              f"unreachable @ {ollama_url}: {e}")
+        pulled = set()
+
+    # ── role-model pull check ──────────────────────────────────
+    role_misses: list[str] = []
+    for role, key, _label in _TASK_MODEL_KEYS:
+        m = (cfg_rows.get(key) or "").strip()
+        if not m:
+            continue
+        if "/" in m:
+            # cloud-prefixed; verified separately under cloud check
+            continue
+        if not _is_pulled(m, pulled):
+            role_misses.append(f"{role}={m}")
+    if role_misses:
+        _add("models", "[yellow]⚠[/yellow]",
+              f"unpulled role models: {', '.join(role_misses)}  "
+              f"(fix: org-llm launch will auto-pull)")
+    else:
+        _add("models", "[green]✓[/green]", "all role models pulled")
+
+    # ── org_dir ────────────────────────────────────────────────
+    if org_dir.exists() and org_dir.is_dir():
+        n_org = sum(1 for _ in org_dir.rglob("*.org"))
+        _add("org_dir", "[green]✓[/green]",
+              f"{org_dir} ({n_org} .org files)")
+    else:
+        _add("org_dir", "[red]✗[/red]",
+              f"{org_dir} missing or not a directory")
+
+    # ── cloud config sanity ───────────────────────────────────
+    cloud_prov = cfg_rows.get("cloud_provider", "")
+    cloud_endpoint = cfg_rows.get("cloud_endpoint_url", "")
+    cloud_model = cfg_rows.get("cloud_model", "")
+    if cloud_prov:
+        problems = []
+        if not cloud_endpoint:
+            problems.append("missing cloud_endpoint_url")
+        if not cloud_model:
+            problems.append("missing cloud_model")
+        api_key = ""
+        try:
+            from . import creds as _creds
+            api_key = _creds.read_secret(_creds.cloud_slug(cloud_prov)) or ""
+        except Exception:
+            pass
+        if not api_key:
+            problems.append(f"no API key in pass for slug {cloud_prov!r}")
+        if problems:
+            _add("cloud", "[red]✗[/red]",
+                  f"cloud_provider={cloud_prov} but: {'; '.join(problems)}")
+        else:
+            _add("cloud", "[green]✓[/green]",
+                  f"{cloud_prov}: {cloud_model} @ {cloud_endpoint[:40]}…")
+    else:
+        cf = (cfg_rows.get("proxy_cloud_first", "") or "false").lower() == "true"
+        if cf:
+            _add("cloud", "[red]✗[/red]",
+                  "proxy_cloud_first=true but cloud_provider is empty")
+        else:
+            _add("cloud", "[dim]-[/dim]",
+                  "cloud not configured (local-only)")
+
+    # ── .opencode/ structure ──────────────────────────────────
+    oc = org_dir / ".opencode"
+    expected = ["opencode.json", "tui.json", "AGENTS.md",
+                "themes/org-llm-lcars.json"]
+    missing = [p for p in expected if not (oc / p).exists()]
+    if not oc.exists():
+        _add("opencode", "[dim]-[/dim]",
+              f"{oc} missing (run: org-llm launch)")
+    elif missing:
+        _add("opencode", "[yellow]⚠[/yellow]",
+              f"{oc.name}/ exists but missing: "
+              f"{', '.join(missing)}  (re-run: org-llm launch)")
+    else:
+        _add("opencode", "[green]✓[/green]",
+              f"{oc} fully wired ({len(expected)} files OK)")
+
+    # ── doom keybinds ↔ plugin slash registry ────────────────
+    repo_root = Path(__file__).resolve().parent.parent
+    doom_path = repo_root / "doom" / "org-llm.el"
+    plugin_path = (repo_root / "extensions" / "opencode" / "src"
+                              / "sys-commands.tsx")
+    try:
+        plugin_src = plugin_path.read_text()
+        # `slash: { name: "X" }` → set of registered slash names
+        import re as _re
+        plugin_slashes = set(_re.findall(
+            r'slash:\s*\{\s*name:\s*"([a-z0-9_-]+)"', plugin_src))
+        if doom_path.exists():
+            doom_src = doom_path.read_text()
+            # `/sysFOO` (alphanumeric, no hyphens — opencode rejects them)
+            doom_refs = set(_re.findall(r'/(sys[a-z0-9]+)\b', doom_src))
+            # Slashes mentioned in doom but NOT registered in plugin.
+            stale = sorted(doom_refs - plugin_slashes)
+            if stale:
+                _add("doom", "[yellow]⚠[/yellow]",
+                      f"doom references slashes the plugin doesn't "
+                      f"register: {', '.join('/' + s for s in stale)}  "
+                      f"(edit doom/org-llm.el or update plugin)")
+            else:
+                _add("doom", "[green]✓[/green]",
+                      f"all {len(doom_refs)} doom slash references "
+                      f"are in the plugin registry")
+        else:
+            _add("doom", "[dim]-[/dim]",
+                  f"{doom_path.relative_to(repo_root)} not present")
+    except Exception as e:
+        _add("doom", "[yellow]⚠[/yellow]", f"could not check: {e}")
+
+    # ── env-var coverage ──────────────────────────────────────
+    # Every config key has an ORG_LLM_<KEY>= env-var override per
+    # literate_config.env_var_for. Verify each currently-set env
+    # var matches a known key (typo guard).
+    try:
+        from .literate_config import (
+            KEY_DESCRIPTIONS as _DESCS,
+            env_var_for as _envname,
+        )
+        from .db import MODEL_DEFAULTS as _DEF
+        valid_keys = set(_DEF) | set(_DESCS) | set(cfg_rows)
+        valid_envs = {_envname(k) for k in valid_keys} | {
+            "ORG_LLM_ORG_DIR", "ORG_LLM_OLLAMA_URL", "ORG_LLM_DB_PATH",
+        }
+        unknown = sorted(
+            v for v in os.environ
+            if v.startswith("ORG_LLM_") and v not in valid_envs
+        )
+        if unknown:
+            _add("env", "[yellow]⚠[/yellow]",
+                  f"ORG_LLM_* env vars not mapped to any config key: "
+                  f"{', '.join(unknown[:6])}"
+                  + (f" (+{len(unknown)-6} more)" if len(unknown) > 6 else ""))
+        else:
+            _add("env", "[green]✓[/green]",
+                  f"all ORG_LLM_* env vars match known config keys")
+    except Exception as e:
+        _add("env", "[dim]-[/dim]", f"env coverage check skipped: {e}")
+
+    # ── Render ─────────────────────────────────────────────────
+    tbl = _Tbl(box=None, pad_edge=False, show_header=True)
+    tbl.add_column("Check",   style="lcars2", no_wrap=True, width=10)
+    tbl.add_column("Status",  width=4, no_wrap=True)
+    tbl.add_column("Detail",  style="dim")
+    for n, st, dt in rows:
+        tbl.add_row(n, st, dt)
+    console.print()
+    console.print(_Pn(tbl,
+                       title="[lcars1]config check[/lcars1]",
+                       border_style="lcars2",
+                       padding=(1, 1)))
+    n_err = sum(1 for _, st, _ in rows if "✗" in st)
+    n_warn = sum(1 for _, st, _ in rows if "⚠" in st)
+    summary = f"{len(rows)} checks · "
+    if n_err:
+        summary += f"[red]{n_err} error(s)[/red]"
+    if n_warn:
+        summary += (f"  [yellow]{n_warn} warning(s)[/yellow]"
+                     if n_err else f"[yellow]{n_warn} warning(s)[/yellow]")
+    if not (n_err or n_warn):
+        summary += "[green]all green[/green]"
+    on_screen(summary)
+    if n_err:
+        raise typer.Exit(1)
+
+
+def _json_load_safe(b: bytes) -> dict:
+    """Best-effort JSON load — returns {} on any failure. Used
+    by _config_check_run where we don't want a malformed ollama
+    response to crash the whole check pass."""
+    import json as _j
+    try:
+        out = _j.loads(b.decode("utf-8", "replace"))
+        return out if isinstance(out, dict) else {}
+    except Exception:
+        return {}
+
+
 @app.command(rich_help_panel="Maintenance")
 def config(
     key:   Annotated[str, typer.Argument(help="Config key")] = "",
@@ -5497,6 +5721,10 @@ def config(
     search:  Annotated[str, typer.Option("--search", "-S",
             help="Fuzzy-search config keys: matches on key name AND "
                  "description. Returns each hit with its current value.")] = "",
+    check:   Annotated[bool, typer.Option("--check", "-C",
+            help="Run a general configuration sanity check (models pulled, "
+                 "cloud creds present, ollama reachable, doom keybinds in "
+                 "sync with /sys* slashes, .opencode/ structure intact)")] = False,
 ):
     """Get or set a config value. No args = show all.
 
@@ -5512,9 +5740,12 @@ def config(
     knob (one heading per knob, one src block per message). Excludes
     runtime state (cloud_usage, db_version).
     """
-    if sum(1 for f in (tangle, apply_from_org, diff_org, bool(search)) if f) > 1:
-        red_alert("--tangle / --apply-from-org / --diff-org / --search are mutually exclusive.")
+    if sum(1 for f in (tangle, apply_from_org, diff_org, bool(search), check) if f) > 1:
+        red_alert("--tangle / --apply-from-org / --diff-org / --search / --check are mutually exclusive.")
         raise typer.Exit(1)
+    if check:
+        _config_check_run()
+        return
     if search:
         from .literate_config import (
             KEY_DESCRIPTIONS as _DESCS,

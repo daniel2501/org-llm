@@ -29,44 +29,49 @@ shortcuts; first-run users see a setup nudge instead.
 
 </div>
 
-<div align="center">
-  <img src="docs/img/24-splash-lcars-classic.svg" alt="org-llm splash — LCARS classic colorway" width="900" />
-</div>
+## opencode workspace — your second brain in chat
 
-### Five LCARS palettes, switchable via `org-llm palette <name>`
+`org-llm launch` opens [opencode](https://opencode.ai) on your vault
+with the proxy + plugin pre-wired. The workspace is the primary way
+to use org-llm day-to-day: rounded LCARS sidebar, 64-tool MCP catalog,
+cloud-first proxy, auto-doctor, slash commands you can `/sysapply`
+when something needs tuning.
 
-The splash + every themed surface (panels, banners, opencode greeting,
-MCP tool decorations) re-skins to whichever LCARS palette is active.
-Switch with one command — no rebuild, no editor open, no config file
-edit. Per-channel hex overrides via `--primary` / `--secondary` /
-`--tertiary` stack on top.
+> Capture your own opencode screenshots while running and drop them in
+> `docs/img/opencode-*.png`. The CLI screenshots in this README are
+> Rich-captured SVGs; the opencode TUI is rendered by opentui (Solid),
+> which Rich's exporter can't see — so opencode imagery has to come
+> from your terminal screenshot tool.
 
-```sh
-org-llm palette                            # text-based palette picker
-org-llm palette red                        # red-alert mode
-org-llm palette green                      # Voyager astrometrics
-org-llm palette gold --primary '#FFD60A'   # gold + custom override
-org-llm palette reset                      # back to classic
-```
+**Recent ships visible in the workspace** (Phase 18.6, 2026-05):
 
-<table>
-<tr>
-  <td align="center"><b>classic</b><br/><sub>orange · purple · blue</sub><br/>
-    <img src="docs/img/24-splash-lcars-classic.svg" alt="LCARS classic" /></td>
-  <td align="center"><b>red</b><br/><sub>red · salmon · amber</sub><br/>
-    <img src="docs/img/20-splash-lcars-red.svg" alt="LCARS red — red alert" /></td>
-</tr>
-<tr>
-  <td align="center"><b>green</b><br/><sub>green · sky · gold</sub><br/>
-    <img src="docs/img/21-splash-lcars-green.svg" alt="LCARS green — Voyager astrometrics" /></td>
-  <td align="center"><b>gold</b><br/><sub>gold · amber · red</sub><br/>
-    <img src="docs/img/22-splash-lcars-gold.svg" alt="LCARS gold — engineering" /></td>
-</tr>
-<tr>
-  <td align="center" colspan="2"><b>violet</b><br/><sub>violet · magenta · sky</sub><br/>
-    <img src="docs/img/23-splash-lcars-violet.svg" alt="LCARS violet — sciences / medbay" width="500" /></td>
-</tr>
-</table>
+- **Cloud-first proxy** (`proxy_cloud_first=true`) — chat completions
+  skip the local upstream when hardware can't deliver; routes directly
+  through the failover machinery. Onboarding step 6c offers it
+  automatically when free RAM < 1.2× the chat-model footprint.
+  Tools-using prompts on RAM-constrained hardware: ~40s → ~9.5s.
+- **Synthetic tool calls for tool-incapable models** — gemma, gemma2,
+  gemma3, phi3, phi3.5, llava all get full MCP/RAG via proxy-side
+  prompt-engineered tool calling (`<tool_call>{...}</tool_call>`
+  contract). No capability loss when picking a non-tool-native model.
+- **Context-overflow retry chain** on cloud failover — 64-tool MCP
+  inventory busts the 32k cap; proxy retries with compressed tool
+  schemas (drops ~19k → ~3k tokens), falls back to no-tools as a
+  last resort.
+- **Live model override on the sidebar** — mid-session `/model`
+  swaps reflect immediately on the ACTIVE/MODEL cards; cloud-failover
+  / cloud-first turns flip the route row from `local` to `cloud`
+  with the actual served model.
+- **`/sysexport [sidebar]`** — handled in the proxy, returns the
+  written file path (and optionally the rendered sidebar markdown)
+  as the assistant turn — no LLM round-trip, no hallucination.
+- **Auto-doctor** no longer aborts the LLM mid-prefill; it injects
+  the diagnostic + numbered proposals (`/sysapply 1,3`) and lets the
+  in-flight call finish. Threshold 45s by default.
+- **Auto-pull missing role models on launch** + background
+  chat-model warmup so the first prompt isn't a cold-load.
+- **`org-llm config --check`** — one-shot CLI sanity check against
+  ollama/cloud/models/.opencode/doom keybinds/env-vars.
 
 ---
 
@@ -86,6 +91,8 @@ org-llm palette reset                      # back to classic
 | 📓 **Captain's Log** — every CLI invocation, LLM call (local + cloud + askbook + claude + pi), MCP tool call, config change mirrored to BOTH SQLite history AND `~/org/captains-log.org` for vault-level analytics; `--reflect` for LLM pattern-spotting | 🗂 **Literate config** — `org-llm config --tangle` writes a round-trippable `~/org/org-llm-config.org` (selective via `--keys`); `--apply-from-org` pushes edits back; theme knobs round-trip too |
 | 🔄 **Background auto-embedder** — opt-in daemon thread keeps the index + embeddings fresh without manual `embed` runs; surfaces stats in CLI footers | 📖 **Live man page** — `org-llm man --install` derives a `man 1 org-llm` page from the Typer registry; stays in sync without a build step |
 | 🌎 **Env-var override visibility** — every config key has an `ORG_LLM_<KEY>` env tap; `org-llm config` shows the source ([env|config|default]) + env name for every row | 🤖 **LLM copywriting throughout** — Try-it lines, models nudge, doctor closing, tutor recommendation all generated from real state |
+| ⚡ **Cloud-first proxy** — `proxy_cloud_first=true` skips the local upstream when hardware can't deliver, routing chat completions through cloud directly. Onboarding step 6c auto-offers it when free RAM < 1.2× the chat-model footprint. Pairs with a context-overflow retry chain (compressed-tools → no-tools) so cloud's 32k cap doesn't block 64-tool MCP requests | 🔧 **Synthetic tool calls for tool-incapable models** — gemma, gemma2, gemma3, phi3, phi3.5, llava all get full MCP/RAG via proxy-side prompt-engineered tool calling (`<tool_call>{...}</tool_call>` contract) — no capability loss when picking a non-tool-native model |
+| 🩺 **`config --check`** — one-shot sanity check: ollama reachability, role-model pull status, cloud creds, .opencode/ structure, doom keybinds vs plugin slash registry, ORG_LLM_* env-var validity. Exit 1 on errors, 0 on warnings/clean | 🚀 **Auto-pull on launch + chat-model warmup** — `org-llm launch` fetches any missing role models from ollama AND fires a background warmup ping so your first prompt isn't a cold-load. Preflight context cached 5min so repeat-launches drop to ~2s |
 
 ---
 
@@ -528,6 +535,45 @@ surface (chrome + chat + sidebar + agent picker) reads as "org-llm".
 
 Rule of thumb: if you'd otherwise pipe four CLI commands together,
 opencode is probably the right tool.
+
+### LCARS palettes (CLI splash + TUI sidebar)
+
+Splash screen + every themed surface (panels, banners, opencode
+greeting, MCP tool decorations) re-skins to whichever LCARS palette
+is active. Switch with one command — no rebuild, no editor open, no
+config file edit. Per-channel hex overrides via `--primary` /
+`--secondary` / `--tertiary` stack on top.
+
+```sh
+org-llm palette                            # text-based palette picker
+org-llm palette red                        # red-alert mode
+org-llm palette green                      # Voyager astrometrics
+org-llm palette gold --primary '#FFD60A'   # gold + custom override
+org-llm palette reset                      # back to classic
+```
+
+<div align="center">
+  <img src="docs/img/24-splash-lcars-classic.svg" alt="LCARS classic" width="700" />
+</div>
+
+<details>
+<summary>Other palettes (red / green / gold / violet)</summary>
+
+<table>
+<tr>
+  <td align="center"><b>red</b><br/><sub>red · salmon · amber</sub><br/>
+    <img src="docs/img/20-splash-lcars-red.svg" alt="LCARS red" /></td>
+  <td align="center"><b>green</b><br/><sub>green · sky · gold</sub><br/>
+    <img src="docs/img/21-splash-lcars-green.svg" alt="LCARS green" /></td>
+</tr>
+<tr>
+  <td align="center"><b>gold</b><br/><sub>gold · amber · red</sub><br/>
+    <img src="docs/img/22-splash-lcars-gold.svg" alt="LCARS gold" /></td>
+  <td align="center"><b>violet</b><br/><sub>violet · magenta · sky</sub><br/>
+    <img src="docs/img/23-splash-lcars-violet.svg" alt="LCARS violet" /></td>
+</tr>
+</table>
+</details>
 
 ---
 

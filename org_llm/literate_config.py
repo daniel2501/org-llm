@@ -210,6 +210,17 @@ KEY_DESCRIPTIONS = {
         "master switch off). After the first byte arrives the socket "
         "timeout is extended to 300s so legitimate slow streaming "
         "runs uninterrupted. Tune against the Phase 17 audit's p95.",
+    "proxy_cloud_first":
+        "When true, chat completions skip the local upstream and "
+        "route directly to cloud — saving the per-request "
+        "proxy_first_byte_timeout_ms wait. Useful when local "
+        "hardware can't realistically serve the configured "
+        "chat_model in time (low free RAM, no GPU, thermal "
+        "throttling). The cloud-failover retry chain "
+        "(compressed-tools → no-tools) still applies on context "
+        "overflow. Default false. Onboarding step 6c offers this "
+        "automatically when free RAM < 1.2× the chat_model "
+        "footprint AND a cloud provider is configured.",
     "cloud_catalog_auto_refresh_enabled":
         "Background catalog refresh on every launch (Phase 18). True "
         "(default) spawns a daemon thread that polls OpenRouter for "
