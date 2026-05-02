@@ -1114,10 +1114,15 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     # Strip trailing opencode delegation hint anywhere in the
     # last user message. Pattern matches the boilerplate opencode
     # appends; tolerant of casing/whitespace variations.
+    # opencode space-joins (sometimes newline-joins) its
+    # delegation hint to the user message. Match any whitespace
+    # — \s+ covers both forms — and don't anchor to end-of-string
+    # because intercept_qwen3_no_think may have already appended
+    # `\n\n/no_think` by the time we run.
     suffix_re = _re_mod.compile(
-        r'\n+\s*Use the above message and context to generate '
+        r'\s+Use the above message and context to generate '
         r'a prompt and call the task tool with subagent:\s*'
-        rf'{_re_mod.escape(agent)}\s*\.?\s*$',
+        rf'{_re_mod.escape(agent)}\s*\.?',
         _re_mod.DOTALL | _re_mod.IGNORECASE,
     )
     _strip_suffix_from_last_user(parsed, suffix_re)
