@@ -1213,6 +1213,20 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     agent_def = known[agent]
     agent_prompt = (agent_def.get("prompt") or "").strip()
     agent_model  = (agent_def.get("model")  or "").strip()
+    # Scribe-only behaviour knob: skip the confirm-before-capture
+    # step when `scribe_confirm_before_capture=false`. Default
+    # true (the prompt's FLOW expects confirmation).
+    if (agent == "scribe" and agent_prompt
+            and _proxy_cfg_str("scribe_confirm_before_capture",
+                                  "true").strip().lower() == "false"):
+        agent_prompt = (
+            "OVERRIDE — auto-capture mode (scribe_confirm_before_capture=false): "
+            "after drafting, capture IMMEDIATELY without asking. Skip "
+            "the 'Save to <file>? [y/N]' step in the FLOW rule. Still "
+            "offer the open-in-frame prompt AFTER the capture lands.\n\n"
+            + agent_prompt
+        )
+
     # Phase 20.x: read baselines from the AgentBaseline DB table.
     # This replaces ~80 lines of hardcoded preamble with a query.
     # User can edit/disable/add baselines via the table directly

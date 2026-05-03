@@ -393,6 +393,12 @@ MODEL_DEFAULTS = {
     "ollama_url":     "http://localhost:11434",
     # Defaults are tuned to fit a laptop CPU/16 GB RAM out of the box. Use
     # `org-llm models --tune` once you've got real hardware to scale up.
+    "scribe_confirm_before_capture": "true",  # scribe shows draft + asks
+                                              # 'Save to <file>? [y/N]' before
+                                              # calling capture_note. Set to
+                                              # "false" for auto-capture (LLM
+                                              # writes the file directly after
+                                              # drafting).
     "cloud_fast_model": "",                 # cheap/fast cloud model used by
                                             # delegate() for fast-role agents
                                             # (classifier, tag, summarize).
