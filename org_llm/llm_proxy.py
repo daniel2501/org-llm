@@ -1075,13 +1075,12 @@ def intercept_agent_sticky(req: ProxyRequest) -> Optional[ProxyResponse]:
     age_s = (time.time() * 1000 - stamp_ms) / 1000.0
     if intent and (stamp_ms == 0 or age_s > ttl_s):
         intent = ""   # stale — fall through to default-agent
-    # Phase 20: when no recent intent, default to the manager
-    # agent (`crew`) so unprefixed turns get the orchestrator
-    # rather than opencode's flat primary. Knob:
-    # `proxy_default_agent` (default "crew"); set empty string to
-    # disable default-agent injection entirely.
+    # Phase 20.x revert: default-agent injection is OFF by default
+    # (was always-crew). Re-enable by setting
+    # `proxy_default_agent` to a real agent name. Empty / unset =
+    # unprefixed turns hit opencode's primary as usual.
     if not intent:
-        intent = _proxy_cfg_str("proxy_default_agent", "crew").strip()
+        intent = _proxy_cfg_str("proxy_default_agent", "").strip()
         if not intent:
             return None
     # Agent still registered?
@@ -1183,21 +1182,15 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
             ),
         )
 
-    # Phase 20.x: crew is the always-default orchestrator. Even
-    # when the user names a specialist explicitly (`@scribe …`),
-    # route to crew with a "requested specialist" hint and let
-    # crew decide whether to delegate. Force-solo (`@scribe!`)
-    # bypasses this — goes directly to the specialist as before.
-    requested_specialist = ""
+    # Phase 20.x revert: @<specialist> goes DIRECTLY to the
+    # specialist (was redirecting through crew). Crew is still
+    # invocable explicitly via @crew. The orchestration hint
+    # mechanism remains in code, gated off by
+    # `proxy_orchestrate_via_crew` (default false).
     if (agent != "crew" and not force_solo
-            and _proxy_cfg_str("proxy_default_agent",
-                                  "crew").strip() == "crew"
+            and _proxy_cfg_str("proxy_orchestrate_via_crew",
+                                  "false").strip().lower() == "true"
             and "crew" in known):
-        requested_specialist = agent
-        # Prepend a routing hint to the user message so crew sees
-        # who the user named. Crew's prompt teaches it to honor the
-        # hint (delegate to that specialist) unless it has strong
-        # reason to override.
         msgs = parsed.get("messages") or []
         for i in range(len(msgs) - 1, -1, -1):
             mm = msgs[i]
@@ -1205,7 +1198,7 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
                 continue
             content = mm.get("content")
             hint = (f"[ORCHESTRATION HINT: user requested specialist: "
-                     f"{requested_specialist}]\n")
+                     f"{agent}]\n")
             if isinstance(content, str):
                 mm["content"] = hint + content
             elif isinstance(content, list):
@@ -1214,8 +1207,6 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
                         part["text"] = hint + part.get("text", "")
                         break
             break
-        # Switch the agent slot to crew for the rest of this
-        # interceptor's logic.
         agent = "crew"
 
     # Agent exists — perform the per-turn swap.
