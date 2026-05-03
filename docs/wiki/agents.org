@@ -1,0 +1,274 @@
+:PROPERTIES:
+:ID:       a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6
+:CREATED:  [2026-05-03]
+:END:
+#+TITLE: Agents — what they are and how they work
+#+FILETAGS: :wiki:agents:architecture:overview:
+#+OPTIONS: toc:2 num:nil
+
+* What agents are
+
+In =org-llm=, an *agent* is a *named persona + tool roster + model
+choice* that gets injected as the system prompt when the user
+addresses it (=@<name>=). The proxy layer
+([[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]]) detects the
+=@-tag=, swaps the system prompt to the agent's persona, and lets
+the underlying LLM answer with that voice + tool defaults.
+
+Three things make an agent an agent (and not just a system
+prompt):
+
+1. *Persona* — a paragraph telling the LLM who it is, what tools
+   it owns, and what defaults to apply (lead with a tool call,
+   never invent vault content, hedge unless certain, etc.).
+2. *Tool roster* — the subset of MCP tools the agent is told to
+   reach for. The MCP server exposes everything; the persona
+   *narrows* what the agent reaches for first.
+3. *Model role* — which configured model handles the agent's
+   work (=chat_model= / =fast_model= / =code_model= /
+   =creative_model= / etc.). Lets the user route fast scans
+   through a small model while keeping deep reasoning on the
+   bigger one.
+
+The unit is *cheap*: one entry in =_PRECONFIGURED_AGENT_PROMPTS=
+in =org_llm/cli.py= (built-in) or one heading in
+=~/org/org-llm-agents.org= (user-editable, literate). No new
+runtime, no extra process. Adding an agent is 4-5 lines of
+persona text.
+
+* The current roster (17 agents, 2026-05-03)
+
+** Vault-content (read + reason)
+
+| agent           | what it does                                                           | model_role     |
+|-----------------+------------------------------------------------------------------------+----------------|
+| =@researcher=   | Find / summarise / compare info already in the vault. The workhorse.   | chat_model     |
+| =@analyst=      | Read text → derived text. Mode-switches: SUMMARIZE / EXTRACT / ANALYZE | text_model     |
+| =@librarian=    | Tag taxonomy curation: surface duplicates, suggest consolidations      | tag_model      |
+| =@vision-analyst= | OCR + image reasoning when the user attaches images                  | vision_model   |
+| =@translator=   | Translate user-supplied text between languages                         | translate_model |
+
+** Vault-state (write, capture, hygiene)
+
+| agent          | what it does                                                                | model_role      |
+|----------------+-----------------------------------------------------------------------------+-----------------|
+| =@scribe=      | Capture-flow + DRAFTING mode. Two shapes: clean org notes; long-form drafts | instruct_model  |
+| =@gardener=    | Vault hygiene advisor: orphans, stale TODOs, embeddings, broken links       | chat_model      |
+
+** Personal context (life-domain)
+
+| agent           | what it does                                                                       | model_role  |
+|-----------------+------------------------------------------------------------------------------------+-------------|
+| =@agenda=       | Scheduling, planning, "what's on deck" — reasons across time + commitments         | chat_model  |
+| =@journalist=   | Mood + sentiment over dailies; hedged, observational, never moralising             | chat_model  |
+| =@almanac=      | External context: weather (live), planned daylight/holidays/seasons. Owns weather setup | chat_model  |
+| =@planner=      | Break complex requests into sequenced steps before executing                       | reason_model |
+
+** Code + ops
+
+| agent         | what it does                                                                     | model_role    |
+|---------------+----------------------------------------------------------------------------------+---------------|
+| =@engineer=   | Code-corpus + dbt focus: small reviewable diffs, never multi-file rewrites       | code_model    |
+| =@reviewer=   | Code review: severity-ranked findings, smallest fix per issue                    | review_model  |
+| =@doom=       | Doom Emacs config specialist (keybinds, packages, =config.el= introspection)     | chat_model    |
+| =@ops=        | CLI + config + diagnostics expert. Translates plain-language → =org-llm config=  | chat_model    |
+
+** Meta
+
+| agent           | what it does                                                                                | model_role |
+|-----------------+---------------------------------------------------------------------------------------------+------------|
+| =@crew=         | The manager. Decompose → delegate → sanity-check → synthesise. Default when no agent tagged | chat_model |
+| =@agentsmith=   | Meta-agent: interviews you about a new agent and ships it (persona + tools + literate entry) | chat_model |
+
+** What used to be agents but isn't now
+
+These were dropped on 2026-05-03 after the agent-rationalization
+pass. The underlying capability still exists; the surface changed.
+
+| dropped agent  | replaced by                                                                                          |
+|----------------+------------------------------------------------------------------------------------------------------|
+| =@triager=     | =@gardener= (100% trigger overlap; the more thorough persona absorbed it)                            |
+| =@summarizer=  | =@analyst='s SUMMARIZE mode (triggered by tl;dr / in N sentences / shorten)                          |
+| =@extractor=   | =@analyst='s EXTRACT mode (triggered by extract / pull out / list entities / find names\|dates)      |
+| =@writer=      | =@scribe='s DRAFTING mode (triggered by draft / essay / narrative / write me / compose / story)      |
+| =@classifier=  | =classify_items(items, criterion)= MCP tool. Was never user-facing — only manager called it via =delegate()=. Now a first-class tool — no agent-registry indirection.    |
+
+If you used to rely on per-agent model_role specialisation (e.g.
+=@summarizer= on =summarize_model=), see "Customising" below — the
+literate file makes break-outs trivial.
+
+* Invocation paths
+
+There are four ways an agent gets engaged. They compose; one user
+turn may exercise more than one.
+
+** 1. Direct =@-tag=
+
+#+begin_example
+@scribe save this as a journal entry: …
+#+end_example
+
+The proxy's =intercept_agent_prefix= parses the leading =@<name>=,
+looks up the agent in the registry, REPLACES the system prompt with
+the agent's persona, and forwards the request unchanged. One agent,
+one turn.
+
+** 2. Auto-route
+
+#+begin_example
+what's on my schedule this week?
+#+end_example
+
+No =@-tag=. The proxy's =intent_classify= scores the message
+against every agent's =triggers= list, picks the highest-scoring
+match (≥ =proxy_auto_route_min_score=), and routes there. Falls
+back to the session's default agent (usually =@researcher=) when
+no triggers fire. Knob: =proxy_auto_route_to_agent= (default off).
+
+** 3. Manager-mediated delegation
+
+User asks =@crew= a multi-domain question. =@crew='s persona
+calls =org-llm_delegate(agent, prompt, context)=. The MCP layer
+runs the specialist with its own persona + model, splices the
+result back into =@crew='s context. Manager log captures every
+hop in =crew_log=.
+
+Special-cased: =classify_items(items, criterion)= for filter /
+criterion calls. Used to be =delegate('classifier', …)=; promoted
+to a first-class MCP tool in 2026-05-03 because it was never
+user-facing.
+
+** 4. Recipe pre-fetch (the proxy intercepts AHEAD of the LLM)
+
+The lightest layer:
+[[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes]] are regex →
+deterministic-tool → pre-fetch shortcuts that fire BEFORE the
+agent sees the message, when the question shape is known. The
+agent then narrates over the pre-fetched data in one cloud call
+instead of round-tripping to call the tool itself. Two recipes
+ship today: =count_across_vault= and =weather_aware_agenda=. The
+mechanism is opt-in per recipe, validated via the A/B harness in
+=scripts/recipe_ab_harness.py= before any new entry is added.
+
+* How agents compose with the rest of the stack
+
+#+begin_example
+            user types message
+                 │
+                 ▼
+   ┌──────────────────────────────────────────────────────┐
+   │  proxy.intercept_agent_prefix                        │
+   │   1. parse @<name>?                                  │
+   │   2. swap system prompt to agent's persona           │
+   │   3. (recipe layer) match_recipe + execute_recipe    │
+   │      → inject pre-fetch block when applicable        │
+   └──────────────────────────────────────────────────────┘
+                 │
+                 ▼
+   ┌──────────────────────────────────────────────────────┐
+   │  cloud or local LLM (per agent's model_role)         │
+   │   • emits tool_calls into MCP server                 │
+   │   • OR narrates over pre-fetched data                │
+   └──────────────────────────────────────────────────────┘
+                 │
+                 ▼
+   ┌──────────────────────────────────────────────────────┐
+   │  MCP server                                          │
+   │   • routes tool_calls to org_tools / vault_facts /   │
+   │     weather / delegate / classify_items / …          │
+   │   • returns structured results back to the LLM       │
+   └──────────────────────────────────────────────────────┘
+                 │
+                 ▼
+   final answer rendered in the chat surface (opencode TUI,
+   sidebar, or =org-llm ask= one-shot)
+#+end_example
+
+The proxy layer is invisible — opencode thinks it's talking to a
+single LLM endpoint. The agent injection, recipe pre-fetch, and
+tool-call repair all happen between opencode and the upstream
+model. See [[id:47ba2143-c53a-409a-8286-2b3759794608][llm-proxy.org]]
+for the full interceptor chain.
+
+* Customising
+
+The built-in registry is a *floor*. Users override at any level
+via the literate file =~/org/org-llm-agents.org=:
+
+#+begin_src org
+,* summarizer                                                    :agent:
+,:PROPERTIES:
+,:DESCRIPTION:    My fast tl;dr specialist (uses small fast model)
+,:MODEL_ROLE:     fast_model
+,:TRIGGERS:       summary, summarise, summarize, tl;dr, in N sentences
+,:END:
+,
+,You are a fast summarizer. Compress without losing meaning.
+,Match the user's requested length exactly. Preserve names,
+,dates, numbers, direct quotations. Lose stylistic flourish.
+,If summarising a tool result, cite source paths.
+#+end_src
+
+Round-trips:
+- =org-llm agents --tangle= writes the file from current built-ins +
+  DB rows.
+- =org-llm agents --apply= reads the file → DB rows.
+- User entries override built-ins by name. Built-ins the user
+  didn't redefine carry over.
+
+This is how you re-add =@summarizer= / =@extractor= / =@writer=
+as specialists with their own model_role: just add a heading. The
+trigger lists in the built-in =@analyst= / =@scribe= won't conflict
+because the user override registers a NEW agent name.
+
+* Design rules (from the 2026-05-03 rationalisation)
+
+The agent surface went from 21 → 17 in one pass after a
+persona-by-persona audit. The rules that drove the cuts (reusable
+for future calls):
+
+1. *Default surface should be simple.* If two agents have ≥80%
+   trigger overlap and similar tool roster, they're the same
+   agent in practice — merge.
+2. *Granularity stays available via the literate file.* Anyone
+   wanting per-shape model routing (a tiny fast =@summarizer=, a
+   creative =@writer=) breaks them out themselves; the built-in
+   set ships the umbrella.
+3. *If an agent is only invoked by other agents (never by the
+   user), it's a tool, not an agent.* =@classifier= got demoted
+   to =classify_items= for this reason.
+4. *Personas earn breadth, not just feature parity.* A
+   speculative agent ("I want a weather agent") often becomes a
+   real agent only after we identify the broader category it
+   belongs to (weather → @almanac → external context). One agent
+   covering five future tools beats five narrow agents covering
+   one each.
+5. *Add via [[file:agentsmith.org][@agentsmith]].* The meta-agent
+   is the canonical onboarding for a new persona — interviews
+   you, drafts the entry, suggests triggers, validates against a
+   test prompt before it lands.
+
+* See also
+
+- [[file:agent-framework.org][agent-framework.org]] — the deeper
+  architecture: =Agent= dataclass, =DELEGATES_TO= rules,
+  vault_facts inferrers, registration patterns, the four
+  invocation paths in detail.
+- [[file:agent-roster.org][agent-roster.org]] — the catalogue:
+  every shipped agent + the speculative roadmap (=@coach=,
+  =@medic=, =@bookkeeper=, =@oracle=, …) sorted by where the
+  rave-coding voltage is highest.
+- [[file:agentsmith.org][agentsmith.org]] — how to ship a new
+  agent in one conversation.
+- [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes.org]] — the
+  proxy-time pre-fetch mechanism agents compose with.
+- [[id:47ba2143-c53a-409a-8286-2b3759794608][llm-proxy.org]] —
+  the interceptor chain that hosts the agent layer.
+- =org_llm/cli.py= — =_PRECONFIGURED_AGENT_PROMPTS= (built-in
+  registry) + =_AGENT_TRIGGERS= (auto-route).
+- =org_llm/mcp_server.py= — =delegate()= (manager → specialist)
+  + =classify_items()= (the demoted classifier tool) +
+  =list_agents()= (run-time agent introspection).
+- =~/org/org-llm-agents.org= — the user's literate override
+  file. Edit any agent's persona, MODEL_ROLE, or TRIGGERS here;
+  =org-llm agents --apply= ingests changes.
