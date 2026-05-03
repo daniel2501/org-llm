@@ -16515,6 +16515,17 @@ def launch(
         runtime_path.write_text("{}")
     except Exception:
         pass
+    # Wipe manager-log.jsonl at session start — user wants a fresh
+    # MANAGER buffer per launch. Durable history lives in the
+    # History DB table (kind="crew"), so wiping the on-disk JSONL
+    # only resets the live tail-followed view; nothing salient is
+    # lost. The DB row written by db.log_crew_action persists.
+    try:
+        manager_log = org_dir / ".opencode" / "manager-log.jsonl"
+        if manager_log.exists():
+            manager_log.write_text("")
+    except Exception:
+        pass
     # tui.json — proper home for theme + plugin (per opencode's
     # tui-schema.ts). Always written even if no_theme so future
     # plugin registrations have a home.

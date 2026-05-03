@@ -113,6 +113,7 @@ def log_crew_action(action: str, agent_from: str = "crew",
     try:
         from datetime import datetime
         from sqlalchemy.orm import Session
+        import json as _json
         engine = make_engine()
         ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
         with Session(engine) as s:
@@ -129,6 +130,29 @@ def log_crew_action(action: str, agent_from: str = "crew",
                 outcome=outcome,
             )
             s.add(row)
+            # Mirror salient fields into the History table too so
+            # crew actions appear in the unified event log alongside
+            # CLI / LLM / MCP / config events. Survives the
+            # manager-log.jsonl wipe at session start.
+            try:
+                hist = History(
+                    timestamp=ts,
+                    command=f"crew/{action}",
+                    query=(prompt or "")[:600],
+                    response=(result or "")[:600],
+                    kind="crew",
+                    model=model,
+                    args=_json.dumps({
+                        "agent_from": agent_from,
+                        "agent_to":   agent_to,
+                        "session_id": session_id or "",
+                    }),
+                    duration_ms=int(duration_ms),
+                    outcome=outcome,
+                )
+                s.add(hist)
+            except Exception:
+                pass
             s.commit()
         # Sidebar overlay update — last 3 actions visible in the
         # MANAGER row. Mirror to BOTH sidebar-runtime.json (for
