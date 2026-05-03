@@ -1,0 +1,310 @@
+:PROPERTIES:
+:ID:       b9e5d3c2-4a7f-48a6-9c1d-e2f3a4b5c6d7
+:CREATED:  [2026-05-03]
+:END:
+#+TITLE: @agentsmith — design and ship new agents in one conversation
+#+FILETAGS: :wiki:agents:meta:onboarding:
+#+OPTIONS: toc:1 num:nil
+
+* What @agentsmith is
+
+A meta-agent. You bring it a domain or a pain point ("I want
+something that nags me about flashcards"), and it walks you
+through designing a new specialist agent that fits your vault and
+the existing agent framework, then writes the heading to
+=~/org/org-llm-agents.org= so the new agent ships immediately.
+
+It's the canonical onboarding for adding agents — using
+@agentsmith means you don't need to read the framework spec
+first, and you can't accidentally forget a field that matters.
+The result is a working @-tag in one conversation.
+
+* When to use it
+
+| situation                                                    | use @agentsmith? |
+|--------------------------------------------------------------+------------------|
+| You want a new domain agent (=@coach=, =@bookkeeper=, …)     | yes              |
+| You want to clone a built-in with a different model_role      | yes              |
+| You want to tweak ONE field on an existing agent (triggers)  | edit ~/org/org-llm-agents.org directly |
+| You want to design an MCP tool, not an agent                 | no — it's the wrong abstraction |
+| You're adding capabilities the host doesn't ship yet         | discuss with @ops or open a Phase 23.x ticket |
+
+The cost of building an agent that turns out unused is small (a
+heading in your literate file you can delete), so err toward
+shipping when the domain is real.
+
+* The seven design steps
+
+@agentsmith works through these in order. You can answer "I don't
+know" / "you decide" on any step and it'll suggest a default
+based on your vault and the existing roster.
+
+** 1. Domain definition
+
+What does the agent answer questions about? In one sentence.
+Examples that work:
+- "How my exercise habits are trending."
+- "Books I've finished, want to read, and what to read next."
+- "Whether I can afford this purchase."
+
+Examples that don't:
+- "Be helpful." (too broad — that's the chat model already)
+- "Be like a buddy." (no domain — what does it know about?)
+
+@agentsmith calls =search_notes= on candidate keywords to verify
+the vault actually has data the agent could reason over. If
+there's nothing, it surfaces the gap ("you don't have any
+=:fitness:= entries yet — want to design the data shape first?").
+
+** 2. Name + icons
+
+Lowercase, no spaces, no punctuation. Common naming patterns:
+- *Profession* — =@journalist=, =@analyst=, =@librarian=,
+  =@bookkeeper=
+- *Role in a household / shop* — =@scribe=, =@gardener=,
+  =@triager=¹, =@reviewer=, =@ops=
+- *Concrete object* — =@almanac=, =@compass=, =@inbox=
+
+Avoid generic names (=@assistant=, =@helper=) and brand-y names
+(=@chatgpt=, =@copilot=). Avoid clashes with the current roster
+([[file:agents.org][see agents.org]]).
+
+@agentsmith picks an icon set from the [[file:agent-roster.org][roster's
+icon palette]] (nerd-font / utf-8 / ascii fallback ladder). If no
+existing icons fit, it suggests three new ones from the
+=nf-md-*= family for the user to pick.
+
+¹ Now merged into =@gardener= as of 2026-05-03 — see
+[[file:agents.org][agents.org]] for the rationalization. Use this
+list as a naming-pattern reference, not a complete roster.
+
+** 3. Persona voice
+
+The system prompt that defines the agent's defaults. @agentsmith
+drafts this from a template:
+
+#+begin_example
+You are <name> — org-llm's <domain> specialist. The user comes
+to you for <kinds of questions>. You <one-sentence operating
+philosophy>.
+
+TOOL ROSTER:
+  • tool_a — <when to call it>
+  • tool_b — <when to call it>
+  • …
+
+DEFAULTS:
+  • Lead with <X> not <Y>.
+  • Cite <source> when relevant.
+  • Never <known failure mode>.
+  • If the data is empty, say so plainly.
+#+end_example
+
+Voice-match: @agentsmith reads =vault_profile= so the persona's
+register matches the user's existing notes. A user with a
+sentence-fragment journal style gets a sentence-fragment-style
+persona; a user who writes formal reports gets a formal one.
+
+** 4. Tool roster
+
+Which existing MCP tools the agent reaches for first. The
+persona NARROWS what's available; the MCP server still exposes
+everything. @agentsmith reads
+=docs/wiki/agent-framework.org= + the live tool list to suggest a
+roster, but you confirm.
+
+If a needed tool doesn't exist, that's a separate ticket — agents
+shouldn't ship blocked on speculative tools. @agentsmith proposes
+the agent without the missing tool and adds a TODO note.
+
+** 5. Triggers
+
+Auto-route keywords. The proxy's =intent_classify= scores user
+messages against every agent's =triggers=; this list determines
+when the agent fires *without* an explicit =@-tag=.
+
+Rules:
+- 5-15 phrases. Fewer → never auto-routes; more → starts
+  hijacking other agents' turf.
+- Use phrases users actually type, not categorical labels.
+  ("how have I been" not "introspection".)
+- Avoid bigrams that another agent already owns. @agentsmith
+  flags conflicts.
+
+** 6. Capabilities
+
+The host enforces a small declared set:
+
+| capability         | grants                                                  |
+|--------------------+---------------------------------------------------------|
+| =read.vault=       | search_notes / get_node / read_file                     |
+| =write.vault=      | capture_note / write_file / append_to_file              |
+| =read.config=      | inspect db.Config                                       |
+| =write.config=     | set db.Config (e.g. =org-llm config location_lat=)      |
+| =shell=            | shell_run                                                |
+| =external.network= | tools that hit the internet (weather, gcal, …)          |
+
+Default for new agents: =read.vault= only. Add more on a
+need-justified basis. =write.config= and =shell= are the
+high-blast-radius ones; @agentsmith asks specifically for
+those.
+
+** 7. Recipes / inferrers / hygiene scan (optional)
+
+Three optional power-up fields:
+
+- *Recipe* — a regex → deterministic-tool → pre-fetch shortcut
+  for one task shape. Only worth adding if it clears the A/B bar
+  ([[file:recipes.org][see recipes.org]]; the bar is ≥55% judge wins). Skip on
+  first ship; add later when you observe a repeated task shape.
+- *Inferrer* — a vault_facts entry that caches a derived value
+  with a TTL. Worth adding when the agent reads the same
+  derived value frequently (e.g. =mood_signal= for
+  =@journalist=, =routine_chores= for chore-overlap detection).
+- *Hygiene scan* — a callable returning =Suggestion= rows the
+  user can review via =org-llm hygiene=. Worth adding when the
+  agent's domain has structural improvements that aren't urgent
+  but compound (e.g. =@almanac= proposing =:outdoor:= tags on
+  candidate agenda items).
+
+If you skip all three on first ship, the agent still works — you
+just don't get the deterministic shortcut, the cached fact, or
+the maintenance feedback. Add them later when the agent's earned
+its keep.
+
+* What lands at the end
+
+@agentsmith writes a heading to =~/org/org-llm-agents.org= shaped
+like:
+
+#+begin_src org
+,* coach                                                         :agent:
+,:PROPERTIES:
+,:DESCRIPTION:    Fitness + workout coach — reasons over :exercise: dailies + clock minutes.
+,:MODEL_ROLE:     chat_model
+,:CAPABILITIES:   read.vault
+,:TRIGGERS:       workout, exercise, gym, run, lift, fitness, training, my routine
+,:TOOL_ROSTER:    org_count_matches, list_dailies, org_clock_summary, vault_profile
+,:DELEGATES_TO:   journalist
+,:END:
+,
+,You are coach — org-llm's fitness specialist. The user comes to
+,you for questions about how their workout habits are trending,
+,what they've been doing lately, and whether they're hitting
+,their own goals. …
+#+end_src
+
+Then runs =org-llm agents --apply= so the new agent is live.
+
+A *test prompt* validates before declaring done: @agentsmith
+fires =@coach how have I been training lately?= and checks the
+response narrates from real vault data. If empty / generic /
+hallucinated, it surfaces the issue and asks whether to revise
+or scrap.
+
+** No-code-edit path
+
+Everything above lands in the user's literate file. The built-in
+registry (=org_llm/cli.py::_PRECONFIGURED_AGENT_PROMPTS=) doesn't
+get touched.
+
+A new agent gets *promoted* to a built-in when (a) it's broadly
+useful (others would benefit) and (b) it's stable. That's a
+separate code-edit step, not part of @agentsmith's flow.
+
+* Worked example: shipping @coach in one conversation
+
+#+begin_example
+user: @agentsmith I want a coach agent that knows my workout
+      habits
+
+agentsmith: Let me look at what your vault has on that. Searching
+            for :exercise:, :workout:, :fitness:, :gym: …
+            Found 47 daily entries with [X] exercise checkboxes,
+            12 :workout: tagged headings, and your routine_chores
+            fact lists "exercise" as the 3rd most-recurring chore.
+            You've got real data to reason over.
+
+            Step 1 — domain. One sentence: "Coaches you on workout
+            habits and trends from your dailies + clock data."
+            Sound right?
+
+user: yes
+
+agentsmith: Step 2 — name. @coach is unused, free to take.
+            Icons: nf-md-run / 🏃 / =CCH=. OK?
+
+user:
+
+agentsmith: Step 3 — persona. Drafting based on your dailies'
+            voice (terse, sentence-fragment) … [draft persona]
+            Edit?
+
+user: looks good
+
+agentsmith: Step 4 — tool roster. From your data shape:
+              org_count_matches (workout streak counts)
+              list_dailies (recent workout entries)
+              org_clock_summary (gym minutes)
+              vault_profile (your habits + schedule)
+            Add anything?
+
+user: no
+
+agentsmith: Step 5 — triggers. Suggesting: workout, exercise,
+            gym, run, lift, fitness, training, "my routine".
+            Conflict check: "exercise" doesn't conflict with
+            anyone. OK?
+
+user: yes
+
+agentsmith: Step 6 — capabilities. read.vault is enough; the agent
+            doesn't write, doesn't shell out, doesn't hit the
+            network. Locking that in.
+
+agentsmith: Step 7 — optional fields. No recipe yet (not enough
+            repeated task shape to A/B). No inferrer needed —
+            existing routine_chores covers it. No hygiene scan
+            for v1. Skip all three?
+
+user: yes
+
+agentsmith: Writing to ~/org/org-llm-agents.org … applying …
+            Test prompt: @coach how have I been training lately?
+            Got: "Last 14 days: 9 [X] exercise checkboxes
+            (cadence ≈ 2/3 days). Strongest week: 2026-04-21
+            (5 entries). Slowest: 2026-05-01 to 05-03 (1 entry —
+            traveling?)." Cites real dates. Looks healthy.
+
+            @coach is live. Try @coach <anything>.
+#+end_example
+
+* Constraints
+
+- *Name conflicts* — @agentsmith refuses to ship an agent whose
+  name collides with a built-in or an existing user agent.
+- *Trigger overlap with existing agents* — @agentsmith flags
+  trigger conflicts but lets you ship anyway (with a warning).
+  The auto-route picks the highest-scoring match; a fully-
+  overlapping trigger means the new agent never wins.
+- *Capability escalation* — agents can't grant themselves
+  capabilities the host doesn't ship. =write.budget= for
+  example needs the budget agent's MCP plumbing first.
+- *Persona length* — < 800 chars usually; > 2000 chars often
+  bloats every turn's context for marginal voice gain.
+  @agentsmith warns at 1500.
+- *Lifecycle* — there's no =org-llm agents --remove=. To remove
+  an agent, delete the heading from =~/org/org-llm-agents.org=
+  and re-apply.
+
+* See also
+
+- [[file:agents.org][agents.org]] — what agents are, current
+  roster, invocation paths, design rules
+- [[file:agent-framework.org][agent-framework.org]] — the
+  architecture spec: Agent dataclass, capabilities,
+  inferrers, migration plan
+- [[file:agent-roster.org][agent-roster.org]] — the catalogue,
+  including aspirational agents to inspire ideas
+- =org_llm/cli.py= — built-in registry
+- =~/org/org-llm-agents.org= — your literate override file

@@ -8,6 +8,32 @@
 
 * What this is
 
+This page is the *architecture spec* for org-llm's agent
+framework — Agent dataclass, capabilities, hygiene scans, recipes,
+inferrers, registration, the four invocation paths, migration
+plan. Status: design draft written 2026-05-03; some pieces (the
+dataclass refactor in Phase 23.1) are forward-looking, others
+(the invocation paths, the literate-file overrides) are shipped.
+
+Companion docs (different audience, different scope):
+
+- [[file:agents.org][agents.org]] — *what's running today*: the
+  current 17-agent roster, how to invoke, customisation via the
+  literate file, design rules. Read this first if you just want
+  to use agents or know which one to @-tag.
+- [[file:agent-roster.org][agent-roster.org]] — the
+  *catalogue*: every shipped agent + the speculative roadmap
+  (=@coach=, =@medic=, =@bookkeeper=, …) sorted by interestingness.
+- [[file:agentsmith.org][agentsmith.org]] — the seven design
+  steps =@agentsmith= walks the user through to ship a new agent
+  in one conversation.
+
+This page (=agent-framework.org=) is the *deep architecture*
+reference — what the dataclass looks like, how capabilities are
+enforced, how recipes/inferrers/hygiene scans compose. Read this
+when you're extending the framework itself, not when you're
+adding a single agent.
+
 Org-llm's accumulating domain features (weather-aware agenda,
 battery + power policy, budget, drill review, fitness, reading
 log, mood tracking, calendar, …) all want similar plumbing:
@@ -18,10 +44,6 @@ inferrers. We almost built a "plugin" abstraction for these
 Cast as agents, the existing primitives already do the job —
 we just need the agent framework to be powerful enough that
 adding a new domain is "write a new agent" and nothing more.
-
-This page is the design of that framework. Status: design draft
-written 2026-05-03 to capture the architecture before we extend
-the agent registry beyond researcher / scribe / engineer / etc.
 
 * Why "agent" is the right unit (not "plugin")
 
@@ -91,9 +113,9 @@ another agent) confirms before applying. Examples:
 
 | agent     | scan does                                                          |
 |-----------+--------------------------------------------------------------------|
-| weather   | finds untagged outdoor-flavoured agenda items → suggests :cant-rain:|
+| almanac   | finds untagged outdoor-flavoured agenda items → suggests :outdoor:  |
 | scribe    | finds untagged headings → suggests tags from existing taxonomy      |
-| triager   | finds orphan files / stale TODOs → suggests cleanup                |
+| gardener  | finds orphan files / stale TODOs → suggests cleanup                |
 | librarian | finds tag drift / sprawl → suggests retag                          |
 | researcher| finds prose mentions of node titles that aren't =[[id:…]]= linked  |
 | budget    | finds transactions without categories → suggests categories         |
@@ -129,28 +151,39 @@ rows). Same pattern as =org-llm-config.org= for knobs and
 =org-llm-baselines.org= for the AgentBaseline shared rules.
 
 #+begin_src org
-,* weather                                                       :agent:
+,* almanac                                                       :agent:
 ,:PROPERTIES:
-,:DESCRIPTION:    Weather-aware agenda — forecasts + reschedule suggestions.
+,:DESCRIPTION:    External-context streams — weather + (planned) daylight, holidays, seasons.
 ,:MODEL_ROLE:     chat_model
-,:CAPABILITIES:   read.vault, external.network
-,:TRIGGERS:       weather, forecast, rain, snow, hike, bbq, outdoor
-,:TOOL_ROSTER:    weather_forecast, weather_for_agenda, weather_tag_suggest, org_agenda
+,:CAPABILITIES:   read.vault, read.config, write.config, external.network
+,:TRIGGERS:       weather, forecast, rain, snow, sunrise, sunset, daylight, holiday, season, good day for
+,:TOOL_ROSTER:    weather_for_agenda, weather_forecast, weather_tag_suggest, org_agenda
 ,:DELEGATES_TO:   agenda
 ,:END:
 
-,You are org-llm's weather agent. ...
+,You are almanac — org-llm's external-context agent. ...
 #+end_src
 
 ** Built-in defaults
 
-The Python-side registry at =org_llm/agents/_builtins.py= ships
-default Agent objects for the canonical personas: researcher,
-scribe, engineer, triager, planner, librarian, summarizer,
-extractor, reviewer, writer, translator, analyst, agenda, ops,
-weather (if/when extracted), battery (ditto). User edits to
-=org-llm-agents.org= override the matching built-in by name;
-unedited built-ins stay live.
+Today the registry lives at =org_llm/cli.py::_PRECONFIGURED_AGENT_PROMPTS=
+(the dataclass refactor in Phase 23.1 will move this to
+=org_llm/agents/_builtins.py=). Current built-ins (17, after the
+2026-05-03 rationalization — see [[file:agents.org][agents.org]]):
+
+  *Vault content* — researcher, analyst (umbrella for summarize /
+  extract / interpret), librarian, vision-analyst, translator
+  *Vault state*  — scribe (umbrella for capture + drafting), gardener
+  *Personal context* — agenda, journalist, almanac, planner
+  *Code + ops*  — engineer, reviewer, doom, ops
+  *Meta*        — crew (manager), agentsmith (creates new agents)
+
+User edits to =~/org/org-llm-agents.org= override the matching
+built-in by name; unedited built-ins stay live. Power users
+wanting per-shape model_role specialisation (e.g. =@summarizer=
+on =summarize_model=) re-add the agent in the literate file with
+the desired override — see [[file:agents.org][agents.org]] for an
+example.
 
 ** Resolution at startup
 
@@ -166,39 +199,23 @@ def load_agents() -> dict[str, Agent]:
 
 * Invocation paths
 
-There are four ways an agent gets engaged. They compose; a
-single user turn may exercise more than one.
+Four invocation paths compose; one user turn may exercise more
+than one. Each is described in detail in [[file:agents.org][agents.org]];
+this section just names them so the rest of this page can
+reference them.
 
-** Direct (=@<name>=)
+  1. *Direct* — user types =@<name>=; proxy swaps system prompt
+     to the agent's persona.
+  2. *Auto-route* — proxy's =intent_classify= scores the message
+     against agents' =triggers= and picks the best match.
+  3. *Manager-mediated delegation* — agent A's persona calls
+     =org-llm_delegate(B, prompt, context)= for cross-agent
+     synthesis.
+  4. *Recipe pre-fetch* — proxy intercepts ahead of the LLM and
+     pre-fetches deterministic data so the agent narrates in
+     ONE cloud call. Curated set; see [[file:recipes.org][recipes.org]].
 
-User types =@weather what's saturday=. The proxy's
-=intercept_agent_prefix= routes the turn through the weather
-agent's persona + tool roster + (potentially) a matching recipe.
-Already implemented today.
-
-** Auto-route
-
-User types a question without =@<name>=. =intent_classify=
-matches the question against every agent's =triggers=, picks
-the highest-scoring match. Falls back to the session's default
-agent (usually researcher) when no triggers fire. Already
-implemented today.
-
-** Manager-mediated delegation
-
-Agent A's reasoning needs Agent B's domain (e.g. researcher
-gets a question about hiking plans → wants weather context).
-Agent A's persona says "for weather questions, delegate to
-@weather". The MCP layer dispatches, captures the result,
-splices it back into Agent A's context. Manager log records
-the cross-agent hop.
-
-** Recipe pre-fetch
-
-The orchestration recipe layer matches the user's text against
-known patterns and runs the relevant agent's pre-fetch path
-BEFORE the LLM sees the turn. Manager pre-fetches data; agent
-narrates in 1 cloud call. Already implemented (Phase 22 v2).
+All four are implemented today.
 
 * Cross-agent collaboration model
 
@@ -314,5 +331,5 @@ MCP tool can sit in =life_support.py= until then; no rush.
 - =docs/wiki/tonight-rave-list.org= — current queue.
 - =org_llm/cli.py::_PRECONFIGURED_AGENT_PROMPTS= — current registry.
 - =org_llm/db.py::AgentBaseline= — shared rules table.
-- =org_llm/vault_facts.py= — inferrer registry pattern.
-- =org_llm/orchestration.py= — recipe registry pattern.
+- [[file:../../org_llm/vault_facts.py][=org_llm/vault_facts.py=]] — inferrer registry pattern.
+- [[file:../../org_llm/orchestration.py][=org_llm/orchestration.py=]] — recipe registry pattern.
