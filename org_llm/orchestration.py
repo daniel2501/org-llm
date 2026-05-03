@@ -72,9 +72,13 @@ _RECIPES: list[tuple[_re.Pattern, RecipeMatch]] = [
         ),
     ),
     (
+        # Match BOTH a "dailies" word AND a routine-keyword in any
+        # order via lookaheads — earlier the regex required
+        # `dailies.*routine` and missed "pull RECURRING items from
+        # recent DAILIES" where the order is reversed.
         _re.compile(
-            r"\b(dailies|daily files?|recent dailies)\b.*"
-            r"\b(routine|recurring|typically|regular)\b",
+            r"(?=.*\b(?:dailies|daily files?|recent dailies)\b)"
+            r"(?=.*\b(?:routine|recurring|typically|regular)\b)",
             _re.IGNORECASE | _re.DOTALL,
         ),
         RecipeMatch(

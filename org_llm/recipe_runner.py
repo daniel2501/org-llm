@@ -116,6 +116,41 @@ _SCOPE_RE = _re.compile(
 _DAILY_HINT_RE = _re.compile(
     r"\b(daily|dailies|journal|day-?notes?)\b", _re.IGNORECASE
 )
+# finding-5 (2026-05-03) — strip relative time-modifier phrases
+# BEFORE tokenising, so they don't end up as content tokens. The
+# user's question is "exercise this year", not "exercise this year
+# year"; tokenising "year" as content used to produce nonsense
+# regexes like `(exercis|...).{0,12}\byear\b` → 0 hits.
+#
+# Single broad regex that absorbs the optional preposition
+# ("in"/"for"/"over") + optional article ("the") + the time
+# qualifier ("this|last|past|next") + optional count ("30") +
+# the unit ("month"/"week"/"day"/...). Applied first so leftover
+# fragments don't leak into tokenisation.
+_TIME_MODIFIER_RES = [
+    _re.compile(
+        r"\b(?:in|for|over|during)?\s*(?:the\s+)?"
+        r"(?:this|last|next|past)\s+"
+        r"(?:\d+\s+)?(?:year|month|week|day|quarter)s?\b",
+        _re.IGNORECASE,
+    ),
+    _re.compile(
+        r"\b(?:in|for|over|during)\s+(?:the\s+)?"
+        r"(?:\d+\s+)(?:year|month|week|day|quarter)s?\b",
+        _re.IGNORECASE,
+    ),
+    _re.compile(
+        r"\b(?:today|yesterday|tomorrow|recently|lately|so far)\b",
+        _re.IGNORECASE,
+    ),
+    _re.compile(r"\bin\s+\d{4}\b", _re.IGNORECASE),
+    _re.compile(
+        r"\bin\s+(?:january|february|march|april|may|june|july|"
+        r"august|september|october|november|december)\b",
+        _re.IGNORECASE,
+    ),
+]
+
 _COUNT_PREFIX_RES = [
     _re.compile(r"^how many times (?:have i |did i |do i |i )?",
                  _re.IGNORECASE),
@@ -141,6 +176,11 @@ def _strip_count_question(text: str) -> tuple[str, str]:
     when the user mentions dailies/journal."""
     t = (text or "").strip().rstrip("?!. ")
     daily = bool(_DAILY_HINT_RE.search(t))
+    # 0. relative time-modifier phrases (finding-5) — strip
+    # before scope/prefix/tokenisation so they don't become
+    # content tokens.
+    for pat in _TIME_MODIFIER_RES:
+        t = pat.sub(" ", t)
     # 1. scope marker (in dailies / in my notes …)
     t = _SCOPE_RE.sub(" ", t).strip(" ,").strip()
     # 2. count question prefix
@@ -393,6 +433,117 @@ def _run_recent_activity_summary(user_text: str) -> RunResult | None:
     )
 
 
+# ── dailies_routine_filter runner ────────────────────────────────────────────
+
+def _run_dailies_routine_filter(user_text: str) -> RunResult | None:
+    """Promote the v1 advisory recipe (which asked the LLM to do
+    its own filter pass over recent dailies) to manager pre-fetch.
+
+    Phase 21.1's `routine_chores` inferrer already produces the
+    REJECT-first chore list deterministically — we just hand it to
+    the agent so it can draft the flat list per CAPTURE STYLE and
+    handle the confirm-and-save flow. No LLM filter pass needed.
+
+    Falls back to advisory mode (returns None) when the fact is
+    empty — e.g. fresh vault with no dailies yet."""
+    try:
+        from . import vault_facts as _vf
+    except Exception:
+        return None
+    fact = _vf.get_fact("routine_chores") or {}
+    chores = fact.get("chores") or []
+    if not chores:
+        return None
+    return RunResult(
+        answer="",
+        tool_name="routine_chores",
+        tool_args={"window_dailies": fact.get("dailies_scanned", 0),
+                    "limit": len(chores)},
+        tool_result={
+            "chores":           chores,
+            "samples_total":    fact.get("samples_total", 0),
+            "samples_rejected": fact.get("samples_rejected", 0),
+            "dailies_scanned":  fact.get("dailies_scanned", 0),
+        },
+    )
+
+
+# ── dailies_general runner ───────────────────────────────────────────────────
+
+def _run_dailies_general(user_text: str) -> RunResult | None:
+    """Manager pre-fetches the last 5 dailies (path + first heading
+    + content excerpt) so the agent answers without an extra MCP
+    round-trip.
+
+    Mirrors the inline `list_dailies` MCP tool's body, but capped
+    at ~1500 chars per file (vs. 4000) to keep the pre-fetch block
+    under ~10KB. Agents that need fuller context can still call
+    `list_dailies` themselves."""
+    try:
+        from .db import Config, make_engine
+        from sqlalchemy.orm import Session
+    except Exception:
+        return None
+    try:
+        with Session(make_engine()) as s:
+            org_row   = s.get(Config, "org_dir")
+            daily_row = s.get(Config, "daily_dir")
+        from pathlib import Path as _Path
+        org_dir = _Path((org_row.value if org_row else "~/org")
+                          ).expanduser()
+        daily_dir = (_Path(daily_row.value).expanduser()
+                      if daily_row and daily_row.value
+                      else (org_dir / "daily"))
+    except Exception:
+        return None
+    if not daily_dir.exists():
+        return None
+    try:
+        files = sorted(daily_dir.glob("*.org"),
+                        key=lambda p: p.stat().st_mtime,
+                        reverse=True)[:5]
+    except Exception:
+        return None
+    if not files:
+        return None
+    from datetime import datetime as _dt
+    rows: list[dict] = []
+    max_chars = 1500
+    for f in files:
+        try:
+            full = f.read_text(errors="replace")
+        except Exception:
+            continue
+        title = ""
+        for line in full.splitlines()[:8]:
+            s = line.strip()
+            if s.lower().startswith("#+title:"):
+                title = s.split(":", 1)[1].strip()
+                break
+            if s.startswith("* "):
+                title = s[2:].strip()
+                break
+        body = full[:max_chars]
+        if len(full) > max_chars:
+            body += f"\n... [truncated; full file {len(full)} chars]"
+        rows.append({
+            "date":       _dt.fromtimestamp(f.stat().st_mtime).date().isoformat(),
+            "stem":       f.stem,
+            "title":      title,
+            "content":    body,
+            "truncated":  len(full) > max_chars,
+            "full_chars": len(full),
+        })
+    if not rows:
+        return None
+    return RunResult(
+        answer="",
+        tool_name="list_dailies",
+        tool_args={"limit": 5, "include_content": True},
+        tool_result={"dailies": rows, "n_dailies": len(rows)},
+    )
+
+
 # ── pre-fetch block (manager → agent hand-off) ───────────────────────────────
 
 def _user_context_addendum(recipe_name: str, run: RunResult,
@@ -482,6 +633,33 @@ def format_prefetch_block(recipe_name: str, run: RunResult,
                 lines.append(f"  {f.get('date', '?')}  "
                               f"{os.path.basename(str(f.get('path','')))}")
         body = "\n  ".join(lines)
+    elif "chores" in res:
+        # routine_chores shape — flat list, top N kept already.
+        chores_list = res.get("chores") or []
+        scanned     = res.get("dailies_scanned", 0)
+        total_s     = res.get("samples_total", 0)
+        rejected    = res.get("samples_rejected", 0)
+        lines = [f"routine_chores (scanned {scanned} dailies, "
+                  f"{total_s} samples, {rejected} rejected):"]
+        for c in chores_list:
+            lines.append(f"  {c.get('count', 0):>3}× "
+                          f"{c.get('phrase', '')}  "
+                          f"(first {c.get('first_seen', '?')} → "
+                          f"last {c.get('last_seen', '?')})")
+        body = "\n  ".join(lines)
+    elif "dailies" in res:
+        # dailies_general shape — file-by-file content excerpts.
+        dailies_list = res.get("dailies") or []
+        lines = [f"recent_dailies ({len(dailies_list)} files):"]
+        for d in dailies_list:
+            head = (f"  --- {d.get('date','?')}  {d.get('stem','')}.org"
+                    + (f"  ({d.get('title','')})" if d.get('title') else "")
+                    + (f"  [truncated, {d.get('full_chars',0)} chars]"
+                        if d.get("truncated") else "")
+                    + " ---")
+            lines.append(head)
+            lines.append(d.get("content", ""))
+        body = "\n".join(lines)
     else:
         try:
             body = _json.dumps(res, default=str,
@@ -506,4 +684,6 @@ def format_prefetch_block(recipe_name: str, run: RunResult,
 _RUNNERS: dict[str, Callable[[str], RunResult | None]] = {
     "count_across_vault":      _run_count_across_vault,
     "recent_activity_summary": _run_recent_activity_summary,
+    "dailies_routine_filter":  _run_dailies_routine_filter,
+    "dailies_general":         _run_dailies_general,
 }
