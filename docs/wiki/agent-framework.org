@@ -1,0 +1,318 @@
+:PROPERTIES:
+:ID:       3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6
+:CREATED:  [2026-05-03]
+:END:
+#+TITLE: Agent framework architecture
+#+FILETAGS: :wiki:architecture:agents:
+#+OPTIONS: toc:2 num:nil
+
+* What this is
+
+Org-llm's accumulating domain features (weather-aware agenda,
+battery + power policy, budget, drill review, fitness, reading
+log, mood tracking, calendar, …) all want similar plumbing:
+a persona, a tool roster, opt-in triggers, optional
+orchestration recipes, optional hygiene scans, optional
+inferrers. We almost built a "plugin" abstraction for these
+2026-05-03 then realised: *they're not plugins, they're agents*.
+Cast as agents, the existing primitives already do the job —
+we just need the agent framework to be powerful enough that
+adding a new domain is "write a new agent" and nothing more.
+
+This page is the design of that framework. Status: design draft
+written 2026-05-03 to capture the architecture before we extend
+the agent registry beyond researcher / scribe / engineer / etc.
+
+* Why "agent" is the right unit (not "plugin")
+
+| concern                         | plugin abstraction              | agent abstraction                          |
+|---------------------------------+---------------------------------+--------------------------------------------|
+| user mental model               | "tooling that runs in the host" | "a specialist I can talk to"               |
+| invocation                      | invisible — runs on hooks       | explicit — =@weather=, or auto-routed      |
+| addressability in chat          | none                            | first-class                                |
+| composes with manager pattern   | new abstraction                  | already integrates                         |
+| literate-config round-trip      | new manifest format              | reuses =org-llm-agents.org=                |
+| user mod / extension            | edit a Python file              | edit an org heading                        |
+
+The plugin idea added a layer of indirection that wasn't earning
+its keep. Agents are the natural domain unit AND the user-facing
+surface for asking domain questions. One concept, used twice.
+
+* The Agent
+
+An *Agent* is the unit of org-llm's specialist behaviour.
+Defined by an entry in the agent registry:
+
+#+begin_src python
+@dataclass
+class Agent:
+    name:           str          # @<name> identifier; lowercase, no spaces
+    description:    str          # one-liner shown in /agents
+    persona:        str          # system-prompt body
+    model_role:     str = "chat_model"  # resolves at launch via the role chain
+    triggers:       list[str] = field(default_factory=list)  # keyword auto-route
+    tool_roster:    list[str] = field(default_factory=list)  # MCP tool names
+    recipes:        list[Recipe] = field(default_factory=list)  # orchestration patterns
+    inferrers:      list[Inferrer] = field(default_factory=list)
+    hygiene_scan:   Callable | None = None
+    capabilities:   set[str] = field(default_factory=set)   # see below
+    requires_facts: list[str] = field(default_factory=list)
+    delegates_to:   list[str] = field(default_factory=list) # other agents it can call
+    config_keys:    list[ConfigKey] = field(default_factory=list)
+#+end_src
+
+Each field is independently optional. A minimal agent is just
+=name + persona=. Domain-rich agents (weather, budget) populate
+nearly all fields.
+
+** Capabilities
+
+A small declared set the host enforces:
+
+| capability        | what the agent is allowed to do                       |
+|-------------------+-------------------------------------------------------|
+| =read.vault=      | call read_file / search_notes / get_node              |
+| =write.vault=     | call capture_note / write_file / append_to_file       |
+| =read.config=     | inspect db.Config rows                                |
+| =write.config=    | set db.Config rows                                    |
+| =shell=           | call shell_run / system commands                      |
+| =external.network=| call MCP tools that hit the internet (weather, gcal)  |
+| =write.budget=    | for the budget agent specifically — gates `budget_*`  |
+
+The host's MCP layer cross-checks each tool call against the
+agent's capability set. Tool calls outside the set fail with a
+"capability not granted" error rather than silently working.
+
+** Hygiene scan
+
+Every agent CAN ship a domain-specific scanner that proposes
+structural improvements without writing them — the user (or
+another agent) confirms before applying. Examples:
+
+| agent     | scan does                                                          |
+|-----------+--------------------------------------------------------------------|
+| weather   | finds untagged outdoor-flavoured agenda items → suggests :cant-rain:|
+| scribe    | finds untagged headings → suggests tags from existing taxonomy      |
+| triager   | finds orphan files / stale TODOs → suggests cleanup                |
+| librarian | finds tag drift / sprawl → suggests retag                          |
+| researcher| finds prose mentions of node titles that aren't =[[id:…]]= linked  |
+| budget    | finds transactions without categories → suggests categories         |
+
+A hygiene scan returns a list of =Suggestion= rows. The host
+exposes the scans via a unified =org-llm hygiene= verb — runs
+ALL enabled agents' scans and presents a triaged list.
+
+** Recipes
+
+An agent can own orchestration recipes that route to it. The
+recipe's =target= can be the agent's name, or =*= for "any
+agent fires this; whichever agent the user @-tagged narrates".
+Recipes ship as part of the agent's manifest, not as a global
+list.
+
+** Inferrers
+
+An agent can register vault_facts inferrers. =routine_chores=
+naturally belongs to the dailies-flavour scribe; weather wants
+its own =outdoor_items_pending= inferrer; budget wants
+=spending_by_category=. Inferrers stay in the unified vault_facts
+registry — the agent just owns their lifecycle.
+
+* The agent registry
+
+** Source-of-truth: =~/org/org-llm-agents.org=
+
+A literate org file. One heading per agent. Round-trips via
+=org-llm agents --tangle= (writes the file from current built-ins
++ DB rows) and =org-llm agents --apply= (reads the file → DB
+rows). Same pattern as =org-llm-config.org= for knobs and
+=org-llm-baselines.org= for the AgentBaseline shared rules.
+
+#+begin_src org
+,* weather                                                       :agent:
+,:PROPERTIES:
+,:DESCRIPTION:    Weather-aware agenda — forecasts + reschedule suggestions.
+,:MODEL_ROLE:     chat_model
+,:CAPABILITIES:   read.vault, external.network
+,:TRIGGERS:       weather, forecast, rain, snow, hike, bbq, outdoor
+,:TOOL_ROSTER:    weather_forecast, weather_for_agenda, weather_tag_suggest, org_agenda
+,:DELEGATES_TO:   agenda
+,:END:
+
+,You are org-llm's weather agent. ...
+#+end_src
+
+** Built-in defaults
+
+The Python-side registry at =org_llm/agents/_builtins.py= ships
+default Agent objects for the canonical personas: researcher,
+scribe, engineer, triager, planner, librarian, summarizer,
+extractor, reviewer, writer, translator, analyst, agenda, ops,
+weather (if/when extracted), battery (ditto). User edits to
+=org-llm-agents.org= override the matching built-in by name;
+unedited built-ins stay live.
+
+** Resolution at startup
+
+#+begin_src python
+def load_agents() -> dict[str, Agent]:
+    builtins = _BUILTIN_AGENTS              # the canonical set
+    overrides = parse_agents_org()           # user edits, possibly empty
+    out = {a.name: a for a in builtins}
+    for a in overrides:
+        out[a.name] = a                      # user wins
+    return out
+#+end_src
+
+* Invocation paths
+
+There are four ways an agent gets engaged. They compose; a
+single user turn may exercise more than one.
+
+** Direct (=@<name>=)
+
+User types =@weather what's saturday=. The proxy's
+=intercept_agent_prefix= routes the turn through the weather
+agent's persona + tool roster + (potentially) a matching recipe.
+Already implemented today.
+
+** Auto-route
+
+User types a question without =@<name>=. =intent_classify=
+matches the question against every agent's =triggers=, picks
+the highest-scoring match. Falls back to the session's default
+agent (usually researcher) when no triggers fire. Already
+implemented today.
+
+** Manager-mediated delegation
+
+Agent A's reasoning needs Agent B's domain (e.g. researcher
+gets a question about hiking plans → wants weather context).
+Agent A's persona says "for weather questions, delegate to
+@weather". The MCP layer dispatches, captures the result,
+splices it back into Agent A's context. Manager log records
+the cross-agent hop.
+
+** Recipe pre-fetch
+
+The orchestration recipe layer matches the user's text against
+known patterns and runs the relevant agent's pre-fetch path
+BEFORE the LLM sees the turn. Manager pre-fetches data; agent
+narrates in 1 cloud call. Already implemented (Phase 22 v2).
+
+* Cross-agent collaboration model
+
+The user's standing position: "agents help other agents per the
+guidance of the manager." Mechanically:
+
+1. *Shared MCP tools.* All agents see all MCP tools (modulo
+   capability checks). When researcher needs weather data, it
+   calls =weather_for_agenda= directly — the weather agent
+   doesn't need to be invoked.
+2. *Delegation when prose synthesis is needed.* When the agent
+   needs another agent's *narrative*, not just data, it
+   delegates via the manager. The manager runs the target
+   agent, captures its response as a tool-result, splices into
+   the caller's context.
+3. *Shared facts.* vault_facts entries are global. An agent
+   reads any fact even if a different agent registered the
+   inferrer.
+4. *Shared baselines.* AgentBaseline rules apply to multiple
+   agents (=applies_to=). Cross-cutting concerns (no
+   hallucination, cite sources, etc.) live there.
+
+The manager's job is to ROUTE — match the request to the right
+agent, possibly pre-fetch data, possibly delegate cross-agent.
+The agents themselves are the actual specialists.
+
+* Hygiene scan + tag-applying as default agent behaviour
+
+The user asked 2026-05-03: "agents in general do this file
+crawling and tag applying behavior, unique to their purpose.
+This is part of default agent config."
+
+Mechanism: every Agent ships an optional =hygiene_scan: Callable=
+that takes no arguments and returns a list of =Suggestion=.
+The host exposes:
+
+  - =org-llm hygiene= — runs every enabled agent's scan, presents
+    a triaged list grouped by agent.
+  - =org-llm hygiene --agent <name>= — runs just one.
+  - The scribe / triager / agenda / weather / librarian agents
+    also expose their own scan as an MCP tool, so other agents
+    can call =hygiene_<agent>= and reason over the suggestions.
+
+Suggestions never auto-apply. The user (or a confirming agent
+like scribe) approves and writes. False-positive cost is one
+ignored row; false-negative cost is a missed structural
+improvement.
+
+* Migration plan
+
+** Phase 23.1 — Agent dataclass + registry refactor
+- Define =Agent= dataclass.
+- Convert =_PRECONFIGURED_AGENT_PROMPTS= (dict) +
+  =_AGENT_TRIGGERS= (sibling dict) into a list of Agent
+  instances at =org_llm/agents/_builtins.py=.
+- =_known_agents= reads the new shape; existing
+  =@<name>=-style routing keeps working unchanged.
+- =org-llm agents --tangle= / =--apply= round-trip the new
+  shape to/from =org-llm-agents.org=.
+
+** Phase 23.2 — Capability enforcement
+- Wire the MCP layer to check capabilities before dispatch.
+- Add capability declarations to every built-in agent.
+
+** Phase 23.3 — Hygiene scans
+- Add the =hygiene_scan= field. Implement the existing scribe
+  +librarian scans; ship a sample weather_tag_suggest as the
+  agenda agent's scan. =org-llm hygiene= verb.
+
+** Phase 23.4 — Recipes + inferrers as agent properties
+- Migrate =orchestration._RECIPES= → per-agent recipe lists.
+- Migrate =vault_facts._INFERRERS= → per-agent inferrer lists
+  (registry stays unified for fact-name lookup).
+- The host composes the global list at startup.
+
+** Phase 23.5 — User-supplied agents
+- =~/.config/org-llm/agents/<name>.org= sourced as additional
+  overrides. Same shape as =org-llm-agents.org=.
+- Sandbox: user-supplied agents can't grant themselves new
+  capabilities; they pick from the existing capability set.
+
+* What this means for tonight's weather + battery work
+
+We landed weather as a recipe + agent (=agenda=) + MCP tools and
+battery as a richer probe + power_profile + MCP tool. None of
+that needs to move now. Phase 23.1 absorbs them when the Agent
+dataclass lands; nothing about the user-facing surface changes.
+
+Bookkeeping in the roadmap: weather is the @agenda agent's
+domain capability. Battery + power policy will eventually be a
+@host (or @steward) agent — but the probe + power_profile +
+MCP tool can sit in =life_support.py= until then; no rush.
+
+* Open questions
+
+1. *Agent vs. tool — when does a domain warrant a full agent
+   rather than just MCP tools?* Lean: when the domain has its
+   own *voice* (specialised system prompt) AND its own
+   *recipes* OR *hygiene scan*. Pure tool-only domains can
+   stay as plain MCP entries.
+2. *Capability-set drift.* As we add capabilities (e.g.
+   `external.gcal`), should existing agents need explicit
+   allowlists or do they auto-get new capabilities? Lean:
+   explicit allowlist; safer.
+3. *Hot-reloading agents.* Should =org-llm agents --apply=
+   live-reload the running session, or require a relaunch?
+   Lean: relaunch initially; live-reload is a Phase 24
+   improvement.
+
+* See also
+
+- =docs/wiki/roadmap.org= — phase index.
+- =docs/wiki/tonight-rave-list.org= — current queue.
+- =org_llm/cli.py::_PRECONFIGURED_AGENT_PROMPTS= — current registry.
+- =org_llm/db.py::AgentBaseline= — shared rules table.
+- =org_llm/vault_facts.py= — inferrer registry pattern.
+- =org_llm/orchestration.py= — recipe registry pattern.

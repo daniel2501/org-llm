@@ -3550,6 +3550,47 @@ def create_mcp_server():
                         f"{len(rows)} match(es) for {query!r}", body)
 
     @server.tool()
+    def battery_status() -> str:
+        """Return rich battery state: percent, charging/discharging,
+        cycle count, current vs design capacity (% health), time
+        to empty / full, instantaneous draw, and a panic flag
+        (≤5% AND discharging). Use to reason about whether to
+        offer a heavy operation now or defer."""
+        from . import life_support as _ls
+        bd = _ls.battery_details()
+        if not bd.get("present"):
+            return _themed("battery_status",
+                            "no battery (desktop / VM)")
+        rows = [
+            f"  status:           {bd.get('status', '?')} "
+            f"({'plugged' if bd.get('plugged') else 'on battery'})",
+            f"  percent:          {bd.get('percent', '?')}%",
+        ]
+        if bd.get("time_to_empty_min") is not None:
+            rows.append(f"  time_to_empty:    "
+                          f"{bd['time_to_empty_min']}m")
+        if bd.get("time_to_full_min") is not None:
+            rows.append(f"  time_to_full:     "
+                          f"{bd['time_to_full_min']}m")
+        if bd.get("power_now_w") is not None:
+            rows.append(f"  power_now:        "
+                          f"{bd['power_now_w']}W")
+        if bd.get("cycle_count") is not None:
+            rows.append(f"  cycle_count:      "
+                          f"{bd['cycle_count']} (ageing proxy)")
+        if bd.get("energy_full_pct") is not None:
+            rows.append(f"  capacity_health:  "
+                          f"{bd['energy_full_pct']}% of design  "
+                          f"[{bd.get('health', '?')}]")
+        rows.append(f"  power_profile:    {_ls.power_profile()}")
+        if bd.get("panic"):
+            rows.append("  ⚠ PANIC mode — ≤5% and discharging. "
+                          "Save work; abort heavy ops.")
+        return _themed("battery_status",
+                        "battery + power state",
+                        "\n".join(rows))
+
+    @server.tool()
     def weather_forecast(days: int = 7, force: bool = False) -> str:
         """Return the next `days` days of weather for the user's
         configured location. Uses open-meteo (FOSS, no key).

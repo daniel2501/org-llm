@@ -112,6 +112,170 @@ def probe_battery() -> Reading:
                         "nominal", "Battery sensor unreachable.")
 
 
+# ── extended battery details (Phase TBD — souped-up probe) ──────────────────
+
+def battery_details() -> dict:
+    """Return a richer view of battery state than `probe_battery`:
+
+      {
+        "present":         bool,
+        "percent":         int | None,
+        "status":          "Charging" | "Discharging" | "Full" | "Not charging" | "Unknown",
+        "plugged":         bool,
+        "cycle_count":     int | None,        # ageing proxy
+        "energy_full_pct": float | None,      # current full vs design (0-100)
+        "time_to_empty_min": int | None,      # extrapolated runtime
+        "time_to_full_min":  int | None,      # extrapolated charge time
+        "power_now_w":     float | None,      # instantaneous draw (negative when discharging)
+        "health":          "nominal" | "watch" | "alert" | "critical" | "unknown",
+        "panic":           bool,              # ≤5% AND discharging — abort heavy ops
+      }
+
+    Read from /sys/class/power_supply/BAT*. psutil fallback fills
+    `percent` + `plugged` + `time_to_empty_min` only — the health
+    + cycle metrics are Linux-only today.
+    """
+    out: dict = {
+        "present": False, "percent": None, "status": "Unknown",
+        "plugged": False, "cycle_count": None,
+        "energy_full_pct": None, "time_to_empty_min": None,
+        "time_to_full_min": None, "power_now_w": None,
+        "health": "unknown", "panic": False,
+    }
+
+    def _read_int(p: Path) -> int | None:
+        try:
+            return int(p.read_text().strip())
+        except (FileNotFoundError, ValueError, OSError):
+            return None
+
+    try:
+        ps_root = Path("/sys/class/power_supply")
+        for entry in sorted(ps_root.iterdir()):
+            if not entry.name.startswith("BAT"):
+                continue
+            out["present"] = True
+            try:
+                pct    = int((entry / "capacity").read_text().strip())
+                status = (entry / "status").read_text().strip()
+            except (FileNotFoundError, OSError, ValueError):
+                continue
+            out["percent"] = pct
+            out["status"]  = status
+            out["plugged"] = status.lower() in (
+                "charging", "full", "not charging")
+            out["cycle_count"] = _read_int(entry / "cycle_count")
+            full      = _read_int(entry / "energy_full")
+            design    = _read_int(entry / "energy_full_design")
+            full_now  = _read_int(entry / "energy_now")
+            power_uw  = _read_int(entry / "power_now")
+            current_uA = _read_int(entry / "current_now")
+            voltage_uV = _read_int(entry / "voltage_now")
+            # Some kernels expose charge_*; prefer energy when both
+            # are present. Charge units = µAh; convert to µWh if
+            # voltage is known.
+            if full is None:
+                full      = _read_int(entry / "charge_full")
+                design    = _read_int(entry / "charge_full_design")
+                full_now  = _read_int(entry / "charge_now")
+            if full and design:
+                out["energy_full_pct"] = round(100.0 * full / design, 1)
+                if out["energy_full_pct"] >= 80:   out["health"] = "nominal"
+                elif out["energy_full_pct"] >= 60: out["health"] = "watch"
+                elif out["energy_full_pct"] >= 40: out["health"] = "alert"
+                else:                              out["health"] = "critical"
+            # power_now is in µW (energy-driven kernels) or computed
+            # from current × voltage (charge-driven). Negative when
+            # discharging on most kernels; abs() for the magnitude.
+            if power_uw is None and current_uA and voltage_uV:
+                power_uw = current_uA * voltage_uV // 1000  # µA × µV → µW
+            if power_uw:
+                out["power_now_w"] = round(abs(power_uw) / 1_000_000, 1)
+                if full_now and out["power_now_w"] > 0:
+                    if status.lower() == "discharging":
+                        # remaining_µWh / draw_µW × 60 = minutes
+                        out["time_to_empty_min"] = int(
+                            full_now / max(1, power_uw) * 60
+                        ) if power_uw > 0 else None
+                    elif status.lower() == "charging" and full:
+                        out["time_to_full_min"] = int(
+                            (full - full_now) / max(1, power_uw) * 60
+                        ) if power_uw > 0 else None
+            # Panic: ≤5% AND actively discharging.
+            if pct is not None and pct <= 5 and (
+                    status.lower() == "discharging"):
+                out["panic"] = True
+            return out
+    except (FileNotFoundError, OSError):
+        pass
+
+    # psutil fallback for non-Linux. Limited fields.
+    try:
+        import psutil
+        b = psutil.sensors_battery()
+        if b is None:
+            return out
+        out["present"] = True
+        out["percent"] = int(b.percent)
+        out["plugged"] = bool(b.power_plugged)
+        out["status"]  = ("Charging" if b.power_plugged
+                          else "Discharging" if b.percent < 100
+                          else "Full")
+        if (not b.power_plugged
+                and b.secsleft is not None
+                and b.secsleft > 0):
+            out["time_to_empty_min"] = int(b.secsleft // 60)
+        if out["percent"] <= 5 and not b.power_plugged:
+            out["panic"] = True
+    except Exception:
+        pass
+    return out
+
+
+# ── power profile (auto / performance / saver) ──────────────────────────────
+
+def power_profile() -> str:
+    """Return the active power profile.
+
+    Knob `power_profile`:
+      - "auto"        — follow battery state (default).
+                        on AC or charging → performance.
+                        discharging + ≤30% → saver.
+                        otherwise → balanced.
+      - "performance" — always treat the host as on AC.
+      - "saver"       — always conserve (defer auto-tasks, prefer
+                        local models, longer cache TTLs).
+      - "balanced"    — middle ground. No auto-defers, but prefers
+                        cheaper models when available.
+
+    Other modules (auto-embedder, llm_proxy, scheduler) read this
+    via `power_profile()` and adjust their behaviour. Returns one
+    of {performance, balanced, saver}; "auto" resolves at call
+    time."""
+    knob = "auto"
+    try:
+        from .db import Config, make_engine
+        from sqlalchemy.orm import Session
+        with Session(make_engine()) as s:
+            row = s.get(Config, "power_profile")
+            if row and row.value:
+                knob = row.value.strip().lower()
+    except Exception:
+        pass
+    if knob in ("performance", "saver", "balanced"):
+        return knob
+    # auto — derive from current battery state.
+    bd = battery_details()
+    if not bd.get("present"):
+        return "performance"   # desktop / VM
+    if bd.get("plugged"):
+        return "performance"
+    pct = bd.get("percent") or 100
+    if pct <= 30:
+        return "saver"
+    return "balanced"
+
+
 def _battery_message(pct: int, plugged: bool) -> str:
     if plugged:
         return "External power source engaged. Reserves recharging."
