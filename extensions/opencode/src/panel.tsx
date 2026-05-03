@@ -151,6 +151,10 @@ export interface SidebarStatus {
 // emits it at runtime from a stash file but doesn't have a static
 // default). Spread + override pattern below carries that.
 import { SIDEBAR_DEFAULTS } from "./sidebar-defaults.generated";
+// Top-level fs import — `require("node:fs")` inside render
+// functions doesn't resolve in opencode's bun plugin runtime
+// (silent failure in try/catch). Static import works.
+import * as _fs from "node:fs";
 
 // Solid signal for the cached status. Ensures the sidebar slot
 // re-renders when refreshStatus produces a new value. Without
@@ -777,10 +781,9 @@ function SectionActive(props: { s: SidebarStatus; t: any; color: any }) {
   }
   if (!intentAgent) {
     try {
-      const fs = require("node:fs");
       const home = process.env.HOME ?? "";
       const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
-      const ss = JSON.parse(fs.readFileSync(
+      const ss = JSON.parse(_fs.readFileSync(
         `${orgDir}/.opencode/sidebar-status.json`, "utf8"));
       intentAgent = (ss?.active?.intent_agent || "").trim();
     } catch { /* file not present */ }
@@ -962,7 +965,7 @@ function SectionManager(props: { s: SidebarStatus; t: any; color: any }) {
   }
   if (!entries.length) {
     try {
-      const fs = require("node:fs");
+      const fs = _fs;
       const home = process.env.HOME ?? "";
       const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
       const ss = JSON.parse(fs.readFileSync(
