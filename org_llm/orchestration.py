@@ -41,6 +41,52 @@ class RecipeMatch(NamedTuple):
 # bar new entries must clear.
 _RECIPES: list[tuple[_re.Pattern, RecipeMatch]] = [
     (
+        # Weather-aware agenda — fires when the user asks about
+        # weather impact on plans. The 2026-05-03 A/B found this
+        # recipe lost 5/5 trials, BUT the failure mode was data-
+        # starvation (weather not configured, few agenda items in
+        # the user's vault), not a design flaw. Kept as latent
+        # infrastructure because the user expects vault volume to
+        # grow and weather-sensitive items will become routine.
+        # The runner is hardened to ALWAYS return a result (with
+        # explicit "weather: unavailable" markers when needed) so
+        # the A7 hallucination shape — bare-body advisory mode
+        # claiming "manager pre-fetched data" with no data — can't
+        # recur. See docs/wiki/recipes.org for the full rationale.
+        _re.compile(
+            r"\b(weather|forecast|rain|snow|storm|outdoor|hike|bbq|"
+            r"barbecue|garden|mow|cookout|picnic)\b.*"
+            r"\b(agenda|schedule|plan|week|today|tomorrow|saturday|"
+            r"sunday|monday|tuesday|wednesday|thursday|friday)\b|"
+            r"\b(should i (?:reschedule|move)|will it rain|impact "
+            r"my plans|weather problems)\b",
+            _re.IGNORECASE | _re.DOTALL,
+        ),
+        RecipeMatch(
+            name="weather_aware_agenda",
+            target="*",
+            body=(
+                "RECIPE — weather-aware agenda:\n"
+                "  1. The MANAGER PRE-FETCH block below contains "
+                "whatever data is available — agenda items always; "
+                "forecast + outdoor flags only when weather is "
+                "configured.\n"
+                "  2. Narrate ONLY from the pre-fetch. If "
+                "`weather: unavailable` appears, say so plainly and "
+                "answer from agenda alone — DO NOT invent forecasts "
+                "or weather details.\n"
+                "  3. Lead with the most weather-sensitive item if "
+                "any are flagged; otherwise lead with the headline "
+                "agenda summary.\n"
+                "  4. Recommend ADJUSTMENTS, not just observations. "
+                "If a morning is wet but afternoon clears, suggest "
+                "the time shift.\n"
+                "  5. Don't re-invoke the tool — the data above is "
+                "authoritative."
+            ),
+        ),
+    ),
+    (
         # Counting questions across the vault — "how many times have
         # I X", "count X in dailies", etc. Routes to researcher with
         # a 3-step plan that uses the deterministic

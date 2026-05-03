@@ -337,6 +337,84 @@ def _format_count_answer(phrase: str, path_glob: str, pattern: str,
     return "\n".join(lines)
 
 
+# ── weather_aware_agenda runner ──────────────────────────────────────────────
+
+def _run_weather_aware_agenda(user_text: str) -> RunResult | None:
+    """Manager pre-fetches agenda + (when configured) forecast +
+    outdoor-flagged items so the agent narrates one cloud call.
+
+    HARDENED 2026-05-03 (post-A/B): the previous version returned
+    None when weather wasn't configured, which fell through to
+    advisory mode and triggered the A7 hallucination — the agent
+    saw a recipe body claiming "manager pre-fetched data" with
+    nothing under it and invented forecasts. The new shape:
+
+      - weather configured + outdoor items present → full bundle
+      - weather configured + no outdoor items      → forecast +
+                                                       agenda; agent
+                                                       says "nothing
+                                                       weather-sensitive
+                                                       this week"
+      - weather NOT configured                     → agenda alone +
+                                                       explicit
+                                                       `weather: unavailable`
+                                                       marker
+
+    The runner ALWAYS returns a RunResult (no Nones except on a
+    true exception). format_prefetch_block renders honestly; the
+    recipe body tells the agent never to invent forecasts when
+    they're missing.
+    """
+    weather_status = "ok"
+    weather_error  = ""
+    bundle: dict = {}
+    try:
+        from . import weather as _w
+        bundle = _w.weather_for_agenda(days=7)
+        if bundle.get("error"):
+            weather_status = "unavailable"
+            weather_error  = bundle["error"]
+    except Exception as e:
+        weather_status = "unavailable"
+        weather_error  = f"{type(e).__name__}: {e}"
+
+    # Always fetch agenda separately so we have something even when
+    # weather fails. The bundle's agenda is only populated on the
+    # weather-OK path; mirror it locally on the failure path.
+    if weather_status == "ok":
+        agenda_today    = (bundle.get("agenda") or {}).get("today")    or []
+        agenda_upcoming = (bundle.get("agenda") or {}).get("upcoming") or []
+        agenda_overdue  = (bundle.get("agenda") or {}).get("overdue")  or []
+    else:
+        try:
+            from . import org_tools as _ot
+            agenda = _ot.org_agenda(window_days=7)
+            agenda_today    = agenda.get("today") or []
+            agenda_upcoming = agenda.get("upcoming") or []
+            agenda_overdue  = agenda.get("overdue") or []
+        except Exception:
+            agenda_today = agenda_upcoming = agenda_overdue = []
+
+    return RunResult(
+        answer="",
+        tool_name="weather_for_agenda",
+        tool_args={"days": 7},
+        tool_result={
+            "weather_status":  weather_status,
+            "weather_error":   weather_error,
+            "summary":         bundle.get("summary", "") if weather_status == "ok" else "",
+            "outdoor_items":   bundle.get("outdoor_items") or [] if weather_status == "ok" else [],
+            "daily_forecast":  ((bundle.get("forecast") or {}).get("daily") or []
+                                  if weather_status == "ok" else []),
+            "agenda_today":    agenda_today,
+            "agenda_upcoming": agenda_upcoming,
+            "agenda_overdue":  agenda_overdue,
+            "stale":           ((bundle.get("forecast") or {}).get("stale", False)
+                                  if weather_status == "ok" else False),
+        },
+    )
+
+
 # ── pre-fetch block (manager → agent hand-off) ───────────────────────────────
 
 def _user_context_addendum(recipe_name: str, run: RunResult,
@@ -407,6 +485,70 @@ def format_prefetch_block(recipe_name: str, run: RunResult,
             except (TypeError, IndexError, KeyError):
                 continue
         body = "\n  ".join(lines)
+    elif "weather_status" in res:
+        # weather_aware_agenda shape — always renders; weather pieces
+        # are gated by `weather_status` so the agent never sees a
+        # bare body without data to ground it.
+        lines: list[str] = []
+        ws = res.get("weather_status", "unavailable")
+        if ws == "ok":
+            if res.get("summary"):
+                lines.append(f"summary: {res['summary']}")
+            if res.get("stale"):
+                lines.append("[stale forecast — fetch failed; serving cache]")
+            df = res.get("daily_forecast") or []
+            if df:
+                lines.append("forecast:")
+                for d in df[:7]:
+                    wmax = d.get("wind_max")
+                    wind_str = (f"  wind {wmax:.0f}km/h"
+                                  if isinstance(wmax, (int, float))
+                                  else "")
+                    lines.append(
+                        f"  {d.get('date')}  {d.get('short','?'):<14s}  "
+                        f"{d.get('t_min','?')}-{d.get('t_max','?')}°C  "
+                        f"precip {d.get('precip_prob',0)}%{wind_str}"
+                    )
+            outdoor = res.get("outdoor_items") or []
+            if outdoor:
+                lines.append(f"outdoor_items_with_concerns ({len(outdoor)}):")
+                for it in outdoor[:10]:
+                    concerns = ", ".join(it.get("concerns") or []) or "fine"
+                    lines.append(
+                        f"  {it.get('date')}  [{it.get('state','?')}] "
+                        f"{(it.get('item','') or '')[:50]}  → {concerns}"
+                    )
+                    for alt in (it.get("suggestions") or [])[:2]:
+                        delta = alt.get("delta_days", 0)
+                        delta_str = f"+{delta}d" if delta > 0 else f"{delta}d"
+                        lines.append(
+                            f"      ↳ try {alt.get('date')} ({delta_str})"
+                            f": {alt.get('label')}, "
+                            f"{alt.get('t_min','?')}-{alt.get('t_max','?')}°C, "
+                            f"precip {alt.get('precip_prob',0)}%"
+                        )
+            else:
+                lines.append("outdoor_items: none flagged this window.")
+        else:
+            err = res.get("weather_error", "not configured")
+            lines.append(f"weather: unavailable ({err})")
+        # Agenda lines render in BOTH branches — that's the always-
+        # present floor.
+        today    = res.get("agenda_today") or []
+        upcoming = res.get("agenda_upcoming") or []
+        overdue  = res.get("agenda_overdue") or []
+        lines.append(
+            f"agenda_counts: today={len(today)}, "
+            f"upcoming={len(upcoming)}, overdue={len(overdue)}"
+        )
+        if today:
+            lines.append(f"agenda_today ({len(today)}):")
+            for it in today[:8]:
+                lines.append(
+                    f"  [{it.get('state','?')}] "
+                    f"{(it.get('text','') or '')[:60]}"
+                )
+        body = "\n  ".join(lines)
     else:
         # No-shape fallback — only fires if a future recipe lands
         # without a custom branch above. Keeps the call safe; the
@@ -432,5 +574,6 @@ def format_prefetch_block(recipe_name: str, run: RunResult,
 # ── runner registry ──────────────────────────────────────────────────────────
 
 _RUNNERS: dict[str, Callable[[str], RunResult | None]] = {
-    "count_across_vault": _run_count_across_vault,
+    "count_across_vault":   _run_count_across_vault,
+    "weather_aware_agenda": _run_weather_aware_agenda,
 }
