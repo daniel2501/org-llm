@@ -263,8 +263,13 @@ export async function registerSidebar(api: any): Promise<void> {
   try {
     const fs = require("node:fs");
     const watchPath = `${directory}/.opencode/sidebar-status.json`;
-    const watcher = fs.watch(watchPath, () => {
-      void refreshStatus(directory);
+    const watcher = fs.watch(watchPath, async () => {
+      // refreshStatus FIRST (await) so _cachedStatus has fresh
+      // manager_recent / active.intent_agent before we trigger
+      // the slot re-render via setActiveAgentOverride. Without
+      // the await, the override fired the re-render while the
+      // cache still held stale manager_recent.
+      try { await refreshStatus(directory); } catch {}
       try {
         const ss = JSON.parse(fs.readFileSync(watchPath, "utf8"));
         const intent = (ss?.active?.intent_agent || "").trim();
