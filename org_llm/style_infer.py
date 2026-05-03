@@ -204,8 +204,7 @@ def style_summary(info: dict) -> str:
             "Format: ORG-MODE (NOT markdown). Headings are FLUSH "
             "LEFT — no indentation, no leading spaces. Cookie "
             "states: `[ ]` open / `[X]` done / `[-]` wip.\n"
-            "OUTPUT THIS SHAPE EXACTLY (flat list, no wrapper, "
-            "no grouping, no invented categories):\n"
+            "DEFAULT SHAPE (flat list, no wrapper, no grouping):\n"
             "<<<\n"
             "* [ ] Make bed\n"
             "* [ ] Clean bathroom\n"
@@ -214,7 +213,14 @@ def style_summary(info: dict) -> str:
             "DO NOT indent the `*` lines. DO NOT add a wrapper "
             "parent ('Chores', 'Weekend', 'Personal Care'). DO "
             "NOT group items into invented categories. DO NOT "
-            "use `- [ ]` bullets — the format is `*` headings.")
+            "use `- [ ]` bullets — the format is `*` headings. "
+            "EXCEPTION: when the user's request explicitly calls "
+            "for grouping, sub-tasks, a wrapper heading, or a "
+            "specific structural shape ('group these by project', "
+            "'under a Weekend heading', 'with sub-tasks for each'), "
+            "honor that — use parent + `**` sub-tasks as needed. "
+            "The DO-NOTs apply to the DEFAULT case, not when the "
+            "user has named a specific structure.")
     elif shape == "header_todo":
         head = (
             "Format: HEADERS-WITH-TODO.\n"
