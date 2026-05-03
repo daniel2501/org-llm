@@ -392,29 +392,26 @@ card."
     (unless (file-exists-p path)
       (make-directory (file-name-directory path) t)
       (write-region "" nil path))
-    ;; Read raw lines, render to org, display in a dedicated buffer.
+    ;; Read raw lines, render to org-syntax, display in a
+    ;; dedicated buffer. We intentionally do NOT activate
+    ;; org-mode: in Doom + with our auto-refresh timer, the
+    ;; buffer name vs `#+title:` interaction triggers a
+    ;; "Buffer name … is in use" error mid-render. Leaving the
+    ;; buffer in fundamental-mode keeps the text readable
+    ;; (org-mode-style hierarchy) without the rename hazard.
+    ;; User can `M-x org-mode` manually if they want folding.
     (let ((buf (get-buffer-create buf-name)))
       (with-current-buffer buf
-        (let ((inhibit-read-only t))
-          (erase-buffer)
-          (insert "#+title: org-llm MANAGER (live)\n")
-          (insert (format "#+source: %s\n\n" path))
-          (insert "Tailing — auto-refreshes on new crew_log entries.\n"
-                   "Keybinds: g revert, q bury.\n\n")
-          (let ((lines (and (file-exists-p path)
-                             (with-temp-buffer
-                               (insert-file-contents path)
-                               (split-string (buffer-string) "\n" t)))))
-            (dolist (line (nreverse lines))   ; newest first
-              (insert (org-llm--manager-render-line line)))))
-        ;; Setup org-mode for nice rendering, plus auto-revert tail
-        ;; so the buffer follows new appends.
-        (when (fboundp 'org-mode) (org-mode))
+        (org-llm--manager-rerender path)
         (setq buffer-read-only t)
         (use-local-map (let ((m (make-sparse-keymap)))
-                          (set-keymap-parent m org-mode-map)
                           (define-key m (kbd "g") #'org-llm-manager-buffer)
                           (define-key m (kbd "q") #'bury-buffer)
+                          (define-key m (kbd "n") #'next-line)
+                          (define-key m (kbd "p") #'previous-line)
+                          (define-key m (kbd "j") #'next-line)
+                          (define-key m (kbd "k") #'previous-line)
+                          (define-key m (kbd "RET") #'org-llm-manager-buffer)
                           m))
         ;; Follow appends via a 2s polling timer that rerenders
         ;; if the file's mtime advanced. auto-revert-tail-mode
@@ -465,16 +462,18 @@ card."
   "Replace the current buffer's contents with a fresh render of PATH."
   (let ((inhibit-read-only t))
     (erase-buffer)
-    (insert "#+title: org-llm MANAGER (live)\n")
-    (insert (format "#+source: %s\n\n" path))
-    (insert "Tailing — auto-refreshes every 2s.\n"
-             "Keybinds: g revert, q bury.\n\n")
+    (insert "─── org-llm MANAGER (live) ───\n")
+    (insert (format "source: %s\n" path))
+    (insert "tailing — auto-refresh every 2s · "
+             "keys: g revert · q bury · j/k navigate · RET refresh\n\n")
     (let ((lines (and (file-exists-p path)
                        (with-temp-buffer
                          (insert-file-contents path)
                          (split-string (buffer-string) "\n" t)))))
-      (dolist (line (nreverse lines))
-        (insert (org-llm--manager-render-line line))))))
+      (if (null lines)
+          (insert "(no entries yet — manager hasn't been consulted)\n")
+        (dolist (line (nreverse lines))
+          (insert (org-llm--manager-render-line line)))))))
 
 
 ;;;###autoload

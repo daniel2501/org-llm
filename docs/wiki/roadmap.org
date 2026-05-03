@@ -1073,6 +1073,60 @@ configurable threshold, transparently retry against the cloud
 provider (or a different local model). Today the user sees
 opencode's raw error UI; the proxy can recover before it bubbles.
 
+* TODO [#B] Planned — Phase 22.5: thought-process capture in MANAGER log :planned:
+
+The MANAGER buffer (Phase 22, Doom keybind =<leader> y Y=)
+currently logs the I/O envelope of each crew action — action,
+target agent, prompt excerpt, result excerpt, model, duration,
+outcome. What it doesn't capture is the LLM's *internal*
+reasoning during the turn: which tool calls it considered, how
+it ranked candidates, why it kept item X over item Y in a
+filter pass.
+
+** What "thought process" looks like
+
+Three layers of visibility, increasing in cost:
+
+| layer                  | source                              | cost            |
+|------------------------+-------------------------------------+-----------------|
+| current (P22)          | I/O envelope                        | free            |
+| token-stream excerpt   | proxy buffers full assistant content | small (~storage) |
+| explicit reasoning     | =<thinking>= tags or JSON-shape    | model-dependent |
+
+** Roll-out
+
+*** 22.5a — token-stream excerpt
+- Proxy already buffers the cloud response in =_failover_to_cloud=
+  (for raw-text tool-call repair). Extend to ALWAYS buffer the
+  assistant content stream when an orchestration recipe matched
+  (cheap; recipe-matched turns are infrequent).
+- Append the buffered content (truncated to ~2KB) as a
+  =reasoning= field on the manager-log.jsonl entry.
+- Surface in the MANAGER buffer as a third nested heading:
+  =*** reasoning [collapsed by default]=.
+
+*** 22.5b — explicit reasoning capture
+- For models that natively emit structured thinking
+  (=<thinking>...</thinking>= tags, OpenAI o1-style reasoning
+  tokens, etc.), extract those separately so the user sees the
+  decision tree, not just the verbose narration.
+- Knob: =proxy_capture_reasoning= (off / brief / full).
+
+*** 22.5c — chain visualisation
+- For multi-delegate turns (crew → classifier → scribe),
+  generate a small ASCII chain diagram in the MANAGER buffer
+  showing the call graph: who called whom, what was passed,
+  what came back, in what order.
+
+** Open questions
+
+1. Storage growth: each turn could append 2-5KB to
+   manager-log.jsonl. Cap at 30 days / 50MB and rotate?
+2. Privacy: prompt+result already live in the file; reasoning
+   is more verbose. Option to redact via knob.
+3. Performance: capture for ALL turns or only orchestrated?
+   Lean orchestrated-only at first.
+
 * TODO [#A] Planned — Phase 22: orchestration v2 (no-cost manager) :planned:
 
 The 2026-05-02 attempt at full crew orchestration (Phase 20.x)
