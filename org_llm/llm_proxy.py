@@ -1160,6 +1160,11 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
         return None
     agent = m.group(1)
     force_solo = bool(m.group(2))
+    # Group 3 is the actual REQUEST content — everything after the
+    # @<agent>(!) routing tag. Downstream (recipe match, recipe
+    # runner) must use this, not the raw user_text, otherwise it
+    # treats 'researcher' as part of the user's query.
+    request_text = (m.group(3) or "").strip()
 
     org_dir = Path(os.environ.get("ORG_LLM_ORG_DIR")
                     or (Path.home() / "org"))
@@ -1213,34 +1218,110 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     agent_def = known[agent]
     agent_prompt = (agent_def.get("prompt") or "").strip()
     agent_model  = (agent_def.get("model")  or "").strip()
-    # Phase 22: orchestration recipe injection. When the user
-    # message matches a known task-shape, inject a deterministic
-    # RECIPE into the agent's prompt — buys orchestration's
-    # quality benefits (predictable tool order, inline filters)
-    # at zero cloud cost. Activated by
-    # `proxy_orchestration_mode = "recipe"` (default).
+    # Phase 22 v2: manager-driven recipe execution. When the user
+    # message matches a known task-shape, the MANAGER (this proxy
+    # layer) tries to execute the underlying tool itself — zero
+    # cloud round-trips. Falls back to advisory mode (recipe body
+    # injected into agent prompt) when the runner can't fully
+    # resolve the request. Activated by
+    # `proxy_orchestration_mode = "recipe"` (default) and
+    # `proxy_recipe_deterministic = "true"` (default).
     if (agent_prompt and _proxy_cfg_str(
             "proxy_orchestration_mode", "recipe").strip().lower()
             == "recipe"):
         try:
             from .orchestration import match_recipe
-            user_text = _last_user_text(parsed)
-            recipe = match_recipe(user_text)
+            # finding-1 (2026-05-03): opencode auto-generates a
+            # session title by re-prompting the same model with
+            # the user message + a "summarize / title" system
+            # instruction + a tiny max_tokens. That request also
+            # has the @<agent> tag intact, so the recipe block
+            # would fire AGAIN — wasted DB queries for a
+            # ~20-char title. Detect the title-gen shape and skip.
+            _max_tok = parsed.get("max_tokens") or parsed.get("max_completion_tokens") or 0
+            _sys0 = ""
+            for _m in (parsed.get("messages") or []):
+                if isinstance(_m, dict) and _m.get("role") == "system":
+                    _c = _m.get("content")
+                    _sys0 = (_c if isinstance(_c, str)
+                              else " ".join(p.get("text","") for p in _c
+                                              if isinstance(p, dict)))
+                    break
+            _is_title_gen = (
+                isinstance(_max_tok, int) and 0 < _max_tok <= 200
+                and _re_mod.search(r"\b(title|summari[sz]e the conversation)\b",
+                                      _sys0 or "", _re_mod.IGNORECASE)
+            )
+            recipe = None if _is_title_gen else match_recipe(request_text)
             if recipe and (recipe.target == agent
                             or recipe.target == "*"):
-                agent_prompt = recipe.body + "\n\n" + agent_prompt
-                # Log to crew_log for sidebar visibility.
-                try:
-                    from .db import log_crew_action as _log
-                    _log(
-                        "recipe", agent_from="proxy",
-                        agent_to=agent, model="(deterministic)",
-                        prompt=user_text[:200],
-                        result=f"recipe={recipe.name}",
-                        duration_ms=0, outcome="ok",
-                    )
-                except Exception:
-                    pass
+                from .db import log_crew_action as _log
+                deterministic_ok = (_proxy_cfg_str(
+                    "proxy_recipe_deterministic", "true")
+                    .strip().lower() == "true")
+                run = None
+                if deterministic_ok:
+                    try:
+                        from .recipe_runner import execute_recipe
+                        run = execute_recipe(recipe, request_text)
+                    except Exception:
+                        run = None
+                if run is not None:
+                    # Manager pre-fetched the data; agent narrates.
+                    # ONE cloud call total. Tool use is enforced (the
+                    # data is already in the prompt). The agent
+                    # answers in its own voice instead of receiving
+                    # a robotic stat dump from the manager.
+                    from .recipe_runner import format_prefetch_block
+                    prefetch = format_prefetch_block(
+                        recipe.name, run, request_text)
+                    agent_prompt = agent_prompt + "\n\n" + prefetch
+                    # Stash so _failover_to_cloud can correlate the
+                    # cloud response back to this orchestrated turn
+                    # and append a `narration` log entry — Phase
+                    # 22.5a "manager watches agents at zero cost".
+                    try:
+                        req._org_llm_recipe = recipe.name
+                        req._org_llm_agent  = agent
+                    except Exception:
+                        pass
+                    try:
+                        _log("recipe", agent_from="proxy",
+                              agent_to=agent,
+                              model="(deterministic)",
+                              prompt=request_text[:200],
+                              result=f"recipe={recipe.name} → pre-fetch",
+                              duration_ms=0, outcome="ok")
+                        _log("tool_call", agent_from="manager",
+                              agent_to=run.tool_name,
+                              model="(deterministic)",
+                              prompt=json.dumps(run.tool_args)[:200],
+                              result=json.dumps(run.tool_result)[:300],
+                              duration_ms=run.duration_ms,
+                              outcome="ok")
+                        _log("delegate", agent_from="manager",
+                              agent_to=agent,
+                              model="(pre-fetched)",
+                              prompt=request_text[:200],
+                              result="data injected; agent narrates",
+                              duration_ms=run.duration_ms,
+                              outcome="ok")
+                    except Exception:
+                        pass
+                    # Fall through — request flows to the cloud with
+                    # the augmented system prompt. One round-trip.
+                else:
+                    # Advisory fallback: inject recipe body into the
+                    # agent prompt; agent does its own tool calls.
+                    agent_prompt = recipe.body + "\n\n" + agent_prompt
+                    try:
+                        _log("recipe", agent_from="proxy",
+                              agent_to=agent, model="(advisory)",
+                              prompt=request_text[:200],
+                              result=f"recipe={recipe.name} (advisory)",
+                              duration_ms=0, outcome="ok")
+                    except Exception:
+                        pass
         except Exception:
             # Recipe match must never break agent dispatch.
             pass
@@ -1693,11 +1774,262 @@ _TOOL_CALL_PATTERNS: list = [
         r"(?:^|[^A-Za-z0-9_])([a-z][a-z_0-9-]{2,})\s*"
         r"(\{\s*\"[^\"]+\"\s*:.+?\})",
         _re.DOTALL),
+    # Paren-form: `tool_name({"...":"..."})` — observed 2026-05-03
+    # when qwen-72b emitted `org-llm_count_matches({...})` as PROSE
+    # in its narration instead of as a real tool call. The bare
+    # pattern above only matches `name{...}` with curly braces;
+    # this one captures the `name(json)` shape too. Same anchor +
+    # quoted-key guards. (finding-3)
+    _re.compile(
+        r"(?:^|[^A-Za-z0-9_])([a-z][a-z_0-9-]{2,})\s*"
+        r"\(\s*(\{\s*\"[^\"]+\"\s*:.+?\})\s*\)",
+        _re.DOTALL),
 ]
 
 # Kept for backwards-compat with anything in the proxy that still
 # imports the old name.
 _TOOL_CALL_BLOCK_RE = _TOOL_CALL_PATTERNS[0]
+
+
+# Manager-side repair: markdown-fenced JSON blocks containing a
+# `tool_calls` array (the Phase 20 regression shape — Qwen on cloud
+# narrating in markdown instead of emitting a real tool call).
+_FENCED_JSON_RE = _re.compile(
+    r"```(?:json|jsonc)?\s*\n\s*(\{.*?\})\s*\n\s*```",
+    _re.DOTALL | _re.IGNORECASE,
+)
+# Sanitize Python raw-string literals that some models emit inside
+# JSON (`"pattern": r'\[X\].*'`). JSON has no raw-string syntax;
+# convert to a regular escaped string before json.loads.
+_PY_RAW_SQ_RE = _re.compile(r"r'([^']*)'")
+_PY_RAW_DQ_RE = _re.compile(r'r"([^"]*)"')
+
+
+def _sanitize_pythonic_json(s: str) -> str:
+    """Fix the most common JSON-shape mistakes models make: Python
+    raw-string prefixes, Python-style `True/False/None`, trailing
+    commas. Returns `s` unchanged if it parses already."""
+    if not s:
+        return s
+    try:
+        json.loads(s)
+        return s
+    except Exception:
+        pass
+    def _quote(m: "_re.Match") -> str:
+        inner = m.group(1)
+        return '"' + inner.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    out = _PY_RAW_SQ_RE.sub(_quote, s)
+    out = _PY_RAW_DQ_RE.sub(_quote, out)
+    out = _re.sub(r"\bTrue\b",  "true",  out)
+    out = _re.sub(r"\bFalse\b", "false", out)
+    out = _re.sub(r"\bNone\b",  "null",  out)
+    out = _re.sub(r",(\s*[}\]])", r"\1", out)   # trailing commas
+    return out
+
+
+def _extract_markdown_tool_call(text: str) -> Optional[dict]:
+    """Detect the Phase 20 regression: a markdown-fenced JSON block
+    containing a `tool_calls` array (or a bare {name, arguments}
+    object). Returns {name, arguments} on hit, None otherwise.
+
+    This is the second-line defense that runs after the canonical
+    `_extract_tool_call` patterns miss. Cloud models — Qwen 2.5,
+    Llama 3.1 — sometimes wrap structured tool calls inside ```json
+    fences as if they were narrating a function call instead of
+    emitting one. Without this, the user sees a markdown blob and
+    no tool ever runs."""
+    if not text:
+        return None
+    for m in _FENCED_JSON_RE.finditer(text):
+        raw = m.group(1)
+        sanitized = _sanitize_pythonic_json(raw)
+        try:
+            obj = json.loads(sanitized)
+        except Exception:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        # Shape A: { "tool_calls": [{"function": "...", "arguments": ...}] }
+        tc_list = obj.get("tool_calls")
+        if isinstance(tc_list, list) and tc_list:
+            tc = tc_list[0]
+            if isinstance(tc, dict):
+                fn = tc.get("function") or tc.get("name") or tc.get("tool")
+                args = tc.get("arguments") or tc.get("args") or {}
+                if isinstance(fn, dict):
+                    args = fn.get("arguments") or args
+                    fn = fn.get("name", "")
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {}
+                if isinstance(fn, str) and fn:
+                    return {"name": fn, "arguments": args
+                              if isinstance(args, dict) else {}}
+        # Shape B: bare {"name"|"function"|"tool": "...", "arguments": ...}
+        fn = obj.get("name") or obj.get("function") or obj.get("tool")
+        if isinstance(fn, str) and fn:
+            args = obj.get("arguments") or obj.get("args") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {}
+            if isinstance(args, dict):
+                return {"name": fn, "arguments": args}
+    return None
+
+
+# Tool names we can execute LOCALLY without bouncing back to opencode.
+# Lets the manager produce a final assistant message in ONE pass
+# instead of "repair → opencode dispatches tool → re-prompt LLM"
+# (which is two cloud calls, not one). Names match the MCP-prefixed
+# form opencode/cloud emit ("org-llm_org_count_matches") AND the
+# bare org_tools form ("org_count_matches").
+_LOCAL_TOOL_PREFIXES = ("org-llm_", "org_llm_", "")
+
+
+def _try_local_org_tool(name: str, args: dict) -> Optional[str]:
+    """Execute a known org_tools function locally and return a
+    formatted human-readable string. Returns None if the tool isn't
+    one we own (caller falls back to structured repair)."""
+    if not name:
+        return None
+    bare = name
+    for prefix in _LOCAL_TOOL_PREFIXES:
+        if bare.startswith(prefix) and prefix:
+            bare = bare[len(prefix):]
+            break
+    try:
+        from . import org_tools as _ot
+    except Exception:
+        return None
+    if not hasattr(_ot, bare):
+        return None
+    fn = getattr(_ot, bare)
+    if not callable(fn):
+        return None
+    try:
+        result = fn(**args) if isinstance(args, dict) else fn()
+    except TypeError:
+        # Argument schema didn't match — let the caller fall back.
+        return None
+    except Exception:
+        return None
+    # Per-tool renderers — each returns a short user-readable
+    # string. The closing italic line marks the response as repaired
+    # so the user knows the LLM emitted a fake tool call.
+    rendered = _render_local_tool_result(bare, result)
+    if rendered is not None:
+        return rendered + "\n\n_(repaired markdown tool call → executed locally)_"
+    # Generic fallback: dump structure as JSON in a code fence.
+    try:
+        body = json.dumps(result, indent=2, default=str)[:2000]
+    except Exception:
+        return None
+    return f"`{bare}` →\n```json\n{body}\n```\n\n_(repaired)_"
+
+
+def _render_local_tool_result(name: str, result) -> Optional[str]:
+    """Render a known org-tool result as a compact human-readable
+    string. Returns None when the shape is unknown (caller falls
+    back to a generic JSON dump). Each branch is intentionally
+    short — the goal is "did this work?" answers, not full reports."""
+    if name == "org_count_matches" and isinstance(result, dict):
+        if result.get("error"):
+            return None
+        total = int(result.get("total_hits", 0))
+        files = int(result.get("files_with_hits", 0))
+        top   = list(result.get("top_files") or [])[:3]
+        lines = [f"**{total}** hit(s) across **{files}** file(s) "
+                  f"for `{result.get('pattern', '')}`."]
+        if top:
+            lines.append("")
+            lines.append("Top files:")
+            for entry in top:
+                try:
+                    p, n = entry[0], entry[1]
+                except (TypeError, IndexError, KeyError):
+                    continue
+                lines.append(f"  {n:>4}  {os.path.basename(str(p))}")
+        return "\n".join(lines)
+    if name == "org_grep" and isinstance(result, list):
+        if not result:
+            return "no hits."
+        lines = [f"{len(result)} hit(s):"]
+        for h in result[:10]:
+            lines.append(f"  {h.get('file','')}:{h.get('line','')}: "
+                          f"{h.get('text','')[:120]}")
+        return "\n".join(lines)
+    if name == "org_orphans" and isinstance(result, list):
+        if not result:
+            return "no orphans — vault is well-linked / well-tagged."
+        lines = [f"{len(result)} orphan(s):"]
+        for r in result[:15]:
+            lines.append(f"  {r.get('title','')[:50]}  "
+                          f"({os.path.basename(str(r.get('file','')))})")
+        return "\n".join(lines)
+    if name == "org_id_find" and isinstance(result, list):
+        if not result:
+            return "no titles matched."
+        lines = [f"{len(result)} match(es):"]
+        for r in result[:10]:
+            lines.append(f"  [{r.get('score','?')}] "
+                          f"{r.get('title','')[:50]}  "
+                          f"{r.get('id','')[:8]}")
+        return "\n".join(lines)
+    if name == "org_outline" and isinstance(result, list):
+        if not result:
+            return "no headings."
+        lines = [f"{len(result)} heading(s):"]
+        for n in result[:25]:
+            indent = "  " * (n.get("level", 1) - 1)
+            lines.append(f"  {n.get('line','?'):>5}  {indent}* "
+                          f"{(n.get('text','') or '')[:60]}")
+        return "\n".join(lines)
+    if name == "org_tag_index" and isinstance(result, list):
+        if not result:
+            return "no tags found."
+        lines = [f"top {len(result)} tag(s):"]
+        for tag, cnt in result[:25]:
+            lines.append(f"  {cnt:>4}  #{tag}")
+        return "\n".join(lines)
+    if name == "org_tag_suggest" and isinstance(result, list):
+        if not result:
+            return "no existing tags fit this text."
+        return "suggested tags: " + " ".join(f":{t}:" for t in result)
+    if name == "org_file_meta" and isinstance(result, dict):
+        if not result:
+            return "file missing or refused."
+        lines = [f"**{result.get('title','?')}**"]
+        for k in ("id", "file_tags", "headings_total", "todos",
+                   "dones", "roam_links", "modified"):
+            if k in result:
+                lines.append(f"  {k:<14} {result[k]}")
+        return "\n".join(lines)
+    if name == "org_agenda" and isinstance(result, dict):
+        sections = []
+        for bucket in ("today", "upcoming", "overdue", "stale_todo"):
+            items = result.get(bucket) or []
+            if not items:
+                continue
+            sections.append(f"{bucket.upper()} ({len(items)}):")
+            for it in items[:10]:
+                date = it.get("scheduled") or it.get("deadline") or "—"
+                sections.append(f"  [{it.get('state','?')}] {date}  "
+                                  f"{it.get('text','')[:50]}")
+        return "\n".join(sections) if sections else "clean — no items."
+    if name == "org_drill_review_due" and isinstance(result, list):
+        if not result:
+            return "no overdue cards."
+        lines = [f"{len(result)} card(s) overdue:"]
+        for r in result[:10]:
+            lines.append(f"  {r.get('overdue_days','?'):>4}d  "
+                          f"{r.get('title','')[:50]}")
+        return "\n".join(lines)
+    return None
 
 
 def _is_no_tool_model(model_id: str) -> bool:
@@ -3863,6 +4195,13 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
             # _forward populates status/bytes_out/error via instance
             # vars so the audit entry can capture them after return.
             self._parsed_for_audit = parsed
+            # Phase 22.5a — propagate orchestration markers from
+            # the interceptor (intercept_agent_prefix recipe block)
+            # to the handler so _failover_to_cloud can append a
+            # `narration` action to the manager log when the cloud
+            # response comes back.
+            self._org_llm_recipe = getattr(req, "_org_llm_recipe", None)
+            self._org_llm_agent  = getattr(req, "_org_llm_agent",  None)
             self._forward(req.body)
             status = getattr(self, "_last_status", None)
             bytes_out = getattr(self, "_last_bytes", 0)
@@ -4009,6 +4348,31 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
         # streaming doesn't trip the failover path.
         local_timeout = fb_timeout if cloud_target else 300
 
+        # Phase 22.5a — when an orchestration recipe matched (or
+        # when proxy_capture_all_narrations=true), accumulate the
+        # streaming bytes into a side buffer so we can log the
+        # agent's textual response to manager-log after the stream
+        # completes.
+        # `proxy_capture_all_narrations` (default false) extends
+        # capture to EVERY chat-eligible turn, not only orchestrated
+        # ones — addresses finding-4 (untracked turns invisible).
+        orch_buf: Optional[list[bytes]] = (
+            [] if (chat_eligible
+                    and (getattr(self, "_org_llm_recipe", None)
+                          or _proxy_cfg_str(
+                              "proxy_capture_all_narrations", "false"
+                          ).strip().lower() == "true")
+                    and _proxy_cfg_str(
+                        "proxy_capture_narration", "true"
+                    ).strip().lower() == "true")
+            else None
+        )
+        # Cap to keep the buffer bounded — we only render the
+        # first ~600 chars of content text downstream, so 16KB of
+        # SSE chunks is plenty even for long responses with lots
+        # of role / finish_reason metadata. (opt-3)
+        orch_cap = 16 * 1024
+
         try:
             with urllib.request.urlopen(req, timeout=local_timeout) as resp:
                 # Try to read the first byte under the failover-tight
@@ -4054,6 +4418,8 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
                             cache_buf.append(first_chunk)
                         if probe_buf is not None:
                             probe_buf.append(first_chunk)
+                        if orch_buf is not None:
+                            orch_buf.append(first_chunk)
                     except (BrokenPipeError, ConnectionResetError):
                         return
                 while True:
@@ -4068,8 +4434,40 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
                             cache_buf.append(chunk)
                         if probe_buf is not None:
                             probe_buf.append(chunk)
+                        if orch_buf is not None:
+                            if sum(len(b) for b in orch_buf) < orch_cap:
+                                orch_buf.append(chunk)
                     except (BrokenPipeError, ConnectionResetError):
                         return
+                # Phase 22.5a — orchestrated turn finished; extract
+                # the agent's narration from the buffered stream and
+                # append a `narration` action to the manager log so
+                # the user can audit what the agent actually said
+                # using the pre-fetched data.
+                if orch_buf:
+                    try:
+                        full = b"".join(orch_buf)
+                        content_text, _tc = _sse_collect_content_and_tool_calls(full)
+                        if content_text:
+                            from .db import (
+                                log_crew_action as _log_narration)
+                            _log_narration(
+                                "narration",
+                                agent_from="manager",
+                                agent_to=(getattr(
+                                    self, "_org_llm_agent", "") or ""),
+                                model=str(self._parsed_for_audit.get("model", "")
+                                            if getattr(self, "_parsed_for_audit", None)
+                                            else ""),
+                                prompt=("recipe="
+                                          + str(getattr(self,
+                                                          "_org_llm_recipe",
+                                                          ""))),
+                                result=content_text[:600],
+                                duration_ms=0, outcome="ok",
+                            )
+                    except Exception:
+                        pass
                 if (cache_key and cache_buf and resp.status == 200
                         and self.server.cache is not None):
                     self.server.cache.put(cache_key, ProxyResponse(
@@ -4188,6 +4586,82 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
             content, tool_calls = _sse_collect_content_and_tool_calls(buf)
             extracted = (None if tool_calls
                          else _extract_tool_call(content or ""))
+            # Phase 22.6 manager-repair: model wrapped a real tool
+            # call inside a ```json fence (markdown narration of a
+            # function call instead of a real tool emission). The
+            # canonical _extract_tool_call rejects these because
+            # `json` is on the language denylist; fall back to a
+            # dedicated extractor that recognises the {tool_calls:
+            # [...]} shape. Gated by `proxy_repair_markdown_tools`
+            # (default true).
+            if (extracted is None and not tool_calls
+                    and _proxy_cfg_str(
+                        "proxy_repair_markdown_tools", "true"
+                    ).strip().lower() == "true"):
+                md_extracted = _extract_markdown_tool_call(content or "")
+                if md_extracted:
+                    md_name = md_extracted.get("name") or ""
+                    md_args = md_extracted.get("arguments") or {}
+                    if isinstance(md_args, dict):
+                        md_args = _normalize_tool_args(md_name, md_args)
+                    # Manager-as-final-arbiter: when the tool is one
+                    # we own, execute it RIGHT HERE and return a
+                    # final assistant message — saves the second
+                    # cloud round-trip that the structured-repair
+                    # path would otherwise need (opencode dispatches
+                    # the repaired tool, then re-prompts the LLM
+                    # with the result).
+                    local_text = _try_local_org_tool(
+                        md_name,
+                        md_args if isinstance(md_args, dict) else {},
+                    )
+                    streaming = bool(parsed and parsed.get("stream", True))
+                    if local_text:
+                        try:
+                            from .db import log_crew_action as _log_repair
+                            _log_repair(
+                                "repair", agent_from="manager",
+                                agent_to=md_name,
+                                model="(markdown→local)",
+                                prompt=(content or "")[:300],
+                                result=local_text[:300],
+                                duration_ms=0, outcome="ok",
+                            )
+                        except Exception:
+                            pass
+                        synth = _empty_assistant_response(
+                            target.get("model", "cloud"),
+                            streaming, content=local_text,
+                        )
+                        self._last_intercept = (
+                            "cloud_repair_markdown_local")
+                        self.send_response(synth.status)
+                        for k, v in synth.headers.items():
+                            self.send_header(k, v)
+                        self.end_headers()
+                        for c in (synth.body_chunks or []):
+                            try:
+                                self.wfile.write(c)
+                                self.wfile.flush()
+                                self._last_bytes += len(c)
+                            except (BrokenPipeError, ConnectionResetError):
+                                return True
+                        return True
+                    # Tool isn't one we own → repair as structured
+                    # tool_calls and let opencode dispatch normally.
+                    extracted = {"name": md_name, "arguments": md_args}
+                    try:
+                        from .db import log_crew_action as _log_repair
+                        _log_repair(
+                            "repair", agent_from="manager",
+                            agent_to=md_name,
+                            model="(markdown→structured)",
+                            prompt=(content or "")[:300],
+                            result=f"reshaped to structured tool_call",
+                            duration_ms=0, outcome="ok",
+                        )
+                    except Exception:
+                        pass
             if extracted:
                 # Repair: reshape raw text into structured tool_calls.
                 name = extracted.get("name") or ""
@@ -4226,6 +4700,31 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
                         return True
                 _emit_failover_toast(target['model'])
                 return True
+            # Phase 22.5a — manager watches agents at zero cost.
+            # When the originating turn matched an orchestration
+            # recipe, append a `narration` action to the manager
+            # log with the agent's actual textual response (not the
+            # tool call). The bytes are already buffered above for
+            # tool-call repair; this just extracts + logs them.
+            recipe_name_for_log = getattr(self, "_org_llm_recipe", None)
+            if (recipe_name_for_log and content
+                    and _proxy_cfg_str(
+                        "proxy_capture_narration", "true"
+                    ).strip().lower() == "true"):
+                try:
+                    from .db import log_crew_action as _log_narration
+                    _log_narration(
+                        "narration",
+                        agent_from="manager",
+                        agent_to=(getattr(self, "_org_llm_agent", "")
+                                    or ""),
+                        model=target.get("model", "cloud"),
+                        prompt=f"recipe={recipe_name_for_log}",
+                        result=(content or "")[:600],
+                        duration_ms=0, outcome="ok",
+                    )
+                except Exception:
+                    pass
             # No repair needed — emit the buffered cloud response.
             self.send_response(resp_status)
             for k, v in resp_headers:

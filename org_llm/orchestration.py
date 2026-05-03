@@ -39,9 +39,17 @@ _RECIPES: list[tuple[_re.Pattern, RecipeMatch]] = [
         # have I X", "count X in dailies", etc. Routes to researcher
         # with a 3-step plan that uses the deterministic
         # org_count_matches helper.
+        #
+        # NB: `frequency` was originally part of this trigger but
+        # over-fired on "top 10 tags by frequency" / "exercise
+        # frequency" — the tokeniser then built a nonsense regex
+        # and the runner returned 0 hits. `count_across_vault` is
+        # for counting EVENTS (DONE / [X] checkbox occurrences),
+        # not aggregations. If the user says "frequency" without
+        # "times" / "count" / "often", route through the normal
+        # MCP path. (finding-2, 2026-05-03)
         _re.compile(
-            r"\b(how many times|how often|count(?:ed)?|tally|total|"
-            r"frequency)\b",
+            r"\b(how many times|how often|count(?:ed)?|tally|total)\b",
             _re.IGNORECASE,
         ),
         RecipeMatch(

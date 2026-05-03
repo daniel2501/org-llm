@@ -151,12 +151,68 @@ export interface SidebarStatus {
 // emits it at runtime from a stash file but doesn't have a static
 // default). Spread + override pattern below carries that.
 import { SIDEBAR_DEFAULTS } from "./sidebar-defaults.generated";
-// Named import for readFileSync — `require("node:fs")` and
+// Named import for fs primitives — `require("node:fs")` and
 // `import * as _fs from "node:fs"` both failed silently in
-// opencode's bun plugin runtime. A direct named import that's
-// only used inside try/catch should at worst throw at first
-// call (visible) rather than silently produce undefined.
-import { readFileSync as _readFileSync } from "node:fs";
+// opencode's bun plugin runtime at one point or another, and
+// stale references like `const fs = _fs` (when only readFileSync
+// was imported) leave the disk-read fallbacks silently broken
+// for months at a time. The two helpers below are the ONLY
+// supported way to read sidebar JSON from this file — anything
+// else risks the recurring "(idle — no recent actions)" bug
+// where on-disk state never reaches the rendered card.
+import {
+  readFileSync as _readFileSync,
+  statSync as _statSync,
+} from "node:fs";
+
+let _orgLlmDiskWarned = false;
+function _orgLlmDiskWarn(file: string, err: unknown): void {
+  if (_orgLlmDiskWarned) return;
+  _orgLlmDiskWarned = true;
+  try {
+    process.stderr.write(
+      `[org-llm] sidebar disk read failed for ${file}: ${String(err)}\n`,
+    );
+  } catch { /* stderr unavailable in plugin sandbox */ }
+}
+
+// Read + parse one of the JSON files under $ORG_LLM_ORG_DIR/.opencode
+// (sidebar-status.json, sidebar-runtime.json, manager-log.jsonl).
+// Returns parsed JSON on success, `null` on any failure (file
+// missing / unreadable / bad JSON). Emits exactly one stderr line
+// per process the first time disk fails, so future regressions
+// surface immediately instead of going silent.
+function readOrgLlmJson(filename: string): any {
+  try {
+    const home = process.env.HOME ?? "";
+    const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
+    const path = `${orgDir}/.opencode/${filename}`;
+    return JSON.parse(_readFileSync(path, "utf8"));
+  } catch (err) {
+    _orgLlmDiskWarn(filename, err);
+    return null;
+  }
+}
+
+// Same shape as readOrgLlmJson but takes an explicit directory
+// (e.g. refreshStatus runs against a parameterized directory, not
+// always $ORG_LLM_ORG_DIR) and also returns the file's mtime for
+// cache-invalidation logic. Same canonical fs path — the named
+// _readFileSync / _statSync imports above. Returns null on any
+// failure with a one-shot stderr warning.
+function readOrgLlmJsonAt(
+  directory: string, filename: string,
+): { data: any; mtimeMs: number } | null {
+  try {
+    const path = `${directory}/.opencode/${filename}`;
+    const mtimeMs = _statSync(path).mtimeMs ?? 0;
+    const data = JSON.parse(_readFileSync(path, "utf8"));
+    return { data, mtimeMs };
+  } catch (err) {
+    _orgLlmDiskWarn(filename, err);
+    return null;
+  }
+}
 
 // Solid signal for the cached status. Ensures the sidebar slot
 // re-renders when refreshStatus produces a new value. Without
@@ -169,12 +225,22 @@ import { readFileSync as _readFileSync } from "node:fs";
 // cache and accept the staleness.
 let _statusGetter: (() => SidebarStatus) | null = null;
 let _statusSetter: ((s: SidebarStatus) => void) | null = null;
+// Solid-js loading: prior code used `require("solid-js")` which
+// fails silently in opencode's bun plugin runtime (the .tsx file
+// is loaded as ESM, where `require` isn't defined). The static
+// import below resolves at module load time. If it fails, the
+// `if (createSignal)` guard preserves the fall-back to plain
+// variables — no crash. Critical: without this, _statusSetter
+// stays null, the sidebar slot never re-renders on cache changes,
+// and live MANAGER stays "(idle)" while disk has fresh data.
+import {
+  createSignal as _createSignal,
+  onMount as _onMount,
+  onCleanup as _onCleanup,
+} from "solid-js";
 try {
-  // @ts-ignore — solid-js is in node_modules but TS may not
-  // pick it up depending on tsconfig; runtime resolution works.
-  const solid = require("solid-js");
-  if (solid?.createSignal) {
-    const [g, s] = solid.createSignal({} as SidebarStatus);
+  if (typeof _createSignal === "function") {
+    const [g, s] = _createSignal({} as SidebarStatus);
     _statusGetter = g;
     _statusSetter = s;
   }
@@ -442,15 +508,8 @@ export function setActiveAgentOverride(agent: string, ts: number): void {
   // every assistant turn — that's the path that actually flows
   // to the visible TUI.
   let intent = "";
-  let existing: any = {};
-  try {
-    const fs = require("node:fs");
-    const home = process.env.HOME ?? "";
-    const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
-    existing = JSON.parse(fs.readFileSync(
-      `${orgDir}/.opencode/sidebar-runtime.json`, "utf8"));
-    intent = (existing.intent_agent || "").trim();
-  } catch {}
+  let existing: any = readOrgLlmJson("sidebar-runtime.json") ?? {};
+  intent = (existing.intent_agent || "").trim();
   // The display-time agent prefers the intent (what the user
   // asked for via @<name>, which the proxy stamps) over what
   // opencode tagged the assistant message with (always the
@@ -591,16 +650,14 @@ export async function refreshStatus(directory: string): Promise<SidebarStatus> {
   let managerRecent: any[] = [];
   let runtimeModel    = "";
   let runtimeProvider = "";
-  try {
-    const fs = require("node:fs");
-    const path = `${directory}/.opencode/sidebar-runtime.json`;
-    runtimeMtime = fs.statSync(path).mtimeMs ?? 0;
-    const overlay = JSON.parse(fs.readFileSync(path, "utf8"));
-    intentAgent     = (overlay.intent_agent  || "").trim();
-    managerRecent   = overlay.manager_recent || [];
-    runtimeModel    = overlay.model    || "";
-    runtimeProvider = overlay.provider || "";
-  } catch { /* no overlay yet */ }
+  const overlay = readOrgLlmJsonAt(directory, "sidebar-runtime.json");
+  if (overlay) {
+    runtimeMtime    = overlay.mtimeMs;
+    intentAgent     = (overlay.data?.intent_agent  || "").trim();
+    managerRecent   = overlay.data?.manager_recent || [];
+    runtimeModel    = overlay.data?.model    || "";
+    runtimeProvider = overlay.data?.provider || "";
+  }
   // Build a new object so the slot's prop diff fires.
   _cachedStatus = {
     ...loaded,
@@ -782,13 +839,8 @@ function SectionActive(props: { s: SidebarStatus; t: any; color: any }) {
     intentAgent = ((props.s as any)._intent_agent ?? "").trim();
   }
   if (!intentAgent) {
-    try {
-      const home = process.env.HOME ?? "";
-      const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
-      const ss = JSON.parse(_readFileSync(
-        `${orgDir}/.opencode/sidebar-status.json`, "utf8"));
-      intentAgent = (ss?.active?.intent_agent || "").trim();
-    } catch { /* file not present */ }
+    const ss = readOrgLlmJson("sidebar-status.json");
+    intentAgent = (ss?.active?.intent_agent || "").trim();
   }
   const agentOvr = getActiveAgentOverride();
   const agentDisplay = intentAgent || agentOvr?.agent || "org-llm";
@@ -952,76 +1004,92 @@ function SectionLifeSupport(props: { s: SidebarStatus; t: any; color: any }) {
 
 function SectionManager(props: { s: SidebarStatus; t: any; color: any }) {
   // Phase 20: surface what the manager (crew) has been doing on
-  // the user's behalf. Reads `manager_recent` from the runtime
-  // overlay — a list of the most recent 3 crew_log entries written
-  // by db.log_crew_action. For full history use `/sysexport manager`.
+  // the user's behalf. Reads manager_recent from sidebar-status.json
+  // on a self-owned poll loop — bypasses the slot/PanelBody render
+  // chain entirely.
+  //
+  // Why self-driving: opencode invokes the slot fn ONCE at mount.
+  // After that, the slot's JSX tree relies on Solid signals to
+  // propagate updates. The shared _statusGetter / _cachedStatus
+  // pattern lost reactivity through plain prop destructuring in
+  // PanelBody/SectionManager — the live MANAGER card never updated
+  // even though disk had fresh data. Giving SectionManager its own
+  // createSignal + setInterval polling sidesteps that whole chain:
+  // signal updates inside this component's JSX expressions DO
+  // re-render the children (Solid's per-expression reactivity).
+  // Cost: one disk read every 1.5s, ~10µs each.
   const { t, color } = props;
-  // Cached props first; fall back to disk read every render
-  // (microseconds; cheap) — same brute-force pattern as
-  // SectionActive's intent_agent. The Solid-signal approach
-  // didn't bridge cache changes into slot re-renders; this
-  // ensures every render picks up the latest state regardless.
-  let entries: any[] = (props.s as any).manager_recent ?? [];
-  if (!entries.length) {
-    entries = (props.s as any)._manager_recent ?? [];
-  }
-  if (!entries.length) {
-    try {
-      const fs = _fs;
-      const home = process.env.HOME ?? "";
-      const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
-      const ss = JSON.parse(fs.readFileSync(
-        `${orgDir}/.opencode/sidebar-status.json`, "utf8"));
-      entries = ss?.manager_recent ?? [];
-    } catch { /* file not present */ }
-  }
-  // sidebar_manager_card_max_lines knob caps the visible lines
-  // before the card scrolls internally. Each entry is 2 lines
-  // (timestamp+action+outcome row, then agent+duration row).
   const cfg = resolveConfig(props.s);
   const maxLines = (cfg as any).manager_card_max_lines ?? 8;
-  const innerEntries = entries; // already capped at keep_n by db side
+  const maxEntries = Math.max(1, Math.floor(maxLines / 2));
+
+  const [entries, setEntries] = _createSignal<any[]>([]);
+
+  const refresh = () => {
+    const ss = readOrgLlmJson("sidebar-status.json");
+    const fresh: any[] = ss?.manager_recent ?? [];
+    // Only update on length OR head-timestamp change — avoids
+    // pointless re-renders when the file is rewritten with the
+    // same data (db.log_crew_action rewrites on every event,
+    // even unrelated ones).
+    const prev = entries();
+    const sameHead =
+      prev.length === fresh.length &&
+      (prev[0]?.ts ?? "") === (fresh[0]?.ts ?? "");
+    if (!sameHead) setEntries(fresh);
+  };
+
+  _onMount(() => {
+    refresh();
+    const tick = setInterval(refresh, 1500);
+    _onCleanup(() => clearInterval(tick));
+  });
+
+  // Render — use entries() inside the JSX so Solid subscribes to
+  // the signal at the access point. innerEntries is computed
+  // freshly on each reactive re-evaluation.
   return (
     <SectionCard color={color} title="MANAGER">
-      {innerEntries.length === 0 ? (
-        <box flexDirection="row">
-          <text fg={t.textMuted}>(idle — no recent actions)</text>
-        </box>
-      ) : (
-        <scrollbox
-          height={maxLines}
-          scrollY={true}
-          scrollX={false}
-          stickyScroll={false}
-        >
-          {innerEntries.map((e: any) => {
-            const outcome = e.outcome ?? "?";
-            const outcomeColor = outcome === "ok"      ? t.success :
-                                  outcome === "empty"   ? t.warning :
-                                  outcome === "timeout" ? t.warning :
-                                  outcome === "error"   ? t.danger  :
-                                  t.textMuted;
-            const ts = (e.ts ?? "").slice(11, 19);   // HH:MM:SS
-            const dur = e.duration_ms != null
-              ? `${Math.round(e.duration_ms / 100) / 10}s`
-              : "";
-            return (
-              <box flexDirection="column">
-                <box flexDirection="row">
-                  <text fg={t.textMuted}>{ts.padEnd(9)}</text>
-                  <text fg={t.accent}>{(e.action ?? "?").padEnd(9)}</text>
-                  <text fg={outcomeColor}>{outcome}</text>
+      {(() => {
+        const innerEntries = entries().slice(0, maxEntries);
+        if (innerEntries.length === 0) {
+          return (
+            <box flexDirection="row">
+              <text fg={t.textMuted}>(idle — no recent actions)</text>
+            </box>
+          );
+        }
+        return (
+          <box flexDirection="column">
+            {innerEntries.map((e: any) => {
+              const outcome = e.outcome ?? "?";
+              const outcomeColor = outcome === "ok"      ? t.success :
+                                    outcome === "empty"   ? t.warning :
+                                    outcome === "timeout" ? t.warning :
+                                    outcome === "error"   ? t.danger  :
+                                    t.textMuted;
+              const ts = (e.ts ?? "").slice(11, 19);   // HH:MM:SS
+              const dur = e.duration_ms != null
+                ? `${Math.round(e.duration_ms / 100) / 10}s`
+                : "";
+              return (
+                <box flexDirection="column">
+                  <box flexDirection="row">
+                    <text fg={t.textMuted}>{ts.padEnd(9)}</text>
+                    <text fg={t.accent}>{(e.action ?? "?").padEnd(9)}</text>
+                    <text fg={outcomeColor}>{outcome}</text>
+                  </box>
+                  <box flexDirection="row">
+                    <text fg={t.textMuted}>  → </text>
+                    <text fg={t.warning}>{(e.agent_to ?? "?").padEnd(11)}</text>
+                    <text fg={t.textMuted}>{dur}</text>
+                  </box>
                 </box>
-                <box flexDirection="row">
-                  <text fg={t.textMuted}>  → </text>
-                  <text fg={t.warning}>{(e.agent_to ?? "?").padEnd(11)}</text>
-                  <text fg={t.textMuted}>{dur}</text>
-                </box>
-              </box>
-            );
-          })}
-        </scrollbox>
-      )}
+              );
+            })}
+          </box>
+        );
+      })()}
       <box flexDirection="row">
         <text fg={t.textMuted}>full: /sysexport manager</text>
       </box>

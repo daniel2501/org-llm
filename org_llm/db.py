@@ -294,6 +294,35 @@ class CrewLog(Base):
     outcome      = Column(Text, nullable=False, default="ok")  # ok|empty|timeout|error|rejected
 
 
+class VaultFact(Base):
+    """Phase 21 — DB-backed cache of computed facts about the user's
+    vault. Each row is ONE deterministic fact (e.g. tag taxonomy,
+    routine chores list, daily streak) keyed by inferrer name. The
+    `value` column is JSON; `inputs_mtime` is the newest mtime of
+    the files that fed the computation; `ttl_secs` is a hard
+    refresh ceiling so even non-changing vaults get a periodic
+    re-scan (catches deletions, time-relative facts).
+
+    Inferrers live in =org_llm/vault_facts.py= and read/write here
+    via =get_fact()= / =refresh_fact()=. Agents read facts via the
+    =vault_facts= MCP tool.
+
+    Why DB rather than ~/.cache/org-llm/inferrer-cache.json: the
+    DB layer is queryable (=org-llm config-show=, sqlite CLI),
+    backs up alongside the rest of the user's state, and integrates
+    cleanly with the existing Config / History / CrewLog audit
+    surfaces. Speed cost is negligible — a single keyed lookup vs.
+    JSON parse, both sub-millisecond on a 50-row table."""
+    __tablename__ = "vault_fact"
+
+    name          = Column(Text, primary_key=True)
+    value         = Column(Text, nullable=False, default="{}")    # JSON
+    computed_at   = Column(Text, nullable=False)                  # ISO-8601 UTC
+    inputs_mtime  = Column(Float, nullable=False, default=0.0)
+    inputs_count  = Column(Integer, nullable=False, default=0)
+    ttl_secs      = Column(Integer, nullable=False, default=86400) # 24h
+
+
 class SensorLog(Base):
     """Timeseries of host-system probes — battery / cpu / mem / disk /
     thermal / network / ollama / auto-embedder. Written by

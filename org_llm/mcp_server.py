@@ -3436,6 +3436,297 @@ def create_mcp_server():
                         f"agenda window={window_days}d",
                         "\n".join(sections))
 
+    # ── Phase 22.6.1: roam graph + property + refile tools ────────────────────
+
+    @server.tool()
+    def org_link_graph(node_id: str, hops: int = 2,
+                        max_nodes: int = 100) -> str:
+        """Walk roam `[[id:…]]` links from `node_id` up to `hops`
+        steps. Returns nodes (id, title, file, depth) + edges.
+        Use to answer 'what is this node connected to?' without
+        re-reading every file."""
+        from . import org_tools as _ot
+        g = _ot.org_link_graph(node_id, hops=hops, max_nodes=max_nodes)
+        if g.get("error"):
+            return _themed("org_link_graph",
+                            f"{node_id}: {g['error']}")
+        nodes  = g.get("nodes", [])
+        edges  = g.get("edges", [])
+        head   = (f"{len(nodes)} node(s), {len(edges)} edge(s) "
+                   f"within {hops} hop(s) of {node_id}")
+        if g.get("truncated"):
+            head += " (truncated at max_nodes)"
+        body = []
+        for n in nodes:
+            indent = "  " * n.get("depth", 0)
+            body.append(f"{indent}- [{n.get('depth', 0)}] "
+                          f"{n.get('title', '')}  "
+                          f"({n.get('id', '')[:8]} · {n.get('file', '')})")
+        return _themed("org_link_graph", head, "\n".join(body))
+
+    @server.tool()
+    def org_backlinks(target: str) -> str:
+        """List incoming roam links pointing at `target` (an ID or
+        a file path). Each row: from_file:line — anchor text. Use
+        when answering 'what links HERE?'"""
+        from . import org_tools as _ot
+        rows = _ot.org_backlinks(target)
+        if not rows:
+            return _themed("org_backlinks",
+                            f"no backlinks found for {target}")
+        body = "\n".join(
+            f"  {r['from_file']}:{r['line']}  "
+            f"[{r.get('from_title', '')}]  "
+            f"→ {r.get('anchor_text', '') or '(unanchored)'}"
+            for r in rows
+        )
+        return _themed("org_backlinks",
+                        f"{len(rows)} backlink(s) to {target}", body)
+
+    @server.tool()
+    def org_orphans(max_results: int = 50) -> str:
+        """Files with NO incoming/outgoing roam links AND no tags.
+        Triage candidates for prune / refile / tag. Each row:
+        title — file (bytes, mtime, headings)."""
+        from . import org_tools as _ot
+        from datetime import datetime as _dt
+        rows = _ot.org_orphans(max_results=max_results)
+        if not rows:
+            return _themed("org_orphans",
+                            "no orphans — vault is well-linked / well-tagged")
+        body_lines = []
+        for r in rows:
+            mt = _dt.fromtimestamp(r["mtime"]).strftime("%Y-%m-%d")
+            body_lines.append(
+                f"  {r['title'][:40]:<40}  "
+                f"{r['bytes']:>6}b  {mt}  "
+                f"{r['headings_total']}h  ({r['file']})"
+            )
+        return _themed("org_orphans",
+                        f"{len(rows)} orphan(s)",
+                        "\n".join(body_lines))
+
+    @server.tool()
+    def org_property_search(prop: str, value: str = "",
+                              path_glob: str = "**/*.org",
+                              max_results: int = 50) -> str:
+        """Find headings whose :PROPERTIES: drawer contains `prop`
+        (case-insensitive). When `value` is non-empty also requires
+        the value to match (substring, case-insensitive). Returns
+        rows of file:line — title  :prop: value."""
+        from . import org_tools as _ot
+        rows = _ot.org_property_search(prop, value=(value or None),
+                                          path_glob=path_glob,
+                                          max_results=max_results)
+        if not rows:
+            return _themed("org_property_search",
+                            f"no headings with :{prop}:"
+                            + (f" = {value!r}" if value else ""))
+        body = "\n".join(
+            f"  {r['file']}:{r['line']}  {r['title'][:50]}  "
+            f":{r['prop']}: {r['value']}"
+            for r in rows
+        )
+        return _themed("org_property_search",
+                        f"{len(rows)} hit(s) for :{prop}:", body)
+
+    @server.tool()
+    def org_id_find(query: str, top_n: int = 10) -> str:
+        """Fuzzy-find node IDs by partial title match. Cheaper than
+        search_notes when you just want the ID for a known title.
+        Use BEFORE org_link_graph / org_backlinks when you have a
+        title but not an ID."""
+        from . import org_tools as _ot
+        rows = _ot.org_id_find(query, top_n=top_n)
+        if not rows:
+            return _themed("org_id_find",
+                            f"no titles matched {query!r}")
+        body = "\n".join(
+            f"  [{r['score']}] {r['kind']:<7}  {r['id']}  "
+            f"{r['title']}  ({r['file']})"
+            for r in rows
+        )
+        return _themed("org_id_find",
+                        f"{len(rows)} match(es) for {query!r}", body)
+
+    @server.tool()
+    def vault_facts(name: str = "", force: bool = False) -> str:
+        """Phase 21 — read DB-backed deterministic facts about the
+        user's vault. Pass `name` to fetch one fact (e.g.
+        =vault_stats=, =tag_taxonomy=, =routine_chores=); pass empty
+        string to get a roll-up of all registered inferrers. Set
+        `force=True` to bypass the mtime / TTL cache and recompute.
+
+        These are *facts*, not summaries — agents should treat them
+        as authoritative for the questions they answer (e.g. when
+        the user asks 'what's my morning routine?', the
+        =routine_chores= fact is the answer; do not re-derive)."""
+        from . import vault_facts as _vf
+        import json as _json
+        if name:
+            v = _vf.get_fact(name, force=force)
+            if v is None:
+                avail = ", ".join(r["name"] for r in _vf.list_inferrers())
+                return _themed("vault_facts",
+                                f"unknown fact {name!r}",
+                                f"available: {avail}")
+            return _themed("vault_facts",
+                            f"fact: {name}",
+                            _json.dumps(v, indent=2, default=str)[:2000])
+        # Roll-up — list registered facts + their values.
+        all_facts = _vf.get_all_facts(force=force)
+        body = []
+        for n, v in all_facts.items():
+            body.append(f"=== {n} ===")
+            body.append(_json.dumps(v, indent=2, default=str)[:1500])
+            body.append("")
+        return _themed("vault_facts",
+                        f"{len(all_facts)} fact(s) cached",
+                        "\n".join(body))
+
+    @server.tool()
+    def org_clock_summary(since_days: int = 7,
+                            per_tag: bool = False) -> str:
+        """Aggregate org CLOCK time across the vault. Returns total
+        minutes + top-25 headings by minutes (and per-tag breakdown
+        when per_tag=true). Use to answer 'where did my week go?'"""
+        from . import org_tools as _ot
+        r = _ot.org_clock_summary(since_days=since_days, per_tag=per_tag)
+        total = r.get("total_minutes", 0)
+        head_lines = []
+        for row in r.get("by_heading", [])[:25]:
+            mins = row.get("minutes", 0)
+            head_lines.append(f"  {mins//60:>2}h {mins%60:02d}m  "
+                                f"{row.get('heading','')[:50]}  "
+                                f"({row.get('file','')}:{row.get('line','')})")
+        body = "\n".join(head_lines) if head_lines else "(no clocked time)"
+        if per_tag and r.get("by_tag"):
+            body += "\n\nby tag:\n"
+            for tag, mins in r["by_tag"].items():
+                body += f"  {mins//60:>2}h {mins%60:02d}m  #{tag}\n"
+        return _themed("org_clock_summary",
+                        f"{total//60}h {total%60:02d}m clocked "
+                        f"in last {since_days}d", body)
+
+    @server.tool()
+    def org_drill_review_due(max_results: int = 50) -> str:
+        """Find org-drill / org-fc cards whose next review is overdue.
+        Sorted most-overdue first. Each row: overdue days + heading
+        title + file:line."""
+        from . import org_tools as _ot
+        rows = _ot.org_drill_review_due(max_results=max_results)
+        if not rows:
+            return _themed("org_drill_review_due",
+                            "no overdue cards — review queue empty")
+        body = "\n".join(
+            f"  {r['overdue_days']:>4}d  "
+            f"{r['title'][:50]}  ({r['file']}:{r['line']})"
+            for r in rows
+        )
+        return _themed("org_drill_review_due",
+                        f"{len(rows)} card(s) overdue", body)
+
+    @server.tool()
+    def org_attach_list(node_id_or_path: str) -> str:
+        """List attachments belonging to a node. Resolves the
+        node's attach directory via the standard org-attach layout
+        (.attach/<id[:2]>/<id[2:]>). Each row: name, size, mtime."""
+        from . import org_tools as _ot
+        from datetime import datetime as _dt
+        rows = _ot.org_attach_list(node_id_or_path)
+        if not rows:
+            return _themed("org_attach_list",
+                            f"no attachments for {node_id_or_path}")
+        body_lines = []
+        for r in rows:
+            mt = _dt.fromtimestamp(r["mtime"]).strftime("%Y-%m-%d")
+            body_lines.append(f"  {r['size']:>8}b  {mt}  {r['name']}")
+        return _themed("org_attach_list",
+                        f"{len(rows)} attachment(s)",
+                        "\n".join(body_lines))
+
+    @server.tool()
+    def org_template_apply(name: str, initial: str = "",
+                              link: str = "") -> str:
+        """Render a saved capture template (registered in
+        db.Config('capture_templates')) by name. Substitutes
+        %t/%T/%u/%U/%i/%a; leaves %? and %^{prompt} for the caller."""
+        from . import org_tools as _ot
+        body = _ot.org_template_apply(name, initial=initial, link=link)
+        if not body:
+            return _themed("org_template_apply",
+                            f"no template named {name!r}")
+        return _themed("org_template_apply",
+                        f"rendered template {name!r}", body)
+
+    @server.tool()
+    def doom_packages() -> str:
+        """List packages declared in ~/.doom.d/packages.el (or
+        ~/.config/doom/packages.el). Each row: name + disabled flag
+        + source line. Use BEFORE suggesting a workflow that depends
+        on a specific package — verify the user actually has it."""
+        from . import org_tools as _ot
+        rows = _ot.doom_packages()
+        if not rows:
+            return _themed("doom_packages",
+                            "no packages.el found or no (package! …) entries")
+        body = "\n".join(
+            f"  {'✗' if r['disabled'] else '✓'}  {r['name']:<30}  "
+            f"{r['source_line'][:80]}"
+            for r in rows
+        )
+        return _themed("doom_packages",
+                        f"{len(rows)} package(s) declared", body)
+
+    @server.tool()
+    def doom_keybinds() -> str:
+        """Parse the user's Doom config.el / bindings.el for
+        leader-key bindings. Each row: key + desc + command + scope.
+        Use BEFORE telling the user to press a specific keybind —
+        verify it exists in their config."""
+        from . import org_tools as _ot
+        rows = _ot.doom_keybinds()
+        if not rows:
+            return _themed("doom_keybinds",
+                            "no bindings parsed — file missing or no (map! …)")
+        body = "\n".join(
+            f"  [{r['scope'][:6]:<6}] {r['key']:<20}  "
+            f"→ {r['command'][:50]}  "
+            f"{('— ' + r['desc']) if r['desc'] else ''}"
+            for r in rows[:60]
+        )
+        suffix = (f" (showing first 60 of {len(rows)})"
+                   if len(rows) > 60 else "")
+        return _themed("doom_keybinds",
+                        f"{len(rows)} binding(s){suffix}", body)
+
+    @server.tool()
+    def org_refile_candidates(heading_text: str,
+                                heading_tags: str = "",
+                                top_n: int = 5) -> str:
+        """Propose refile destinations for `heading_text`.
+        `heading_tags` is a colon- or space-separated tag list
+        (e.g. ':work:postgres:' or 'work postgres'). Scores files
+        by tag overlap (×3) + title/filename token overlap (×1)."""
+        from . import org_tools as _ot
+        import re as _re_mod
+        tags = [t for t in _re_mod.split(r"[\s:]+", heading_tags or "") if t]
+        rows = _ot.org_refile_candidates(heading_text,
+                                            heading_tags=tags,
+                                            top_n=top_n)
+        if not rows:
+            return _themed("org_refile_candidates",
+                            f"no refile candidates for {heading_text!r}")
+        body_lines = []
+        for r in rows:
+            body_lines.append(f"  [{r['score']}] {r['title'][:50]}  "
+                                f"({r['file']})")
+            for reason in r.get("reasons", []):
+                body_lines.append(f"        — {reason}")
+        return _themed("org_refile_candidates",
+                        f"{len(rows)} candidate(s)",
+                        "\n".join(body_lines))
+
     return server
 
 
