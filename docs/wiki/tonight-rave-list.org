@@ -56,6 +56,61 @@ manager pre-fetch (count_across_vault + recent_activity_summary
 dailies-flavoured prompts in the test catalog land in 1
 cloud call.
 
+* Agent expansion — priority queue                  :phase24:
+
+User priority order set 2026-05-03 (rave session) for the new
+domain agents catalogued in [[file:agent-roster.org][agent-roster.org]]:
+
+1. *=@oracle=*    — voice + TTS bridge (different I/O modality).
+2. *=@coach=*    — fitness + workout (compounds with clock + dailies).
+3. *=@journalist=* — mood + journal sentiment over dailies.
+4. *=@medic=*    — weight + body metrics; trend over =:weight:= entries.
+5. *=@bookworm=*  — media log: books + movies + shows + music.
+                     Queue + finished list + recommend-next from
+                     habits. Cross-media discovery via shared
+                     tags.
+6. *=@inbox=*    — email triage (imap → inbox.org pipeline).
+7. *=@horologe=*  — calendar sync (gcal/caldav → SCHEDULED).
+8. *=@bookkeeper=* — beanhub budget integration.
+9. *=@agentsmith=* — meta-agent that interviews and ships new agents.
+
+Effort summary:
+- =@oracle=     L (multi-night) — needs FOSS-clean TTS + STT
+                  (piper / whisper.cpp), audio I/O wiring,
+                  streaming integration. Highest novelty.
+- =@coach=      M — uses existing =org_clock_summary= +
+                  =routine_chores= + dailies parsing. Persona +
+                  recipe + hygiene scan.
+- =@journalist= M — sentiment-over-dailies inferrer + persona +
+                  weekly-mood recipe. Uses voice_register
+                  baseline.
+- =@medic=      M — =:weight:= / =:body:= trend inferrer +
+                  persona. Quirky + personal.
+- =@bookworm=   M — reading-list inferrer + persona; pairs with
+                  =:reading-log:= / =:book:= tag conventions.
+- =@inbox=      L — needs imap client + auth + capture pipeline.
+- =@horologe=   L — needs caldav/gcal credentials + ingest +
+                  conflict UX.
+- =@bookkeeper= L — depends on beanhub bridge; budget DB schema.
+- =@agentsmith= M — meta. Reads agent-framework.org, agent-roster.org,
+                  interviews user, drafts persona + tool roster +
+                  triggers + icons. Self-bootstrapping.
+
+Acceptance for each: persona block in =_PRECONFIGURED_AGENT_PROMPTS=,
+=_AGENT_TRIGGERS= entry, optional recipes registered in
+=orchestration._RECIPES=, optional inferrers registered via
+=vault_facts.register_inferrer=, optional hygiene scan, icon set
+documented in [[file:agent-roster.org][agent-roster.org]].
+
+Recommendation: start with the M-effort middle (=@journalist=,
+=@coach=, =@medic=, =@bookworm=) for momentum + immediate value
+(they read data the user is already capturing). The L-effort
+heads (=@oracle=, =@inbox=, =@horologe=, =@bookkeeper=) need
+external system integration and earn their own sessions.
+=@agentsmith= is a great closer — once the patterns are well-worn
+from shipping a few agents, the meta-agent has training data
+(itself).
+
 * Queued
 
 ** DONE Theme 1 — 5 more inferrers + vault_profile           :phase21:
@@ -129,7 +184,22 @@ afford this" without leaving the org-llm loop.
 Effort: L (multi-night). Deps: Phase 19.1 (sync MVP) for the
 auto-pull; standalone otherwise.
 
-** TODO [#B] Weather-aware org-agenda                         :weather:
+** DONE Weather-aware org-agenda                              :weather:
+CLOSED: [2026-05-03]
+Shipped tonight as the @agenda agent + a weather subsystem
+(=org_llm/weather.py=). Open-meteo API, FOSS-clean. Explicit
+weather-constraint tag DSL (=:cant-rain:= / =:cant-snow:= /
+=:cant-wind:= / =:cant-hot:= / =:cant-cold:= / =:needs-sun:= /
+=:weather-sensitive:=). Reschedule suggestions ranked by a
+day-suitability score that respects user's hard constraints.
+Three MCP tools (=weather_forecast=, =weather_for_agenda=,
+=weather_tag_suggest=). New orchestration recipe with target=*.
+Falls back gracefully when location not configured.
+
+Stretch (deferred): per-day score in the forecast block,
+sidebar AGENDA row, agent-driven tag application.
+
+** TODO [#B] Weather-aware org-agenda (deferred stretch)       :weather:
 
 User asked 2026-05-03 (rave-coding session). New phase candidate
 or part of org-agenda-agent (wishlist).
@@ -163,7 +233,17 @@ Implementation sketch:
 Effort: M-L. Deps: agenda agent (wishlist) for the narrative
 side; the inferrer + sidebar row can ship standalone.
 
-** TODO [#A] An agent who is an expert in using the org-llm CLI :agent:
+** DONE An agent who is an expert in using the org-llm CLI    :agent:
+CLOSED: [2026-05-03]
+Shipped tonight as =@ops= (cli.py::_PRECONFIGURED_AGENT_PROMPTS).
+Tool roster: shell, read_file, vault_profile, org-llm_run.
+Triggers: =org-llm=, =config=, =knob=, =doctor=, =verb=, =cli=,
+=command=, =how do i run=, =broken=, =set up=, =install=,
+=embedder=, =auto-embed=. Persona reads the user's actual
+=org-llm --help= output rather than guessing flags. Tested live
+2026-05-03; routing works end-to-end.
+
+** TODO [#A] An agent who is an expert in using the org-llm CLI (deferred polish) :agent:
 
 User asked 2026-05-03. Persona that knows every =org-llm= verb,
 its flags, common recipes ("when do I run =org-llm walk= vs.
