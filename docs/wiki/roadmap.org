@@ -152,12 +152,20 @@ cards" = Phase 12) ship in slices without renumbering the world.
     recurring "(idle — no recent actions)" bug across 4+ prior
     fix attempts.
 - *Active focus:* Phase 22.5a (thought-process capture in
-  manager log), Phase 22 recipe expansion (3 more recipe shapes
-  queued for promotion to deterministic pre-fetch — scheduled
-  remote agent on 2026-05-17 to assess), Phase 19.1 (=org-llm
-  sync= MVP — gates the weekly GTD remote routine), Phase 22.6.2
-  (CLOCK summary + drill review + attach list — three more
-  tools to round out the toolbelt).
+  manager log), Phase 19.1 (=org-llm sync= MVP — gates the
+  weekly GTD remote routine), Phase 22.6.2 (CLOCK summary +
+  drill review + attach list — three more tools to round out
+  the toolbelt).
+- *Phase 22 recipe-expansion: REVERSED 2026-05-03.* The
+  90-judged-pair A/B (=scripts/recipe_ab_harness.py= +
+  =scripts/recipe_ab_judge.py=, blinded Claude Opus judge) found
+  that 5 of 6 shipped recipes (=recent_activity_summary=,
+  =dailies_general=, =dailies_routine_filter=,
+  =weekly_mood_review=, =weather_aware_agenda=) lost or tied to
+  the agent-tool-use baseline. Catalog trimmed to one (=count_across_vault=,
+  60% wins). The 2026-05-17 recipe-promotion remote agent is now
+  obsolete; future recipes must clear the bar in the A/B harness
+  before adding. See [[file:2026-05-03-recipe-ab-ground-truth.org][ground-truth doc]] + [[file:recipes.org][recipes.org]] for detail.
 - *Punch list before 1.0:* cross-platform install validation
   (macOS / Ubuntu), Termux/Android port, smoke coverage on
   less-walked verbs, MCP-kind tool-call logging.

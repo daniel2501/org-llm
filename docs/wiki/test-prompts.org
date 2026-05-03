@@ -33,23 +33,24 @@ agent narration + tool routing) without becoming a chore.
 
 ** Categories at a glance
 
-| # | category                  | recipe / tool                                 | shape                                           |
-|---+---------------------------+-----------------------------------------------+-------------------------------------------------|
-| 1 | Counting                  | =count_across_vault= (deterministic)          | regex over =[X]/DONE= — answer is a number      |
-| 2 | Recent activity           | =recent_activity_summary= (deterministic)     | Node + File DB query, agent narrates by topic   |
-| 3 | Tag taxonomy              | =org_tag_index= via MCP                       | top-N tags by frequency                          |
-| 4 | Free-text search          | =org_grep= / =search_notes= via MCP           | path:line: match                                 |
-| 5 | Link graph                | =org_link_graph= / =org_backlinks= via MCP    | adjacency list / incoming links                  |
-| 6 | Property drawer search    | =org_property_search= via MCP                 | headings whose drawer matches                    |
-| 7 | Triage / orphans          | =org_orphans= via MCP                         | files with no in/out links + no tags             |
-| 8 | Agenda                    | =org_agenda= via MCP                          | today / upcoming / overdue / stale_todo          |
-| 9 | File metadata + outline   | =org_file_meta= / =org_outline= via MCP       | title / id / heading counts / outline tree       |
-| 10 | Tag suggestion           | =org_tag_suggest= via MCP                     | rank existing tags by content overlap            |
-| 11 | Refile candidates        | =org_refile_candidates= via MCP               | rank target files by tag + token overlap        |
-| 12 | Dailies routine filter   | =dailies_routine_filter= recipe (advisory)    | filter chores: KEEP lowercase universal, REJECT proper nouns |
-| 13 | CLOCK + agenda combo     | =org_clock_summary= + =org_agenda= via MCP    | parallel tool_calls: weekly burn + due items     |
-| 14 | Doom config introspection| =doom_keybinds= via MCP                       | list :leader bindings + commands                 |
-| 15 | Markdown-JSON repair     | (any tool, ask in a way that triggers fenced JSON) | manager intercepts markdown-fenced tool call, executes locally, single cloud call |
+|  # | category                  | recipe / tool                                      | shape                                                                             |
+|----+---------------------------+----------------------------------------------------+-----------------------------------------------------------------------------------|
+|  1 | Counting                  | =count_across_vault= (deterministic)               | regex over =[X]/DONE= — answer is a number                                        |
+|  2 | Recent activity           | MCP =list_recent_nodes= + =recent_files=           | Node + File DB query, agent narrates by topic                                     |
+|  3 | Tag taxonomy              | =org_tag_index= via MCP                            | top-N tags by frequency                                                           |
+|  4 | Free-text search          | =org_grep= / =search_notes= via MCP                | path:line: match                                                                  |
+|  5 | Link graph                | =org_link_graph= / =org_backlinks= via MCP         | adjacency list / incoming links                                                   |
+|  6 | Property drawer search    | =org_property_search= via MCP                      | headings whose drawer matches                                                     |
+|  7 | Triage / orphans          | =org_orphans= via MCP                              | files with no in/out links + no tags                                              |
+|  8 | Agenda                    | =org_agenda= via MCP                               | today / upcoming / overdue / stale_todo                                           |
+|  9 | File metadata + outline   | =org_file_meta= / =org_outline= via MCP            | title / id / heading counts / outline tree                                        |
+| 10 | Tag suggestion            | =org_tag_suggest= via MCP                          | rank existing tags by content overlap                                             |
+| 11 | Refile candidates         | org_refile_candidates = via MCP                    | rank target files by tag + token overlap                                          |
+| 12 | Dailies routine filter    | MCP =list_dailies= (agent-driven filter)           | filter chores: KEEP lowercase universal, REJECT proper nouns                      |
+| 13 | CLOCK + agenda combo      | =org_clock_summary= + =org_agenda= via MCP         | parallel tool_calls: weekly burn + due items                                      |
+| 14 | Doom config introspection | =doom_keybinds= via MCP                            | list :leader bindings + commands                                                  |
+| 15 | Markdown-JSON repair      | (any tool, ask in a way that triggers fenced JSON) | manager intercepts markdown-fenced tool call, executes locally, single cloud call |
+#+TBLFM: $3=org_refile_candidates= via MCP
 
 * Prompts
 
@@ -106,11 +107,14 @@ Prompt:
 @researcher summarize what I've been working on recently
 #+end_example
 
-Engages =recent_activity_summary= (deterministic pre-fetch).
-Manager queries =Node= + =File= tables, dedupes captains-log
-entries (bucketed as a count), passes 20 nodes + 25 files into
-the agent prompt. Agent narrates: "Recent activity centers on X,
-Y, and Z, including specific files...". Single cloud call.
+Routes through opencode tool-use: agent calls =list_recent_nodes=
++ =recent_files= via MCP, dedupes captains-log entries, narrates
+"Recent activity centers on X, Y, and Z, including specific
+files...".
+
+Note: this used to be a deterministic recipe (=recent_activity_summary=)
+but the 2026-05-03 A/B (see [[file:2026-05-03-recipe-ab-ground-truth.org][ground-truth doc]]) found the agent-tool
+path produced equal-or-better narration; recipe was dropped.
 
 *Regression flags:* the answer is dominated by captains-log /
 embed events (manager dedupe broke); answer hallucinates topics
@@ -251,12 +255,17 @@ Prompt:
 @scribe pull the most common routine items from my recent dailies
 #+end_example
 
-Engages =dailies_routine_filter= recipe (advisory — recipe body
-is injected into scribe's prompt; scribe runs the chain manually
-because there's no deterministic runner yet). Expected: a flat
-list of universal lowercase chores ("make bed", "exercise",
-"clean bathroom"), REJECTED proper nouns (no "Postgres", "Cory",
-"Wiki" mid-task), no learning/follow-up/one-off verbs.
+Routes through opencode tool-use: agent calls =list_dailies(limit=5,
+include_content=True)= and applies the REJECT-first filter (proper
+nouns, learning/tutorial verbs, one-off events all out; only
+universal lowercase chores stay in). Expected output: a flat list
+("make bed", "exercise", "clean bathroom").
+
+Note: this used to be a deterministic recipe (=dailies_routine_filter=)
+backed by the =routine_chores= vault fact, but the 2026-05-03 A/B
+showed the agent-tool path produced cleaner narration. The
+=routine_chores= fact is still computed and surfaced via the
+=user_context= addendum on count prompts that overlap a known chore.
 
 *Regression flags:* proper nouns leak into the kept list (Phase
 18.4 regression); the list is empty when the user clearly has

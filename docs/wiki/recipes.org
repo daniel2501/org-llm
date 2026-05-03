@@ -1,0 +1,151 @@
+:PROPERTIES:
+:ID:       3ed81ee4-e28d-4daf-87fb-c1645b58a05c
+:CREATED:  [2026-05-03]
+:END:
+#+TITLE: Recipes — proxy-time pre-fetch (one recipe, earned)
+#+FILETAGS: :wiki:recipe:orchestration:phase-22:
+#+OPTIONS: toc:nil num:nil
+
+* What this is
+
+A *recipe* is the manager's way of saying:
+  /"I recognise this task shape; I've already done the
+  deterministic part — agent, just narrate."/
+
+It lives entirely inside [[id:47ba2143-c53a-409a-8286-2b3759794608][the LLM proxy]] (between opencode and
+the upstream LLM) and exists for one reason: *remove cloud
+round-trips on common task shapes while still letting the agent
+narrate in its own voice*.
+
+A recipe match swaps a 2-call orchestration cycle (decide → tool-
+call → narrate) for ONE cloud call (narrate over pre-fetched
+data). The manager ran the tool itself, in Python,
+deterministically, before the LLM saw the message.
+
+Activated by =proxy_orchestration_mode = "recipe"= (the default).
+
+* Why one recipe, not six
+
+Phase 22 v2 shipped six recipes. The 2026-05-03 A/B run (90
+judged pairs over qwen-2.5-72b cloud, blinded Claude Opus 4.7
+judge, see =scripts/recipe_ab_harness.py= + the [[file:2026-05-03-recipe-ab-ground-truth.org][ground-truth doc]])
+found that *only* =count_across_vault= consistently beat the
+agent-tool-use baseline on quality:
+
+| recipe                       | judge wins | verdict |
+|------------------------------+------------+---------|
+| =count_across_vault=         | 60% (12/20) | KEEP    |
+| =dailies_general=            | 20% (2/10)  | drop    |
+| =recent_activity_summary=    | 10% (1/10)  | drop    |
+| =dailies_routine_filter=     | 0% (0/5)    | drop    |
+| =weather_aware_agenda=       | 0% (0/5)    | drop    |
+| =weekly_mood_review=         | 0% (0/5)    | drop    |
+
+The headline wins on latency (-48%) and tokens (-89%) were real
+but partly inflated — the recipes-on arm often "won" those metrics
+by *short-circuiting on incomplete data* (e.g. =weather_aware_agenda=
+fell back to advisory mode and the agent hallucinated a "Jane
+meeting" with no agenda data; arm-B looked at real overdue
+tasks and answered honestly).
+
+The five dropped recipes were removed in the same change that
+fixed =finding-6= (the scope-modifier leak that lost A2 5/5
+trials). Catalog 6 → 1; ~10 KB of runner code + 5 format-prefetch
+branches went away. The agent-tool-use path now handles every
+question shape we used to recipe-match, with judge-verified
+better narration quality.
+
+** When to add a future recipe
+
+Don't add a new recipe just because the task shape is recognisable.
+Add one only when:
+
+1. The deterministic path is meaningfully faster *and* correct
+   — not "faster because we skipped a tool call".
+2. The A/B harness shows ≥55% judge wins on the recipe's own
+   prompts, with no quality regression on neighbours.
+3. The runner is robust to the user's actual phrasings (regex
+   pollution from scope/time modifiers is the canonical failure
+   shape — see findings 5 + 6).
+
+The bar isn't "this is a recipe-shaped problem". It's "the
+deterministic version produces a *better* answer than the
+agent-with-tools".
+
+* The current recipe
+
+** =count_across_vault=
+
+User question shape: "how many times have I X", "how often did
+I X", "count of X", "tally of X", "total of X" (case-insensitive).
+
+Triggers:
+
+#+begin_src python
+\b(how many times|how often|count(?:ed)?|tally|total)\b
+#+end_src
+
+Excludes =frequency= (originally part of this trigger; over-fired
+on "top 10 tags by frequency" — finding-2).
+
+What the runner does:
+
+1. =_strip_count_question= peels off:
+   - the question prefix (=how many times have I=)
+   - the scope marker — both =in dailies/notes/vault/...= AND
+     =across the vault/notes/...= (finding-6 fix, 2026-05-03)
+   - relative time-modifier phrases (=this year=, =last week=,
+     =in March=, =in 2026= — finding-5)
+2. =_phrase_to_regex= tokenises the residual content phrase,
+   drops stopwords, looks up irregular verbs (=drank= → =drink/
+   drinking/drunk/drinks=), builds a permissive regex anchored
+   on =[X]= or =DONE=. Memoised via =lru_cache=.
+3. =org_count_matches(pattern, path_glob)= — pure-Python ripgrep
+   wrapper. Returns =total_hits= + =files_with_hits= + =top_files=.
+4. If =total_hits=0=, retry once without the =[X]/DONE= anchor
+   so un-checkboxed mentions still count.
+5. =format_prefetch_block= renders =total_hits=N, files_with_hits=M=
+   plus top-3 files, plus an optional =user_context= addendum
+   when the count target overlaps a known routine chore (uses
+   the =routine_chores= vault fact).
+
+Wired into the proxy at [[file:../../org_llm/llm_proxy.py][llm_proxy.py]] =intercept_agent_prefix=:
+
+#+begin_src python
+recipe = match_recipe(request_text)
+if recipe and (recipe.target == agent or recipe.target == "*"):
+    run = execute_recipe(recipe, request_text)
+    if run is not None:
+        prefetch = format_prefetch_block(recipe.name, run, request_text)
+        agent_prompt = agent_prompt + "\n\n" + prefetch
+    else:
+        agent_prompt = recipe.body + "\n\n" + agent_prompt   # advisory
+#+end_src
+
+* Where it lives
+
+| concern                    | file                                                  |
+|----------------------------+-------------------------------------------------------|
+| recipe registry + matching | [[file:../../org_llm/orchestration.py][org_llm/orchestration.py]]                              |
+| deterministic runner       | [[file:../../org_llm/recipe_runner.py][org_llm/recipe_runner.py]] :: =_run_count_across_vault= |
+| pre-fetch block formatter  | [[file:../../org_llm/recipe_runner.py][org_llm/recipe_runner.py]] :: =format_prefetch_block=   |
+| recipe injection point     | [[file:../../org_llm/llm_proxy.py][org_llm/llm_proxy.py]] :: =intercept_agent_prefix=      |
+| manager-log entries        | [[file:../../org_llm/db.py][org_llm/db.py]] :: =log_crew_action= (table =crew_log=) |
+| A/B harness                | =scripts/recipe_ab_harness.py=                        |
+| Blinded judge              | =scripts/recipe_ab_judge.py=                          |
+
+The MANAGER buffer / sidebar card surfaces every recipe + tool_call
++ delegate + narration entry — the user-visible audit trail.
+
+* See also
+
+- [[file:2026-05-03-recipe-ab-ground-truth.org][2026-05-03 recipe A/B ground truth]] — the prompt set + facts the
+  judge graded against
+- [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] — the HTTP shim that hosts the recipe interceptor
+- [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][Agent framework]] — how personas compose with recipes
+- [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][Agent roster]] — the @<name> agents recipes target
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — the tool surface recipes pre-fetch from
+- [[file:test-prompts.org][test-prompts.org]] — the prompt catalog
+- [[file:2026-05-03-test-session.org][2026-05-03 test session]] — the validation pass that produced
+  findings 5–8 (most still relevant; finding-6 fixed in this
+  same change)
