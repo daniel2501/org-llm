@@ -128,6 +128,46 @@ _RECIPES: list[tuple[_re.Pattern, RecipeMatch]] = [
         ),
     ),
     (
+        # Weather-aware agenda: fires when the user asks about
+        # weather impact on plans, OR mentions an outdoor activity
+        # that's on the agenda. Routes to @agenda (Phase 21.x).
+        _re.compile(
+            r"\b(weather|forecast|rain|snow|storm|outdoor|hike|bbq|"
+            r"barbecue|garden|mow|cookout|picnic)\b.*"
+            r"\b(agenda|schedule|plan|week|today|tomorrow|saturday|"
+            r"sunday|monday|tuesday|wednesday|thursday|friday)\b|"
+            r"\b(should i (?:reschedule|move)|will it rain|impact "
+            r"my plans|weather problems)\b",
+            _re.IGNORECASE | _re.DOTALL,
+        ),
+        RecipeMatch(
+            name="weather_aware_agenda",
+            # `*` = fires for any agent the user @-tagged. The
+            # weather subsystem is a SHARED capability — researcher
+            # and scribe should also benefit from the pre-fetch
+            # when the user asks them a weather-flavoured question.
+            # The agenda agent is the natural narrator but isn't
+            # the only valid target.
+            target="*",
+            body=(
+                "RECIPE — weather-aware agenda:\n"
+                "  1. Manager has pre-fetched forecast + agenda + "
+                "outdoor-flagged items (see MANAGER PRE-FETCH "
+                "below).\n"
+                "  2. Lead with the most weather-sensitive item or "
+                "the headline summary — never a chronological "
+                "dump.\n"
+                "  3. Recommend ADJUSTMENTS, not just observations. "
+                "If a morning is wet but afternoon clears, suggest "
+                "the time shift. Personalise via vault_profile.\n"
+                "  4. Don't re-invoke the tool — the data is "
+                "authoritative. If you need MORE detail (specific "
+                "hour breakdowns), call weather_for_agenda again "
+                "with a narrower window."
+            ),
+        ),
+    ),
+    (
         _re.compile(
             r"\b(summari[sz]e|recent activity|what.{0,15}been (working|"
             r"doing|up to))\b",

@@ -3550,6 +3550,103 @@ def create_mcp_server():
                         f"{len(rows)} match(es) for {query!r}", body)
 
     @server.tool()
+    def weather_forecast(days: int = 7, force: bool = False) -> str:
+        """Return the next `days` days of weather for the user's
+        configured location. Uses open-meteo (FOSS, no key).
+        Cached at ~/.cache/org-llm/weather.json. Configure with
+        `org-llm config location_lat <N>` and
+        `org-llm config location_lon <N>`."""
+        from . import weather as _w
+        f = _w.get_forecast(days=days, force=force)
+        if f.get("error"):
+            return _themed("weather_forecast", "weather unavailable",
+                            f.get("error"))
+        body = []
+        if f.get("stale"):
+            body.append("[stale — served from cache; fetch failed]")
+        for d in f.get("daily") or []:
+            body.append(
+                f"  {d.get('date')}  {d.get('short','?'):<14s}  "
+                f"{d.get('t_min','?')}-{d.get('t_max','?')}°C  "
+                f"precip {d.get('precip_prob',0)}%  "
+                f"wind {d.get('wind_max','?'):.0f}km/h"
+                if isinstance(d.get('wind_max'), (int, float))
+                else
+                f"  {d.get('date')}  {d.get('short','?'):<14s}  "
+                f"{d.get('t_min','?')}-{d.get('t_max','?')}°C  "
+                f"precip {d.get('precip_prob',0)}%"
+            )
+        return _themed("weather_forecast",
+                        f"forecast for ({f.get('lat')}, {f.get('lon')})",
+                        "\n".join(body) or "(no daily data)")
+
+    @server.tool()
+    def weather_for_agenda(days: int = 7) -> str:
+        """Cross-reference the next `days` of weather against the
+        user's org-agenda. Flags outdoor-flavoured agenda items
+        (hike, bbq, garden, mow, walk, etc) whose forecast
+        crosses concerning thresholds (≥50% precip, sustained
+        wind >35km/h, gusts >50, freezing or heat extremes, high
+        UV). Output: forecast summary + flagged items + agenda
+        counts. Use BEFORE making any "should I reschedule X"
+        recommendations."""
+        from . import weather as _w
+        b = _w.weather_for_agenda(days=days)
+        if b.get("error"):
+            return _themed("weather_for_agenda",
+                            "weather unavailable", b.get("error"))
+        out = []
+        if b.get("summary"):
+            out.append(f"summary: {b['summary']}")
+        flagged = b.get("outdoor_items") or []
+        if flagged:
+            out.append(f"outdoor_items_with_concerns ({len(flagged)}):")
+            for it in flagged[:15]:
+                concerns = ", ".join(it.get("concerns") or []) or "fine"
+                out.append(f"  {it.get('date')}  "
+                            f"[{it.get('state','?')}] "
+                            f"{(it.get('item','') or '')[:60]}  "
+                            f"→ {concerns}")
+        else:
+            out.append("outdoor_items: none flagged this window.")
+        return _themed("weather_for_agenda",
+                        "weather × agenda",
+                        "\n".join(out))
+
+    @server.tool()
+    def weather_tag_suggest(window_days: int = 14,
+                              max_results: int = 50) -> str:
+        """Scan agenda items for headings whose text suggests an
+        outdoor / weather-sensitive activity but lacks an explicit
+        weather-constraint tag (=:cant-rain:= / =:cant-snow:= /
+        =:cant-wind:= / =:cant-hot:= / =:cant-cold:= /
+        =:needs-sun:= / =:weather-sensitive:=). Surface for the
+        user — never auto-apply.
+
+        Part of the cross-agent 'scan + suggest' pattern: every
+        agent has a domain-specific hygiene scan that proposes
+        structural improvements without writing them. The agent
+        confirms with the user before applying."""
+        from . import weather as _w
+        rows = _w.weather_tag_suggest(window_days=window_days,
+                                         max_results=max_results)
+        if not rows:
+            return _themed("weather_tag_suggest",
+                            "all weather-sensitive items already tagged")
+        body = []
+        for r in rows:
+            body.append(
+                f"  {r.get('file')}:{r.get('line')}  "
+                f"{(r.get('heading','') or '')[:50]}  "
+                f"→ suggest "
+                + " ".join(f":{t}:" for t in r.get("suggested_tags") or [])
+                + f"  ({r.get('reason','')})"
+            )
+        return _themed("weather_tag_suggest",
+                        f"{len(rows)} suggestion(s)",
+                        "\n".join(body))
+
+    @server.tool()
     def vault_profile(force: bool = False) -> str:
         """Phase 21 — return a compact human-readable digest of
         the user's vault from all registered inferrers. Use this

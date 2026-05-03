@@ -329,17 +329,17 @@ Effort: M. Deps: Phase 21.1 (shipped).
 
 A 9-night queue if you want pacing rather than picking:
 
-| night | theme                                              | effort | yield                                    |
-|-------+----------------------------------------------------+--------+------------------------------------------|
-| 1     | Tonight: Theme 3 cheap wins                        | S+S+S  | 3 deterministic recipes; finding-5 fixed |
-| 2     | Theme 1: 5 inferrers + vault_profile               | M      | richer pre-fetch context everywhere      |
-| 3     | Theme 6: battery probe + per-turn routing          | S+M    | low-batt alert; cheap qwen for trivials  |
-| 4     | Theme 2: 22.5b thinking + capture-all default      | M+S    | full audit trail per turn                |
-| 5     | Theme 5: 22.6.4 tool-roster + walks → facts        | M+L    | agents see the toolbelt; walks compound  |
-| 6     | Theme 3 part 2: 5 new recipes                      | M      | most @-tagged Qs become 1 cloud call     |
-| 7     | Theme 7: smoke-test runner                         | M-L    | regression detection wired to launch     |
-| 8     | Theme 4: Phase 19.1 sync MVP                       | M-L    | cross-machine first-class                |
-| 9     | Theme 2 22.5c chain viz + Theme 4 19.2/19.3        | M+M    | multi-delegate visibility; conflict UX   |
+| night | theme                                         | effort | yield                                    |
+|-------+-----------------------------------------------+--------+------------------------------------------|
+|     1 | Tonight: Theme 3 cheap wins                   | S+S+S  | 3 deterministic recipes; finding-5 fixed |
+|     2 | Theme 1: 5 inferrers + vault_profile          | M      | richer pre-fetch context everywhere      |
+|     3 | Theme 6: battery probe + per-turn routing     | S+M    | low-batt alert; cheap qwen for trivials  |
+|     4 | Theme 2: 22.5b thinking + capture-all default | M+S    | full audit trail per turn                |
+|     5 | Theme 5: 22.6.4 tool-roster + walks → facts  | M+L    | agents see the toolbelt; walks compound  |
+|     6 | Theme 3 part 2: 5 new recipes                 | M      | most @-tagged Qs become 1 cloud call     |
+|     7 | Theme 7: smoke-test runner                    | M-L    | regression detection wired to launch     |
+|     8 | Theme 4: Phase 19.1 sync MVP                  | M-L    | cross-machine first-class                |
+|     9 | Theme 2 22.5c chain viz + Theme 4 19.2/19.3   | M+M    | multi-delegate visibility; conflict UX   |
 
 * See also
 

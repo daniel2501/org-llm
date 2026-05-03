@@ -544,6 +544,42 @@ def _run_dailies_general(user_text: str) -> RunResult | None:
     )
 
 
+# ── weather_aware_agenda runner ──────────────────────────────────────────────
+
+def _run_weather_aware_agenda(user_text: str) -> RunResult | None:
+    """Manager pre-fetches forecast + agenda + outdoor-item join
+    so the @agenda agent narrates recommendations in one cloud
+    call. Falls back to advisory when location isn't configured."""
+    try:
+        from . import weather as _w
+    except Exception:
+        return None
+    bundle = _w.weather_for_agenda(days=7)
+    if bundle.get("error"):
+        # Not an internal failure — the user just hasn't set their
+        # location. Fall through to advisory so the agent can
+        # surface the configuration hint.
+        return None
+    return RunResult(
+        answer="",
+        tool_name="weather_for_agenda",
+        tool_args={"days": 7},
+        tool_result={
+            "summary":          bundle.get("summary", ""),
+            "outdoor_items":    bundle.get("outdoor_items") or [],
+            "daily_forecast":   (bundle.get("forecast") or {}).get("daily")
+                                  or [],
+            "agenda_today":     (bundle.get("agenda") or {}).get("today")
+                                  or [],
+            "agenda_upcoming":  (bundle.get("agenda") or {}).get("upcoming")
+                                  or [],
+            "agenda_overdue":   (bundle.get("agenda") or {}).get("overdue")
+                                  or [],
+            "stale":            (bundle.get("forecast") or {}).get("stale", False),
+        },
+    )
+
+
 # ── pre-fetch block (manager → agent hand-off) ───────────────────────────────
 
 def _user_context_addendum(recipe_name: str, run: RunResult,
@@ -647,6 +683,68 @@ def format_prefetch_block(recipe_name: str, run: RunResult,
                           f"(first {c.get('first_seen', '?')} → "
                           f"last {c.get('last_seen', '?')})")
         body = "\n  ".join(lines)
+    elif "outdoor_items" in res or "daily_forecast" in res:
+        # weather_aware_agenda shape — forecast + flagged items.
+        lines = []
+        if res.get("summary"):
+            lines.append(f"summary: {res['summary']}")
+        if res.get("stale"):
+            lines.append("[stale forecast — fetch failed; serving cache]")
+        # Daily forecast — one line per day, top 7.
+        df = res.get("daily_forecast") or []
+        if df:
+            lines.append("forecast:")
+            for d in df[:7]:
+                lines.append(
+                    f"  {d.get('date')}  {d.get('short','?'):<14s}  "
+                    f"{d.get('t_min','?')}-{d.get('t_max','?')}°C  "
+                    f"precip {d.get('precip_prob',0)}%  "
+                    f"wind {d.get('wind_max','?'):.0f}km/h"
+                    if isinstance(d.get('wind_max'), (int, float))
+                    else
+                    f"  {d.get('date')}  {d.get('short','?'):<14s}  "
+                    f"{d.get('t_min','?')}-{d.get('t_max','?')}°C  "
+                    f"precip {d.get('precip_prob',0)}%"
+                )
+        # Flagged items — the actionable cross-reference.
+        outdoor = res.get("outdoor_items") or []
+        if outdoor:
+            lines.append(f"outdoor_items_with_concerns "
+                          f"({len(outdoor)}):")
+            for it in outdoor[:10]:
+                concerns = ", ".join(it.get("concerns") or []) or "fine"
+                tags = it.get("weather_tags") or []
+                tag_str = (" tags=" + "/".join(f":{t}:" for t in tags)
+                              if tags else "")
+                lines.append(f"  {it.get('date')}  "
+                              f"[{it.get('state','?')}] "
+                              f"{(it.get('item','') or '')[:50]}  "
+                              f"→ {concerns}{tag_str}")
+                # Alternative-day suggestions: rendered inline so
+                # the agent sees them and can recommend.
+                for alt in (it.get("suggestions") or [])[:2]:
+                    delta = alt.get("delta_days", 0)
+                    delta_str = (f"+{delta}d" if delta > 0
+                                  else f"{delta}d")
+                    same_dow = " (same day-of-week)" if alt.get("same_dow") else ""
+                    lines.append(
+                        f"      ↳ try {alt.get('date')} ({delta_str})"
+                        f": {alt.get('label')}, "
+                        f"{alt.get('t_min','?')}-{alt.get('t_max','?')}°C, "
+                        f"precip {alt.get('precip_prob',0)}%{same_dow}"
+                    )
+        else:
+            lines.append("outdoor_items: none flagged this window.")
+        # Agenda items the agent might still want to see (non-outdoor).
+        today_items = res.get("agenda_today") or []
+        upcoming    = res.get("agenda_upcoming") or []
+        overdue     = res.get("agenda_overdue") or []
+        if today_items or upcoming or overdue:
+            lines.append(
+                f"agenda_counts: today={len(today_items)}, "
+                f"upcoming={len(upcoming)}, overdue={len(overdue)}"
+            )
+        body = "\n  ".join(lines)
     elif "dailies" in res:
         # dailies_general shape — file-by-file content excerpts.
         dailies_list = res.get("dailies") or []
@@ -686,4 +784,5 @@ _RUNNERS: dict[str, Callable[[str], RunResult | None]] = {
     "recent_activity_summary": _run_recent_activity_summary,
     "dailies_routine_filter":  _run_dailies_routine_filter,
     "dailies_general":         _run_dailies_general,
+    "weather_aware_agenda":    _run_weather_aware_agenda,
 }
