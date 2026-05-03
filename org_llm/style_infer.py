@@ -201,16 +201,20 @@ def style_summary(info: dict) -> str:
 
     if shape == "header_cookie":
         head = (
-            "Format: header-cookie. Headings FLUSH LEFT (no "
-            "leading spaces). States: `[ ]` open / `[X]` done / "
-            "`[-]` wip.\n"
-            "DEFAULT (flat — most cases):\n"
-            "<<<\n* [ ] Make bed\n* [ ] Clean bathroom\n>>>\n"
-            "PARENT + SUB-TASKS only for meaningful real "
-            "categories (chores / project name etc). Don't invent "
-            "wrapper parents ('Weekend', 'List'). Don't invent "
-            "sub-tasks. Use `**` headings, not `- [ ]` bullets.\n"
-            "<<<\n* [ ] chores\n** [ ] Make bed\n** [ ] Clean bathroom\n>>>")
+            "Format: ORG-MODE (NOT markdown). Headings are FLUSH "
+            "LEFT — no indentation, no leading spaces. Cookie "
+            "states: `[ ]` open / `[X]` done / `[-]` wip.\n"
+            "OUTPUT THIS SHAPE EXACTLY (flat list, no wrapper, "
+            "no grouping, no invented categories):\n"
+            "<<<\n"
+            "* [ ] Make bed\n"
+            "* [ ] Clean bathroom\n"
+            "* [ ] Take out trash\n"
+            ">>>\n"
+            "DO NOT indent the `*` lines. DO NOT add a wrapper "
+            "parent ('Chores', 'Weekend', 'Personal Care'). DO "
+            "NOT group items into invented categories. DO NOT "
+            "use `- [ ]` bullets — the format is `*` headings.")
     elif shape == "header_todo":
         head = (
             "Format: HEADERS-WITH-TODO.\n"
