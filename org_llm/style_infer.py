@@ -202,17 +202,25 @@ def style_summary(info: dict) -> str:
     if shape == "header_cookie":
         head = (
             "Format: HEADERS-WITH-COOKIE.\n"
-            "EXACT TEMPLATE — copy this shape verbatim:\n"
-            "  * [ ] Category heading\n"
-            "  ** [ ] Sub-task one\n"
-            "  ** [X] Sub-task already done\n"
-            "  ** [-] Sub-task in progress\n"
+            "FOR A FLAT TODO LIST (most cases — chores, weekend "
+            "items, simple tasks), use ONE parent and `**` items:\n"
+            "  * [ ] Weekend\n"
+            "  ** [ ] Make bed\n"
+            "  ** [ ] Clean bathroom\n"
+            "  ** [ ] Take out trash\n"
+            "FOR A MULTI-CATEGORY LIST (only when items group "
+            "naturally), use multiple parents:\n"
+            "  * [ ] Chores\n"
+            "  ** [ ] Make bed\n"
+            "  ** [ ] Clean bathroom\n"
+            "  * [ ] Errands\n"
+            "  ** [ ] Groceries\n"
             "RULES:\n"
-            "  - Top-level (`*`) is a CATEGORY with `[ ]` cookie.\n"
-            "  - Sub-tasks are `**` headings, NOT `- [ ]` bullets.\n"
             "  - States: `[ ]` open / `[X]` done / `[-]` in-progress.\n"
-            "  - DO NOT mix `- [ ]` bullets with `*` headings — pick "
-            "headings.")
+            "  - Tasks are `**` headings, NOT `- [ ]` bullets.\n"
+            "  - DO NOT invent sub-tasks for items that don't have "
+            "them in the source. 'Make bed' does not need "
+            "'Tidy up all blankets' under it.")
     elif shape == "header_todo":
         head = (
             "Format: HEADERS-WITH-TODO.\n"

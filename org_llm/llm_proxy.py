@@ -1323,6 +1323,27 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
         })
         rt_path.parent.mkdir(parents=True, exist_ok=True)
         rt_path.write_text(json.dumps(existing))
+        # Also touch sidebar-status.json's `active.intent_agent`
+        # field so the plugin's refreshStatus() tick sees the
+        # change. Solid only re-renders when the cached status
+        # *content* changes; sidebar-runtime.json on its own
+        # doesn't trigger that path (the plugin reads it but the
+        # framework doesn't know the props changed). Mirroring
+        # into sidebar-status.json — which the plugin already
+        # reads on every tick — closes the gap.
+        try:
+            ss_path = org_dir / ".opencode" / "sidebar-status.json"
+            ss_data: dict = {}
+            if ss_path.exists():
+                ss_data = json.loads(ss_path.read_text()) or {}
+            active = ss_data.get("active")
+            if not isinstance(active, dict):
+                active = {}
+            active["intent_agent"] = agent
+            ss_data["active"] = active
+            ss_path.write_text(json.dumps(ss_data, indent=2))
+        except Exception:
+            pass
     except Exception:
         # Non-fatal — overlay write is for sidebar polish only.
         pass

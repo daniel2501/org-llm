@@ -508,7 +508,9 @@ def create_mcp_server():
 
     # ── list_dailies ──────────────────────────────────────────────────────────
     @server.tool()
-    def list_dailies(limit: int = 10, since_days: int = 0) -> str:
+    def list_dailies(limit: int = 10, since_days: int = 0,
+                       include_content: bool = True,
+                       max_chars_each: int = 4000) -> str:
         """List recent daily-log files from the vault's daily directory.
 
         Daily files live at `<daily_dir>/*.org` (default
@@ -546,9 +548,11 @@ def create_mcp_server():
         for f in files:
             mtime = datetime.fromtimestamp(f.stat().st_mtime)
             title = ""
+            content = ""
             try:
-                head = f.read_text(errors="replace").splitlines()[:8]
-                for line in head:
+                full = f.read_text(errors="replace")
+                lines = full.splitlines()
+                for line in lines[:8]:
                     s = line.strip()
                     if s.lower().startswith("#+title:"):
                         title = s.split(":", 1)[1].strip()
@@ -556,14 +560,22 @@ def create_mcp_server():
                     if s.startswith("* "):
                         title = s[2:].strip()
                         break
+                if include_content:
+                    content = full[:max_chars_each]
+                    if len(full) > max_chars_each:
+                        content += f"\n... [truncated; full file is {len(full)} chars]"
             except Exception:
                 pass
-            rows.append(f"- {f.stem}  ({mtime.date().isoformat()})"
-                         f"{'  — ' + title if title else ''}\n  {f}")
+            row = (f"- {f.stem}  ({mtime.date().isoformat()})"
+                    f"{'  — ' + title if title else ''}\n  {f}")
+            if include_content and content:
+                row += "\n  ```org\n" + "\n".join(
+                    "  " + ln for ln in content.splitlines()) + "\n  ```"
+            rows.append(row)
         body = "\n".join(rows)
-        return _themed("list_dailies",
-                        f"{len(files)} daily file(s) in {daily_dir}",
-                        body)
+        title_line = (f"{len(files)} daily file(s) in {daily_dir}"
+                       + (" with content" if include_content else ""))
+        return _themed("list_dailies", title_line, body)
 
     # ── get_vault_stats ───────────────────────────────────────────────────────
     @server.tool()

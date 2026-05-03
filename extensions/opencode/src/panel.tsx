@@ -729,20 +729,17 @@ function SectionActive(props: { s: SidebarStatus; t: any; color: any }) {
   // message.updated handler kept stamping "org-llm" on every
   // assistant event. The overlay file is the cross-process
   // truth-source the proxy wrote during the swap.
-  // Prefer the value baked into _cachedStatus by refreshStatus
-  // (ensures the slot re-renders when the overlay changes); fall
-  // back to a fresh disk read only if the cache hasn't populated
-  // yet (first render before the tick fires).
-  let intentAgent = (props.s as any)._intent_agent ?? "";
+  // Read intent_agent from the cached SidebarStatus's active
+  // block. The proxy writes both sidebar-runtime.json AND
+  // sidebar-status.json on every @-routed turn — the latter is
+  // what refreshStatus() picks up on its tick, so the slot
+  // re-renders with the fresh value. The runtime overlay alone
+  // wasn't enough because Solid only re-runs the slot when the
+  // cached status object changes.
+  const activeRow: any = (props.s as any).active ?? {};
+  let intentAgent = (activeRow.intent_agent || "").trim();
   if (!intentAgent) {
-    try {
-      const fs = require("node:fs");
-      const home = process.env.HOME ?? "";
-      const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
-      const overlay = JSON.parse(fs.readFileSync(
-        `${orgDir}/.opencode/sidebar-runtime.json`, "utf8"));
-      intentAgent = (overlay.intent_agent || "").trim();
-    } catch { /* no overlay — fine, fall through */ }
+    intentAgent = ((props.s as any)._intent_agent ?? "").trim();
   }
   const agentOvr = getActiveAgentOverride();
   const agentDisplay = intentAgent || agentOvr?.agent || "org-llm";
