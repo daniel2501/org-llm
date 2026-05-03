@@ -763,17 +763,27 @@ function SectionActive(props: { s: SidebarStatus; t: any; color: any }) {
   // message.updated handler kept stamping "org-llm" on every
   // assistant event. The overlay file is the cross-process
   // truth-source the proxy wrote during the swap.
-  // Read intent_agent from the cached SidebarStatus's active
-  // block. The proxy writes both sidebar-runtime.json AND
-  // sidebar-status.json on every @-routed turn — the latter is
-  // what refreshStatus() picks up on its tick, so the slot
-  // re-renders with the fresh value. The runtime overlay alone
-  // wasn't enough because Solid only re-runs the slot when the
-  // cached status object changes.
+  // Resolve intent_agent. Try cached props first (fastest);
+  // fall back to a fresh disk read so even if the slot didn't
+  // re-render the cached props are stale, we still pick up the
+  // current state. The disk read is a few microseconds — cheap
+  // enough to do every render. This is the brute-force fix
+  // after the Solid-signal + tick-bridge approaches both failed
+  // to make the slot pick up overlay changes.
   const activeRow: any = (props.s as any).active ?? {};
   let intentAgent = (activeRow.intent_agent || "").trim();
   if (!intentAgent) {
     intentAgent = ((props.s as any)._intent_agent ?? "").trim();
+  }
+  if (!intentAgent) {
+    try {
+      const fs = require("node:fs");
+      const home = process.env.HOME ?? "";
+      const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
+      const ss = JSON.parse(fs.readFileSync(
+        `${orgDir}/.opencode/sidebar-status.json`, "utf8"));
+      intentAgent = (ss?.active?.intent_agent || "").trim();
+    } catch { /* file not present */ }
   }
   const agentOvr = getActiveAgentOverride();
   const agentDisplay = intentAgent || agentOvr?.agent || "org-llm";
@@ -941,16 +951,24 @@ function SectionManager(props: { s: SidebarStatus; t: any; color: any }) {
   // overlay — a list of the most recent 3 crew_log entries written
   // by db.log_crew_action. For full history use `/sysexport manager`.
   const { t, color } = props;
-  // sidebar-status.json's `manager_recent` is the source-of-
-  // truth for the live TUI — db.log_crew_action mirrors there
-  // every time a delegate/recipe/etc. fires. The plugin's
-  // refreshStatus tick (every 2s) re-reads sidebar-status.json
-  // and hands props.s a NEW object → Solid re-renders → fresh
-  // entries display here. Fall back to props.s._manager_recent
-  // (the runtime overlay path) on first render.
+  // Cached props first; fall back to disk read every render
+  // (microseconds; cheap) — same brute-force pattern as
+  // SectionActive's intent_agent. The Solid-signal approach
+  // didn't bridge cache changes into slot re-renders; this
+  // ensures every render picks up the latest state regardless.
   let entries: any[] = (props.s as any).manager_recent ?? [];
   if (!entries.length) {
     entries = (props.s as any)._manager_recent ?? [];
+  }
+  if (!entries.length) {
+    try {
+      const fs = require("node:fs");
+      const home = process.env.HOME ?? "";
+      const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
+      const ss = JSON.parse(fs.readFileSync(
+        `${orgDir}/.opencode/sidebar-status.json`, "utf8"));
+      entries = ss?.manager_recent ?? [];
+    } catch { /* file not present */ }
   }
   return (
     <SectionCard color={color} title="MANAGER">
