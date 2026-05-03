@@ -1,0 +1,345 @@
+:PROPERTIES:
+:ID:       e2bcfb16-8db5-4c50-9d7a-2fb6f4f31f7e
+:CREATED:  [2026-05-03]
+:END:
+#+TITLE: End-to-end test prompts
+#+FILETAGS: :wiki:testing:eval:
+#+OPTIONS: toc:2 num:nil
+
+* What this is
+
+A growing battery of natural-language prompts the user can throw
+at running =org-llm=, organised by query category. Each prompt
+names the *recipe* / *MCP tool* it should engage and gives a
+one-line description of what a passing answer looks like — so
+when a regression silently fails, the diff is obvious.
+
+The 11-prompt seed below is the minimum viable suite: enough
+breadth to catch a Phase-22-class regression (manager bypass +
+agent narration + tool routing) without becoming a chore.
+
+** How to run
+
+1. Launch: =M-x org-llm-launch= (or =SPC y o= in Doom).
+2. Inject any prompt below via =SPC y P= (=org-llm-sys-prompt-submit=)
+   or paste it into the prompt bar manually.
+3. Watch the MANAGER card in the sidebar (=SPC y Y= for the
+   live-tailing buffer). For deterministic-pre-fetch recipes you
+   should see =recipe= → =tool_call= → =delegate= within ~50ms,
+   then the agent's narration ~5-10s later.
+4. Compare the answer against the "passing answer" hint. If it
+   diverges, capture the export: =/sysexport= writes
+   =~/org/.opencode/chat-export-*.md=.
+
+** Categories at a glance
+
+| # | category                  | recipe / tool                                 | shape                                           |
+|---+---------------------------+-----------------------------------------------+-------------------------------------------------|
+| 1 | Counting                  | =count_across_vault= (deterministic)          | regex over =[X]/DONE= — answer is a number      |
+| 2 | Recent activity           | =recent_activity_summary= (deterministic)     | Node + File DB query, agent narrates by topic   |
+| 3 | Tag taxonomy              | =org_tag_index= via MCP                       | top-N tags by frequency                          |
+| 4 | Free-text search          | =org_grep= / =search_notes= via MCP           | path:line: match                                 |
+| 5 | Link graph                | =org_link_graph= / =org_backlinks= via MCP    | adjacency list / incoming links                  |
+| 6 | Property drawer search    | =org_property_search= via MCP                 | headings whose drawer matches                    |
+| 7 | Triage / orphans          | =org_orphans= via MCP                         | files with no in/out links + no tags             |
+| 8 | Agenda                    | =org_agenda= via MCP                          | today / upcoming / overdue / stale_todo          |
+| 9 | File metadata + outline   | =org_file_meta= / =org_outline= via MCP       | title / id / heading counts / outline tree       |
+| 10 | Tag suggestion           | =org_tag_suggest= via MCP                     | rank existing tags by content overlap            |
+| 11 | Refile candidates        | =org_refile_candidates= via MCP               | rank target files by tag + token overlap        |
+| 12 | Dailies routine filter   | =dailies_routine_filter= recipe (advisory)    | filter chores: KEEP lowercase universal, REJECT proper nouns |
+| 13 | CLOCK + agenda combo     | =org_clock_summary= + =org_agenda= via MCP    | parallel tool_calls: weekly burn + due items     |
+| 14 | Doom config introspection| =doom_keybinds= via MCP                       | list :leader bindings + commands                 |
+| 15 | Markdown-JSON repair     | (any tool, ask in a way that triggers fenced JSON) | manager intercepts markdown-fenced tool call, executes locally, single cloud call |
+
+* Prompts
+
+** [#1] Counting — known-good baseline                      :counting:
+
+Prompt:
+#+begin_example
+@researcher in dailies, how many times have I made my bed?
+#+end_example
+
+Should engage =count_across_vault= (deterministic recipe). MANAGER
+card shows three rows in <50ms (=recipe=, =tool_call=, =delegate=).
+Agent narrates: "Based on the dailies, you've made your bed N
+times..." with at least one specific date cited.
+
+*Regression flags:* answer says "0" when disk has hits → the
+prefix-strip / verb-stem heuristic is broken; agent dumps a
+fenced =```json {tool_calls: [...]}```= block → manager-prefetch
+isn't engaging and v1 advisory mode is leaking the failure
+shape.
+
+** [#2] Counting — verb stemming                            :counting:
+
+Prompt:
+#+begin_example
+@researcher how often have I exercised across the vault?
+#+end_example
+
+Same recipe, broader scope (no =dailies= keyword → glob =**/*.org=).
+Tests verb stem expansion: =exercised= → =(exercise|exercised|exercising)=.
+
+*Regression flags:* very low count (<5) when the user actually has
+gym/fitness entries → stem expansion lost a tense; very high
+count (hundreds) when none of those are real exercise mentions →
+the regex is matching too eagerly (e.g. catching "exercise" in
+documentation).
+
+** [#3] Counting — past-tense irregular verb                :counting:
+
+Prompt:
+#+begin_example
+@researcher how many times have I drunk coffee this year?
+#+end_example
+
+Tests the irregular-verb table (=drank= / =drunk= / =drink=).
+Should map =drunk= → all three forms. If the user genuinely
+doesn't track coffee, expect 0 hits — that's still a passing
+answer ("0 hits for 'drunk coffee' in the vault").
+
+** [#4] Recent activity — narrative summary                 :recent:
+
+Prompt:
+#+begin_example
+@researcher summarize what I've been working on recently
+#+end_example
+
+Engages =recent_activity_summary= (deterministic pre-fetch).
+Manager queries =Node= + =File= tables, dedupes captains-log
+entries (bucketed as a count), passes 20 nodes + 25 files into
+the agent prompt. Agent narrates: "Recent activity centers on X,
+Y, and Z, including specific files...". Single cloud call.
+
+*Regression flags:* the answer is dominated by captains-log /
+embed events (manager dedupe broke); answer hallucinates topics
+not in the file list (agent ignored the pre-fetch directive).
+
+** [#5] Tag taxonomy                                        :tags:
+
+Prompt:
+#+begin_example
+@researcher what are my top 10 tags by frequency?
+#+end_example
+
+Should call =org_tag_index= via MCP. No deterministic recipe
+yet — agent's tool-call should engage. Expected output: a
+formatted top-10 list (e.g. =#tour 88, #trek 88, #setup 88, …=).
+Verifies that the MCP tool path still works for non-recipe
+shapes.
+
+*Regression flags:* answer narrates from memory or invents tags
+not in the user's vault.
+
+** [#6] Free-text search — literal match                    :search:
+
+Prompt:
+#+begin_example
+@researcher where in my notes do I mention Postgres?
+#+end_example
+
+Should call =org_grep= or =search_notes=. Expected output: a
+short list of =path:line: text= excerpts (or "no matches"). A
+proper-noun query like "Postgres" tests that the agent doesn't
+filter the matches into routine-shape (Phase 18.4 regression
+where proper nouns got rejected from results).
+
+** [#7] Link graph — N-hop walk                             :graph:
+
+Prompt:
+#+begin_example
+@researcher what is connected to my org-llm node within 2 hops?
+#+end_example
+
+Tests =org_id_find= → =org_link_graph= chain. Agent should
+fuzzy-find the org-llm node by title, then walk the link graph 2
+hops out, returning an indented list of titles + file paths.
+
+*Regression flags:* agent says "no node found" when one exists
+(=org_id_find= scoring miscalibrated); returns a single-hop list
+when 2 was requested (hops parameter dropped).
+
+** [#8] Property drawer search                              :props:
+
+Prompt:
+#+begin_example
+@researcher show me every node that has a :CUSTOM_ID: property
+#+end_example
+
+Tests =org_property_search=. Expected: a list of =file:line= +
+heading title + property value rows. Validates the property-block
+regex correctly handles =:PROPERTIES:= / =:END:= drawer parsing.
+
+** [#9] Triage — orphans                                    :triage:
+
+Prompt:
+#+begin_example
+@researcher which of my notes are orphaned (no links and no tags)?
+#+end_example
+
+Tests =org_orphans=. Expected: a list of files with title +
+filename + size + mtime. Useful as a maintenance prompt — the
+agent should suggest these as candidates for prune / refile /
+tag.
+
+** [#10] Agenda — today / overdue                           :agenda:
+
+Prompt:
+#+begin_example
+@researcher what's overdue or due this week?
+#+end_example
+
+Tests =org_agenda(window_days=7)=. Expected output: sectioned
+=TODAY=, =UPCOMING=, =OVERDUE= lists with =[STATE] DATE — text
+(file:line)= rows. If empty, "clean — no items in 7d window".
+
+** [#11] File metadata + outline                            :meta:
+
+Prompt:
+#+begin_example
+@researcher how many headings are in my Phase 22 roadmap entry?
+And give me a high-level outline.
+#+end_example
+
+Two-shot test: =org_id_find=("Phase 22") → =org_file_meta= for
+the heading counts → =org_outline= for the structure. Agent
+should chain these tools (or do them in parallel via a single
+=tool_calls= array) and present a 2-3 sentence summary.
+
+*Regression flags:* agent invents headings not in the file
+(no MCP call happened); agent calls =org_outline= without
+first finding the right file (hallucinated path).
+
+** [#12] Tag suggestion — pick from existing taxonomy        :tags:
+
+Prompt:
+#+begin_example
+@scribe what tags should I use for this note: "spent the morning
+debugging Postgres slow queries with the data team"
+#+end_example
+
+Tests =org_tag_suggest=. Expected: a list of tags drawn ONLY from
+the user's existing taxonomy that match the content (e.g.
+=:postgres:= if the user has a postgres tag, =:work:= /
+=:debugging:= etc). The agent should NOT invent new tags.
+
+*Regression flags:* agent suggests tags not in the vault;
+=org_tag_suggest= returns tags whose token-substring match is
+spurious (e.g. =:po:= matching "Postgres").
+
+** [#13] Refile destination — tag + token overlap            :triage:
+
+Prompt:
+#+begin_example
+@scribe where should I file a heading about Postgres connection pooling?
+#+end_example
+
+Tests =org_refile_candidates=. Expected: ranked list of org files
+with title + score + reason ("shared tags / shared tokens"). Top
+candidate should be a file whose title or filename includes
+"postgres" or related token.
+
+*Regression flags:* agent answers from memory ("file it under
+work-notes.org") without calling the tool; the tool returns no
+candidates when the vault clearly has postgres-related notes.
+
+** [#14] Dailies routine filter — advisory recipe            :dailies:
+
+Prompt:
+#+begin_example
+@scribe pull the most common routine items from my recent dailies
+#+end_example
+
+Engages =dailies_routine_filter= recipe (advisory — recipe body
+is injected into scribe's prompt; scribe runs the chain manually
+because there's no deterministic runner yet). Expected: a flat
+list of universal lowercase chores ("make bed", "exercise",
+"clean bathroom"), REJECTED proper nouns (no "Postgres", "Cory",
+"Wiki" mid-task), no learning/follow-up/one-off verbs.
+
+*Regression flags:* proper nouns leak into the kept list (Phase
+18.4 regression); the list is empty when the user clearly has
+routine items in dailies; the agent re-invokes =list_dailies=
+multiple times instead of once.
+
+** [#15] CLOCK + agenda — parallel tool calls                :combo:
+
+Prompt:
+#+begin_example
+@researcher how busy am I this week? Show me my agenda and
+how much time I've clocked.
+#+end_example
+
+Tests parallel tool calls: =org_agenda(window_days=7)= +
+=org_clock_summary(since_days=7)=. Expected: a 2-3 sentence
+summary citing both data sources. Validates that the agent emits
+ONE =tool_calls= array with two entries (parallel) rather than
+two sequential turns.
+
+*Regression flags:* agent only calls one of the two tools;
+calls them sequentially in two cloud round-trips; gives a
+generic "I'd need to check your agenda" non-answer.
+
+** [#16] Doom config introspection — keybind lookup          :doom:
+
+Prompt:
+#+begin_example
+@researcher what's my keybinding for org-roam-node-find?
+#+end_example
+
+Tests =doom_keybinds=. Expected: parses the user's =config.el=
+/=bindings.el=, finds the (leader/global) binding pointing at
+=org-roam-node-find=, returns the key sequence (e.g. =SPC r f=).
+
+*Regression flags:* agent says "I don't know your config" without
+calling the tool; the regex misses the user's binding shape
+(=(map! :leader "r f" (cmd! (org-roam-node-find)))=); answer
+cites a Doom default binding instead of the user's actual one.
+
+** [#17] Markdown-JSON repair — defensive regression test    :repair:
+
+Prompt:
+#+begin_example
+@researcher count my DONE items grouped by tag — then summarize
+which areas I'm most active in.
+#+end_example
+
+A multi-step query that historically triggered the markdown-JSON
+failure mode (the model emits a ```json ``` block listing
+multiple tool calls instead of emitting them as real
+tool_calls). Tests the manager-side repair path.
+
+*Regression flags:* user sees a literal ```json {tool_calls: ...}
+``` block in the chat (manager repair didn't engage); manager-log
+shows no =repair= action; total cloud time exceeds 2× the solo
+path baseline.
+
+Passing answer: the count + summary is delivered in one or two
+cloud calls. Manager log includes either a deterministic
+=tool_call= chain (best case) or a single =repair= action
+(fallback case). Either way, no markdown JSON in user-facing
+output.
+
+* Adding a prompt
+
+When you find a query that should always work, add it here under
+the matching category. Each prompt entry needs:
+
+1. The verbatim prompt (in =#+begin_example= so it's
+   copy-pastable).
+2. Which recipe / MCP tool it should engage.
+3. What a passing answer looks like (short — one sentence).
+4. Optional regression flags if the failure shape is interesting.
+
+Avoid adding prompts that depend on transient state (e.g.
+"what's the time?") or that require live cloud data — this suite
+is for vault-content questions only.
+
+* See also
+
+- =docs/wiki/roadmap.org= — the phase index + status snapshot.
+- =org_llm/recipe_runner.py= — the deterministic recipe runners.
+- =org_llm/orchestration.py= — the recipe-match patterns.
+- =org_llm/org_tools.py= — read-only org helpers (the MCP tool
+  bodies live in =mcp_server.py=).

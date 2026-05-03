@@ -42,21 +42,102 @@ cards" = Phase 12) ship in slices without renumbering the world.
   cleared all four bars.
 - *Currently:* late beta. Core flows (index → embed → ask →
   capture → launch) are stable. Most active recent surface is
-  Phase 22 (manager pattern via deterministic recipes).
-- *Latest shipped:* Phase 22 — orchestration v2 (recipe-based) +
-  MANAGER buffer. Proxy pattern-matches the user message,
-  injects a deterministic recipe into the agent prompt, no extra
-  cloud round-trips. Live-tailing Emacs MANAGER buffer (=<leader>
-  y Y=) with crew_log + History mirror for durable cross-session
-  audit. fs.watch'd sidebar reactivity. Recipe rejection-first
-  filter (proper-noun-anywhere = reject, frequency does not
-  override).
+  Phase 22 v2 (manager pre-fetch + agent narrates).
+- *Latest shipped (2026-05-03):*
+  - *Phase 21.1 — DB-backed vault fact store (first cut).*
+    New =vault_fact= table + =org_llm/vault_facts.py= with
+    =register_inferrer= / =get_fact= / =get_all_facts= and
+    mtime / ttl-aware invalidation. Three inferrers:
+    =vault_stats= (572 files, 138 dailies, 182k nodes for this
+    user), =tag_taxonomy= (top 30 tags), =routine_chores=
+    (recurring chores from last 30 dailies; REJECT-first
+    filtering — fixes Phase 18.4-style routine drift at the
+    data layer). Pre-fetch integration: =count_across_vault=
+    runs append a =user_context:= line when the count target
+    overlaps a known chore, so the agent gets accurate routine
+    context inline (no extra LLM round-trip). New =vault_facts=
+    MCP tool. Bug-hunt finding: time-modifier phrases
+    ("this year") still tokenise as content — see finding-5 in
+    =docs/wiki/2026-05-03-test-session.org=.
+  - *Phase 22.5a — manager watches agents at zero perf cost.*
+    Cloud response stream is buffered (was already done for the
+    repair path — bytes are free) and the agent's textual
+    narration is appended to manager-log.jsonl as a =narration=
+    action when an orchestration recipe matched. Per-turn cost:
+    one extra =log_crew_action= call (~5ms). Visible in the
+    MANAGER buffer (=<leader> y Y=) and the sidebar's MANAGER
+    card. Knob: =proxy_capture_narration= (default true).
+  - *Phase 22.6.2 + 22.6.3 — six more org/doom tools.*
+    =org_clock_summary=, =org_drill_review_due=,
+    =org_attach_list=, =org_template_apply=, =doom_packages=,
+    =doom_keybinds=. With these the toolbelt is *13 / 12*
+    (one more than the original Phase 22.6 plan because
+    =org_template_apply= came in alongside the others). MCP
+    wrappers shipped.
+  - *Repair-path renderer coverage.* The markdown-JSON
+    repair path's =_try_local_org_tool= now renders
+    =org_count_matches=, =org_grep=, =org_orphans=,
+    =org_id_find=, =org_outline=, =org_tag_index=,
+    =org_tag_suggest=, =org_file_meta=, =org_agenda=,
+    =org_drill_review_due=. Coverage means a markdown-JSON tool
+    call from a flaky cloud model returns a final answer in
+    ONE cloud call (manager extracts → executes locally →
+    synthesises response) instead of falling back to the
+    structured-tool_calls repair (which costs +1 cloud call).
+  - *=recent_activity_summary= promoted to manager pre-fetch.*
+    Second runner in =recipe_runner.py= (after
+    =count_across_vault=). Manager queries =Node= + =File=
+    tables directly (mirroring the inline =list_recent_nodes=
+    / =recent_files= MCP tools, dedupes captains-log noise),
+    injects 20 nodes + 25 files into the agent prompt, agent
+    narrates with one cloud call. Ahead of the scheduled
+    2026-05-17 review agent — that agent now has one fewer
+    recipe to assess.
+  - *=docs/wiki/test-prompts.org= — 11-prompt eval suite.*
+    Categorised by recipe / tool: counting, recent activity,
+    tags, search, link graph, properties, orphans, agenda,
+    metadata. Each prompt names the expected recipe + describes
+    a passing answer + lists regression flags.
+  - *Phase 22 v2 — manager pre-fetch + agent narrates.* When a
+    recipe matches, the proxy executes the underlying tool
+    itself (zero LLM cost), injects the result into the agent
+    prompt as a compact =MANAGER PRE-FETCH= block, then lets the
+    agent narrate in ONE cloud call. Tool use is enforced because
+    the result is already in context — the agent doesn't have to
+    "decide" to call the tool. New module: =org_llm/recipe_runner.py=
+    (=_run_count_across_vault= + =format_prefetch_block=). Validated
+    end-to-end: "in dailies, how many times have I made my bed?"
+    → 17ms manager pre-fetch + ~6s qwen3:4b narration → "Based on
+    the dailies, you've made your bed 10 times..."
+  - *Phase 22.6 manager-side markdown-JSON tool-call repair.*
+    When a model emits a fenced ```json {tool_calls:…} ``` block
+    instead of a real tool call (the Phase 20 regression shape),
+    the proxy extracts it, executes locally for known org tools,
+    and returns a final assistant message — no second cloud call.
+    Knob: =proxy_repair_markdown_tools= (default true).
+  - *Phase 22.6.1 — six new pure-python org tools.* =org_link_graph=,
+    =org_backlinks=, =org_orphans=, =org_property_search=,
+    =org_id_find=, =org_refile_candidates=. MCP wrappers in
+    =mcp_server.py=. Six of twelve tools queued in 22.6 done.
+  - *Sidebar plugin disk-read squash.* Canonical
+    =readOrgLlmJson= / =readOrgLlmJsonAt= helpers in
+    =extensions/opencode/src/panel.tsx=. Static
+    =import { createSignal } from "solid-js"= replaces
+    =require("solid-js")= which silently failed in opencode's
+    bun ESM runtime. Self-driving =SectionManager= with own
+    =createSignal= + 1.5s =setInterval= polling sidebar-status.json
+    — bypasses the slot/PanelBody/prop chain entirely. Plain
+    =<box>= (not nested =<scrollbox>=) inside the rounded
+    =SectionCard= for clean borders. Fix root-causes the
+    recurring "(idle — no recent actions)" bug across 4+ prior
+    fix attempts.
 - *Active focus:* Phase 22.5a (thought-process capture in
-  manager log), recipe expansion (more task-shapes), Phase 19.1
-  (=org-llm sync= MVP — gates the weekly GTD remote routine),
-  Phase 22.6 (12 more org/doom agent tools queued up — seed
-  shipped: =org_grep / count / file_meta / outline / tag_index /
-  tag_suggest / agenda=).
+  manager log), Phase 22 recipe expansion (3 more recipe shapes
+  queued for promotion to deterministic pre-fetch — scheduled
+  remote agent on 2026-05-17 to assess), Phase 19.1 (=org-llm
+  sync= MVP — gates the weekly GTD remote routine), Phase 22.6.2
+  (CLOCK summary + drill review + attach list — three more
+  tools to round out the toolbelt).
 - *Punch list before 1.0:* cross-platform install validation
   (macOS / Ubuntu), Termux/Android port, smoke coverage on
   less-walked verbs, MCP-kind tool-call logging.
@@ -74,7 +155,7 @@ load-bearing for recipe expansion (22).
 | 1  | <2026-05-09> | 22.5 thought-process capture             | A NEXT   | jump to ↓     |
 | 2  | <2026-05-10> | 22 orchestration v2 (recipe expansion)   | A active | ↓             |
 | 3  | <2026-05-12> | 19 built-in vault git-sync               | A        | ↓             |
-| 4  | <2026-05-13> | 22.6 agent tools v2 (org/doom toolbelt)  | A        | ↓             |
+| 4  | <2026-05-13> | 22.6 agent tools v2 (6/12 shipped)       | A active | ↓             |
 | 5  | <2026-05-15> | 21 deterministic vault inferrers         | A        | ↓             |
 | 6  | <2026-05-18> | 18 proxy expansion follow-ups            | A        | ↓             |
 | 7  | <2026-05-20> | 16.5 Doom config introspection           | A        | ↓             |
@@ -645,23 +726,23 @@ through another's review before reaching the user.
 
 Working name → role → typical reviewers (suggested defaults):
 
-| agent      | role                          | reviewed by      |
-|------------+-------------------------------+------------------|
-| crew       | Manager / dispatcher          | (none — top)     |
-| researcher | Vault read-only Q&A           | scribe (citation) |
-| scribe     | Capture + structure           | librarian (tags)  |
-| engineer   | Code + dbt                    | coder (review)   |
-| coder      | Code review (any language)    | (terminal)       |
-| planner    | Multi-step decomposition      | engineer (deps)  |
-| triager    | Vault hygiene                 | (auto-approved)  |
-| reviewer   | Critique / lint / safety      | (terminal)       |
-| writer     | Long-form prose               | scribe (style)   |
-| translator | Multilingual                  | (terminal)       |
-| analyst    | Data + metrics                | engineer (sql)   |
-| librarian  | Tag taxonomy                  | (terminal)       |
-| extractor  | NER / fact extraction         | scribe (capture) |
-| summarizer | TL;DR / abstracts             | (terminal)       |
-| vision     | Image understanding           | (terminal)       |
+| agent      | role                       | reviewed by       |
+|------------+----------------------------+-------------------|
+| crew       | Manager / dispatcher       | (none — top)      |
+| researcher | Vault read-only Q&A        | scribe (citation) |
+| scribe     | Capture + structure        | librarian (tags)  |
+| engineer   | Code + dbt                 | coder (review)    |
+| coder      | Code review (any language) | (terminal)        |
+| planner    | Multi-step decomposition   | engineer (deps)   |
+| triager    | Vault hygiene              | (auto-approved)   |
+| reviewer   | Critique / lint / safety   | (terminal)        |
+| writer     | Long-form prose            | scribe (style)    |
+| translator | Multilingual               | (terminal)        |
+| analyst    | Data + metrics             | engineer (sql)    |
+| librarian  | Tag taxonomy               | (terminal)        |
+| extractor  | NER / fact extraction      | scribe (capture)  |
+| summarizer | TL;DR / abstracts          | (terminal)        |
+| vision     | Image understanding        | (terminal)        |
 
 The user customises the table — adds their own specialists,
 removes ones they don't use, swaps reviewers — by editing
@@ -1139,6 +1220,201 @@ configurable threshold, transparently retry against the cloud
 provider (or a different local model). Today the user sees
 opencode's raw error UI; the proxy can recover before it bubbles.
 
+* DONE Shipped — Phase 22 v2: manager pre-fetch + agent narrates :shipped:
+CLOSED: [2026-05-03]
+:PROPERTIES:
+:STATUS: shipped
+:END:
+
+The 2026-05-02 advisory recipe pattern (Phase 22) injected a
+RECIPE block into the agent prompt and trusted the LLM to follow
+it. Validation against qwen-2.5-72b proved that trust was
+misplaced: the model recognised the recipe but emitted a fenced
+=```json {"tool_calls":...}```= block instead of a real tool
+call. Result: zero hits, no count, robotic dump of fake JSON.
+
+Phase 22 v2 pulls the deterministic step UP into the manager.
+
+** What changed
+- *New module* =org_llm/recipe_runner.py= with =execute_recipe()=
+  and the =_run_count_across_vault= runner. Strips the
+  =@<agent>= routing tag at the parse site (not via a second
+  regex strip downstream), tokenises the user phrase with
+  stopword removal, expands the head verb via an irregular-verb
+  table + simple stem rules, builds a permissive regex, calls
+  =org_count_matches=, and returns a =RunResult= containing the
+  tool name, args, structured result, and a duration.
+- *=format_prefetch_block(recipe, run, request)=*: renders a
+  ~500-char =MANAGER PRE-FETCH= block — tool name, args (capped),
+  result summary (top 3 files), and the directive: "USE THIS
+  DATA. Answer in 1-2 sentences in your normal voice. Do NOT
+  re-invoke this tool."
+- *Proxy wiring* in =llm_proxy.py= (around the =_handle_at_agent=
+  recipe block): when a runner produces a result, log
+  =recipe= + =tool_call= + =delegate= to the manager log,
+  append the pre-fetch block to =agent_prompt=, and fall through
+  to the normal forward path. The agent gets ONE cloud call to
+  narrate using data already present in its context.
+- *Knob:* =proxy_recipe_deterministic= (default true). When
+  false, falls back to the prior advisory recipe injection.
+
+** Why this beats the short-circuit alternative
+The first cut SHORT-CIRCUITED the LLM entirely — manager ran the
+tool, returned the formatted stat dump as the assistant turn, no
+cloud call. User pushback: when @researcher is tagged, the
+researcher should deliver the answer. The pre-fetch shape gives
+the manager the speed/quality enforcement (the tool DEFINITELY
+runs, with the right args, against fresh data) AND keeps the
+agent's voice + context-awareness in the loop. ONE cloud call
+total.
+
+** End-to-end validation
+Test prompt: =@researcher in dailies, how many times have I made
+my bed?=
+
+Manager trace (sidebar):
+#+begin_example
+04:26:13  recipe    → researcher  (deterministic)   0ms
+04:26:13  tool_call → org_count_matches              17ms
+04:26:13  delegate  → researcher  (pre-fetched)     17ms
+#+end_example
+
+Cloud (qwen3:4b local) returns ~6s later:
+#+begin_quote
+Based on the dailies, you've made your bed 10 times, spread
+across 10 different days, including 2025-11-09, 2026-03-07,
+and 2026-03-14.
+#+end_quote
+
+Single =step=1 loop= in opencode's session log — the agent did
+not re-invoke the tool. Tool use enforced, narration intact.
+
+* DONE Shipped — Phase 22.6 (manager-side markdown-JSON repair) :shipped:
+CLOSED: [2026-05-03]
+:PROPERTIES:
+:STATUS: shipped
+:END:
+
+Defence in depth for the Phase 20 regression shape. When a model
+emits a fenced =```json {tool_calls:[…]}```= block instead of a
+real tool call, the proxy now intercepts it, parses the
+(possibly Python-flavoured) JSON, and executes the named tool
+locally for any known org tool. The repaired turn returns a
+final assistant message in ONE cloud call total — no second
+round-trip to feed the tool result back to the LLM.
+
+** Surface
+- =_extract_markdown_tool_call= — matches fenced JSON blocks
+  with a denylisted language tag (=json=, =jsonc=) and finds
+  =tool_calls: [...]= or bare ={name|function, arguments}=
+  shapes inside.
+- =_sanitize_pythonic_json= — fixes the most common JSON
+  mistakes models emit: Python raw-string literals
+  (=r'\\[X\\]…'=), Python =True/False/None=, trailing commas.
+- =_try_local_org_tool= — given a name like
+  =org-llm_org_count_matches=, dispatches to the corresponding
+  =org_tools.py= function with the supplied args. Returns a
+  rendered string for known result shapes (e.g.
+  =org_count_matches= → "**N** hit(s) across **M** file(s)…").
+- *Wiring* in =_failover_to_cloud=: runs after the canonical
+  =_extract_tool_call= patterns miss. If the local executor
+  fires, returns a synth assistant response directly. If the
+  tool isn't one we own, falls back to the existing structured
+  =tool_calls= repair (which costs the second cloud call but
+  still recovers the turn).
+- *Knob:* =proxy_repair_markdown_tools= (default true).
+- *Manager log:* writes a =repair= action with
+  agent_from=manager, agent_to=<tool>, model=
+  =(markdown→local)= or =(markdown→structured)=.
+
+* DONE Shipped — Phase 22.6.1: six pure-python org tools     :shipped:
+CLOSED: [2026-05-03]
+:PROPERTIES:
+:STATUS: shipped
+:END:
+
+Round 1 of the Phase 22.6 toolbelt expansion. Six pure-python
+helpers added to =org_tools.py=, each with an MCP wrapper in
+=mcp_server.py= mirroring the seven seed tools (=org_grep=,
+=org_count_matches=, =org_file_meta=, =org_outline=,
+=org_tag_index=, =org_tag_suggest=, =org_agenda=).
+
+| tool                    | answers                                                     |
+|-------------------------+-------------------------------------------------------------|
+| =org_link_graph=        | walk =[[id:…]]= roam links N hops; adjacency list           |
+| =org_backlinks=         | incoming roam links targeting an id or file                 |
+| =org_orphans=           | files with no in/out links AND no tags — triage candidates  |
+| =org_property_search=   | headings whose =:PROPERTIES:= drawer matches prop (and val) |
+| =org_id_find=           | fuzzy node-ID lookup by partial title (cheaper than search) |
+| =org_refile_candidates= | propose refile destinations via tag/path overlap            |
+
+Built on a shared =_vault_id_index()= helper (~30-80ms scan that
+returns ={id: {file, title, kind}}=). All read-only. All refuse
+paths outside =org_dir=. Validated against the live vault: 523
+ids indexed, refile picks the right Phase-related files for
+=Phase 22 orchestration recipe= input, =org_orphans= surfaces 50
+unlinked-untagged files for triage.
+
+Remaining sub-rollouts in Phase 22.6 still planned: 22.6.2
+(CLOCK summary, drill review-due, attach list), 22.6.3
+(template apply, doom packages, doom keybinds), 22.6.4 (wire
+into agent prompts).
+
+* DONE Shipped — sidebar plugin disk-read squash             :shipped:
+CLOSED: [2026-05-03]
+:PROPERTIES:
+:STATUS: shipped
+:END:
+
+Definitive fix for the recurring "(idle — no recent actions)"
+MANAGER card bug — at least four prior fix attempts (commits
+=84e72f3=, =547aaa6=, =904920d=, =8239dba=) chased symptoms
+without finding the root cause.
+
+Two compounding silent failures lived in
+=extensions/opencode/src/panel.tsx=:
+
+1. =require("solid-js")= returned =undefined= in opencode's bun
+   ESM plugin runtime. The wrapping try/catch swallowed the
+   resulting =ReferenceError= and =_statusSetter= stayed null —
+   no signal-based re-render ever fired when the cache changed.
+2. The disk-read fallback in =SectionManager= referenced a
+   nonexistent =_fs= binding (only =_readFileSync= was
+   imported). The fallback always threw and produced an empty
+   array — even though =/sysexport sidebar= read the same file
+   correctly via the Python proxy.
+
+** What landed
+- *Static named imports* for both =node:fs= and =solid-js=:
+  =readFileSync=, =statSync=, =createSignal=, =onMount=,
+  =onCleanup= — all imported by name at the top of panel.tsx.
+- *Canonical disk-read helpers:* =readOrgLlmJson(filename)=
+  and =readOrgLlmJsonAt(directory, filename)= are now the
+  ONLY supported way to read sidebar JSON from this file.
+  =_orgLlmDiskWarn= emits a stderr-once warning so future
+  regressions surface immediately. All four prior call sites
+  (=setActiveAgentOverride=, =refreshStatus=,
+  =SectionActive=, =SectionManager=) consolidated.
+- *Self-driving =SectionManager=* with its own =createSignal=
+  + 1.5s =setInterval= polling sidebar-status.json. Bypasses
+  the brittle slot → PanelBody → prop-chain plumbing
+  entirely. Solid's per-JSX-expression reactivity inside the
+  component triggers re-renders without depending on opencode
+  re-invoking the slot fn (which it doesn't, after initial
+  mount — empirically verified).
+- *Choppy-border revert.* The Phase 22.5 nested =<scrollbox>=
+  inside a rounded =<SectionCard>= corrupted the corner
+  cells on each redraw. Replaced with a plain =<box>= +
+  entry slicing (=manager_card_max_lines / 2=) for stable
+  rounded borders.
+
+** Memory
+Captured in =feedback_panel_disk_reads.md= so the bug doesn't
+return: never =require("node:fs")= or =require("solid-js")= in
+plugin .tsx files; route all sidebar JSON through the canonical
+helpers; components that need to react to disk changes should
+own a =createSignal= + =setInterval=.
+
 * NEXT [#A] Active — Phase 22.5: thought-process capture in MANAGER log :in_progress:
 SCHEDULED: <2026-05-09 Sat>
 
@@ -1162,15 +1438,18 @@ Three layers of visibility, increasing in cost:
 
 ** Roll-out
 
-*** 22.5a — token-stream excerpt
-- Proxy already buffers the cloud response in =_failover_to_cloud=
-  (for raw-text tool-call repair). Extend to ALWAYS buffer the
-  assistant content stream when an orchestration recipe matched
-  (cheap; recipe-matched turns are infrequent).
-- Append the buffered content (truncated to ~2KB) as a
-  =reasoning= field on the manager-log.jsonl entry.
-- Surface in the MANAGER buffer as a third nested heading:
-  =*** reasoning [collapsed by default]=.
+*** DONE 22.5a — token-stream excerpt :shipped:
+CLOSED: [2026-05-03]
+Shipped slightly differently than originally specced — instead
+of attaching a =reasoning= field to the existing =delegate= entry,
+the proxy writes a SEPARATE =narration= action right after the
+cloud response completes. This keeps the manager-log entries
+1:1 with the user-visible row in the MANAGER buffer (no
+collapsed sub-heading needed). On the local-forward path
+(ollama), an =orch_buf= side-buffer accumulates the SSE chunks
+without slowing the wfile.write loop; on the cloud-failover
+path the bytes were already buffered for the tool-call repair.
+Knob: =proxy_capture_narration= (default true).
 
 *** 22.5b — explicit reasoning capture
 - For models that natively emit structured thinking
@@ -1196,6 +1475,21 @@ Three layers of visibility, increasing in cost:
 
 * TODO [#A] Active — Phase 22: orchestration v2 (recipe expansion) :in_progress:
 SCHEDULED: <2026-05-10 Sun>
+
+Phase 22 v1 (advisory recipe injection, shipped 2026-05-02) and
+Phase 22 v2 (manager pre-fetch + agent narrates, shipped
+2026-05-03) cover the =count_across_vault= shape end-to-end.
+This sub-phase is about *expansion* — promoting more recipes
+to the deterministic pre-fetch shape and adding new recipes
+for additional task shapes.
+
+A one-time remote agent is scheduled for 2026-05-17
+(=trig_019bhYiLEzxMWF5UkcWBuf1j=) to assess whether
+=recent_activity_summary=, =dailies_general=, and
+=dailies_routine_filter= can be promoted (single deterministic
+data-gathering step) or whether they genuinely need
+LLM-multi-step. Outcome: a draft PR with the runners + tests,
+or a markdown note explaining why each stays advisory.
 
 The 2026-05-02 attempt at full crew orchestration (Phase 20.x)
 was reverted because it cost 3-5× cloud round-trips per turn
@@ -1299,20 +1593,25 @@ Hard constraints for Phase 22:
    keyword router + the inline classifier rule (already in
    scribe's prompt).
 
-* TODO [#A] Planned — Phase 22.6: agent tools v2 (org/doom toolbelt expansion) :planned:
+* TODO [#A] Active — Phase 22.6: agent tools v2 (org/doom toolbelt expansion) :in_progress:
 SCHEDULED: <2026-05-13 Wed>
 
-The seed shipped this session: =org_llm/org_tools.py= +
-seven MCP wrappers (=org_grep=, =org_count_matches=,
-=org_file_meta=, =org_outline=, =org_tag_index=,
-=org_tag_suggest=, =org_agenda=) — deterministic, read-only
-helpers that answer common "what does my vault look like?"
-questions in milliseconds without an LLM round-trip.
+The seed shipped 2026-05-02: =org_llm/org_tools.py= + seven MCP
+wrappers (=org_grep=, =org_count_matches=, =org_file_meta=,
+=org_outline=, =org_tag_index=, =org_tag_suggest=,
+=org_agenda=) — deterministic, read-only helpers that answer
+common "what does my vault look like?" questions in
+milliseconds without an LLM round-trip.
 
-This phase rounds the toolbelt out to *twelve more* org-roam,
-org-mode, and Doom-specific tools so any agent (scribe,
-researcher, planner, org-agenda-agent) can reason about the
-user's vault structurally instead of guessing from prose.
+22.6.1 shipped 2026-05-03: six more pure-python tools
+(=org_link_graph=, =org_backlinks=, =org_orphans=,
+=org_property_search=, =org_id_find=, =org_refile_candidates=)
++ MCP wrappers. See "Shipped — Phase 22.6.1" above.
+
+This phase rounds the toolbelt out to twelve total beyond the
+seed so any agent (scribe, researcher, planner,
+org-agenda-agent) can reason about the user's vault
+structurally instead of guessing from prose.
 
 ** The twelve tools
 
@@ -1359,30 +1658,41 @@ user's vault structurally instead of guessing from prose.
 
 ** Roll-out
 
-*** 22.6.1 — Pure-python tools (1, 2, 3, 5, 8, 10)
-- Six functions in =org_llm/org_tools.py= (or a sibling
-  =org_graph.py= for the link-graph ones).
-- Each gets an MCP wrapper in =org_llm/mcp_server.py=,
-  same shape as the seven shipped this session.
-- Zero new dependencies; ripgrep already optional.
+*** DONE 22.6.1 — Pure-python tools (1, 2, 3, 5, 8, 10) :shipped:
+CLOSED: [2026-05-03]
+Six functions added to =org_llm/org_tools.py= +
+=mcp_server.py= wrappers. Built on a shared
+=_vault_id_index()= helper (~30-80ms scan returning
+={id: {file, title, kind}}=). Validated against the live
+vault: 523 ids indexed; =org_orphans= surfaces 50 unlinked
+files; =org_refile_candidates= picks correct destinations
+for "Phase 22 orchestration recipe" input. Zero new deps.
 
-*** 22.6.2 — CLOCK + drill + attach (4, 6, 9)
-- =org_clock_summary= — parse =CLOCK: [date]--[date] => duration=
-  lines. Aggregate per-heading inheritance.
-- =org_drill_review_due= — read =:DRILL_LAST_REVIEWED:= /
-  =:DRILL_NEXT_REVIEW:= properties; sort by overdue gap.
-- =org_attach_list= — resolve the node's attach directory
-  (=org-attach-id-dir-format-function=); listdir it.
+*** DONE 22.6.2 — CLOCK + drill + attach (4, 6, 9) :shipped:
+CLOSED: [2026-05-03]
+=org_clock_summary= parses =CLOCK: [start]--[end] => H:MM=
+lines, aggregates per-heading + per-tag (when
+=per_tag=True=). =org_drill_review_due= matches
+=:DRILL_NEXT_REVIEW:= property dates against today,
+sorted most-overdue first. =org_attach_list= resolves a
+node's attach dir under the standard layout
+(=.attach/<id[:2]>/<id[2:]>/=) and listdirs it. MCP
+wrappers shipped.
 
-*** 22.6.3 — Templating + Doom config (7, 11, 12)
-- =org_template_apply= — read templates from a new
-  =db.Config('capture_templates')= JSON entry (org-llm's
-  own registry, populated lazily from Doom's
-  =org-capture-templates= via the companion bridge).
-- =doom_packages= / =doom_keybinds= — small parser pair
-  over =~/.doom.d/=. Pairs naturally with Phase 16.5
-  (Doom config introspection); 22.6 ships the
-  read-only-now-static cuts, 16.5 makes them live.
+*** DONE 22.6.3 — Templating + Doom config (7, 11, 12) :shipped:
+CLOSED: [2026-05-03]
+=org_template_apply= reads from
+=db.Config('capture_templates')= JSON, substitutes
+%t/%T/%u/%U/%i/%a; leaves %? / %^{prompt} for the
+caller. =doom_packages= parses =~/.config/doom/packages.el=
+(or =~/.doom.d/=) for =(package! …)= entries with the
+=:disable= flag. =doom_keybinds= parses =config.el= /
+=bindings.el= for =(map! :leader …)= bindings — broad
+regex covers both the =(map! :leader "key" cmd)= and
+=(map! :leader :desc "..." "key" #'cmd)= shapes the
+user's actual config uses. Phase 16.5 will make the doom
+parsers live (file-watch + reparse on change); these are
+the static-now read-only cuts.
 
 *** 22.6.4 — Wire into agent prompts
 - Add a one-line tool-roster line per relevant agent

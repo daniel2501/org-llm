@@ -1,0 +1,472 @@
+:PROPERTIES:
+:ID:       4d9f6a2c-c1e7-4b18-9b6e-3a7c2d6f9e51
+:CREATED:  [2026-05-03]
+:END:
+#+TITLE: 2026-05-03 — hands-on test session
+#+FILETAGS: :wiki:testing:session:
+#+OPTIONS: toc:1 num:nil
+
+* Scope
+
+Tire-kick of features that landed today (2026-05-03):
+- Phase 22 v2 — manager pre-fetch + agent narrates
+- Phase 22.5a — narration capture in manager-log
+- Phase 22.6.1 — six pure-python org tools (link graph, backlinks,
+  orphans, property search, id_find, refile_candidates)
+- Phase 22.6.2 + 22.6.3 — six more tools (clock, drill, attach,
+  template, doom_packages, doom_keybinds)
+- Markdown-JSON repair path with renderer coverage
+- =recent_activity_summary= recipe runner (second deterministic
+  recipe)
+- Sidebar plugin disk-read squash (panel.tsx canonical helpers,
+  static solid-js import, self-driving =SectionManager=)
+
+Methodology: quit + relaunch + inject prompts via the
+action-bridge, capture findings inline. Reference
+=docs/wiki/test-prompts.org= for the prompt catalog (now 17
+prompts across 9 categories).
+
+Tonight's session ran 3 of the 17 prompts (#1, #4, #5).
+Continuation routine =trig_01BDFVAqLhrDkSDua3Y3CjSP= fires
+*2026-05-04T08:00 EDT (2026-05-04T12:00:00Z)* with the brief
+in [[#tomorrows-continuation][Tomorrow's continuation]] below.
+
+* Outstanding action items                              :todo:
+
+** TODO Get Claude set up with GitHub for daniel2501/org-llm
+
+The =/web-setup= flow (or installing the Claude GitHub App on
+the repo) is needed before the scheduled remote agents can open
+PRs. Two routines already require it:
+
+- =trig_019bhYiLEzxMWF5UkcWBuf1j= (2026-05-17) — recipe
+  promotion review for the remaining advisory recipes.
+- A second routine queued for tomorrow morning (see end of this
+  file) to resume the test campaign.
+
+Without GitHub access, both agents can clone the public repo but
+will fail the "open a draft PR" step. Visit
+[[https://claude.ai/code/onboarding?magic=github-app-setup]] or
+run =/web-setup= in Claude Code locally.
+
+** TODO Add battery health + charge to health monitors
+
+User asked 2026-05-03: alert when battery is low. Plumbing path:
+
+- New probe in =org_llm/life_support.py= (or sibling) that
+  reads =/sys/class/power_supply/BAT*/= on Linux:
+  - =capacity= (0–100, percent of full charge)
+  - =status= (Charging / Discharging / Full / Not charging)
+  - =cycle_count= (battery health proxy; high → ageing)
+  - =energy_full= / =energy_full_design= (health %)
+- Integrate into the sidebar HEALTH section
+  (=panel.tsx::SectionHealth=) alongside cpu / memory /
+  disk / thermal — same =sensor_*= ladder. Threshold:
+  WARN below 20%, CRIT below 10% AND discharging.
+- For non-Linux (macOS), shell out to =pmset -g batt= and
+  parse. Expose battery_health_pct as a synthetic probe.
+
+Phase number: TBD. Likely a sub-issue of Phase 17.x (sidebar /
+health probes). Worth ~1 hour of work; the file paths exist on
+every laptop, parsing is trivial.
+
+* Findings log
+
+Each entry below: =[ts]= prompt → recipe/tool that engaged →
+what landed → verdict (✓ / ✗ / ⚠).
+
+** Setup
+
+[2026-05-03T05:44Z] Quit + sweep + relaunch. Manager log wiped to
+0 lines. Opencode PID 483597. Plugin loaded (solid-js loads via
+static import, =_statusSetter= populated, sidebar refresh tick
+running every 2s). All 9 sections render on initial mount.
+
+** [2026-05-03T05:44Z] #1 — bed count baseline                ✓
+
+Prompt: =@researcher in dailies, how many times have I made my bed?=
+
+Manager trace:
+#+begin_example
+recipe    → researcher  (deterministic)   0ms
+tool_call → org_count_matches             13ms   total_hits=10, files_with_hits=10
+delegate  → researcher  (pre-fetched)    13ms
+narration → researcher  (qwen 2.5-72b)   ~10s   "you have made your bed 10 times..."
+#+end_example
+
+Single cloud call. Cited 3 specific files (2025-11-09, 2026-03-07,
+2026-03-14). Phase 22 v2 + 22.5a confirmed working end-to-end.
+
+** [2026-05-03T05:44Z] #4 — recent activity narrative         ✓⚠
+
+Prompt: =@researcher summarize what I have been working on recently=
+
+Manager trace:
+#+begin_example
+recipe    → researcher  (deterministic)   0ms
+tool_call → list_recent_activity         106ms   days_nodes=14, days_files=7
+delegate  → researcher  (pre-fetched)    106ms
+recipe    → researcher  (deterministic)   0ms     ← second fire
+tool_call → list_recent_activity         143ms     ← second fire
+delegate  → researcher  (pre-fetched)    143ms
+narration → researcher  (qwen 2.5-72b)   ~26s    "Ongoing Engagements... Backlog
+                                                   and Reading List..."
+#+end_example
+
+⚠ The recipe runner fires *twice* — once for the actual user
+turn, once for opencode's automatic title-generation request. Not
+a correctness issue (cost: ~150ms extra of local DB queries; no
+extra cloud calls because the title-gen call uses qwen-72b too)
+but worth tightening — the pre-fetch is wasted on title-gen.
+
+Possible fix: skip the recipe block when the request looks like a
+title-generation pass. Heuristic: opencode's title-gen request
+has a system prompt mentioning "summarize" or "title" and a tiny
+=max_tokens=. Could short-circuit on either signal.
+
+Filing as: =finding-1= — title-gen turns trigger redundant recipe
+pre-fetch.
+
+Narration quality: agent grouped notes into "Ongoing Engagements
+and Planning", "Backlog and Reading List" — synthesised from the
+pre-fetched titles. The captains-log dedupe prevented log noise
+from drowning out user content.
+
+** [2026-05-03T05:46Z] #5 — top tags by frequency             ✗
+
+Prompt: =@researcher what are my top 10 tags by frequency?=
+
+Manager trace:
+#+begin_example
+recipe    → researcher  (deterministic)   0ms     ← matched count_across_vault!
+tool_call → org_count_matches            3391ms   total_hits=0  ← garbage regex
+delegate  → researcher  (pre-fetched)    3391ms
+narration → researcher  (qwen 2.5-72b)
+            └ "org-llm_count_matches({\"pattern\":\"^\\*.*?\\btag:([a-zA-Z0-9_-]+)\\b\"...})"
+#+end_example
+
+✗ TWO bugs compounded:
+
+*finding-2 — over-eager recipe match.* The =count_across_vault=
+trigger regex includes the word =frequency=, which fires on "tag
+frequency", "exercise frequency", and any other "by frequency"
+phrasing — not just on event-count questions. The runner
+tokenised "top tags frequency" → built a nonsense regex →
+returned 0 hits. =frequency= should be REMOVED from the trigger
+words. Trigger words for =count_across_vault= should be:
+counting *events* (=how many times=, =how often=, =count of=,
+=tally=, =total=) — never bare =frequency=, which is too generic.
+
+*finding-3 — repair path misses paren-form tool calls.* The
+agent gave up on the pre-fetch (saw 0 hits → didn't trust it)
+and emitted =org-llm_count_matches({...})= as PROSE in its
+response. The current =_TOOL_CALL_PATTERNS[3]= only matches
+=name{...}= (curly braces); this paren shape =name({...})=
+slips through. =_extract_markdown_tool_call= also misses (no
+```json fence). User sees a literal fake-tool-call string in the
+chat. Add a paren-form pattern, or detect bare
+=name(\{...\})= and treat the inner JSON as the args.
+
+Severity of both: medium. Workaround: avoid the word
+"frequency" when asking about tags; ask "what are my top 10
+tags?" instead, which doesn't match the recipe and routes
+through =org_tag_index= cleanly.
+
+* Thought-tracking analysis (Phase 22.5a)
+
+The user's standing ask: *manager watches agents at zero
+performance cost*. Today's implementation captures the agent's
+narration as a =narration= manager-log entry, but ONLY for
+turns where an orchestration recipe matched. Implications:
+
+| turn shape                              | tracked?  | gap                                                  |
+|-----------------------------------------+-----------+------------------------------------------------------|
+| recipe match → pre-fetch → narrate      | ✓ yes     | full trace: recipe / tool_call / delegate / narration |
+| recipe match (advisory, no runner)      | ✓ partial | recipe + delegate logged; narration captured        |
+| no recipe (raw cloud forward)           | ✗ no      | nothing in manager-log; only the chat surface       |
+| no recipe + LLM-driven tool_calls       | ✗ no      | tool_calls visible only in opencode session storage |
+
+*finding-4 — non-orchestrated turns are invisible to the
+manager log.* Today the user has no audit trail for "the agent
+did stuff" turns that bypass the recipe layer. To track every
+turn, =orch_buf= would need to fire on EVERY chat-eligible
+request, not only when =_org_llm_recipe= is set. Worth
+~5 lines in =llm_proxy.py= but watch the cost: every chat turn
+already buffers nothing on the local-forward path; this would
+add a small accumulator. Mostly free if we keep the buffer
+capped at e.g. 8KB and only extract the head.
+
+Recommendation: add a =proxy_capture_all_narrations= knob
+(default false). When true, every cloud / local turn captures a
+=narration= entry, not just orchestrated ones. Pairs naturally
+with Phase 22.5b (explicit =<thinking>= tag extraction).
+
+* Optimization opportunities
+
+Code-review pass over today's diffs while the test runs:
+
+** opt-1 — title-gen turns trigger redundant recipe pre-fetch
+
+(See finding-1.) The =recent_activity_summary= recipe fires
+twice per user turn — once for the actual answer, once for
+opencode's automatic title generation. Cost: ~150ms of local
+DB queries each title-gen request, no extra cloud calls but
+tangible CPU on a busy session.
+
+Fix shape: detect title-gen requests by checking the system
+prompt for "summarize the conversation" + tiny =max_tokens= +
+no =@<agent>= tag in the user content. Skip the recipe block
+entirely.
+
+** opt-2 — pre-fetch block dedupes don't cap noise SQL-side for nodes only
+
+In =recipe_runner.py::_run_recent_activity_summary= the
+captains-log filter is at the SQL layer (=Node.tags.like(…)=)
+which is great. The file-level captains-log filter is
+*post-query Python* (=base.startswith("captains-log")=). Both
+work, but the file scan retrieves up to 200 rows from disk to
+get the user-content 25 — wasted I/O.
+
+Fix shape: also add the SQL filter for =File=
+(=File.path.notlike("%captains-log%")=) and drop the limit to
+~50. Saves 150 disk reads per recipe fire.
+
+** opt-3 — narration buffer accumulates the whole stream
+
+=orch_buf= is unbounded — captures every byte of the cloud
+response. For a 5-paragraph reply that's tens of KB, all to
+extract a 600-char excerpt. Memory pressure is irrelevant on
+modern hardware, but the join + parse at the end takes O(N).
+
+Fix shape: cap orch_buf at e.g. 16KB and stop appending after
+that. The narration excerpt is truncated to 600 chars anyway
+(=result_excerpt= column limit + the explicit slice), so we
+only need enough bytes for the FIRST 600 chars of content
+text. Most responses fit easily in 16KB.
+
+** opt-4 — recipe runner's regex is rebuilt per turn
+
+Each turn re-parses =_phrase_to_regex= from scratch, then
+=org_count_matches= recompiles the resulting regex. Two
+phases, both ~µs each, but for a hot path this is wasteful.
+
+Fix shape: memoize =_phrase_to_regex(phrase)= on the
+=phrase= input — same phrase always yields the same regex. A
+=functools.lru_cache(maxsize=64)= takes 5 keystrokes.
+
+** opt-5 — manager log JSONL writes are synchronous
+
+=db.log_crew_action= writes to manager-log.jsonl synchronously
+(open / append / close). For orchestrated turns we do this 3-4
+times in quick succession (recipe → tool_call → delegate →
+narration). On a slow disk this would serialise 4 fsyncs per
+turn (10-40ms). Today's spinning rust would notice; SSDs
+won't.
+
+Fix shape: defer narration writes to a background thread (the
+write order already preserves causality if we keep recipe /
+tool_call / delegate synchronous and only narration deferred).
+
+* Outstanding test coverage (deferred to tomorrow)
+
+Prompts not exercised in this session — picked up by the
+morning agent (see schedule below):
+
+- #2 (counting verb stem)
+- #3 (irregular verb)
+- #6 (org_grep proper noun)
+- #7 (link graph N-hop)
+- #8 (property drawer)
+- #9 (orphans)
+- #10 (agenda)
+- #11 (file meta + outline)
+- #12 (tag suggest)
+- #13 (refile candidates)
+- #14 (dailies routine filter)
+- #15 (CLOCK + agenda combo)
+- #16 (doom keybinds)
+- #17 (markdown-JSON repair)
+
+* Same-night follow-up: fixes shipped              :inline-fixes:
+
+After scheduling the morning agent we kept going (user said
+"continue"), so the four findings + the three easy optimizations
+landed in this session rather than tomorrow. The morning agent's
+brief is now narrowed to PART 3 (run the 14 remaining test
+prompts).
+
+** finding-2 — drop "frequency" from count_across_vault     ✓
+=org_llm/orchestration.py= — removed =frequency= from the
+trigger regex. Verified: =match_recipe("what are my top 10 tags
+by frequency?")= → =NO MATCH=. Baseline preserved:
+=match_recipe("how many times have I made my bed")= →
+=count_across_vault=.
+
+** finding-3 — paren-form repair pattern                    ✓
+=org_llm/llm_proxy.py= — added =name(\{...\})= as the 5th entry
+in =_TOOL_CALL_PATTERNS=. Verified: a prose-embedded
+=org-llm_count_matches({"pattern":"foo"})= now extracts to
+={'name': 'org-llm_count_matches', 'arguments': {'pattern': 'foo'}}=.
+The previous bare =name\{...\}= pattern still fires on
+curly-brace shapes (no regression).
+
+** finding-1 — title-gen detection skips recipe block       ✓
+=org_llm/llm_proxy.py= =intercept_agent_prefix= — before
+calling =match_recipe=, the proxy now checks the system message
+for "title" / "summarize the conversation" AND that
+=max_tokens ≤ 200=. When both hold, =recipe= is forced to
+=None= and the recipe block is skipped. Title-generation passes
+flow straight to the cloud without redundant local work.
+
+** finding-4 — proxy_capture_all_narrations knob            ✓
+=org_llm/llm_proxy.py= — extended the =orch_buf= guard to also
+fire when =proxy_capture_all_narrations= is true (default
+false). Set the knob to true to surface every chat turn's
+narration in manager-log, not just orchestrated ones. Pairs
+with the existing =proxy_capture_narration= master switch.
+
+** opt-2 — SQL filter for File captains-log                 ✓
+=org_llm/recipe_runner.py= — replaced the Python-side
+=base.startswith("captains-log")= filter with
+=File.path.notlike("%captains-log%")= at the SQL layer +
+dropped the limit from 200 to 60. Separate =.count()= preserves
+the bucket-summary line. Net: ~140 fewer disk reads per
+=recent_activity_summary= fire on this user's vault.
+
+** opt-3 — orch_buf cap at 16KB                              ✓
+=org_llm/llm_proxy.py= — the chunk-loop append now checks
+=sum(len(b) for b in orch_buf) < orch_cap= before appending.
+Prevents unbounded growth on very long agent responses; we only
+render the first ~600 chars of content text so 16KB is plenty.
+
+** opt-4 — lru_cache(_phrase_to_regex)                       ✓
+=org_llm/recipe_runner.py= — wrapped =_phrase_to_regex= with
+=functools.lru_cache(maxsize=64)=. Same phrase always yields the
+same regex; second-and-later calls hit the cache. Verified:
+3 calls of "made my bed" → 1 miss + 2 hits.
+
+** Validation
+- =match_recipe("how many times have I made my bed")= →
+  =count_across_vault= (baseline preserved).
+- =execute_recipe= against the bed prompt → =total_hits=10=
+  (no functional change).
+- Plugin typecheck (=tsc --noEmit=) clean.
+- Python ast.parse clean for proxy / runner / orchestration.
+
+* Same-night follow-up: Phase 21.1 shipped               :inline-fixes:
+
+User: "we must improve accuracy in part, by maintaining facts and
+context about the vault contents in the db" → shipped a first
+cut of Phase 21 with a DB-backed fact store.
+
+** =VaultFact= table
+=org_llm/db.py= — new table =vault_fact= keyed by inferrer
+name. Columns: =value= (JSON), =computed_at=, =inputs_mtime=,
+=inputs_count=, =ttl_secs=. Created on existing DBs via the
+existing =_migrate_in_place= path (=Base.metadata.create_all=
+is idempotent).
+
+** =vault_facts.py= infrastructure
+=get_fact(name, force=False)= reads cached value, recomputes
+when stale (mtime drift OR ttl exceeded). =get_all_facts()= for
+roll-ups. =register_inferrer(name, ttl_secs=)= decorator —
+adding a new inferrer is 3 lines.
+
+** Three first-cut inferrers
+
+| name           | ttl  | what                                                                            |
+|----------------+------+---------------------------------------------------------------------------------|
+| =vault_stats=  | 1h   | files / dailies / oldest+newest daily / span days / nodes (from index)          |
+| =tag_taxonomy= | 1h   | top 30 tags by frequency (reuses =org_tag_index=)                              |
+| =routine_chores= | 12h | recurring chores from last 30 dailies, REJECT-first filter (multi-cap / acronym / mid-cap / stop verbs / dates), top 12 by count |
+
+Live results on this user's vault:
+- =vault_stats=: 572 files, 138 dailies spanning 1121 days,
+  182,734 nodes.
+- =tag_taxonomy=: top tags =#bug=, =#idea=, =#org-llm=,
+  =#noexport=, =#log=.
+- =routine_chores=: 12 chores, top 5: =make bed= (8×),
+  =clean bathroom= (4×), =exercise= (3×), =trash= (3×),
+  =juice= (3×). 16/71 samples rejected.
+
+** Pre-fetch integration
+=recipe_runner.format_prefetch_block= now appends a
+=user_context:= line when the count target overlaps a known
+chore (token-set ≥ 50% of the chore's tokens). Agent gets
+authoritative routine context inline:
+
+#+begin_example
+user_context: this matches a known recurring chore ('make bed',
+logged 8× since 2025-10-26, most recently 2026-04-11).
+#+end_example
+
+** =vault_facts= MCP tool
+=mcp_server.py= — single MCP tool dispatches to the inferrer
+by name (or returns the full roll-up). =force= parameter
+bypasses cache.
+
+** finding-5 — time-modifier phrases break the count regex
+While testing, "how often have I exercised this year?" tokenised
+"this" + "year" as content tokens. The runner's regex became
+=(exercis|exercised|...).{0,12}\\byear\\b= → 0 hits. Strip
+common time-modifier phrases ("this year", "last week", "in
+the past month", "today", "yesterday") before tokenising.
+
+Severity: medium. Workaround: drop the time qualifier from the
+question.
+
+* Forward-direction note: walks enrich the fact store
+
+User: "walk activities will also enrich context data and
+directives and knowledge". Phase 13's =org-llm walk= is an
+LLM-driven dialog over the vault. Today walks produce one-off
+output (the walk's response) but nothing persisted. The
+direction:
+
+- Each walk turn that produces a *correction*, *new tag*, or
+  *user preference statement* should write a row to
+  =VaultFact= (either as a new inferrer-style fact or as a
+  free-form =user_directive= entry).
+- Inferrers re-read these on next compute so the walk's
+  knowledge propagates into every agent's pre-fetch context.
+- Two new fact shapes worth carving out:
+  - =user_directives=  — "always use lowercase tags",
+    "make_bed and bed_made are the same thing", "don't
+    suggest new commits without asking". List of strings,
+    surfaced in agent system prompts.
+  - =vault_corrections= — "node X should be filed under Y",
+    "this checkbox isn't actually a routine, it was a
+    one-off". Map keyed by node ID / file path.
+
+Phase number for the walk → fact-store wiring: probably 21.4
+(after the inferrer infrastructure stabilises in 21.1–21.3).
+Add to the roadmap when the inferrer set grows beyond 5.
+
+* Tomorrow's continuation
+:PROPERTIES:
+:CUSTOM_ID: tomorrows-continuation
+:END:
+
+A remote agent has been scheduled to resume the test campaign
+first thing 2026-05-04. See the routine ID at the top of the
+file. The agent's brief:
+
+1. Run prompts #2 / #3 / #6–#17 in sequence, capturing manager
+   trace + chat output for each.
+2. Append findings to this file under =* Findings log= using the
+   same format as #1 / #4 / #5.
+3. Triage the four findings logged tonight:
+   - finding-1 (title-gen redundant pre-fetch) — try the
+     =max_tokens= + system-prompt heuristic.
+   - finding-2 (over-eager recipe match on "frequency") —
+     remove =frequency= from the =count_across_vault= trigger
+     regex.
+   - finding-3 (paren-form repair miss) — add a
+     =name(\{...\})= pattern to =_TOOL_CALL_PATTERNS=, careful
+     to anchor (line-start or non-word character before the
+     name) so prose mentions don't false-positive.
+   - finding-4 (untracked turns) — add the
+     =proxy_capture_all_narrations= knob.
+4. If GitHub is connected by then (see TODO), open a draft PR
+   per finding. Otherwise post the findings as a markdown note
+   in this file.
