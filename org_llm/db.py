@@ -158,9 +158,19 @@ def log_crew_action(action: str, agent_from: str = "crew",
                     existing = json.loads(rt_path.read_text()) or {}
                 except Exception:
                     existing = {}
+            # Keep N most-recent entries; default 10, configurable
+            # via sidebar_manager_recent_count.
+            try:
+                from sqlalchemy.orm import Session as _S
+                with _S(make_engine()) as _ms:
+                    _row = _ms.get(Config, "sidebar_manager_recent_count")
+                    keep_n = int((_row.value if _row else "10") or "10")
+            except Exception:
+                keep_n = 10
+            keep_n = max(1, min(keep_n, 100))
             recent: list = existing.get("manager_recent") or []
             recent.insert(0, entry)
-            existing["manager_recent"] = recent[:3]
+            existing["manager_recent"] = recent[:keep_n]
             rt_path.parent.mkdir(parents=True, exist_ok=True)
             rt_path.write_text(json.dumps(existing))
             # 2. sidebar-status.json — the file the plugin polls.
@@ -172,7 +182,7 @@ def log_crew_action(action: str, agent_from: str = "crew",
                     ss_data = {}
                 ss_recent: list = ss_data.get("manager_recent") or []
                 ss_recent.insert(0, entry)
-                ss_data["manager_recent"] = ss_recent[:3]
+                ss_data["manager_recent"] = ss_recent[:keep_n]
                 ss_path.write_text(json.dumps(ss_data, indent=2))
         except Exception:
             pass
@@ -891,6 +901,14 @@ MODEL_DEFAULTS = {
     "sidebar_scroll_down_keys":       "alt+down,shift+down,ctrl+down",
     "sidebar_scroll_pageup_keys":     "alt+left,alt+pageup,shift+pageup,ctrl+pageup",
     "sidebar_scroll_pagedown_keys":   "alt+right,alt+pagedown,shift+pagedown,ctrl+pagedown",
+    "sidebar_manager_recent_count":   "10",       # Number of MANAGER
+                                                  # entries to keep in
+                                                  # manager_recent + show
+                                                  # in the sidebar card.
+    "sidebar_manager_card_max_lines": "8",        # Max visible lines
+                                                  # before the MANAGER
+                                                  # card scrolls
+                                                  # internally.
     # Confirm-before-act gate for the auto-doctor flow (17.1q).
     # When true (default), the slow-LLM watcher injects the
     # diagnostic + a list of the commands it WILL run, then waits

@@ -975,38 +975,53 @@ function SectionManager(props: { s: SidebarStatus; t: any; color: any }) {
       entries = ss?.manager_recent ?? [];
     } catch { /* file not present */ }
   }
+  // sidebar_manager_card_max_lines knob caps the visible lines
+  // before the card scrolls internally. Each entry is 2 lines
+  // (timestamp+action+outcome row, then agent+duration row).
+  const cfg = resolveConfig(props.s);
+  const maxLines = (cfg as any).manager_card_max_lines ?? 8;
+  const innerEntries = entries; // already capped at keep_n by db side
   return (
     <SectionCard color={color} title="MANAGER">
-      {entries.length === 0 ? (
+      {innerEntries.length === 0 ? (
         <box flexDirection="row">
           <text fg={t.textMuted}>(idle — no recent actions)</text>
         </box>
-      ) : entries.slice(0, 3).map((e: any) => {
-        const outcome = e.outcome ?? "?";
-        const outcomeColor = outcome === "ok"      ? t.success :
-                              outcome === "empty"   ? t.warning :
-                              outcome === "timeout" ? t.warning :
-                              outcome === "error"   ? t.danger  :
-                              t.textMuted;
-        const ts = (e.ts ?? "").slice(11, 19);   // HH:MM:SS
-        const dur = e.duration_ms != null
-          ? `${Math.round(e.duration_ms / 100) / 10}s`
-          : "";
-        return (
-          <box flexDirection="column">
-            <box flexDirection="row">
-              <text fg={t.textMuted}>{ts.padEnd(9)}</text>
-              <text fg={t.accent}>{(e.action ?? "?").padEnd(9)}</text>
-              <text fg={outcomeColor}>{outcome}</text>
-            </box>
-            <box flexDirection="row">
-              <text fg={t.textMuted}>  → </text>
-              <text fg={t.warning}>{(e.agent_to ?? "?").padEnd(11)}</text>
-              <text fg={t.textMuted}>{dur}</text>
-            </box>
-          </box>
-        );
-      })}
+      ) : (
+        <scrollbox
+          height={maxLines}
+          scrollY={true}
+          scrollX={false}
+          stickyScroll={false}
+        >
+          {innerEntries.map((e: any) => {
+            const outcome = e.outcome ?? "?";
+            const outcomeColor = outcome === "ok"      ? t.success :
+                                  outcome === "empty"   ? t.warning :
+                                  outcome === "timeout" ? t.warning :
+                                  outcome === "error"   ? t.danger  :
+                                  t.textMuted;
+            const ts = (e.ts ?? "").slice(11, 19);   // HH:MM:SS
+            const dur = e.duration_ms != null
+              ? `${Math.round(e.duration_ms / 100) / 10}s`
+              : "";
+            return (
+              <box flexDirection="column">
+                <box flexDirection="row">
+                  <text fg={t.textMuted}>{ts.padEnd(9)}</text>
+                  <text fg={t.accent}>{(e.action ?? "?").padEnd(9)}</text>
+                  <text fg={outcomeColor}>{outcome}</text>
+                </box>
+                <box flexDirection="row">
+                  <text fg={t.textMuted}>  → </text>
+                  <text fg={t.warning}>{(e.agent_to ?? "?").padEnd(11)}</text>
+                  <text fg={t.textMuted}>{dur}</text>
+                </box>
+              </box>
+            );
+          })}
+        </scrollbox>
+      )}
       <box flexDirection="row">
         <text fg={t.textMuted}>full: /sysexport manager</text>
       </box>

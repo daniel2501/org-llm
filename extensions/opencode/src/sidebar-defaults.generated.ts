@@ -16,10 +16,15 @@ export const SIDEBAR_DEFAULTS = {
   "sections": [
     "vault",
     "active",
+    "manager",
+    "agent",
     "health",
     "archive",
     "engage"
   ],
+  "active_rows": "agent,palette,knobs,model,route,failover",
+  "active_knob_rows": 2,
+  "section_titles": "",
   "refresh_secs": 15,
   "panel_width": 36,
   "replace_internal": [
@@ -49,5 +54,7 @@ export const SIDEBAR_DEFAULTS = {
   "scroll_down_keys": "alt+down,shift+down,ctrl+down",
   "scroll_pageup_keys": "alt+left,alt+pageup,shift+pageup,ctrl+pageup",
   "scroll_pagedown_keys": "alt+right,alt+pagedown,shift+pagedown,ctrl+pagedown",
+  "manager_recent_count": 10,
+  "manager_card_max_lines": 8,
   "slow_llm_confirm": true
 } as const;
