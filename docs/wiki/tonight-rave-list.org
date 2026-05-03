@@ -68,7 +68,13 @@ domain agents catalogued in [[file:agent-roster.org][agent-roster.org]]:
 5. *=@bookworm=*  — media log: books + movies + shows + music.
                      Queue + finished list + recommend-next from
                      habits. Cross-media discovery via shared
-                     tags.
+                     tags. *Music side stretch:* offer streaming-
+                     API integration — ListenBrainz preferred
+                     (FOSS, no auth tax), Spotify / Apple Music /
+                     last.fm as alternates. Bidirectional:
+                     ingest listens / likes / playlists from
+                     streaming → tagged org capture, AND push
+                     org-derived playlists back to streaming.
 6. *=@inbox=*    — email triage (imap → inbox.org pipeline).
 7. *=@horologe=*  — calendar sync (gcal/caldav → SCHEDULED).
 8. *=@bookkeeper=* — beanhub budget integration.
