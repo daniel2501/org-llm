@@ -545,25 +545,36 @@ export async function loadStatus(directory: string): Promise<SidebarStatus> {
   }
 }
 
-// Phase 20.x: include runtime-overlay mtime in _cachedStatus so any
-// overlay change (intent_agent, manager_recent, etc.) invalidates
-// the cache and triggers a sidebar re-render. Without this, the
-// slot only re-runs when sidebar-status.json changes (every 5s
-// at most), and overlay updates are invisible until the next
-// status-file write — which is why the live TUI sidebar lagged
-// the /sysexport markdown output by minutes.
+// Phase 20.x: bake the runtime overlay's intent_agent and
+// manager_recent into _cachedStatus directly. Previously the
+// SectionActive / SectionManager components re-read the overlay
+// from disk at render time, but the slot's render function only
+// re-runs when _cachedStatus *content* changes — disk reads from
+// inside an unchanging render are invisible to the framework.
+// Stashing the values on the status object guarantees each
+// refreshStatus tick produces fresh props the slot can render.
 export async function refreshStatus(directory: string): Promise<SidebarStatus> {
   const status = await loadStatus(directory);
   let runtimeMtime = 0;
+  let intentAgent  = "";
+  let managerRecent: any[] = [];
+  let runtimeModel    = "";
+  let runtimeProvider = "";
   try {
     const fs = require("node:fs");
-    runtimeMtime = fs.statSync(
-      `${directory}/.opencode/sidebar-runtime.json`).mtimeMs ?? 0;
+    const path = `${directory}/.opencode/sidebar-runtime.json`;
+    runtimeMtime = fs.statSync(path).mtimeMs ?? 0;
+    const overlay = JSON.parse(fs.readFileSync(path, "utf8"));
+    intentAgent     = (overlay.intent_agent  || "").trim();
+    managerRecent   = overlay.manager_recent || [];
+    runtimeModel    = overlay.model    || "";
+    runtimeProvider = overlay.provider || "";
   } catch { /* no overlay yet */ }
-  // Stash the mtime under a private key so it's part of the cached
-  // value's identity; SectionActive / SectionManager still read
-  // the overlay file fresh on every render.
-  (status as any)._runtime_mtime = runtimeMtime;
+  (status as any)._runtime_mtime    = runtimeMtime;
+  (status as any)._intent_agent     = intentAgent;
+  (status as any)._manager_recent   = managerRecent;
+  (status as any)._runtime_model    = runtimeModel;
+  (status as any)._runtime_provider = runtimeProvider;
   _cachedStatus = status;
   return _cachedStatus;
 }
@@ -719,15 +730,21 @@ function SectionActive(props: { s: SidebarStatus; t: any; color: any }) {
   // message.updated handler kept stamping "org-llm" on every
   // assistant event. The overlay file is the cross-process
   // truth-source the proxy wrote during the swap.
-  let intentAgent = "";
-  try {
-    const fs = require("node:fs");
-    const home = process.env.HOME ?? "";
-    const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
-    const overlay = JSON.parse(fs.readFileSync(
-      `${orgDir}/.opencode/sidebar-runtime.json`, "utf8"));
-    intentAgent = (overlay.intent_agent || "").trim();
-  } catch { /* no overlay — fine, fall through */ }
+  // Prefer the value baked into _cachedStatus by refreshStatus
+  // (ensures the slot re-renders when the overlay changes); fall
+  // back to a fresh disk read only if the cache hasn't populated
+  // yet (first render before the tick fires).
+  let intentAgent = (props.s as any)._intent_agent ?? "";
+  if (!intentAgent) {
+    try {
+      const fs = require("node:fs");
+      const home = process.env.HOME ?? "";
+      const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
+      const overlay = JSON.parse(fs.readFileSync(
+        `${orgDir}/.opencode/sidebar-runtime.json`, "utf8"));
+      intentAgent = (overlay.intent_agent || "").trim();
+    } catch { /* no overlay — fine, fall through */ }
+  }
   const agentOvr = getActiveAgentOverride();
   const agentDisplay = intentAgent || agentOvr?.agent || "org-llm";
   return (
@@ -894,15 +911,19 @@ function SectionManager(props: { s: SidebarStatus; t: any; color: any }) {
   // overlay — a list of the most recent 3 crew_log entries written
   // by db.log_crew_action. For full history use `/sysexport manager`.
   const { t, color } = props;
-  let entries: any[] = [];
-  try {
-    const fs = require("node:fs");
-    const home = process.env.HOME ?? "";
-    const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
-    const overlay = JSON.parse(fs.readFileSync(
-      `${orgDir}/.opencode/sidebar-runtime.json`, "utf8"));
-    entries = overlay.manager_recent ?? [];
-  } catch { /* no overlay or no manager_recent yet */ }
+  // Prefer the cached entries from _cachedStatus (refreshStatus
+  // baked them in); fall back to disk read on first render.
+  let entries: any[] = (props.s as any)._manager_recent ?? [];
+  if (!entries.length) {
+    try {
+      const fs = require("node:fs");
+      const home = process.env.HOME ?? "";
+      const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
+      const overlay = JSON.parse(fs.readFileSync(
+        `${orgDir}/.opencode/sidebar-runtime.json`, "utf8"));
+      entries = overlay.manager_recent ?? [];
+    } catch { /* no overlay or no manager_recent yet */ }
+  }
   return (
     <SectionCard color={color} title="MANAGER">
       {entries.length === 0 ? (
