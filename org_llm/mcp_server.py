@@ -1068,6 +1068,167 @@ def create_mcp_server():
                             f"to diagnose.")
 
     @server.tool()
+    def classify_items(items: list[str], criterion: str,
+                        timeout_s: int = 60) -> str:
+        """Filter a list of items by a criterion using a fast LLM pass.
+
+        Replaces the old `delegate('classifier', …)` pattern: same
+        rule sets, same JSON output shape, but called as a first-
+        class MCP tool with no agent-registry indirection.
+
+        Default rule sets the LLM applies when the criterion matches:
+          - ROUTINE: recurs in multiple source files OR has no end-
+            state OR is a standing weekly/daily habit. REJECT one-off
+            events, one-shot learning projects, anything tied to a
+            specific date or person.
+          - URGENT: explicit deadline within 7 days OR blocking
+            another item OR flagged with [#A] / SCHEDULED past.
+          - RECURRING: appears 3+ times in the source.
+
+        Returns JSON-shaped string:
+          {"kept":     [{"item": "...", "why": "..."}, ...],
+           "rejected": [{"item": "...", "why": "..."}, ...],
+           "criterion_used": "the rule applied"}
+
+        Routes through cloud_fast_model when available (saves 5-10s
+        per call vs the chat model); falls back to local ollama
+        with the configured fast model.
+        """
+        import time as _t
+        from .db import log_crew_action as _log
+        if not isinstance(items, list) or not items:
+            return _themed("classify_items",
+                            "[yellow]∅[/yellow] no items to classify",
+                            json.dumps({"kept": [], "rejected": [],
+                                        "criterion_used": criterion}))
+        # Ground-truth identity inlined here so dropping
+        # @classifier from the agent registry doesn't lose the
+        # contract.
+        sys_prompt = (
+            "You are a fast classifier. The caller hands you a "
+            "LIST of items and a CRITERION. Your only job: return "
+            "the subset that matches, with a one-clause "
+            "justification per item.\n"
+            "\n"
+            "Default rule sets (apply when the criterion matches):\n"
+            "  - ROUTINE = recurs across multiple source files OR "
+            "has no end-state OR is a standing weekly/daily "
+            "habit. REJECT one-off events, one-shot learning, "
+            "anything tied to a specific date or person.\n"
+            "  - URGENT = explicit deadline within 7 days OR "
+            "blocks another item OR is [#A] / SCHEDULED past.\n"
+            "  - RECURRING = appears 3+ times in the source.\n"
+            "\n"
+            "OUTPUT SHAPE: STRICT JSON, no prose around it:\n"
+            "  {\"kept\":     [{\"item\":\"…\", \"why\":\"…\"}, …],\n"
+            "   \"rejected\": [{\"item\":\"…\", \"why\":\"…\"}, …],\n"
+            "   \"criterion_used\": \"the rule you applied\"}\n"
+            "\n"
+            "Be ruthless on rejection — when in doubt, reject. "
+            "Speed > exhaustiveness."
+        )
+        user_msg = (f"CRITERION: {criterion}\n\n"
+                    f"ITEMS ({len(items)}):\n"
+                    + "\n".join(f"  - {it}" for it in items))
+        t0 = _t.monotonic()
+        with get_session(engine) as session:
+            from . import creds as _creds
+            cloud_provider   = _cfg(session, "cloud_provider")
+            cloud_endpoint   = _cfg(session, "cloud_endpoint_url")
+            cloud_fast_model = _cfg(session, "cloud_fast_model")
+            cloud_model      = _cfg(session, "cloud_model")
+            ollama_url       = (_cfg(session, "ollama_url")
+                                or "http://localhost:11434")
+            fast_model_local = _cfg(session, "fast_model")
+            api_key = ""
+            if cloud_provider:
+                try:
+                    api_key = _creds.read_secret(
+                        _creds.cloud_slug(cloud_provider)) or ""
+                except Exception:
+                    api_key = ""
+        use_cloud = bool(cloud_endpoint and api_key
+                          and (cloud_fast_model or cloud_model))
+        try:
+            if use_cloud:
+                import urllib.request as _ur
+                from .cloud import _urlopen as _ssl_urlopen
+                send_model = cloud_fast_model or cloud_model
+                payload = json.dumps({
+                    "model":       send_model,
+                    "messages": [
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user",   "content": user_msg},
+                    ],
+                    "stream":      False,
+                    "max_tokens":  1024,
+                    "temperature": 0.1,
+                }).encode()
+                req = _ur.Request(
+                    cloud_endpoint.rstrip("/") + "/chat/completions",
+                    data=payload, method="POST",
+                    headers={
+                        "Content-Type":  "application/json",
+                        "Authorization": f"Bearer {api_key}",
+                        "User-Agent":    "org-llm/classify_items",
+                    })
+                with _ssl_urlopen(req, timeout=timeout_s) as resp:
+                    raw = resp.read().decode("utf-8", "replace")
+                obj = json.loads(raw)
+                msg = (obj.get("choices") or [{}])[0].get("message") or {}
+                content = (msg.get("content") or "").strip()
+            else:
+                from .llm import chat as _chat
+                bare = (fast_model_local
+                        or _cfg(get_session(engine).__enter__(),
+                                "chat_model")
+                        or "")
+                if bare.startswith("ollama/"):
+                    bare = bare[len("ollama/"):]
+                if not bare:
+                    return _themed("classify_items",
+                                    "[red]✗[/red] no fast model configured",
+                                    "Set cloud_fast_model or fast_model.")
+                content = _chat(user_msg, bare, ollama_url,
+                                 system=sys_prompt,
+                                 timeout=timeout_s).strip()
+            dt_ms = int((_t.monotonic() - t0) * 1000)
+            # Strip a markdown fence if the model wrapped the JSON.
+            if content.startswith("```"):
+                import re as _re_local
+                content = _re_local.sub(r"^```[a-zA-Z]*\n?", "", content)
+                content = _re_local.sub(r"\n?```\s*$", "", content)
+            try:
+                json.loads(content)   # validate
+                result_str = content
+                outcome = "ok"
+            except Exception:
+                result_str = json.dumps({
+                    "kept": [], "rejected": [],
+                    "criterion_used": criterion,
+                    "_error": "model output was not valid JSON",
+                    "_raw":   content[:400],
+                })
+                outcome = "bad-json"
+            _log("classify", agent_from="manager",
+                 agent_to="classifier(tool)",
+                 model=("cloud_fast" if use_cloud else "local"),
+                 prompt=criterion[:200],
+                 result=result_str[:300],
+                 duration_ms=dt_ms, outcome=outcome)
+            return _themed("classify_items",
+                            f"classified {len(items)} item(s) "
+                            f"({outcome}, {dt_ms}ms)",
+                            result_str)
+        except Exception as e:
+            dt_ms = int((_t.monotonic() - t0) * 1000)
+            _log("classify", agent_from="manager",
+                 agent_to="classifier(tool)", prompt=criterion[:200],
+                 result=str(e), duration_ms=dt_ms, outcome="error")
+            return _themed("classify_items",
+                            f"[red]✗[/red] classify failed: {e}")
+
+    @server.tool()
     def open_in_emacs(path: str, line: int = 0,
                        new_frame: bool = True) -> str:
         """Open `path` in Emacs via emacsclient.
