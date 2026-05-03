@@ -128,6 +128,39 @@ _RECIPES: list[tuple[_re.Pattern, RecipeMatch]] = [
         ),
     ),
     (
+        # Weekly mood review — routes to the @journalist agent.
+        # Pre-fetches the mood_signal fact so the agent narrates
+        # over weekly aggregates + tough-day flags, never raw
+        # prose. target=* so any agent the user @-tagged still
+        # gets the data, but @journalist is the natural narrator.
+        _re.compile(
+            r"\b(how (have|am) i (been|doing)|mood|feeling|"
+            r"feelings|tough week|rough week|burnt out|"
+            r"burnout|review my week|weekly mood|how was my "
+            r"week|reflect on)\b",
+            _re.IGNORECASE,
+        ),
+        RecipeMatch(
+            name="weekly_mood_review",
+            target="*",
+            body=(
+                "RECIPE — weekly mood review:\n"
+                "  1. Manager pre-fetched the mood_signal fact "
+                "(weekly sentiment counts + tough-day flags) — "
+                "see MANAGER PRE-FETCH below.\n"
+                "  2. Lead with the OBSERVATION, not a diagnosis.\n"
+                "  3. Hedge: 'word-pattern signal', 'based on "
+                "dailies', 'noticed in your entries'. Counts "
+                "are coarse; honour that.\n"
+                "  4. Cite specific dates for tough days so the "
+                "user can re-read the entry themselves.\n"
+                "  5. Never quote raw mood prose unless asked.\n"
+                "  6. Never prescribe (no therapy / med / "
+                "intervention recs). Mirror, don't fix."
+            ),
+        ),
+    ),
+    (
         # Weather-aware agenda: fires when the user asks about
         # weather impact on plans, OR mentions an outdoor activity
         # that's on the agenda. Routes to @agenda (Phase 21.x).

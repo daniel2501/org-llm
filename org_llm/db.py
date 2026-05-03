@@ -496,6 +496,25 @@ MODEL_DEFAULTS = {
     "ollama_url":     "http://localhost:11434",
     # Defaults are tuned to fit a laptop CPU/16 GB RAM out of the box. Use
     # `org-llm models --tune` once you've got real hardware to scale up.
+    # Manager / recipe / narration / repair knobs (Phase 22 v2 + 22.5a + 22.6).
+    "proxy_recipe_deterministic":     "true",   # when a recipe matches and a
+                                                 # runner exists, the manager
+                                                 # pre-fetches data + injects;
+                                                 # false → advisory recipe only.
+    "proxy_capture_narration":        "true",   # log agent narration to
+                                                 # manager-log on recipe-matched
+                                                 # turns (Phase 22.5a).
+    "proxy_capture_all_narrations":   "false",  # extend capture to every
+                                                 # chat turn (finding-7 work).
+    "proxy_repair_markdown_tools":    "true",   # detect ```json {tool_calls:…}
+                                                 # and execute locally.
+    # Weather subsystem (FOSS-clean: open-meteo).
+    "location_lat":                   "",       # latitude (empty → weather off)
+    "location_lon":                   "",       # longitude
+    "weather_enabled":                "",       # empty = auto (true if location)
+    "weather_cache_ttl_secs":         "3600",   # forecast cache TTL.
+    # Power profile (battery-aware behaviour).
+    "power_profile":                  "auto",   # auto | performance | balanced | saver
     "proxy_orchestration_mode":      "recipe",  # off | recipe.
                                               # `recipe` = pattern-match the
                                               # user message and inject a

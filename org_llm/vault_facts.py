@@ -741,6 +741,157 @@ def _infer_voice_register() -> dict:
     }
 
 
+# ── mood_signal — sentiment markers over recent dailies ──────────────────────
+
+# Lexicon for the @journalist agent. Conservative + lowercase
+# substring match. The point isn't to "diagnose" the user — these
+# are word-pattern signals that the LLM narrates with appropriate
+# hedging ("based on word patterns in your dailies, last week
+# was rougher than usual"). Privacy: counts only; never echo
+# the user's actual prose.
+_MOOD_LEXICON: dict[str, set[str]] = {
+    "stress": {
+        "stressed", "stressful", "anxious", "anxiety", "worried",
+        "overwhelmed", "exhausted", "burnt out", "burnout",
+        "frustrated", "angry", "rough day", "hard day", "bad day",
+        "tough day", "rough week", "hard week", "off day",
+        "drained", "slammed", "swamped", "scrambling",
+    },
+    "low_energy": {
+        "tired", "sleepy", "lethargic", "sluggish", "headache",
+        "low energy", "no energy", "groggy", "foggy", "spacey",
+        "off", "not feeling it",
+    },
+    "gratitude": {
+        "grateful", "thankful", "blessed", "appreciate",
+        "appreciated", "lucky", "fortunate",
+    },
+    "positive": {
+        "happy", "great day", "good day", "pleased",
+        "delighted", "joyful", "joy", "loved", "fun",
+        "excited", "energized", "productive", "in flow",
+        "on a roll", "feeling good", "felt good",
+    },
+    "connection": {
+        "with friends", "with family", "called mom", "called dad",
+        "saw cory", "with cory", "boys and i", "we played",
+        "we hiked", "dinner with", "lunch with", "coffee with",
+    },
+    "self_care": {
+        "meditation", "meditated", "yoga", "exercise",
+        "exercised", "walk", "walked", "run", "ran", "rest",
+        "rested", "nap", "napped", "slept in", "early to bed",
+    },
+}
+
+
+@register_inferrer("mood_signal", ttl_secs=21600)
+def _infer_mood_signal() -> dict:
+    """Aggregate weekly sentiment markers across recent dailies.
+
+    For each of the last ~6 weeks, count occurrences of each
+    lexicon category in dailies whose filename matches
+    YYYY-MM-DD. Surfaces weekly trends + flagged "tough days"
+    (any daily with ≥2 stress markers AND no positive markers).
+
+    Designed for the @journalist agent's pre-fetch path — the
+    agent narrates with hedged language ("based on word
+    patterns") and never echoes raw mood content."""
+    org = _org_dir()
+    daily_dir = org / "daily"
+    if not daily_dir.is_dir():
+        return {"available": False,
+                 "reason": "no daily/ directory found"}
+
+    # Collect dailies with parseable date.
+    by_date: dict[str, Path] = {}
+    for f in daily_dir.glob("*.org"):
+        if not f.is_file():
+            continue
+        m = re.match(r"^(\d{4}-\d{2}-\d{2})", f.stem)
+        if m:
+            by_date[m.group(1)] = f
+    if not by_date:
+        return {"available": False, "reason": "no dated dailies"}
+
+    # Window: last 42 days, bucket by ISO week start (Monday).
+    today = datetime.now().date()
+    cutoff = today - timedelta(days=42)
+    week_buckets: dict[str, dict] = {}
+    tough_days: list[dict] = []
+    samples_total = 0
+
+    for dstr, f in sorted(by_date.items(), reverse=True):
+        try:
+            d = datetime.strptime(dstr, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if d < cutoff:
+            continue
+        try:
+            text = f.read_text(errors="replace").lower()
+        except Exception:
+            continue
+        samples_total += 1
+        # Per-day counts per category.
+        per_day: dict[str, int] = {k: 0 for k in _MOOD_LEXICON}
+        for cat, words in _MOOD_LEXICON.items():
+            for w in words:
+                if w in text:
+                    per_day[cat] += text.count(w)
+        # Tough-day flag.
+        if (per_day["stress"] + per_day["low_energy"] >= 2
+                and per_day["positive"] + per_day["gratitude"] == 0):
+            tough_days.append({
+                "date":   dstr,
+                "stress": per_day["stress"],
+                "low_energy": per_day["low_energy"],
+            })
+        # Bucket by ISO week-start.
+        week_start = (d - timedelta(days=d.weekday())).isoformat()
+        bucket = week_buckets.setdefault(week_start, {
+            "week_start": week_start,
+            "dailies":    0,
+            **{k: 0 for k in _MOOD_LEXICON},
+        })
+        bucket["dailies"] += 1
+        for cat, n in per_day.items():
+            bucket[cat] += n
+
+    if not week_buckets:
+        return {"available": False, "reason": "no recent dailies"}
+
+    windows = sorted(week_buckets.values(), key=lambda b: b["week_start"],
+                      reverse=True)
+
+    # Trend: compare last 2 weeks vs prior 2 weeks (positive ratio).
+    def _score(w: dict) -> float:
+        pos = w.get("positive", 0) + w.get("gratitude", 0)
+        neg = w.get("stress", 0) + w.get("low_energy", 0)
+        return (pos - neg) / max(1, w.get("dailies", 1))
+    trend = "stable"
+    if len(windows) >= 4:
+        recent_avg = (_score(windows[0]) + _score(windows[1])) / 2
+        prior_avg  = (_score(windows[2]) + _score(windows[3])) / 2
+        delta = recent_avg - prior_avg
+        if delta > 1.0:   trend = "improving"
+        elif delta < -1.0: trend = "declining"
+    elif len(windows) >= 2:
+        if _score(windows[0]) > _score(windows[1]) + 1.0:
+            trend = "improving"
+        elif _score(windows[0]) < _score(windows[1]) - 1.0:
+            trend = "declining"
+
+    return {
+        "available":     True,
+        "windows":       windows[:6],
+        "tough_days":    tough_days[:8],
+        "trend":         trend,
+        "samples_total": samples_total,
+        "lexicon_size":  sum(len(v) for v in _MOOD_LEXICON.values()),
+    }
+
+
 # ── vault_profile digest ─────────────────────────────────────────────────────
 
 def vault_profile_digest(*, force: bool = False) -> str:

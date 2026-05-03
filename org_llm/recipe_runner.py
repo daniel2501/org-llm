@@ -544,6 +544,34 @@ def _run_dailies_general(user_text: str) -> RunResult | None:
     )
 
 
+# ── weekly_mood_review runner ────────────────────────────────────────────────
+
+def _run_weekly_mood_review(user_text: str) -> RunResult | None:
+    """Manager pre-fetches the mood_signal fact (weekly sentiment
+    counts + tough-day flags) so @journalist narrates from
+    aggregates rather than re-scanning dailies. Falls back to
+    advisory when no recent dailies."""
+    try:
+        from . import vault_facts as _vf
+    except Exception:
+        return None
+    fact = _vf.get_fact("mood_signal")
+    if not fact or not fact.get("available"):
+        return None
+    return RunResult(
+        answer="",
+        tool_name="mood_signal",
+        tool_args={"window_days": 42},
+        tool_result={
+            "windows":       fact.get("windows", []),
+            "tough_days":    fact.get("tough_days", []),
+            "trend":         fact.get("trend", "stable"),
+            "samples_total": fact.get("samples_total", 0),
+            "lexicon_size":  fact.get("lexicon_size", 0),
+        },
+    )
+
+
 # ── weather_aware_agenda runner ──────────────────────────────────────────────
 
 def _run_weather_aware_agenda(user_text: str) -> RunResult | None:
@@ -683,6 +711,35 @@ def format_prefetch_block(recipe_name: str, run: RunResult,
                           f"(first {c.get('first_seen', '?')} → "
                           f"last {c.get('last_seen', '?')})")
         body = "\n  ".join(lines)
+    elif "windows" in res and "trend" in res:
+        # mood_signal shape — weekly counts + tough days + trend.
+        windows = res.get("windows") or []
+        tough   = res.get("tough_days") or []
+        lines = [f"trend: {res.get('trend','stable')}  "
+                  f"(samples: {res.get('samples_total', 0)} dailies, "
+                  f"lexicon: {res.get('lexicon_size', 0)} markers)"]
+        if windows:
+            lines.append("weekly_buckets (most-recent first):")
+            for w in windows:
+                lines.append(
+                    f"  {w.get('week_start')}  "
+                    f"dailies={w.get('dailies', 0)}  "
+                    f"stress={w.get('stress', 0)}  "
+                    f"low_energy={w.get('low_energy', 0)}  "
+                    f"positive={w.get('positive', 0)}  "
+                    f"gratitude={w.get('gratitude', 0)}  "
+                    f"connection={w.get('connection', 0)}  "
+                    f"self_care={w.get('self_care', 0)}"
+                )
+        if tough:
+            lines.append(f"tough_days_flagged ({len(tough)} — "
+                          f"≥2 stress/low_energy, no positives):")
+            for t in tough[:8]:
+                lines.append(
+                    f"  {t.get('date')}  stress={t.get('stress',0)}  "
+                    f"low_energy={t.get('low_energy',0)}"
+                )
+        body = "\n  ".join(lines)
     elif "outdoor_items" in res or "daily_forecast" in res:
         # weather_aware_agenda shape — forecast + flagged items.
         lines = []
@@ -785,4 +842,5 @@ _RUNNERS: dict[str, Callable[[str], RunResult | None]] = {
     "dailies_routine_filter":  _run_dailies_routine_filter,
     "dailies_general":         _run_dailies_general,
     "weather_aware_agenda":    _run_weather_aware_agenda,
+    "weekly_mood_review":      _run_weekly_mood_review,
 }
