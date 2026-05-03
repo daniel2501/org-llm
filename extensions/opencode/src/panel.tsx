@@ -399,40 +399,37 @@ export function getActiveAgentOverride(): {
 
 export function setActiveAgentOverride(agent: string, ts: number): void {
   if (!agent) return;
-  _activeAgentOverride = { agent, ts };
+  // Read the live overlay to capture the proxy's intent_agent
+  // stamp before we (re)write the file. Solid's slot doesn't
+  // re-render on disk-only changes, but it DOES re-render on
+  // assistant message events that drive setActiveAgentOverride.
+  // So we must capture intent_agent INTO our in-memory state at
+  // every assistant turn — that's the path that actually flows
+  // to the visible TUI.
+  let intent = "";
+  let existing: any = {};
+  try {
+    const fs = require("node:fs");
+    const home = process.env.HOME ?? "";
+    const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
+    existing = JSON.parse(fs.readFileSync(
+      `${orgDir}/.opencode/sidebar-runtime.json`, "utf8"));
+    intent = (existing.intent_agent || "").trim();
+  } catch {}
+  // The display-time agent prefers the intent (what the user
+  // asked for via @<name>, which the proxy stamps) over what
+  // opencode tagged the assistant message with (always the
+  // session primary). Fall back to the tagged agent.
+  _activeAgentOverride = { agent: intent || agent, ts };
   // Mirror to disk so the proxy's /sysexport interceptor (which
   // can't reach into plugin memory) can include the live agent
   // in its sidebar snapshot. Two channels in the overlay JSON:
-  //
-  //   intent_agent  — what the user typed (`@scribe`); the proxy's
-  //                   intercept_agent_prefix writes this when an
-  //                   @<name> swap happens. Per-turn user intent.
-  //
-  //   serving_agent — what opencode tagged the assistant turn
-  //                   with (always the session's primary agent —
-  //                   "org-llm" in our default config — even when
-  //                   the user @-targeted a different one).
-  //
-  // The proxy's _format_sidebar_snapshot prefers intent_agent for
-  // the ACTIVE card so per-turn @<agent> intent shows on the
-  // sidebar; falls back to serving_agent, then to "org-llm".
-  // Without this split, every assistant turn's overrides
-  // clobbered the proxy's per-turn intent stamp.
+  //   intent_agent  — what the user typed; the proxy stamps it.
+  //   serving_agent — what opencode tagged the assistant turn with.
   try {
     const home = process.env.HOME ?? "";
     const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
     const path = `${orgDir}/.opencode/sidebar-runtime.json`;
-    // Read existing overlay to preserve intent_agent (the proxy
-    // wrote it; we shouldn't overwrite). Bun.file().text() is
-    // async — JSON.parse(Promise) always throws — so use
-    // readFileSync from node:fs for a real sync read. Otherwise
-    // every plugin overlay write clobbers the proxy's
-    // intent_agent stamp from the same turn.
-    let existing: any = {};
-    try {
-      const fs = require("node:fs");
-      existing = JSON.parse(fs.readFileSync(path, "utf8"));
-    } catch {}
     const merged = {
       ...existing,
       serving_agent: agent,
