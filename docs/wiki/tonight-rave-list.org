@@ -9,7 +9,9 @@
 * What this is
 
 A queue of late-night-knockable items distilled from
-[[file:roadmap.org][roadmap.org]] and the
+[[file:roadmap.org][roadmap.org]], the
+[[file:agent-roster.org][agent-roster classification]], the
+[[file:agent-framework.org][agent-framework architecture]], and
 [[file:2026-05-03-test-session.org][2026-05-03 test session findings]].
 Roughly 3 weeks of one-short-night-each cadence, with cheap wins
 up top so the early sessions feel productive and momentum carries

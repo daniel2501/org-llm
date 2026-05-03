@@ -187,8 +187,12 @@ def battery_details() -> dict:
             # power_now is in µW (energy-driven kernels) or computed
             # from current × voltage (charge-driven). Negative when
             # discharging on most kernels; abs() for the magnitude.
+            # µA × µV = 10⁻¹² W; divide by 10⁶ to land in µW.
+            # (Earlier `// 1000` was off by 1000× — a 9W draw came
+            # out as 9000W; verified 2026-05-03 against /sys values
+            # current_now=476000 voltage_now=17357000 → 8.3W.)
             if power_uw is None and current_uA and voltage_uV:
-                power_uw = current_uA * voltage_uV // 1000  # µA × µV → µW
+                power_uw = current_uA * voltage_uV // 1_000_000
             if power_uw:
                 out["power_now_w"] = round(abs(power_uw) / 1_000_000, 1)
                 if full_now and out["power_now_w"] > 0:

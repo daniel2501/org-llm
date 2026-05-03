@@ -2073,6 +2073,23 @@ its baked context. Open questions:
   planned work; if a 12.8 idea shows up first, it can take the
   next available number.
 
+* Companion docs
+
+- [[file:agent-roster.org][agent-roster.org]] — classified
+  inventory of every domain (current + proposed) cast against
+  the agent-framework. Sorted least → most interesting; bottom
+  rows are the rave-coding fuel.
+- [[file:agent-framework.org][agent-framework.org]] — how agents
+  compose. Defines the Agent dataclass, capability scoping,
+  hygiene scans, the four invocation paths, and the Phase 23
+  migration plan.
+- [[file:tonight-rave-list.org][tonight-rave-list.org]] — the
+  active build queue with effort + dep + yield per item.
+- [[file:test-prompts.org][test-prompts.org]] — 17-prompt eval
+  suite covering every recipe + tool path.
+- [[file:2026-05-03-test-session.org][2026-05-03-test-session.org]]
+  — bug-hunt findings + fix log.
+
 * Source files in this repo
 
 Trace markers for any phase referenced above:
