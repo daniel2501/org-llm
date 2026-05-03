@@ -907,18 +907,16 @@ function SectionManager(props: { s: SidebarStatus; t: any; color: any }) {
   // overlay — a list of the most recent 3 crew_log entries written
   // by db.log_crew_action. For full history use `/sysexport manager`.
   const { t, color } = props;
-  // Prefer the cached entries from _cachedStatus (refreshStatus
-  // baked them in); fall back to disk read on first render.
-  let entries: any[] = (props.s as any)._manager_recent ?? [];
+  // sidebar-status.json's `manager_recent` is the source-of-
+  // truth for the live TUI — db.log_crew_action mirrors there
+  // every time a delegate/recipe/etc. fires. The plugin's
+  // refreshStatus tick (every 2s) re-reads sidebar-status.json
+  // and hands props.s a NEW object → Solid re-renders → fresh
+  // entries display here. Fall back to props.s._manager_recent
+  // (the runtime overlay path) on first render.
+  let entries: any[] = (props.s as any).manager_recent ?? [];
   if (!entries.length) {
-    try {
-      const fs = require("node:fs");
-      const home = process.env.HOME ?? "";
-      const orgDir = process.env.ORG_LLM_ORG_DIR ?? `${home}/org`;
-      const overlay = JSON.parse(fs.readFileSync(
-        `${orgDir}/.opencode/sidebar-runtime.json`, "utf8"));
-      entries = overlay.manager_recent ?? [];
-    } catch { /* no overlay or no manager_recent yet */ }
+    entries = (props.s as any)._manager_recent ?? [];
   }
   return (
     <SectionCard color={color} title="MANAGER">

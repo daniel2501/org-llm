@@ -131,20 +131,17 @@ def log_crew_action(action: str, agent_from: str = "crew",
             s.add(row)
             s.commit()
         # Sidebar overlay update — last 3 actions visible in the
-        # MANAGER row. Best-effort; never propagate failures.
+        # MANAGER row. Mirror to BOTH sidebar-runtime.json (for
+        # /sysexport's snapshot) AND sidebar-status.json (which
+        # is the file the plugin's reactive loadStatus tick
+        # reads — without this mirror the TUI's MANAGER section
+        # stays "(idle)" no matter what we write to the runtime
+        # overlay). Best-effort; never propagate failures.
         try:
             import os, json
             from pathlib import Path
             org_dir = Path(os.environ.get("ORG_LLM_ORG_DIR")
                             or (Path.home() / "org"))
-            rt_path = org_dir / ".opencode" / "sidebar-runtime.json"
-            existing: dict = {}
-            if rt_path.exists():
-                try:
-                    existing = json.loads(rt_path.read_text()) or {}
-                except Exception:
-                    existing = {}
-            recent: list = existing.get("manager_recent") or []
             entry = {
                 "ts":         ts,
                 "action":     action,
@@ -153,10 +150,30 @@ def log_crew_action(action: str, agent_from: str = "crew",
                 "duration_ms": int(duration_ms),
                 "outcome":    outcome,
             }
+            # 1. Runtime overlay (kept for /sysexport).
+            rt_path = org_dir / ".opencode" / "sidebar-runtime.json"
+            existing: dict = {}
+            if rt_path.exists():
+                try:
+                    existing = json.loads(rt_path.read_text()) or {}
+                except Exception:
+                    existing = {}
+            recent: list = existing.get("manager_recent") or []
             recent.insert(0, entry)
             existing["manager_recent"] = recent[:3]
             rt_path.parent.mkdir(parents=True, exist_ok=True)
             rt_path.write_text(json.dumps(existing))
+            # 2. sidebar-status.json — the file the plugin polls.
+            ss_path = org_dir / ".opencode" / "sidebar-status.json"
+            if ss_path.exists():
+                try:
+                    ss_data = json.loads(ss_path.read_text()) or {}
+                except Exception:
+                    ss_data = {}
+                ss_recent: list = ss_data.get("manager_recent") or []
+                ss_recent.insert(0, entry)
+                ss_data["manager_recent"] = ss_recent[:3]
+                ss_path.write_text(json.dumps(ss_data, indent=2))
         except Exception:
             pass
     except Exception:
