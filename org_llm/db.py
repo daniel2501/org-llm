@@ -145,10 +145,33 @@ def log_crew_action(action: str, agent_from: str = "crew",
             entry = {
                 "ts":         ts,
                 "action":     action,
+                "agent_from": agent_from,
                 "agent_to":   agent_to,
                 "model":      model,
                 "duration_ms": int(duration_ms),
                 "outcome":    outcome,
+                "prompt":     (prompt or "")[:600],
+                "result":     (result or "")[:600],
+                "session_id": session_id,
+            }
+            # 0. Append-only manager log — durable full history,
+            #    tail-followable from Emacs / any tool.
+            try:
+                ml_path = org_dir / ".opencode" / "manager-log.jsonl"
+                ml_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(ml_path, "a") as ml:
+                    ml.write(json.dumps(entry) + "\n")
+            except Exception:
+                pass
+            # Slim entry for sidebar files (drop prompt/result
+            # bodies — those bloat the JSON the plugin polls).
+            entry = {
+                "ts":         entry["ts"],
+                "action":     entry["action"],
+                "agent_to":   entry["agent_to"],
+                "model":      entry["model"],
+                "duration_ms": entry["duration_ms"],
+                "outcome":    entry["outcome"],
             }
             # 1. Runtime overlay (kept for /sysexport).
             rt_path = org_dir / ".opencode" / "sidebar-runtime.json"

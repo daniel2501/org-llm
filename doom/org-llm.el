@@ -338,6 +338,146 @@ its own shutdown. Quit signals must reach the process directly."
 
 
 ;;;###autoload
+(defvar org-llm-manager-buffer-name "*org-llm: MANAGER*"
+  "Name of the buffer that tails ~/org/.opencode/manager-log.jsonl.")
+
+(defun org-llm--manager-log-path ()
+  "Return the absolute path of manager-log.jsonl."
+  (let* ((env (getenv "ORG_LLM_ORG_DIR"))
+         (org-dir (or (and env (file-name-as-directory env))
+                       (expand-file-name "~/org/"))))
+    (expand-file-name ".opencode/manager-log.jsonl" org-dir)))
+
+(defun org-llm--manager-render-line (json-line)
+  "Convert one JSONL entry from manager-log.jsonl into a readable
+org-mode block. Falls back to the raw line on parse failure."
+  (condition-case nil
+      (let* ((e (json-parse-string json-line :object-type 'alist))
+             (ts (alist-get 'ts e ""))
+             (action (alist-get 'action e "?"))
+             (from (alist-get 'agent_from e ""))
+             (to (alist-get 'agent_to e ""))
+             (model (alist-get 'model e ""))
+             (dur (alist-get 'duration_ms e 0))
+             (outcome (alist-get 'outcome e "?"))
+             (prompt (alist-get 'prompt e ""))
+             (result (alist-get 'result e "")))
+        (concat
+         (format "* %s %s → %s  (%s · %dms · %s)\n"
+                 ts action to model dur outcome)
+         (when (and from (not (string-empty-p from))
+                     (not (string= from "crew")))
+           (format "  :FROM: %s\n" from))
+         (when (and prompt (not (string-empty-p prompt)))
+           (format "** prompt\n#+begin_src\n%s\n#+end_src\n" prompt))
+         (when (and result (not (string-empty-p result)))
+           (format "** result\n#+begin_src\n%s\n#+end_src\n" result))
+         "\n"))
+    (error (concat json-line "\n"))))
+
+;;;###autoload
+(defun org-llm-manager-buffer ()
+  "Open a live-tailing MANAGER buffer that shows all crew/agent
+activity from ~/org/.opencode/manager-log.jsonl. The buffer
+auto-follows new entries via auto-revert-tail-mode and renders
+each JSONL row as an org-mode block (timestamp, action, target
+agent, model, prompt + result excerpts when present).
+
+For older entries, scroll up — the file is append-only durable
+history. For the in-TUI sidebar last-N view, see the MANAGER
+card."
+  (interactive)
+  (let* ((path (org-llm--manager-log-path))
+         (buf-name org-llm-manager-buffer-name))
+    (unless (file-exists-p path)
+      (make-directory (file-name-directory path) t)
+      (write-region "" nil path))
+    ;; Read raw lines, render to org, display in a dedicated buffer.
+    (let ((buf (get-buffer-create buf-name)))
+      (with-current-buffer buf
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (insert "#+title: org-llm MANAGER (live)\n")
+          (insert (format "#+source: %s\n\n" path))
+          (insert "Tailing — auto-refreshes on new crew_log entries.\n"
+                   "Keybinds: g revert, q bury.\n\n")
+          (let ((lines (and (file-exists-p path)
+                             (with-temp-buffer
+                               (insert-file-contents path)
+                               (split-string (buffer-string) "\n" t)))))
+            (dolist (line (nreverse lines))   ; newest first
+              (insert (org-llm--manager-render-line line)))))
+        ;; Setup org-mode for nice rendering, plus auto-revert tail
+        ;; so the buffer follows new appends.
+        (when (fboundp 'org-mode) (org-mode))
+        (setq buffer-read-only t)
+        (use-local-map (let ((m (make-sparse-keymap)))
+                          (set-keymap-parent m org-mode-map)
+                          (define-key m (kbd "g") #'org-llm-manager-buffer)
+                          (define-key m (kbd "q") #'bury-buffer)
+                          m))
+        ;; Follow appends via a 2s polling timer that rerenders
+        ;; if the file's mtime advanced. auto-revert-tail-mode
+        ;; needs a file-backed buffer; ours is virtual.
+        (let* ((path (org-llm--manager-log-path))
+               (mtime (and (file-exists-p path)
+                            (float-time (file-attribute-modification-time
+                                          (file-attributes path))))))
+          (setq-local org-llm-manager--last-mtime (or mtime 0))
+          (when (timerp (bound-and-true-p org-llm-manager--timer))
+            (cancel-timer org-llm-manager--timer))
+          (setq-local org-llm-manager--timer
+                       (run-with-timer
+                        2 2
+                        (lambda ()
+                          (let* ((b (get-buffer
+                                     org-llm-manager-buffer-name))
+                                 (p (org-llm--manager-log-path))
+                                 (m (and (file-exists-p p)
+                                          (float-time
+                                           (file-attribute-modification-time
+                                            (file-attributes p))))))
+                            (when (and b (or (null m)
+                                              (> (or m 0)
+                                                  (or (with-current-buffer b
+                                                        org-llm-manager--last-mtime)
+                                                       0))))
+                              (let ((selected-window
+                                     (selected-window)))
+                                (with-current-buffer b
+                                  (org-llm--manager-rerender p)
+                                  (setq-local
+                                   org-llm-manager--last-mtime
+                                   (or m 0)))))))))
+          (setq-local revert-buffer-function
+                       (lambda (&rest _) (org-llm-manager-buffer)))
+          ;; Cancel the timer when the buffer is killed.
+          (add-hook 'kill-buffer-hook
+                    (lambda ()
+                      (when (timerp (bound-and-true-p
+                                      org-llm-manager--timer))
+                        (cancel-timer org-llm-manager--timer)))
+                    nil t)))
+      (pop-to-buffer buf)
+      (goto-char (point-min)))))
+
+(defun org-llm--manager-rerender (path)
+  "Replace the current buffer's contents with a fresh render of PATH."
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+    (insert "#+title: org-llm MANAGER (live)\n")
+    (insert (format "#+source: %s\n\n" path))
+    (insert "Tailing — auto-refreshes every 2s.\n"
+             "Keybinds: g revert, q bury.\n\n")
+    (let ((lines (and (file-exists-p path)
+                       (with-temp-buffer
+                         (insert-file-contents path)
+                         (split-string (buffer-string) "\n" t)))))
+      (dolist (line (nreverse lines))
+        (insert (org-llm--manager-render-line line))))))
+
+
+;;;###autoload
 (defun org-llm-opencode-screenshot (&optional whole-frame dir label)
   "Capture the opencode vterm window as an SVG screenshot.
 
@@ -1066,6 +1206,7 @@ current selection."
         :desc "/insights"                "i" #'org-llm-sys-insights
         :desc "Export chat → markdown"   "x" #'org-llm-sys-export
         :desc "Export chat + sidebar"    "X" #'org-llm-sys-export-full
+        :desc "MANAGER buffer (live)"    "Y" #'org-llm-manager-buffer
         :desc "Quit opencode (Ctrl-c x2)" "q" #'org-llm-opencode-quit
         :desc "Screenshot opencode (SVG)" "S" #'org-llm-opencode-screenshot
 
