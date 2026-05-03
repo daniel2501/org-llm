@@ -35,6 +35,35 @@ class RecipeMatch(NamedTuple):
 # patterns first.
 _RECIPES: list[tuple[_re.Pattern, RecipeMatch]] = [
     (
+        # Counting questions across the vault — "how many times
+        # have I X", "count X in dailies", etc. Routes to researcher
+        # with a 3-step plan that uses the deterministic
+        # org_count_matches helper.
+        _re.compile(
+            r"\b(how many times|how often|count(?:ed)?|tally|total|"
+            r"frequency)\b",
+            _re.IGNORECASE,
+        ),
+        RecipeMatch(
+            name="count_across_vault",
+            target="researcher",
+            body=(
+                "RECIPE — count across vault:\n"
+                "  1. Translate the user's phrase to a regex. "
+                "Examples:\n"
+                "     'made my bed'    → r'\\[X\\].*make.{0,4}bed'\n"
+                "     'exercised'      → r'\\[X\\].*(exercis|workout|gym)'\n"
+                "     'mentioned cory' → r'(?i)cory'\n"
+                "  2. Call `org-llm_org_count_matches(pattern=<regex>, "
+                "path_glob='daily/**/*.org')` for dailies-only "
+                "questions, or default `**/*.org` for whole vault.\n"
+                "  3. Answer with `total_hits` and a 1-line breakdown "
+                "from `top_files`. Don't fabricate. If 0, say so.\n"
+                "Run STEP 1 → STEP 2 in this turn."
+            ),
+        ),
+    ),
+    (
         _re.compile(
             r"\b(dailies|daily files?|recent dailies)\b.*"
             r"\b(routine|recurring|typically|regular)\b",

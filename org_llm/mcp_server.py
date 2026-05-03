@@ -3304,6 +3304,138 @@ def create_mcp_server():
                     "noting which old line it replaces.")
         return "\n".join(out)
 
+    # ── org_tools wrappers (Phase 22.6 — general agent tooling) ───────────────
+
+    @server.tool()
+    def org_grep(pattern: str, path_glob: str = "**/*.org",
+                  max_results: int = 50,
+                  ignore_case: bool = True) -> str:
+        """Fast text search across the vault. Returns up to
+        `max_results` hits as `path:line: text`. Uses ripgrep when
+        available, python re fallback otherwise. `pattern` is a
+        regex. Use this for grep-style 'where do I mention X?' —
+        cheaper and more direct than search_notes for literal text."""
+        from . import org_tools as _ot
+        hits = _ot.org_grep(pattern, path_glob=path_glob,
+                              max_results=max_results,
+                              ignore_case=ignore_case)
+        if not hits:
+            return _themed("org_grep",
+                            f"no hits for {pattern!r}")
+        body = "\n".join(f"{h['file']}:{h['line']}: {h['text']}"
+                          for h in hits)
+        return _themed("org_grep",
+                        f"{len(hits)} hit(s) for {pattern!r}", body)
+
+    @server.tool()
+    def org_count_matches(pattern: str, path_glob: str = "**/*.org",
+                            ignore_case: bool = True) -> str:
+        """Count regex matches across the vault. Returns total hits,
+        files-with-hits, and the top-10 files by hit count.
+        Use for questions like 'how many times have I checked off
+        making the bed?' — pattern=r'\\[X\\].*make bed' yields a
+        number without per-file inspection."""
+        from . import org_tools as _ot
+        r = _ot.org_count_matches(pattern, path_glob=path_glob,
+                                    ignore_case=ignore_case)
+        if r.get("error"):
+            return _themed("org_count_matches",
+                            f"bad regex: {r['error']}")
+        body_lines = [f"total_hits      = {r['total_hits']}",
+                       f"files_with_hits = {r['files_with_hits']}"]
+        if r["top_files"]:
+            body_lines.append("top_files:")
+            for path, n in r["top_files"]:
+                body_lines.append(f"  {n:>4}  {path}")
+        return _themed("org_count_matches",
+                        f"counted {pattern!r}", "\n".join(body_lines))
+
+    @server.tool()
+    def org_file_meta(path: str) -> str:
+        """Return file-level metadata for an org file: title, ID,
+        file-tags, inline tags, heading counts per level, todo /
+        done counts, checkbox counts, roam-link count, mtime, size.
+        Path is resolved under org_dir; refuses paths outside."""
+        from . import org_tools as _ot
+        m = _ot.org_file_meta(path)
+        if not m:
+            return _themed("org_file_meta",
+                            f"refused or missing: {path}")
+        body = "\n".join(f"{k:<14} {v}" for k, v in m.items())
+        return _themed("org_file_meta", m.get("title", path), body)
+
+    @server.tool()
+    def org_outline(path: str, max_depth: int = 99) -> str:
+        """Return the heading tree of `path` as a flat indented
+        outline with line numbers. Use to pick a sub-tree to read
+        without reading the whole file."""
+        from . import org_tools as _ot
+        nodes = _ot.org_outline(path, max_depth=max_depth)
+        if not nodes:
+            return _themed("org_outline",
+                            f"no headings or refused: {path}")
+        lines = []
+        for n in nodes:
+            indent = "  " * (n["level"] - 1)
+            tags = (" :" + ":".join(n["tags"]) + ":") if n["tags"] else ""
+            lines.append(f"{n['line']:>5}  {indent}* {n['text']}{tags}")
+        return _themed("org_outline",
+                        f"{len(nodes)} heading(s) in {path}",
+                        "\n".join(lines))
+
+    @server.tool()
+    def org_tag_index(limit: int = 50) -> str:
+        """Return the vault's tag taxonomy as `(tag, count)` rows
+        sorted by frequency. Use BEFORE inventing new tags — pick
+        from the user's existing taxonomy. Aggregates :inline:
+        tags + #+filetags."""
+        from . import org_tools as _ot
+        rows = _ot.org_tag_index(limit=limit)
+        if not rows:
+            return _themed("org_tag_index", "no tags found")
+        body = "\n".join(f"  {n:>4}  {tag}" for tag, n in rows)
+        return _themed("org_tag_index",
+                        f"top {len(rows)} tag(s)", body)
+
+    @server.tool()
+    def org_tag_suggest(text: str, top_n: int = 5) -> str:
+        """Suggest up to `top_n` tags for arbitrary `text`, drawn
+        ONLY from tags that already exist in the vault. Use right
+        before capture so tags fit the user's taxonomy."""
+        from . import org_tools as _ot
+        tags = _ot.org_tag_suggest(text, top_n=top_n)
+        if not tags:
+            return _themed("org_tag_suggest",
+                            "no existing tags fit this text")
+        return _themed("org_tag_suggest",
+                        f"{len(tags)} suggestion(s)",
+                        " ".join(f":{t}:" for t in tags))
+
+    @server.tool()
+    def org_agenda(window_days: int = 7) -> str:
+        """Build a window agenda from the vault: today, upcoming
+        (next `window_days`), overdue, and stale_todo (>30d, no
+        date). Pure scan, no LLM. Use when the user asks 'what's
+        on deck?' / 'overdue?' / 'agenda'."""
+        from . import org_tools as _ot
+        a = _ot.org_agenda(window_days=window_days)
+        sections = []
+        for bucket in ("today", "upcoming", "overdue", "stale_todo"):
+            items = a.get(bucket) or []
+            if not items:
+                continue
+            sections.append(f"{bucket.upper()} ({len(items)}):")
+            for it in items[:25]:
+                date = it.get("scheduled") or it.get("deadline") or "—"
+                sections.append(f"  [{it['state']}] {date}  "
+                                  f"{it['text']}  ({it['file']}:{it['line']})")
+        if not sections:
+            return _themed("org_agenda",
+                            f"clean — no items in {window_days}d window")
+        return _themed("org_agenda",
+                        f"agenda window={window_days}d",
+                        "\n".join(sections))
+
     return server
 
 

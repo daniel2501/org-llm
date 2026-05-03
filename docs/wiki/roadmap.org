@@ -32,6 +32,14 @@ cards" = Phase 12) ship in slices without renumbering the world.
 
 * Status snapshot                                              :snapshot:
 
+- *Standing top priority:* orchestration that is *smooth*,
+  *beneficial*, *faster than solo*, and *higher quality than
+  solo* — all four, simultaneously. No architecture is worth
+  shipping if it trades any one of those. Phase 20.x
+  (full-crew LLM manager) was reverted in this session because
+  it traded speed AND quality; Phase 22 (recipe injection at
+  proxy time, zero extra round-trips) was accepted because it
+  cleared all four bars.
 - *Currently:* late beta. Core flows (index → embed → ask →
   capture → launch) are stable. Most active recent surface is
   Phase 22 (manager pattern via deterministic recipes).
@@ -45,31 +53,41 @@ cards" = Phase 12) ship in slices without renumbering the world.
   override).
 - *Active focus:* Phase 22.5a (thought-process capture in
   manager log), recipe expansion (more task-shapes), Phase 19.1
-  (=org-llm sync= MVP — gates the weekly GTD remote routine).
+  (=org-llm sync= MVP — gates the weekly GTD remote routine),
+  Phase 22.6 (12 more org/doom agent tools queued up — seed
+  shipped: =org_grep / count / file_meta / outline / tag_index /
+  tag_suggest / agenda=).
 - *Punch list before 1.0:* cross-platform install validation
   (macOS / Ubuntu), Termux/Android port, smoke coverage on
   less-walked verbs, MCP-kind tool-call logging.
 
 ** Priority order (current → wishlist)
 
+Orchestration items (22.5, 22, 22.6) are pinned to the top.
+Standing constraint: smooth + beneficial + faster + higher quality
+than the solo path; no orchestration ships if it fails any of
+the four. Tools (22.6) precede inferrers (21) because they're
+load-bearing for recipe expansion (22).
+
 | #  | when         | phase                                    | priority | jump          |
 |----+--------------+------------------------------------------+----------+---------------|
 | 1  | <2026-05-09> | 22.5 thought-process capture             | A NEXT   | jump to ↓     |
 | 2  | <2026-05-10> | 22 orchestration v2 (recipe expansion)   | A active | ↓             |
 | 3  | <2026-05-12> | 19 built-in vault git-sync               | A        | ↓             |
-| 4  | <2026-05-15> | 21 deterministic vault inferrers         | A        | ↓             |
-| 5  | <2026-05-18> | 18 proxy expansion follow-ups            | A        | ↓             |
-| 6  | <2026-05-20> | 16.5 Doom config introspection           | A        | ↓             |
-| 7  | <2026-05-22> | 16.4 extension polish                    | A        | ↓             |
-| 8  | <2026-05-30> | Punch list — beta → 1.0                  | A        | ↓             |
-| 9  | <2026-06-01> | org-agenda-agent (depends on 19)         | B        | wishlist      |
-| 10 | <2026-06-08> | 13.2 dailies as walk targets             | B        | leftover 13.x |
-| 11 | <2026-06-13> | Co-edit org files                        | B        | wishlist      |
-| 12 | <2026-06-15> | 12.6 cached gather persistence           | B        | leftover 12.x |
-| 13 | <2026-06-22> | 12.7 dbt analytics over engagement       | B        | leftover 12.x |
-| 14 | <2026-06-29> | 13.4 per-slug routing / fact replacement | B        | leftover 13.x |
-| 15 | <2026-07-06> | 13.5 follow-up questions in walk         | B        | leftover 13.x |
-| 16 | <2026-07-15> | 20 full agent crew (parked)              | B parked | ↓             |
+| 4  | <2026-05-13> | 22.6 agent tools v2 (org/doom toolbelt)  | A        | ↓             |
+| 5  | <2026-05-15> | 21 deterministic vault inferrers         | A        | ↓             |
+| 6  | <2026-05-18> | 18 proxy expansion follow-ups            | A        | ↓             |
+| 7  | <2026-05-20> | 16.5 Doom config introspection           | A        | ↓             |
+| 8  | <2026-05-22> | 16.4 extension polish                    | A        | ↓             |
+| 9  | <2026-05-30> | Punch list — beta → 1.0                  | A        | ↓             |
+| 10 | <2026-06-01> | org-agenda-agent (depends on 19)         | B        | wishlist      |
+| 11 | <2026-06-08> | 13.2 dailies as walk targets             | B        | leftover 13.x |
+| 12 | <2026-06-13> | Co-edit org files                        | B        | wishlist      |
+| 13 | <2026-06-15> | 12.6 cached gather persistence           | B        | leftover 12.x |
+| 14 | <2026-06-22> | 12.7 dbt analytics over engagement       | B        | leftover 12.x |
+| 15 | <2026-06-29> | 13.4 per-slug routing / fact replacement | B        | leftover 13.x |
+| 16 | <2026-07-06> | 13.5 follow-up questions in walk         | B        | leftover 13.x |
+| 17 | <2026-07-15> | 20 full agent crew (parked)              | B parked | ↓             |
 
 Single-table, single-glance roadmap. =A NEXT= = currently in
 progress. =A= = scheduled for the date shown. =B= = scheduled
@@ -1280,6 +1298,121 @@ Hard constraints for Phase 22:
 3. What's the minimum viable manager? Maybe it's just: a
    keyword router + the inline classifier rule (already in
    scribe's prompt).
+
+* TODO [#A] Planned — Phase 22.6: agent tools v2 (org/doom toolbelt expansion) :planned:
+SCHEDULED: <2026-05-13 Wed>
+
+The seed shipped this session: =org_llm/org_tools.py= +
+seven MCP wrappers (=org_grep=, =org_count_matches=,
+=org_file_meta=, =org_outline=, =org_tag_index=,
+=org_tag_suggest=, =org_agenda=) — deterministic, read-only
+helpers that answer common "what does my vault look like?"
+questions in milliseconds without an LLM round-trip.
+
+This phase rounds the toolbelt out to *twelve more* org-roam,
+org-mode, and Doom-specific tools so any agent (scribe,
+researcher, planner, org-agenda-agent) can reason about the
+user's vault structurally instead of guessing from prose.
+
+** The twelve tools
+
+| #  | tool                          | answers / does                                                                |
+|----+-------------------------------+-------------------------------------------------------------------------------|
+|  1 | =org_link_graph=              | from a node, walk =[[id:…]]= roam links N hops; return adjacency list         |
+|  2 | =org_backlinks=               | list incoming roam links pointing at a given node (id or path)                |
+|  3 | =org_orphans=                 | files / nodes with no in/out links AND no tags — pruning + triage             |
+|  4 | =org_clock_summary=           | parse =CLOCK:= entries; total time per heading / per tag in window            |
+|  5 | =org_property_search=         | find headings whose =:PROPERTIES:= drawer matches =prop= (and optional =val=) |
+|  6 | =org_drill_review_due=        | =org-drill= / =org-fc= cards whose next-review is overdue                     |
+|  7 | =org_template_apply=          | render a saved capture template (Doom or org-llm registry) → string           |
+|  8 | =org_refile_candidates=       | propose refile destinations for a heading via tag overlap + path tokens       |
+|  9 | =org_attach_list=             | list the node's =_attach/= contents (size + mtime) — agents can't see today   |
+| 10 | =org_id_find=                 | fuzzy-find a node ID by partial title — cheaper than search_notes for IDs     |
+| 11 | =doom_packages=               | parse =~/.doom.d/packages.el= → which packages are installed/enabled          |
+| 12 | =doom_keybinds=               | parse =config.el= / =bindings.el= → user's actual leader-key surface          |
+
+** Why each one
+
+- *=org_link_graph= + =org_backlinks=* — the org-roam DB
+  already tracks the link graph; today agents have no
+  cheap way to walk it. Both are <50ms scans.
+- *=org_orphans=* — every vault accumulates these; an agent
+  that surfaces them quarterly is cheap insurance.
+- *=org_clock_summary=* — Doom users live in =org-clock=.
+  Without it the agent can't answer "where did my week
+  go?" without trawling each file.
+- *=org_property_search=* — :CATEGORY:, :STYLE:, custom
+  drawers — currently invisible to the LLM.
+- *=org_drill_review_due=* — flashcards integrate naturally
+  with the daily/weekly routines.
+- *=org_template_apply=* — agents currently invent capture
+  templates inline. Use the user's existing ones instead.
+- *=org_refile_candidates=* — the manual "where should this
+  go?" pause is the slowest part of capture.
+- *=org_attach_list=* — total blind spot today.
+- *=org_id_find=* — many "open node X" intents are partial
+  title matches; full search_notes is heavier than needed.
+- *=doom_packages= + =doom_keybinds=* — when an agent
+  suggests a workflow ("press =SPC m d=, then…"), it
+  should verify the package + binding actually exist in the
+  user's config rather than echo a generic Doom recipe.
+
+** Roll-out
+
+*** 22.6.1 — Pure-python tools (1, 2, 3, 5, 8, 10)
+- Six functions in =org_llm/org_tools.py= (or a sibling
+  =org_graph.py= for the link-graph ones).
+- Each gets an MCP wrapper in =org_llm/mcp_server.py=,
+  same shape as the seven shipped this session.
+- Zero new dependencies; ripgrep already optional.
+
+*** 22.6.2 — CLOCK + drill + attach (4, 6, 9)
+- =org_clock_summary= — parse =CLOCK: [date]--[date] => duration=
+  lines. Aggregate per-heading inheritance.
+- =org_drill_review_due= — read =:DRILL_LAST_REVIEWED:= /
+  =:DRILL_NEXT_REVIEW:= properties; sort by overdue gap.
+- =org_attach_list= — resolve the node's attach directory
+  (=org-attach-id-dir-format-function=); listdir it.
+
+*** 22.6.3 — Templating + Doom config (7, 11, 12)
+- =org_template_apply= — read templates from a new
+  =db.Config('capture_templates')= JSON entry (org-llm's
+  own registry, populated lazily from Doom's
+  =org-capture-templates= via the companion bridge).
+- =doom_packages= / =doom_keybinds= — small parser pair
+  over =~/.doom.d/=. Pairs naturally with Phase 16.5
+  (Doom config introspection); 22.6 ships the
+  read-only-now-static cuts, 16.5 makes them live.
+
+*** 22.6.4 — Wire into agent prompts
+- Add a one-line tool-roster line per relevant agent
+  prompt — e.g. researcher gets =org_link_graph=,
+  =org_backlinks=, =org_clock_summary=; planner gets
+  =org_refile_candidates=, =org_drill_review_due=. Keep
+  prompts skinny; mention each tool by name only,
+  trust the docstring.
+- Add 1-2 recipes to =orchestration.py= that fire on
+  obvious patterns: "review my flashcards" →
+  =org_drill_review_due=, "what's orphaned?" →
+  =org_orphans=.
+
+** Open questions
+
+1. Do the link-graph tools live in =org_tools.py= or a new
+   =org_graph.py=? Lean: keep =org_tools.py= the dumping
+   ground until it crosses ~600 lines, then split.
+2. =org_clock_summary= correctness vs. the Emacs companion
+   bridge. The bridge can ask =org-clock-sum= directly,
+   which is authoritative; the python parser is faster
+   but may diverge on heading inheritance edge cases.
+   Lean: ship python first; route through bridge if
+   accuracy reports come in.
+3. =doom_keybinds= is structurally hard — the parser has
+   to follow =map!=, =global-set-key=, =define-key=,
+   =define-leader-key!=, =evil-define-key= … Lean: ship
+   a "best-effort static parse with diagnostics" rather
+   than try to be exact. The agent can cite "I think you
+   bound X to Y, but please verify".
 
 * TODO [#A] Planned — Phase 21: deterministic vault inferrers :planned:
 SCHEDULED: <2026-05-15 Fri>
