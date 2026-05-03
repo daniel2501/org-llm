@@ -393,6 +393,15 @@ MODEL_DEFAULTS = {
     "ollama_url":     "http://localhost:11434",
     # Defaults are tuned to fit a laptop CPU/16 GB RAM out of the box. Use
     # `org-llm models --tune` once you've got real hardware to scale up.
+    "proxy_orchestration_mode":      "recipe",  # off | recipe.
+                                              # `recipe` = pattern-match the
+                                              # user message and inject a
+                                              # deterministic RECIPE into the
+                                              # agent's system prompt. Same
+                                              # number of cloud round-trips
+                                              # as solo, with predictable
+                                              # tool-call order. See
+                                              # org_llm/orchestration.py.
     "scribe_confirm_before_capture": "true",  # scribe shows draft + asks
                                               # 'Save to <file>? [y/N]' before
                                               # calling capture_note. Set to

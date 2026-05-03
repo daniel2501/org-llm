@@ -1213,6 +1213,38 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     agent_def = known[agent]
     agent_prompt = (agent_def.get("prompt") or "").strip()
     agent_model  = (agent_def.get("model")  or "").strip()
+    # Phase 22: orchestration recipe injection. When the user
+    # message matches a known task-shape, inject a deterministic
+    # RECIPE into the agent's prompt — buys orchestration's
+    # quality benefits (predictable tool order, inline filters)
+    # at zero cloud cost. Activated by
+    # `proxy_orchestration_mode = "recipe"` (default).
+    if (agent_prompt and _proxy_cfg_str(
+            "proxy_orchestration_mode", "recipe").strip().lower()
+            == "recipe"):
+        try:
+            from .orchestration import match_recipe
+            user_text = _last_user_text(parsed)
+            recipe = match_recipe(user_text)
+            if recipe and (recipe.target == agent
+                            or recipe.target == "*"):
+                agent_prompt = recipe.body + "\n\n" + agent_prompt
+                # Log to crew_log for sidebar visibility.
+                try:
+                    from .db import log_crew_action as _log
+                    _log(
+                        "recipe", agent_from="proxy",
+                        agent_to=agent, model="(deterministic)",
+                        prompt=user_text[:200],
+                        result=f"recipe={recipe.name}",
+                        duration_ms=0, outcome="ok",
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            # Recipe match must never break agent dispatch.
+            pass
+
     # Scribe-only behaviour knob: skip the confirm-before-capture
     # step when `scribe_confirm_before_capture=false`. Default
     # true (the prompt's FLOW expects confirmation).
