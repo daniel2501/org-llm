@@ -1073,6 +1073,110 @@ configurable threshold, transparently retry against the cloud
 provider (or a different local model). Today the user sees
 opencode's raw error UI; the proxy can recover before it bubbles.
 
+* TODO [#A] Planned — Phase 22: orchestration v2 (no-cost manager) :planned:
+
+The 2026-05-02 attempt at full crew orchestration (Phase 20.x)
+was reverted because it cost 3-5× cloud round-trips per turn
+(60-150s) AND degraded output quality (LLM emitted tool calls as
+markdown JSON, hallucinated items, ignored format guidance). The
+manager pattern is still desired — but only if it doesn't trade
+speed or quality for the architecture.
+
+Hard constraints for Phase 22:
+- *No more round-trips than the solo path.* If solo is 2 cloud
+  calls (gather + draft), orchestrated must be ≤ 2 cloud calls.
+- *No quality degradation.* Same routine filter strictness, same
+  format adherence, same hallucination suppression.
+- *Visible orchestration when it engages.* MANAGER sidebar +
+  crew_log audit must remain populated.
+
+** Three candidate shapes (pick one in 22.0)
+
+*** A. Deterministic router → direct specialist
+- Route the user message via the existing keyword-based
+  =route_prompt= (microsecond decision, no LLM cost) to pick
+  the right specialist.
+- Inject the specialist's prompt + relevant baselines.
+- Specialist runs directly, no manager LLM in the path.
+- Manager pattern reduces to a *routing layer*, not an LLM
+  agent.
+- *Pros:* zero added latency, deterministic.
+- *Cons:* keyword routing misses novel asks; no sanity-check
+  layer for downstream actions.
+
+*** B. Parallel delegate (single-shot manager)
+- Crew is invoked only when the user genuinely needs
+  cross-specialist coordination (multi-domain ask, ambiguous
+  intent, explicit @crew).
+- Crew emits ALL delegate tool calls in ONE turn (parallel
+  tool_calls array). Cloud runs them concurrently.
+- Crew composes the final reply in ONE follow-up turn.
+- Total: 2 cloud round-trips even for multi-specialist tasks.
+- *Pros:* real orchestration when needed; same cost as solo.
+- *Cons:* requires the LLM to reliably emit parallel
+  tool_calls (qwen-72b is shaky on this).
+
+*** C. Pre-computed orchestration plan
+- A fast deterministic pre-pass (pattern match + heuristics)
+  builds an "orchestration plan" before the LLM runs.
+- The plan is injected into the system prompt as a recipe
+  ("step 1: list_dailies; step 2: filter routine via inline
+  rule; step 3: draft flat list; step 4: confirm").
+- LLM follows the recipe in ONE turn.
+- *Pros:* fastest of the three; quality drift is bounded by
+  the recipe.
+- *Cons:* maintenance burden — recipes need to cover all the
+  task shapes; rigid for novel asks.
+
+** Roll-out
+
+*** 22.0 — Pick a design via A/B
+- Build minimal versions of A, B, C behind a knob
+  (=proxy_orchestration_mode= = =off= / =router= / =parallel=
+  / =recipe=).
+- Run the standard test prompts ("dailies → routine weekend
+  todo", "@crew help me plan the day", "summarize my recent
+  notes on X") against each.
+- Score on: total cloud time, items kept (filter quality),
+  format correctness, hallucination count.
+- Pick the winner; the other two stay in code as fallback
+  modes for future eval.
+
+*** 22.1 — Cleanup of Phase 20.x dead code
+- Audit and remove (or formally archive) the orchestration
+  branches that lost the bake-off:
+  - =proxy_orchestrate_via_crew= knob (currently false; remove
+    if recipe-mode wins).
+  - =intent_agent= overlay path (used by sticky + sidebar).
+  - =final_review_with_crew= baseline (currently disabled).
+- Keep: =delegate= MCP tool, =classifier= + =crew= preconfigured
+  agents, =crew_log= table, MANAGER sidebar row. These are
+  reusable regardless of which orchestration shape wins.
+
+*** 22.2 — Re-introduce manager-on-top supervision
+- Once the chosen v2 design is stable on the happy path, re-
+  enable the *sanity-check before user-facing actions* loop —
+  the part of the original Phase 20 design that actually
+  caught quality issues (non-routines, time-inappropriate
+  items, format mismatches).
+- Constraint: the sanity check is a SINGLE deterministic
+  pass, not an LLM round-trip. Pattern-match against the
+  user's stated criteria; flag obvious violations; let the
+  LLM revise inline.
+
+** Open questions
+
+1. The user's framing "without cost to quality or speed" is the
+   primary constraint. Quality is hard to measure objectively —
+   what's the eval suite? Probably a fixed list of test prompts
+   with known-good outputs to diff against.
+2. How aggressive should the deterministic router be? It's
+   already imperfect ("filter routine items only" might route
+   to scribe instead of triggering a classifier hand-off).
+3. What's the minimum viable manager? Maybe it's just: a
+   keyword router + the inline classifier rule (already in
+   scribe's prompt).
+
 * TODO [#A] Planned — Phase 21: deterministic vault inferrers :planned:
 
 Phase 20.x landed a manager pattern that consults specialist LLM
