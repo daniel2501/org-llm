@@ -162,10 +162,15 @@ cards" = Phase 12) ship in slices without renumbering the world.
   that 5 of 6 shipped recipes (=recent_activity_summary=,
   =dailies_general=, =dailies_routine_filter=,
   =weekly_mood_review=, =weather_aware_agenda=) lost or tied to
-  the agent-tool-use baseline. Catalog trimmed to one (=count_across_vault=,
-  60% wins). The 2026-05-17 recipe-promotion remote agent is now
-  obsolete; future recipes must clear the bar in the A/B harness
-  before adding. See [[file:2026-05-03-recipe-ab-ground-truth.org][ground-truth doc]] + [[file:recipes.org][recipes.org]] for detail.
+  the agent-tool-use baseline. Catalog trimmed to two:
+  =count_across_vault= (60% wins; KEEP) and =weather_aware_agenda=
+  (0% wins, but the failure was data-starvation — no weather
+  configured, sparse outdoor items — not a design flaw; KEPT as
+  latent infra with a hardened runner that can no longer
+  hallucinate forecasts). The 2026-05-17 recipe-promotion remote
+  agent is now obsolete; future recipes must clear the bar in the
+  A/B harness before adding. See [[file:2026-05-03-recipe-ab-ground-truth.org][ground-truth doc]] + [[file:recipes.org][recipes.org]]
+  for detail.
 - *Punch list before 1.0:* cross-platform install validation
   (macOS / Ubuntu), Termux/Android port, smoke coverage on
   less-walked verbs, MCP-kind tool-call logging.

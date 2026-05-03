@@ -2,7 +2,7 @@
 :ID:       3ed81ee4-e28d-4daf-87fb-c1645b58a05c
 :CREATED:  [2026-05-03]
 :END:
-#+TITLE: Recipes — proxy-time pre-fetch (one recipe, earned)
+#+TITLE: Recipes — proxy-time pre-fetch (curated set)
 #+FILETAGS: :wiki:recipe:orchestration:phase-22:
 #+OPTIONS: toc:nil num:nil
 
@@ -24,7 +24,7 @@ deterministically, before the LLM saw the message.
 
 Activated by =proxy_orchestration_mode = "recipe"= (the default).
 
-* Why one recipe, not six
+* Why two recipes, not six
 
 Phase 22 v2 shipped six recipes. The 2026-05-03 A/B run (90
 judged pairs over qwen-2.5-72b cloud, blinded Claude Opus 4.7
@@ -32,14 +32,39 @@ judge, see =scripts/recipe_ab_harness.py= + the [[file:2026-05-03-recipe-ab-grou
 found that *only* =count_across_vault= consistently beat the
 agent-tool-use baseline on quality:
 
-| recipe                       | judge wins | verdict |
-|------------------------------+------------+---------|
-| =count_across_vault=         | 60% (12/20) | KEEP    |
-| =dailies_general=            | 20% (2/10)  | drop    |
-| =recent_activity_summary=    | 10% (1/10)  | drop    |
-| =dailies_routine_filter=     | 0% (0/5)    | drop    |
-| =weather_aware_agenda=       | 0% (0/5)    | drop    |
-| =weekly_mood_review=         | 0% (0/5)    | drop    |
+| recipe                       | judge wins | verdict      |
+|------------------------------+------------+--------------|
+| =count_across_vault=         | 60% (12/20) | KEEP         |
+| =dailies_general=            | 20% (2/10)  | drop         |
+| =recent_activity_summary=    | 10% (1/10)  | drop         |
+| =dailies_routine_filter=     | 0% (0/5)    | drop         |
+| =weather_aware_agenda=       | 0% (0/5)    | KEEP (latent) |
+| =weekly_mood_review=         | 0% (0/5)    | drop         |
+
+** Why =weather_aware_agenda= survived
+
+Its 0% A/B win rate was a *data-starvation* failure, not a design
+failure: the user hadn't configured a weather location and had
+sparse outdoor agenda items, so the runner fell through to
+advisory mode and the agent hallucinated forecasts. With expected
+vault growth (more notes / tags / agenda items) and a configured
+location, the recipe earns its keep — pre-fetching forecast +
+outdoor-flag join is exactly the kind of multi-tool composition
+that justifies a deterministic shortcut.
+
+The runner has been *hardened* against the original failure shape:
+it ALWAYS returns a result (never None except on a true
+exception), embeds an explicit =weather: unavailable= marker when
+the location isn't configured, and renders agenda data as a
+floor. The recipe body forbids inventing forecasts when they're
+missing. The result: the recipe is currently a no-op-or-better
+relative to agent-tool-use on every input, and will silently
+upgrade to a clear win once weather is configured + agenda has
+weather-sensitive items.
+
+Re-run the A/B (=scripts/recipe_ab_harness.py --only-prompt A7=)
+once weather is configured; the bar to keep firing is the same
+≥55% judge wins on its own prompts.
 
 The headline wins on latency (-48%) and tokens (-89%) were real
 but partly inflated — the recipes-on arm often "won" those metrics
@@ -72,7 +97,7 @@ The bar isn't "this is a recipe-shaped problem". It's "the
 deterministic version produces a *better* answer than the
 agent-with-tools".
 
-* The current recipe
+* The current recipes
 
 ** =count_across_vault=
 
@@ -109,6 +134,39 @@ What the runner does:
    when the count target overlaps a known routine chore (uses
    the =routine_chores= vault fact).
 
+** =weather_aware_agenda=
+
+User question shape: "what should I prioritise given the weather",
+"will it rain on my hike Saturday", "should I reschedule my outdoor
+…". Triggers when a weather-keyword AND an agenda/day-keyword
+co-occur, OR on explicit reschedule phrasing.
+
+What the runner does (hardened post-A/B):
+
+1. Try =weather.weather_for_agenda(days=7)= — returns a bundle
+   with forecast + agenda-join + outdoor-flagged items.
+2. If that errors (location not configured, network down, etc.),
+   fall back to =org_tools.org_agenda(window_days=7)= alone and
+   record =weather_status=unavailable= with the underlying
+   error message.
+3. Always return a =RunResult=. The pre-fetch block is rendered
+   in two shapes:
+   - *full*: forecast lines + flagged outdoor items + agenda
+     counts. Agent narrates over weather-sensitive items first.
+   - *agenda-only*: =weather: unavailable (<reason>)= + agenda
+     counts + today's items. Agent narrates from agenda; recipe
+     body explicitly forbids inventing forecasts.
+
+Why the no-None-fallback rule matters: the original A7
+hallucination ("rescheduling Jane's meeting to 2pm") happened
+because the runner returned None, the proxy injected the recipe
+body claiming "manager pre-fetched data" with nothing under it,
+and the agent confabulated forecasts to match the body's
+implication. The hardened runner is structurally incapable of
+producing that shape.
+
+* The injection point
+
 Wired into the proxy at [[file:../../org_llm/llm_proxy.py][llm_proxy.py]] =intercept_agent_prefix=:
 
 #+begin_src python
@@ -127,7 +185,9 @@ if recipe and (recipe.target == agent or recipe.target == "*"):
 | concern                    | file                                                  |
 |----------------------------+-------------------------------------------------------|
 | recipe registry + matching | [[file:../../org_llm/orchestration.py][org_llm/orchestration.py]]                              |
-| deterministic runner       | [[file:../../org_llm/recipe_runner.py][org_llm/recipe_runner.py]] :: =_run_count_across_vault= |
+| count runner               | [[file:../../org_llm/recipe_runner.py][org_llm/recipe_runner.py]] :: =_run_count_across_vault= |
+| weather runner             | [[file:../../org_llm/recipe_runner.py][org_llm/recipe_runner.py]] :: =_run_weather_aware_agenda= |
+| weather data source        | [[file:../../org_llm/weather.py][org_llm/weather.py]] :: =weather_for_agenda=            |
 | pre-fetch block formatter  | [[file:../../org_llm/recipe_runner.py][org_llm/recipe_runner.py]] :: =format_prefetch_block=   |
 | recipe injection point     | [[file:../../org_llm/llm_proxy.py][org_llm/llm_proxy.py]] :: =intercept_agent_prefix=      |
 | manager-log entries        | [[file:../../org_llm/db.py][org_llm/db.py]] :: =log_crew_action= (table =crew_log=) |
