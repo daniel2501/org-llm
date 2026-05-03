@@ -1,21 +1,27 @@
-"""Phase 22 orchestration v2 — recipe-based.
+"""Recipe-based proxy-time pre-fetch.
 
-Manager-pattern alternative that adds ZERO cloud round-trips by
-matching the user's message against known task-shapes at proxy
-time and injecting a deterministic RECIPE into the agent's system
-prompt. The LLM follows the recipe in a single turn.
+Phase 22 v2 shipped six recipes; the 2026-05-03 A/B (90 judged pairs,
+qwen-2.5-72b cloud, blinded Claude Opus 4.7 judge) found that ONLY
+=count_across_vault= consistently beat the agent-tool-use baseline on
+quality. The other five (=recent_activity_summary=, =dailies_general=,
+=dailies_routine_filter=, =weekly_mood_review=, =weather_aware_agenda=)
+either lost or tied to recipes-off; the latency/token wins they showed
+were partly inflated by the recipes-on arm short-circuiting on
+incomplete data. See docs/wiki/recipes.org for the full breakdown.
 
-This is the lightest of the three candidates from the Phase 22
-roadmap (router / parallel-delegate / recipe). It buys
-orchestration's quality benefits — predictable tool-call order,
-inline filter rules, format guidance — without paying for an
-extra LLM pass.
+The catalog is now intentionally small: when the user asks an
+event-counting question (=how many times have I…=, =how often did I…=,
+=count of …=, etc.), the manager pre-fetches the count itself in
+~10ms of pure-Python regex work and the agent narrates over the
+result in ONE cloud call. For everything else, the agent uses MCP
+tools normally — recipes have been verified to add no value there.
 
-Activated by `proxy_orchestration_mode = "recipe"` in config.
-Default `"off"`.
+Activated by `proxy_orchestration_mode = "recipe"` (default).
 
-Adding a recipe is a 4-line entry in `_RECIPES`. No prompt-edit
-or specialist-rewrite required.
+Adding a recipe is a 4-line entry in `_RECIPES` + (optionally) a
+runner in `recipe_runner.py`. Before adding one, run the A/B harness
+(scripts/recipe_ab_harness.py) on it — the bar is ≥55% judge wins on
+the recipe's own prompt shape AND no quality regression on neighbours.
 """
 
 from __future__ import annotations
@@ -30,14 +36,14 @@ class RecipeMatch(NamedTuple):
     target:  str          # which agent the recipe is built for
 
 
-# Each entry: (compiled regex over the user text, recipe target,
-# recipe body). First match wins — order matters; put more specific
-# patterns first.
+# Each entry: (compiled regex over the user text, RecipeMatch). First
+# match wins. Keep this short and earned — see module docstring for the
+# bar new entries must clear.
 _RECIPES: list[tuple[_re.Pattern, RecipeMatch]] = [
     (
-        # Counting questions across the vault — "how many times
-        # have I X", "count X in dailies", etc. Routes to researcher
-        # with a 3-step plan that uses the deterministic
+        # Counting questions across the vault — "how many times have
+        # I X", "count X in dailies", etc. Routes to researcher with
+        # a 3-step plan that uses the deterministic
         # org_count_matches helper.
         #
         # NB: `frequency` was originally part of this trigger but
@@ -68,156 +74,6 @@ _RECIPES: list[tuple[_re.Pattern, RecipeMatch]] = [
                 "  3. Answer with `total_hits` and a 1-line breakdown "
                 "from `top_files`. Don't fabricate. If 0, say so.\n"
                 "Run STEP 1 → STEP 2 in this turn."
-            ),
-        ),
-    ),
-    (
-        # Match BOTH a "dailies" word AND a routine-keyword in any
-        # order via lookaheads — earlier the regex required
-        # `dailies.*routine` and missed "pull RECURRING items from
-        # recent DAILIES" where the order is reversed.
-        _re.compile(
-            r"(?=.*\b(?:dailies|daily files?|recent dailies)\b)"
-            r"(?=.*\b(?:routine|recurring|typically|regular)\b)",
-            _re.IGNORECASE | _re.DOTALL,
-        ),
-        RecipeMatch(
-            name="dailies_routine_filter",
-            target="scribe",
-            body=(
-                "RECIPE — dailies + routine:\n"
-                "  1. `org-llm_list_dailies(limit=5, include_content=True)`.\n"
-                "  2. Filter (REJECT first, never let frequency "
-                "override):\n"
-                "     - any proper noun mid-task (Cory, RMA, "
-                "Postgres, Wiki, Google Drive, etc.) → REJECT\n"
-                "     - learning/tutorial/finish-X/follow-X → REJECT\n"
-                "     - one-off verb (post, repost, follow up, "
-                "send, meeting) → REJECT\n"
-                "     - date/event-tied → REJECT\n"
-                "     KEEP only universal lowercase chores (make "
-                "bed, clean bathroom, take out trash, laundry, "
-                "exercise, juice, dishes, groceries, shower, "
-                "video games).\n"
-                "  3. Draft flat list per CAPTURE STYLE.\n"
-                "  4. Ask 'Save to <file>? [y/N]'; skip if "
-                "scribe_confirm_before_capture=false.\n"
-                "  5. capture_note → offer open_in_emacs.\n"
-                "Start step 1 now."
-            ),
-        ),
-    ),
-    (
-        _re.compile(
-            r"\b(dailies|daily files?|recent dailies)\b",
-            _re.IGNORECASE,
-        ),
-        RecipeMatch(
-            name="dailies_general",
-            target="scribe",
-            body=(
-                "ORCHESTRATION RECIPE — dailies general:\n"
-                "  STEP 1: call "
-                "`org-llm_list_dailies(limit=5, include_content=True)` "
-                "ONCE — paths + bodies in one call.\n"
-                "  STEP 2: answer using the returned content. "
-                "Don't re-read files. If the answer requires more "
-                "context, broaden with search_notes.\n"
-                "Run STEP 1 IMMEDIATELY."
-            ),
-        ),
-    ),
-    (
-        # Weekly mood review — routes to the @journalist agent.
-        # Pre-fetches the mood_signal fact so the agent narrates
-        # over weekly aggregates + tough-day flags, never raw
-        # prose. target=* so any agent the user @-tagged still
-        # gets the data, but @journalist is the natural narrator.
-        _re.compile(
-            r"\b(how (have|am) i (been|doing)|mood|feeling|"
-            r"feelings|tough week|rough week|burnt out|"
-            r"burnout|review my week|weekly mood|how was my "
-            r"week|reflect on)\b",
-            _re.IGNORECASE,
-        ),
-        RecipeMatch(
-            name="weekly_mood_review",
-            target="*",
-            body=(
-                "RECIPE — weekly mood review:\n"
-                "  1. Manager pre-fetched the mood_signal fact "
-                "(weekly sentiment counts + tough-day flags) — "
-                "see MANAGER PRE-FETCH below.\n"
-                "  2. Lead with the OBSERVATION, not a diagnosis.\n"
-                "  3. Hedge: 'word-pattern signal', 'based on "
-                "dailies', 'noticed in your entries'. Counts "
-                "are coarse; honour that.\n"
-                "  4. Cite specific dates for tough days so the "
-                "user can re-read the entry themselves.\n"
-                "  5. Never quote raw mood prose unless asked.\n"
-                "  6. Never prescribe (no therapy / med / "
-                "intervention recs). Mirror, don't fix."
-            ),
-        ),
-    ),
-    (
-        # Weather-aware agenda: fires when the user asks about
-        # weather impact on plans, OR mentions an outdoor activity
-        # that's on the agenda. Routes to @agenda (Phase 21.x).
-        _re.compile(
-            r"\b(weather|forecast|rain|snow|storm|outdoor|hike|bbq|"
-            r"barbecue|garden|mow|cookout|picnic)\b.*"
-            r"\b(agenda|schedule|plan|week|today|tomorrow|saturday|"
-            r"sunday|monday|tuesday|wednesday|thursday|friday)\b|"
-            r"\b(should i (?:reschedule|move)|will it rain|impact "
-            r"my plans|weather problems)\b",
-            _re.IGNORECASE | _re.DOTALL,
-        ),
-        RecipeMatch(
-            name="weather_aware_agenda",
-            # `*` = fires for any agent the user @-tagged. The
-            # weather subsystem is a SHARED capability — researcher
-            # and scribe should also benefit from the pre-fetch
-            # when the user asks them a weather-flavoured question.
-            # The agenda agent is the natural narrator but isn't
-            # the only valid target.
-            target="*",
-            body=(
-                "RECIPE — weather-aware agenda:\n"
-                "  1. Manager has pre-fetched forecast + agenda + "
-                "outdoor-flagged items (see MANAGER PRE-FETCH "
-                "below).\n"
-                "  2. Lead with the most weather-sensitive item or "
-                "the headline summary — never a chronological "
-                "dump.\n"
-                "  3. Recommend ADJUSTMENTS, not just observations. "
-                "If a morning is wet but afternoon clears, suggest "
-                "the time shift. Personalise via vault_profile.\n"
-                "  4. Don't re-invoke the tool — the data is "
-                "authoritative. If you need MORE detail (specific "
-                "hour breakdowns), call weather_for_agenda again "
-                "with a narrower window."
-            ),
-        ),
-    ),
-    (
-        _re.compile(
-            r"\b(summari[sz]e|recent activity|what.{0,15}been (working|"
-            r"doing|up to))\b",
-            _re.IGNORECASE,
-        ),
-        RecipeMatch(
-            name="recent_activity_summary",
-            target="researcher",
-            body=(
-                "ORCHESTRATION RECIPE — recent activity:\n"
-                "  STEP 1: call "
-                "`org-llm_list_recent_nodes(days=14)` AND "
-                "`org-llm_recent_files(days=7)` IN PARALLEL "
-                "(one tool_calls array, two entries).\n"
-                "  STEP 2: synthesise a 1-paragraph summary "
-                "grouped by topic. Cite specific note titles. "
-                "Don't fabricate."
             ),
         ),
     ),
