@@ -254,6 +254,31 @@ export async function registerSidebar(api: any): Promise<void> {
     }
   })();
 
+  // File watcher — fires when proxy stamps sidebar-status.json
+  // mid-session. This is the trigger we kept missing: without it,
+  // the slot only re-rendered on message.updated events, which
+  // sometimes ran with stale props before the proxy's file write
+  // committed. With fs.watch, every file change triggers an
+  // immediate refreshStatus + setActiveAgentOverride.
+  try {
+    const fs = require("node:fs");
+    const watchPath = `${directory}/.opencode/sidebar-status.json`;
+    const watcher = fs.watch(watchPath, () => {
+      void refreshStatus(directory);
+      try {
+        const ss = JSON.parse(fs.readFileSync(watchPath, "utf8"));
+        const intent = (ss?.active?.intent_agent || "").trim();
+        if (intent) {
+          const cur = getActiveAgentOverride();
+          if (!cur || cur.agent !== intent) {
+            setActiveAgentOverride(intent, Date.now());
+          }
+        }
+      } catch { /* file may be mid-write */ }
+    });
+    api.lifecycle?.onDispose?.(() => watcher.close());
+  } catch { /* fs.watch not supported, fall through to tick */ }
+
   // Refresh tick. Min 2s — local-disk file reads are cheap and
   // we now also use this tick to pick up sidebar-runtime.json
   // overlay changes (intent_agent, manager_recent). 5s lag was
