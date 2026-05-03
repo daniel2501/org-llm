@@ -44,6 +44,26 @@ cards" = Phase 12) ship in slices without renumbering the world.
   capture → launch) are stable. Most active recent surface is
   Phase 22 v2 (manager pre-fetch + agent narrates).
 - *Latest shipped (2026-05-03):*
+  - *5 new agents shipped this session* — =@agenda= (weather-aware
+    GTD), =@ops= (CLI / config / diagnostics expert),
+    =@agentsmith= (meta-agent that interviews + ships new
+    agents), =@journalist= (mood / sentiment over dailies via
+    the new =mood_signal= inferrer + =weekly_mood_review=
+    recipe), =@doom= (live Doom Emacs config + keybind expert),
+    =@gardener= (vault hygiene advisor; reads vault_profile +
+    org_orphans + embed status; honours =power_profile= so it
+    defers heavy work in saver mode). Roster catalogued in
+    [[file:agent-roster.org][agent-roster.org]] with nerd-font /
+    utf-8 / ascii icon palette per agent. Architecture +
+    capability scoping + hygiene-scan default behaviour spec'd in
+    [[file:agent-framework.org][agent-framework.org]].
+  - *9 new config knobs* added to =MODEL_DEFAULTS= so they
+    round-trip via =org-llm-config.org=:
+    =proxy_recipe_deterministic=, =proxy_capture_narration=,
+    =proxy_capture_all_narrations=,
+    =proxy_repair_markdown_tools=, =location_lat=,
+    =location_lon=, =weather_enabled=,
+    =weather_cache_ttl_secs=, =power_profile=.
   - *Phase 21.1 — DB-backed vault fact store (first cut).*
     New =vault_fact= table + =org_llm/vault_facts.py= with
     =register_inferrer= / =get_fact= / =get_all_facts= and

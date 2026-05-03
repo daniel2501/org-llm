@@ -64,6 +64,8 @@ domain agents catalogued in [[file:agent-roster.org][agent-roster.org]]:
 1. *=@oracle=*    — voice + TTS bridge (different I/O modality).
 2. *=@coach=*    — fitness + workout (compounds with clock + dailies).
 3. *=@journalist=* — mood + journal sentiment over dailies.
+                     *SHIPPED 2026-05-03.* mood_signal inferrer
+                     + weekly_mood_review recipe + persona.
 4. *=@medic=*    — weight + body metrics; trend over =:weight:= entries.
 5. *=@bookworm=*  — media log: books + movies + shows + music.
                      Queue + finished list + recommend-next from
@@ -79,6 +81,18 @@ domain agents catalogued in [[file:agent-roster.org][agent-roster.org]]:
 7. *=@horologe=*  — calendar sync (gcal/caldav → SCHEDULED).
 8. *=@bookkeeper=* — beanhub budget integration.
 9. *=@agentsmith=* — meta-agent that interviews and ships new agents.
+
+Plus shipped 2026-05-03 outside the priority queue (quick-win
+row from agent-roster):
+
+- *=@doom=*     — Doom Emacs config + keybind expert. Tool
+                   roster: doom_packages, doom_keybinds,
+                   read_file, shell (suggest-only).
+- *=@gardener=* — vault hygiene advisor. Reads vault_profile,
+                   org_orphans, embed status; suggests but
+                   never auto-runs writes; honours
+                   power_profile (defers heavy work in saver
+                   mode).
 
 Effort summary:
 - =@oracle=     L (multi-night) — needs FOSS-clean TTS + STT
