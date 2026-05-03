@@ -1,0 +1,349 @@
+:PROPERTIES:
+:ID:       a3b1c4d2-7e8f-4a59-b2c3-d4e5f6a7b8c9
+:CREATED:  [2026-05-03]
+:END:
+#+TITLE: 2026-05-03 — Recipe A/B ground truth
+#+FILETAGS: :wiki:testing:eval:recipe-ab:
+#+OPTIONS: toc:nil num:nil
+
+* What this is
+
+Hand-computed factual ground truth for the prompt set in
+=scripts/recipe_ab_harness.py=, captured 2026-05-03 against this
+user's vault (~572 files, 138 dailies, 182k nodes).
+
+The judge in =scripts/recipe_ab_judge.py= parses the =:GT:= block
+under each prompt heading and feeds it to Claude Opus alongside
+the two narrations so factual accuracy can be graded without the
+judge having to re-derive the data.
+
+The values below were computed by directly invoking the same
+=org_tools= / =vault_facts= helpers the agents would call. Where a
+recipe runner already gives a trace, that trace is the ground
+truth (e.g. =count_across_vault= → =total_hits=).
+
+* Buckets
+
+- *anchor* — recipe-eligible. Recipes are designed to win here.
+- *control* — no recipe matches. Toggle should be a no-op.
+- *bait*   — recipe matches but the user's intent diverges; tests
+  whether the recipe path produces a misleading answer.
+
+* Anchors
+
+** A1 — bed-count baseline (count_across_vault, deterministic)
+
+Prompt: =in dailies, how many times have I made my bed?=
+
+#+begin_example :GT:
+recipe matched: count_across_vault
+runner output:  total_hits=10, files_with_hits=10
+top files:      daily/2025-11-09.org, daily/2026-03-07.org, daily/2026-03-14.org
+correct answer: "10 times" (cite at least one specific date)
+failure shape:  any answer of 0 OR ≥30 is wrong
+#+end_example
+
+** A2 — exercised across vault (count_across_vault, KNOWN BAD REGEX)
+
+Prompt: =how often have I exercised across the vault?=
+
+#+begin_example :GT:
+recipe matched: count_across_vault
+runner output:  total_hits=0   ← WRONG
+why wrong:      finding-6 — the tokeniser folds "across the vault"
+                into the pattern as content tokens, producing
+                (?:.{0,12}\bacross\b.{0,12}\bvault\b) which never
+                matches.
+correct answer: user has 8+ exercise mentions in dailies; the
+                routine_chores fact lists "exercise" as a tracked
+                chore (3× recent). A fair answer should report a
+                non-zero count or admit the regex returned nothing
+                while flagging that exercise IS tracked.
+#+end_example
+
+** A3 — drunk coffee this year (count_across_vault)
+
+Prompt: =how many times have I drunk coffee this year?=
+
+#+begin_example :GT:
+recipe matched: count_across_vault
+runner output:  total_hits=0
+correct answer: 0 IS plausible — user doesn't appear to log coffee
+                consumption as DONE/[X] events. A fair answer says
+                "no DONE/[X] entries match 'drunk coffee'" without
+                fabricating a count.
+failure shape:  any answer with a fabricated coffee count.
+#+end_example
+
+** A4 — recent activity narrative (recent_activity_summary)
+
+Prompt: =summarize what I have been working on recently=
+
+#+begin_example :GT:
+recipe matched: recent_activity_summary
+runner output:  20 nodes (last 14d) + 26 files (last 7d)
+salient topics: org-llm phase 22 / agentsmith / wiki test prompts /
+                doom keybinds / battery monitor / sidebar plugin /
+                test campaign 2026-05-03
+correct answer: 1-paragraph summary grouped by topic, citing 3-5
+                specific node titles or file paths from the recent
+                set.
+failure shape:  topics not in the recent set; no citations; the
+                answer reads as if generated from memory.
+#+end_example
+
+** A5 — routine chores from dailies (dailies_routine_filter)
+
+Prompt: =pull the most common routine items from my recent dailies=
+
+#+begin_example :GT:
+recipe matched: dailies_routine_filter
+runner output:  routine_chores fact — top 8 phrases:
+                  make bed, clean bathroom, exercise, trash, juice,
+                  bathroom, make juice, exercise 1
+correct answer: lists ≥4 of the chores above. Universal lowercase
+                only. NO proper nouns (Postgres, Cory, Wiki, etc.).
+failure shape:  proper nouns leaking in; learning/follow-up verbs
+                appearing; empty list when chores are clearly tracked.
+#+end_example
+
+** A6 — weekly mood review (weekly_mood_review)
+
+Prompt: =what has my mood been like over the past month?=
+
+#+begin_example :GT:
+recipe matched: weekly_mood_review
+runner output:  mood_signal — trend=stable, tough_days=0, windows=4
+correct answer: hedged, observational ("relatively stable",
+                "no significant fluctuations"). Cites window counts
+                or specific dates if any were tough. Does NOT
+                prescribe (no therapy/med/intervention recs).
+failure shape:  diagnoses; quotes raw mood prose; recommends
+                intervention; ignores the stable-trend signal.
+#+end_example
+
+** A7 — weather-aware agenda (weather_aware_agenda, ADVISORY)
+
+Prompt: =given today's weather and my schedule, what should I prioritise today?=
+
+#+begin_example :GT:
+recipe matched: weather_aware_agenda
+runner output:  None — falls back to advisory mode (recipe body
+                injected into prompt, no pre-fetched data)
+why advisory:   weather provider not configured / API key absent
+correct answer: defers to the agenda alone (no overdue weather data
+                to cite); flags weather data as unavailable; does
+                NOT fabricate a forecast.
+arm-A vs arm-B: this is a NEUTRAL anchor — both arms should land
+                similarly. arm-A's advisory body actually adds
+                noise here.
+#+end_example
+
+* Controls (recipe should NOT match)
+
+** C1 — top 10 tags
+
+Prompt: =what are my top 10 tags by frequency?=
+
+#+begin_example :GT:
+no recipe match (correct — `frequency` was deliberately removed
+from count_across_vault triggers, finding-2)
+correct answer: cites org_tag_index — top 10:
+                  bug 58, idea 30, org-llm 28, noexport 20,
+                  log 18, captains-log 17, ok 13, skill 9,
+                  gap 9, ux 6
+failure shape:  invented tags; uses memory instead of the tool.
+#+end_example
+
+** C2 — postgres mentions
+
+Prompt: =where in my notes do I mention Postgres?=
+
+#+begin_example :GT:
+no recipe match
+correct answer: org_grep returns 8+ matches; specific files
+                include gitlab-postgresql, arka_lab, snowflake-related
+                notes. Sample headings: "Querying the Postgres
+                Repository", "PostgreSQL Interface for Snowflake".
+failure shape:  "no matches" when Postgres is clearly mentioned.
+#+end_example
+
+** C3 — orphans
+
+Prompt: =which of my notes are orphaned (no links and no tags)?=
+
+#+begin_example :GT:
+no recipe match
+correct answer: org_orphans returns ≥10 candidates. The structural
+                shape (file, title, mtime) matters more than which
+                exact files since the orphans set drifts.
+failure shape:  empty list; "I don't know" without calling tool.
+#+end_example
+
+** C4 — overdue / due this week
+
+Prompt: =what's overdue or due this week?=
+
+#+begin_example :GT:
+no recipe match
+correct answer: org_agenda(window_days=7) returns
+                  today=0, upcoming=0, overdue=22, stale_todo=522
+                The strong signal here is "22 overdue" and that
+                stale_todo is a five-hundred-item iceberg.
+failure shape:  dumps the entire stale_todo list; misses the 22
+                overdue items.
+#+end_example
+
+** C5 — doom packages
+
+Prompt: =what doom packages do I have enabled?=
+
+#+begin_example :GT:
+no recipe match
+correct answer: doom_packages returns 7 user-added packages:
+                  csv-mode, doric-themes, modus-themes, ef-themes,
+                  ibuffer-sidebar, org-ql, claude-code-ide
+failure shape:  default Doom packages listed instead; "I don't know
+                your config".
+#+end_example
+
+** C6 — keybinding for org-roam-node-find
+
+Prompt: =what's my keybinding for org-roam-node-find?=
+
+#+begin_example :GT:
+no recipe match
+correct answer: doom_keybinds finds key=`r f` under the leader,
+                file ~/.config/doom/config.el line 121, command
+                `(cmd! (org-roam-node-find ...))`. So the binding
+                is `SPC r f`.
+failure shape:  cites Doom default `SPC n f` or similar; "I don't
+                know your config".
+#+end_example
+
+** C7 — :CUSTOM_ID: property search
+
+Prompt: =show me every node that has a :CUSTOM_ID: property=
+
+#+begin_example :GT:
+no recipe match
+correct answer: org_property_search returns 20+ headings with
+                CUSTOM_ID drawer entries. The structural shape
+                (file, heading, value) matters more than the
+                specific list since CUSTOM_IDs are added/removed
+                by hand.
+failure shape:  empty list; agent says "no CUSTOM_ID found" when
+                the vault clearly has them.
+#+end_example
+
+* Bait (recipe matches but intent diverges)
+
+** B1 — journal regularity (recipe=dailies_general)
+
+Prompt: =in dailies, do I journal regularly?=
+
+#+begin_example :GT:
+recipe matched: dailies_general (FALSE-FIRE — recipe pre-fetches
+                recent daily content, but the question is a yes/no
+                about cadence, not a content read)
+truth:          138 daily files over 1121 days vault span → ~12% lifetime.
+                Last 30d: 8/30 = ~27%. Last 90d: 21/90 = ~23%.
+                Last 365d: 138/365 = ~38%.
+correct answer: "Not daily — about 1 entry every 3-4 days lately"
+                or similar. Cites the rate.
+failure shape:  arm-A drowns in the dailies content dump and
+                produces a content summary instead of a yes/no on
+                cadence. arm-B can compute the rate from list_dailies
+                or by counting files.
+#+end_example
+
+** B2 — burnt out frequency (recipe=count_across_vault)
+
+Prompt: =how often am I burnt out?=
+
+#+begin_example :GT:
+recipe matched: count_across_vault (FALSE-FIRE — "how often"
+                triggers count regex, but the question is about
+                emotional state, not [X]/DONE event counts)
+recipe runner output: 0 hits (the user doesn't checkbox "burnt out")
+truth:          mood_signal trend=stable, tough_days=0 (last 42d).
+correct answer: arm-A reports 0 hits, possibly with caveat that
+                burnout isn't tracked as a DONE event. arm-B can
+                consult mood_signal and report "no tough-day flags
+                in the last 6 weeks; mood trend stable".
+failure shape:  arm-A says "you've never been burnt out" with
+                false confidence (the count is meaningless here).
+#+end_example
+
+** B3 — postgres setup summary (recipe=recent_activity_summary)
+
+Prompt: =summarize my postgres setup=
+
+#+begin_example :GT:
+recipe matched: recent_activity_summary (FALSE-FIRE — "summarize"
+                triggers recent-activity recipe, but the question
+                is content-recall about Postgres specifically, not
+                a recent-work narrative)
+recipe runner output: 14 recent nodes (none of which are
+                postgres-related — recent work is org-llm phase 22)
+truth:          50+ org_grep matches for "postgres" across the
+                vault, including dedicated files (gitlab-postgresql,
+                snowflake-postgresql interface, postgres-as-API
+                scratch notes).
+correct answer: arm-A delivers a recent-activity summary that
+                misses Postgres entirely (or grasps for the only
+                postgres mention if any). arm-B searches and
+                summarises the actual postgres notes.
+failure shape:  any answer that reads as if the user asked "what
+                have I been working on" — that's recipe-on getting
+                misled.
+#+end_example
+
+** B4 — meta-agent design (recipe=dailies_general, finding-8)
+
+Prompt: =help me scope a new @therapist agent that reasons over my dailies' emotional content=
+
+#+begin_example :GT:
+recipe matched: dailies_general (FALSE-FIRE — the word "dailies"
+                triggers the recipe, but the user is asking
+                @agentsmith for AGENT DESIGN, not a dailies read.
+                This is finding-8 from the 2026-05-03 test session.)
+truth:          this is a meta-agent design question. The right
+                response is to walk the user through agent-roster
+                considerations: persona shape, tool surface,
+                routing rules. NO vault data needed.
+correct answer: arm-A gets stuck on the injected dailies content
+                and either summarises emotion words (off-topic) or
+                strugges to redirect. arm-B has no recipe to
+                derail it and can engage with the meta-design
+                question directly.
+failure shape:  arm-A's answer reads as a dailies-content review
+                instead of an agent-design conversation.
+#+end_example
+
+* Decision bar (committed before running)
+
+For the *anchor* bucket all three must hold:
+- p50 latency: =recipes_on= ≥ 30% faster than =recipes_off=
+- median total tokens: =recipes_on= uses ≥ 20% fewer tokens
+- judge quality: prefers =recipes_on= in ≥ 55% of pairs
+
+For the *control* bucket:
+- judge prefers =recipes_off= in ≤ 55% of pairs (no regression)
+
+The *bait* bucket is informational — it shows whether false-fires
+cause measurable quality harm even when they don't fail the bar.
+
+If anchor clears all three AND control is safe → keep, expand
+catalog. If anchor clears 2-of-3 → narrow catalog to the recipes
+that individually clear the bar (per-recipe table in the summary).
+If anchor clears 0-1 → dump.
+
+* See also
+
+- =scripts/recipe_ab_harness.py= — runs the A/B
+- =scripts/recipe_ab_judge.py= — judges with Claude Opus
+- =docs/wiki/recipes.org= — what we're testing
+- =docs/wiki/2026-05-03-test-session.org= — prior validation pass
+  that produced findings 5-8 (still relevant; A2/B4 ground truth
+  cites finding-6/finding-8 directly)
