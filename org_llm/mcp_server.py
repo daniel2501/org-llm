@@ -3550,6 +3550,20 @@ def create_mcp_server():
                         f"{len(rows)} match(es) for {query!r}", body)
 
     @server.tool()
+    def vault_profile(force: bool = False) -> str:
+        """Phase 21 — return a compact human-readable digest of
+        the user's vault from all registered inferrers. Use this
+        as a startup primer ("who is this user, how do they
+        organise their vault?") — one call gets enough context to
+        answer most "what does Daniel typically do" questions
+        without re-scanning files. Equivalent to calling
+        vault_facts() with the synthesised summary view."""
+        from . import vault_facts as _vf
+        return _themed("vault_profile",
+                        "user vault profile",
+                        _vf.vault_profile_digest(force=force))
+
+    @server.tool()
     def vault_facts(name: str = "", force: bool = False) -> str:
         """Phase 21 — read DB-backed deterministic facts about the
         user's vault. Pass `name` to fetch one fact (e.g.

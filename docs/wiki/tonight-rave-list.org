@@ -56,22 +56,110 @@ cloud call.
 
 * Queued
 
-** TODO [#A] Tomorrow night — 5 more inferrers + vault_profile :phase21:
+** DONE Theme 1 — 5 more inferrers + vault_profile           :phase21:
+CLOSED: [2026-05-03]
 
-| inferrer                | what stops being guessed                                 |
-|-------------------------+----------------------------------------------------------|
-| =priority_usage=        | does the user use [#A]/[#B]/[#C]? distribution?          |
-| =date_format=           | YYYY-MM-DD vs ISO vs custom in headlines/filenames       |
-| =scheduling_pattern=    | SCHEDULED vs DEADLINE preference + common offsets        |
-| =capture_section_titles=| recurring level-1 headings (chores / work / reading)     |
-| =voice_register=        | sentence-length distribution + formal/casual tells       |
+Shipped tonight in the same rave session:
 
-Plus an aggregator =vault_profile()= MCP tool that returns all
-inferrer outputs in one call — used as the org-llm primary
-agent's startup primer so the crew has shared context by the
-time the first request lands.
+| inferrer                | live result on this user's vault                              |
+|-------------------------+----------------------------------------------------------------|
+| =priority_usage=        | USED, dominant #B (19 #B, 12 #C, 11 #A; some non-standard)     |
+| =date_format=           | =YYYYMMDDHHMMSS-slug= for nodes (352), =YYYY-MM-DD= dailies (138) |
+| =scheduling_pattern=    | prefers SCHEDULED (143 vs 0 DEADLINE), weekly repeaters seen  |
+| =capture_section_titles=| top: shower (97×), boys dinner (94×), exercise/meditation (90×), dl weather (90×) |
+| =voice_register=        | mixed register, ~13.3 words/sentence, 148 casual / 4 formal markers |
 
-Effort: M (one full night). Deps: Phase 21.1 (shipped).
+=vault_profile_digest()= synthesises a 9-line ~580-char user
+summary suitable as an agent startup primer. Exposed via the
+=vault_profile= MCP tool.
+
+Bonus signal: =dl weather= and =morning contemplation= rank
+among top level-1 headings — the user is already capturing
+weather context in dailies, which directly motivates the
+weather-aware-agenda phase below.
+
+Effort delivered: M. Deps satisfied: Phase 21.1 (shipped earlier
+tonight).
+
+** TODO [#B] Beanhub + org-mode personal budget integration  :budget:
+
+User asked 2026-05-03 (rave-coding session). Reference repos:
+=~/repos/bh-gh-spcs= (Snowflake-side load procs, github
+ingest, transactions_raw). Sibling =bh-gh*= repos likely hold
+the GitHub-side budget feed.
+
+Goal: a tangled database-backed personal budget surface in
+org-llm — debit + credit + account transactions, live, with
+the org-mode capture flow tied directly to the underlying
+DB. The user's existing bean-counting infrastructure becomes a
+native org-llm subsystem rather than an external tool to
+context-switch into.
+
+Implementation sketch:
+- New module =org_llm/budget.py= with a =Budget= /
+  =Account= / =Transaction= schema in =db.py= (or a sibling
+  SQLite db at =~/.local/share/org-llm/budget.sqlite= to
+  keep financial data isolated from vault data).
+- Ingest path: read from beanhub's GitHub-published feed
+  (the =bh-gh-spcs= ingest looks like the precedent — same
+  feed format, different sink). Cron / =org-llm sync= hook
+  pulls new transactions on launch.
+- Tangle path: a literate-config style =budget.org= file
+  with one heading per account; running =org-llm budget
+  --tangle= writes the underlying DB rows. Reverse direction:
+  =--detangle= regenerates the org file from the DB.
+- Sidebar BUDGET card: balance per account, recent N
+  transactions, top categories this month, a colour signal
+  when a category is over-budget.
+- MCP tools: =budget_balance(account?)=,
+  =budget_transactions(since_days, account?)=,
+  =budget_categories(window)=. Agents (planner, scribe) can
+  reason about money the same way they reason about agenda.
+- New recipe candidates: "what did I spend on X" →
+  =budget_transactions= pre-fetch; "am I over budget" →
+  =budget_categories= + threshold check.
+
+Why this matters: the user's vault already tracks personal
+state (routines, agenda, dailies). Money is the missing axis.
+With the integration, the planner agent can answer "can I
+afford this" without leaving the org-llm loop.
+
+Effort: L (multi-night). Deps: Phase 19.1 (sync MVP) for the
+auto-pull; standalone otherwise.
+
+** TODO [#B] Weather-aware org-agenda                         :weather:
+
+User asked 2026-05-03 (rave-coding session). New phase candidate
+or part of org-agenda-agent (wishlist).
+
+Idea: agenda scan reads plans mentioned in headings + every
+SCHEDULED entry with location/outdoor cues. Cross-references
+against a weather feed for the relevant day; alerts when
+forecast impacts the plan.
+
+Example surfaces:
+- Sidebar AGENDA card adds a `weather` row when any item the
+  next 7d has rain/snow/heat/wind that crosses a threshold.
+- "Hike Sunday at 9am" in dailies → check Sunday forecast →
+  surface "60% chance rain Sun 9am-noon".
+- "Mow lawn" / "BBQ" / "garden" / "wash car" / heading tag
+  =:outdoor:= flagged as weather-sensitive.
+
+Implementation sketch:
+- New inferrer =weather_sensitive_keywords= reading recent
+  agenda items + flagging the heading text against a small
+  outdoor-keyword list (curated lowercase: =hike=, =bbq=,
+  =garden=, =mow=, =run=, =bike=, =walk=, =fish=, =camp=,
+  =beach=, =yard=, etc) plus =:outdoor:= tag.
+- New MCP tool =weather_for_agenda(date_range)= calling a
+  free weather API (open-meteo.com — no key, lat/lon based).
+  User location resolved from =db.Config('location_lat')= /
+  =('location_lon')= or via =timedatectl= geo-clue.
+- Sidebar surfaces high-impact alerts; agenda agent narrates
+  them in scheduled-review queries.
+
+Effort: M-L. Deps: agenda agent (wishlist) for the narrative
+side; the inferrer + sidebar row can ship standalone.
 
 ** TODO [#A] An agent who is an expert in using the org-llm CLI :agent:
 
