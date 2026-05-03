@@ -4329,6 +4329,74 @@ class _ProxyHandler(http.server.BaseHTTPRequestHandler):
                     _emit_failover_toast(target['model'])
                     return True
 
+            # Phase 22.7: 400 "Provider returned error" retry.
+            #
+            # Openrouter sometimes routes a chat-completions call to
+            # an upstream provider that doesn't actually serve the
+            # requested model on that endpoint (e.g. Novita rejects
+            # qwen/qwen-2.5-72b-instruct on /completions with
+            # "does not support endpoint"). The user sees "Provider
+            # returned error" and the request fails — but routing is
+            # non-deterministic, so a plain retry usually hits a
+            # different working provider.
+            #
+            # Pattern: HTTP 400, body mentions "Provider returned
+            # error" or "does not support endpoint" or
+            # "INVALID_REQUEST_BODY". We blacklist the offending
+            # provider via openrouter's `provider.ignore` hint and
+            # re-issue the SAME request body. Single retry — if the
+            # second attempt also fails, surface the original error.
+            provider_routing_err = (
+                e.code == 400
+                and (
+                    "provider returned error"      in err_body.lower()
+                    or "does not support endpoint" in err_body.lower()
+                    or "invalid_request_body"      in err_body.lower()
+                )
+            )
+            if provider_routing_err and parsed:
+                bad_provider = ""
+                try:
+                    err_json = json.loads(err_body)
+                    bad_provider = (err_json.get("error", {})
+                                              .get("metadata", {})
+                                              .get("provider_name", "")
+                                            or "")
+                except Exception:
+                    pass
+                retry_parsed = dict(parsed)
+                if bad_provider:
+                    prov_hint = dict(retry_parsed.get("provider") or {})
+                    ignore_list = list(prov_hint.get("ignore") or [])
+                    if bad_provider not in ignore_list:
+                        ignore_list.append(bad_provider)
+                    prov_hint["ignore"] = ignore_list
+                    prov_hint.setdefault("allow_fallbacks", True)
+                    retry_parsed["provider"] = prov_hint
+                try:
+                    if _do_retry(retry_parsed,
+                                  "cloud_failover_provider_retry"):
+                        return True
+                except urllib.error.HTTPError as e3:
+                    try:
+                        err_body2 = (e3.read() or b"").decode(
+                            "utf-8", "replace")[:200]
+                    except Exception:
+                        err_body2 = ""
+                    self._last_error = (
+                        f"failover failed: cloud http {e.code} "
+                        f"(provider {bad_provider!r} rejected); "
+                        f"retry also http {e3.code} — {err_body2}"
+                    )
+                    return False
+                except Exception as e3:
+                    self._last_error = (
+                        f"failover failed: cloud http {e.code} "
+                        f"(provider {bad_provider!r} rejected); "
+                        f"retry errored: {type(e3).__name__}: {e3}"
+                    )
+                    return False
+
             if ctx_overflow and parsed and parsed.get("tools"):
                 # Step 1: compressed tools.
                 compressed = dict(parsed)
