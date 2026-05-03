@@ -1597,6 +1597,23 @@ _PROXY_NO_TOOL_TAGS: set[tuple[str, str]] = {
 # the first match wins. All capture the JSON object as group(1).
 import re as _re                                          # noqa: E402
 
+# Common code-block language tags that LLMs use for FORMATTING but
+# are NOT tool names. The fenced-block + tool-name patterns must
+# reject these — otherwise a classifier returning ```json{...}``` or
+# scribe drafting ```org\n* [ ] ...``` gets reshaped into a tool
+# call to a nonexistent "json"/"org" tool, producing the "Model
+# tried to call unavailable tool" error.
+_TOOL_CALL_NAME_DENYLIST: set = {
+    "json", "yaml", "toml", "xml", "html", "css", "md", "markdown",
+    "txt", "text", "org", "rst", "ini", "csv", "tsv",
+    "py", "python", "ts", "typescript", "tsx", "js", "javascript",
+    "jsx", "rb", "ruby", "go", "rs", "rust", "java", "c", "cpp",
+    "cs", "sh", "bash", "zsh", "fish", "diff", "patch",
+    "sql", "log", "elisp", "lisp", "scheme", "haskell",
+    "tool_call",   # the canonical wrapper itself isn't a tool
+}
+
+
 _TOOL_CALL_PATTERNS: list = [
     # Canonical wrapper — what the synth prompt asks for.
     _re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", _re.DOTALL),
@@ -1707,6 +1724,13 @@ def _extract_tool_call(text: str) -> Optional[dict]:
             wrapper_name = ""
         else:
             wrapper_name, json_str = groups[0], groups[1]
+        # Reject formatting-language tags (json, yaml, org, …).
+        # Those are code-block shapes, not tool names. Without
+        # this guard a classifier returning ```json{...}``` got
+        # reshaped into a tool call to a nonexistent "json" tool.
+        if (wrapper_name
+                and wrapper_name.lower() in _TOOL_CALL_NAME_DENYLIST):
+            continue
         try:
             obj = json.loads(json_str)
         except Exception:

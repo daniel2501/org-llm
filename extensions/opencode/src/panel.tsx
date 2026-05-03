@@ -546,15 +546,14 @@ export async function loadStatus(directory: string): Promise<SidebarStatus> {
 }
 
 // Phase 20.x: bake the runtime overlay's intent_agent and
-// manager_recent into _cachedStatus directly. Previously the
-// SectionActive / SectionManager components re-read the overlay
-// from disk at render time, but the slot's render function only
-// re-runs when _cachedStatus *content* changes — disk reads from
-// inside an unchanging render are invisible to the framework.
-// Stashing the values on the status object guarantees each
-// refreshStatus tick produces fresh props the slot can render.
+// manager_recent into _cachedStatus directly. The Solid renderer
+// only re-runs the slot when its props REFERENCE-CHANGE, so we
+// must produce a NEW object each tick (mutating in place is
+// invisible to Solid's reactivity). Each refreshStatus call
+// allocates a fresh object — stale fields are dropped on every
+// tick, fresh fields appear immediately.
 export async function refreshStatus(directory: string): Promise<SidebarStatus> {
-  const status = await loadStatus(directory);
+  const loaded = await loadStatus(directory);
   let runtimeMtime = 0;
   let intentAgent  = "";
   let managerRecent: any[] = [];
@@ -570,12 +569,15 @@ export async function refreshStatus(directory: string): Promise<SidebarStatus> {
     runtimeModel    = overlay.model    || "";
     runtimeProvider = overlay.provider || "";
   } catch { /* no overlay yet */ }
-  (status as any)._runtime_mtime    = runtimeMtime;
-  (status as any)._intent_agent     = intentAgent;
-  (status as any)._manager_recent   = managerRecent;
-  (status as any)._runtime_model    = runtimeModel;
-  (status as any)._runtime_provider = runtimeProvider;
-  _cachedStatus = status;
+  // Build a new object so the slot's prop diff fires.
+  _cachedStatus = {
+    ...loaded,
+    _runtime_mtime:    runtimeMtime,
+    _intent_agent:     intentAgent,
+    _manager_recent:   managerRecent,
+    _runtime_model:    runtimeModel,
+    _runtime_provider: runtimeProvider,
+  } as any;
   return _cachedStatus;
 }
 
