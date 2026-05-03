@@ -34,18 +34,47 @@ cards" = Phase 12) ship in slices without renumbering the world.
 
 - *Currently:* late beta. Core flows (index → embed → ask →
   capture → launch) are stable. Most active recent surface is
-  Phase 16 (TypeScript / Emacs extensions).
-- *Latest shipped:* Phase 17.1 — LCARS sidebar + LLM proxy + auto-doctor
-  (full TNG-styled status panel with 5 cards, =/sys*= slash family that
-  bypasses ollama via the new HTTP proxy shim, slow-LLM watcher that
-  auto-runs =doctor --power-boost= and offers a one-keystroke cloud
-  failover, auto-session opener so the sidebar appears on launch
-  without typing).
-- *Active focus:* Phase 16.3 (Emacs companion) + Phase 16.4 extension
-  polish.
+  Phase 22 (manager pattern via deterministic recipes).
+- *Latest shipped:* Phase 22 — orchestration v2 (recipe-based) +
+  MANAGER buffer. Proxy pattern-matches the user message,
+  injects a deterministic recipe into the agent prompt, no extra
+  cloud round-trips. Live-tailing Emacs MANAGER buffer (=<leader>
+  y Y=) with crew_log + History mirror for durable cross-session
+  audit. fs.watch'd sidebar reactivity. Recipe rejection-first
+  filter (proper-noun-anywhere = reject, frequency does not
+  override).
+- *Active focus:* Phase 22.5a (thought-process capture in
+  manager log), recipe expansion (more task-shapes), Phase 19.1
+  (=org-llm sync= MVP — gates the weekly GTD remote routine).
 - *Punch list before 1.0:* cross-platform install validation
   (macOS / Ubuntu), Termux/Android port, smoke coverage on
   less-walked verbs, MCP-kind tool-call logging.
+
+** Priority order (current → wishlist)
+
+| #  | when         | phase                                    | priority | jump          |
+|----+--------------+------------------------------------------+----------+---------------|
+| 1  | <2026-05-09> | 22.5 thought-process capture             | A NEXT   | jump to ↓     |
+| 2  | <2026-05-10> | 22 orchestration v2 (recipe expansion)   | A active | ↓             |
+| 3  | <2026-05-12> | 19 built-in vault git-sync               | A        | ↓             |
+| 4  | <2026-05-15> | 21 deterministic vault inferrers         | A        | ↓             |
+| 5  | <2026-05-18> | 18 proxy expansion follow-ups            | A        | ↓             |
+| 6  | <2026-05-20> | 16.5 Doom config introspection           | A        | ↓             |
+| 7  | <2026-05-22> | 16.4 extension polish                    | A        | ↓             |
+| 8  | <2026-05-30> | Punch list — beta → 1.0                  | A        | ↓             |
+| 9  | <2026-06-01> | org-agenda-agent (depends on 19)         | B        | wishlist      |
+| 10 | <2026-06-08> | 13.2 dailies as walk targets             | B        | leftover 13.x |
+| 11 | <2026-06-13> | Co-edit org files                        | B        | wishlist      |
+| 12 | <2026-06-15> | 12.6 cached gather persistence           | B        | leftover 12.x |
+| 13 | <2026-06-22> | 12.7 dbt analytics over engagement       | B        | leftover 12.x |
+| 14 | <2026-06-29> | 13.4 per-slug routing / fact replacement | B        | leftover 13.x |
+| 15 | <2026-07-06> | 13.5 follow-up questions in walk         | B        | leftover 13.x |
+| 16 | <2026-07-15> | 20 full agent crew (parked)              | B parked | ↓             |
+
+Single-table, single-glance roadmap. =A NEXT= = currently in
+progress. =A= = scheduled for the date shown. =B= = scheduled
+but not blocking. =B parked= = on hold pending architectural
+prereq. Wishlist below is =[#C]= — nothing scheduled.
 
 * Shipped — pre-beta foundations                             :shipped:
 
@@ -175,6 +204,7 @@ Every card the user marks bad / clicks / dismisses writes a row to
 =(card_kind, narration_model)= and surfaces patterns.
 
 ** TODO [#B] 12.6: real persistence for cached gather
+SCHEDULED: <2026-06-15 Mon>
 :PROPERTIES:
 :STATUS: planned
 :CODE_REF: [[file:../../org_llm/insights.py::662][org_llm/insights.py:662]]
@@ -184,6 +214,7 @@ The current cache is in-memory; cold every process. Persist to
 SQLite so launch-after-launch hits the cache.
 
 ** TODO [#B] 12.7: dbt analytics over engagement
+SCHEDULED: <2026-06-22 Mon>
 :PROPERTIES:
 :STATUS: planned
 :CODE_REF: [[file:../../org_llm/db.py::140][org_llm/db.py:140]]
@@ -211,6 +242,7 @@ The =walk= verb, =/walk= slash command, walk MCP tool. Atomic-fact
 validator + disambiguation tool + permissive UX.
 
 ** TODO [#B] 13.2: dailies as walk targets
+SCHEDULED: <2026-06-08 Mon>
 :PROPERTIES:
 :STATUS: planned
 :CODE_REF: [[file:../../org_llm/walk.py::141][org_llm/walk.py:141]]
@@ -220,6 +252,7 @@ Walk a day's nodes (today, yesterday, last weekday) without needing
 an explicit start ID.
 
 ** TODO [#B] 13.4: per-slug routing + real fact replacement
+SCHEDULED: <2026-06-29 Mon>
 :PROPERTIES:
 :STATUS: planned
 :CODE_REF: [[file:../../org_llm/cli.py::10341][org_llm/cli.py:10341]], [[file:../../org_llm/cli.py::10430][:10430]]
@@ -229,6 +262,7 @@ Replace "fact removal" with real edit-in-place via slug routing,
 not the current append-with-disambiguation-marker scheme.
 
 ** TODO [#B] 13.5: follow-up questions in walk
+SCHEDULED: <2026-07-06 Mon>
 :PROPERTIES:
 :STATUS: planned
 :CODE_REF: [[file:../../org_llm/walk.py::25][org_llm/walk.py:25]]
@@ -485,6 +519,7 @@ on first-byte timeout. Each is a single new interceptor module
 slotting into the existing chain.
 
 * TODO [#A] Planned — Phase 16.4+: extension polish          :planned:
+SCHEDULED: <2026-05-22 Fri>
 
 ** Status panel slot
 
@@ -532,7 +567,18 @@ The bundled =chat_model= default is already =llama3.2= so fresh
 installs are fine; this is for users who manually overrode it
 without realising the tool-calling implications.
 
-* TODO [#A] Planned — Phase 20: Agent crew (manager + specialists) :planned:
+* TODO [#B] Parked — Phase 20: full agent crew (manager + specialists) :parked:
+SCHEDULED: <2026-07-15 Wed>
+
+*Status (2026-05-02):* Reverted at commit ~f50d10a after the
+multi-round-trip orchestration tripled latency and degraded
+output quality. The deterministic-recipe variant shipped as
+Phase 22 captures most of the practical wins (orchestrated tool
+order, inline filters, MANAGER visibility) without the cost.
+This entry stays on the roadmap as the longer-term home for the
+peer-review / coder-as-language-reviewer ideas — re-enable when
+either (a) cloud LLMs reliably emit parallel tool_calls or (b)
+we have a single-shot orchestrator model.
 
 Today the 13 preconfigured agents are independent specialists —
 the user picks one via =@scribe= / =@engineer= / etc. and the
@@ -655,6 +701,7 @@ already exists; Phase 20 extends the schema to express the
    defaults to =fast_model=.)
 
 * TODO [#A] Planned — Phase 16.5: Doom config introspection  :planned:
+SCHEDULED: <2026-05-20 Wed>
 
 org-llm currently asks the user to set =org_dir=, =daily_dir=,
 and friends by hand, even though Doom Emacs already knows all of
@@ -802,7 +849,8 @@ Open questions:
    remote)? =emacsclient -s <socket>= covers it but the path
    resolution gets messy. Out of scope for 16.5a.
 
-* TODO [#A] Planned — Phase 18: proxy expansion              :planned:
+* TODO [#A] Planned — Phase 18: proxy expansion (follow-ups) :planned:
+SCHEDULED: <2026-05-18 Mon>
 
 Phase 17.1 landed [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] with a 13-interceptor
 chain between opencode and ollama. Each interceptor is a standalone
@@ -1073,7 +1121,8 @@ configurable threshold, transparently retry against the cloud
 provider (or a different local model). Today the user sees
 opencode's raw error UI; the proxy can recover before it bubbles.
 
-* TODO [#B] Planned — Phase 22.5: thought-process capture in MANAGER log :planned:
+* NEXT [#A] Active — Phase 22.5: thought-process capture in MANAGER log :in_progress:
+SCHEDULED: <2026-05-09 Sat>
 
 The MANAGER buffer (Phase 22, Doom keybind =<leader> y Y=)
 currently logs the I/O envelope of each crew action — action,
@@ -1127,7 +1176,8 @@ Three layers of visibility, increasing in cost:
 3. Performance: capture for ALL turns or only orchestrated?
    Lean orchestrated-only at first.
 
-* TODO [#A] Planned — Phase 22: orchestration v2 (no-cost manager) :planned:
+* TODO [#A] Active — Phase 22: orchestration v2 (recipe expansion) :in_progress:
+SCHEDULED: <2026-05-10 Sun>
 
 The 2026-05-02 attempt at full crew orchestration (Phase 20.x)
 was reverted because it cost 3-5× cloud round-trips per turn
@@ -1232,6 +1282,7 @@ Hard constraints for Phase 22:
    scribe's prompt).
 
 * TODO [#A] Planned — Phase 21: deterministic vault inferrers :planned:
+SCHEDULED: <2026-05-15 Fri>
 
 Phase 20.x landed a manager pattern that consults specialist LLM
 agents for things the primary doesn't know. But many of the
@@ -1320,6 +1371,7 @@ without needing to know the internals.
 3. How to test? Sample fixtures + golden-file inferrer outputs.
 
 * TODO [#A] Planned — Phase 19: built-in vault git-sync       :planned:
+SCHEDULED: <2026-05-12 Tue>
 
 Today users syncing =~/org/= across machines have to run their
 own git wrapper (cron, magit, =git auto-commit-mode=, etc.). Make
@@ -1415,6 +1467,7 @@ Three downstream features can't ship cleanly without it:
   a working single-vault sync first.
 
 * TODO [#A] Punch list — beta → 1.0                          :planned:
+SCHEDULED: <2026-05-30 Sat>
 
 Lifted from the original README roadmap stub:
 
@@ -1470,6 +1523,7 @@ Two open questions before this can ship:
    stays visible.
 
 ** TODO [#B] org-agenda-agent — scheduling + GTD over org agenda
+SCHEDULED: <2026-06-01 Mon>
 A new preconfigured agent specialised for daily/weekly planning
 on top of =org-agenda=. Treats the agenda as the source of truth
 for what's open, scheduled, deadlined, and stalled, and helps the
