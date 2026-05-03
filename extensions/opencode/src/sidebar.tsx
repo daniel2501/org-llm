@@ -21,6 +21,7 @@
 import {
   refreshStatus, getStatus, resolveConfig, PanelBody, fmtAge,
   getActiveModelOverride, setActiveModelOverride,
+  getActiveAgentOverride, setActiveAgentOverride,
   scrollSidebar, showToast, setLastFailover,
 } from "./panel";
 import { getPromptRef } from "./auto-session";
@@ -258,7 +259,28 @@ export async function registerSidebar(api: any): Promise<void> {
   // overlay changes (intent_agent, manager_recent). 5s lag was
   // visible to the user on @-routed turns.
   const tickMs = Math.max(2_000, cfg.refresh_secs * 1_000);
-  const tick = setInterval(() => { void refreshStatus(directory); }, tickMs);
+  const tick = setInterval(() => {
+    void refreshStatus(directory);
+    // ALSO push intent_agent into the in-memory _activeAgentOverride
+    // so it flows through the same render path that updates the
+    // model display (which works). This sidesteps the Solid
+    // reactivity mystery — when the proxy stamps intent_agent in
+    // the status file, the next tick (within 2s) reads it and
+    // calls setActiveAgentOverride. The next slot re-render
+    // (message events, etc.) reflects the fresh agent.
+    try {
+      const fs = require("node:fs");
+      const ss = JSON.parse(fs.readFileSync(
+        `${directory}/.opencode/sidebar-status.json`, "utf8"));
+      const intent = (ss?.active?.intent_agent || "").trim();
+      if (intent) {
+        const cur = getActiveAgentOverride();
+        if (!cur || cur.agent !== intent) {
+          setActiveAgentOverride(intent, Date.now());
+        }
+      }
+    } catch { /* file not yet written */ }
+  }, tickMs);
   api.lifecycle?.onDispose?.(() => clearInterval(tick));
 
   // Phase 18.4-iter8: file-based action bridge. opencode's slash
