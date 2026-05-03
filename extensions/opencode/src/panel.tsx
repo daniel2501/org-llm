@@ -152,6 +152,28 @@ export interface SidebarStatus {
 // default). Spread + override pattern below carries that.
 import { SIDEBAR_DEFAULTS } from "./sidebar-defaults.generated";
 
+// Solid signal for the cached status. Ensures the sidebar slot
+// re-renders when refreshStatus produces a new value. Without
+// this, the slot's render only re-runs on opencode-triggered
+// events (message.updated) — which means cache changes between
+// chat turns (e.g. mid-stream tool calls writing to crew_log)
+// stay invisible. Wrapped in a try/catch in case solid-js can't
+// resolve at plugin load time (an issue noted in earlier
+// iterations); if it fails, fall back to the plain-variable
+// cache and accept the staleness.
+let _statusGetter: (() => SidebarStatus) | null = null;
+let _statusSetter: ((s: SidebarStatus) => void) | null = null;
+try {
+  // @ts-ignore — solid-js is in node_modules but TS may not
+  // pick it up depending on tsconfig; runtime resolution works.
+  const solid = require("solid-js");
+  if (solid?.createSignal) {
+    const [g, s] = solid.createSignal({} as SidebarStatus);
+    _statusGetter = g;
+    _statusSetter = s;
+  }
+} catch { /* fall back to plain variable */ }
+
 export const DEFAULT_CONFIG: Required<SidebarConfig> = {
   ...SIDEBAR_DEFAULTS,
   // Ensure the spread casts cleanly to a mutable Required<...>;
@@ -204,7 +226,14 @@ export function resolveConfig(s: SidebarStatus): Required<SidebarConfig> {
 
 let _cachedStatus: SidebarStatus = {};
 
-export function getStatus(): SidebarStatus { return _cachedStatus; }
+// Signal-aware getter — when solid-js loaded successfully,
+// subscribes the calling reactive scope so the sidebar
+// re-renders when setStatus runs. When solid-js didn't load,
+// returns the plain variable.
+export function getStatus(): SidebarStatus {
+  if (_statusGetter) return _statusGetter();
+  return _cachedStatus;
+}
 
 /** Pinnable toast helper. Wraps `api.ui.toast` with a `pin`
  * option and respects the `sidebar_pin_toasts` config knob.
@@ -575,6 +604,11 @@ export async function refreshStatus(directory: string): Promise<SidebarStatus> {
     _runtime_model:    runtimeModel,
     _runtime_provider: runtimeProvider,
   } as any;
+  // Also push to the Solid signal — this is what triggers
+  // sidebar re-render. Without it, the slot only re-runs on
+  // opencode-triggered events (chat updates) and cache changes
+  // between turns are invisible.
+  if (_statusSetter) _statusSetter(_cachedStatus);
   return _cachedStatus;
 }
 
