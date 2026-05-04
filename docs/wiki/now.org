@@ -44,56 +44,107 @@ snapshot= verb could regenerate this page from
 
 * Recently done                                                    :@done:
 
-# As of: 2026-05-04 — agent test campaign + post-fix triage arc
+# As of: 2026-05-04 — wiki concept-graph + meta-agents arc
 
-| When  | Status | Item                                                        | Commit  |
-|-------+--------+-------------------------------------------------------------+---------|
-| 05-04 | ✓      | Wiki sweep — recipes.org + roadmap.org post-fix verdict     | 6212e4e |
-| 05-04 | ✓      | Close weather re-A/B + 2 new bugs found en route            | 277c279 |
-| 05-04 | ✓      | Close agentsmith meta-agent validation                      | 53cbf78 |
-| 05-04 | ✓      | =@agentsmith= trim 3177→1423 + cross-scope refusal          | 4bd81a4 |
-| 05-04 | ✓      | Close @journalist boundary-fix validation                   | 5ad4281 |
-| 05-04 | ✓      | =@journalist= stay-in-lane handoff bullet                   | 525fa31 |
-| 05-04 | ✓      | Close =format_prefetch_block= overdue-rendering bug         | 622f2d3 |
-| 05-04 | ✓      | =format_prefetch_block= renders all 3 agenda buckets        | 2b48ae5 |
-| 05-04 | ✓      | Close phantom-verb bug                                      | e0a547f |
-| 05-04 | ✓      | =agents --apply= alias + docstring fix                      | c4c507a |
-| 05-04 | ✓      | Land 9 agent-test findings + spread cluster                 | b5504da |
+| When  | Status | Item                                                            | Commit  |
+|-------+--------+-----------------------------------------------------------------+---------|
+| 05-04 | ✓      | Queue route-preview Stage 1 visual verification                 | ffcd111 |
+| 05-04 | ✓      | Pro-Agor walkthrough + spike protocol in dev-tracker            | 8586bc5 |
+| 05-04 | ✓      | =feat(opencode-plugin)= route-preview ghost text Stage 1        | e14acf8 |
+| 05-04 | ✓      | Cite Agor/libSQL as prior art + MCP-everything design rule      | 88db583 |
+| 05-04 | ✓      | Park SQLite-successor research at C with trigger conditions     | 2ffa4d2 |
+| 05-04 | ✓      | Queue SQLite-successor research before Phase 25.1               | 6f92205 |
+| 05-04 | ✓      | Queue route-preview entry in dev-tracker (design doc)           | af705c0 |
+| 05-04 | ✓      | Ship =@curator= + =@tracker= + wiki concept-graph sweep         | 3369a8a |
+| 05-04 | ✓      | Add =now.org= — single-view dashboard ('YOU ARE HERE')          | 9f25ecb |
+| 05-04 | ✓      | Close @doom legacy-pack + boundary validation                   | 786b907 |
+| 05-04 | ✓      | =fix(@doom)= promote to starfleet-core + tool-unreachable case  | b70dd00 |
+| 05-04 | ✓      | Wiki sweep — recipes.org + roadmap.org post-fix verdict         | 6212e4e |
+| 05-04 | ✓      | =feat(opencode-plugin)= server-side @<agent> re-injection hook  | f170cc0 |
+| 05-04 | ✓      | Close weather re-A/B + 2 new bugs found en route                | 277c279 |
+| 05-04 | ✓      | Close agentsmith meta-agent validation                          | 53cbf78 |
+| 05-04 | ✓      | =@agentsmith= trim 3177→1423 + cross-scope refusal              | 4bd81a4 |
+| 05-04 | ✓      | Close @journalist boundary-fix validation                       | 5ad4281 |
+| 05-04 | ✓      | =@journalist= stay-in-lane handoff bullet                       | 525fa31 |
+| 05-04 | ✓      | Close =format_prefetch_block= overdue-rendering bug             | 622f2d3 |
+| 05-04 | ✓      | =format_prefetch_block= renders all 3 agenda buckets            | 2b48ae5 |
+| 05-04 | ✓      | Close phantom-verb bug                                          | e0a547f |
+| 05-04 | ✓      | =agents --apply= alias + docstring fix                          | c4c507a |
+| 05-04 | ✓      | Land 9 agent-test findings + spread cluster                     | b5504da |
 
-* ▶ YOU ARE HERE — 2026-05-04 Mon, end of agent-test triage arc    :@here:
+** What landed this arc
+
+- *Two new meta-agents* — =@curator= (atoz, wiki concept-graph
+  specialist) + =@tracker= (boothby, dev-process steward).
+  Birth-name aliases registered; routes via =_AGENT_TRIGGERS=.
+- *Wiki concept-graph sweep* — 14-page cross-link audit, 4 new
+  concept pages registered (=vault-facts.org=,
+  =memory-alpha.org=, =architecture.org=, =interceptors.org=).
+- *Persona whitespace normalizer* — runtime collapse of
+  mid-sentence space runs across all 19 personas; caught by the
+  curator dogfood loop.
+- *Drift fixes* — agent counts synced to canonical
+  =_AGENT_META= (19 / 12 / 7) across 5 wiki files.
+- *Route-preview Stage 1* — fish-style ghost text in opencode's
+  prompt =hint= slot. Passive route preview ("what would happen
+  if I submit this?"); not autocomplete-strict-sense (Stage 2
+  needs upstream PR for =onInput= + Tab hooks). Visual
+  verification queued.
+- *Memory Alpha framing* — Trek metaphor for Phase 25's DB
+  inversion (Memory Alpha = DB, Memory Prime = vault_facts,
+  Captain's Log + Mr. Atoz already in place); naming layer, not
+  a code rename.
+- *@doom* promoted to starfleet-core; tool-unreachable case
+  handled.
+
+* ▶ YOU ARE HERE — 2026-05-04 Mon, end of wiki-concept-graph arc    :@here:
 
 #+begin_quote
-*Last action:* committed wiki sweep (=6212e4e=) closing the
-post-fix narrative on =weather_aware_agenda=.
+*Last action:* committed route-preview Stage 1 visual-
+verification entry to dev-tracker (=ffcd111=). 23 commits
+today.
 
-*Current move:* pushing into =@doom= pack decision (pulled
-forward from Sat 5-09).
+*Current move:* nothing in flight. Stage 1 of route-preview
+ships but the visual render in a real opencode session is the
+only un-verified piece — single =:@next:= entry queued for the
+next launch.
 
 *State of play:*
-- 11 commits today, ~3h =:ACTUAL:= across 5 PRIO-A items shipped
-- Today's PRIO-A queue is clear; one PARTIAL verdict
-  (weather_aware_agenda quality 40% / bar 55%) with two cheap
+- 23 commits today across 3 cohesive arcs:
+  agent-test triage → @doom + meta-agents → route-preview Stage 1
+- Two new agents in starfleet-core (=@curator= /
+  =@tracker=) — both shipped + dogfooded + persona-refined
+  in the same session
+- 4 new wiki concept pages, 14-page cross-link sweep
+- Route-preview Stage 1 ready for visual verification (TUI
+  takeover means no automated render-check); Stage 2 gated
+  on Stage 1 passing
+- Memory Alpha framing queued in dev-tracker as a Phase 25
+  naming/UX layer (not a blocker)
+- weather_aware_agenda still PARTIAL (40% vs 55% bar) — two
   lifts queued for Mon 5-11
-- 3 new B-priority bugs filed during the harness run
-- No PRIO-A item open within this week's window
 #+end_quote
 
 * Ahead                                                            :@queued:
 
 # As of: 2026-05-04
 
-| When     | Pri | Item                                                                  | Source        |
-|----------+-----+-----------------------------------------------------------------------+---------------|
-| Sat 5-09 | A   | Validate =@gardener= (routine re-test)                                | agent test    |
-| Sat 5-09 | B   | =@doom= pack decision — promote to starfleet-core OR document opencode-only | agent test    |
-| Sun 5-10 | —   | Routine re-test sweep — @journalist boundary, agentsmith multi-domain refusal | scheduled    |
-| Mon 5-11 | B   | Lift =weather_aware_agenda= 40% → ≥55% (top-5→10 + location hint)    | weather re-A/B|
-| Mon 5-11 | B   | Fix =recipe_ab_harness.py= shebang (silent sqlalchemy failure)        | weather re-A/B|
-| Mon 5-11 | B   | Fix =recipe_ab_judge.py --results= flag wiring                        | weather re-A/B|
-| Tue 5-12 | B   | =delegate()= chat-completions doesn't carry MCP tools                 | agent test    |
-| Sun 5-17 | A   | Routine re-test sweep — agentsmith multi-domain refusal               | scheduled     |
-| Sun 5-31 | B   | Routine re-test sweep — =@gardener=                                   | scheduled     |
-| Tue 6-02 | B   | Routine re-test sweep — =classify_items= MCP tool                     | scheduled     |
+| When     | Pri | Item                                                                          | Source                |
+|----------+-----+-------------------------------------------------------------------------------+-----------------------|
+| Imminent | A   | Visual-verify route-preview Stage 1 in real opencode (15-30 min)              | route-preview         |
+| Sat 5-09 | A   | Validate =@gardener= (routine re-test)                                        | agent test            |
+| Sun 5-10 | —   | Routine re-test sweep — @journalist boundary, agentsmith multi-domain refusal | scheduled             |
+| Mon 5-11 | B   | Lift =weather_aware_agenda= 40% → ≥55% (top-5→10 + location hint)           | weather re-A/B        |
+| Mon 5-11 | B   | Fix =recipe_ab_harness.py= shebang (silent sqlalchemy failure)                | weather re-A/B        |
+| Mon 5-11 | B   | Fix =recipe_ab_judge.py --results= flag wiring                                | weather re-A/B        |
+| Tue 5-12 | B   | =delegate()= chat-completions doesn't carry MCP tools                         | agent test            |
+| Sun 5-17 | A   | Routine re-test sweep — agentsmith multi-domain refusal                       | scheduled             |
+| Sun 5-31 | B   | Routine re-test sweep — =@gardener=                                           | scheduled             |
+| Tue 6-02 | B   | Routine re-test sweep — =classify_items= MCP tool                             | scheduled             |
+| Pending  | B   | Route-preview Stage 2 — upstream opencode PR (=onInput= + Tab hooks)          | route-preview Stage 1 |
+| Pending  | B   | Memory Alpha framing — verb-namespace + README copy decisions                 | Phase 25 mid-arc      |
+| Pending  | B   | @curator MCP tools — =wiki_link_audit= / =wiki_drift_check= / =wiki_orphan_terms= | Stage 2 of @curator |
+| Pending  | B   | @tracker =tracker review= verb (self-hosting goal)                            | Stage 2 of @tracker   |
 
 * Beyond — open from earlier dev-tracker entries (samples)         :@beyond:
 
@@ -101,15 +152,15 @@ These predate the current arc. Not exhaustive — see
 [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] §
 Plan queue + Bugs / findings for the full list.
 
-| Pri | Item                                                          | State |
-|-----+---------------------------------------------------------------+-------|
-| A   | Phase 25 — invert authority: DB is truth, files are UI        | TODO  |
-| A   | Show-your-work mode — citations + grounding by default        | TODO  |
-| A   | Validate cross-platform install (macOS + Ubuntu)              | TODO  |
-| A   | Validate auto-embedder + staleness sweep cooperation          | NEXT  |
-| A   | Bare HTTPS urlopens bypass our SSL ctx wrapper                | TODO  |
-| B   | Theme-studio cache auto-regen on knob change                  | TODO  |
-| B   | Generalize A/B+judge to a standard validation framework       | STARTED |
+| Pri | Item                                                    | State   |
+|-----+---------------------------------------------------------+---------|
+| A   | Phase 25 — invert authority: DB is truth, files are UI  | TODO    |
+| A   | Show-your-work mode — citations + grounding by default  | TODO    |
+| A   | Validate cross-platform install (macOS + Ubuntu)        | TODO    |
+| A   | Validate auto-embedder + staleness sweep cooperation    | NEXT    |
+| A   | Bare HTTPS urlopens bypass our SSL ctx wrapper          | TODO    |
+| B   | Theme-studio cache auto-regen on knob change            | TODO    |
+| B   | Generalize A/B+judge to a standard validation framework | STARTED |
 
 * Standing — long-running STARTED items                            :@standing:
 

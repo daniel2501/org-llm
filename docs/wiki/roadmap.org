@@ -72,7 +72,46 @@ Cross-reference convention:
   cleared all four bars.
 - *Currently:* late beta. Core flows (index → embed → ask →
   capture → launch) are stable. Most active recent surface is
-  Phase 22 v2 (manager pre-fetch + agent narrates).
+  Phase 22 v2 (manager pre-fetch + agent narrates) plus the
+  Phase 23.x agent-framework refinements + a wiki concept-graph
+  pass.
+- *Latest shipped (2026-05-04):*
+  - *Two new meta-agents in starfleet-core* — =@curator=
+    (birth_name =atoz=, Mr. Atoz from TOS S3E23) + =@tracker=
+    (birth_name =boothby=, Starfleet Academy groundskeeper from
+    TNG/VOY). Curator is the wiki concept-graph specialist;
+    tracker is the dev-process steward. Both shipped + dogfooded
+    + persona-refined in one session — caught their own
+    behavioural misses on first run, fixed in place. Roster now
+    19 agents (12 starfleet-core, 7 legacy-extras).
+  - *Persona whitespace normalizer* — runtime block in =cli.py=
+    that collapses mid-sentence space runs across all 19
+    personas (artefact of adjacent-string-literal concatenation).
+    Discovered + fixed during the curator dogfood.
+  - *Wiki concept-graph sweep* — 14-page cross-link audit;
+    4 new concept pages registered: [[file:vault-facts.org][vault-facts.org]] (Phase 21
+    deterministic inferrers + DB cache), [[file:memory-alpha.org][memory-alpha.org]] (Trek
+    framing for the Phase 25 inversion: Memory Alpha = DB,
+    Memory Prime = =vault_facts=, Captain's Log + Mr. Atoz
+    already in place), [[file:architecture.org][architecture.org]] (single-source-of-truth
+    shape doc), [[file:interceptors.org][interceptors.org]] (concept page for the proxy
+    chain). Drift fixes synced to canonical =_AGENT_META=.
+  - *=@doom= promoted to starfleet-core* — moved out of
+    =legacy-extras=; tool-unreachable case (no local ollama)
+    handled. Drove the 11→12 starfleet-core / 8→7 legacy-extras
+    recount.
+  - *Route-preview Stage 1 — fish-style ghost text in opencode's
+    prompt =hint= slot.* Passive route preview: shows the
+    matching agent / recipe / prefix that would fire on submit.
+    NOT autocomplete (no acceptance gesture); Stage 2 needs
+    upstream opencode PR for =onInput= + Tab keybind hooks.
+    Three pieces: =cli.py:_emit_routes_json()= snapshots 19
+    agents + 2 recipes + 7 prefixes + 77 slashes to
+    =.opencode/routes.json= at launch; new
+    [[file:../../extensions/opencode/src/route-preview.tsx][=extensions/opencode/src/route-preview.tsx=]] polls + scores +
+    renders; [[file:../../extensions/opencode/src/slots.tsx][=slots.tsx=]] wires it into both =home_prompt= +
+    =session_prompt=. Visual verification (a real opencode
+    session) still owed — gates Stage 2.
 - *Latest shipped (2026-05-03):*
   - *5 new agents shipped this session* — =@agenda= (weather-aware
     GTD), =@ops= (CLI / config / diagnostics expert),
