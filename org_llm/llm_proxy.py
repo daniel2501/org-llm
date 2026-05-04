@@ -1173,7 +1173,13 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     if agent not in known:
         # Unknown agent — typo or unconfigured. Surface available
         # names so the user can correct without an LLM round-trip.
-        available = ", ".join(sorted(known))[:300] or "(no agents registered)"
+        # Show only birth-names (collapse aliases) so the listing
+        # isn't 3× the actual agent count.
+        canonical = sorted({
+            (v.get("x_org_llm_birth_name") or k)
+            for k, v in known.items() if isinstance(v, dict)
+        })
+        available = ", ".join(canonical)[:300] or "(no agents registered)"
         return _empty_assistant_response(
             parsed.get("model") or "unknown",
             bool(parsed.get("stream")),
@@ -1187,15 +1193,21 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
             ),
         )
 
+    # Phase 23.1: resolve typed → canonical birth-name as early as
+    # possible. Downstream comparisons (manager check, scribe
+    # auto-capture knob, baselines role) all use birth_names so
+    # @crew and @picard behave identically.
+    agent = (known[agent].get("x_org_llm_birth_name") or agent)
+
     # Phase 20.x revert: @<specialist> goes DIRECTLY to the
-    # specialist (was redirecting through crew). Crew is still
-    # invocable explicitly via @crew. The orchestration hint
-    # mechanism remains in code, gated off by
-    # `proxy_orchestrate_via_crew` (default false).
-    if (agent != "crew" and not force_solo
+    # specialist (was redirecting through the manager). The
+    # manager is still invocable explicitly via @picard / @crew.
+    # The orchestration hint mechanism remains in code, gated off
+    # by `proxy_orchestrate_via_crew` (default false).
+    if (agent != "picard" and not force_solo
             and _proxy_cfg_str("proxy_orchestrate_via_crew",
                                   "false").strip().lower() == "true"
-            and "crew" in known):
+            and "picard" in known):
         msgs = parsed.get("messages") or []
         for i in range(len(msgs) - 1, -1, -1):
             mm = msgs[i]
@@ -1212,7 +1224,7 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
                         part["text"] = hint + part.get("text", "")
                         break
             break
-        agent = "crew"
+        agent = "picard"
 
     # Agent exists — perform the per-turn swap.
     agent_def = known[agent]
@@ -1328,8 +1340,9 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
 
     # Scribe-only behaviour knob: skip the confirm-before-capture
     # step when `scribe_confirm_before_capture=false`. Default
-    # true (the prompt's FLOW expects confirmation).
-    if (agent == "scribe" and agent_prompt
+    # true (the prompt's FLOW expects confirmation). Birth-name
+    # for scribe is `data` post-Phase-23.1.
+    if (agent == "data" and agent_prompt
             and _proxy_cfg_str("scribe_confirm_before_capture",
                                   "true").strip().lower() == "false"):
         agent_prompt = (
@@ -1348,7 +1361,7 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
     if agent_prompt:
         try:
             from .db import render_baselines as _render_baselines
-            role = ("manager" if agent == "crew" else "specialist")
+            role = ("manager" if agent == "picard" else "specialist")
             preamble = _render_baselines(agent, role)
             if preamble:
                 agent_prompt = preamble + "\n\n" + agent_prompt

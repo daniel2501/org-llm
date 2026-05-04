@@ -883,24 +883,37 @@ def create_mcp_server():
 
     @server.tool()
     def list_agents() -> str:
-        """List the bundled org-llm agents — name, role, model_role.
+        """List the active org-llm agents — birth-name, aliases,
+        role, model.
 
         Use this BEFORE delegate() so you know who's available and
-        what they're good at. The `crew` agent is the manager; the
-        rest are domain specialists. Users can add/edit agents via
-        ~/org/org-llm-agents.org (`org-llm agents --tangle`)."""
-        from .cli import _PRECONFIGURED_AGENT_PROMPTS as _AP
-        from .db import Config as _Cfg
+        what they're good at. Each agent's BIRTH-NAME is canonical
+        (Trek-themed for the OOB set: picard, spock, data, geordi,
+        riker, janeway, scotty, soong, keiko); ALIASES are the
+        functional names (crew, researcher, scribe, …) — both work
+        when you call delegate(). Picard is the manager; the rest
+        are domain specialists. Users can add/edit agents via
+        ~/org/org-llm-agents.org (`org-llm agents --tangle`).
+        """
+        from .cli import _resolve_active_agents
+        from .db  import Config as _Cfg
+        import os as _os
+        from pathlib import Path as _P
+        org_dir = _P(_os.environ.get("ORG_LLM_ORG_DIR")
+                      or (_P.home() / "org"))
         with get_session(engine) as session:
             cfg = {r.key: r.value for r in session.query(_Cfg).all()}
         rows = []
-        for name in sorted(_AP.keys()):
-            d = _AP[name]
-            role = d.get("model_role") or "chat_model"
+        for a in _resolve_active_agents(org_dir):
+            if not a.addressable:
+                continue
+            role = a.model_role or "chat_model"
             resolved = ((cfg.get(role) or cfg.get("chat_model")
                           or "(unset)").strip())
-            rows.append(f"- {name}  ({role} → {resolved})\n  "
-                         f"{d.get('description', '')}")
+            alias_str = (f"  [aliases: {', '.join(a.aliases)}]"
+                          if a.aliases else "")
+            rows.append(f"- {a.birth_name}  ({role} → {resolved})"
+                         f"{alias_str}\n  {a.description}")
         return _themed("list_agents",
                         f"{len(rows)} agent(s)", "\n".join(rows))
 
@@ -928,18 +941,34 @@ def create_mcp_server():
 
         Cloud is preferred when configured (faster + tool-capable);
         falls back to local ollama otherwise."""
-        from .cli import _PRECONFIGURED_AGENT_PROMPTS as _AP
-        from .db import log_crew_action as _log
-        from .db import render_baselines as _render_baselines
-        import time as _t
-        if agent not in _AP:
+        from .cli    import _resolve_active_agents
+        from .db     import log_crew_action as _log
+        from .db     import render_baselines as _render_baselines
+        from pathlib import Path as _P
+        import os    as _os
+        import time  as _t
+        org_dir = _P(_os.environ.get("ORG_LLM_ORG_DIR")
+                      or (_P.home() / "org"))
+        active = _resolve_active_agents(org_dir)
+        # Accept birth-name OR any alias. `agent` becomes the
+        # canonical birth_name for downstream logging + role
+        # checks regardless of which form the caller passed.
+        spec_obj = None
+        typed_lc = (agent or "").strip().lower()
+        for _a in active:
+            if (_a.birth_name.lower() == typed_lc
+                    or any(al.lower() == typed_lc for al in _a.aliases)):
+                spec_obj = _a
+                break
+        if spec_obj is None:
+            available = ", ".join(sorted(_a.birth_name for _a in active))
             _log("delegate", agent_to=agent, prompt=prompt,
                  outcome="error",
                  result=f"no such agent: {agent}")
             return _themed("delegate",
                             f"[red]✗[/red] no such agent: {agent}",
-                            f"available: {', '.join(sorted(_AP))}")
-        spec = _AP[agent]
+                            f"available: {available}")
+        agent = spec_obj.birth_name
         # Prepend agent baselines (CURRENT TIME, vault-first,
         # vault_style, etc.) to the sub-LLM's system prompt so the
         # delegated specialist gets the same context the proxy
@@ -947,13 +976,13 @@ def create_mcp_server():
         # the sub-LLM sees only the bare agent prompt and
         # hallucinates format (this was the "delegate to scribe →
         # flat bullets instead of nested headers" gap).
-        role_for_baselines = ("manager" if agent == "crew"
+        role_for_baselines = ("manager" if agent == "picard"
                                else "specialist")
         baselines_block = _render_baselines(agent, role_for_baselines)
-        sys_prompt = (spec.get("prompt", "") or "")
+        sys_prompt = spec_obj.persona
         if baselines_block:
             sys_prompt = baselines_block + "\n\n" + sys_prompt
-        role = spec.get("model_role") or "chat_model"
+        role = spec_obj.model_role or "chat_model"
         with get_session(engine) as session:
             role_model = (_cfg(session, role)
                            or _cfg(session, "chat_model")

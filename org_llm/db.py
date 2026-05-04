@@ -266,6 +266,47 @@ class AgentBaseline(Base):
     sort_order  = Column(Integer, nullable=False, default=100)
 
 
+class AgentRow(Base):
+    """Phase 23.1+ — DB-backed mirror of the `Agent` dataclass.
+
+    Resolution order (in `cli._resolve_active_agents`):
+
+      1. `agents.get_builtins()`           — Python factory defaults
+      2. `agent` table rows (THIS table)   — per-installation customisation
+      3. `~/org/org-llm-agents.org`        — literate-config edit-by-text
+
+    Each layer wins for any field it sets. Layer 2 (this table) is
+    the runtime-editable surface: `org-llm agents --seed`
+    populates it from current built-ins, `org-llm agent set NAME
+    FIELD VALUE` edits a single field, `org-llm agent reset NAME`
+    drops the row (built-in default re-takes effect).
+
+    Tuple-shaped fields (`aliases`, `triggers`, `capabilities`,
+    `recipes`) are stored as comma-separated strings — keeps the
+    column count flat and lets users edit via plain SQL when
+    needed. Empty string = empty tuple.
+
+    `hygiene_scan` is intentionally NOT mirrored: it's a Callable
+    that can't be serialised. Hygiene scans stay registered on the
+    Python side (Phase 23.3 implements them).
+    """
+    __tablename__ = "agent"
+
+    birth_name    = Column(Text, primary_key=True)
+    description   = Column(Text, nullable=False, default="")
+    persona       = Column(Text, nullable=False, default="")
+    model_role    = Column(Text, nullable=False, default="chat_model")
+    aliases       = Column(Text, nullable=False, default="")  # comma-sep
+    triggers      = Column(Text, nullable=False, default="")  # comma-sep
+    capabilities  = Column(Text, nullable=False, default="")  # comma-sep
+    recipes       = Column(Text, nullable=False, default="")  # comma-sep
+    origin        = Column(Text, nullable=False, default="builtin")
+    pack          = Column(Text, nullable=False, default="starfleet-core")
+    addressable   = Column(Integer, nullable=False, default=1)  # 0/1
+    enabled       = Column(Integer, nullable=False, default=1)  # 0/1
+    updated_at    = Column(Text, nullable=False, default="")    # ISO-8601 UTC
+
+
 class CrewLog(Base):
     """Audit trail for the Phase 20 manager pattern.
 

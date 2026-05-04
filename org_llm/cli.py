@@ -5,7 +5,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Optional
 
 import typer
 from rich.table import Table
@@ -5112,26 +5112,32 @@ def _resolve_agent_model(model_role: str, cfg_rows: dict,
     return None
 
 
-def _load_agents_from_org(path: Path) -> Optional[dict[str, dict[str, str]]]:
+def _load_agents_from_org(path: Path) -> Optional[dict[str, dict]]:
     """Load agent definitions from a :agent:-tagged org file.
 
     Schema (one heading per agent, all level-1):
-        * researcher                                          :agent:
+        * spock                                               :agent:
         :PROPERTIES:
-        :DESCRIPTION: Read-heavy ...
+        :DESCRIPTION:  Read-heavy ...
+        :ALIASES:      researcher
+        :MODEL_ROLE:   chat_model
+        :TRIGGERS:     search, find, look up
+        :CAPABILITIES: read.vault
+        :RECIPES:      count_across_vault
+        :PACK:         starfleet-core
+        :ORIGIN:       builtin
+        :ADDRESSABLE:  t
+        :ENABLED:      t
         :END:
         You are an org-llm researcher. ...
 
-    The heading text is the agent name; the body (after the
-    PROPERTIES drawer, if any) is the system prompt; the
-    DESCRIPTION property is what shows in opencode's /agents picker.
+    Heading = birth-name. Body = persona. Every editable Agent
+    field has a property; only DESCRIPTION + body are required.
 
-    Returns None if the file doesn't exist or doesn't parse.
-    Returns an empty dict if it parses but contains no :agent:-
-    tagged headings (treated as "user wants no agents" — caller
-    can decide whether to fall back to defaults). On any parse
-    error, returns None so the caller falls through cleanly to
-    the bundled defaults rather than failing the launch."""
+    Returns None on parse failure / missing file (caller falls
+    back to the bundled defaults). Empty dict means "file exists
+    but has no agents" — caller decides what to do.
+    """
     if not path.exists():
         return None
     try:
@@ -5139,7 +5145,17 @@ def _load_agents_from_org(path: Path) -> Optional[dict[str, dict[str, str]]]:
         org = orgparse.load(str(path))
     except Exception:
         return None
-    out: dict[str, dict[str, str]] = {}
+
+    def _csv(s: str) -> tuple[str, ...]:
+        return tuple(p.strip() for p in (s or "").split(",") if p.strip())
+
+    def _bool(s: str, default: bool) -> bool:
+        v = (s or "").strip().lower()
+        if v in ("t", "true", "yes", "1", "on"):  return True
+        if v in ("nil", "false", "no", "0", "off"): return False
+        return default
+
+    out: dict[str, dict] = {}
     try:
         for node in org:
             tags = list(node.tags or [])
@@ -5149,12 +5165,26 @@ def _load_agents_from_org(path: Path) -> Optional[dict[str, dict[str, str]]]:
             if not name:
                 continue
             description = (node.get_property("DESCRIPTION") or "").strip()
-            prompt = (node.body or "").strip()
+            prompt      = (node.body or "").strip()
             if not prompt:
                 continue   # blank body = skip; agent needs a system prompt
+            # `pack` / `origin` left as None when the file omits
+            # them so `_apply_org_file_to_db` can apply smart
+            # defaults (origin='user' for user-authored headings,
+            # 'builtin' when the heading matches a Python default).
             out[name] = {
-                "description": description or f"org-llm {name} agent",
-                "prompt": prompt,
+                "description":  description or f"org-llm {name} agent",
+                "prompt":       prompt,
+                "aliases":      _csv(node.get_property("ALIASES")),
+                "triggers":     _csv(node.get_property("TRIGGERS")),
+                "capabilities": _csv(node.get_property("CAPABILITIES")),
+                "recipes":      _csv(node.get_property("RECIPES")),
+                "model_role":   (node.get_property("MODEL_ROLE")
+                                  or "chat_model").strip(),
+                "pack":         (node.get_property("PACK") or "").strip() or None,
+                "origin":       (node.get_property("ORIGIN") or "").strip() or None,
+                "addressable":  _bool(node.get_property("ADDRESSABLE"), True),
+                "enabled":      _bool(node.get_property("ENABLED"),     True),
             }
     except Exception:
         return None
@@ -5246,26 +5276,48 @@ _AGENT_TRIGGERS: dict[str, list[str]] = {
 
 
 def route_prompt(text: str, *,
-                  min_score: int = 1) -> tuple[str, int, list[str]]:
+                  min_score: int = 1,
+                  org_dir: Optional[Path] = None,
+                  ) -> tuple[str, int, list[str]]:
     """Score each agent's triggers against `text` (case-insensitive
-    substring match) and return (agent_name, score, matched_triggers).
+    substring match) and return (birth_name, score, matched_triggers).
 
     Returns ('chat', 0, []) when no agent scores above `min_score`
     so callers can fall back to the session default. Score is the
     count of unique trigger phrases that matched — ties broken by
-    declaration order in `_AGENT_TRIGGERS` (researcher first).
+    declaration order in `_AGENT_META`.
 
-    Microsecond latency on prompts up to a few KB; no LLM contact."""
+    Walks the active agent set (built-ins filtered by pack +
+    `agents_include_legacy` knob, plus user overrides). Skips
+    `addressable=False` agents (internal sub-routines like a
+    classifier — never user-facing). Microsecond latency on
+    prompts up to a few KB; no LLM contact.
+    """
     if not text:
         return ("chat", 0, [])
+    if org_dir is None:
+        try:
+            engine = _engine()
+            with get_session(engine) as _s:
+                org_dir = _org_dir(_s)
+        except Exception:
+            from .agents import get_builtins
+            pool = [a for a in get_builtins()
+                     if a.pack == "starfleet-core" and a.addressable]
+        else:
+            pool = [a for a in _resolve_active_agents(Path(org_dir))
+                     if a.addressable]
+    else:
+        pool = [a for a in _resolve_active_agents(Path(org_dir))
+                 if a.addressable]
     lowered = text.lower()
     best_name  = "chat"
     best_score = 0
     best_hits: list[str] = []
-    for agent, triggers in _AGENT_TRIGGERS.items():
-        hits = [t for t in triggers if t.lower() in lowered]
+    for a in pool:
+        hits = [t for t in a.triggers if t.lower() in lowered]
         if len(hits) > best_score:
-            best_name  = agent
+            best_name  = a.birth_name
             best_score = len(hits)
             best_hits  = hits
     if best_score < min_score:
@@ -5273,21 +5325,416 @@ def route_prompt(text: str, *,
     return (best_name, best_score, best_hits)
 
 
-def _resolve_preconfigured_agents(org_dir: Path) -> dict[str, dict[str, str]]:
-    """Pick the active agent definitions: user override file if
-    present + parseable, else the bundled defaults. Source-of-
-    truth precedence is stable so users editing
-    ~/org/org-llm-agents.org know their changes will land."""
+def _resolve_active_agents(
+    org_dir: Path,
+    *,
+    include_legacy: Optional[bool] = None,
+) -> list:
+    """Resolve the active agent set for this launch.
+
+    Two-tier runtime resolution (Shape A — DB authoritative):
+
+      1. `agents.get_builtins()`  — Python factory defaults
+      2. `db.AgentRow` rows       — live, editable config
+
+    Before resolving, `_maybe_auto_apply_org_file` checks if
+    `~/org/org-llm-agents.org` is newer than the newest DB row
+    and applies it to the DB if so. The org file is therefore a
+    *tangled mirror* with bidirectional sync via tangle/apply,
+    not a separate runtime layer.
+
+    After merging, filters apply: `enabled=0` rows drop out;
+    `pack='legacy-extras'` drops out unless `agents_include_legacy=true`.
+
+    Returns a list of `agents.Agent` objects.
+    """
+    from .agents import agent_from_row, get_builtins
+    from .db      import AgentRow as _AR
+    from .db      import Config as _Cfg
+    if include_legacy is None:
+        try:
+            engine = _engine()
+            with get_session(engine) as _s:
+                row = _s.get(_Cfg, "agents_include_legacy")
+                val = (row.value if row else "").strip().lower()
+                include_legacy = val in ("1", "true", "yes", "on")
+        except Exception:
+            include_legacy = False
+
+    # Auto-apply: if the org file has been edited since the last
+    # CLI/auto-apply, write it into the DB before reading rows.
+    _maybe_auto_apply_org_file(org_dir)
+
+    # Layer 1: Python built-ins (filter pack at the end so DB
+    # rows can flip an agent's pack via override).
+    out: list = list(get_builtins())
+    by_name: dict[str, int] = {a.birth_name: i for i, a in enumerate(out)}
+    disabled: set[str] = set()
+
+    # Layer 2: DB rows. enabled=0 → drop from resolved set;
+    # enabled=1 → replace built-in or append as a new agent.
+    try:
+        engine = _engine()
+        with get_session(engine) as _s:
+            db_rows = list(_s.query(_AR).all())
+    except Exception:
+        db_rows = []
+    for r in db_rows:
+        if not r.enabled:
+            disabled.add(r.birth_name)
+            continue
+        ag = agent_from_row(r)
+        if r.birth_name in by_name:
+            out[by_name[r.birth_name]] = ag
+        else:
+            by_name[r.birth_name] = len(out)
+            out.append(ag)
+
+    # Filters: drop disabled-by-DB, then pack filter.
+    out = [a for a in out if a.birth_name not in disabled]
+    if not include_legacy:
+        out = [a for a in out if a.pack != "legacy-extras"]
+    return out
+
+
+def _resolve_preconfigured_agents(org_dir: Path) -> dict[str, dict]:
+    """Legacy adapter — return the resolved agent set as a dict
+    keyed by birth-name with values
+    `{description, model_role, prompt, aliases, pack, addressable}`.
+    New callers should prefer `_resolve_active_agents`.
+    """
+    out: dict[str, dict] = {}
+    for a in _resolve_active_agents(org_dir):
+        d = a.to_legacy_dict()
+        d["aliases"]     = list(a.aliases)
+        d["pack"]        = a.pack
+        d["addressable"] = a.addressable
+        out[a.birth_name] = d
+    return out
+
+
+def _seed_agents_table() -> int:
+    """Populate the `agent` DB table from the current Python
+    built-ins. Idempotent — only inserts rows whose birth_name
+    isn't already in the table. Returns the number of rows
+    inserted so the caller can surface a count.
+
+    Use this once after pulling Phase-23.1+ to make the bundled
+    agents editable via `org-llm agent set …`. After that, the
+    DB row is the live config; built-ins act as the factory
+    default the user can `agent reset` back to.
+    """
+    from .agents import agent_to_row_kwargs, get_builtins
+    from .db     import AgentRow as _AR
+    n = 0
+    engine = _engine()
+    with get_session(engine) as session:
+        existing = {r.birth_name for r in session.query(_AR).all()}
+        for a in get_builtins():
+            if a.birth_name in existing:
+                continue
+            session.add(_AR(**agent_to_row_kwargs(a)))
+            n += 1
+        session.commit()
+    return n
+
+
+def _apply_org_file_to_db(path: Path) -> int:
+    """Read `path` (a tangled org-llm-agents.org file) and upsert
+    every :agent:-tagged heading into the `agent` DB table.
+    Returns the count of rows touched.
+
+    Smart defaults:
+      - If a heading's birth_name doesn't match any Python
+        built-in, default `origin='user'` and `pack='user'`
+        unless the file overrides via :ORIGIN: / :PACK:.
+        Otherwise default to `builtin` / `starfleet-core` (which
+        is what tangle wrote — round-trip stays clean).
+
+    Each row's `updated_at` is set to the file's mtime so the
+    auto-apply trigger (`_maybe_auto_apply_org_file`) doesn't
+    re-fire next launch. Additive — agents present in the DB
+    but absent from the file are left alone (use
+    `org-llm agent reset <name>` to drop them).
+    """
+    parsed = _load_agents_from_org(path)
+    if not parsed:
+        return 0
+    from .agents import get_builtins
+    from .db     import AgentRow as _AR
+    import datetime as _dt
+    builtin_names = {a.birth_name for a in get_builtins()}
+    file_ts = path.stat().st_mtime
+    file_dt = _dt.datetime.fromtimestamp(file_ts).isoformat(timespec="seconds")
+    n = 0
+    engine = _engine()
+    with get_session(engine) as session:
+        for name, data in parsed.items():
+            row = session.get(_AR, name)
+            if row is None:
+                row = _AR(birth_name=name)
+                session.add(row)
+            is_user_authored = name not in builtin_names
+            origin_default = "user" if is_user_authored else "builtin"
+            pack_default   = ("user" if is_user_authored
+                                else "starfleet-core")
+            row.description  = data.get("description", "")
+            row.persona      = data.get("prompt", "")
+            row.model_role   = data.get("model_role", "chat_model")
+            row.aliases      = ",".join(data.get("aliases", ()))
+            row.triggers     = ",".join(data.get("triggers", ()))
+            row.capabilities = ",".join(data.get("capabilities", ()))
+            row.recipes      = ",".join(data.get("recipes", ()))
+            row.pack         = data.get("pack")   or pack_default
+            row.origin       = data.get("origin") or origin_default
+            row.addressable  = 1 if data.get("addressable", True) else 0
+            row.enabled      = 1 if data.get("enabled", True) else 0
+            row.updated_at   = file_dt
+            n += 1
+        session.commit()
+    return n
+
+
+def _maybe_auto_apply_org_file(org_dir: Path) -> int:
+    """If `~/org/org-llm-agents.org` exists AND its mtime is
+    newer than the newest DB row's `updated_at`, apply it into
+    the DB. Called from `_resolve_active_agents` so the
+    "edit file → launch picks it up" UX still works in
+    Shape-A (file is a tangled mirror, not a runtime layer).
+
+    Returns the number of rows applied (0 = no-op).
+    Tolerates DB / parse errors silently — never breaks
+    resolution, even on a corrupt file.
+    """
     user_path = org_dir / "org-llm-agents.org"
-    user_agents = _load_agents_from_org(user_path)
-    if user_agents:
-        # Merge: user entries override defaults by name; defaults
-        # for any agent the user didn't redefine carry over so a
-        # half-customised file doesn't lose the others.
-        merged = dict(_PRECONFIGURED_AGENT_PROMPTS)
-        merged.update(user_agents)
-        return merged
-    return dict(_PRECONFIGURED_AGENT_PROMPTS)
+    if not user_path.exists():
+        return 0
+    try:
+        from .db        import AgentRow as _AR
+        import datetime as _dt
+        file_ts = user_path.stat().st_mtime
+        engine = _engine()
+        with get_session(engine) as session:
+            rows = list(session.query(_AR.updated_at).all())
+        max_row_ts = 0.0
+        for (ts,) in rows:
+            if not ts:
+                continue
+            try:
+                max_row_ts = max(
+                    max_row_ts,
+                    _dt.datetime.fromisoformat(ts).timestamp(),
+                )
+            except Exception:
+                continue
+        # Strict greater-than: ties favour DB so a touched-but-
+        # unchanged file doesn't clobber a recent CLI edit.
+        if file_ts <= max_row_ts:
+            return 0
+        return _apply_org_file_to_db(user_path)
+    except Exception:
+        return 0
+
+
+def _agent_field_set(birth_name: str, field: str, value: str) -> None:
+    """Set one field on an `agent` DB row. Auto-creates the row
+    by seeding from the matching built-in if no row exists yet —
+    so `agent set picard persona "..."` works without a prior
+    `agents --seed`. CSV fields (aliases, triggers, capabilities,
+    recipes) accept comma-separated input.
+    """
+    from .agents import agent_to_row_kwargs, get_builtins
+    from .db     import AgentRow as _AR
+    import datetime as _dt
+    EDITABLE = {
+        "description", "persona", "model_role",
+        "aliases", "triggers", "capabilities", "recipes",
+        "origin", "pack",
+        "addressable", "enabled",
+    }
+    if field not in EDITABLE:
+        red_alert(f"unknown field: {field!r}. "
+                  f"editable fields: {', '.join(sorted(EDITABLE))}")
+        raise typer.Exit(1)
+    engine = _engine()
+    with get_session(engine) as session:
+        row = session.get(_AR, birth_name)
+        if row is None:
+            # Auto-seed from the matching built-in (or create a
+            # blank row with origin='user' if nothing matches).
+            seed = next((a for a in get_builtins()
+                         if a.birth_name == birth_name), None)
+            if seed:
+                row = _AR(**agent_to_row_kwargs(seed))
+            else:
+                row = _AR(birth_name=birth_name, origin="user", pack="user")
+            session.add(row)
+        if field in ("addressable", "enabled"):
+            setattr(row, field, 1 if value.strip().lower()
+                    in ("1", "true", "yes", "on") else 0)
+        else:
+            setattr(row, field, value)
+        row.updated_at = _dt.datetime.now().isoformat(timespec="seconds")
+        session.commit()
+
+
+def _agent_field_reset(birth_name: str) -> bool:
+    """Drop the DB row for `birth_name`. Returns True iff a row
+    existed. The matching Python built-in (if any) re-takes
+    effect on next launch."""
+    from .db import AgentRow as _AR
+    engine = _engine()
+    with get_session(engine) as session:
+        row = session.get(_AR, birth_name)
+        if row is None:
+            return False
+        session.delete(row)
+        session.commit()
+        return True
+
+
+agent_app = typer.Typer(
+    help=("Per-row CRUD on the `agent` DB table — Layer 2 of "
+          "the agent resolution stack (Python builtins → DB → "
+          "auto-applied org file). Use these to edit a single "
+          "field; for bulk edits prefer `agents tangle` + edit "
+          "the file."),
+    rich_markup_mode="rich",
+)
+app.add_typer(agent_app, name="agent",
+              rich_help_panel="Maintenance")
+
+
+@agent_app.command("list")
+def agent_list_cmd():
+    """List all DB rows in the `agent` table."""
+    from .db import AgentRow as _AR
+    engine = _engine()
+    with get_session(engine) as session:
+        rows = list(session.query(_AR)
+                      .order_by(_AR.pack, _AR.birth_name).all())
+    if not rows:
+        on_screen("[dim](no DB rows — run `org-llm agents --seed` to populate)[/dim]")
+        return
+    on_screen(f"[lcars1]agent table[/lcars1]  ({len(rows)} row(s))")
+    for r in rows:
+        flag = "" if r.enabled else "  [dim](disabled)[/dim]"
+        on_screen(f"  [lcars2]{r.birth_name:14s}[/lcars2]  "
+                  f"{(r.description or '')[:60]}  "
+                  f"[dim]pack={r.pack} origin={r.origin}[/dim]{flag}")
+
+
+@agent_app.command("show")
+def agent_show_cmd(
+    name: Annotated[str, typer.Argument(help="Agent birth-name")],
+):
+    """Dump every column of one DB row."""
+    from .db import AgentRow as _AR
+    engine = _engine()
+    with get_session(engine) as session:
+        row = session.get(_AR, name)
+    if row is None:
+        on_screen(f"[yellow]⚠[/yellow] no DB row for [bold]{name}[/bold] "
+                  "— resolution will fall back to the built-in default.")
+        return
+    on_screen(f"[lcars1]{name}[/lcars1]")
+    for col in ("description", "model_role", "origin", "pack",
+                 "aliases", "triggers", "capabilities", "recipes",
+                 "addressable", "enabled", "updated_at"):
+        on_screen(f"  [lcars2]{col:14s}[/lcars2]  {getattr(row, col)}")
+    on_screen(f"  [lcars2]{'persona':14s}[/lcars2]  "
+              f"({len((row.persona or '').split())} words)")
+
+
+@agent_app.command("set")
+def agent_set_cmd(
+    name:  Annotated[str, typer.Argument(help="Agent birth-name")],
+    field: Annotated[str, typer.Argument(
+        help="Field name. One of: description, persona, model_role, "
+             "aliases, triggers, capabilities, recipes, origin, "
+             "pack, addressable, enabled.")],
+    value: Annotated[str, typer.Argument(
+        help="New value. CSV for tuple fields (aliases / triggers "
+             "/ capabilities / recipes); 'true'/'false' for "
+             "addressable / enabled.")],
+):
+    """Set one field on a DB row. Auto-creates the row from the
+    matching built-in if it doesn't exist yet — first-time edit
+    works without a prior `agents --seed`.
+
+    Examples:
+      org-llm agent set picard description "..."
+      org-llm agent set picard aliases "crew,captain,boss"
+      org-llm agent set analyst pack starfleet-core
+    """
+    _agent_field_set(name, field, value)
+    on_screen(f"[green]✓[/green] {name}.{field} updated")
+
+
+@agent_app.command("reset")
+def agent_reset_cmd(
+    name: Annotated[str, typer.Argument(help="Agent birth-name")],
+):
+    """Drop the DB row. Built-in Python default re-takes effect."""
+    if _agent_field_reset(name):
+        on_screen(f"[green]✓[/green] dropped DB row for {name} "
+                  "— built-in default re-takes effect.")
+    else:
+        on_screen(f"[dim](no DB row for {name})[/dim]")
+
+
+@agent_app.command("disable")
+def agent_disable_cmd(
+    name: Annotated[str, typer.Argument(help="Agent birth-name")],
+):
+    """Set enabled=0 — agent drops out of resolved set even if
+    it's a built-in. Use `enable` to re-activate."""
+    _agent_field_set(name, "enabled", "false")
+    on_screen(f"[green]✓[/green] {name} disabled")
+
+
+@agent_app.command("enable")
+def agent_enable_cmd(
+    name: Annotated[str, typer.Argument(help="Agent birth-name")],
+):
+    """Set enabled=1."""
+    _agent_field_set(name, "enabled", "true")
+    on_screen(f"[green]✓[/green] {name} enabled")
+
+
+def _render_agent_block_for_opencode(
+    agents_list: list,
+    cfg_rows: dict,
+    default_model: str,
+    provider_id: str,
+) -> dict[str, dict]:
+    """Render the `agent` map for opencode.json. One entry per
+    (birth_name + each alias). The alias entries are full clones
+    (same prompt + model) so opencode autocomplete + routing
+    works against any of them; the `x_org_llm_birth_name` field
+    lets the proxy collapse them back to one canonical agent
+    when logging or running role-based checks.
+    """
+    out: dict[str, dict] = {}
+    for a in agents_list:
+        if not a.addressable:
+            continue
+        resolved_model = _resolve_agent_model(
+            a.model_role, cfg_rows, default_model, provider_id,
+        )
+        base: dict = {
+            "mode":        "all",
+            "description": a.description,
+            "prompt":      a.persona,
+            "x_org_llm_birth_name": a.birth_name,
+            "x_org_llm_aliases":    list(a.aliases),
+            "x_org_llm_pack":       a.pack,
+        }
+        if resolved_model:
+            base["model"] = resolved_model
+        for n in a.all_names():
+            out[n] = dict(base)
+    return out
 
 
 def _benchmark_local_models(
@@ -6504,26 +6951,44 @@ def agents(
             help="Show the resolved agent set (defaults + any "
                  "active user overrides) — same as what the next "
                  "launch will write to opencode.json")] = False,
+    seed:   Annotated[bool, typer.Option("--seed",
+            help="Populate the `agent` DB table from the current "
+                 "Python built-ins. Idempotent — only inserts rows "
+                 "whose birth_name isn't already in the table. Use "
+                 "this once to make the bundled agents editable via "
+                 "`org-llm agent set …`.")] = False,
 ):
-    """Show / round-trip the preconfigured agents (Phase 18.7).
+    """Show / round-trip the preconfigured agents.
 
-    Source-of-truth precedence:
-      1. ~/org/org-llm-agents.org (user overrides)  — if present
-      2. Bundled _PRECONFIGURED_AGENT_PROMPTS dict  — fallback
-
-    Each :agent:-tagged heading is one agent; heading text is the
-    name; PROPERTIES drawer's :DESCRIPTION: is the picker label;
-    body is the system prompt.
+    Source-of-truth precedence (each layer wins where it sets a field):
+      1. Python built-ins from `org_llm/agents/_builtins.py`
+      2. `agent` DB table rows (per-installation customisation)
+      3. ~/org/org-llm-agents.org (literate-config edits)
 
     Workflow:
       org-llm agents --tangle    # writes the org file
       $EDITOR ~/org/org-llm-agents.org
       org-llm launch              # picks up your edits
+
+    Or, for DB-driven edits:
+      org-llm agents --seed       # populate DB from built-ins
+      org-llm agent set <name> persona "..."   # edit one field
+      org-llm agent reset <name>  # drop the DB row, fall back to built-in
     """
-    flags = sum(1 for f in (tangle, apply_from_org, list_) if f)
+    flags = sum(1 for f in (tangle, apply_from_org, list_, seed) if f)
     if flags > 1:
-        red_alert("--tangle / --apply-from-org / --list are mutually exclusive.")
+        red_alert("--tangle / --apply-from-org / --list / --seed are mutually exclusive.")
         raise typer.Exit(1)
+    if seed:
+        n_added = _seed_agents_table()
+        if n_added == 0:
+            on_screen("[dim]agent table already seeded — no rows added.[/dim]")
+        else:
+            on_screen(f"[green]✓[/green] seeded [bold]{n_added}[/bold] "
+                      "agent row(s) into the DB.")
+            on_screen("[dim]Edit any field with[/dim] "
+                      "[bold]org-llm agent set <name> <field> <value>[/bold]")
+        return
     engine = _engine()
     with get_session(engine) as session:
         org_dir = _org_dir(session)
@@ -6551,38 +7016,59 @@ def agents(
         return
 
     if tangle:
-        resolved = _resolve_preconfigured_agents(org_dir)
+        # Tangle from the resolved Agent objects so every
+        # editable field round-trips. Reads from
+        # _resolve_active_agents (Python builtins → DB after
+        # Phase 23.5; org file no longer a runtime layer, only
+        # a tangle/apply target).
+        active = _resolve_active_agents(org_dir)
         lines = [
             "#+TITLE: org-llm preconfigured agents",
             "#+FILETAGS: :org-llm:agents:literate-config:",
             "#+OPTIONS: toc:nil num:nil",
             "",
             "Generated by [[shell:org-llm agents --tangle][org-llm agents --tangle]].",
-            "Edit the headings below; on the next [[shell:org-llm launch][org-llm launch]] the",
-            "values land in =.opencode/opencode.json= under the =agent= map.",
+            "Edit the headings below — on the next [[shell:org-llm launch][org-llm launch]] (or",
+            "[[shell:org-llm agents --apply-from-org][org-llm agents --apply-from-org]]) the file is",
+            "auto-applied into the =agent= DB table when its mtime is newer than the",
+            "newest DB row's =updated_at=. The DB is the live config; this file is",
+            "a tangled mirror for human editing + version control.",
             "",
-            "Each =:agent:=-tagged heading is one agent. The heading TEXT is the",
-            "agent name, the =:DESCRIPTION:= property is what shows in opencode's",
-            "/agents picker, and the BODY (everything after the PROPERTIES drawer)",
-            "is the system prompt.",
+            "Each =:agent:=-tagged heading is one agent. Heading TEXT is the canonical",
+            "birth-name. Properties round-trip every editable Agent field; body is",
+            "the system prompt.",
             "",
         ]
-        for name, definition in resolved.items():
-            desc = (definition.get("description") or "").strip()
-            prompt = (definition.get("prompt") or "").rstrip()
-            lines.append(f"* {name}                                                  :agent:")
+        for a in active:
+            lines.append(f"* {a.birth_name}                                                  :agent:")
             lines.append(":PROPERTIES:")
-            lines.append(f":DESCRIPTION: {desc}")
+            lines.append(f":DESCRIPTION:  {a.description}")
+            if a.aliases:
+                lines.append(f":ALIASES:      {', '.join(a.aliases)}")
+            if a.model_role:
+                lines.append(f":MODEL_ROLE:   {a.model_role}")
+            if a.triggers:
+                lines.append(f":TRIGGERS:     {', '.join(a.triggers)}")
+            if a.capabilities:
+                lines.append(f":CAPABILITIES: {', '.join(a.capabilities)}")
+            if a.recipes:
+                lines.append(f":RECIPES:      {', '.join(a.recipes)}")
+            if a.pack:
+                lines.append(f":PACK:         {a.pack}")
+            if a.origin and a.origin != "builtin":
+                lines.append(f":ORIGIN:       {a.origin}")
+            if not a.addressable:
+                lines.append(f":ADDRESSABLE:  nil")
             lines.append(":END:")
             lines.append("")
-            lines.append(prompt)
+            lines.append(a.persona.rstrip())
             lines.append("")
         org_dir.mkdir(parents=True, exist_ok=True)
         user_path.write_text("\n".join(lines))
         on_screen(f"[green]✓[/green] wrote [bold]{user_path}[/bold]  "
-                  f"({len(resolved)} agent(s))")
+                  f"({len(active)} agent(s))")
         on_screen("[dim]Edit, then[/dim] [bold]org-llm launch[/bold]"
-                  " [dim]to apply.[/dim]")
+                  " [dim]— auto-apply lands the changes.[/dim]")
         return
 
     if apply_from_org:
@@ -6590,33 +7076,18 @@ def agents(
             red_alert(f"{user_path} doesn't exist. "
                       f"Run [bold]org-llm agents --tangle[/bold] first.")
             raise typer.Exit(1)
-        user_agents = _load_agents_from_org(user_path) or {}
-        if not user_agents:
+        n = _apply_org_file_to_db(user_path)
+        if n == 0:
             on_screen(f"[yellow]⚠[/yellow] {user_path} parsed but "
                       f"contains no :agent:-tagged headings.")
-            return
-        defaults = _PRECONFIGURED_AGENT_PROMPTS
-        added    = sorted(set(user_agents) - set(defaults))
-        removed  = sorted(set(defaults) - set(user_agents))
-        modified = sorted(
-            n for n in (set(user_agents) & set(defaults))
-            if user_agents[n]["prompt"] != defaults[n]["prompt"]
-            or user_agents[n].get("description") !=
-                defaults[n].get("description")
-        )
-        if not (added or removed or modified):
-            on_screen(f"[green]✓[/green] {user_path} matches defaults exactly")
-        if added:
-            on_screen(f"[lcars2]+ added:[/lcars2]    {', '.join(added)}")
-        if removed:
-            on_screen(f"[dim]- absent:[/dim]   {', '.join(removed)} "
-                      f"[dim](defaults will be merged in at launch)[/dim]")
-        if modified:
-            on_screen(f"[lcars1]~ modified:[/lcars1] {', '.join(modified)}")
-        on_screen("")
-        on_screen("[dim]The next[/dim] [bold]org-llm launch[/bold] "
-                  "[dim]auto-loads this file. No --apply step needed.[/dim]")
+        else:
+            on_screen(f"[green]✓[/green] applied [bold]{n}[/bold] "
+                      "agent row(s) from "
+                      f"[bold]{user_path}[/bold] into the DB.")
         return
+
+    # Unreachable; the flag-set check above handles all cases.
+    return
 
 
 @app.command(rich_help_panel="Maintenance")
@@ -16677,32 +17148,27 @@ def launch(
             # routes @<agent> messages to that specific model.
             # Empty model_role (or unresolvable role) falls back
             # to the session default.
-            **{
-                _agent_name: {
-                    # mode: "all" surfaces the agent in BOTH the
-                    # /agents picker (primary slot) AND the @<name>
-                    # autocomplete + routing (subagent slot). With
-                    # mode: "primary" the agent only appeared in
-                    # /agents — typing @scribe was literal text,
-                    # opencode never routed. SDK ref: tui.d.ts:1030
-                    # (=AgentConfig.mode: "subagent" | "primary" | "all"=).
-                    "mode":        "all",
-                    "description": _agent_def["description"],
-                    "prompt":      _agent_def["prompt"],
-                    **(
-                        {"model": _resolved_model}
-                        if (_resolved_model := _resolve_agent_model(
-                            _agent_def.get("model_role", ""),
-                            cfg_rows_for_agents,
-                            active_model_str,
-                            active_provider_id,
-                        ))
-                        else {}
-                    ),
-                }
-                for _agent_name, _agent_def in
-                _resolve_preconfigured_agents(org_dir).items()
-            },
+            # Phase 23.1: one opencode.json entry per (birth_name +
+            # each alias). All entries share the same description /
+            # prompt / model — the alias entries carry an
+            # `x_org_llm_birth_name` field so the proxy can resolve
+            # any alias back to the canonical name without re-
+            # parsing this dict. opencode tolerates and ignores
+            # the `x_*` extension field.
+            #
+            # `mode: "all"` surfaces the agent in BOTH the /agents
+            # picker (primary slot) AND the @<name> autocomplete +
+            # routing (subagent slot). With `mode: "primary"` the
+            # agent only appeared in /agents — typing @scribe was
+            # literal text, opencode never routed. SDK ref:
+            # tui.d.ts:1030 (`AgentConfig.mode: "subagent" |
+            # "primary" | "all"`).
+            **_render_agent_block_for_opencode(
+                _resolve_active_agents(org_dir),
+                cfg_rows_for_agents,
+                active_model_str,
+                active_provider_id,
+            ),
         },
         "mcp": {
             "org-llm": {

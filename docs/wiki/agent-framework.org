@@ -11,9 +11,24 @@
 This page is the *architecture spec* for org-llm's agent
 framework — Agent dataclass, capabilities, hygiene scans, recipes,
 inferrers, registration, the four invocation paths, migration
-plan. Status: design draft written 2026-05-03; some pieces (the
-dataclass refactor in Phase 23.1) are forward-looking, others
-(the invocation paths, the literate-file overrides) are shipped.
+plan.
+
+Status (2026-05-03):
+- Phase 23.1 *shipped* — Agent dataclass lives at
+  =org_llm/agents/_types.py=; metadata + builtin registry at
+  =org_llm/agents/_builtins.py=; alias-aware resolution wired
+  through proxy + MCP layer; OOB cut to 9 starfleet-core agents
+  with Trek birth-names + functional aliases.
+- Phase 23.2 (capability enforcement) — *declarative shipped*,
+  enforcement still pending. Each Agent declares its
+  =capabilities=; the MCP layer doesn't gate yet.
+- Phase 23.3 (hygiene scans) — slot exists on the Agent
+  dataclass; concrete scans not yet implemented.
+- Phase 23.4 (per-agent recipes/inferrers) — slot exists; the
+  global =orchestration._RECIPES= registry remains the active
+  source of truth for now.
+- Phase 23.5 (user-supplied agents from a library) — verb
+  surface =org-llm agents install= still to be designed.
 
 Companion docs (different audience, different scope):
 
@@ -63,29 +78,70 @@ surface for asking domain questions. One concept, used twice.
 * The Agent
 
 An *Agent* is the unit of org-llm's specialist behaviour.
-Defined by an entry in the agent registry:
+Defined as a frozen dataclass at =org_llm/agents/_types.py=:
 
 #+begin_src python
-@dataclass
+@dataclass(frozen=True)
 class Agent:
-    name:           str          # @<name> identifier; lowercase, no spaces
-    description:    str          # one-liner shown in /agents
-    persona:        str          # system-prompt body
-    model_role:     str = "chat_model"  # resolves at launch via the role chain
-    triggers:       list[str] = field(default_factory=list)  # keyword auto-route
-    tool_roster:    list[str] = field(default_factory=list)  # MCP tool names
-    recipes:        list[Recipe] = field(default_factory=list)  # orchestration patterns
-    inferrers:      list[Inferrer] = field(default_factory=list)
-    hygiene_scan:   Callable | None = None
-    capabilities:   set[str] = field(default_factory=set)   # see below
-    requires_facts: list[str] = field(default_factory=list)
-    delegates_to:   list[str] = field(default_factory=list) # other agents it can call
-    config_keys:    list[ConfigKey] = field(default_factory=list)
+    birth_name:   str                          # canonical id; @<birth_name> always routes
+    description:  str                          # one-liner shown in /agents
+    persona:      str                          # system-prompt body
+    model_role:   str            = "chat_model"
+    aliases:      tuple[str, ...] = ()         # extra @<name>s; theme-aware aliases live here
+    triggers:     tuple[str, ...] = ()         # keyword auto-route
+    capabilities: tuple[str, ...] = ()         # declared; enforcement = Phase 23.2
+    recipes:      tuple[str, ...] = ()         # recipe NAMES owned by agent (Phase 23.4)
+    hygiene_scan: Callable | None = None       # domain-specific scanner (Phase 23.3)
+    origin:       Origin          = "builtin"  # builtin | library | user
+    pack:         str             = "starfleet-core"   # pack filter at launch
+    addressable:  bool            = True       # False = internal subroutine, hidden from picker
 #+end_src
 
 Each field is independently optional. A minimal agent is just
-=name + persona=. Domain-rich agents (weather, budget) populate
-nearly all fields.
+=birth_name + description + persona=. Domain-rich agents
+populate more fields.
+
+The legacy persona strings + triggers still live in
+=cli.py::_PRECONFIGURED_AGENT_PROMPTS= /
+=cli.py::_AGENT_TRIGGERS=; =agents/_builtins.py::get_builtins()=
+joins them with the structural metadata to produce =Agent=
+instances. A future PR can lift the literals into the agents
+package; the dataclass shape is stable across that move.
+
+** Birth-names + aliases (Phase 23.1)
+
+Each agent has a stable *birth_name* — what =crew_log= records,
+what code references, what the user types =@<name>= against.
+For starfleet-core agents the birth_name is a Trek crew name
+(=picard=, =spock=, =data=, …); for legacy agents it stays
+functional (=gardener=, =analyst=, …).
+
+*Aliases* are additional =@<name>= routes for the same agent.
+=@crew= and =@captain= both reach Picard. The launcher writes
+one =opencode.json= entry per (birth_name + alias), all
+carrying =x_org_llm_birth_name= so the proxy collapses aliases
+back to one canonical name for logging + role checks.
+
+** Captain = manager (one mental model)
+
+There are *not* two distinct manager roles. There is *one*
+captain (=picard=, alias =crew= / =captain=) who manages the
+crew. The captain has two execution modes:
+
+1. *Reflex* — when the user's request matches a known recipe
+   pattern, the proxy executes the underlying tool
+   deterministically (~10ms regex match + tool call) and
+   injects the result into the agent's prompt. The agent
+   narrates in ONE cloud call. This is the captain's
+   pre-cognition; no LLM round-trip on the manager side.
+2. *Deliberation* — when no recipe fires, the captain (LLM)
+   reasons through the request, delegates to specialists via
+   the =delegate= MCP tool, sanity-checks before surfacing.
+
+Earlier drafts of this doc described the recipe layer as a
+separate "orchestrator" role. That distinction added confusion
+without paying its way. The captain is the manager; the
+deterministic recipe layer is one of its tools.
 
 ** Capabilities
 
@@ -168,7 +224,7 @@ rows). Same pattern as =org-llm-config.org= for knobs and
 
 Today the registry lives at =org_llm/cli.py::_PRECONFIGURED_AGENT_PROMPTS=
 (the dataclass refactor in Phase 23.1 will move this to
-=org_llm/agents/_builtins.py=). Current built-ins (17, after the
+[[file:../../org_llm/agents/_builtins.py][=org_llm/agents/_builtins.py=]]). Current built-ins (17, after the
 2026-05-03 rationalization — see [[file:agents.org][agents.org]]):
 
   *Vault content* — researcher, analyst (umbrella for summarize /
@@ -266,36 +322,62 @@ improvement.
 
 * Migration plan
 
-** Phase 23.1 — Agent dataclass + registry refactor
-- Define =Agent= dataclass.
-- Convert =_PRECONFIGURED_AGENT_PROMPTS= (dict) +
-  =_AGENT_TRIGGERS= (sibling dict) into a list of Agent
-  instances at =org_llm/agents/_builtins.py=.
-- =_known_agents= reads the new shape; existing
-  =@<name>=-style routing keeps working unchanged.
+** Phase 23.1 — Agent dataclass + registry refactor *[shipped 2026-05-03]*
+- =Agent= dataclass shipped at =org_llm/agents/_types.py=
+  (frozen, with =birth_name=, =aliases=, =pack=, =origin=,
+  =addressable=).
+- =_AGENT_META= at =org_llm/agents/_builtins.py= maps legacy
+  keys (=crew=, =researcher=, …) → birth-names (=picard=,
+  =spock=, …). =get_builtins()= joins with cli.py's persona +
+  trigger dicts.
+- 9 starfleet-core OOB agents (Trek birth-names + functional
+  aliases); 8 legacy-extras retained but filtered out at launch
+  unless =agents_include_legacy=true=.
+- Launcher writes one =opencode.json= entry per (birth_name +
+  alias) with =x_org_llm_birth_name= so the proxy resolves any
+  alias back to the canonical name.
+- =@crew=, =@captain=, =@picard= all route to the same agent.
 - =org-llm agents --tangle= / =--apply= round-trip the new
-  shape to/from =org-llm-agents.org=.
+  shape; user file accepts =:ALIASES:= and =:MODEL_ROLE:=
+  properties.
 
-** Phase 23.2 — Capability enforcement
-- Wire the MCP layer to check capabilities before dispatch.
-- Add capability declarations to every built-in agent.
+** Phase 23.2 — Capability enforcement *[declarative shipped, gating pending]*
+- =Agent.capabilities= populated for the core 9 (read.vault for
+  Spock, write.vault for Data, shell for Scotty + Geordi, etc).
+- Enforcement at the MCP-tool dispatch layer not yet wired —
+  the proxy / opencode bridge doesn't currently pass the
+  invoking agent's identity through to MCP tool calls. Wiring
+  that signal end-to-end is the load-bearing part of this
+  phase.
 
-** Phase 23.3 — Hygiene scans
-- Add the =hygiene_scan= field. Implement the existing scribe
-  +librarian scans; ship a sample weather_tag_suggest as the
-  agenda agent's scan. =org-llm hygiene= verb.
+** Phase 23.3 — Hygiene scans *[slot exists, scans pending]*
+- =Agent.hygiene_scan: Callable | None= field exists.
+- Concrete scans (gardener vault hygiene, scribe untagged
+  headings, agenda outdoor-flag suggestions) not yet
+  implemented. =org-llm hygiene= verb still TODO.
 
-** Phase 23.4 — Recipes + inferrers as agent properties
-- Migrate =orchestration._RECIPES= → per-agent recipe lists.
-- Migrate =vault_facts._INFERRERS= → per-agent inferrer lists
-  (registry stays unified for fact-name lookup).
-- The host composes the global list at startup.
+** Phase 23.4 — Recipes + inferrers as agent properties *[slot exists, migration pending]*
+- =Agent.recipes: tuple[str, ...]= field exists; the two
+  current recipes (=count_across_vault= owned by Spock,
+  =weather_aware_agenda= owned by Janeway) are tagged on the
+  respective agents.
+- =orchestration._RECIPES= remains the active source of truth;
+  the per-agent declarations are documentation-only until the
+  matcher is rewired to compose the global list from
+  =get_builtins()=.
+- =vault_facts._INFERRERS= migration unchanged from this plan.
 
-** Phase 23.5 — User-supplied agents
-- =~/.config/org-llm/agents/<name>.org= sourced as additional
-  overrides. Same shape as =org-llm-agents.org=.
+** Phase 23.5 — User-supplied agents (library) *[design pending]*
+- =~/.config/org-llm/agents/<pack>/<name>.org= sourced as
+  additional overrides. Same shape as =org-llm-agents.org=.
+- =org-llm agents install <git-url-or-pack>= clones into the
+  pack dir; =org-llm agents pack list= shows installed packs.
 - Sandbox: user-supplied agents can't grant themselves new
   capabilities; they pick from the existing capability set.
+- Open: signing / verification / audit-on-update story. Until
+  then the verb is documented but not implemented — users who
+  want a custom agent today edit =~/org/org-llm-agents.org=
+  directly (Phase 23.1's existing path).
 
 * What this means for tonight's weather + battery work
 
