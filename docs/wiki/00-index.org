@@ -166,6 +166,15 @@ for the full convention.
 - [[id:9b012557-f592-4d1e-8dd1-464c2a4250c3][Audit log]] —
   bidirectional wiki↔reality audits; what's drifted, what's
   fixed, what's deferred
+- [[id:03be52bf-003f-4762-a274-e7c88f97847f][Coordination]] —
+  parallel-instance protocol: claim before you touch, one
+  branch per arc, re-Read before Edit, no silent wiki edits.
+  Live state in [[id:281ddc58-169b-4f35-bab6-03f59c1df359][active-claims.org]]; durable
+  decisions in [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]].
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][Decisions]] —
+  the directional record (ADR-ish): one heading per
+  load-bearing decision, with status, context, and triggers
+  for revisit
 
 The substrate makes search and ask work at all. The hygiene
 keeps them USEFUL as your vault grows. The surfaces are how
@@ -247,6 +256,9 @@ the link to the source:
 | @agentsmith                | [[id:b9e5d3c2-4a7f-48a6-9c1d-e2f3a4b5c6d7][agentsmith.org]]         | full       |
 | Agent orientation (manifest + primer) | [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]] | full (Phase 24.5 candidate) |
 | Lazy-loading policy        | [[id:cf466e65-0fa1-4f23-8103-8205f67a6ca3][lazy-loading.org]]        | full       |
+| Coordination (parallel instances) | [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]]   | full       |
+| Active claims (live board) | [[id:281ddc58-169b-4f35-bab6-03f59c1df359][active-claims.org]]       | full       |
+| Decisions (ADR-ish record) | [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]]           | full       |
 
 * How to contribute / extend
 

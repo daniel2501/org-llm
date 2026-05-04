@@ -1,0 +1,372 @@
+:PROPERTIES:
+:ID:       190baa35-06d1-4b34-a67d-2926859f47cb
+:CREATED:  [2026-05-04]
+:END:
+#+TITLE: Decisions — directional record (ADR-ish)
+#+FILETAGS: :wiki:meta:decisions:adr:sdlc:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* The durable record of *directional* decisions for
+org-llm — the choices a future contributor (human or agent)
+would otherwise have to reverse-engineer from commits. One
+heading per decision, with =:ID:= for org-roam linking, status,
+date, context, decision, and consequences. Not every choice
+goes here; only the ones that would surprise a future reader
+or that we'd hate to re-litigate.
+
+* Summary of when to write one
+
+*Summary.* Write a decision entry when the choice is
+*directional* (sets a default for future work), *non-obvious*
+(a smart contributor would otherwise pick differently), or
+*paid for* (we tried the alternative and it cost us). Skip
+decisions that are obvious from the code, locally scoped, or
+trivially reversible. If unsure: ask in
+[[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][captain's log]]
+whether the decision belongs here, then either write the
+entry or drop the question.
+
+*Expanded.*
+
+Triggers (write an entry):
+- A new convention every contributor will need to follow
+  ("the wiki is org, .md is for cross-tool surfaces only")
+- Closing off an alternative we evaluated and rejected
+  ("we considered libSQL; staying on SQLite because …")
+- A trade-off where the loser is non-obvious
+  ("vault-authoritative now → DB-authoritative in Phase 25;
+  the inversion has costs and we accept them because …")
+- A deferral with a trigger condition
+  ("CODEOWNERS deferred until N agent reviewers …")
+
+Anti-triggers (skip):
+- The choice is visible in code or wiki and self-explanatory
+- The choice is local to one file/function
+- The choice will be reversed cheaply if wrong
+- The choice is "use library X" with no real alternative
+
+When in doubt, lean toward writing — a 5-line entry is cheap;
+re-litigating a forgotten decision is expensive.
+
+* Convention
+
+Each decision is a level-1 heading with this shape:
+
+#+begin_example
+* DEC-NNN — short title
+:PROPERTIES:
+:ID:       <uuid>
+:STATUS:   accepted | superseded-by-DEC-MMM | deprecated
+:DATE:     [YYYY-MM-DD]
+:DECIDERS: <names / instance handles>
+:END:
+
+*Summary.* One-paragraph TL;DR (per wiki Rule 2b).
+
+*Context.* What forces are at play. What we knew at the time.
+
+*Decision.* What we decided.
+
+*Consequences.* What this commits us to. What it forecloses.
+What might trigger revisiting.
+#+end_example
+
+Numbering: =DEC-NNN= is monotonic, three digits, never reused.
+Superseded entries stay in place with =STATUS: superseded-by-X=
+and a link to the successor — don't delete history.
+
+The seed entries below establish the format. Future decisions
+append at the end of the "Decisions" section.
+
+* Decisions
+
+** DEC-001 — Branching: trunk model with PR-to-main
+:PROPERTIES:
+:ID:       1f3eaffe-3edd-4d8f-9aa7-9aa9c5e35d9e
+:STATUS:   accepted
+:DATE:     [2026-05-04]
+:DECIDERS: Daniel, Claude/opus-A
+:END:
+
+*Summary.* Primary integration is on the =trunk= branch;
+everything merges to =main= via PR. Secondary streams
+(human or agent) branch off =main= using the
+=<who>/<slug>= naming scheme. =main= is protected; force-push
+forbidden. Force-push to =trunk= requires a captain's-log
+announcement.
+
+*Context.* org-llm went from one developer to a parallel
+human + agent team in May 2026. Without an explicit branching
+model, instances were defaulting to direct =trunk= edits —
+fine for one developer, breaks immediately at N>1.
+
+*Decision.* Trunk-based development with PR-mediated merges to
+=main=. =trunk= is the primary stream's working branch (the
+maintainer's local-fast-path); secondary streams use named
+branches off =main=. PRs target =main=, not =trunk=.
+
+*Consequences.*
+- All non-primary work is reviewable before merge.
+- The maintainer's =trunk= velocity is unchanged.
+- Force-push hygiene becomes a coordination signal (forbidden
+  on =main=, announced on =trunk=, free on personal branches).
+- Triggers revisit: if N humans regularly merge directly,
+  collapse =trunk= into =main= and use only named branches.
+
+** DEC-002 — Org-native first; .md only for cross-tool surfaces
+:PROPERTIES:
+:ID:       4a2ffd67-2ddc-4d12-9b18-86e7e15ec6a4
+:STATUS:   accepted
+:DATE:     [2026-05-04]
+:DECIDERS: Daniel, Claude/opus-A
+:END:
+
+*Summary.* All durable project documentation lives in
+=docs/wiki/= as =.org= files with =:ID:= properties for
+org-roam linking. Markdown files are reserved for surfaces
+that external tools auto-load and don't render =.org= well:
+README.md (GitHub front page), CONTRIBUTING.md or .org (TBD),
+AGENTS.md (cross-tool agent primer), .github/* templates.
+
+*Context.* org-llm is "Claude Code for Org Mode" — the
+file format IS the brand. But GitHub, Claude Code, opencode,
+and Cursor all auto-discover certain =.md= filenames. Forcing
+=.org= everywhere would lose those integrations; forcing
+=.md= everywhere would lose org-roam graph + Emacs ergonomics.
+
+*Decision.* Org is the default. =.md= is the exception, used
+only where a cross-tool surface specifically requires it.
+Every =.md= file at root or in =.github/= should link back
+into the org wiki for the substantive content.
+
+*Consequences.*
+- The wiki concept graph stays whole.
+- New contributors landing on README/CONTRIBUTING get a hop
+  into the org wiki, not a separate .md tree.
+- Updates: any concept page change ripples to the .md
+  surfaces that reference it (per
+  =feedback_keep_wiki_and_readme_in_sync=).
+- Triggers revisit: if a tool we adopt only reads .org, we
+  drop the corresponding .md.
+
+** DEC-003 — Agents-as-SDLC; vault is substrate
+:PROPERTIES:
+:ID:       8e0c3b71-1f75-4a0f-9d3e-9b85f29c4ed1
+:STATUS:   accepted
+:DATE:     [2026-05-04]
+:DECIDERS: Daniel, Claude/opus-A
+:END:
+
+*Summary.* org-llm's stance on SDLC for code projects (its own
+or users') is: org-mode is the substrate (headings, properties,
+agenda, clock, priorities, roam-links provide most of the data
+layer "for free"); agents are the SDLC layer (judgment,
+facilitation, cross-document synthesis, ceremony when
+configured). Formality is a configuration knob
+(=sdlc.formality = none | light | kanban | scrum=), not
+separate products. The "none" level must stay genuinely free
+of nags.
+
+*Context.* The team going multi-developer raised the question
+of formal SDLC. The org-llm thesis ("Claude Code for Org
+Mode", agent-driven life management) means SDLC for code is
+already in scope as a specialization, not a pivot. The risk
+is generalizing too early into a Linear/Jira-shaped product
+surface before we know what's load-bearing.
+
+*Decision.*
+1. Dogfood SDLC on org-llm itself first; do not generalize.
+2. Use existing agents (=@curator=, =@tracker=) for
+   PM-shaped work; promote new agents (=@scrummaster=,
+   =@projectmanager=, etc.) only when patterns are
+   undeniable, per agent-idea-interaction-lens and Phase 29
+   self-coded-tools.
+3. Treat ceremony as opt-in, never as default.
+4. Differentiator must be agent-native + vault-grounded +
+   org-native; do NOT pursue feature-parity with Linear/Jira.
+
+*Consequences.*
+- The Phase-29-and-later roadmap gains an "SDLC arc"
+  candidate (not yet committed; see
+  [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]]).
+- Decision blocks attempts to add cross-project PM features
+  before single-project dogfooding has shipped.
+- We accept that the upper end of the formality spectrum
+  (full Scrum) is *designed*, not *dogfooded*, until org-llm
+  has a real multi-team user.
+
+** DEC-004 — CODEOWNERS deferred; trigger is non-human reviewers
+:PROPERTIES:
+:ID:       db61ab07-3475-4cda-9b58-f3e1cdc3af2a
+:STATUS:   accepted
+:DATE:     [2026-05-04]
+:DECIDERS: Daniel, Claude/opus-A
+:END:
+
+*Summary.* No CODEOWNERS file at this stage. Revisit when there
+are enough *non-human* reviewers regularly approving merges
+that owner-routing would route review labor in a meaningful
+way; revisit also if/when the human team grows past ~3
+regular committers. Today the human/agent count makes
+CODEOWNERS premature ceremony.
+
+*Context.* The user explicitly framed CODEOWNERS as
+applicable "once we get enough NON humans merging" — the
+forward-looking framing is that agents will be normal
+reviewers, and CODEOWNERS becomes meaningful when routing
+a PR to =@curator= or =@tracker= for wiki / dev-process
+review actually delegates labor. Today the team is one
+human + a handful of in-conversation agents; routing has no
+work to amortize.
+
+*Decision.* Skip CODEOWNERS for now. The trigger to add it
+is *either*:
+- ≥3 regular human committers (review-load distribution
+  becomes a real concern), *or*
+- ≥2 stable agent reviewers wired into PR review
+  (programmatic delegation to =@curator=, =@tracker=, etc.)
+
+*Consequences.*
+- Today: no review-routing ceremony to maintain.
+- Future: when triggered, the file's first ownership lines
+  will likely route =docs/wiki/*= → =@curator=,
+  =org_llm/dev_tracker_*= → =@tracker=,
+  [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] → maintainer, etc. — i.e., agent
+  ownership of the surfaces those agents already steward.
+- This decision is part of the
+  "agents-as-SDLC" thesis (DEC-003); CODEOWNERS is a
+  natural artifact of that thesis once non-human reviewers
+  stabilize.
+
+** DEC-005 — Strict claim-before-touch + commit hygiene + worktree escape hatch
+:PROPERTIES:
+:ID:       54843097-3bf9-447e-b8b8-54cbc0a0ed6b
+:STATUS:   accepted
+:DATE:     [2026-05-04]
+:DECIDERS: Daniel, Claude/opus-B
+:END:
+
+*Summary.* The unified git strategy for org-llm. Builds on
+DEC-001 (trunk + PR-to-main) by adding three operational rules:
+*claim-before-touch is strict for everyone including the
+maintainer*; *commit hygiene* (pull-rebase before push, explicit
+file staging, =scope = phase= in conventional-commits format,
+push immediately after commit); and a *worktree escape hatch*
+when concurrent agents physically overlap on hot files. The
+strict claim closes a loophole that ran silently across 414
+solo-maintainer commits — fine at n=1, breaks at N≥2.
+
+*Context.* On 2026-05-04 the project went from one
+solo-maintainer to a parallel human + agent team (multiple
+Claude Code / opencode instances, future @-agents). That same
+day three commits landed in trunk in six minutes from different
+agents (=docs(wiki):= → =feat(resolvers):= → =feat(primers):=)
+with overlapping uncommitted edits to =orchestration.py= /
+=mcp_server.py= / =db.py=. The existing
+[[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] Rule 1
+already requires a claim before any =Edit=/=Write=, but n=1
+muscle memory has been running without one — the rule reads
+strict but operates soft. This decision flips it operationally.
+
+The git log itself is evidence the existing flow works: 414
+commits, zero merge commits, zero abandoned branches,
+conventional-commits format strictly followed, every commit's
+scope tied to a phase. The strategy preserves that velocity for
+the maintainer's primary stream while adding the minimum
+ceremony needed for parallel work.
+
+*Decision.*
+
+1. *Strict claim-before-touch — no maintainer exception.* Every
+   contributor (human or agent) opens an =active-claims.org=
+   STARTED heading before the first =Edit=/=Write= in a session.
+   This applies to Daniel's solo sessions too. The license to
+   skip the claim board ended on 2026-05-04 when N became ≥2.
+
+2. *Commit hygiene rules.*
+   - Stage files explicitly (=git add <path>=); never =-A= /
+     =.= / =-u=. The git-safety-protocol bans this; DEC-005
+     promotes it from agent-instruction to project rule.
+   - =git pull --rebase= before =git push=. Concurrent commits
+     resolve as fast-forwards or interleaves, never merges.
+     The trunk graph stays linear (zero merge commits across
+     414 commits is a feature; preserve it).
+   - Conventional Commits with =scope = phase= (or
+     =scope = component= when phase doesn't apply):
+     =feat(primers): Phase 24.5b — …=,
+     =docs(wiki): canonize agent-orientation pattern + …=.
+     The scope token grep-anchors the phase narrative.
+   - Push immediately after commit. Holding committed-but-
+     unpushed work is a coordination violation when other
+     agents are active — they can't pull-rebase against work
+     they can't see.
+   - Co-author tag stays for agent commits:
+     =Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>=
+     (or equivalent for other agents). Preserves attribution
+     lineage even when squashed/rebased.
+
+3. *Worktree escape hatch.* When your planned scope overlaps a
+   hot file (=orchestration.py=, =mcp_server.py=, =db.py=,
+   =cli.py=, =llm_proxy.py=) that another contributor has
+   uncommitted local changes on, you MUST either:
+   - Coordinate via captain's log (=kind=coord=) and wait, OR
+   - Spin up =git worktree add ../org-llm-<phase> origin/main=
+     (or =origin/trunk= if you're on the maintainer's stream)
+     and work there. The worktree shares =.git= with the main
+     checkout — no clone, no remote-config drift; just a
+     separate working dir for a separate branch.
+   The list of "hot files" is the set the dev-tracker phase
+   plans repeatedly schedule for edits; today's set is the
+   five named above. Add to it (in this DEC) when a sixth
+   surfaces.
+
+4. *No PR gate until the trigger.* PRs to =main= remain the
+   merge surface for secondary streams (DEC-001), but no CI
+   gating, no required review, no PR template enforcement
+   beyond what =.github/PULL_REQUEST_TEMPLATE.md= proposes.
+   Trigger to add a CI gate: ≥3 regular human committers OR
+   the first outside FOSS contributor (whichever is first),
+   matching DEC-004's CODEOWNERS trigger.
+
+*Consequences.*
+- *Operational.* Daniel's solo sessions now post a claim before
+  editing. Cost: ~30 seconds per session start. Benefit: agents
+  spawning concurrently can see what's in flight without
+  guessing from =git status=.
+- *Velocity.* The maintainer's trunk fast-path is preserved
+  (DEC-001 unchanged). Pull-rebase and explicit staging are
+  habit-shaped friction that surfaces races loudly rather than
+  letting them silently corrupt the working tree.
+- *Worktree escape hatch.* Lets parallel agents proceed when
+  they would otherwise have to wait for someone else's commit.
+  The maintainer rarely needs it; secondary streams reach for
+  it whenever DEC-001 would otherwise force them to coordinate
+  before starting.
+- *Forecloses.* No long-running feature branches that miss
+  trunk by weeks. No squash-rebase-rewrite of public history.
+  No CI ceremony before it amortizes. No "I'll claim later"
+  escape valve.
+- *Triggers revisit.* If we reach ≥3 regular human committers
+  or first outside contributor, add CI + required review (and
+  re-evaluate CODEOWNERS per DEC-004). If hot-file races
+  recur despite the escape hatch, escalate the file to
+  per-section locks or split it.
+
+* See also
+
+- [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] —
+  the live-protocol page that references these decisions
+- [[id:281ddc58-169b-4f35-bab6-03f59c1df359][active-claims.org]] —
+  the ephemeral counterpart
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] —
+  long-form phase narrative; decisions feed it but don't
+  duplicate it
+- [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki conventions]] —
+  Rule 2b summary+expanded format applies here
+- [[id:9b012557-f592-4d1e-8dd1-464c2a4250c3][audit log]] —
+  decisions.org is the *prospective* record; audit-log is the
+  *retrospective* drift record. Different shapes, adjacent
+  purpose.

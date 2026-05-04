@@ -1,0 +1,93 @@
+:PROPERTIES:
+:ID:       281ddc58-169b-4f35-bab6-03f59c1df359
+:CREATED:  [2026-05-04]
+:END:
+#+TITLE: Active claims — parallel-instance live board
+#+FILETAGS: :wiki:meta:coordination:live:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* The live state half of
+[[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]].
+Each active contributor (human or agent instance) holds at most
+one =STARTED= heading under "Active claims" naming the files
+they're touching, the branch, and the start time. On completion
+the heading flips to =DONE= and moves to "Recently closed".
+Stale claims (>4h with no commit/update) are subject to
+announced reclaim.
+
+* How to use this file
+
+Read [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]]
+§ "Rule 1 — Claim before you touch" for the full protocol.
+Short version: append a =STARTED= heading under "Active claims"
+before your first =Edit=/=Write= call. Update or move it to
+=Recently closed= when done. Don't leave silent stale entries.
+
+This file is meant to churn. Don't worry about pretty diffs or
+chronological ordering — append to the bottom; the next
+=@tracker= sweep will compact.
+
+* Active claims                                                 :@active:
+
+# Append STARTED entries here. One per active contributor.
+# Format:
+#
+#   ** STARTED <who> — <one-line scope>
+#      :PROPERTIES:
+#      :CLAIM:    <space-separated paths>
+#      :BRANCH:   <branch-name>
+#      :STARTED:  [YYYY-MM-DD Day HH:MM]
+#      :END:
+#
+# When done: change STARTED → DONE, add :CLOSED: timestamp, move
+# the entry to "Recently closed" below.
+
+
+* Recently closed                                              :@closed:
+
+# Move closed claims here. Compact periodically — entries older
+# than ~2 weeks can be deleted; the captain's log retains the
+# durable record.
+
+** DONE Claude/opus-A — coordination + decisions wiki seed
+   :PROPERTIES:
+   :CLAIM:    docs/wiki/coordination.org docs/wiki/active-claims.org docs/wiki/decisions.org docs/wiki/00-index.org
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-04 Mon 15:35]
+   :CLOSED:   [2026-05-04 Mon 15:50]
+   :END:
+
+** DONE Claude/opus-A — Tier 2 contributor onboarding (CONTRIBUTING + AGENTS + PR template)
+   :PROPERTIES:
+   :CLAIM:    CONTRIBUTING.md AGENTS.md .github/PULL_REQUEST_TEMPLATE.md README.md
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-04 Mon 15:55]
+   :CLOSED:   [2026-05-04 Mon 16:05]
+   :END:
+
+** DONE Claude/opus-B — DEC-005 strict git strategy canonization
+   :PROPERTIES:
+   :CLAIM:    docs/wiki/decisions.org docs/wiki/coordination.org docs/wiki/active-claims.org
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-04 Mon 13:55]
+   :CLOSED:   [2026-05-04 Mon 14:10]
+   :END:
+
+* Stale / reclaimed                                            :@stale:
+
+# When a claim is reclaimed under the >4h-no-update rule, the
+# original heading moves here with a note naming who reclaimed
+# and when. Reclaim must also post a captain's-log entry
+# (kind=coord, command=stale-reclaim).
+
+* See also
+
+- [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] —
+  the rules this file implements
+- [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][captain's log]] —
+  durable record of takeovers / conflicts / resolutions
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] —
+  durable work plans (this file is its ephemeral shadow)

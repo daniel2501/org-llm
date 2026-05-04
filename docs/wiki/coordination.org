@@ -1,0 +1,371 @@
+:PROPERTIES:
+:ID:       03be52bf-003f-4762-a274-e7c88f97847f
+:CREATED:  [2026-05-04]
+:END:
+#+TITLE: Coordination — parallel-instance protocol
+#+FILETAGS: :wiki:meta:coordination:multi-agent:sdlc:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* This page is the contract between the humans and
+agent-instances developing org-llm in parallel. Before touching
+the repo, declare your claim in
+[[id:281ddc58-169b-4f35-bab6-03f59c1df359][active-claims.org]]; work
+on your own branch; re-Read every file immediately before editing
+it (parallel streams invalidate session caches); never edit the
+wiki silently. Decisions that outlive a single arc go in
+[[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]]; ephemeral
+work-state stays in dev-tracker / now / captain's log.
+
+* Why this exists
+
+org-llm is now developed by multiple agents (Claude Code
+instances, opencode, future @-agents) and humans, often
+concurrently. Without a shared protocol, parallel streams will
+silently overwrite each other's work, branch off stale wiki
+state, or duplicate in-flight changes. This page is the minimum
+ceremony to keep the streams composable.
+
+It is deliberately *light*. We are not Scrum. We are an
+opinionated FOSS project with a single-digit team and a growing
+agent roster — the rules below are the load-bearing ones, and
+nothing more.
+
+See also [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] §
+"SDLC arc" for the agent-mediated dogfooding direction this page
+seeds.
+
+* The rules
+
+** Rule 1 — Claim before you touch
+
+*Summary.* Every contributor (human or agent) writes one heading
+under "Active claims" in
+[[id:281ddc58-169b-4f35-bab6-03f59c1df359][active-claims.org]]
+*before* opening an Edit/Write tool. The claim names the scope,
+the branch, and the start time. When done, mark =DONE= or
+delete; if abandoned silently for >4h with no commit/update, the
+claim is stale and another instance MAY reclaim after announcing
+the takeover.
+
+*Expanded.*
+
+The claim heading uses the form:
+
+#+begin_example
+** STARTED <who> — <one-line scope>
+   :PROPERTIES:
+   :CLAIM:    docs/wiki/foo.org docs/wiki/bar.org org_llm/baz.py
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-04 Mon 15:30]
+   :END:
+#+end_example
+
+- =<who>= is human name *or* instance handle
+  (=Claude/opus-A=, =opencode=, =@curator-spawned-by-X=). Make
+  it identifiable, not anonymous.
+- =CLAIM= lists files/directories you intend to write. Be
+  generous — claiming a few extra files is fine; failing to
+  claim one you touch is a violation.
+- =BRANCH= is the branch you'll commit on. Use =trunk= only for
+  the single primary stream; everything else gets its own
+  branch (Rule 2).
+- =STARTED= is an org-mode active timestamp.
+
+When done: change =STARTED= → =DONE=, add =:CLOSED:= timestamp,
+and either leave the entry for the next sweep or move it to the
+=Recently closed= section.
+
+The 4-hour stale rule exists because instances die without
+warning. If you see a claim that hasn't moved in 4h and no
+commits have landed against its files, post a takeover note in
+[[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][captain's log]]
+("reclaiming stale claim X from <who>") and rewrite the claim
+heading with your handle. This is not a soft rule — silent
+reclaim is a violation; announced reclaim is fine.
+
+*No maintainer exception.* Per
+[[id:54843097-3bf9-447e-b8b8-54cbc0a0ed6b][DEC-005]] the rule
+applies to every contributor — including Daniel's solo
+sessions. The "n=1, claim is implicit" license expired on
+2026-05-04 when N became ≥2. The rule has always been strict in
+language ("Every contributor (human or agent) writes one
+heading"); DEC-005 made it strict in operation.
+
+** Rule 2 — One branch per logical arc
+
+*Summary.* Don't share branches. Each arc (feature, bugfix,
+wiki sweep) gets its own branch off =main=, lands as a PR
+through the trunk model, and dies after merge. The branch named
+=trunk= is the integration line for the primary developer
+stream; secondary streams branch off =main=, not =trunk=.
+
+*Expanded.*
+
+Naming: =<who>/<short-slug>= or =<topic>/<short-slug>=.
+Examples: =claude/coordination-artifacts=,
+=tracker/dev-tracker-self-host=, =fix/route-preview-stage1=.
+
+The PR is the merge surface. =git push --force= against a
+shared branch is a coordination violation — if you need to
+rewrite, do it on your own branch and open a fresh PR. (Force
+push to =main= is never OK; force push to =trunk= warrants a
+captain's-log note before doing it.)
+
+When two arcs need to share intermediate state, *rebase the
+later one* on the earlier when it merges; don't co-edit the
+earlier branch. Rebase is friction that surfaces conflicts
+loudly; co-editing is friction that hides them until merge.
+
+** Rule 3 — Re-Read before Edit
+
+*Summary.* Treat every file as potentially mutated since you
+last read it. Before any =Edit= or =Write= call, re-Read the
+file. Do not trust earlier-in-session snapshots. Prefer =Edit=
+(diff-based) over =Write= (whole-file overwrite) — =Write=
+clobbers concurrent changes silently.
+
+*Expanded.*
+
+This is canonized as Claude memory =feedback_reread_before_edits=
+and now applies as a *project rule* to every contributor (human
+or agent). The reason: parallel dev streams invalidate any
+mental model of "I read this file 20 minutes ago." A 20-minute-
+old read is forensic evidence, not current state.
+
+In practice:
+- Open the file with =Read= immediately before the edit
+  operation.
+- For multi-edit batches, batch the =Read= calls in parallel
+  with each other but *not* in parallel with the =Edit= calls
+  that depend on them.
+- If you're using =Write= on an existing file, stop and ask
+  why =Edit= won't do. The answer is almost always "I'm being
+  lazy" — fix that. Legitimate =Write= cases: scaffolding a
+  new file, top-to-bottom rewrite the user explicitly asked
+  for.
+
+For human contributors editing in Emacs: =M-x revert-buffer=
+on any file you've had open while another stream might have
+landed. =auto-revert-mode= is recommended for the wiki
+directory.
+
+** Rule 4 — Wiki edits are never silent
+
+*Summary.* Per
+[[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki conventions]]
+Rule 2: every wiki edit is announced in the conversation /
+commit / PR description before/while it lands. No exceptions for
+parallel agents — the always-notified rule extends across
+instances, not just within a single conversation.
+
+*Expanded.*
+
+The reason this matters more in a multi-instance world: a silent
+wiki edit by instance A invalidates instance B's read of the
+same page, but instance B has no way to know. The announcement
+is the signal. Three surfaces for the announcement:
+
+- *In-conversation*: the user / orchestrator sees the edit as
+  it lands (existing wiki-conventions rule).
+- *In commit message*: when the edit is part of a larger
+  commit, the message names the wiki page touched and why
+  ("=docs/wiki/foo.org=: clarify X because Y").
+- *In captain's log*: significant wiki structural changes
+  (new pages, deletions, renames, ID changes) get an explicit
+  log entry — instance B reading the captain's log sees the
+  signal even if it never saw the conversation.
+
+Rule 2b (summary + expanded format) applies to every new
+concept page added by any instance. No exceptions for agents.
+
+** Rule 5 — Commit hygiene
+
+*Summary.* Stage files explicitly (never =-A= / =.= / =-u=);
+=git pull --rebase= before =git push=; push immediately after
+commit; conventional-commits format with =scope = phase= (or
+=scope = component= when phase doesn't apply); co-author tag
+on every agent commit. The trunk graph stays linear (zero merge
+commits across 414 commits is a feature, not an accident); these
+rules preserve that property under N≥2 concurrent agents.
+
+*Expanded.*
+
+- *Explicit staging.* Name the files. =git add docs/wiki/foo.org
+  org_llm/bar.py= rather than =git add -A=. The latter sweeps
+  another agent's uncommitted work into your commit silently —
+  a coordination violation. The git-safety-protocol bans the
+  shorthand for agents; DEC-005 promotes it to a project rule
+  for everyone.
+- *Pull-rebase before push.* Concurrent commits resolve as
+  fast-forwards or interleaves, never merges. Today's
+  13:35 / 13:38 / 13:41 three-agent race succeeded *only*
+  because each agent pulled-rebased before pushing. If you
+  forget and =git push= fails, the recovery is
+  =git pull --rebase && git push=, not =git push --force=.
+- *Push immediately.* Holding committed-but-unpushed work is a
+  coordination violation when other agents are active — they
+  can't pull-rebase against work they can't see. The exception
+  is an in-flight multi-commit arc where the next commit
+  depends on the previous; in that case, push the arc as soon
+  as the last commit lands.
+- *Conventional Commits, scope = phase.* The 414-commit history
+  follows =type(scope): subject= strictly: =feat(primers):=,
+  =docs(wiki):=, =fix(@doom):=, =refactor(agents):=. The scope
+  token grep-anchors the phase narrative — every commit ties to
+  a dev-tracker entry. Subject under ~70 chars; details in body.
+- *Co-author tag.* Every agent commit ends with
+  =Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>= (or
+  the equivalent for other agent instances). Preserves
+  attribution lineage even when commits are rebased or squashed.
+
+** Rule 6 — Worktree escape hatch when scopes overlap
+
+*Summary.* When your planned scope overlaps a *hot file*
+(=orchestration.py=, =mcp_server.py=, =db.py=, =cli.py=,
+=llm_proxy.py=) that another contributor has uncommitted local
+changes on, you MUST either coordinate via captain's log and
+wait, OR spin up =git worktree add ../org-llm-<phase>
+origin/main= and work there. Worktrees share =.git=; no clone,
+no remote-config drift, just a separate working dir for a
+separate branch.
+
+*Expanded.*
+
+The hot-files list is empirical — it's the set the dev-tracker
+phase plans repeatedly schedule for edits. Today (2026-05-04):
+
+| file                            | why it's hot                                    |
+|---------------------------------+-------------------------------------------------|
+| [[file:../../org_llm/orchestration.py][=org_llm/orchestration.py=]]      | every supervision / recipe / agent change       |
+| [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]]         | every new MCP tool registration                 |
+| [[file:../../org_llm/db.py][=org_llm/db.py=]]                 | every schema change                             |
+| [[file:../../org_llm/cli.py][=org_llm/cli.py=]]                | every new verb / subcommand                     |
+| [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]]          | every interceptor add / change                  |
+
+When a *cold* file is the overlap (rare two-agent edit on a
+domain-specific module), Rule 1's claim board is sufficient —
+the second claimer yields and waits. The escape hatch is for
+the hot-file case where waiting would block whole arcs of work.
+
+Worktree mechanics, the short version:
+
+#+begin_src sh
+# From the main checkout:
+git worktree add ../org-llm-24.5a origin/main
+cd ../org-llm-24.5a
+git switch -c claude/phase-24.5a-manifest
+# … work, commit, push …
+gh pr create --base main
+# After PR merges:
+cd ../org-llm
+git worktree remove ../org-llm-24.5a
+#+end_src
+
+The maintainer's primary stream rarely needs this — Daniel
+works on =trunk= and the fast-path is a feature (DEC-001).
+Secondary streams (other Claude / opencode instances, future
+@-agents) reach for the escape hatch whenever DEC-001 would
+otherwise force them to coordinate before starting work, AND
+the overlap is on a hot file.
+
+Add to the hot-files list (in the table above + DEC-005) when
+a sixth file surfaces empirically. Don't pre-add files
+speculatively; the table is observational.
+
+* Conflict surfacing
+
+When two instances claim overlapping files, the second to claim
+yields and posts a note in captain's log. If the overlap is only
+discovered at edit time (because Rule 1 was bypassed):
+
+1. The instance that committed first wins by default.
+2. The second instance rebases its branch on the now-merged
+   state and resolves manually.
+3. Both instances post a captain's-log entry naming the
+   overlap, the resolution, and what coordination signal was
+   missed (so the protocol can be tightened).
+
+Tie-breakers when neither has merged yet:
+- Human > agent.
+- Earlier =STARTED= timestamp wins.
+- If both started within 5 minutes, the one that already has
+  uncommitted local changes wins — the other discards.
+
+* Roles (informal, today)
+
+| Role            | Who                          | Authority                            |
+|-----------------+------------------------------+--------------------------------------|
+| Maintainer      | Daniel                       | Final say on directional decisions   |
+| Curator         | =@curator= agent             | Wiki concept-graph integrity         |
+| Tracker         | =@tracker= agent             | Dev-tracker hygiene + claims sweeps  |
+| Contributor     | Any human or agent instance  | Make claims, write code, open PRs    |
+
+The agent roles are advisory, not gating — they don't block
+merges, but their sweeps catch protocol violations and surface
+them in captain's log. As the team grows, expect this table to
+formalize (CODEOWNERS becomes meaningful once enough
+non-human reviewers regularly approve merges; see
+[[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] §
+"CODEOWNERS deferral").
+
+* Captain's Log integration
+
+The protocol leans on
+[[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][captain's log]] as the
+shared event stream. Specifically:
+
+- Stale-claim takeovers → captain's log entry, =kind=coord=
+- Conflict resolutions → captain's log entry, =kind=coord=
+- New decisions landed in =decisions.org= → captain's log
+  entry, =kind=decision=
+- Wiki structural changes (new pages, renames, deletions) →
+  captain's log entry, =kind=wiki=
+
+These =kind= values may not be wired in
+[[file:../../org_llm/logbook.py][=org_llm/logbook.py=]] yet.
+Until they are, write to =kind=cli= with =command=coordination=
+or =command=decision-log= and a structured =args= payload. The
+Phase 16.4 MCP-kind logging upgrade will widen the kind
+taxonomy.
+
+* What this is NOT
+
+- *Not Scrum.* No standups, no sprint planning, no story
+  points, no retros — yet. The agent-mediated path to
+  optional Scrum/agile is a Phase-29-or-later direction; see
+  [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]].
+- *Not a permission system.* These are coordination signals,
+  not access controls. A bad-actor agent can violate any of
+  them; the protocol assumes good-faith parallel work.
+- *Not a substitute for the wiki.* Coordination is process;
+  the wiki is substance. If you're touching a concept,
+  consult its wiki page first
+  ([[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki conventions]]
+  Rule 1).
+
+* See also
+
+- [[id:281ddc58-169b-4f35-bab6-03f59c1df359][active-claims.org]] —
+  the live claim board
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] —
+  the directional record; specifically
+  [[id:1f3eaffe-3edd-4d8f-9aa7-9aa9c5e35d9e][DEC-001]] (branching) and
+  [[id:54843097-3bf9-447e-b8b8-54cbc0a0ed6b][DEC-005]] (strict
+  claim + commit hygiene + worktree escape hatch)
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] —
+  durable work surface; complementary to active-claims
+- [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] —
+  in-flight + recently shipped dashboard
+- [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][captain's log]] —
+  shared event stream the protocol writes to
+- [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki conventions]] —
+  the always-notified rule and Rule 2b summary+expanded format
+- [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent orientation]] —
+  how agents are spawned with manifest + on-demand primers;
+  coordination is one of those primers in spirit
+- [[id:cf466e65-0fa1-4f23-8103-8205f67a6ca3][lazy loading]] —
+  the policy that says "load context when relevance is
+  established"; coordination context is itself lazy-loaded
