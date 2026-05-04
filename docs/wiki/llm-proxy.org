@@ -25,11 +25,15 @@ If any interceptor returns a =ProxyResponse=, the proxy short-circuits
 ollama doesn't even wake up. If every interceptor returns =None=, the
 request forwards transparently and the response streams back.
 
-Phase 17.1 shipped 13 interceptors. Phase 18 has added 10+ more
-(sysexport, sysscreenshot, !shell, @agent, synth_tool_call,
-:tool, ??:explain, ?:cite, ~replay, >raw, prompt_cache).
-Phase 18 is still adding more, one per
-single-file landing; cloud failover is the first.
+Phase 17 shipped 12 interceptors. Phase 18 has added 13 more
+(=sysexport=, =sysscreenshot=, =shell=, =agent_sticky=,
+=agent_prefix=, =synth_tool_call=, =tool_dialect_translate=,
+=force_tool_call=, =explain_prose_only=, =cite=,
+=replay_history=, =raw_passthrough=, =prompt_cache=).
+=DEFAULT_INTERCEPTORS= currently has *25 entries*;
+=intercept_local_only= is appended conditionally when
+=proxy_local_only=true=. Phase 18 is still landing one per
+single-file commit; cloud failover was the first.
 
 * Why it exists
 
@@ -48,6 +52,24 @@ ollama waking up just to return an empty assistant turn was pure
 waste. Now the proxy returns the empty response directly, the plugin
 runs the action, and ollama stays asleep.
 
+* The interceptor model
+
+Two roles in the chain:
+
+- *Short-circuit* interceptors return a =ProxyResponse= and the
+  proxy ships it straight back — the upstream is never touched.
+  ollama doesn't even wake up.
+- *Mutation* interceptors return =None= after editing the parsed
+  body (re-encoded via =_reencode_body=). The request keeps moving
+  down the chain and is forwarded transparently at the end.
+
+First win takes the request: every interceptor sees the request
+before the next one does, and the first one to return a
+=ProxyResponse= wins. Order is the only ordering source — the
+position of each entry in =DEFAULT_INTERCEPTORS=. =intercept_local_only=
+is appended by [[file:../../org_llm/cli.py][=org_llm/cli.py=]]
+only when =proxy_local_only=true=.
+
 * Shipped interceptors (in order)
 
 The order matters: every interceptor sees the request before the
@@ -56,7 +78,7 @@ next one does, and the first one to return a =ProxyResponse= wins.
 Order matches =DEFAULT_INTERCEPTORS= in [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]]; if
 this table drifts again, regenerate by reading that list directly.
 Short-circuiters are #1-13; mutators (modify the request, fall
-through to forward) are #14-23; the conditional kill-switch
+through to forward) are #14-25; the conditional kill-switch
 =intercept_local_only= is appended by =cli.py= when the user
 flips =proxy_local_only=.
 
@@ -66,25 +88,27 @@ flips =proxy_local_only=.
 |  2 | =intercept_sysexport_command=    | =/sysexport [sidebar]= → write chat-export + return path/snapshot       |
 |  3 | =intercept_sysscreenshot_command= | =/sysscreenshot= → run =org-llm screenshot=, return path                |
 |  4 | =intercept_shell=                | =!shell <cmd>= prefix → run cmd locally (gated by =proxy_allow_shell_prefix=) |
-|  5 | =intercept_agent_prefix=         | =@<agent>= prefix → stub pending preconfigured-agents roadmap entry     |
-|  6 | =intercept_sys_commands=         | =/sys*= prefix in the latest user message → empty response              |
-|  7 | =intercept_synth_tool_call=      | Tool-incapable model (gemma, phi3) + =tools= → prompt-engineered tool calls |
-|  8 | =intercept_md_skills=            | =.md= slash with =exec:= frontmatter → run as subprocess, return stdout |
-|  9 | =intercept_static_slashes=       | =/menu=, =/help=, =/config= → handwritten markdown response             |
-| 10 | =intercept_probe_cache=          | Repeated provider probes (=GET /api/tags= etc.) → cached body           |
-| 11 | =intercept_response_cache=       | Exact-prompt cache hit → cached response                                |
-| 12 | =intercept_force_tool_call=      | =:tool <name>= prefix → pin =tool_choice= to that function              |
-| 13 | =intercept_explain_prose_only=   | =??:explain= prefix → force =tool_choice: "none"= (prose only)          |
-| 14 | =intercept_cite=                 | =?:cite <claim>= → force =search_notes= + raw-output system overlay     |
-| 15 | =intercept_replay_history=       | =~<n>= prefix → replay the Nth-prior user prompt, optional suffix       |
-| 16 | =intercept_raw_passthrough=      | =>raw <model> <prompt>= → strip system+tools+history, swap model        |
-| 17 | =intercept_pii_redact=           | Redact secrets (API keys, tokens) before forwarding                     |
-| 18 | =intercept_time_grounding=       | Inject current date into the system prompt before forwarding            |
-| 19 | =intercept_model_routing=        | Route by query shape (cheap model for trivia, smart for code)           |
-| 20 | =intercept_tool_call_repair=     | Fix common LLM-emitted malformed tool-call schemas                      |
-| 21 | =intercept_qwen3_no_think=       | Auto-inject =/no_think= for qwen3 models                                |
-| 22 | =intercept_prompt_cache=         | Inject =keep_alive= on local Ollama; mark Anthropic =cache_control= on largest system block |
-| 23 | =intercept_prompt_slim=          | Strip the MCP catalog (~22 KB) from system prompts that don't need tools |
+|  5 | =intercept_agent_sticky=         | Carry =intent_agent= forward to the next un-prefixed user turn          |
+|  6 | =intercept_agent_prefix=         | =@<agent>= prefix → stub pending preconfigured-agents roadmap entry     |
+|  7 | =intercept_sys_commands=         | =/sys*= prefix in the latest user message → empty response              |
+|  8 | =intercept_synth_tool_call=      | Tool-incapable model (gemma, phi3) + =tools= → prompt-engineered tool calls |
+|  9 | =intercept_tool_dialect_translate= | Kimi/qwen3 tool-call dialect in assistant content → OpenAI =tool_calls= shape |
+| 10 | =intercept_md_skills=            | =.md= slash with =exec:= frontmatter → run as subprocess, return stdout |
+| 11 | =intercept_static_slashes=       | =/menu=, =/help=, =/config= → handwritten markdown response             |
+| 12 | =intercept_probe_cache=          | Repeated provider probes (=GET /api/tags= etc.) → cached body           |
+| 13 | =intercept_response_cache=       | Exact-prompt cache hit → cached response                                |
+| 14 | =intercept_force_tool_call=      | =:tool <name>= prefix → pin =tool_choice= to that function              |
+| 15 | =intercept_explain_prose_only=   | =??:explain= prefix → force =tool_choice: "none"= (prose only)          |
+| 16 | =intercept_cite=                 | =?:cite <claim>= → force =search_notes= + raw-output system overlay     |
+| 17 | =intercept_replay_history=       | =~<n>= prefix → replay the Nth-prior user prompt, optional suffix       |
+| 18 | =intercept_raw_passthrough=      | =>raw <model> <prompt>= → strip system+tools+history, swap model        |
+| 19 | =intercept_pii_redact=           | Redact secrets (API keys, tokens) before forwarding                     |
+| 20 | =intercept_time_grounding=       | Inject current date into the system prompt before forwarding            |
+| 21 | =intercept_model_routing=        | Route by query shape (cheap model for trivia, smart for code)           |
+| 22 | =intercept_tool_call_repair=     | Fix common LLM-emitted malformed tool-call schemas                      |
+| 23 | =intercept_qwen3_no_think=       | Auto-inject =/no_think= for qwen3 models                                |
+| 24 | =intercept_prompt_cache=         | Inject =keep_alive= on local Ollama; mark Anthropic =cache_control= on largest system block |
+| 25 | =intercept_prompt_slim=          | Strip the MCP catalog (~22 KB) from system prompts that don't need tools |
 |    | =intercept_local_only=           | Catch-all kill switch (=proxy_local_only=true=) — appended only when set |
 
 The full source with rationale comments is in [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]];
@@ -101,6 +125,31 @@ inside =_forward= rather than the interceptor list:
   context-overflow (32k caps + a 64-tool MCP inventory) two
   retries follow: =cloud_failover_compressed_tools= (descriptions
   trimmed, schemas stripped) then =cloud_failover_no_tools=.
+
+** Reading aid: by category
+
+Looking at the table by what each interceptor /does/ rather than
+its position in the chain:
+
+- *UX no-ops (don't waste the model):* =/sys*=, =/menu=, =/help=,
+  =/config=, =/sysexport=, =/sysscreenshot= → the TS plugin
+  handles the UI; the proxy returns a synthetic empty assistant
+  turn shaped like a real Ollama SSE stream so opencode's session
+  queue accepts the turn and unblocks. Plus =--no-llm= as a hard
+  bypass.
+- *Caching:* =intercept_probe_cache= (provider probes),
+  =intercept_response_cache= (exact-prompt hits),
+  =intercept_prompt_cache= (=keep_alive= + Anthropic
+  =cache_control=).
+- *Tool-use plumbing:* =intercept_synth_tool_call= (compatibility
+  for gemma / phi3 / deepseek-coder),
+  =intercept_tool_dialect_translate= (Kimi/qwen3 → OpenAI),
+  =intercept_tool_call_repair= (malformed schemas),
+  =intercept_md_skills= (=.md= slash → subprocess).
+- *Quality / safety mutators:* =intercept_pii_redact=,
+  =intercept_time_grounding=, =intercept_qwen3_no_think=,
+  =intercept_model_routing=, =intercept_prompt_slim=.
+- *Typed prefixes:* see the dedicated table below.
 
 ** Cloud failover (Phase 18, first interceptor)
 
@@ -131,7 +180,7 @@ The cloud target is the same =cloud_endpoint_url= / =cloud_model= /
 =cloud_provider= the rest of the app uses (see
 [[id:510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08][Cloud-or-local routing]]). Failover
 audit entries show =intercepted_by="cloud_failover"=, distinguishable
-from regular forwards in =scripts/audit_phase17.py='s output.
+from regular forwards in [[file:../../scripts/audit_phase17.py][=scripts/audit_phase17.py=]]'s output.
 
 * Why it matters
 
@@ -217,11 +266,18 @@ context window — see =cloud_failover_compressed_tools= path).
 
 * Auditing & observability
 
-The proxy ships a basic =AuditLogger= that writes a JSONL stream of
-every intercepted/forwarded request to
-=~/.local/share/org-llm/llm-audit.jsonl= when enabled. =/sysrecent=
-surfaces the tail in chat (see
-[[file:../../extensions/opencode/src/sys-commands.tsx][=sys-commands.tsx=]]).
+=AuditLogger= writes one JSONL line per request to
+=~/.local/share/org-llm/llm-audit.jsonl=: timestamp, method, path,
+model, prompt hash, truncated user text, which interceptor handled
+it (=intercepted_by=, set to the function's =__name__= — or to
+=forward= / =cloud_first= / =cloud_failover= /
+=cloud_failover_compressed_tools= / =cloud_failover_no_tools= when
+the chain falls through to =_forward=), status, duration, byte
+count. =/sysrecent= surfaces the tail in chat (see
+[[file:../../extensions/opencode/src/sys-commands.tsx][=sys-commands.tsx=]]);
+[[file:../../scripts/audit_phase17.py][=scripts/audit_phase17.py=]]
+groups by =intercepted_by= for deeper slicing. See also
+[[id:9b012557-f592-4d1e-8dd1-464c2a4250c3][Audit log]].
 
 * Where it lives
 
