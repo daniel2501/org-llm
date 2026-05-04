@@ -16155,6 +16155,72 @@ def _opencode_lcars_theme() -> dict:
     }
 
 
+def _emit_routes_json(out_path: Path, slash_cmds: dict) -> None:
+    """Phase 23.x — emit routes.json snapshot for the opencode plugin's
+    route-preview ghost text (Stage 1).
+
+    Mirrors the registries the plugin needs to score user input:
+    agents + their triggers, recipes, the typed-prefix family, and
+    the slash command names. The plugin polls prompt input and
+    re-derives the same scoring algorithm as cli.py:route_prompt.
+
+    Routes.json is the single source of truth for the plugin —
+    Python authors agents/recipes/prefixes; the TS module renders.
+    Trivial substring-count algorithm in TS mirrors `route_prompt`;
+    drift risk is contained because the data lives here, the
+    plugin only reads.
+    """
+    import json
+    from .agents._builtins import get_builtins
+    from .orchestration import _RECIPES
+
+    agents_payload = [
+        {
+            "birth_name":  a.birth_name,
+            "aliases":     list(a.aliases),
+            "triggers":    list(a.triggers),
+            "model_role":  a.model_role,
+            "pack":        a.pack,
+            "description": a.description,
+        }
+        for a in get_builtins()
+    ]
+
+    recipes_payload = [
+        {
+            "name":    rm.name,
+            "pattern": pat.pattern,
+            "target":  rm.target,
+            "tier":    rm.tier,
+        }
+        for pat, rm in _RECIPES
+    ]
+
+    # Hand-listed from docs/wiki/llm-proxy.org § Prefix interceptor
+    # family. No clean export from llm_proxy.py today — open question
+    # in dev-tracker.org "Route preview — ghost text in opencode prompt".
+    # When that registry lands upstream, this list goes away.
+    prefixes_payload = [
+        {"token": ":tool",      "effect": "pin tool_choice to that function (force tool call)"},
+        {"token": "??:explain", "effect": "tool_choice=none — prose only, no tool call"},
+        {"token": "?:cite",     "effect": "force search_notes + raw-output overlay (citation)"},
+        {"token": "~",          "effect": "replay Nth-prior user prompt + optional suffix"},
+        {"token": ">raw",       "effect": "strip system+tools+history; route to named model"},
+        {"token": "!shell",     "effect": "run cmd locally (gated by proxy_allow_shell_prefix)"},
+        {"token": "@",          "effect": "swap to that agent's persona + model for this turn"},
+    ]
+
+    payload = {
+        "generated_at": int(time.time()),
+        "agents":       agents_payload,
+        "recipes":      recipes_payload,
+        "prefixes":     prefixes_payload,
+        "slashes":      sorted(slash_cmds.keys()),
+    }
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, indent=2))
+
+
 def _opencode_slash_commands(workspace: str) -> dict:
     """Return {name: markdown-body} for slash commands written to
     .opencode/command/<name>.md. opencode treats these as stored prompts
@@ -17537,6 +17603,7 @@ def launch(
     theme_path   = org_dir / ".opencode" / "themes"  / "org-llm-lcars.json"
     agents_path  = org_dir / ".opencode" / "AGENTS.md"
     sidebar_path = org_dir / ".opencode" / "sidebar-status.json"
+    routes_path  = org_dir / ".opencode" / "routes.json"
     command_dir  = org_dir / ".opencode" / "command"
 
     slash_cmds = _opencode_slash_commands(workspace) if not no_commands else {}
@@ -17565,6 +17632,7 @@ def launch(
         on_screen(f"Would write config:   {config_path}")
         on_screen(f"Would write agents:   {agents_path}")
         on_screen(f"Would write sidebar:  {sidebar_path}")
+        on_screen(f"Would write routes:   {routes_path}")
         on_screen(f"Would write tui:      {tui_path}")
         on_screen(f"Would write cards:    {cards_path} ({len(_cards)} card(s))")
         if not no_theme:
@@ -17683,6 +17751,23 @@ def launch(
         command_dir.mkdir(parents=True, exist_ok=True)
         for name, body in slash_cmds.items():
             (command_dir / f"{name}.md").write_text(body)
+
+    # routes.json — Stage 1 of the route-preview ghost text feature
+    # (see dev-tracker.org "Route preview — ghost text in opencode
+    # prompt"). Snapshot of the registries the plugin needs to score
+    # user input. Plugin polls the prompt at ~80ms, scores against
+    # this file, and renders a one-line hint in the <Prompt hint={…}>
+    # slot. Failure mode is "no preview" — never blocks launch.
+    try:
+        _emit_routes_json(routes_path, slash_cmds)
+    except Exception:
+        routes_path.write_text(json.dumps({
+            "generated_at": int(time.time()),
+            "agents":       [],
+            "recipes":      [],
+            "prefixes":     [],
+            "slashes":      [],
+        }, indent=2))
 
     # Skill→slash auto-bridge (Phase 18.7).
     #

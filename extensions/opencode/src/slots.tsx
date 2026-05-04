@@ -51,6 +51,7 @@
 import { setPromptRef, getPromptRef, shouldShowPrompt } from "./auto-session";
 import { resolveConfig, getStatus, showToast } from "./panel";
 import { dispatchSysCommand } from "./sys-commands";
+import { RoutePreview } from "./route-preview";
 
 // ── Chrome bars — TNG bridge-readout look ──────────────────────────
 // Real TNG pre-subspace-comms screens have varied chunky color
@@ -345,6 +346,7 @@ export function registerSlots(api: any): void {
                   normal: PROMPT_PLACEHOLDERS_NORMAL,
                   shell:  PROMPT_PLACEHOLDERS_SHELL,
                 }}
+                hint={<RoutePreview getRef={getPromptRef} theme={t} />}
               />
             </box>
           );
@@ -407,6 +409,7 @@ export function registerSlots(api: any): void {
                   normal: PROMPT_PLACEHOLDERS_NORMAL,
                   shell:  PROMPT_PLACEHOLDERS_SHELL,
                 }}
+                hint={<RoutePreview getRef={getPromptRef} theme={t} />}
               />
             </box>
           );
