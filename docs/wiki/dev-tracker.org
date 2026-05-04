@@ -670,7 +670,7 @@ Fix path locked = (1) patch the opencode plugin
 (=extensions/opencode/src/=) to re-inject =@<name>= into the
 user-message body before send. Sub-agent investigated
 2026-05-04, recommended =chat.message= server-side hook.
-Patch shipped: =extensions/opencode/src/server.ts= +
+Patch shipped: [[file:../../extensions/opencode/src/server.ts][=extensions/opencode/src/server.ts=]] +
 =package.json= ./server export + cli.py launcher writes the
 plugin into =opencode.json='s plugin[]. Verified by re-launch
 + resending =@data ...= — response shape changed from primary's
@@ -716,7 +716,7 @@ Probed the code corpus directly:
 =SELECT title FROM nodes WHERE tags LIKE '%code%';= returns
 117 rows but only =org-llm/main.py=, =pyproject.toml=,
 =schema.sql=, =README.md=, =tools/gallery.py= and similar
-top-level entries. =org_llm/agents/__init__.py= (where
+top-level entries. [[file:../../org_llm/agents/__init__.py][=org_llm/agents/__init__.py=]] (where
 =resolve_alias= lives, shipped today) is NOT indexed. Means:
 even with the right tool, =resolve_alias= won't be findable
 until reindex. Quick fix: =org-llm code index --force --embed=
@@ -774,7 +774,7 @@ to the entire vault.
 - Tangle/apply round-trips every editable field. Smart defaults:
   user-authored headings (no matching built-in) get
   =origin=user=, =pack=user= automatically.
-- 22 tests in =tests/test_agents.py=, all passing. Cross-check
+- 22 tests in [[file:../../tests/test_agents.py][=tests/test_agents.py=]], all passing. Cross-check
   100/100 on agents + mcp + db + knobs.
 
 *** Why this composes with Phase 25
@@ -812,8 +812,8 @@ canary" risk is about.
 
 *** See also
 
-- =org_llm/agents/_types.py= — Agent dataclass
-- =org_llm/agents/_builtins.py= — _AGENT_META + get_builtins()
+- [[file:../../org_llm/agents/_types.py][=org_llm/agents/_types.py=]] — Agent dataclass
+- [[file:../../org_llm/agents/_builtins.py][=org_llm/agents/_builtins.py=]] — _AGENT_META + get_builtins()
 - =org_llm/cli.py::_resolve_active_agents= — runtime resolver
 - =org_llm/cli.py::_maybe_auto_apply_org_file= — Shape-A bridge
 - =docs/wiki/agent-framework.org= — architecture spec (updated)
@@ -1742,6 +1742,144 @@ anyway.
 # Migrated 2026-05-03 from ~/org/org-llm-test-session/backlog.org
 # + gap-analysis P2/P3 + recipes.org roadmap section.
 
+** TODO Phase 24 — Supervision trinity (resolvers + recovery + detector) :plan:agents:proxy:meta:load-bearing:
+:PROPERTIES:
+:PRIORITY:        A
+:GATE:            1,2,3
+:EFFORT:          multi-day (24.1 ~1d, 24.2 ~1d, 24.3 ~1.5d, 24.4 open)
+:PHASE_CANDIDATE: yes
+:SOURCE:          2026-05-04 — design rule canonized in
+                  architecture.org § /Design rule —
+                  supervision is deterministic by default/;
+                  full plan in roadmap.org § Phase 24
+:END:
+
+*Generative principle:* when the agent layer needs supervision
+(disambiguating a prompt, recovering from a wrong tool call,
+spotting a confusion loop), it runs as deterministic code
+unless the confusion genuinely needs reasoning. An LLM-based
+observer is an extra round-trip per turn and the orchestration
+top priority (smoother + faster + higher-quality than solo)
+fails the moment supervision taxes latency. Generalizes the
+already-shipped Phase 22 v2 pattern (manager pre-fetch + agent
+narrates) from a single recipe-bound instance into a uniform
+three-layer framework.
+
+*Motivating bug (2026-05-04):* user said "@curator in org-llm,
+=wiki/superset.org=, fix it up". Curator (qwen3:4b) called
+=read_file("wiki/superset.org")= which got resolved against
+MCP's cwd (=~/=, not the repo), failed silently with no
+recovery hint, then guessed =~/org/wiki/superset.org=, failed
+again, and gave up. The actual file lives at
+=docs/wiki/superset.org= in the org-llm repo. Three independent
+layers each fix this bug at a different point in the call.
+
+*Why this is gate-1, gate-2, AND gate-3 healthy:*
+- *Gate 1:* manager-mediated path becomes quantifiably better
+  — fewer "agent gives up and asks user to clarify" turns,
+  fewer wasted tool calls, fewer wrong-path reads.
+- *Gate 2:* every layer is a *registry* — complexity is
+  bounded to the registry shape; new entries add capability
+  without touching the orchestration core.
+- *Gate 3:* audit log + manager-pre-fetch wiring already
+  exist; this consolidates them into a uniform protocol that
+  Phase 29 (self-coded tools) can write into automatically.
+
+*** Recommended ship order (3 sub-phases + 1 open)
+
+1. *Phase 24.1 — Pre-flight resolver registry.* New package
+   =org_llm/resolvers/= with one file per resolver
+   (=path.py=, =repo.py=, =agent.py=, =time.py=,
+   =org_node.py=). Each is a pure function
+   =(prompt, context) → ResolvedFact[]=. =resolve_all()= runs
+   them in parallel with a per-resolver time budget (~80ms)
+   and concatenates output into a ~RESOLVED CONTEXT~ block
+   injected into the sub-LLM's user message. Wired into
+   [[file:../../org_llm/mcp_server.py][=mcp_server.py=]] =delegate()= just before =user_msg=
+   composition (line ~1000). Initial entries: =PathResolver=,
+   =RepoResolver=, =AgentResolver=. Closes the motivating bug
+   alone. ~1d.
+
+2. *Phase 24.2 — Tool-failure recovery hooks.* =@recover=
+   decorator at each MCP tool's registration site. On tool
+   failure, hook gets =(args, error)= and returns
+   =list[Suggestion]=; framework appends them to the error
+   string the agent sees. Initial hooks: =read_file= (basename
+   glob across granted roots — fills the empty recovery slot
+   already at [[file:../../org_llm/access.py][=access.py:292=]]), =list_directory= (same),
+   =delegate= (fuzzy-match agent names), =request_access=
+   (parent-directory suggestion). Suggestions, not auto-
+   substitutions — agent decides on next call. ~1d.
+
+3. *Phase 24.3 — Confusion detector.* Signal registry over
+   =crew_log=, layered on top of 24.2's wiring (when a
+   recovery hook fires, the detector also runs). Initial
+   signals: failure-loop (N consecutive failures of same
+   tool), identical-args-loop, hedging-phrase ("does not
+   exist" / "could you clarify" — opencode-only since proxy
+   sees agent text), tool-call inflation. When a signal trips,
+   injects ~MANAGER NOTE~ into next turn. Pure code, no cloud
+   round-trip. ~1.5d (signal-tripping thresholds need
+   calibration against real audit traces).
+
+4. *Phase 24.4 — Manager quorum (open question, async-only).*
+   For reasoning-required supervision (the rule's exception),
+   N managers vote on whether a delegate's output addressed
+   the user's actual intent. Runs *async on the audit log* —
+   never in user-facing turn — so latency tax stays at zero.
+   Existing A/B harness + blinded-judge pattern
+   ([[file:../../scripts/recipe_ab_judge.py][=scripts/recipe_ab_judge.py=]]) is the starting muscle.
+   Gated until 24.1–24.3 prove their keep; open whether
+   "ineffective delegation retrospective" is a recurring
+   need or stays as on-demand validation tooling.
+
+*** Concrete first instance (24.1 = motivating bug closed)
+
+The 2026-05-04 superset.org bug closes with =PathResolver=
+alone. Curator's prompt parsed for path-shaped tokens; basename
+glob across granted roots returns =/home/daniel/repos/org-llm/
+docs/wiki/superset.org=; result lands in ~RESOLVED CONTEXT~
+block ahead of curator's user message; curator calls
+=read_file= with the absolute path on its first attempt. Zero
+guessing, zero wasted tool calls, zero "I don't know what to
+do" turns.
+
+This is the smallest possible demonstration of the framework
+and ships standalone before 24.2/24.3. Validation: re-run the
+same "@curator in org-llm, wiki/superset.org, fix it up" prompt
+against pre-24.1 and post-24.1 snapshots; pre-24.1 takes 4+
+tool calls and gives up; post-24.1 takes 1 tool call and
+proceeds.
+
+*** Connections
+
+- *Phase 22 v2 (shipped)* is the prototype that 24 generalizes;
+  =format_prefetch_block= in [[file:../../org_llm/recipe_runner.py][=recipe_runner.py=]] is the shape
+  reference for resolver output formatting.
+- *Phase 25 (DB-authoritative inversion)* turns the DB into
+  resolvers' reference desk — repo registry, person/agent
+  index, org-node lookups all hit the DB once Phase 25.x
+  lands. Pre-25 resolvers fall back to disk walks.
+- *Phase 29 (self-coded tools)* provides the auto-promotion
+  path: when audit log shows a recurring confusion not caught
+  by any current resolver/hook/signal, the system proposes a
+  new registry entry and validates it the same way 29.2
+  validates synthesized tools.
+- *Architecture rule* canonized in
+  =docs/wiki/architecture.org= § /Design rule — supervision is
+  deterministic by default/. The trinity IS the
+  implementation; the rule explains the why.
+- *Wiki Rule 2b* (Summary + Expanded) shipped alongside the
+  rule, in =docs/wiki/wiki-conventions.org=. Applied to the
+  rule's own page as the worked example.
+
+*Scheduling:* 24.1 sprint-eligible (~1d, framework + three
+resolvers; closes the motivating bug standalone). 24.2 follows
+naturally (~1d, decorator + four hooks). 24.3 needs design on
+signal thresholds before starting (~1.5d). 24.4 stays gated
+until 24.1–24.3 are in production and we've measured what
+they catch (and what they don't).
+
 ** TODO Phase 25 — invert authority: DB is truth, files are UI    :plan:db:foundation:load-bearing:
 :PROPERTIES:
 :PRIORITY:        A
@@ -2091,7 +2229,7 @@ def commits_since(
 note actually created — git knows, mtime doesn't);
 =vault_authors(since)= (multi-author future).
 
-**** Migration stub (lift into =org_llm/db.py= when 25.4 starts)
+**** Migration stub (lift into [[file:../../org_llm/db.py][=org_llm/db.py=]] when 25.4 starts)
 
 #+begin_src python
 class GitRepo(Base):
@@ -2712,6 +2850,30 @@ trigger 1 fires and spike moves up. *Cheapest possible test
 of the strongest pro-Agor argument; zero Agor code, zero
 new tooling.*
 
+**** Evidence log (live, weighing trigger 1)
+
+The quarterly question above measures =git stash= and
+=git status= cross-contamination. A *second* shape of the same
+parallel-stream pain shows up in conversation: side-quests
+during a focused task. Logging both forms here.
+
+- *2026-05-04 — superset.org walkthrough.* Rabbitholed twice in
+  ~1h:
+  1. Hosting/install stub (resolved inline; <5 min — fine).
+  2. =manager-notices-pattern= general-feature proposal
+     (substantial; parked into design conversation, almost
+     disrupted the top-to-bottom walkthrough flow).
+  Both side-quests competed with the foreground walkthrough
+  for the same single-conversation context. Mechanically the
+  same problem trigger 1 measures, just with /thread/ instead
+  of /worktree/. *Trigger 1 evidence weight:* +1.
+  *Implication:* the worktree-spike value would extend to
+  conversation-level side-quests too — the agent could pick up
+  the side-quest in its own worktree while foreground
+  walkthrough continues. That's a stronger pro-Agor case than
+  the original git-mechanics framing, and one the parked entry
+  doesn't currently capture.
+
 **** Through 2029-01-15 — the policy
 
 - *Default:* no Agor adoption. Entry stays at C.
@@ -3153,7 +3315,7 @@ Practical answer: ship two display paths.
 2. *Terminal protocol path* — detect kitty/iTerm2/sixel; emit
    appropriate escape sequence; fall back to ASCII when no
    protocol available. (ASCII fallback = current
-   =org_llm/avatars.py= hand-pixel work — demoted but reused.)
+   [[file:../../org_llm/avatars.py][=org_llm/avatars.py=]] hand-pixel work — demoted but reused.)
 
 *** FOSS image-gen backends
 
@@ -3235,7 +3397,7 @@ Cloud proprietary gated behind the existing
   pattern (containerize SD server, keep CLI/agents native)
 - *Phase 25 DB-authoritative* — visual metadata + theme defs +
   prompt history all live in DB
-- *Existing =org_llm/avatars.py=* — demoted to ASCII fallback;
+- *Existing [[file:../../org_llm/avatars.py][=org_llm/avatars.py=]]* — demoted to ASCII fallback;
   the 23 hand-pixel avatars stay as the low-bandwidth render
 
 *Scheduling:* full feature is post-1.0 (Phase 31, after 25 +
@@ -3800,7 +3962,7 @@ configurable per user / per agent without code changes.
 *Gate-2 check:* shape mirrors existing literate-config and
 agent-roster patterns; not new architecture.
 
-** TODO MCP tool *creation* tier 3 (Phase 24 candidate)           :plan:mcp:research:
+** TODO MCP tool *creation* tier 3 (Phase 23.6.3+ candidate)      :plan:mcp:research:
 :PROPERTIES:
 :PRIORITY: C
 :SOURCE: ~/org/20260503155918-claude_scratchpad.org Tier 3
@@ -3823,7 +3985,9 @@ c) *Python-via-org-babel* (~1-2 weeks if responsible) —
 
 *Gate-2/3 check:* this expands scope significantly — only
 proceed when tiers 1+2 prove insufficient AND a real user need
-surfaces. Phase 24 candidate, not 1.0.
+surfaces. Tracked under Phase 23.6.3 / 23.6.4 / 23.6.5 in
+roadmap.org now that Phase 24 is allocated to the supervision
+trinity.
 
 ** TODO Get Claude set up with GitHub for daniel2501/org-llm     :plan:meta:infra:
 :PROPERTIES:
@@ -3919,7 +4083,7 @@ Architecture:
 - Launch verb dumps =~/.local/share/org-llm/routes.json= on
   start (snapshot of =_AGENT_TRIGGERS= + =_RECIPES= + prefix
   family + slash list).
-- New plugin module =extensions/opencode/src/route-preview.tsx=
+- New plugin module [[file:../../extensions/opencode/src/route-preview.tsx][=extensions/opencode/src/route-preview.tsx=]]
   polls =ref.current.input= at ~80ms (only when
   =ref.focused=), scores against routes.json with the same
   substring-count algorithm as =cli.py:route_prompt=.
@@ -4093,7 +4257,7 @@ Three pieces shipped at =e14acf8=:
 - =cli.py:_emit_routes_json()= — snapshots 19 agents + 2
   recipes + 7 prefixes + 77 slashes to
   =.opencode/routes.json= on launch
-- =extensions/opencode/src/route-preview.tsx= (new, 235 lines)
+- [[file:../../extensions/opencode/src/route-preview.tsx][=extensions/opencode/src/route-preview.tsx=]] (new, 235 lines)
   — Solid component, polls =ref.current.input= @80ms
   (focus-gated, debounced), scores against the same algorithm
   as =cli.py:route_prompt=

@@ -112,6 +112,22 @@ Cross-reference convention:
     renders; [[file:../../extensions/opencode/src/slots.tsx][=slots.tsx=]] wires it into both =home_prompt= +
     =session_prompt=. Visual verification (a real opencode
     session) still owed — gates Stage 2.
+  - *Supervision design rule canonized + Phase 24 planned.*
+    [[file:architecture.org][architecture.org]] gains a top-level /Design rule —
+    supervision is deterministic by default/ section: when the
+    agent layer needs supervision, it runs as deterministic
+    code unless the confusion genuinely needs reasoning.
+    Implementation is three registries (pre-flight resolvers,
+    tool-failure recovery hooks, confusion detector); spelled
+    out in [[*Phase 24: Supervision trinity][Phase 24]] with sub-phases 24.1–24.3 and an
+    open-question 24.4 (manager quorum, async-only). Motivating
+    bug: =@curator= delegated for =wiki/superset.org=, agent
+    looked in two wrong places (cwd + =~/org/=), gave up;
+    actual file is =docs/wiki/superset.org=. Pre-flight
+    resolvers would have closed the bug before the first tool
+    call. New wiki convention shipped alongside: Rule 2b in
+    [[file:wiki-conventions.org][wiki-conventions.org]] — every new concept entry leads with
+    =*Summary.*= (1–3 sentences) then =*Expanded.*=.
 - *Latest shipped (2026-05-03):*
   - *5 new agents shipped this session* — =@agenda= (weather-aware
     GTD), =@ops= (CLI / config / diagnostics expert),
@@ -2191,6 +2207,110 @@ spec — file format, properties, security boundaries, sub-phase
 shipping order). Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] when work
 starts. 23.6.1 + 23.6.2 are sprint-eligible immediately; 23.6.3+
 blocks on Phase 23.2 (capability enforcement).
+
+* TODO [#A] Planned — Phase 24: Supervision trinity          :planned:
+SCHEDULED: 24.1 sprint-eligible; 24.2 follows; 24.3 after; 24.4 open question
+
+Generalize the already-shipped Phase 22 v2 pattern (manager
+pre-fetch + agent narrates) from a single recipe-bound instance
+into a three-layer supervision framework. Each layer is a
+*registry* — adding new entries is one file, one decorator, or
+one function, not core surgery. Implements the
+=docs/wiki/architecture.org= design rule /supervision is
+deterministic by default/.
+
+Motivating bug (2026-05-04): user said "@curator in org-llm,
+=wiki/superset.org=, fix it up" — curator (qwen3:4b) called
+=read_file("wiki/superset.org")= which got resolved against
+MCP's cwd (=~/=, not the repo), failed silently with no
+recovery hint, then guessed =~/org/wiki/superset.org=, failed
+again, and gave up. The actual file lives at
+=docs/wiki/superset.org= in the repo. Three independent layers
+of the trinity each fix this bug at a different point in the
+call.
+
+** Why three quality gates healthy
+- *Gate 1:* the manager-mediated path becomes quantifiably
+  better — fewer "agent gives up and asks user to clarify"
+  turns, fewer wasted tool calls, fewer wrong-path reads.
+- *Gate 2:* every layer is a *registry* — complexity is bounded
+  to the registry shape; new entries add capability without
+  touching the orchestration core.
+- *Gate 3:* the audit log + manager-pre-fetch wiring already
+  exist; this consolidates them into a uniform protocol that
+  Phase 29 (self-coded tools) can write into automatically.
+
+** Sub-phases
+
+- *24.1 — Pre-flight resolver registry.* New package
+  =org_llm/resolvers/= with one file per resolver
+  (=path.py=, =repo.py=, =agent.py=, =time.py=, =org_node.py=).
+  Each is a pure function =(prompt, context) → ResolvedFact[]=.
+  =resolve_all()= runs them in parallel with a per-resolver time
+  budget (~80ms) and concatenates output into a
+  ~RESOLVED CONTEXT~ block injected into the sub-LLM's user
+  message. Wired into [[file:../../org_llm/mcp_server.py][=mcp_server.py=]] =delegate()= just before
+  =user_msg= composition. Initial entries: =PathResolver=,
+  =RepoResolver=, =AgentResolver=. Closes the motivating bug
+  alone.
+
+- *24.2 — Tool-failure recovery hooks.* =@recover= decorator at
+  each MCP tool's registration site. On tool failure, hook gets
+  =(args, error)= and returns =list[Suggestion]=; framework
+  appends them to the error string. Initial hooks: =read_file=
+  (basename glob across granted roots), =list_directory= (same),
+  =delegate= (fuzzy-match agent names), =request_access=
+  (parent-directory suggestion). The agent self-corrects on its
+  next call — no extra round-trip, no observer agent. Recovery
+  slot already exists empty in [[file:../../org_llm/access.py][=access.py:292=]]; this fills it.
+
+- *24.3 — Confusion detector.* Signal registry over =crew_log=,
+  layered on top of 24.2's wiring (when a recovery hook fires,
+  the detector also runs). Initial signals: failure-loop (N
+  consecutive failures of the same tool), identical-args-loop
+  (same tool + same args twice), hedging-phrase (agent output
+  contains "does not exist" / "could you clarify" — opencode-
+  only since proxy sees agent text), tool-call inflation (high
+  count with no successful side effect). When a signal trips,
+  injects ~MANAGER NOTE~ into the next turn. Pure code, no
+  cloud round-trip.
+
+- *24.4 — Manager quorum (open question, async-only).* For
+  reasoning-required supervision (the rule's exception case),
+  N managers vote on whether a delegate's output addressed the
+  user's actual intent. Runs *async on the audit log* — never
+  in the user-facing turn — so latency tax stays at zero. Not
+  a competitor to 24.1–24.3; an additional layer for
+  semantically-judgey decisions only. Existing A/B harness +
+  blinded-judge pattern (=scripts/recipe_ab_judge.py=) is the
+  starting muscle. Open question: is "ineffective delegation
+  retrospective" enough of a recurring need to justify the
+  pipeline, or does it stay as on-demand validation tooling?
+
+** Cross-references
+- Generalizes [[*DONE Shipped — Phase 22 v2: manager pre-fetch + agent narrates][Phase 22 v2]] from a single recipe-bound
+  instance into a framework. Phase 22 v2's =format_prefetch_block=
+  is the prototype shape for resolver output formatting.
+- *Phase 25 (DB-authoritative inversion)* turns the DB into
+  the resolvers' reference desk — repo registry, person/agent
+  index, and org-node lookups all hit the DB once Phase 25.x
+  lands.
+- *Phase 29 (self-coded tools)* provides the auto-promotion
+  path: when the audit log shows a recurring confusion not
+  caught by any current resolver/hook/signal, the system
+  proposes a new registry entry and validates it the same way
+  29.2 validates synthesized tools.
+
+** Status
+
+Design rule canonized in =docs/wiki/architecture.org= §
+/Design rule — supervision is deterministic by default/
+[2026-05-04]. Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 24 when
+work starts. 24.1 is sprint-eligible (~1 day for framework +
+three resolvers); 24.2 follows naturally (~1 day for decorator
++ four hooks); 24.3 needs more design on the signal-tripping
+threshold (likely ~1.5 days). 24.4 stays gated until 24.1–24.3
+prove their keep.
 
 * TODO [#A] Planned — Phase 29: Self-coded tools             :planned:
 SCHEDULED: post-Phase 25.4

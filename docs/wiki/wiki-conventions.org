@@ -64,6 +64,45 @@ form. Run it after a bulk wiki edit to catch regressions:
 python scripts/link_wiki_files.py
 #+end_src
 
+** Rule 2b: Every concept gets a summary + expanded version
+
+Whenever the wiki canonizes a new concept, design rule, or
+architectural decision, the page entry must lead with a
+*Summary.* paragraph (1–3 sentences, sharply stated, the
+TL;DR a busy reader needs) and then an *Expanded.* section
+with the full prose.
+
+#+begin_example
+  GOOD:
+  * Design rule — supervision is deterministic by default
+
+  *Summary.* Three-sentence version stating the rule, the why,
+  and the implementation shape.
+
+  *Expanded.*
+
+  Full prose, sub-points, alignment notes, examples.
+
+  BAD:
+  * Design rule — supervision is deterministic by default
+
+  Six paragraphs of prose with the load-bearing sentence buried
+  on line 4 of paragraph 3.
+#+end_example
+
+Reason: every wiki concept is read at two speeds — by a future
+LLM/human looking up a single fact (wants the summary) and by
+someone learning the system (wants the expanded version). Forcing
+the author to write both up-front means the summary actually
+exists and isn't just the first paragraph by accident. It also
+forces the author to know what the load-bearing claim is before
+shipping the page.
+
+Applies to: new design rules, new architectural sections, new
+recipes/agents/tools getting their own wiki page, and any
+substantial revision of an existing concept page (passing
+edits like a typo fix don't trigger it).
+
 ** Rule 2: Propose edits — always notified
 
 When the LLM notices a gap or staleness while answering — a

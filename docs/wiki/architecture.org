@@ -1060,6 +1060,91 @@ Deep dives:
 page — it's documented in the README's Life-support section and
 slated as TODO in [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][the wiki index]].)
 
+* Design rule — supervision is deterministic by default
+
+*Summary.* When the agent layer needs supervision (disambiguating
+a prompt, recovering from a wrong tool call, spotting a confusion
+loop), it runs as deterministic code unless the confusion
+genuinely requires reasoning — because an LLM-based observer is
+an extra round-trip per turn and the orchestration top priority
+(/smoother + faster + higher-quality than solo/) fails the moment
+supervision taxes latency. The rule, sharply: /if a confusion
+can be detected by code, it must be; LLM-based supervision is
+reserved for confusions that genuinely need reasoning./ The
+implementation is three registries — pre-flight resolvers that
+enrich the prompt before =delegate()=, tool-failure recovery
+hooks that suggest /"did you mean X?"/ so the agent self-corrects
+on its next call, and a confusion detector that watches the
+audit stream for failure loops and injects a ~MANAGER NOTE~ —
+each accepting new entries the way the recipe registry accepts
+new recipes.
+
+*Expanded.*
+
+The orchestration top priority is that the manager-mediated path
+must be /smooth + beneficial + faster + higher-quality than
+solo/. An LLM-based observer agent — one that reads each tool
+call and reasons about whether the working agent is on track —
+adds a cloud round-trip per turn. That round-trip breaks the
+priority by construction. So supervision must, by default, be
+implemented as code that runs alongside the existing call, not
+as a second LLM that watches the first.
+
+The rule is implemented by three /registries/ — not three
+features. Each accepts new entries the way the recipe registry
+accepts new recipes: one file or one decorator, no core surgery.
+
+1. *Pre-flight resolvers.* Pure functions
+   =(prompt, context) → ResolvedFact[]= run in parallel before
+   =delegate()= and concatenate their output into a
+   ~RESOLVED CONTEXT~ block injected into the sub-LLM's user
+   message. Examples: path-token → absolute candidates, /"in
+   <repo>"/ → repo root, =@handle= → agent capability summary,
+   /"yesterday"/ → absolute date, vague org-node title → node
+   ID. Each resolver has a time budget and drops silently if
+   slow.
+
+2. *Tool-failure recovery hooks.* Every MCP tool's failure path
+   returns recovery candidates alongside the error
+   (/"File does not exist: X. Did you mean Y?"/). The agent
+   self-corrects on its next tool call — no extra round-trip,
+   no separate observer. The hook is a decorator at the tool
+   registration site so the protocol is uniform across tools.
+
+3. *Confusion detector.* Heuristics over the audit stream
+   (=crew_log= entries): N consecutive failures of the same
+   tool, identical-args loops, hedging phrases in agent output
+   ("does not exist", "could you clarify"). When a signal trips
+   it injects a structured ~MANAGER NOTE~ into the next agent
+   turn ("you've called =read_file= 3 times unsuccessfully — try
+   =find_file('superset.org')="). The detector itself is a list
+   of signal functions; adding a signal is one entry.
+
+The three layers compose. Pre-flight catches the common case
+without the agent ever going wrong. Tool-failure recovery
+catches what slips through. The confusion detector catches the
+remaining cases where the agent loops without an explicit
+failure to recover from.
+
+What this rule rules /out/: an LLM-based observer agent that
+reads each tool call and reasons about whether the working
+agent is on track. That is the right answer only when the
+supervision genuinely needs reasoning (e.g. judging semantic
+equivalence between phrasings). For pattern-matchable
+confusions — wrong path, wrong agent name, wrong date format,
+repeated failure, hedging — the answer must be code.
+
+Alignment with adjacent arcs:
+- The existing /Recipe pre-fetch (zero round-trip)/ row in the
+  [[*Capability matrix][capability matrix]] is one instance of pattern (1).
+- Phase 25's DB-authoritative inversion turns the DB into the
+  resolvers' reference desk (repo registry, person/agent index,
+  org-node lookup all hit the DB).
+- Phase 29's self-coded tools provide the auto-promotion path:
+  when the audit log shows the LLM repeatedly disambiguating
+  the same kind of thing, the proposed tool is a new resolver
+  registry entry.
+
 * Source-of-truth conventions
 
 | concern                     | authoritative location                                  |
