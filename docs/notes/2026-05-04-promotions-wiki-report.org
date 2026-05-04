@@ -1,0 +1,138 @@
+#+TITLE: Promotions wiki page — drafting report
+#+DATE: [2026-05-04]
+#+FILETAGS: :report:wiki:promotions:
+
+* Objective
+
+*Summary.* Draft a canonical wiki concept page for *Promotions*
+(top-down, manager-driven) and *See-Something-Say-Something*
+(bottom-up, specialist-driven) — the two complementary
+"who notices?" mechanisms that fill Phase 29's gap between LLM
+audit-log signal and shipped deterministic artifacts. Two actions:
+(1) created =docs/wiki/promotions.org= (~250 lines, Rule 2b
+compliant, ID-linked), and (2) added a one-line index entry under
+"Surfaces & integrations" in =docs/wiki/00-index.org=. No code
+touched — the parallel slice agent owns the substrate.
+
+* Dev-tracking
+
+- Wiki concept (artifact of this work):
+  [[id:6aa21db3-1bae-4c6c-ae11-fb02a64e0a56][promotions.org]] —
+  =6aa21db3-1bae-4c6c-ae11-fb02a64e0a56=.
+- Dev-tracker: [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 29
+  (self-coded tools). Promotions + SSSS are the "who notices"
+  half of the same machinery.
+- Roadmap: [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] §
+  "Phase 29 — Self-coded tools" (planned, [#A]).
+- Sister note: =docs/notes/2026-05-04-promotions-slice-report.org=
+  — parallel agent's substrate slice (Notice table + writer).
+
+* What landed
+
+| path                                                            | lines |
+|-----------------------------------------------------------------+-------|
+| =docs/wiki/promotions.org=                                      |   254 |
+| =docs/wiki/00-index.org= (one-line entry under "Surfaces & integrations") | +5  |
+
+The new page has fresh UUID =6aa21db3-1bae-4c6c-ae11-fb02a64e0a56=,
+follows Rule 2b (every section leads with =*Summary.*= +
+=*Expanded.*=), uses link form for every code-file mention, and
+cross-links by ID to roadmap / agents / recipes / insight-cards /
+wiki-conventions.
+
+=python scripts/link_wiki_files.py= runs clean against the new
+page (touched =literate-tools.org= and =roadmap.org= on the
+first pass — both pre-existing, unrelated to this work).
+
+* Decisions
+
+- *Section ordering.* What this is → Promotions → SSSS →
+  Threshold → Literate config trio → Overlap audit → Risks →
+  Concrete first slice → See also. Two mechanisms first
+  (so the reader gets the load-bearing pair before the
+  scaffolding), then the hard part (thresholds), then the
+  user-touchable layer (literate config), then the comparison
+  / risk / status passes that close out concept pages in this
+  wiki.
+- *SSSS as sibling, not sub-bullet.* Per the brief — a peer
+  H1 to Promotions, not nested under it.
+- *Worked example trimmed.* The dashboard case originally
+  had four bulleted phrasings; collapsed to inline parens to
+  hit the ~250 line target without losing the punchline.
+- *No filenames for the LOG slice.* Brief said the parallel
+  agent owns the names; the page refers to "the LOG layer
+  (in progress)", "the DB-side notice table", "the writer
+  API" without naming files or columns.
+- *Threshold defaults.* Picked first-cut numbers (N=4 / 7d /
+  ≥10s mean cloud time / cosine ≥0.82) and labelled them
+  guesses, with the LOG-layer-evidence loop as the path to
+  re-tune. Rather than leave them un-specified.
+- *Overlap audit.* Kept all four comparisons from the brief
+  (curator, agentsmith, insight cards, recipes); each
+  trimmed to 2–3 sentences after a length pass.
+- *@data-analyst as the canonical builder.* Used as the
+  worked-example dispatch target throughout. The brief named
+  it once; I propagated it without inventing it as a wiki
+  entry. It does NOT yet exist in =agents.org= /
+  =agent-roster.org= — see open question below.
+
+* Open questions
+
+1. *=@data-analyst= status.* I treated it as the natural
+   builder for chart/dashboard promotions but did NOT add it
+   to =agents.org= or =agent-roster.org= — the brief only
+   asked for the concept page. Want me to scaffold the
+   roster entry next, or is =@data-analyst= itself still
+   speculative?
+2. *Phase 29 sub-phase placement.* The page positions
+   promotions + SSSS as filling Phase 29's "who notices"
+   gap, but doesn't propose new sub-phase numbers (29.4 /
+   29.5?). Brief was silent; I left numbering to whoever
+   updates the roadmap. Should the roadmap entry get a
+   "Promotions / SSSS slot" cross-reference?
+3. *Threshold defaults are guesses.* N=4, 7d, 10s, cosine
+   0.82 are reasonable but unjustified. If you have a
+   stronger prior, swap them in. The LOG-layer-first plan
+   is the actual answer to "we don't know yet."
+4. *Recipes graduation path.* Page says "mature promotions
+   can graduate into shared recipes" but doesn't define the
+   bar (analogue to recipes' ≥55% A/B win rate). Worth
+   spelling out, or wait until we have one to graduate?
+
+* Non-goals
+
+- Did not modify any =org_llm/*.py= file (parallel agent
+  owns code).
+- Did not touch =MEMORY.md= or any =~/.claude/= file.
+- Did not claim the LOG slice has shipped — referred to it
+  as "in progress" and "substrate-only" throughout.
+- Did not add =@data-analyst=, =@curator=, or
+  =@agentsmith= entries to =agents.org=. The page links to
+  the agents/roster wiki entries but doesn't expand the
+  roster.
+- Did not propose roadmap edits. Phase 29 reference is by
+  ID-link only.
+
+* Gotchas
+
+- *"4 weeks of evidence" for the LOG layer.* Number came
+  from the brief; I propagated it. It's a guess — could be
+  2, could be 8. Worth revisiting once the LOG layer is
+  actually emitting rows.
+- *=@data-analyst= writes "chart YAML".* The artifact shape
+  is implied to integrate with [[id:a2af071e-8244-444d-8954-61317cc1ec4d][Superset]]'s semantic-layer
+  registry. I cross-linked Superset but did NOT confirm the
+  YAML format the analyst would produce matches what
+  Superset actually consumes. If those don't line up, the
+  worked example needs adjustment.
+- *Insight cards as announce surface.* Stated definitively;
+  not yet wired anywhere. Reasonable design claim but worth
+  confirming with whoever owns Phase 12 that an "announce a
+  promotion" card kind would land cleanly.
+- *Capability gating for builder dispatch.* I didn't
+  mention that builder agents need =write.vault= /
+  =write.config= / etc. capabilities to actually ship the
+  artifact. Phase 23.2 capabilities are still
+  declarative-only per =agent-framework.org=, so this isn't
+  blocked, but a "capability prerequisite" sentence might
+  belong on the page later.

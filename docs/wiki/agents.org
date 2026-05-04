@@ -79,8 +79,8 @@ persona text.
 |-----------------+---------------------------------------------------------------------------------------------+------------|
 | =@crew=         | The manager. Decompose → delegate → sanity-check → synthesise. Default when no agent tagged | chat_model |
 | =@agentsmith=   | Meta-agent: interviews you about a new agent and ships it (persona + tools + literate entry) | chat_model |
-| =@curator=      | Wiki concept-graph specialist: sweeps =docs/wiki/= for missing cross-links, broken =[[id:…]]= / file: links, and numeric drift between wiki tables and code | chat_model |
-| =@tracker=      | Dev-process steward: owns =dev-tracker.org=. Daily what's-on-deck, end-of-session what-shipped/what's-blocked, EFFORT-vs-actual drift. Birth-name =boothby= | chat_model |
+| =@curator=      | Wiki concept-graph specialist: sweeps =docs/wiki/= for missing cross-links, broken =[[id:…]]= / file: links, and numeric drift between wiki tables and code. Owns the =wiki-authorship= and =agent-report= primer namespaces (see [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]]). | chat_model |
+| =@tracker=      | Dev-process steward: owns =dev-tracker.org=. Daily what's-on-deck, end-of-session what-shipped/what's-blocked, EFFORT-vs-actual drift. Owns the =dev-tracker-entry= primer namespace. Birth-name =boothby= | chat_model |
 
 ** What used to be agents but isn't now
 

@@ -1746,7 +1746,7 @@ anyway.
 :PROPERTIES:
 :PRIORITY:        A
 :GATE:            1,2,3
-:EFFORT:          multi-day (24.1 ~1d, 24.2 ~1d, 24.3 ~1.5d, 24.4 open)
+:EFFORT:          multi-day (24.1 ~1d, 24.2 ~1d, 24.3 ~1.5d, 24.4 open, 24.5 ~1.5d)
 :PHASE_CANDIDATE: yes
 :SOURCE:          2026-05-04 — design rule canonized in
                   architecture.org § /Design rule —
@@ -1833,6 +1833,22 @@ layers each fix this bug at a different point in the call.
    "ineffective delegation retrospective" is a recurring
    need or stays as on-demand validation tooling.
 
+5. *Phase 24.5 — Orientation primer registry.* Sibling
+   discipline to 24.1: instead of injecting *facts* per
+   prompt, inject *conventions* per domain. Manifest at
+   spawn names core agents and their primer namespaces
+   (=@curator= → =wiki-authorship= / =agent-report=,
+   =@tracker= → =dev-tracker-entry=, =@agentsmith= →
+   =new-agent=); full primer fetched on demand via
+   deterministic resolver reading the authoritative source.
+   Closes the "specialist writes non-conformant wiki/report
+   on first try" failure mode the way 24.1 closes the wrong-
+   path failure mode. Implementation: 24.5a manifest
+   scaffold (~half-day), 24.5b =org_llm/primers/= package
+   (~1d), 24.5c =primer()= MCP tool (~1h). Detail in
+   [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]] and policy framing in
+   [[id:cf466e65-0fa1-4f23-8103-8205f67a6ca3][lazy-loading.org]]. ~1.5d total.
+
 *** Concrete first instance (24.1 = motivating bug closed)
 
 The 2026-05-04 superset.org bug closes with =PathResolver=
@@ -1869,16 +1885,28 @@ proceeds.
   =docs/wiki/architecture.org= § /Design rule — supervision is
   deterministic by default/. The trinity IS the
   implementation; the rule explains the why.
+- *Sibling architecture rule* canonized in
+  =docs/wiki/architecture.org= § /Design rule — agent
+  orientation: manifest at spawn, primer on demand/.
+  Phase 24.5 IS that rule's implementation; same
+  deterministic-by-default discipline applied to context
+  injection rather than supervision.
 - *Wiki Rule 2b* (Summary + Expanded) shipped alongside the
   rule, in =docs/wiki/wiki-conventions.org=. Applied to the
   rule's own page as the worked example.
+- *Lazy-loading policy* in =docs/wiki/lazy-loading.org=. The
+  policy 24.5 instantiates and which 24.1 already follows
+  (resolvers fire only when relevance is established, never
+  speculatively).
 
 *Scheduling:* 24.1 sprint-eligible (~1d, framework + three
 resolvers; closes the motivating bug standalone). 24.2 follows
 naturally (~1d, decorator + four hooks). 24.3 needs design on
 signal thresholds before starting (~1.5d). 24.4 stays gated
 until 24.1–24.3 are in production and we've measured what
-they catch (and what they don't).
+they catch (and what they don't). 24.5 sprint-eligible after
+24.1 lands (shares the registry pattern; ~1.5d total across
+24.5a/b/c).
 
 ** TODO Phase 25 — invert authority: DB is truth, files are UI    :plan:db:foundation:load-bearing:
 :PROPERTIES:

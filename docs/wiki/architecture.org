@@ -1145,6 +1145,108 @@ Alignment with adjacent arcs:
   the same kind of thing, the proposed tool is a new resolver
   registry entry.
 
+* Design rule — agent orientation: manifest at spawn, primer on demand
+
+*Summary.* When a specialist is spawned, the orchestration layer
+hands it a thin *manifest* naming the core agents and their
+primer namespaces (=@curator= owns wiki conventions,
+=@tracker= owns dev-tracker entries, =@agentsmith= owns
+new-agent shape). The full conventions for any namespace are
+fetched *on demand* via a deterministic resolver — never
+LLM-mediated, always read fresh from the authoritative source
+file. This is a sibling discipline to /supervision is
+deterministic by default/: orientation is deterministic by
+default. Both rules share the same load-bearing claim — *if a
+context can be encoded as a rule, it must be; LLM-mediated
+context is reserved for cases that genuinely need reasoning.*
+
+*Expanded.*
+
+The manifest pattern threads a needle between two failure modes
+that apply to context-injection broadly:
+
+1. /Eager-load everything/ at spawn. Specialist starts with
+   every convention pre-pended to its prompt. Outcome: token
+   bloat, attention dilution, stale-by-spawn-time risk. Breaks
+   on small local models (4B-7B parameter classes with 8k–32k
+   windows) — the conventions crowd out the actual task. The
+   shape that fits the cloud frontier model breaks the local
+   4B; the shape that fits the local 4B leaves the frontier
+   under-oriented.
+
+2. /Vanilla spawn, hope-for-the-best/. Specialist spawns
+   without orientation; either re-derives conventions from
+   source files (slow, per-call) or ships non-conformant work
+   (rework). Either way, the manager-mediated path becomes
+   *worse* than solo on the dimensions
+   =project_orchestration_top_priority= names (smoother +
+   faster + higher-quality).
+
+The pattern: a one-paragraph manifest at spawn (~10–15 lines)
+naming each core agent and its primer namespace, plus any
+*always-on inline rule* short enough and universal enough to
+fit (Rule 2b is the canonical example). The full primer for
+any namespace is fetched on demand via a deterministic
+resolver that reads the source file at fetch time. The
+manifest is awareness; the primer is correctness.
+
+The implementation maps to the same *registry* shape as the
+supervision trinity:
+
+1. *Manifest scaffold.* Static template in
+   [[file:../../org_llm/orchestration.py][=org_llm/orchestration.py=]],
+   built from the meta-agent roster. Injected into every
+   =delegate()= sub-LLM call.
+
+2. *Primer registry.* =org_llm/primers/= package, one file
+   per namespace (=wiki_authorship.py=,
+   =dev_tracker_entry.py=, =agent_report.py=,
+   =new_agent.py=). Each file exports a pure
+   =primer(namespace) → str= reading authoritative source
+   files (=docs/wiki/wiki-conventions.org=,
+   =docs/wiki/dev-tracker.org=, =docs/templates/agent-report.org=).
+
+3. *MCP surface.* =primer(namespace)= registered in
+   [[file:../../org_llm/mcp_server.py][=mcp_server.py=]] under capability =read.wiki=.
+   Specialists call it like any tool.
+
+The /lazy-loading/ row in the capability matrix is the policy
+this rule instantiates. The full statement of that policy lives
+in [[id:cf466e65-0fa1-4f23-8103-8205f67a6ca3][lazy-loading]] — three rules: manifest at spawn,
+deterministic resolver (not LLM call), always-fresh (read at
+fetch time). Every new context-injection feature inherits these
+defaults; opting out requires explicit justification.
+
+Composition with the rest of the orchestration layer:
+
+- *AGENTS.md project primer* (already shipped) operates at
+  *project* grain — host launch, regenerated, single file. The
+  orientation primer operates at *domain* grain — fetched per
+  task, per namespace. They stack; nothing duplicates.
+- *Recipes* (Phase 22 v2) operate at *intent* grain — manager
+  detects intent class match, pre-fetches deterministically.
+  Same lazy-loading discipline, different trigger.
+- *Resolver registry* (Phase 24.1) operates at *prompt*
+  grain — facts (path, repo, agent, time) injected per call.
+  Orientation operates at *domain* grain — conventions
+  injected per task class.
+- *Self-coded tools* (Phase 29) is the auto-promotion path:
+  when the audit log shows a primer fetch consistently
+  precedes a specific intent class, the primer fetch
+  becomes part of a recipe — collapsing today's per-spawn
+  fetch into tomorrow's zero-round-trip pre-fetch.
+
+What this rule rules /out/: an LLM-based "orientation agent"
+that the manager calls before each specialist to generate a
+custom briefing. That is the eager-+-LLM-mediated shape both
+this rule and the supervision rule reject. For
+pattern-matchable conventions — wiki authorship, dev-tracker
+entries, report templates, new-agent shape — the answer must
+be a deterministic resolver.
+
+The full pattern, the namespace roster, the manifest format,
+risks, and implementation order live in [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]].
+
 * Source-of-truth conventions
 
 | concern                     | authoritative location                                  |

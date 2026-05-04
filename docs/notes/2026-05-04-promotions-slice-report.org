@@ -1,0 +1,180 @@
+#+TITLE: Promotions + See-Something-Say-Something — Substrate Slice
+#+DATE: [2026-05-04]
+#+FILETAGS: :slice:promotions:notices:substrate:report:
+
+* Objective
+
+*Summary.* Stand up the SSSS (see-something-say-something)
+substrate so specialist agents have somewhere to write typed
+notices, without yet wiring any agent to use it. Two actions:
+(1) added the =Notice= SQLAlchemy class to =org_llm/db.py=, and
+(2) created =org_llm/notices.py= with a single =notice(...)=
+writer. Substrate-only on purpose — no dispatch, no thresholds,
+no specialist call sites. The =promotions= wiki page is the
+design context this slice realizes the bottom-up half of.
+
+* Dev-tracking
+
+- Wiki concept: [[id:6aa21db3-1bae-4c6c-ae11-fb02a64e0a56][promotions.org]] — design
+  page for both Promotions (top-down) and SSSS (bottom-up); this
+  slice is the LOG / DB substrate the SSSS half writes into.
+- Dev-tracker: [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 29
+  (self-coded tools). SSSS is the "who notices, bottom-up" arm
+  of the promotion machinery Phase 29 owns.
+- Roadmap: [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] §
+  "Phase 29 — Self-coded tools" (planned, [#A]).
+- Sister note: =docs/notes/2026-05-04-promotions-wiki-report.org=
+  — parallel agent's report on drafting the wiki concept page
+  this substrate aligns with.
+
+* What landed
+
+- =org_llm/db.py= — added =Notice= SQLAlchemy class (+38 LOC, file
+  now 1385 LOC). Inserted between =InsightEngagement= and
+  =_load_sqlite_vec=. Paragraph-style docstring matches surrounding
+  tables (=CrewLog=, =VaultFact=, =InsightEngagement=).
+
+- =org_llm/notices.py= — new file, 61 LOC. Single public function
+  =notice(intent_class, observation_kind, payload, source_agent,
+  session_id, dedup_key)=. Mirrors =logbook.py='s engine-acquisition
+  pattern (=DB_PATH= + =ORG_LLM_DB= env override) and its
+  swallow-on-failure contract.
+
+* Decisions
+
+** Schema chosen
+
+Took the suggested schema verbatim. No deviations. Column order in
+the model matches the brief; SQLAlchemy emits them in that order
+when creating the table (verified against =.schema notice= output).
+
+** Migration wiring
+
+No new migration code needed. =_migrate_in_place()= already calls
+=Base.metadata.create_all(engine)= unconditionally on existing DBs
+(db.py lines 455–458, comment "New TABLES introduced over time …
+need to be created on existing DBs that pre-date them"). That call
+is idempotent — adding the =Notice= class to =Base.metadata= is
+sufficient for both fresh and existing installs to pick up the
+table on next =make_engine()= call. This is the same path
+=AgentBaseline=, =CrewLog=, =VaultFact=, =SensorLog=, and
+=InsightEngagement= ride.
+
+* Verification
+
+All five commands from the brief, run in order against the live
+=~/.local/share/org-llm/org-llm.db=:
+
+** Schema loads cleanly
+
+#+begin_src text
+$ uv run python -c "from org_llm import db; db.make_engine()"
+(no output, exit 0)
+#+end_src
+
+** Migration applies to existing DB
+
+#+begin_src text
+$ sqlite3 ~/.local/share/org-llm/org-llm.db ".schema notice"
+CREATE TABLE notice (
+        id INTEGER NOT NULL,
+        timestamp TEXT NOT NULL,
+        source_agent TEXT NOT NULL,
+        intent_class TEXT NOT NULL,
+        observation_kind TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        dedup_key TEXT NOT NULL,
+        PRIMARY KEY (id)
+);
+#+end_src
+
+** Helper writes a row
+
+#+begin_src text
+$ uv run python -c "from org_llm.notices import notice; \
+    notice('test_intent', 'test_kind', {'k':'v'}, source_agent='bench'); \
+    print('ok')"
+ok
+#+end_src
+
+** Row exists
+
+#+begin_src text
+$ sqlite3 ~/.local/share/org-llm/org-llm.db \
+    "SELECT * FROM notice WHERE intent_class='test_intent'"
+1|2026-05-04T15:15:20.242245+00:00|bench|test_intent|test_kind|{"k": "v"}||
+#+end_src
+
+Confirms: ISO-8601 UTC timestamp with =+00:00= tz suffix, payload
+JSON-encoded, source_agent populated, defaults applied for the
+unset string columns (session_id, dedup_key).
+
+** Cleanup
+
+#+begin_src text
+$ sqlite3 ~/.local/share/org-llm/org-llm.db \
+    "DELETE FROM notice WHERE intent_class='test_intent'"
+$ sqlite3 ~/.local/share/org-llm/org-llm.db \
+    "SELECT COUNT(*) FROM notice WHERE intent_class='test_intent'"
+0
+#+end_src
+
+* Open questions
+
+- =dedup_key= semantics — captured but unused. The brief frames it
+  as substrate ("collapse repeats at the read layer once that
+  exists"). No index on it yet; the read layer will likely want
+  one. Flagging for the dispatch-design pass, not now.
+
+- Timestamp format includes microseconds + =+00:00=
+  (=datetime.now(timezone.utc).isoformat()= default). =History= and
+  =CrewLog= use =isoformat(timespec="seconds")+"Z"= — second
+  resolution, =Z= suffix. I followed the brief's literal spec
+  (=datetime.now(timezone.utc).isoformat()=) which gives microsecond
+  precision and explicit offset. Both are valid ISO-8601 UTC; if
+  the read layer needs to join =Notice.timestamp= against
+  =History.timestamp= literally, this becomes friction. Easy to
+  switch later — flagging now.
+
+- Payload size — no truncation cap. Logbook has =_DEFAULT_BODY_CAP
+  = 1500=. Specialists could in principle =notice()= a full LLM
+  response. Not bounding it for now (substrate gathers, doesn't
+  judge), but worth a cap once we see real data.
+
+* Non-goals
+
+The brief's "Hard NO" list, all observed:
+
+- No Typer subcommand added to =cli.py= (didn't open the file).
+- No MCP tool registered.
+- No specialist agent wired to call =notice()= yet.
+- No threshold / dispatch / promotion logic.
+- No new external dependency. SQLAlchemy + stdlib only (=json=,
+  =os=, =sys=, =datetime=, =pathlib=).
+- No file under =docs/wiki/= touched.
+- No memory-file edits.
+
+* Gotchas
+
+- =sqlite3 ~/.local/share/org-llm/org-llm.db= raised "database is
+  locked" twice during verification, once right after the
+  =make_engine()= invocation finished (engine handle still
+  releasing). A 2-3 second pause cleared it both times. Not a
+  code defect — just local DB contention from running the
+  helper-write and CLI-read back-to-back. Worth knowing for
+  future verification scripts: insert =sleep 2= between
+  =uv run= writes and =sqlite3= reads.
+
+- =Base.metadata.create_all()= path in =_migrate_in_place= is the
+  reason no explicit migration code is needed. The function name
+  suggests it only handles in-place column additions, but it
+  also creates whole new tables — the implementation comment at
+  lines 452–454 spells this out. Future readers may grep for
+  "ALTER TABLE notice" expecting to find migration wiring;
+  there is none, by design.
+
+- The =__allow_unmapped__ = True= flag on =Base= silenced no
+  warnings here, but it's required because other classes in
+  =db.py= have plain-Python attribute aliases SQLAlchemy 2.x
+  would otherwise complain about. =Notice= inherits cleanly.

@@ -82,6 +82,14 @@ for the full convention.
   deterministic regex-derived knowledge (=routine_chores=,
   =mood_signal=, =tag_taxonomy=, …) cached in SQLite; agents
   treat as authoritative (Phase 21)
+- [[id:a2af071e-8244-444d-8954-61317cc1ec4d][Superset]] —
+  integration ladder + the semantic-layer registry (one
+  source of truth for "what does =metric:X= mean") that ships
+  ahead of Phase 27
+- [[id:6aa21db3-1bae-4c6c-ae11-fb02a64e0a56][Promotions & SSSS]] —
+  manager promotes recurring LLM intent into deterministic
+  artifacts (top-down); specialists report typed notices into
+  a manager inbox (bottom-up); both feed Phase 29's dispatch loop
 - [[id:b91f980e-5699-4994-843a-00532f1770b3][Memory Alpha]] —
   Trek framing for Phase 25's DB-authoritative inversion: the
   DB becomes the central library, files are renders, vault facts
@@ -98,6 +106,9 @@ for the full convention.
   user-controlled allowlist for read/execute paths
 - [[id:39c17d6a-b502-4d9a-adc9-3cf71f776ad2][Tutor]] —
   23-step interactive walkthrough for first-time users
+- [[id:ce2e4d01-4e45-4acd-8ca1-310085c8b821][Walkthroughs]] —
+  small-step explainers agents pace through with the user;
+  one =.org= per topic in =docs/wiki/walkthroughs/=
 
 ** Agent surface (specialists you can talk to)
 - [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][Agents]] — what's
@@ -111,12 +122,20 @@ for the full convention.
   =@bookkeeper=, …) sorted by interestingness.
 - [[id:b9e5d3c2-4a7f-48a6-9c1d-e2f3a4b5c6d7][@agentsmith]] —
   the meta-agent that ships new agents in one conversation.
+- [[id:32fe7314-0a69-4945-aef3-7105d507b201][Agent orientation]] —
+  manifest at spawn, primer on demand: the pattern for handing
+  specialists their domain conventions without bloating spawn
+  prompts. Names =@curator= / =@tracker= / =@agentsmith= as
+  the meta stewards each owning a primer namespace.
 - =@curator= — wiki concept-graph specialist (covered in agents
   + agent-roster); sweeps =docs/wiki/= for missing cross-links,
   numeric drift between tables and code, new-page candidates.
+  Owns the =wiki-authorship= and =agent-report= primer
+  namespaces.
 - =@tracker= — dev-process steward (covered in agents +
   agent-roster); owns =dev-tracker.org=; daily what's-on-deck,
   end-of-session what-shipped/what's-blocked, EFFORT drift.
+  Owns the =dev-tracker-entry= primer namespace.
 
 ** Visual + voice personalization
 - [[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][LCARS theming]] —
@@ -139,6 +158,11 @@ for the full convention.
   detailed phase catalog + project plan
 - [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][Wiki conventions]] —
   the self-updating, always-notified contract
+- [[id:cf466e65-0fa1-4f23-8103-8205f67a6ca3][Lazy loading]] —
+  policy: load context when relevance is established, not on
+  the chance it'll be needed. Manifest at spawn, deterministic
+  resolver on demand, always-fresh. The default for every new
+  context-injection feature.
 - [[id:9b012557-f592-4d1e-8dd1-464c2a4250c3][Audit log]] —
   bidirectional wiki↔reality audits; what's drifted, what's
   fixed, what's deferred
@@ -211,6 +235,7 @@ the link to the source:
 | Cloud-or-local routing    | [[id:510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08][cloud-or-local-routing.org]] | full       |
 | Doctor + self-heal        | [[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][doctor-self-heal.org]] | full       |
 | Tutor / onboarding        | [[id:39c17d6a-b502-4d9a-adc9-3cf71f776ad2][tutor.org]] | full       |
+| Walkthroughs (concept)    | [[id:ce2e4d01-4e45-4acd-8ca1-310085c8b821][walkthroughs.org]] | full       |
 | Pi bridge                 | [[id:ddfb74ae-3c16-45e3-b1be-df3c2b03966b][pi-bridge.org]] | full       |
 | Code corpus               | [[id:ff70047c-6611-4391-857e-f94c14fc1914][code-corpus.org]] | full       |
 | Granted filesystem access | [[id:11029de4-2780-4169-9f3b-2fd1a3a73e6a][granted-filesystem-access.org]] | full       |
@@ -220,6 +245,8 @@ the link to the source:
 | Agent framework            | [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][agent-framework.org]]    | full       |
 | Agent roster               | [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]]       | full       |
 | @agentsmith                | [[id:b9e5d3c2-4a7f-48a6-9c1d-e2f3a4b5c6d7][agentsmith.org]]         | full       |
+| Agent orientation (manifest + primer) | [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]] | full (Phase 24.5 candidate) |
+| Lazy-loading policy        | [[id:cf466e65-0fa1-4f23-8103-8205f67a6ca3][lazy-loading.org]]        | full       |
 
 * How to contribute / extend
 

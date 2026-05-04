@@ -1,0 +1,117 @@
+#+TITLE: <Short report title — what the work was, in 4–8 words>
+#+DATE: [<YYYY-MM-DD>]
+#+FILETAGS: :report:<topic>:<slice|wiki|design|fix|...>:
+
+# Agent post-action report template.
+#
+# Canonized 2026-05-04. Owned by @curator under the agent-report
+# primer namespace (see docs/wiki/agent-orientation.org).
+#
+# How to use:
+# 1. Copy this file to docs/notes/YYYY-MM-DD-<slug>.org
+# 2. Fill every section. Delete sections that genuinely don't apply
+#    (e.g. Verification when the work didn't ship code) — but DO
+#    NOT delete Objective or Dev-tracking; those are load-bearing.
+# 3. Keep the Objective summary tight (1–3 sentences). State what
+#    was done AND why. If the work has multiple actions, name them.
+# 4. Dev-tracking links use [[id:UUID][label]] form for wiki/roadmap
+#    pages, and relative paths for sister notes.
+# 5. Run scripts/link_wiki_files.py if your report cross-links into
+#    docs/wiki/.
+#
+# Reference exemplars:
+# - docs/notes/2026-05-04-promotions-slice-report.org (code slice)
+# - docs/notes/2026-05-04-promotions-wiki-report.org (wiki draft)
+
+* Objective
+
+*Summary.* <1–3 sentences. What was done and why. Name the
+discrete actions if there were more than one. A reader returning
+to this note in three months should know from this paragraph
+alone what the work was for and what it produced.>
+
+* Dev-tracking
+
+# Links to where this work fits in the broader project. Include:
+# - The wiki concept page(s) this work realizes or extends
+# - The dev-tracker phase entry (with § section reference)
+# - The roadmap phase if applicable
+# - Sister notes from parallel agents working on the same arc
+
+- Wiki concept: [[id:<UUID>][<page name>]] — <one-line context>.
+- Dev-tracker: [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase <NN>
+  (<phase title>). <one-line context>.
+- Roadmap: [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] §
+  "Phase <NN> — <title>" (<status>).
+- Sister note: =docs/notes/<YYYY-MM-DD>-<slug>.org= — <relationship>.
+
+* What landed
+
+# Concrete artifacts. File paths + LOC deltas where useful. Tables
+# work well for multi-file changes; bullet lists for one or two.
+# Be specific — vague "added some code" is not useful in three months.
+
+- =<path/to/file>= — <what changed, +/-LOC, position relative to
+  surrounding code>.
+- =<path/to/file>= — <new file? modification? what shape?>.
+
+* Decisions
+
+# Key choices made during the work. For each: what was chosen,
+# what the alternatives were, why this one won. Skip purely
+# mechanical decisions (variable naming, import order); keep
+# load-bearing ones (schema shape, integration point, error
+# handling stance).
+
+** <Decision title>
+
+<What was chosen, what was rejected, why. Reference the brief or
+the relevant wiki rule if applicable.>
+
+* Verification
+
+# Only include if the work shipped runnable code OR a verifiable
+# artifact (e.g. a wiki page passing link_wiki_files.py). For
+# pure-design / pure-doc work where there's nothing to verify
+# beyond "the file was written," delete this section.
+
+** <Check name>
+
+#+begin_src text
+$ <command>
+<output>
+#+end_src
+
+<Brief comment if the output needs interpretation.>
+
+* Open questions
+
+# Things the work surfaced that need a human call. Number them so
+# they're easy to reference in follow-up conversation. Be specific
+# about what answer would unblock what.
+
+1. *<question title>.* <Context, why it matters, what would
+   unblock it.>
+2. *<question title>.* <…>
+
+* Non-goals
+
+# Boundaries deliberately observed. The "Hard NO" list from the
+# brief, or the natural boundaries you respected even when
+# tempting to expand scope. This is the section that proves you
+# didn't drift; a future reviewer should be able to audit it.
+
+- <thing not done>.
+- <thing not done>.
+
+* Gotchas
+
+# Things a future reader (you, a sister agent, a contributor)
+# might trip over. Include:
+# - Surprising behaviors discovered during the work
+# - Idioms in the code that aren't self-evident
+# - Local-environment quirks that affected verification
+# - Caveats that aren't bugs but feel like one
+
+- <surprising thing>. <why it's not a bug, what to know>.
+- <surprising thing>. <why it's not a bug, what to know>.

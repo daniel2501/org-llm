@@ -1,0 +1,221 @@
+:PROPERTIES:
+:ID:       cf466e65-0fa1-4f23-8103-8205f67a6ca3
+:CREATED:  [2026-05-04]
+:UPDATED:  [2026-05-04]
+:END:
+#+TITLE: Lazy loading — policy: load context when relevance is established, not on the chance it'll be needed
+#+FILETAGS: :wiki:policy:context:orchestration:meta:
+#+OPTIONS: toc:nil num:nil
+
+* What this is
+
+*Summary.* Org-llm's default for every kind of context — primers,
+conventions, recipes, vault facts, deep references, embedded
+docs — is *lazy*: load it when the specialist's task has
+established relevance, not at spawn-time on the chance it might
+matter. The exception is a thin always-on *manifest* of names +
+where to find the deep content. Lazy beats eager because token
+budgets are tight, primers go stale fast, and unused context is
+pure overhead. The policy is canonized here so future features
+(orientation primers, security reviewers, vault-hygiene checks,
+etc.) inherit the default rather than re-litigating it.
+
+*Expanded.* Eager-loading every potentially-relevant rule into
+every spawn-prompt is the obvious shape — and the wrong one for
+org-llm's surface mix. Specialists run on a wide model spread
+(local 4B/7B parameter classes up to cloud frontier models);
+their context budgets vary 10× between hosts. A policy that
+fits the cloud frontier model breaks the local 4B's window. A
+policy that fits the 4B leaves the frontier model
+under-oriented. Lazy-loading sidesteps the dilemma: every host
+gets the same thin manifest, and the deep content shows up only
+when the specialist has decided it's relevant.
+
+* The policy
+
+*Summary.* Three rules. (1) *Manifest at spawn, deep content
+on demand.* (2) *On demand = deterministic resolver, not LLM
+call.* (3) *Always-fresh — read from authoritative source at
+fetch time, not cached at spawn time.* These compose: any new
+primer / convention / reference docs / domain-specific rule
+inherits all three by default.
+
+*Expanded.*
+
+** Rule 1 — Manifest at spawn, deep content on demand
+
+The spawn-prompt gets a short manifest naming what's available
+and how to fetch it. The full content lives behind a fetch
+call. Manifest fits in ≤15 lines so the smallest target window
+still carries the actual task instruction. Deep content can
+be arbitrarily long because only specialists who need it pay
+the cost.
+
+The exception is *always-on inline rules* — rules short enough
+to fit one line *and* universal enough that *every* artifact in
+that domain must follow them. Wiki Rule 2b is the canonical
+example: 12 words ("every wiki concept leads with =*Summary.*=
++ =*Expanded.*="), no specialist who writes a wiki page can
+skip it. Inlining beats a fetch round-trip for content that
+short and that universal. The bar is deliberately high — most
+rules don't qualify.
+
+** Rule 2 — On demand = deterministic resolver, not LLM call
+
+A primer / convention / reference fetch is a *file read with a
+templated wrapper*, not a sub-LLM call. This means:
+
+- Predictable cost (file I/O, no token economics).
+- Unit-testable.
+- No risk of the primer hallucinating a rule.
+- Composable with [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Phase 29 self-coded tools]] — a deterministic
+  resolver IS the artifact Phase 29 promotes recurring patterns
+  into.
+
+If a fetch *would* benefit from reasoning, the resolver is the
+wrong shape; the right shape is to encode the reasoning as a
+rule and emit it deterministically. (Same logic as the [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Phase 24
+supervision rule]] — supervision and orientation share the
+deterministic-default discipline.)
+
+** Rule 3 — Always-fresh
+
+The resolver reads the authoritative source at fetch time, not
+at spawn time. =primer("wiki-authorship")= reads
+=wiki-conventions.org= when called, not when the specialist
+spawned. This means:
+
+- A wiki convention edit propagates to in-flight specialists on
+  their next fetch — no restart needed.
+- Drift between primer text and source-of-truth becomes
+  mechanically impossible.
+- Caching is a separate, explicit decision (with a
+  cache-invalidation policy) — it's not the default.
+
+The cost is one file read per fetch. For org-llm scale that's
+sub-millisecond local I/O — well below the noise floor of any
+LLM call the fetch precedes.
+
+* Where the policy already shows up
+
+*Summary.* Lazy-loading isn't new to this page; it's the
+implicit pattern behind several of org-llm's load-bearing
+features. Naming it as policy makes the pattern explicit so
+future features inherit it instead of re-discovering it.
+
+*Expanded.*
+
+| feature                            | what's lazy                     | trigger                                |
+|------------------------------------+----------------------------------+----------------------------------------|
+| [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][Recipes]]                          | full pre-fetched context payload | manager detects intent class match     |
+| [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]]                      | =routine_chores=, =mood_signal=…  | agent calls =get_vault_fact(name)=     |
+| [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] =/sys*= short-circuits | full system-prompt body          | =/sysstatus=, =/syswiki= etc. invoked  |
+| [[id:32fe7314-0a69-4945-aef3-7105d507b201][Agent orientation primer]]         | wiki / dev-tracker / report rules | specialist calls =primer(namespace)=    |
+| Phase 24.1 [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][resolver registry]]            | path / repo / agent / time facts | every =delegate()= (parallel fetch)    |
+
+The /eager/ counterpart in each row would be: a recipe whose
+context is pre-built into the agent's persona, vault facts
+inlined into every spawn, =/sysstatus=-equivalent
+status-snapshot embedded in the system prompt, the orientation
+primer crammed into the manifest, the resolvers run inline
+before every prompt regardless. Each of those breaks for the
+same reason: large context paid on every call to cover a use
+case that fires on a small fraction of calls.
+
+* When NOT to apply
+
+*Summary.* Lazy-loading is wrong when (a) the content is
+small enough that the fetch round-trip costs more than the
+content saves, (b) the content is universal — every specialist
+of every type uses it on every call, or (c) the relevance
+signal is too noisy to trust the specialist with the fetch
+decision.
+
+*Expanded.*
+
+- *Tiny + universal → eager.* Rule 2b is 12 words and
+  universal. Wrapping a 12-word rule behind a fetch is pure
+  overhead. Manifest inlines it.
+- *Frequency-based eagerization.* If the audit log shows a
+  primer namespace fetched on >70% of specialist spawns of a
+  given type, that's evidence it should be in the manifest —
+  *or* that the specialist type's spawn-prompt should embed
+  the full primer (Phase 29 self-coded-tools territory: the
+  pattern-detection loop catches this). Eager-becomes-lazy is
+  reversible.
+- *Adversarial relevance.* If a security primer needs to fire
+  on EVERY tool call regardless of what the agent thinks is
+  relevant, lazy-fetch by the specialist is the wrong shape —
+  the resolver should be triggered by the host (interceptor
+  on the proxy) instead of the agent. Phase 24.1's resolver
+  registry is the closer match for that case.
+
+* The cache-window argument (LLM-host specific)
+
+*Summary.* For Anthropic-style 5-minute prompt-cache TTLs,
+spawn-prompt content gets cached and is effectively free on
+re-use within the window. This is the strongest argument for
+*eager*-loading inside a session. It does not flip the policy:
+even within a 5-min window, every byte of unused context is a
+byte the specialist's attention has to filter past, and stale
+content is still wrong content. But it does shape *what* gets
+cached: the manifest itself is a perfect cache target (small,
+stable, every call).
+
+*Expanded.* The Anthropic prompt cache (5-min TTL) means a
+spawn-prompt loaded once is free on subsequent calls within
+the session. Naively this argues for embedding everything —
+"it's already cached, why fetch?" — but that misses three
+things:
+
+1. *Cache != attention budget.* A specialist still has to
+   process every token in its prompt, regardless of whether
+   the bytes were re-served from cache. Larger prompts =
+   slower per-token attention compute = noticeably higher
+   per-turn latency on large local models.
+2. *Cache misses on rule edits.* The moment the source rule
+   changes, cached prompts that embedded it are wrong until
+   re-spawned. Lazy fetch reads the current rule.
+3. *Cache spans a session, not a feature lifetime.* Across
+   sessions and across users (FOSS distribution) the cache
+   resets. The eager case only works if you assume a hot
+   session — a brittle assumption to bake into the policy.
+
+The manifest is the right caching target precisely because
+it's small and stable: cached cheaply, never goes stale,
+referenced by every spawn.
+
+* Status
+
+*Summary.* Policy canonized 2026-05-04. Active applications
+listed in /Where the policy already shows up/ above. Future
+features default to it; opting out requires explicit
+justification in the dev-tracker entry that proposes the
+feature.
+
+*Expanded.* This page is referenced by [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]]
+and the upcoming Phase 24.5 dev-tracker entry. Any new feature
+that introduces context-injection — a new primer, a new
+resolver, a new system-prompt addition, a new pre-fetch — must
+either inherit the lazy default or document why eager is right
+for that specific case. The default is asymmetric: lazy is
+free to ship; eager carries a justification burden.
+
+* See also
+
+- [[id:32fe7314-0a69-4945-aef3-7105d507b201][Agent orientation]] —
+  the canonical primer-style application.
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] —
+  the design-rule layer (supervision-as-deterministic and
+  orientation-as-deterministic share the same shape).
+- [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][Recipes]] —
+  manager pre-fetch as lazy (intent-triggered, not eager).
+- [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]] —
+  fact cache fetched on agent demand, not embedded.
+- [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] —
+  =/sys*= short-circuits as lazy system-prompt fetches.
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] § Phase 24.5 —
+  the orientation-primer registry.
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 29 —
+  self-coded tools; lazy fetches that prove their keep can be
+  promoted to deterministic recipes.
