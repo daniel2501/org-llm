@@ -648,6 +648,31 @@ from the prompt. Either:
 - Inject CURRENT TIME into the polish system prompt (existing
   AgentBaseline pattern).
 
+***** TODO @<agent> per-turn routing dies inside opencode TUI    :friction:w2:bug:gate-1:opencode:agents:
+:PROPERTIES:
+:PRIORITY:  A
+:SOURCE:    W2 walkthrough 2026-05-04
+:END:
+Sent =@data Idea: cold-start latency …= via opencode TUI;
+primary =Org-Llm= persona answered (NOT data/scribe) and ran
+=org-llm doctor= instead of capturing. No swap recorded in
+=crew_log=. =opencode.json= has =data= entry with
+=mode: "all"= + =x_org_llm_birth_name= (verified).
+
+Inferred cause: opencode 1.14.33 strips/transforms =@<name>=
+before the chat-completions body leaves opencode. Documented
+in =cli.py= launcher comment block: opencode's native
+=@<name>= is treated as a delegation HINT to primary; subagent
+delegation fails because opencode's task tool can't find them
+as proper subagents.
+
+Fix path locked = (1) patch the opencode plugin
+(=extensions/opencode/src/=) to re-inject =@<name>= into the
+user-message body before send. Sub-agent dispatched
+2026-05-04 to investigate the right hook (=chat.message= vs
+=experimental.chat.messages.transform=) and sketch the patch.
+Expected: plan → edit → ship. Tracked here until lands.
+
 
 ** DONE Phase 23.1 + 23.5 — Agent dataclass + DB-backed registry  :plan:agents:db:cli:load-bearing:
 CLOSED: [2026-05-03]
@@ -1134,29 +1159,42 @@ tool roster, declined a music-recommendation drift cleanly.
 Cleanest of the three recent agents. Re-test on next vault-hygiene
 feature land.
 
-*** NEXT Validate @journalist mood agent + tighten boundary          :validation:agents:load-bearing:
+*** DONE Validate @journalist mood agent + tighten boundary          :validation:agents:load-bearing:
+CLOSED: [2026-05-04 Mon]
 :PROPERTIES:
-:PRIORITY: A
-:GATE:     1
-:EFFORT:   1h
+:PRIORITY:  A
+:GATE:      1
+:VALIDATED: [2026-05-04]
+:EFFORT:    1h
+:ACTUAL:    25m
 :END:
-SCHEDULED: <2026-05-07 Thu>
 
-@journalist smoke pass (hedged observational tone, no diagnosing,
-open follow-up question — persona shape held). Determinism
-acceptable at temp=0.3.
+*Resolution (2026-05-04):* added a 7th DEFAULTS bullet to the
+@journalist persona at
+[[file:../../org_llm/cli.py][=cli.py=]]:4935 — "Stay in your lane.
+If the user asks about Doom keybinds, point to @doom; weather or
+seasons, @almanac; agenda or schedule, @agenda; vault hygiene,
+@gardener. Decline politely + redirect — don't answer from
+training-data guesses about other domains."
 
-*Boundary FAIL:* given a Doom keybind question, answered
-confidently with "=SPC p f=" (a Doom default it knows from
-training data), no refusal/handoff. Persona has no explicit "stay
-in scope" / "refuse out-of-domain" rule — @gardener and @doom both
-do, @journalist doesn't. Add a "decline + handoff to @doom for
-keybinds, @almanac for weather, @agenda for schedule" line. Also
-=pack="legacy-extras"= — same OOB-loading question as @doom.
-Hallucinates specific dates without dailies access (delegate-path
-tool gap, see bug below).
+Original test findings preserved for re-test reference: smoke
+pass (hedged observational tone, no diagnosing, persona shape
+held); determinism acceptable at temp=0.3; *boundary FAIL* —
+given a Doom keybind question, answered confidently with "=SPC
+p f=" (Doom default from training data), no refusal/handoff.
 
-*Re-test cadence:* <2026-05-10 Sun>.
+*Behavioural re-test* — open gate; will fold into the routine
+sweep on <2026-05-10 Sun>. Single-prompt boundary test (~8s
+cloud roundtrip) — drop a Doom keybind question and confirm
+refusal + handoff. If the new bullet doesn't catch it, escalate
+to a more directive phrasing.
+
+*Two adjacent issues NOT closed by this entry:*
+- =pack="legacy-extras"= so @journalist doesn't load OOB —
+  tracked in the [[*NEXT Validate @doom keybind agent + fix legacy-pack default][@doom entry]] (same
+  decision applies to both).
+- Hallucinates specific dates without dailies access (delegate-
+  path tool gap) — tracked in the [[*TODO =delegate()= chat-completions path doesn't carry MCP tools][delegate() bug]].
 
 *** TODO Validate agentsmith meta-agent                              :validation:agents:meta:load-bearing:
 :PROPERTIES:
