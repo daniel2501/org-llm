@@ -3082,6 +3082,52 @@ Decisions to make before 25.1 lands:
 Pending — not a Phase 25 blocker; can land mid-arc as the
 inversion progresses.
 
+** TODO Route preview — ghost text in opencode prompt        :ui:opencode:plugin:
+:PROPERTIES:
+:CAPTURED:  [2026-05-04]
+:EFFORT:    5-7h
+:STAGE:     1 of 2 (preview today; full autocomplete needs upstream PR)
+:END:
+
+Fish-inspired *route preview* via the opencode plugin's
+=<Prompt hint={…}>= slot — passive ghost text showing what
+would happen if the user submits their current input right now.
+Explicitly NOT calling it autocomplete in the UX; that label
+waits for Stage 2 when an upstream opencode PR adds =onInput= +
+prompt-scoped Tab keybind hooks.
+
+Architecture:
+- Launch verb dumps =~/.local/share/org-llm/routes.json= on
+  start (snapshot of =_AGENT_TRIGGERS= + =_RECIPES= + prefix
+  family + slash list).
+- New plugin module =extensions/opencode/src/route-preview.tsx=
+  polls =ref.current.input= at ~80ms (only when
+  =ref.focused=), scores against routes.json with the same
+  substring-count algorithm as =cli.py:route_prompt=.
+- =slots.tsx= mounts =<RoutePreview/>= into the =hint= prop on
+  both =home_prompt= and =session_prompt=.
+
+Hint shape (one line):
+- =@cur=                          → =@curator (atoz)=
+- =audit the wiki=                → =@curator  via "audit the wiki" (score 2)  cloud=
+- =how many times have I run X=   → =recipe count_across_vault  pre-fetch · no LLM=
+- =what's for dinner=             → =no route — default @crew  cloud=
+
+Risks (per pre-flight design):
+- *Code↔code drift* between Python =route_prompt= and TS
+  scorer — mitigated by routes.json being the single data
+  source (algorithm is trivial substring count).
+- Polling churn on idle sessions — only poll when focused.
+- =hint= height affecting prompt layout — keep to 1 line, ellipsis-truncate.
+
+Open decisions:
+- Does Stage 1 land before or after the @curator MCP tools
+  ([[id:b91f980e-5699-4994-843a-00532f1770b3][memory-alpha.org]] / wiki sweep automation)?
+- Should the launcher emit routes.json *and* keep it in sync
+  on agent-config edits, or is launch-time-only sufficient?
+- Stage 2 (onInput + Tab hook) — is it worth filing the
+  upstream opencode PR ourselves vs waiting for opencode 1.15?
+
 * Test campaigns                                                :@test:
 
 # Active or upcoming test campaigns. Each gets a sub-heading
