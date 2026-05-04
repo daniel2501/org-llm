@@ -1196,34 +1196,45 @@ to a more directive phrasing.
 - Hallucinates specific dates without dailies access (delegate-
   path tool gap) — tracked in the [[*TODO =delegate()= chat-completions path doesn't carry MCP tools][delegate() bug]].
 
-*** TODO Validate agentsmith meta-agent                              :validation:agents:meta:load-bearing:
+*** DONE Validate agentsmith meta-agent                              :validation:agents:meta:load-bearing:
+CLOSED: [2026-05-04 Mon]
 :PROPERTIES:
-:PRIORITY: A
-:GATE:     1
-:EFFORT:   45m
+:PRIORITY:  A
+:GATE:      1
+:VALIDATED: [2026-05-04]
+:EFFORT:    45m
+:ACTUAL:    35m
 :END:
-SCHEDULED: <2026-05-08 Fri>
 
-agentsmith is structurally sound: =Agent= dataclass populated,
-=route_prompt= resolves @agentsmith and @soong, 11 triggers fire
-on natural phrasing, persona covers all 7 design steps from
-[[file:agentsmith.org][=agentsmith.org=]], capabilities
-(read.vault, write.vault, shell) match doc intent. Output IS
-shippable on the well-behaved happy path — the user ends with a
-valid =~/org/org-llm-agents.org= heading that
-=_maybe_auto_apply_org_file=
-([[file:../../org_llm/cli.py][=cli.py=]]:5498-5520) ingests on
-next =org-llm launch=.
+*Resolution (2026-05-04):* all three cleanup points addressed.
 
-*Needs human cleanup* on three points: (1) persona references
-nonexistent =org-llm agents --apply= CLI verb — see bug below;
-(2) persona length is 3143 chars while agentsmith.org's own
-§Constraints warns at 1500 ("bloats every turn's context for
-marginal voice gain"); (3) cross-scope refusal is soft ("bias
-toward small + focused") rather than a hard guard — adversarial
-"agent that does keybind + mood" can slide through.
+(1) =org-llm agents --apply= verb now works — added as an alias
+to =--apply-from-org= in commit c4c507a. The persona reference
+is now correct without a doc edit.
 
-*Re-test cadence:* <2026-05-17 Sun>.
+(2) Persona trimmed 3177 → 1423 chars (under the 1500 budget
+agentsmith.org §Constraints sets). Replaced the WORKFLOW 1-7
+prose (~1700 chars duplicating the wiki) with one DEFAULTS
+bullet: "Follow agentsmith.org's 7 steps. Don't recite — read +
+apply." Since agentsmith already reads the wiki via =read_file=
+on every invocation, the duplication added no signal.
+
+(3) Hard cross-scope refusal added as a DEFAULTS bullet:
+"REFUSE multi-domain proposals (keybinds + mood, weather +
+finance, etc.). One agent = one domain. Decline + suggest a
+split." Replaces the previous soft "bias toward small +
+focused" guidance. Existing-agent collision guard tightened
+similarly.
+
+Original happy-path validation preserved: =Agent= dataclass
+populated, =route_prompt= resolves @agentsmith + @soong, 11
+triggers fire, capabilities (read.vault, write.vault, shell)
+match doc intent.
+
+*Behavioural re-test* — fold into the routine 2026-05-17 sweep:
+ask agentsmith for a multi-domain agent (e.g. "ship me an agent
+that does keybinds AND mood journaling"); confirm it refuses +
+splits per the new bullet.
 
 *** TODO Re-validate weather_aware_agenda post-hardening             :validation:recipes:load-bearing:
 :PROPERTIES:
