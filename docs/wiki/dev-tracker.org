@@ -281,6 +281,205 @@ A/B harness shape if applicable.
 # Items I'm actively working on right now. Move to DONE when
 # shipped, or back to TODO/NEXT if I had to pause.
 
+** STARTED Daily-drive org-llm + Doom as my Emacs distro             :dogfood:daily-driver:load-bearing:
+:PROPERTIES:
+:PRIORITY:  A
+:STARTED:   2026-05-03
+:GATE:      1
+:END:
+
+The leg of work where I use =org-llm + Doom Emacs= as ONE
+Emacs distro for actual daily life: notes, schedule, capture,
+reflection, code, search. Two purposes:
+
+1. *Feel-check* — does the app feel like a usable thing yet?
+   Does living in it for real work create the sense of a
+   coherent product forming?
+2. *Catch-and-fix loop* — when friction surfaces, fix it now,
+   not later. Iterate against real use.
+
+This is a long-running STARTED — it doesn't close. Specific
+bugs and missing-ergonomics findings get filed as =:bug:= or
+=:plan:= entries elsewhere in this tracker that link back
+here. Future: =@agentsmith= or a dedicated walkthrough agent
+can simulate these workflows autonomously.
+
+*** Walkthrough workflow set (v1)
+
+Six workflows split work / personal, covering the core verbs.
+Walk through each in sequence; descriptions are notes (not
+TODOs), the workflow itself is a TODO scheduled for today, and
+any friction observed during walkthrough gets filed below as a
+TODO + (where actionable) cross-linked to a =:bug:= / =:plan:=
+entry elsewhere in this tracker.
+
+Validation rule: a workflow's =:VALIDATED:= property records
+the ISO date it was last walked end-to-end without surfacing a
+gate-1 blocker. Walkthroughs older than ~14 days = re-walk.
+
+**** Work workflows                                              :workflow:work:
+
+***** TODO W1 — Morning open (workday lens)                  :workflow:work:read:plan:
+SCHEDULED: <2026-05-03 Sun>
+:PROPERTIES:
+:VALIDATED:  -
+:END:
+
+Run =emacsclient -c (org-llm-launch)= (or =org-llm launch= in
+shell). The sidebar should surface today's workday context
+without prompting: agenda items, code TODOs, dbt status,
+manager-recent.
+
+Walk-through observations (notes — not actionable):
+- *Eyeball:* weather, today's SCHEDULED items, recent crew_log,
+  vault-health card.
+- *Success:* I have a sense of "what does my workday look
+  like" inside 5 seconds of frame opening.
+- *Failure modes to watch:* slow open, blank sidebar
+  sections, agenda shows wrong day, weather "unavailable" with
+  no graceful narration, code corpus index stale.
+
+***** TODO W2 — Capture work item (meeting / decision / code idea)  :workflow:work:write:
+SCHEDULED: <2026-05-03 Sun>
+:PROPERTIES:
+:VALIDATED:  -
+:END:
+
+A work-flavored thought arrives — meeting note, project
+decision, code idea. Test BOTH capture surfaces:
+
+1. *Quick CLI capture:* =org-llm capture= from a terminal.
+2. *Agent-assisted capture:* =@data ...= via opencode.
+
+Walk-through observations:
+- *Watch:* capture → file lands → auto-tag fires (work tag
+  candidates: =:work:= =:meeting:= =:project-X:=) → re-find
+  in 30s via vault search.
+- *Success:* one of the two paths feels lighter than my
+  previous flow (raw =org-capture=); re-find proves the tag
+  was useful.
+- *Failure modes:* either path takes >2s, tag is wrong /
+  empty, captured note has wrong path, the two paths produce
+  inconsistent results.
+
+***** TODO W3 — Code session (=@geordi=)                          :workflow:work:code:
+SCHEDULED: <2026-05-03 Sun>
+:PROPERTIES:
+:VALIDATED:  -
+:END:
+
+Open the code corpus and do a small, scoped change.
+
+Walk-through observations:
+- Use =@geordi find <function-name>= or =org-llm code-search=.
+- Ask =@geordi= for a small refactor proposal as a diff.
+- If the diff touches dbt models, verify =dbt build= still
+  passes.
+- *Success:* code_search returns the right hit in <2s; diff
+  is reviewable (small, before/after, no multi-file
+  surprises); dbt feedback loop is fast enough to actually
+  use.
+- *Failure modes:* code_search latency, diff over-scopes,
+  dbt run is too slow to feel iterative, code_index stale.
+
+**** Personal workflows                                          :workflow:personal:
+
+***** TODO P1 — Vault search ("recall + discovery")          :workflow:personal:read:
+SCHEDULED: <2026-05-03 Sun>
+:PROPERTIES:
+:VALIDATED:  -
+:END:
+
+Test BOTH search modes — different friction profiles:
+
+1. *Recall mode:* "I know I wrote about X, find it." (Verifies
+   the citation surface for a known target.)
+2. *Discovery mode:* "What have I written about X?"
+   (Tests the breadth of retrieval + ranking.)
+
+Walk-through observations:
+- *Watch:* top-3 hits with file:line citations; one should
+  be the target in recall mode; discovery mode should surface
+  variety not duplicates.
+- *Success:* I navigate to the cited note with one keystroke;
+  the answer was useful in <10s.
+- *Failure modes:* hits stale / wrong, citations broken,
+  search latency > local Ollama warm-up, discovery mode
+  returns near-duplicates.
+
+***** TODO P2 — Daily reflection                          :workflow:personal:write:reflect:
+SCHEDULED: <2026-05-03 Sun>
+:PROPERTIES:
+:VALIDATED:  -
+:END:
+
+End of day: open today's daily, capture mood / what worked /
+what I'm carrying. =@journalist= dependency dropped from this
+walkthrough (currently legacy-extras and would re-litigate the
+OOB cut) — substitute: write in the daily, then run a vault
+search for prior-week dailies to retrieve patterns manually.
+
+Walk-through observations:
+- *Watch:* the daily-capture path is fast; vault search over
+  recent dailies surfaces the prior-week pattern; the closing
+  feels like a closing.
+- *Success:* I close the loop on the day and feel done.
+- *Failure modes:* no signal from prior dailies, capture path
+  for daily reflections is awkward, prior-week search returns
+  noise rather than my own entries.
+- *Surfaces (expected):* the friction here likely re-opens the
+  question of putting =@journalist= back in OOB. Don't
+  pre-decide — let the walkthrough generate the signal.
+
+***** TODO P3 — Hygiene check + check-in                  :workflow:personal:reflect:ops:
+SCHEDULED: <2026-05-03 Sun>
+:PROPERTIES:
+:VALIDATED:  -
+:END:
+
+Run =@keiko what needs cleanup= as-is. Phase 23.3 (concrete
+hygiene scans) is pending — @keiko has the persona but no
+backing scan results yet. The friction *is* the signal —
+walking the workflow surfaces what scan(s) need to land first.
+
+Walk-through observations:
+- *Watch:* what does @keiko surface today (probably advisory
+  text, generic suggestions)? Does it feel actionable, or
+  vague?
+- *Success:* either gardener proposes the top 3 issues I'd
+  agree with, OR the gap forces a clean Phase 23.3 scope.
+- *Failure modes:* @keiko hallucinates "scan results,"
+  proposes too much, scope is wrong (suggests cleanup of
+  files I'm actively working on), needs the daemon running
+  to do anything useful.
+
+*** Recurring review
+
+**** TODO Weekly friction-log review                                  :workflow:review:
+SCHEDULED: <2026-05-10 Sun ++1w>
+:PROPERTIES:
+:LASTREVIEW:  -
+:END:
+
+Every Sunday: re-walk any workflow with =:VALIDATED:= older
+than 14 days, triage anything new in the friction log below.
+
+*** Friction log
+
+# Format: date heading + brief description + cross-link to
+# any :bug: / :plan: entry it spawned elsewhere in the
+# tracker. Heading style:
+#
+#   **** TODO <date>: <one-line summary>           :friction:bug?:
+#   - what happened
+#   - cross-link: see [[*Bug heading]] / Phase X.Y plan
+#
+# Plain notes (no TODO state) for observations that aren't
+# actionable yet.
+
+# (none yet — start logging on the first walkthrough)
+
+
 ** DONE Phase 23.1 + 23.5 — Agent dataclass + DB-backed registry  :plan:agents:db:cli:load-bearing:
 CLOSED: [2026-05-03]
 :PROPERTIES:
@@ -738,7 +937,7 @@ empty-items short-circuit would prevent wasted cloud roundtrip.
 :GATE:     1
 :EFFORT:   45m
 :END:
-SCHEDULED: <2026-05-04 Mon>
+SCHEDULED: <2026-05-09 Sat>
 
 @doom smoke + boundary pass (refused mood-journaling drift,
 suggested org-journal/org-roam handoff). Two issues:
@@ -772,7 +971,7 @@ feature land.
 :GATE:     1
 :EFFORT:   1h
 :END:
-SCHEDULED: <2026-05-04 Mon>
+SCHEDULED: <2026-05-07 Thu>
 
 @journalist smoke pass (hedged observational tone, no diagnosing,
 open follow-up question — persona shape held). Determinism
@@ -796,7 +995,7 @@ tool gap, see bug below).
 :GATE:     1
 :EFFORT:   45m
 :END:
-SCHEDULED: <2026-05-04 Mon>
+SCHEDULED: <2026-05-08 Fri>
 
 agentsmith is structurally sound: =Agent= dataclass populated,
 =route_prompt= resolves @agentsmith and @soong, 11 triggers fire
@@ -1038,6 +1237,78 @@ dump) time out sub-4B local models at 60s NAR_TIMEOUT.
 
 *Fix:* extend =_strip_count_question= with a
 =_SCOPE_MODIFIER_RES= strip pass mirroring =_TIME_MODIFIER_RES=.
+
+** TODO =org-llm agents --apply= verb missing — 4 wikis + agentsmith persona reference it  :bug:cli:doc:agents:
+:PROPERTIES:
+:PRIORITY: A
+:SOURCE:   2026-05-03 agentsmith smoke test
+:END:
+SCHEDULED: <2026-05-04 Mon>
+
+agentsmith persona
+([[file:../../org_llm/cli.py][=cli.py=]]:4941-5023) and four wiki
+pages instruct users to run =org-llm agents --apply= after
+writing a new agent file. *That flag does not exist* — =cli.py='s
+=agents= verb only ships =--tangle=, =--apply-from-org=
+(read-only diff), =--list=, =--seed=. Auto-apply happens at the
+next =org-llm launch= via =_maybe_auto_apply_org_file=
+(cli.py:5498-5520).
+
+References to fix:
+- [[file:../../docs/wiki/agentsmith.org][=agentsmith.org=]]:197
+- [[file:../../docs/wiki/agent-framework.org][=agent-framework.org=]]:204-205, 340, 405
+- [[file:../../docs/wiki/agents.org][=agents.org=]]:215, 274
+- agentsmith persona prompt (cli.py:4941-5023)
+
+*Fix:* either (a) add a real =--apply= flag that calls
+=_apply_agents_org_file= deterministically, OR (b) update all 4
+references to say "write the file; relaunch picks it up via
+=_maybe_auto_apply_org_file=".
+
+** TODO =format_prefetch_block= missing =agenda_overdue= branch    :bug:recipes:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:SOURCE:   2026-05-03 weather_aware_agenda re-validation
+:END:
+SCHEDULED: <2026-05-05 Tue>
+
+[[file:../../org_llm/recipe_runner.py][=recipe_runner.py=]]:467
+only renders =agenda_today= items in the pre-fetch block. When
+=agenda_today=0= but =agenda_overdue>0= (e.g. 22 overdue), the
+on-arm gets a count and nothing to cite — losing grounding
+quality vs the off-arm even though the hallucination trap is
+gone.
+
+*Fix:* mirror the =agenda_today= rendering for =agenda_overdue=
+(top-5 with file paths) when today is empty. Same fix for
+=agenda_upcoming= when both today and overdue are sparse. After
+patch, re-A/B weather_aware_agenda per the validation entry above
+(=scripts/recipe_ab_harness.py --only-prompt A7 --trials 5= → bar
+≥55% on-arm wins).
+
+** TODO =delegate()= chat-completions path doesn't carry MCP tools  :bug:agents:proxy:load-bearing:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE:   2026-05-03 @doom + @journalist smoke tests
+:END:
+SCHEDULED: <2026-05-12 Tue>
+
+The =delegate()= path in
+[[file:../../org_llm/mcp_server.py][=mcp_server.py=]] builds a
+system prompt + cloud message but does NOT pass MCP tools
+through. Any persona that promises "I'll call =doom_keybinds= /
+=mood_signal= / =vault_facts=" produces narration-as-action
+hallucinations — the agent narrates a tool call that never
+happened. Bites @doom and @journalist hardest because their
+personas lean on tool calls. Agents work correctly when invoked
+via opencode (full MCP wiring).
+
+*Options:* (a) extend =delegate()= to forward a tool subset (per
+agent's =tool_roster=); (b) document the constraint loudly in
+[[file:../../docs/wiki/agent-framework.org][=agent-framework.org=]]
+and require tool-leaning personas to refuse @-delegate
+invocation; (c) make =delegate()= refuse to run an agent whose
+persona promises unwired tools.
 
 * Plan queue                                                    :@plan:
 
