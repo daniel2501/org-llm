@@ -996,9 +996,25 @@ def create_mcp_server():
                             f"[red]✗[/red] could not resolve model "
                             f"for {agent}")
         t0 = _t.monotonic()
+        # Phase 24.1 — pre-flight resolver enrichment. Pure-code
+        # disambiguation of repo/path/agent tokens BEFORE the
+        # cloud sees the prompt, so the sub-LLM doesn't have to
+        # guess where a relative path lives or which @handle the
+        # user meant. The block sits ahead of the user message
+        # so it's the first thing the sub-LLM reads. Failure is
+        # always silent — we'd rather lose enrichment than
+        # block a delegate call.
+        try:
+            from .resolvers import resolve_all, format_resolved_context
+            _resolved_block = format_resolved_context(
+                resolve_all(prompt, context))
+        except Exception:
+            _resolved_block = ""
         # Compose user prompt
         user_msg = (f"{context}\n\n{prompt}".strip()
                      if context else prompt)
+        if _resolved_block:
+            user_msg = f"{_resolved_block}\n\n{user_msg}"
         with get_session(engine) as session:
             from . import creds as _creds
             cloud_provider   = _cfg(session, "cloud_provider")
