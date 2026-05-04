@@ -1916,6 +1916,61 @@ sprint *after* this one closes (~2026-05-17 onward). The first
 concrete deliverable should be: round-trip fidelity proof on
 the dev's vault.
 
+** TODO Investigate: databases that could replace SQLite          :research:db:foundation:phase25:
+:PROPERTIES:
+:PRIORITY: B
+:GATE:     3
+:SOURCE:   2026-05-04 — Phase 25 says "SQLite (or successor)"; pick the successor before 25.1 lands
+:END:
+
+Phase 25 inverts vault/DB authority and explicitly leaves the
+engine open ("SQLite or successor"). Once the DB carries raw
+bytes + parsed structure + embeddings + history + config +
+crew log + sensors + engagement + creds digest, the engine
+choice becomes load-bearing — not a swap-later detail.
+
+Candidates worth a serious look (FOSS-first per
+[[id:][feedback_foss_emacs_first]]):
+
+- *Stay on SQLite* — single file, zero ops, Litestream/LiteFS
+  for replication, =sqlite-vec= / =sqlite-vss= for embeddings.
+  The "successor" might just be SQLite + extensions.
+- *libSQL / Turso* — SQLite fork with native replication,
+  embedded + server modes, vector search built in. Same file
+  format, escape-hatch back to SQLite. FOSS core (MIT).
+- *DuckDB* — columnar, OLAP-shaped; fits the dbt/Superset arc
+  in Phase 12.7/27. Worse for OLTP write churn (every
+  =log.kind=llm= row); could be a *sibling* analytical engine
+  rather than a replacement.
+- *PostgreSQL* (embedded via =pg_embed= / =postgres-wasm=, or
+  local socket) — full-featured, =pgvector= for embeddings,
+  rich JSON. Cost: laptop-path ergonomics, ops surface,
+  conflicts with native-install primary.
+- *LMDB / RocksDB* — KV with great write throughput; wrong
+  abstraction layer for cross-file SQL queries Phase 25
+  promises. Probably out.
+- *Datalog/EDB engines* (Datomic-style, XTDB, =cozodb=) —
+  appealing for =:VALIDATED:= /tag rename mass-ops, but
+  ecosystem (dbt, Superset, MCP tool authors) is SQL-shaped.
+
+*What to produce:*
+
+1. A decision matrix: write throughput (logbook), read
+   patterns (search, agenda), embeddings, replication/backup,
+   ops complexity, dbt+Superset compatibility, single-file
+   portability, FOSS license.
+2. A small benchmark on a realistic vault (~1k notes, captain's
+   log churn, embedding writes) — same A/B-harness discipline
+   as recipe validation.
+3. A go/no-go before Phase 25.1 ships, so we don't bake
+   SQLite-specific assumptions into the inversion if the
+   successor is libSQL/DuckDB.
+
+*Bias:* default to "SQLite + sqlite-vec + Litestream" unless a
+concrete Phase-25 requirement disqualifies it. The burden is
+on alternatives to *earn* the swap, per Gate 2 (not too
+complex).
+
 ** TODO Phase 27 — Apache Superset dashboards (optional)          :plan:db:dashboards:dbt:
 :PROPERTIES:
 :PRIORITY:        B
