@@ -824,7 +824,49 @@ canary" risk is about.
 # Items I plan to start within the current sprint. Pull from
 # below as I'm ready. Keep this list short — 3-7 items max.
 
-# (none yet)
+** TODO Visual-verify route-preview Stage 1 in real opencode  :validation:opencode:plugin:
+:PROPERTIES:
+:CAPTURED:  [2026-05-04]
+:COMMIT:    e14acf8
+:RELATES:   route-preview Stage 1 (queued in :@plan:)
+:EFFORT:    15-30 min
+:END:
+
+Stage 1 shipped (commit e14acf8) but the visual render hasn't
+been confirmed in a real opencode session — only typecheck,
+bun build, and Python emission smoke-test. opencode TUI
+takeover means automated tools can't see the render.
+
+Test cases (each should produce a one-line ghost hint under
+the prompt):
+
+| input                          | expected hint                                              |
+|--------------------------------+------------------------------------------------------------|
+| =audit the wiki=               | =→ @curator (atoz)  via "audit the wiki" (1)=             |
+| =@cur=                         | =→ @curator (atoz)=                                        |
+| =how many times have I run X=  | =→ recipe count_across_vault  pre-fetch · no LLM call=    |
+| =:tool search_notes=           | =→ prefix :tool  pin tool_choice…=                         |
+| =??:explain X=                 | =→ prefix ??:explain  tool_choice=none…=                  |
+| =/menu=                        | =→ slash /menu  local=                                     |
+| =whatever=                     | =→ no route — default @crew=                               |
+| (empty)                        | (no hint rendered)                                         |
+
+Failure modes to watch for:
+- Hint appears but text is wrong shape → scoring algorithm bug
+- Hint never appears → routes.json missing OR ref polling broken
+- Hint flickers / re-renders excessively → debounce broken
+- Hint pushes prompt down by 2+ lines → multi-line render bug
+- Theme color wrong (too bright / unreadable) → fg fallback didn't pick textMuted
+- "(idle)"-style stale text after typing → setSignal not firing
+
+If any case fails, capture the input + the actual rendered
+hint + the contents of
+=$ORG_LLM_ORG_DIR/.opencode/routes.json=, then iterate.
+
+Stage 2 (real Tab acceptance via upstream opencode PR) waits
+on this verification — no point requesting =onInput= hooks
+upstream until Stage 1 proves the route-preview surface is
+useful at all.
 
 * Validation backlog                                        :@validation:
 
