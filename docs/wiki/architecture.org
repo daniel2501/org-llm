@@ -763,6 +763,12 @@ Four properties of the tool surface worth pinning:
    =open_in_emacs= / =close_emacs_frames= use =emacsclient= for
    the running daemon. No HTTP, no shell-out, no eval beyond
    what's enumerated.
+5. *Design rule — every user action is also an MCP tool.* If a
+   verb exists for the user (=org-llm capture=, =org-llm
+   delegate=, =org-llm grant=…), an agent can invoke the same
+   action over MCP with identical semantics. New surfaces are
+   gated by this rule; UI-only actions are a smell. (Independent
+   convergence: [[https://github.com/preset-io/agor][preset-io/agor]] adopts the same principle.)
 
 Deep dive: [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]].
 

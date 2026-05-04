@@ -1969,6 +1969,12 @@ Candidates worth a serious look (FOSS-first per
 - *libSQL / Turso* — SQLite fork with native replication,
   embedded + server modes, vector search built in. Same file
   format, escape-hatch back to SQLite. FOSS core (MIT).
+  *Public production reference (2026-05):* [[https://github.com/preset-io/agor][preset-io/agor]] — a
+  multi-agent-over-shared-DB workspace (same author as Apache
+  Superset/Airflow) chose libSQL for exactly the
+  many-agents-writing-to-one-store use case Phase 25 is
+  heading into. Strongest non-speculative prior on the libSQL
+  trigger.
 - *DuckDB* — columnar, OLAP-shaped; fits the dbt/Superset arc
   in Phase 12.7/27. Worse for OLTP write churn (every
   =log.kind=llm= row); could be a *sibling* analytical engine
