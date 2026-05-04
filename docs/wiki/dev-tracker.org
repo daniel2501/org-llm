@@ -1,0 +1,2485 @@
+:PROPERTIES:
+:ID:       9096622a-689c-4bb1-8e32-1654bce48d1c
+:CREATED:  [2026-05-03]
+:END:
+#+TITLE: Dev tracker — central hub for all org-llm development
+#+FILETAGS: :wiki:meta:tracker:agenda:
+#+OPTIONS: toc:2 num:nil
+#+TODO: TODO(t) NEXT(n) STARTED(s!) HOLD(h@) WAITING(w@) | DONE(d!) CANCELLED(c@)
+#+PRIORITIES: A B C
+#+CATEGORY: dev
+
+#+STARTUP: overview content
+
+* What this is
+
+The single source of truth for *active* org-llm development —
+what to do next, what's blocked, what needs validating, what
+needs deciding. This is the agenda surface; [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] stays
+as the long-form phase narrative.
+
+** How to use this file
+
+- Every actionable item is a TODO heading with a workflow state
+  (=TODO=, =NEXT=, =STARTED=, =HOLD=, =WAITING=, =DONE=,
+  =CANCELLED=).
+- Tags express category, layer, and criticality:
+  - *Category:* =:validation:= =:bug:= =:plan:= =:test:= =:doc:=
+    =:perf:= =:research:=
+  - *Layer:* =:proxy:= =:mcp:= =:recipes:= =:agents:= =:cli:=
+    =:opencode:= =:emacs:= =:pi:= =:db:= =:vault:= =:cloud:=
+  - *Criticality:* =:load-bearing:= (orchestration, recipes,
+    proxy, agent_baseline) · =:polish:= (themes, splash) ·
+    =:research:= (exploring options)
+- =:PRIORITY:= property: =A= = pinned, must do · =B= = scheduled
+  · =C= = idea bin
+- =:VALIDATED:= property: ISO date the item was last hands-on
+  certified. Older than ~30 days = re-validate.
+- =SCHEDULED:= for date-driven work (remote agents, deadlines).
+- =DEADLINE:= for hard stops (merge freezes, demos).
+
+** Agenda views to set up
+
+In =~/.config/doom/config.el= or your =~/.emacs.d/init.el=:
+
+#+begin_src elisp
+;; Pull this file into the agenda. (Wiki must be symlinked into
+;; ~/org first — see below.)
+(after! org
+  (add-to-list 'org-agenda-files
+               (expand-file-name "~/org/org-llm-wiki/dev-tracker.org")))
+
+;; Custom agenda commands
+(after! org-agenda
+  (add-to-list 'org-agenda-custom-commands
+    '("d" . "org-llm dev tracker"))
+  (add-to-list 'org-agenda-custom-commands
+    '("dn" "Next actions"          tags-todo "TODO=\"NEXT\""))
+  (add-to-list 'org-agenda-custom-commands
+    '("dp" "Pinned (priority A)"   tags-todo "+PRIORITY=\"A\""))
+  (add-to-list 'org-agenda-custom-commands
+    '("dv" "Validation backlog"    tags-todo "+validation+load-bearing-DONE"))
+  (add-to-list 'org-agenda-custom-commands
+    '("db" "Bugs"                  tags-todo "+bug-DONE"))
+  (add-to-list 'org-agenda-custom-commands
+    '("dh" "Holds + waits"         tags "TODO=\"HOLD\"|TODO=\"WAITING\""))
+  (add-to-list 'org-agenda-custom-commands
+    '("ds" "Stale validations (>30d)"
+      tags "+VALIDATED<\"<-30d>\"+load-bearing")))
+#+end_src
+
+** Wiki symlink (one-time setup)
+
+For agenda to see this file, the repo wiki has to live inside
+the vault:
+
+#+begin_src sh
+ln -s ~/repos/org-llm/docs/wiki ~/org/org-llm-wiki
+org-llm index    # so org-roam picks up the new files too
+#+end_src
+
+After that, =C-c a d n= shows the next-actions view; =C-c a d v=
+shows the validation backlog; etc.
+
+* North star
+
+** What org-llm is
+
+*Claude Code for Org Mode* — assistants that help the user
+manage their life in org-mode in ways they would never have time
+to do without an agent system. Wide-scoped on purpose; opinionated
+about the stack (org-mode / Doom / FOSS CLI tools / tangle / dbt
+/ SQL / FOSS LLMs).
+
+** The three quality gates
+
+Every feature, refactor, and decision is tested against these
+three gates (in order — each gate has veto power over the next):
+
+1. *Be really good at what the app does.* Does this make
+   org-llm a better Claude-Code-for-org-mode — better at
+   agent-driven life management? If it doesn't move that
+   needle, default to skepticism.
+2. *Not too complex.* Could the same value land in a simpler
+   shape? Three similar lines beats a premature abstraction.
+   New module + new table + new knob + new agent for one
+   feature is a high bar.
+3. *Manage required complexity well.* The app IS wide-scoped
+   (orchestration · agents · surfaces · self-care · stack
+   maximalism). Complexity that's required must be made
+   tractable: clear seams, deterministic-first paths, single
+   sources of truth, documented invariants. Complexity that
+   compounds without management = thicket = off the rails.
+
+These gates govern this entire tracker. Validation = "does it
+pass gate 1?" Architecture review = "does it pass gates 2-3?"
+
+** What 1.0 looks like
+
+- Cross-platform install validated (macOS + Ubuntu + Termux).
+- Load-bearing orchestration features all *certified*: each one
+  has an A/B-validated bar (per
+  =scripts/recipe_ab_{harness,judge}.py= template) and a recent
+  hands-on confirmation in this file.
+- Wiki + README + architecture in sync (no drift count >0).
+- Smoke coverage on all 71 MCP tools and 23 proxy interceptors.
+- Auto-embedder + life-support + doctor proven to keep the
+  system honest under daily use.
+- No layer fails gate 2 or 3 (no thickets).
+
+Phase log: [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] (shipped/in-progress/planned).
+Architecture: [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] (the shape).
+
+* Pace + estimates                                              :@pace:
+
+The estimation discipline: every TODO/NEXT item gets an
+=:EFFORT:= (initial estimate) when it's created or first
+considered. When the item lands DONE, =:ACTUAL:= captures what
+it really took. Over time the ratio =:ACTUAL: / :EFFORT:= becomes
+the calibration we use to size future sprints.
+
+** Convention
+
+- =:EFFORT:= — org-mode standard, e.g. =30m=, =1h=, =2h=, =1d=,
+  =2d=. Set when the item enters TODO/NEXT (or earliest
+  contemplation).
+- =:ACTUAL:= — same format, set when the item moves to DONE. Be
+  honest — if it took 4× the estimate, write 4×; that's the
+  calibration signal.
+- =:STARTED-AT:= and =:COMPLETED-AT:= — wallclock dates (org
+  inactive timestamps work). The state-change bracket; not the
+  same as actual focused effort because work is interleaved.
+- For multi-session work: optional org-mode clocking
+  (=C-c C-x C-i= start, =C-c C-x C-o= stop). Sums become
+  =:ACTUAL:= when done.
+
+** Calibration buckets (current best-guess; refine over time)
+
+| bucket     | range          | shape                                                            |
+|------------+----------------+------------------------------------------------------------------|
+| trivial    | <30m           | single-file edit; copy text; add a one-liner; no tests           |
+| quick      | 30m–2h         | feature in one file w/ minimal test; small bug fix               |
+| small      | 2h–half-day    | new module + tests + docs in one area                            |
+| medium     | half-day–1d    | cross-cutting, touches 3–5 files; new CLI verb wired             |
+| big        | 1–2d           | refactor + integration; A/B-validated decision; new agent        |
+| multi-day  | 2d+            | architecture sweep; cross-surface migration; multi-recipe rework |
+
+These buckets are inputs to the planning conversation. If an
+=:EFFORT:= is bigger than =medium=, the item should probably be
+split.
+
+** Sprint snapshot — 2026-05-03 → 2026-05-17
+
+:PROPERTIES:
+:UPDATED: [2026-05-03]
+:END:
+
+The snapshot is updated by hand at the end of each focused
+session and at sprint boundaries. It's a roll-up of what's in
+the tracker, not a live dashboard. Errors in the table reflect
+counting drift, not state mismatch.
+
+| metric                              | value                                     |
+|-------------------------------------+-------------------------------------------|
+| sprint length                       | 14 days                                   |
+| days elapsed                        | 1                                         |
+| days remaining                      | 13                                        |
+| items DONE this sprint              | 1 (vault_facts validation)                |
+| items STARTED with significant work | 5                                         |
+| items NEXT awaiting pickup          | 4                                         |
+| items TODO                          | ~28                                       |
+| items CANCELLED                     | 1 (Phase 22.5b merged into show-your-work)|
+| items HOLD/WAITING                  | 0                                         |
+| open :EFFORT: estimated             | ~30h sized + show-your-work (1d–5d slices)|
+| :ACTUAL: spent this session         | ~7h15m                                    |
+| estimate-accuracy ratio so far      | 1 datapoint: 1h15m / 2h = *0.63×* (under) |
+| capacity remaining (days × ~6h)     | ~78h ceiling                              |
+| burn-down trajectory                | ahead of nominal — first DONE landed day 1 |
+
+** Velocity log
+
+The rolling record of sessions and what landed. Each row is a
+focused work session. Items "touched" includes started + meaningfully
+advanced; the actual effort number is the human-felt focused-work
+hours, not wallclock.
+
+| date       | session focus                                            | actual | items touched | items DONE |
+|------------+----------------------------------------------------------+--------+---------------+------------|
+| 2026-05-03 | Architecture rationalization + dev-tracker consolidation + recipe-tier + validation framework + pace tracking + dev-as-app + vault_facts validation + deterministic checks kind + first DONE | ~7h15m | 10 (5 STARTED, 1 DONE) | 1 |
+
+** Calibration log
+
+The single-datapoint calibration ratio (=:ACTUAL: / :EFFORT:=) per
+DONE item. After ~5 datapoints we'll have meaningful averages by
+work-type. Until then the buckets in the calibration table above
+stay best-guesses.
+
+| item                              | bucket | est | actual  | ratio | note                                            |
+|-----------------------------------+--------+-----+---------+-------+-------------------------------------------------|
+| Validate =vault_facts= accuracy   | small  | 2h  | 1h15m   | 0.63× | 11/11 PASS; included building deterministic harness  inline |
+
+* Pinned this rationalization sprint    :sprint:
+
+This sprint runs through *<2026-05-17 Sun>*. After that, roadmap
+velocity resumes regardless of completeness — the validated 20%
+is more valuable than a partial 100%. Don't extend without
+explicit re-decision.
+
+** STARTED Rationalize architecture + docs + dev tracking          :plan:doc:
+:PROPERTIES:
+:PRIORITY: A
+:CREATED:    [2026-05-03]
+:STARTED-AT: [2026-05-03]
+:EFFORT:     8h
+:ACTUAL:     ~3h (architecture pass) — ongoing
+:END:
+DEADLINE: <2026-05-17 Sun>
+
+Built end-to-end architecture.org (1051 lines, 7 sections), drift
+cleanup across architecture/llm-proxy/README, this dev tracker
+file. Remaining: complete the migration of scattered planning
+docs (next item) + populate validation backlog from triage.
+
+** STARTED Consolidate scattered planning + testing docs           :plan:doc:
+:PROPERTIES:
+:PRIORITY: A
+:CREATED:    [2026-05-03]
+:STARTED-AT: [2026-05-03]
+:EFFORT:     4h
+:ACTUAL:     ~2h — 11 files archived, 2 passes done
+:END:
+DEADLINE: <2026-05-10 Sun>
+
+In progress: 8 vault files + 5 wiki files marked "pending
+fold-in" in the Archive section below. Aggressive migration
+plan: extract live TODOs into this tracker, mark each source
+file ARCHIVED at the top, link from Archive section.
+
+** TODO Populate validation backlog from the three quality gates   :validation:plan:
+:PROPERTIES:
+:PRIORITY: A
+:END:
+
+Per [[*The three quality gates][quality gates]], the load-bearing validation list isn't
+"every shipped feature" — it's "every feature whose failure
+would mean gate 1, 2, or 3 is violated."
+
+Working hypothesis (to confirm by walking architecture.org):
+
+- Recipe pre-fetch correctness end-to-end (gate 1 — orchestration is the core)
+- Cloud failover under TTFB stress (gate 1 — degrades user experience hard if broken)
+- =agent_baseline= round-trip with =applies_to= scoping (gate 3 — the agent system's invariant)
+- Tool-call repair across the model dialects we support (gate 1)
+- =vault_facts= inferrer accuracy (gate 1 — these feed the recipe pre-fetch)
+- Auto-embedder + staleness sweep cooperation (gate 3 — self-care loop composition)
+
+Convert each into a NEXT item with a concrete pass criterion +
+A/B harness shape if applicable.
+
+* Active work — STARTED  :@active:
+
+# Items I'm actively working on right now. Move to DONE when
+# shipped, or back to TODO/NEXT if I had to pause.
+
+** DONE Phase 23.1 + 23.5 — Agent dataclass + DB-backed registry  :plan:agents:db:cli:load-bearing:
+CLOSED: [2026-05-03]
+:PROPERTIES:
+:VALIDATED:  2026-05-03
+:GATE:       1,2,3
+:EFFORT:     1 day
+:END:
+
+Restructured the agent registry from two parallel Python
+literals into a real Agent dataclass with a DB layer behind it.
+The org-file (=~/org/org-llm-agents.org=) is now a tangled
+mirror of the DB rather than a parallel runtime layer.
+"Shape A" pattern — same shape Phase 25 will eventually apply
+to the entire vault.
+
+*** What landed
+
+- =org_llm/agents/= package — frozen =Agent= dataclass
+  (=birth_name=, =aliases=, =capabilities=, =recipes=,
+  =hygiene_scan=, =origin=, =pack=, =addressable=) +
+  =get_builtins()= + =resolve_alias()= + =agent_from_row()=.
+- 9 starfleet-core OOB agents with Trek birth-names
+  (=picard/spock/data/geordi/riker/janeway/scotty/soong/keiko=);
+  functional names (=crew/researcher/scribe/…=) ship as
+  aliases — both work as =@<name>= routes.
+- 8 legacy-extras retained in code, filtered out at launch
+  unless =agents_include_legacy=true=.
+- =db.AgentRow= mirrors every editable Agent field. Resolution
+  is *Python builtins → DB* at runtime; the org file is a
+  tangled mirror with mtime-based auto-apply.
+- =org-llm agents --seed= populates DB from built-ins
+  (idempotent). =org-llm agent set/show/reset/disable/enable=
+  is a real typer subcommand group with per-subcommand =--help=.
+- Tangle/apply round-trips every editable field. Smart defaults:
+  user-authored headings (no matching built-in) get
+  =origin=user=, =pack=user= automatically.
+- 22 tests in =tests/test_agents.py=, all passing. Cross-check
+  100/100 on agents + mcp + db + knobs.
+
+*** Why this composes with Phase 25
+
+This IS Phase 25's pattern, applied to one table (agents). The
+"DB authoritative; file is tangled mirror; auto-apply when file
+is newer" model proven here is what Phase 25.1-25.6 does for
+=File.raw_content=. If round-trip fidelity holds for agents
+across a sprint, that's a credible signal Phase 25 can clear
+the same bar for vault content. Bug found during this work —
+=datetime.utcnow()= vs =mtime= timezone mismatch — is exactly
+the kind of subtle round-trip footgun Phase 25's "round-trip
+canary" risk is about.
+
+*** Deferred (slots exist, functional pending)
+
+- *Capability enforcement* — declarations populated for the 9
+  core agents, but the MCP tool dispatch layer doesn't yet gate
+  by capability. Wiring agent identity through opencode→MCP is
+  the load-bearing engineering task.
+- *Hygiene scans* — =Agent.hygiene_scan= field exists; concrete
+  scans (gardener vault hygiene, scribe untag) not yet
+  implemented.
+- *Per-agent recipe matcher rewire* — recipe ownership declared
+  on Agent (spock owns =count_across_vault=, janeway owns
+  =weather_aware_agenda=) but =orchestration._RECIPES= is still
+  the active matcher. Phase 23.4 rewires.
+- *Library install verb* — =org-llm agents install <pack>=
+  documented as Phase 23.5 design pending; needs sandboxing +
+  signing story.
+- *Persona text rewrites* — agents still self-identify with
+  functional names (=you are crew=, =you are scribe=) rather
+  than Trek (=you are picard=). Birth-name = routing identifier;
+  persona = self-identity. Held off by design.
+
+*** See also
+
+- =org_llm/agents/_types.py= — Agent dataclass
+- =org_llm/agents/_builtins.py= — _AGENT_META + get_builtins()
+- =org_llm/cli.py::_resolve_active_agents= — runtime resolver
+- =org_llm/cli.py::_maybe_auto_apply_org_file= — Shape-A bridge
+- =docs/wiki/agent-framework.org= — architecture spec (updated)
+- [[*Phase 25 — invert authority: DB is truth, files are UI][Phase 25]] — vault-level version of this pattern
+
+* Next  :@next:
+
+# Items I plan to start within the current sprint. Pull from
+# below as I'm ready. Keep this list short — 3-7 items max.
+
+# (none yet)
+
+* Validation backlog                                        :@validation:
+
+# The "untested but shipped" backlog. Triaged by load-bearingness.
+
+** Load-bearing                                          :load-bearing:
+
+# These are gate-1 critical: if they fail, the app fails at its
+# core job. Each gets an A/B harness shape if applicable, or a
+# concrete pass criterion + hands-on confirmation date.
+
+*** STARTED Validate recipe pre-fetch correctness end-to-end      :validation:recipes:proxy:load-bearing:
+:PROPERTIES:
+:PRIORITY:  A
+:GATE:      1
+:VALIDATED: [2026-05-03]
+:EFFORT:    1d   (iterate templates + re-A/B + robustness check)
+:ACTUAL:    ~30m (initial A/B already run; analysis + finding capture)
+:END:
+
+A/B harness ran 2026-05-03 with 90 trial pairs (18 prompts × 5
+trials × qwen-2.5-72b) against blinded Opus 4.7 judge. Results
+in =/tmp/recipe_ab_results.jsonl= +
+=/tmp/recipe_ab_summary.md=.
+
+**** Findings (gate-1 critical)
+
+Per-recipe quality verdict:
+
+| recipe                  | on win | off win | tie | verdict          |
+|-------------------------+--------+---------+-----+------------------|
+| count_across_vault      | 60%    | 35%     | 5%  | *PASS* (>=55%)   |
+| dailies_general         | 20%    | 10%     | 70% | NEUTRAL (mostly tied) |
+| recent_activity_summary | 10%    | 20%     | 70% | NEUTRAL/loss     |
+| dailies_routine_filter  | 0%     | 100%    | 0%  | *FAIL — total*   |
+| weather_aware_agenda    | 0%     | 100%    | 0%  | *FAIL — total*   |
+| weekly_mood_review      | 0%     | 100%    | 0%  | *FAIL — total*   |
+
+Latency: recipes_on +48% faster (2.44s vs 4.68s p50). Tokens:
+recipes_on -89% (360 vs 3387 median). Both PASS bar.
+
+Quality: anchor 31% on (need ≥55%), control 0% on (need ≤55%
+off). Both FAIL bar.
+
+*Decision summary from judge:* recipes do NOT clear the bar.
+Only =count_across_vault= has real value as currently shaped.
+
+**** Why the four failing recipes lose
+
+Inspection of A7 head-to-head (=given today's weather and my
+schedule, what should I prioritise today?=):
+
+- recipes_on (3.6s, 293 tokens): "prioritize moving your outdoor
+  meeting with Jane from 10 AM to 2 PM... morning rainy" —
+  fabricated meeting + forecast.
+- recipes_off (7.9s, 5012 tokens): cites real overdue tasks with
+  file paths (=20220304170356-arka_lab.org=, =vacation_weekend.org=).
+
+The pre-fetch shape gives the model just enough data to
+*hallucinate around*. The tool-use path forces the model to
+actually retrieve before narrating, which produces grounded,
+cited answers. This is the failure mode that violates gate 1
+(be good at the job) — speed + tokens win don't matter when the
+output is fabricated.
+
+**** Why each FAIL recipe loses
+
+The three FAIL recipes share one failure mode: condensed
+pre-fetch hides what's missing, letting the model fabricate
+around silence.
+
+- *=dailies_routine_filter= (A5 — "most common routine items"):*
+  pre-fetch caps at top 3; model presents the cap as the full
+  set + invents a date range ("from 2025-10-26 to 2026-04-11")
+  not in the source. recipes_off lists 5 items honestly without
+  the date claim.
+- *=weekly_mood_review= (A6 — "mood over past month"):*
+  pre-fetch feeds zero-counts for sentiment categories; model
+  reads absence-of-evidence as evidence-of-flatness ("no reports
+  of … positive feelings, gratitude, or connection"). recipes_off
+  retrieves real entries and finds active self-care.
+- *=weather_aware_agenda= (A7 — "weather + schedule, prioritise"):*
+  pre-fetch is sparse enough that the model invents details — a
+  fictional "outdoor meeting with Jane from 10 AM to 2 PM" + a
+  fabricated "rainy morning, afternoon clear" forecast. recipes_off
+  cites real overdue tasks with file paths AND honestly surfaces
+  "couldn't fetch weather: location not configured."
+
+**** Decision: iterate, then re-judge (n=1 dev → n=many FOSS)
+
+Initial recommendation was "dump 3 fails." Revised on
+[2026-05-03] after framing context: recipes are 2 days old, dev
+is solo, but eventual users are FOSS-many. At n=1 the
+iteration cost is low and the design intent is fresh — fix
+beats dump. At n=many the iteration's exit state has to be
+defensible for unknown vaults — fixes must be defensive, not
+just dev-vault-friendly.
+
+The failure modes above are concrete and pre-fetch-template
+fixable:
+
+1. *Add citations.* Every pre-fetch block includes file paths
+   for the data shown. Model cannot fabricate around silence
+   when sources are inline.
+2. *Add completeness markers.* "Top 3 of 27" not bare "Top 3".
+   "No mood entries this period" not zero-count rows that read
+   as flatness.
+3. *Surface error states.* "Location not configured" lands in
+   the pre-fetch block, not silently as empty data.
+4. *Robustness check (FOSS bar).* Each fixed recipe must pass
+   A/B on a sparse vault, missing-config vault, and
+   errors-injected vault — not just the dev's well-populated
+   vault.
+
+Plus a separate decision (see [[*Introduce a recipe tier system][recipe tier system]] in Plan
+queue): some recipes (=weather_aware_agenda=) may not belong
+in the *shared baseline* at all — they assume a workflow.
+Better as user-defined personal recipes in literate config.
+
+**** Follow-up TODOs
+
+- =[ ]= Iterate pre-fetch templates for the 3 FAIL recipes
+  (citations + completeness markers + error surfacing)
+- =[ ]= Re-run A/B harness + judge against iterated templates
+- =[ ]= Robustness check: re-run on sparse / missing-config /
+  errors-injected vaults
+- =[ ]= Decide per-recipe based on iterated A/B verdict:
+  promote to shared baseline · demote to user-personal recipe ·
+  dump
+- =[ ]= Update [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] + [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes.org]] to reflect outcomes
+- =[ ]= Address the =count_across_vault= 4.5s perf hit on
+  no-match queries (A3 trace: runner_ms=4500 even when
+  total_hits=0) — independent of the quality work above
+
+*** NEXT Validate cloud failover under TTFB stress                :validation:proxy:cloud:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:GATE:     1
+:EFFORT:   2h
+:END:
+
+When local Ollama stalls past =proxy_first_byte_timeout_ms=,
+=proxy_cloud_failover_enabled= triggers the per-turn cloud
+re-issue. Plus context-overflow retries: =cloud_failover_compressed_tools=
+then =cloud_failover_no_tools=.
+
+*Pass criterion:* manually induce a stall (e.g. unload the model
+between turns) and confirm:
+- The same body re-issues cleanly to the configured cloud
+  provider.
+- The user sees one clean answer, not a half-stream-then-cloud
+  retry visible as two responses.
+- Audit log shows =cloud_failover= label.
+
+Untested hands-on. Risk: silent failure (worst-case the user
+sees a hang and has no idea cloud failover existed).
+
+*** NEXT Validate =agent_baseline= round-trip + =applies_to= scoping :validation:agents:db:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:GATE:     3
+:EFFORT:   2h
+:END:
+
+The =agent_baseline= table round-trips via
+=~/org/org-llm-baselines.org= using the same literate-config
+pattern as =config=. =applies_to= field scopes rules to
+=all|specialist|manager|<name,…>=.
+
+*Pass criterion:* edit a baseline rule in the org file, re-tangle,
+verify the rule actually applies in agent prompts. Test each of
+the four =applies_to= scopes. Verify =enabled=0= disables
+globally. Verify =sort_order= controls injection order.
+
+Why gate-3: the agent system's invariant. If round-trip silently
+drops a rule, every agent's persona drifts.
+
+*** NEXT Validate tool-call repair across model dialects          :validation:proxy:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:GATE:     1
+:EFFORT:   half-day
+:END:
+
+=intercept_tool_call_repair= extracts markdown-JSON
+=```json {tool_calls:…} ```= blocks and either executes locally
+(when the tool is in =org_tools.py=) or forwards a clean
+=tool_calls= array.
+
+*Pass criterion:* a curated input set covering:
+- Each model that's known to emit malformed tool calls (qwen3,
+  gemma, kimi)
+- Each =org_*= tool the repair path renders locally
+  (=org_count_matches=, =org_grep=, =org_orphans=, =org_id_find=,
+  =org_outline=, =org_tag_index=, =org_tag_suggest=,
+  =org_file_meta=, =org_agenda=, =org_drill_review_due=)
+
+For each (model, tool) pair: confirm the flaky output is
+extracted, the tool runs, the user sees a clean final answer in
+ONE cloud call.
+
+*** DONE Validate =vault_facts= inferrer accuracy                 :validation:db:recipes:load-bearing:
+CLOSED: [2026-05-03]
+:PROPERTIES:
+:PRIORITY:     A
+:GATE:         1
+:EFFORT:       2h
+:ACTUAL:       ~1h15m
+:STARTED-AT:   [2026-05-03]
+:COMPLETED-AT: [2026-05-03]
+:VALIDATED:    [2026-05-03]
+:END:
+
+Validation results 2026-05-03 (9 inferrers registered — more than
+the 3 originally listed in the pass criterion):
+
+| inferrer                | check                                                | verdict |
+|-------------------------+------------------------------------------------------+---------|
+| =vault_stats=           | files=580 matches disk grep                          | PASS    |
+| =vault_stats=           | dailies=138 matches =daily/= directory count         | PASS    |
+| =vault_stats=           | nodes=313464 matches DB =Node= count                 | PASS    |
+| =tag_taxonomy=          | top-15 vs disk-grep ground truth                     | PASS — 15/15 set overlap, 13/15 exact rank, off-by-one on tied counts (ux/audit at 5 each) |
+| =routine_chores=        | REJECT filter rejects proper nouns + stop-verbs      | PASS — 7/7 reject cases caught |
+| =routine_chores=        | KEEP filter keeps real chores                        | PASS — 7/7 chore cases kept   |
+| =routine_chores=        | non-empty output (12 chores from 30 dailies)         | PASS    |
+| TTL invalidation        | fresh / expired / mtime-changed / malformed paths    | PASS — 4/4 once tested via direct =_stale()= without DB writes (the original db-lock failure was an artifact of also calling =_compute_and_store=, which writes; sidestepped in the deterministic harness) |
+
+*Sub-finding:* the database-locked error during the TTL test is
+the no-WAL concurrency risk from [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org § Concurrency]]
+showing up in practice. Not a vault_facts bug — would happen to
+any concurrent writer. Confirms the latent risk identified there
+is real, not theoretical.
+
+*Other sub-finding:* the architecture page describes vault_facts
+as "DB-backed inferrer cache" which is accurate but ambiguous —
+inferrers READ from disk and only WRITE results to the DB. Will
+clarify in a follow-up architecture edit.
+
+*Other sub-finding:* "inferrer" is org-llm-internal jargon. The
+standard-industry equivalent is *materialized view* (or *feature
+store entry*). Rename candidate for FOSS audience clarity.
+
+*Verdict:* *gate-1 PASS* for the 3 inferrers covered by the
+original pass criterion (=vault_stats=, =tag_taxonomy=,
+=routine_chores=) plus all 4 TTL-invalidation conditions. The
+other 6 inferrers (=priority_usage=, =date_format=,
+=scheduling_pattern=, =capture_section_titles=, =voice_register=,
+=mood_signal=) ran cleanly with non-empty output but lack
+ground-truth checks — listed as follow-up work below.
+
+*Same-session follow-ups shipped:*
+- *Validation framework gained =deterministic= kind* — see
+  [[*Generalize A/B+judge to a standard validation framework][validation framework]] item below. =org-llm validate inferrers=
+  runs the 11 checks repeatably; output at
+  =~/.local/share/org-llm/validation/inferrers/summary.md=.
+
+*Remaining follow-ups (later sessions):*
+- =[ ]= Cover the remaining 6 inferrers with ground-truth checks.
+- =[ ]= Architecture.org wording fix: clarify "inferrers read
+  disk; only the cache lives in =vault_fact=".
+- =[ ]= Rename consideration: =inferrer= → =materialized view= or
+  =vault feature= for FOSS audience clarity. Plan-queue B.
+- =[ ]= Wire =org-llm validate inferrers= to a scheduled remote
+  routine for nightly regression CI.
+
+Three inferrers shipped Phase 21.1: =vault_stats=, =tag_taxonomy=,
+=routine_chores=. They feed recipe pre-fetch (=count_across_vault=
+adds a =user_context:= line when count target overlaps a known
+chore).
+
+*Pass criterion:*
+- =vault_stats= matches a hand-counted ground truth on this
+  vault (572 files, 138 dailies, 182k nodes — known good as of
+  2026-05-03).
+- =tag_taxonomy= top-30 matches a hand-grep ranking.
+- =routine_chores= correctly REJECTS routines marked
+  cancelled/skipped (the Phase 18.4-style routine drift fix).
+- TTL invalidation actually re-runs after =ttl_secs= expires.
+
+*** NEXT Validate auto-embedder + staleness sweep cooperation     :validation:auto-embedder:cli:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:GATE:     3
+:EFFORT:   1h
+:END:
+
+The self-care loop composition: auto-embedder feeds fresh data
+→ staleness sweep audits → insight cards surface → user reacts
+→ insight_engagement → doctor =--diagnose-cards= surfaces
+patterns.
+
+*Pass criterion:* end-to-end walk of the full chain. Touch a
+file, wait for auto-embedder to pick it up (or trigger), run
+=org-llm stale=, verify candidate appears as an insight card,
+mark it good/bad, run =doctor --diagnose-cards=, confirm the
+reaction shows up.
+
+Why gate-3: this is the canonical example of "loops compose"
+from the architecture page. If the chain breaks at any link,
+self-care silently degrades.
+
+*** TODO Validate cross-platform install (macOS + Ubuntu)         :validation:install:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:GATE: 1
+:SOURCE: gap-analysis-alpha-to-beta.org P0.1
+:END:
+
+Tested fresh-install on Guix only. Real risk areas:
+- *macOS:* =pass= via Homebrew, =gpg= path differences, no
+  =/etc/ssl= → certifi fallback should help but untested
+- *Ubuntu/Debian:* =pass= present, =/etc/ssl/certs/ca-certificates.crt=
+  exists → probably works but never run
+- *Arch:* same as Ubuntu, untested
+- *Windows:* not in scope until post-1.0 (=pass= doesn't exist)
+
+*Pass criterion:* one real beta tester runs =uv tool install
+. && org-llm setup= on at least one non-Guix Linux box +
+one macOS, hits =org-llm ask= successfully.
+
+*** TODO Validate MCP tool fleet under opencode (smoke pass)      :validation:mcp:opencode:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:GATE: 1
+:SOURCE: gap-analysis-alpha-to-beta.org P1.2
+:END:
+
+Phase 9.7 validated 4 of 71 MCP tools live in opencode. The
+other 67 are tested via =test_workspace_mcp.py= structural
+assertions but no end-to-end exercise inside an actual
+opencode/claude session.
+
+*Pass criterion:* 10-20 prompts driven through opencode, each
+exercising a different tool family from the MCP architecture
+table (vault search · org-tools · capture · walk · agents ·
+self-care · filesystem · external · skills · meta · insight).
+Capture surprises in this tracker as bugs.
+
+*** NEXT Validate classify_items MCP tool                          :validation:mcp:agents:load-bearing:
+:PROPERTIES:
+:PRIORITY:  B
+:GATE:      1
+:VALIDATED: [2026-05-03]
+:EFFORT:    30m
+:END:
+SCHEDULED: <2026-06-02 Tue>
+
+End-to-end smoke + adversarial pass for the classifier-as-tool at
+[[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]]
+lines 1099-1258. Cloud-fast path used (~2-3s for 1-3 items, ~20s
+for 50). Empty list short-circuits at 1128-1132 without an LLM
+call (95ms). Output shape matches docstring; partition (kept vs
+rejected) is deterministic across repeat runs but the per-item
+=why= clause drifts in wording — fine for a programmatic filter
+but callers should consume =item= as the key, not =why=. Bad-shape
+input returns a structured FastMCP =ToolError= via pydantic
+validation (no wall traceback).
+
+Soft gap: empty =criterion= is silently accepted and the LLM still
+classifies — one-line guard at mcp_server.py:1128 mirroring the
+empty-items short-circuit would prevent wasted cloud roundtrip.
+
+*Re-test cadence:* monthly (~30d).
+
+*** NEXT Validate @doom keybind agent + fix legacy-pack default     :validation:agents:load-bearing:
+:PROPERTIES:
+:PRIORITY: B
+:GATE:     1
+:EFFORT:   45m
+:END:
+SCHEDULED: <2026-05-04 Mon>
+
+@doom smoke + boundary pass (refused mood-journaling drift,
+suggested org-journal/org-roam handoff). Two issues:
+=pack="legacy-extras"= so it doesn't load by default (commit
+84acc44's framing implied OOB); persona references =doom_packages=
+/ =doom_keybinds= but the =delegate()= chat-completions path can't
+reach MCP tools — narration hallucinates tool calls. Decide:
+promote pack to =starfleet-core=, OR document "@doom requires
+opencode invocation, not @-delegate".
+
+*Re-test cadence:* <2026-05-17 Sun>.
+
+*** TODO Validate @gardener vault hygiene agent                      :validation:agents:load-bearing:
+:PROPERTIES:
+:PRIORITY:  B
+:GATE:      1
+:VALIDATED: [2026-05-03]
+:EFFORT:    20m
+:END:
+SCHEDULED: <2026-05-31 Sun>
+
+@gardener (canonical=keiko) smoke + boundary clean, in
+=starfleet-core=, capabilities (read.vault, shell) match persona's
+tool roster, declined a music-recommendation drift cleanly.
+Cleanest of the three recent agents. Re-test on next vault-hygiene
+feature land.
+
+*** NEXT Validate @journalist mood agent + tighten boundary          :validation:agents:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:GATE:     1
+:EFFORT:   1h
+:END:
+SCHEDULED: <2026-05-04 Mon>
+
+@journalist smoke pass (hedged observational tone, no diagnosing,
+open follow-up question — persona shape held). Determinism
+acceptable at temp=0.3.
+
+*Boundary FAIL:* given a Doom keybind question, answered
+confidently with "=SPC p f=" (a Doom default it knows from
+training data), no refusal/handoff. Persona has no explicit "stay
+in scope" / "refuse out-of-domain" rule — @gardener and @doom both
+do, @journalist doesn't. Add a "decline + handoff to @doom for
+keybinds, @almanac for weather, @agenda for schedule" line. Also
+=pack="legacy-extras"= — same OOB-loading question as @doom.
+Hallucinates specific dates without dailies access (delegate-path
+tool gap, see bug below).
+
+*Re-test cadence:* <2026-05-10 Sun>.
+
+*** TODO Validate agentsmith meta-agent                              :validation:agents:meta:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:GATE:     1
+:EFFORT:   45m
+:END:
+SCHEDULED: <2026-05-04 Mon>
+
+agentsmith is structurally sound: =Agent= dataclass populated,
+=route_prompt= resolves @agentsmith and @soong, 11 triggers fire
+on natural phrasing, persona covers all 7 design steps from
+[[file:agentsmith.org][=agentsmith.org=]], capabilities
+(read.vault, write.vault, shell) match doc intent. Output IS
+shippable on the well-behaved happy path — the user ends with a
+valid =~/org/org-llm-agents.org= heading that
+=_maybe_auto_apply_org_file=
+([[file:../../org_llm/cli.py][=cli.py=]]:5498-5520) ingests on
+next =org-llm launch=.
+
+*Needs human cleanup* on three points: (1) persona references
+nonexistent =org-llm agents --apply= CLI verb — see bug below;
+(2) persona length is 3143 chars while agentsmith.org's own
+§Constraints warns at 1500 ("bloats every turn's context for
+marginal voice gain"); (3) cross-scope refusal is soft ("bias
+toward small + focused") rather than a hard guard — adversarial
+"agent that does keybind + mood" can slide through.
+
+*Re-test cadence:* <2026-05-17 Sun>.
+
+*** TODO Re-validate weather_aware_agenda post-hardening             :validation:recipes:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:GATE:     1
+:EFFORT:   2h
+:END:
+SCHEDULED: <2026-05-10 Sun>
+
+*Hallucination trap is fixed.* 3/3 =recipes_on= trials on the
+prior FAIL prompt ("given today's weather and my schedule, what
+should I prioritise today?") produced honest no-fabrication
+output. Sample: "Given that the weather is unavailable and you
+have 22 overdue items, prioritize clearing some of those overdue
+tasks today." Compare to prior FAIL evidence at
+[[*Findings (gate-1 critical)][line 327]]: "prioritize moving your
+outdoor meeting with Jane from 10 AM to 2 PM... morning rainy" —
+that shape is gone.
+
+Mechanism: (a) =_run_weather_aware_agenda= always returns a
+=RunResult= (never =None= on missing config); (b)
+=format_prefetch_block= renders =weather: unavailable
+(<reason>)= explicitly; (c) recipe body in
+[[file:../../org_llm/orchestration.py][=orchestration.py=]]:43
+adds "DO NOT invent forecasts or weather details — narrate ONLY
+from the pre-fetch."
+
+*Verdict is partial, not pass.* =recipes_on= still loses on
+grounding quality. Off-arm cited 5-7 specific overdue tasks with
+verbatim file paths
+(=20220304170356-arka_lab.org=, =vacation_weekend.org=, etc.);
+on-arm said only "22 overdue items" with no file references. Root
+cause: =format_prefetch_block=
+([[file:../../org_llm/recipe_runner.py][=recipe_runner.py=]]:467)
+has no branch for =agenda_overdue= (only renders =agenda_today=).
+See bug entry below.
+
+*Action:* patch overdue-rendering, then re-run
+=scripts/recipe_ab_harness.py --only-prompt A7 --trials 5= and
+=scripts/recipe_ab_judge.py= (Opus blinded). Bar: ≥55% on-arm
+wins per the restoration commit's pledge.
+
+*Re-test cadence:* <2026-05-17 Sun>.
+
+** Polish                                                :polish:
+
+# Themes, splash, slash menus, sidebar visuals. Validate when
+# next touched. Gate-2 mostly — keep these from accruing
+# untested complexity.
+
+*** TODO README quickstart pass                                   :doc:polish:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE: gap-analysis-alpha-to-beta.org P0.3
+:END:
+
+Beta needs:
+- 5-min "what is this" + value prop (Claude-Code-for-org-mode framing)
+- =uv tool install . && org-llm setup= flow
+- Two real examples: indexing your vault + asking a question
+- Common-failure FAQ
+
+*Note:* README's =## Architecture= section was updated to link
+to architecture.org this session. Worth checking what else is
+stale.
+
+*** TODO README screenshots — cull stale, capture new             :doc:polish:
+:PROPERTIES:
+:PRIORITY: C
+:SOURCE: gap-analysis-alpha-to-beta.org P1.4
+:END:
+
+Two issues:
+1. =03-cloud-providers.svg= still lists Groq — banned per
+   =feedback_no_groq.md=. Stale.
+2. Splash SVGs (=10-splash.svg=, palette variants) pre-LCARS
+   overhead-bar redesign — slightly stale.
+
+Plus features shipped this session with no screenshot:
+=models --benchmark=, =models --upgrade= unified table,
+=cloud --tune --budget=, =cloud --refresh-catalog=, structured
+rescue panel, in-chat MCP tool calls.
+
+Use =docs/recording/= vhs scripts as templates.
+
+** Untriaged
+
+# Awaiting classification.
+
+* Bugs / findings                                                :@bug:
+
+# Migrated 2026-05-03 from ~/org/org-llm-test-session/gap-analysis-alpha-to-beta.org
+# (the 2026-04-29 punch list). Each item: verify still relevant before
+# starting; some may have shipped since.
+
+** TODO Bare HTTPS urlopens bypass our SSL ctx wrapper            :bug:cloud:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:SOURCE: gap-analysis-alpha-to-beta.org P0.2
+:END:
+
+Two HTTPS callers still use bare urllib instead of
+=cloud._urlopen()=:
+- [[file:../../org_llm/models.py][=org_llm/models.py:342=]] — =_github_latest()= for install-tools
+- [[file:../../org_llm/cli.py][=org_llm/cli.py:5816=]] — gh CLI download during install
+
+Both fail with =CERTIFICATE_VERIFY_FAILED= on Guix without
+certifi. Currently masked because only =install-tools= triggers
+them, but a fresh-install user without certifi hits this.
+
+*Fix:* route through =_urlopen= or duplicate the SSL-context
+probe. ~5 minute fix. Per [[file:../../org/.password-store/][project_guix_ssl_certs.md]] memory:
+SSL_CERT_FILE is set in =~/.config/fish/conf.d/ssl-cert.fish=
+on the dev box, so this only bites users who don't have that.
+
+** TODO Test coverage gaps in 4 verbs                             :bug:test:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE: gap-analysis-alpha-to-beta.org P1.1
+:END:
+
+Verbs with 0-1 references in =tests/=:
+- =theme-studio= — no smoke test for regenerate / show / verify
+- =review-emacs= — no test for the LLM review path
+- =skill-examples= — bundled-skill installer untested
+- =recommend-upgrade= — cloud telemetry-driven, untested
+
+Each is a ~10-line smoke test. Bundle into one PR before beta.
+
+** TODO =pi --install= requires Node.js with no pre-flight check  :bug:pi:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE: gap-analysis-alpha-to-beta.org P1.3
+:END:
+
+=pi --install= shells out to npm. A user without Node hits a
+useless error. =--reinstall= guard exists for "not installed"
+but the FIRST install step still assumes npm exists.
+
+*Fix:* pre-flight check + clean error directing to a Node
+install path (per FOSS-first rule, document the FOSS-friendly
+options).
+
+** TODO Performance regressions don't surface proactively         :bug:perf:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE: gap-analysis-alpha-to-beta.org P1.5
+:END:
+
+[[file:../../org_llm/perf.py][=perf.regression_warning()=]] exists but is only consulted by
+=proactive_doctor=. The =models= dashboard doesn't surface "X is
+2× slower than baseline." Easy add: footer row on =models= /
+=models --benchmark=.
+
+** TODO launch's opencode config writes DB path inconsistently    :bug:opencode:
+:PROPERTIES:
+:PRIORITY: C
+:SOURCE: backlog.org [later]
+:END:
+
+Surfaced during Phase 12.1 smoke test. Opencode config writer
+hard-codes the env from when the org-llm process started, not
+the walk-wrapper override. Annoying not breaking — opencode
+starts; the MCP server it spawns just talks to the real DB
+instead of the corpus DB.
+
+*Fix:* route env capture through =_mcp_inherit_env()= or detect
+env-var override at write time.
+
+** TODO title-phrase boost too weak in search                     :bug:search:
+:PROPERTIES:
+:PRIORITY: C
+:SOURCE: backlog.org [later]
+:END:
+
+Search works well enough post-Phase 11; revisit if real users
+complain. Low priority — gate 1 (be good at the job) is met for
+typical retrieval; this would only help edge cases.
+
+** TODO Recipe over-eager match — meta-agents see content recipes  :bug:recipes:agents:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:SOURCE: recipes.org § finding-8
+:END:
+
+=@agentsmith help me scope a new @therapist that reasons over my
+dailies' emotional content= → recipe matcher sees "dailies" →
+=dailies_general= fires → 3 KB of recent daily content gets
+injected → meta-agent overflows trying to digest data it should
+never have received.
+
+*Fix:* META_AGENTS short-circuit in =match_recipe= OR
+=excludes_agents= field on =RecipeMatch=. See [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes.org]] for
+the two implementation options.
+
+** TODO Heavy pre-fetch chokes small local models                 :bug:recipes:perf:
+:PROPERTIES:
+:PRIORITY: A
+:SOURCE: recipes.org § finding-7
+:END:
+
+Runners producing ≥1.5 KB pre-fetch (vault_profile,
+weather_aware_agenda's overdue list, dailies_general's content
+dump) time out sub-4B local models at 60s NAR_TIMEOUT.
+
+*Fix:* =proxy_prefetch_max_chars= knob (default ~6000 cloud,
+~1500 local) + per-shape truncation in =format_prefetch_block=.
+
+** TODO Scope-modifier phrases leak into count regex              :bug:recipes:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE: recipes.org § finding-6
+:END:
+
+=how often have I exercised across the vault?= → tokeniser folds
+"across the vault" into the regex → 0 hits. Sibling of finding-5
+(time modifiers, partially fixed).
+
+*Fix:* extend =_strip_count_question= with a
+=_SCOPE_MODIFIER_RES= strip pass mirroring =_TIME_MODIFIER_RES=.
+
+* Plan queue                                                    :@plan:
+
+# Migrated 2026-05-03 from ~/org/org-llm-test-session/backlog.org
+# + gap-analysis P2/P3 + recipes.org roadmap section.
+
+** TODO Phase 25 — invert authority: DB is truth, files are UI    :plan:db:foundation:load-bearing:
+:PROPERTIES:
+:PRIORITY:        A
+:GATE:            1,3
+:EFFORT:          multi-day (5-phase arc, weeks not days)
+:PHASE_CANDIDATE: yes
+:SOURCE:          2026-05-03 directional decision
+:END:
+
+Today: vault on disk = source of truth; SQLite = derived cache.
+Stated in architecture.org five places ("vault authoritative;
+SQLite derived"). Implies: DB wipeable; vault must be
+backed-up separately; mass ops require disk walks; cross-file
+queries require code, not SQL.
+
+*Inverted target:* SQLite (or successor) = source of truth;
+=~/org/*.org= = rendered UI surface. Users edit org files in
+Emacs as today; engine ingests changes; engine renders changes
+back. DB carries *everything*: raw file bytes + parsed
+structure + embeddings + history + config + crew log + sensors
++ insight engagement + creds digest. One file (or one
+replicated DB) IS the entire org-llm state.
+
+*** Why this is gate-1 worth doing
+
+- *Mass operations* — "rename =:old:= → =:new:= across vault"
+  becomes one SQL statement + re-render of affected files.
+  Today it's a vault scan + per-file edit + rewrite.
+- *Cross-file queries* — "every TODO older than 30 days with
+  priority A" is a one-liner. Today it's code.
+- *Single backup target* — SQLite dump = full state. No "did I
+  push my vault to git?" gap. Today the =self snapshot= verb
+  bundles package source + DB but *not* the vault.
+- *Atomic transactions* — tag + content + embedding updates
+  land together or roll back together. Today they're three
+  separate disk operations with no atomicity.
+- *History of the vault itself* — WAL or DB-of-git lets us
+  query "what did this note say last week?" without a separate
+  vault git repo.
+- *Sync / multi-device* — SQLite over Litestream (or successor
+  on Postgres) = trivial replication. Today the vault is
+  pinned to one box.
+- *dbt over EVERYTHING* — Phase 12.7's dbt scope is currently
+  the engagement table. With everything in DB, dbt models the
+  *vault content directly* — analytics over notes is a
+  one-liner.
+
+This isn't a refactor for elegance. Each bullet is a feature
+the app can't currently deliver because the DB doesn't hold
+enough.
+
+*** Why this is gate-2/3 hard
+
+- *Round-trip fidelity is the boss fight.* Org-mode files have
+  subtle invariants: file-level keywords, property drawers,
+  blank-line discipline, comment lines, mode lines, code
+  blocks, exact whitespace, end-of-line style. Disk → DB →
+  disk *must* reproduce byte-for-byte (or close to it; user
+  must be able to re-open the file and not flinch). This is
+  what kills naïve "store parsed AST, regenerate from AST"
+  designs in practice.
+- *Two writers competing.* User edits in Emacs (disk write).
+  Engine writes DB (e.g. embedding refresh, tag-rename op).
+  Conflict resolution is non-trivial. Today the indexer reads
+  disk-authoritative; in the new world, both must merge.
+- *Editor integrations don't know about the DB.* Emacs +
+  org-roam + Doom keybinds work on disk. Either the DB stays a
+  slave to disk edits (= current model, just with raw bytes
+  added) OR there's a watcher loop that re-renders affected
+  files atomically OR users adopt an org-llm-aware mode (locks
+  them into the stack — gate-2 risk).
+- *Hidden Emacs state.* Folding, narrowing, cursor position
+  are not in files but in the editor. DB-driven re-render must
+  not blow these away when files change underneath.
+- *SQLite at scale.* Vault content + embeddings + history can
+  grow. User signaled willingness to outgrow SQLite — DuckDB
+  (column store, analytics-friendly), Postgres + pgvector
+  (replaces sqlite-vec, mature) are real candidates. Each adds
+  operational complexity (Postgres = a service to run; DuckDB
+  = different concurrency model).
+- *No-WAL concurrency latent risk* (already noted in
+  architecture.org § Concurrency) becomes a *blocker*. If DB
+  is authoritative, write contention matters. Phase 25 must
+  ship WAL.
+
+*** Recommended ship order (6 sub-phases)
+
+Revised 2026-05-03 to insert *25.4 git ingestion* before
+DB-authoritative engine ops. Reason: conflict resolution in
+the new model IS a git problem (user-edit-vs-engine-edit =
+git merge). With git semantics in the DB by 25.4, conflict
+resolution becomes a known-solved problem instead of one we
+invent.
+
+1. *Phase 25.1 — DB as full mirror (vault still authoritative).*
+   Add =File.raw_content= column. Indexer writes raw bytes
+   alongside parsed structure. Validate round-trip: dump from
+   DB → rendered file == original disk file (byte-equal or
+   diff'd through a tolerant comparator). Iterate on the dev's
+   vault until 100%. ~3-5 days.
+
+2. *Phase 25.2 — backup + restore tooling.* Once round-trip
+   verified: =org-llm backup [path]= produces a single archive
+   (SQLite dump + creds digest manifest + version stamp).
+   =org-llm restore <archive>= unpacks with confirmation +
+   integrity check. Reuses =self snapshot= substrate. ~1d.
+
+3. *Phase 25.3 — WAL + concurrency hardening.* =PRAGMA
+   journal_mode = WAL=. Test multi-process write contention
+   (proxy + auto-embedder + CLI). Document the new concurrency
+   model. ~half-day.
+
+4. *Phase 25.4 — git ingestion as audit/history layer (NEW).*
+   Snowflake-style "git repo as DB" pattern, FOSS-implemented.
+   Add tables =git_commits= (sha, ts, author, msg) +
+   =file_versions= (file_id, commit_sha → raw_content_blob,
+   mtime). Use =pygit2= (libgit2 bindings, MIT FOSS) to ingest
+   =~/org/= git history. Current-state view materialised from
+   the latest commit per file.
+
+   *Wins:* free versioning · free diff/blame queries · branch
+   + tag references as queryable state · "what did this note
+   say last Tuesday?" → SQL · multi-device sync via push/pull
+   instead of DB-replication · backup is just =git push=.
+
+   *Engine-write isolation:* engine writes (embeddings,
+   auto_tags, vault_fact cache) live in gitignored DB tables
+   only. Git tracks user edits to =*.org= files; engine state
+   never pollutes git history.
+
+   ~3-5 days. Composes with 25.5's conflict resolution.
+
+5. *Phase 25.5 — DB-authoritative for engine ops.* Mass
+   operations (=org-llm tag --rename foo bar=, content edits
+   triggered by agents) read/write DB and trigger re-render of
+   affected files. Disk watcher (auto-embedder evolution)
+   ingests user-side edits and merges using *git merge
+   primitives from 25.4* — conflict resolution becomes a
+   known-solved problem. ~1-2 weeks of careful work.
+
+6. *Phase 25.6 — full inversion.* Architecture.org's "vault
+   authoritative" principle becomes "DB authoritative; vault
+   is rendered UI." All engine reads go to DB; disk is touched
+   only for user-facing render. Multi-device sync becomes a
+   feature. ~1 week.
+
+7. *(Optional) Phase 26 — beyond SQLite.* If perf or analytics
+   demand, evaluate DuckDB / Postgres+pgvector. Schema lift
+   shouldn't be hard if Phase 25.x is well-designed. Decision
+   gate: are we hitting actual SQLite limits, or is it
+   premature?
+
+   Sub-decision: Dolt (Apache 2.0; foss MySQL fork with
+   git-style branching at row level) is technically the
+   "purest" implementation of the inverted model — but locks
+   us out of sqlite-vec / the SQLite ecosystem we depend on.
+   Shape A (git-ingested-into-our-DB) avoids this dependency
+   shift. Reconsider Dolt only if 25.4's projection-based
+   approach hits limits.
+
+*** Connections to existing work
+
+- =self snapshot= verb is the seed for Phase 25.2 backup
+  tooling. Currently bundles package source + DB; just needs
+  raw vault content (which 25.1 puts in DB).
+- *auto-embedder* is the seed for the disk-watcher in 25.4 —
+  it already watches mtime + re-ingests. Just needs to learn
+  conflict resolution.
+- *dbt (Phase 12.7)* dramatically expands in usefulness once
+  vault content lives in DB.
+- =vault_facts= inferrers currently read disk; with 25.1 they
+  could read DB (faster, more consistent, keeps disk-read
+  fallback). See the inferrer-vs-DB discussion in
+  [[*Validate =vault_facts= inferrer accuracy][validate vault_facts]] DONE entry — Phase 25.1 lets us
+  reverse that decision cleanly.
+- Show-your-work mode + this: cross-file analytics views
+  become much richer when the underlying data is queryable.
+- *Agent-as-app principle* — backup/restore is exactly what
+  FOSS users need; org-llm ships it as a user feature, not
+  just a dev tool.
+
+*** Risks worth pinning before starting
+
+- *Round-trip fidelity is the canary.* If 25.1 can't achieve
+  byte-equal round-trip on the dev's vault within ~5 days,
+  reconsider. The whole arc is built on this foundation.
+- *Editor integration with org-roam.* org-roam has its own
+  =org-roam.db= (separate from =org-llm.db=). The two databases
+  must coexist OR org-llm must absorb org-roam's role
+  (probably the latter long-term). Out-of-scope for 25.1 but
+  on the radar.
+- *Personal-now-FOSS-later cost.* At n=1, round-trip mistakes
+  are recoverable (the dev's git has the vault). At n=many, a
+  round-trip bug silently corrupts users' notes — gate-1
+  catastrophic. Phase 25.1 needs aggressive validation
+  (multi-vault test corpus including the user's, sparse
+  vaults, weird-formatting vaults) before 25.2 ships
+  user-facing.
+- *Don't ship 25.x partial.* Mid-state ("DB has raw bytes but
+  isn't authoritative; backup ships but restore is buggy")
+  would confuse users about what's load-bearing. Each sub-
+  phase ships only when the previous is solid.
+
+*** Effort + scheduling
+
+Per-phase estimates above. Total arc: 4-6 weeks of focused
+work, not counting Phase 26. Way beyond the current sprint —
+this is foundation work for the next quarter.
+
+*Recommendation:* don't start during this rationalization
+sprint. Land show-your-work first (immediate user-visible win,
+doesn't touch the foundation). Schedule Phase 25.1 for the
+sprint *after* this one closes (~2026-05-17 onward). The first
+concrete deliverable should be: round-trip fidelity proof on
+the dev's vault.
+
+** TODO Phase 27 — Apache Superset dashboards (optional)          :plan:db:dashboards:dbt:
+:PROPERTIES:
+:PRIORITY:        B
+:GATE:            1
+:EFFORT:          3-5d MVP
+:PHASE_CANDIDATE: yes
+:SOURCE:          2026-05-03 — directional decision (post-1.0 analytics surface)
+:END:
+
+[[https://superset.apache.org][Apache Superset]] as the dashboarding/BI surface for org-llm.
+*Why it fits the stack:*
+
+- Apache 2.0 — FOSS-aligned (per =feedback_foss_emacs_first.md=)
+- Self-hostable — local-first compatible
+- Speaks SQLAlchemy natively — we already use SQLAlchemy →
+  zero glue code; one connection-string config to point at
+  =~/.local/share/org-llm/org-llm.db=
+- Pairs naturally with dbt (Phase 12.7) — Superset commonly
+  fronts dbt models; we already have dbt scaffolding
+- Composes with Phase 25.4 (git history) for time-travel
+  analytics — "which notes were most active this quarter,
+  faceted by tag, week-over-week" is one query
+
+*Where it slots:*
+- =insight_engagement= dashboards (Phase 12.5) — which card
+  generators land
+- =sensor_log= timeseries — system health under various
+  workloads
+- =crew_log= — orchestration patterns; recipe match rates
+- =history= — usage analytics
+- Post-Phase 25: vault content directly — note creation
+  patterns, tag distribution, writing time-of-day, daily
+  heatmaps
+
+*Implementation shape:*
+1. Ship a dashboard pack: =docs/superset/dashboards.json=
+   + =datasources.yaml= (pre-built dashboards as portable JSON)
+2. Add =org-llm superset --start= verb that spins up Superset
+   via docker-compose (or native install per FOSS-first rule)
+   with =org-llm.db= mounted + dashboards pre-imported
+3. =org-llm superset --stop= tears it down cleanly
+4. Document in tutor as an opt-in step for users who want
+   analytics
+
+*Caveats:*
+- Heavyweight: Python web app + Redis + browser. Not a CLI
+  thing.
+- Adds operational surface (a service to run). Not core
+  dependency.
+- Most users won't need it day-1 — power-user / multi-user-org
+  feature.
+- Adds docker-as-default-dep risk. Mitigation: also ship
+  native-install instructions; docker is the convenience
+  path.
+
+*Gate-2 read:* opt-in component, not core. =org-llm= without
+Superset still works perfectly. Adding it is a one-liner for
+users who want it. That's the right complexity ratio.
+
+*Scheduling:* post-1.0. Definitely post Phase 25 (the data
+model needs to settle first). Earliest: 2026-Q3.
+
+*Connections:*
+- Phase 12.7 (dbt analytics) — Superset is the natural BI
+  layer above dbt models
+- Phase 25.4 (git ingestion) — dashboards over vault history
+  become possible
+- Phase 25.6 (full inversion) — when DB is truth, dashboards
+  reflect ground truth, not stale projections
+
+** TODO Phase 28 — Containerization strategy (asymmetric)         :plan:infra:deployment:
+:PROPERTIES:
+:PRIORITY:        B
+:GATE:            2,3
+:EFFORT:          decision now (~30m); shipping varies per component
+:PHASE_CANDIDATE: yes
+:SOURCE:          2026-05-03 — directional decision
+:END:
+
+*Decision: native install stays primary. Containers ship for
+specific use cases only.*
+
+The asymmetry: containerizing too little is recoverable
+(ship images later); containerizing too much makes native
+users (the design center) hit friction on every file/editor
+workflow. Native-first is gate-2 + gate-3 healthy.
+
+*** Why native stays primary
+
+Org-llm wraps the user's local environment. Container
+isolation fights the design:
+- =~/org/=, =~/.opencode/=, =~/.config/doom/=,
+  =~/.password-store/= are all mounts; at ~5 mounts the
+  container is mostly cosmetic
+- Local Ollama needs GPU passthrough (NVIDIA Container
+  Toolkit), real friction on laptops + Pis
+- Editor processes (Emacs, opencode, claude, pi) run *outside*
+  the container; their MCP subprocess (=org-llm mcp=) needs to
+  see the same DB the editor sees
+- =pass=, =gpg-agent=, =ssh-agent= state doesn't compose with
+  container isolation
+- Literate-programming workflow tangles Python from
+  =20260425230731-org_llm.org=; running app needs to detect
+  and reload — more wires through container boundaries
+- Our stack is mostly native (Ollama, opencode, Claude Code,
+  org-roam, dbt all native install) — containerizing org-llm
+  would make us the outlier in our own stack
+- Per =feedback_foss_emacs_first.md=: containerization moves
+  AWAY from native Emacs/CLI integration
+
+*** Where containers DO ship
+
+| component / use case        | container? | ships when?     | notes |
+|-----------------------------+------------+-----------------+-------|
+| Primary install (laptop)    | NO         | n/a             | native install via uv |
+| Apache Superset (Phase 27)  | yes        | with Phase 27   | standard Superset deploy; docker-compose |
+| Cloud GPU side              | yes        | already         | RunPod/Lambda/etc templates — provider-managed |
+| Headless / Pi / NAS / cloud | yes (opt)  | post-1.0        | =org-llm/server= image; vault bind-mounted, MCP socket exposed; ships ALONGSIDE native |
+| CI / test infra             | yes        | when CI lands   | reproducible test env; not user-facing |
+| A/B harness reproducibility | maybe      | Phase 28+       | containerize validation runs for cloud-judge consistency |
+| Multi-user / SaaS server    | yes        | if-ever         | different product; not optimizing for now |
+
+*** What we are NOT adding
+
+- *Redis* — only relevant for Superset (Superset's dep, not
+  ours). Don't add it to the core stack. SQLite covers caching
+  / queue / rate-limit needs durably without a separate
+  process.
+- *docker-as-default-dependency* — never required for the
+  primary install path. Optional for the use cases above.
+- *Kubernetes* — way out of scope.
+
+*** Implementation when each container lands
+
+- =org-llm superset --start= / =--stop= — Phase 27 covers
+- =org-llm server --image=...= — post-1.0; one-line spinup for
+  headless deployments
+- =scripts/ci/= containerized test images — when CI work begins
+- All container configs ship in =docs/containers/= or
+  =extensions/containers/= for transparency; users can build
+  themselves rather than pulling pre-built
+
+*** Connections
+
+- Phase 27 (Superset) — already containerizes its component
+- Phase 25.6 (full inversion) — multi-device sync via DB
+  replication is more naturally containerized but the *user
+  side* still runs native
+- Cross-platform install validation (gap-analysis P0.1) — the
+  *native* path is what we validate; containers are an
+  alternative deployment, not a substitute
+
+*Scheduling:* decision is documented above. Specific container
+shipments happen alongside the components they serve (Phase 27
+Superset, post-1.0 headless variant). No standalone "Phase 28"
+sprint.
+
+** TODO Phase 29 — Self-coded tools (LLM patterns → deterministic) :plan:meta:db:mcp:test:load-bearing:
+:PROPERTIES:
+:PRIORITY:        A
+:GATE:            1,2,3
+:EFFORT:          multi-day (3 sub-phases, ~2-3 weeks)
+:PHASE_CANDIDATE: yes
+:SOURCE:          2026-05-03 — directional decision (the
+                  "if LLM does X repeatedly, app codes a tool
+                   that does X" principle)
+:END:
+
+*Generative principle:* when the LLM does a pattern of work
+repeatedly, the app should detect it, propose a deterministic
+tool, validate the tool against the LLM's output, and register
+it so future invocations skip the LLM entirely. Driven from
+the DB; the tool itself is FOSS Python; the LLM only writes
+code, not runtime decisions.
+
+*Why this is gate-1, gate-2, AND gate-3 healthy:*
+- *Gate 1:* the app gets faster and more deterministic over
+  time for the user's actual workflows (not theoretical ones)
+- *Gate 2:* every tool is a complexity *reduction* — replaces
+  a slow expensive cloud call with a 10ms DB query
+- *Gate 3:* audit log + validation framework already in place;
+  this feature consolidates them into a generative loop
+
+*** Recommended ship order (3 sub-phases)
+
+1. *Phase 29.1 — pattern detection.* Build =org-llm tools
+   auto-discover= verb. Walks recent =llm-audit.jsonl=,
+   identifies repeated query shapes (same prompt-hash class,
+   same tool sequence, deterministic-shaped output). Outputs
+   ranked list of "tool candidates" with hit count + estimated
+   savings. Pure analysis — no synthesis yet. ~2d.
+
+2. *Phase 29.2 — tool synthesis with validation.* For each
+   candidate: =org-llm tools propose <name>= → LLM generates
+   a Python implementation. The proposed tool gets a
+   =ValidationConfig= (deterministic kind) sampling N past
+   invocations from audit log; auto-tool runs against same
+   inputs, validation compares output similarity. PASS →
+   register; FAIL → reject + save proposal for human review.
+   ~5d.
+
+3. *Phase 29.3 — registration + replacement.* Validated tools
+   register in =mcp_server.py= via an =@auto_generated=
+   decorator (signals provenance + makes them reviewable).
+   Future LLM calls matching the original pattern hit the
+   tool first; LLM is bypassed for that pattern. Audit log
+   records the bypass; periodic re-validation catches drift.
+   ~3d.
+
+*** Concrete first instance (29.0): roadmap ↔ dev-tracker sync
+
+The user's specific question — "good mechanism for the app to
+keep roadmap + dev-tracker in sync" — is the *seed example*
+for Phase 29.
+
+The sync is rules-based (deterministic), not LLM-needed:
+- For each =:PHASE_CANDIDATE: yes= tracker entry, ensure
+  roadmap.org has a corresponding TODO/NEXT/DONE entry
+- For each roadmap TODO/NEXT, ensure tracker has an active
+  entry (or wishlist note)
+- For each tracker DONE that's a phase candidate, ensure
+  roadmap has DONE entry with commit anchor
+- Cross-references stay valid (broken org-mode links flagged)
+- Sprint snapshot velocity log gets recomputed from
+  =:STARTED-AT:= / =:COMPLETED-AT:= properties
+
+This is exactly the kind of thing that today is done by the
+LLM in conversation. Phase 29.0 makes it a deterministic
+verb: =org-llm tracker sync= or =org-llm tools sync-roadmap=.
+Run as cron OR =git pre-commit= hook. ~half-day to write.
+
+*Phase 29.0 ships standalone* as a proof-of-concept of the
+self-coded-tools principle BEFORE the full discover/synthesise
+loop. It's the smallest possible demonstration; success here
+informs the design of 29.1+. Could land within this sprint
+or shortly after.
+
+*** Connections
+
+- *Audit log* (=llm-audit.jsonl=) is the input
+- *Validation framework* (Phase 27) is how proposed tools get
+  validated before registration
+- *MCP server* is where validated tools register
+- *Show-your-work mode* — auto-generated tools support
+  citations natively (they read the DB; citations are field
+  mappings)
+- *DB-authoritative (Phase 25)* — tools operate on DB, not
+  files; this is the unifier
+- *Tracker self-hosting goal* (=project_tracker_self_hosting_goal.md=)
+  — Phase 29 is the engine; tracker.org is one user-facing
+  feature it powers
+- *dbt-LLM intersection* — proposed dbt models are a special
+  case of proposed tools; same validation flow applies
+
+*Scheduling:* 29.0 (sync verb) — sprint-eligible; ~half-day.
+29.1+ (full discover/synth/replace loop) — post-Phase 25.4
+when DB has enough for tools to operate against.
+
+** TODO Phase 30 — FOSS agent value-adds (always-on / multi-model / multi-judge) :plan:agents:proxy:research:
+:PROPERTIES:
+:PRIORITY:        A
+:GATE:            1,3
+:EFFORT:          multi-day (5 sub-features, parallel-shippable)
+:PHASE_CANDIDATE: yes
+:SOURCE:          2026-05-03 — directional decision
+:END:
+
+The Phase 20 lesson: orchestration that adds latency without
+quality wins is a loss. So FOSS-agent value-add must be wins
+the user can't get from a single solo agent. The unifying
+thread: *FOSS agents add value when they're cheap enough to
+run in patterns cloud can't afford.*
+
+*** Five concrete value-adds (parallel-shippable)
+
+**** 30.1 — Local-only flows (always-cloud-bypass)
+
+Agents that should *never* need cloud — auto-tagger, hygiene
+scanner, daily summarizer, mood-signal updater. Pure local
+FOSS. Cost: zero. Privacy: maximal.
+
+These run regardless of =proxy_cloud_first= / =--cloud=
+flags. Identifying them: a =cloud_eligible: false= field on
+agent persona / baseline. ~1d.
+
+**** 30.2 — Specialized small models per domain
+
+Multi-agent ≠ multi-call; it's multi-MODEL. A 1B param model
+(gemma 1B, qwen 1.5B) does narrow tasks (tag suggestion, mood
+classification, link extraction) faster than a 70B general
+one.
+
+Concrete: each agent persona gains a =model_size_hint:
+{nano,small,medium,large}= field; the proxy's
+=intercept_model_routing= maps hints to actual models based
+on what's pulled locally. ~2d.
+
+**** 30.3 — Background continuous work
+
+Cloud is per-call expensive; local agents run free 24/7.
+
+Concrete agents:
+- *@gardener nightly* — vault hygiene scan, drafts cleanups
+  onto =org-llm/gardener= branch (uses Phase 25.4), user
+  reviews in morning
+- *@journalist weekly* — drafts weekly digest from dailies
+  (mood + activity + carry-overs)
+- *@indexer-evolved* — detects new files in tracked
+  directories, prompts capture sessions
+
+Scheduler: re-uses existing schedule infrastructure (scheduled
+remote agents). Local agents are just remote agents that
+target =localhost=. ~3d.
+
+**** 30.4 — Multi-judge validation (reduce judge bias)
+
+Currently the validation framework's judge model is a single
+field (Claude Opus 4.7). Single-judge has bias.
+
+Concrete: =ValidationConfig.judge_model= becomes
+=judge_models: list[str]=. Each judge runs independently;
+majority vote determines verdict; per-judge breakdown
+preserved in summary. Use FOSS judges (Llama 3.3, Qwen 2.5,
+DeepSeek R1) by default; cloud only when user opts in.
+
+Effort: ~1d (=validation.py= changes + summary aggregation).
+*Quickest win + most independent;* could ship this sprint.
+
+**** 30.5 — Self-validation (agents validating agents)
+
+Agent A drafts a vault edit; Agent B checks against ground
+truth (citations exist, file paths resolve, claims are
+factual). Catches hallucinations at the agent layer, not at
+user-review time.
+
+Concrete: a new =@validator= agent persona; recipe shape "any
+agent that produces a draft edit gets validated by @validator
+before commit." Pairs with show-your-work (citations make
+validation trivially mechanical). ~2d.
+
+*** Connections
+
+- *Phase 25.4 (git ingestion)* — branch-based output (30.3)
+  needs the git layer
+- *Phase 25.5 (DB-authoritative)* — agents-write-to-DB-then-
+  render unlocks 30.5 self-validation
+- *Show-your-work mode* — citations are the validator's
+  ground truth
+- *Validation framework* — 30.4 multi-judge plugs directly in
+- *Recipe registry* — 30.3 agents register recipes for their
+  scheduled triggers
+- *No Groq* (=feedback_no_groq.md=) — none of the FOSS judges
+  are Groq; FOSS-first ordering is preserved
+
+*Scheduling:* parallel-shippable. 30.4 (multi-judge) is the
+quickest + most independent — could ship within this sprint
+as an A/B framework upgrade (~1d). 30.1 (local-only flag)
+also small + sprint-eligible. Others depend on Phase 25.x.
+
+** TODO Expand Phase 12.7 — dbt as universal analytics layer      :plan:db:dbt:research:
+:PROPERTIES:
+:PRIORITY:        A
+:GATE:            3
+:EFFORT:          ~3d to expand current scope
+:PHASE_CANDIDATE: yes
+:SOURCE:          2026-05-03 — directional decision (dbt usage)
+:END:
+
+*Current scope:* Phase 12.7 in roadmap.org is "dbt analytics
+over engagement" — narrow.
+
+*Expanded role:* dbt becomes the *abstraction layer between
+raw DB and any analytics consumer* (Superset, agents, doctor,
+user via SQL). Three concrete roles:
+
+1. *Pre-computed analytics views.* Models like
+   =vault_summary=, =agent_activity_daily=,
+   =recipe_performance=, =sprint_metrics_rolling=,
+   =git_activity_weekly=.
+
+2. *Data quality tests.* dbt's =unique= / =not_null= /
+   =accepted_values= tests catch schema regressions
+   automatically. Ship as =org-llm doctor --dbt-tests=.
+
+3. *LLM-generated dbt models.* Per Phase 29: agents propose
+   dbt models from natural language. dbt's own test framework
+   auto-validates the model.
+
+*** Layer placement
+
+#+begin_example
+~/org/ (vault, git-tracked)
+  ↓ ingest (Phase 25.4 git_sync)
+SQLite raw tables
+  ↓ dbt models (this expansion)
+dbt views — domain abstractions
+  ↓ consumed by:
+  • Superset (Phase 27 dashboards)
+  • Agents (via MCP tool: dbt query results)
+  • doctor --dbt-tests (data quality)
+  • org-llm tracker pace (sprint metrics)
+  • Phase 29 self-coded tools (deterministic ops over views)
+#+end_example
+
+*** Concrete first models to ship
+
+- =models/vault_summary.sql=
+- =models/tag_distribution_weekly.sql=
+- =models/agent_activity_daily.sql=
+- =models/recipe_performance.sql=
+- =models/sprint_metrics.sql= (sources tracker properties via
+  dbt-from-org adapter or scripted ingest)
+- =models/git_activity_weekly.sql= (post-25.4)
+
+*Scheduling:* sequence with Phase 25 (raw tables stable
+first). 12.7 v1 (engagement-only) could ship pre-25.x; full
+expansion lands alongside 25.4.
+
+** TODO Show-your-work mode — citations + grounding by default    :plan:proxy:agents:opencode:cli:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:GATE:     1
+:EFFORT:   1d (slice 1) → 5d (full feature)
+:SOURCE:   2026-05-03 — recipe A/B finding generalised
+:END:
+
+The recipe A/B revealed the most damaging failure mode in the
+app: the model fabricates around sparse data ("meeting with
+Jane", invented forecasts, fictitious counts). The fix that
+worked in the tool-use path was *grounding* — file citations,
+explicit "no matches" answers, error states surfaced. This
+feature promotes grounding from a per-path emergent property
+to a project-wide *default*.
+
+*FOSS-bar criticality:* at n=1 the dev can spot fabrications
+because they know their own vault. At n=many users can't.
+Citations are how strangers confirm an answer is real before
+trusting it. This is the highest-leverage gate-1 win we've
+identified this session.
+
+*** Design
+
+A log-level knob =proxy_show_work_level= (0..4):
+
+| level | name      | what shows                                                | default |
+|-------+-----------+-----------------------------------------------------------+---------|
+| 0     | off       | narration only (legacy)                                   |         |
+| 1     | citations | footer listing files cited (=Sources: foo.org, …=)        | *yes*   |
+| 2     | inline    | =[foo.org:42]= markers next to claims                     |         |
+| 3     | trace     | tool calls + args + results above answer                  |         |
+| 4     | full      | pre-fetch blocks + raw tool results + reasoning trace     |         |
+
+Where it lives:
+- Knob =proxy_show_work_level= in =config= table
+- Baseline rule in =agent_baseline= (=applies_to=all=) — uniform
+  across agents, can't drift per-agent
+- Proxy phase-2 interceptor =intercept_show_work= — injects the
+  level-appropriate cite instruction
+- opencode TUI plugin renders citations distinctly (LCARS-themed,
+  clickable when possible)
+- CLI =ask= prints citations as a footer
+- Existing =manager-log.jsonl= already carries the trace data;
+  levels 3+ just surface what's there
+
+*** Why this is a unification, not a new layer
+
+This feature ties together infrastructure we've already built:
+- *Phase 22.5a* (manager log) — narration capture wired but
+  audit-only. Show-your-work makes it user-visible.
+- *Phase 22.5b* (reasoning capture probe — in plan queue) — same
+  idea, different framing. *Should merge into this item.*
+- *Insight cards (Phase 12)* — already cite evidence in their
+  bodies. Show-your-work generalises the pattern to ALL LLM
+  output.
+- *=llm-audit.jsonl=* — already records every call. Levels 3+
+  surface what's already captured.
+- *Recipe pre-fetch fix (citations + completeness markers)* —
+  literally show-your-work applied to one slice. The principle
+  shipped piecemeal there, ship it project-wide here.
+
+*** Slices (ship in order)
+
+- *Slice 1 — level 1 citations + baseline rule + knob* (1d):
+  Smallest valuable cut. Add knob, add =agent_baseline= row
+  (=applies_to=all=) with the cite instruction, add proxy
+  interceptor that injects the level-appropriate text. Test
+  with a few existing agents. Default new installs to level 1.
+- *Slice 2 — opencode TUI rendering + CLI footer* (1d):
+  =extensions/opencode/src/= renders the =Sources:= block as a
+  distinct LCARS-themed panel below the assistant turn. CLI
+  =ask= prints it inline. Make citations clickable in opencode
+  where possible.
+- *Slice 3 — levels 2-4* (2d): inline markers (2), tool-trace
+  surfacing (3), full debug view (4). Each level adds an
+  output path but no new infrastructure.
+- *Slice 4 — validation hook* (2h): =org-llm validate
+  show-your-work= deterministic check — given queries whose
+  answers should be grounded, does the agent cite ≥1 source?
+  Failing this is gate-1 violation; goes in CI.
+
+*** Gate-2 risk + mitigation
+
+This touches persona/baseline + proxy + TUI + CLI — cross-cutting.
+Risk: agents partially comply (some facts cited, others not),
+which is *worse* than not citing because users learn to trust
+citations.
+
+Mitigation:
+- Baseline rule lives in =agent_baseline=, not per-agent
+  prompts. Drift is impossible.
+- Validation hook (slice 4) catches non-compliant agents in CI.
+- Ship level 1 first; validate compliance; THEN ship levels
+  2-4.
+
+*** Merges with
+
+- =Phase 22.5b — explicit reasoning capture= (in plan queue):
+  same problem space; merge into this entry's slice 3 (the
+  reasoning probe IS show-your-work level 3+ for thinking).
+- *Recipe pre-fetch template iteration* (in validation
+  backlog): the proposed fix (citations + completeness markers
+  + error surfacing) is exactly this feature applied to recipe
+  outputs. When show-your-work ships, the recipe templates
+  inherit the citation discipline automatically.
+
+** TODO =--playful= flag implementation (Phase A + B)             :plan:cli:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE: backlog.org § Implementation notes
+:END:
+
+Two-phase rollout to gate Trek-themed chrome / persona portraits
+/ knob-derived banners behind a =playful_level= 0..3 knob.
+
+- *Phase A* (no behavior change, ~2h): add =playful_level=
+  config key, =org-llm config playful_level <0..3>= verb,
+  =playful_at_least(N)= helper, =--playful= top-level flag,
+  tutor + README docs.
+- *Phase B* (~3-4h): wrap each --playful trigger site in
+  =if playful_at_least(N):=. Verify by toggling
+  =playful_level=0= that chrome goes silent.
+
+Items moving behind =--playful>=2=: Trek banners outside
+workspace, LCARS chrome on non-workspace surfaces, persona-named
+verbs. Behind =--playful>=3=: TNG portraits, Trek-doctor quorum,
+knob-derived theme variants beyond LCARS.
+
+Stays unconditional: self-healing / proactive doctor /
+life-support / =ask --emh= for sensor_log.
+
+*Gate-1 check:* this is polish, not core. Default new-installs
+to =playful_level=0= — keeps the app focused on the job for new
+users.
+
+** CANCELLED Phase 22.5b — explicit reasoning capture            :plan:proxy:agents:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE: recipes.org § Roadmap
+:MERGED_INTO: [[*Show-your-work mode — citations + grounding by default][Show-your-work mode]] (slice 3)
+:END:
+
+*Merged 2026-05-03 into [[*Show-your-work mode — citations + grounding by default][Show-your-work mode]] slice 3.*
+
+The =Reasoning:= probe is the same idea as show-your-work
+levels 3+ for thinking traces. Implementing it standalone would
+fragment the design — better to land it as one capability in
+the unified show-your-work feature.
+
+(Original framing: 2026-05-03 headless campaign validated that
+a portable =Reasoning:= system-prompt probe yields useful signal
+across models that don't natively emit =<thinking>= tags.
+Promote the probe into the proxy's persona-injection layer;
+pair with the existing native-=<think>=-tag extractor for
+models that do.)
+
+** TODO Phase 22.6 expansion — promote two recipes to deterministic :plan:recipes:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE: recipes.org § Roadmap
+:END:
+
+Promote =busy_week= (=org_agenda + org_clock_summary= parallel)
+and =link_graph_walk= (=org_id_find → org_link_graph= chain) from
+agent-driven tool-call shapes into deterministic recipes. Both
+are tool-chains agents currently re-invent each turn.
+
+Scheduled remote review agent fires <2026-05-17> to assess
+whether the remaining advisory recipes (no runner yet) earn
+promotion to deterministic.
+
+** TODO Auto-capture session-narrative dev logs to org each day   :plan:capture:research:
+:PROPERTIES:
+:PRIORITY: C
+:SOURCE: backlog.org [open]
+:END:
+
+Captain's Log records every CLI/LLM/MCP call (mechanical). Phase
+journals capture design + bug ledger. Git records implementation.
+But the SESSION NARRATIVE — "we discovered X today, tried Y, the
+lever turned out to be Z" — currently lives only in the Claude
+session transcript, lost after the session ends. Not searchable
+from inside org-llm.
+
+*Two shapes considered:*
+- End-of-session walk variant that asks "what were today's key
+  findings? what's the carry-over?" and writes
+  =~/org/org-llm-test-session/<YYYY-MM-DD>-session-log.org=.
+- claude / opencode hook that periodically writes deltas as
+  they happen.
+
+Phase 13.2-5 timeframe. Per the dog-food meta in this tracker —
+a related app-level feature.
+
+** TODO =org-llm mcp call <tool>= for scripted MCP testing        :plan:mcp:test:
+:PROPERTIES:
+:PRIORITY: C
+:SOURCE: backlog.org [later]
+:END:
+
+Affordance for future test work: =org-llm mcp call search_notes
+"my query"= drives the MCP server like a CLI. Surfaced in Phase
+10. Useful for the validation sprint — would let us script
+end-to-end MCP tool tests without spinning opencode.
+
+*Gate-1 check:* it serves the testing flywheel that supports
+gate 1, even if it's not user-facing.
+
+** TODO CLI =capture --link-to= picker (org-roam-node-insert eq.) :plan:cli:capture:
+:PROPERTIES:
+:PRIORITY: C
+:SOURCE: backlog.org [later]
+:END:
+
+Nice-to-have; users in opencode can already link via the
+workspace LLM. Defer until users complain.
+
+** TODO Cloud-routing for =log --reflect= quality                 :plan:cloud:
+:PROPERTIES:
+:PRIORITY: C
+:SOURCE: backlog.org [later]
+:END:
+
+Small models produce mediocre reflections; cloud would help but
+adds cost. Phase 12's deterministic-stats pre-pass may obviate
+the need. Revisit after Phase 12.6 lands.
+
+** TODO Knob ↔ palette decoupling                                 :plan:theme:
+:PROPERTIES:
+:PRIORITY: C
+:SOURCE: gap-analysis-alpha-to-beta.org P2
+:END:
+
+User question 2026-04-28: "when a user creates a new theme knob
+with the app, will they be able to theme opencode successfully?"
+Answer: NO — knobs are content-only. Per-channel hex overrides
+exist (=lcars_color_primary=) but no way to bind a knob to a
+palette shift.
+
+*Possible feature:* knob with =palette: green= attribute that
+swaps =lcars_palette= when level>0.
+
+** TODO Theme-studio cache auto-regen on knob change              :plan:theme:ux:
+:PROPERTIES:
+:PRIORITY: C
+:SOURCE: gap-analysis-alpha-to-beta.org P2 + Phase 6 finding
+:END:
+
+User adds a knob → cached variants stale. Currently they need to
+=org-llm theme-studio regenerate= manually. Could detect knob
+churn + auto-trigger.
+
+** TODO =--apply= confirmation could be paginated (accept some)   :plan:cli:ux:
+:PROPERTIES:
+:PRIORITY: C
+:SOURCE: gap-analysis-alpha-to-beta.org P2
+:END:
+
+When =models --upgrade --apply= proposes 6 changes, the prompt
+is a single y/N. Should let user accept some + reject others.
+
+** TODO Batch =kind=llm= rows during long verbs                   :plan:logbook:ux:
+:PROPERTIES:
+:PRIORITY: C
+:SOURCE: gap-analysis-alpha-to-beta.org P2
+:END:
+
+=theme-studio regenerate= writes 28 surfaces × multiple LLM calls
+to History. Adds 100+ rows in 30 min. Captain's Log gets noisy.
+Could batch under a parent =kind=batch= row and only surface the
+parent in default views.
+
+** STARTED Introduce a recipe tier system (shared / personal)     :plan:recipes:proxy:literate-config:
+:PROPERTIES:
+:PRIORITY:   A
+:GATE:       2
+:VALIDATED:  [2026-05-03]
+:STARTED-AT: [2026-05-03]
+:EFFORT:     2h
+:ACTUAL:     ~30m (core shipped; CLI verbs deferred)
+:SOURCE: 2026-05-03 strategy session — personal-now-FOSS-later framing
+:END:
+
+*Shipped 2026-05-03:* core tier system in =orchestration.py=:
+- =RecipeMatch.tier= field (default ="shared"=)
+- =_PERSONAL_RECIPES_PATH= = =~/org/org-llm-recipes.org= (env override
+  =ORG_LLM_PERSONAL_RECIPES=)
+- =_load_personal_recipes()= with mtime-cached parse
+- =match_recipe()= checks personal first (wins on overlap), then shared
+- Malformed entries silently skipped (proxy never crashes on user error)
+- Sample template: [[file:../templates/org-llm-recipes.org.example][=docs/templates/org-llm-recipes.org.example=]]
+- Wiki updated: [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes.org]] § Two tiers
+- Tested: 4 unit checks pass (default tier, shared still matches,
+  parse + body extraction, personal-overrides-shared priority)
+- Pre-existing test failures (TagProvenance, theme palette) unrelated
+
+*Remaining (lower priority):*
+- =[ ]= CLI verb =org-llm recipes init= to scaffold
+  =org-llm-recipes.org= from the example template (~5 min)
+- =[ ]= CLI verb =org-llm recipes list= showing both tiers with
+  source attribution (~10 min)
+- =[ ]= Audit-log entry shows =tier= for recipe matches (currently
+  manager-log captures recipe name; tier would help "why did this
+  override?" questions)
+
+The current =_RECIPES= list is a single tier. Some recipes
+genuinely belong as shared baseline (=count_across_vault= —
+counting checked-off entries is a universal vault operation).
+Others assume a specific workflow (=weather_aware_agenda=
+requires location configured + outdoor things tagged + populated
+agenda) — closer to a user-personal recipe than a kernel feature.
+
+*Proposed shape:*
+- =_RECIPES= becomes the *shared baseline* — high bar, must
+  pass FOSS robustness check, ships for everyone
+- =~/org/org-llm-recipes.org= becomes user-defined recipes —
+  literate config, same shape as =org-llm-tools-config.org= /
+  =org-llm-agents.org=, user wins on conflict
+- Both go through the same =match_recipe= path; provenance
+  visible in manager-log
+
+*Gate-2 check:* this expands the surface but in a way that
+clarifies what's universal vs personal — net simplification of
+the "is this recipe defensible for all FOSS users?" question.
+
+*Pairs naturally with:* the proposed iteration on the 3 FAIL
+recipes — some may move to personal tier rather than the
+shared baseline.
+
+** STARTED Generalize A/B+judge to a standard validation framework :plan:test:proxy:agents:
+:PROPERTIES:
+:PRIORITY:   A
+:GATE:       1,3
+:VALIDATED:  [2026-05-03]
+:STARTED-AT: [2026-05-03]
+:EFFORT:     4h (scaffold + 2 kinds + 2 configs + CLI)
+:ACTUAL:     ~1h30m (~45m scaffold + ~45m deterministic kind + inferrers config)
+:SOURCE: 2026-05-03 strategy session
+:END:
+
+*Shipped 2026-05-03:* the framework scaffolding + first registered
+config. =org-llm validate --list= and =org-llm validate <name>=
+work end-to-end against the recipe A/B as the seed feature.
+
+- [[file:../../org_llm/validation.py][=org_llm/validation.py=]] — framework module:
+  =ValidationConfig= dataclass · arm-callable contract ·
+  registry (=register=, =get=, =list_registered=) ·
+  =run_validation()= driver (loops prompts × arms × trials × models,
+  emits JSONL) · =evaluate_bars()= verdict checker ·
+  per-feature output paths under
+  =~/.local/share/org-llm/validation/<name>/=
+- [[file:../../org_llm/validation_configs/__init__.py][=org_llm/validation_configs/=]] — config-registration package
+  - [[file:../../org_llm/validation_configs/recipes.py][=recipes.py=]] — first registered config; thin adapter wrapping
+    [[file:../../scripts/recipe_ab_harness.py][=scripts/recipe_ab_harness.py=]] arms (no rewrite — gate-2: defer
+    deep refactor until a SECOND validation use case shows the
+    truly-reusable shape)
+- =org-llm validate= CLI verb in [[file:../../org_llm/cli.py][=cli.py=]] (Maintenance panel) —
+  =--list= shows registered configs in a panel; positional
+  =<feature>= runs full pipeline; =--harness-only= /
+  =--judge-only= split the run; =--trials N= override default 3
+- Tested: =org-llm validate --list= shows the recipes config (18
+  prompts, 7 anchor); =--help= renders cleanly; unknown-feature
+  error path works
+
+*Same-session expansion 2026-05-03:* the framework now supports
+two kinds of validation:
+
+- =kind="ab"= (original) — A/B + blinded judge for subjective
+  LLM quality
+- =kind="deterministic"= (new) — ground-truth correctness checks
+  for features where the right answer is computable
+
+[[file:../../org_llm/validation_configs/inferrers.py][=validation_configs/inferrers.py=]] is the first deterministic
+config (11 checks across vault_stats / tag_taxonomy /
+routine_chores / TTL invalidation). Run via =org-llm validate
+inferrers=. Result: PASS 11/11 on this vault.
+
+The CLI verb dispatches by =cfg.kind=: deterministic configs
+skip the harness/judge dance, run their checks directly, and
+exit 0 on PASS / 1 on FAIL (cron-friendly).
+
+Output shape for deterministic: =results.jsonl= (one line per
+check with passed + message + error) plus a markdown summary.
+
+*Deferred (intentional):*
+- =run_judge()= for =kind="ab"= still raises =NotImplementedError=
+  because the recipe judge in [[file:../../scripts/recipe_ab_judge.py][=scripts/recipe_ab_judge.py=]] is
+  hard-coded to recipe-specific JSONL fields. Per gate-2, we
+  don't extract reusable judge core until a SECOND ab-style
+  feature exposes what's actually common. Workaround: run
+  =python scripts/recipe_ab_judge.py= directly.
+- Cloud-cred sourcing is feature-specific in current shape.
+  Future configs that want framework-managed cloud creds can grow
+  a =ValidationConfig.cloud_provider= hint.
+
+*Follow-ups:*
+- =[ ]= After SECOND validation feature lands (e.g. =synth_tool_call=
+  or =@gardener= persona), extract reusable judge core from
+  [[file:../../scripts/recipe_ab_judge.py][=scripts/recipe_ab_judge.py=]] → =org_llm/validation.py:run_judge()=
+- =[ ]= Add a contribution-standard note in [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]]
+  ("new LLM-mediated features need a ValidationConfig")
+- =[ ]= Wire scheduled remote routine to re-run =org-llm validate
+  recipes= weekly as regression CI for LLM behaviour
+- =[ ]= Add agenda-visible TODO when =:VALIDATED:= timestamp on a
+  load-bearing entry crosses 30 days (the doctor-stale-validation
+  hook from the earlier dog-food TODO)
+
+The =scripts/recipe_ab_{harness,judge}.py= pattern caught a
+real failure mode in 2 days that hands-on use might never have
+surfaced. The pattern generalises to most LLM-mediated
+features — most of org-llm.
+
+*Targets worth A/B-validating beyond recipes:*
+- Interceptors that change LLM output: =tool_call_repair=,
+  =synth_tool_call=, =tool_dialect_translate=, =model_routing=,
+  =prompt_slim=
+- Agent personas (does =@gardener= really beat =@scribe + tools=?)
+- Cloud-first vs local-first routing
+- Walk vs vector search per query shape
+- Auto-tagger relevance impact
+- Insight cards on session open
+- Theme-studio output quality vs plain text
+
+*Proposed shape:*
+- =org-llm validate <feature>= verb that takes a feature spec
+  (toggle, prompt set, ground truth file, judge model, bars)
+- Each LLM-mediated feature ships with its own =validate=
+  config under =scripts/validate/<feature>.py= or as a literate
+  block in the relevant org file
+- Pre-committed bars per feature type (latency · tokens ·
+  quality)
+- Periodic re-runs become regression CI for LLM behaviour
+
+*Constraints worth keeping in view:*
+- *Cost:* heavyweight (90-trial validation = real cloud spend);
+  not commit-grade. Manual / scheduled triggers, not on-push.
+- *Ground-truth upkeep:* each validation suite needs a curated
+  truth file kept fresh as the vault evolves.
+- *Judge bias:* single-judge has its own biases; consider
+  rotating judges over time to reduce.
+- *Bars are heuristics:* the recipe ≥55% bar may not be right
+  for every feature type; let each feature type set its own.
+- *Validates iteration, not invention:* novel features have no
+  baseline; this tool is for refinement.
+
+*Contribution standard:* PRs adding a new LLM-mediated feature
+include a validate config. Same pattern as test files for
+deterministic features.
+
+*Phase 23.x or 24 candidate.* Pairs with the dev-tracker
+self-hosting goal — both are about org-llm becoming great at
+the meta-work of running an org-mode project responsibly.
+
+** TODO Add "intended audience" note to architecture.org          :doc:meta:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE: 2026-05-03 strategy session — personal-now-FOSS-later
+:END:
+
+architecture.org currently reads as documentation for
+"future-you." Given the FOSS-for-everyone direction, future
+readers include unknown contributors and unknown end users.
+Worth adding a short framing block at the top:
+
+- Intended audience: dev (current), future contributors,
+  curious users tracing how a feature works
+- Two-track design implications: shared baseline vs
+  user-personal layers (themes, knobs, recipes-tier-2 if
+  shipped)
+- "Defensible for unknown vaults" as a default frame for
+  design decisions
+
+** TODO MCP tool customization tier 1+2 (literate config)         :plan:mcp:literate-config:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE: ~/org/20260503155918-claude_scratchpad.org Tier 1+2
+:END:
+
+Make the existing 71-tool MCP surface customizable without
+enabling user code execution. Two cheap wins (~2 days total).
+
+*Tier 1 — Customize:* =~/org/org-llm-tools-config.org= for tool
+defaults and toggles. One heading per tool with properties:
+=:ENABLED:= =:DEFAULT_PATH_GLOB:= =:CAPABILITY:=
+=:DESCRIPTION_OVERRIDE:= etc. Round-trips via =org-llm tools
+--tangle / --apply= same shape as =org-llm-config.org=.
+~1 day.
+
+*Tier 2 — Manage:* tool grouping (=:TOOL_ROSTER: hygiene-tools=
+referencing groups, not 30 individual names) + per-agent
+allow/deny lists. Same literate file. ~1 day.
+
+*Gate-1 check:* fits the mission — agents become more
+configurable per user / per agent without code changes.
+*Gate-2 check:* shape mirrors existing literate-config and
+agent-roster patterns; not new architecture.
+
+** TODO MCP tool *creation* tier 3 (Phase 24 candidate)           :plan:mcp:research:
+:PROPERTIES:
+:PRIORITY: C
+:SOURCE: ~/org/20260503155918-claude_scratchpad.org Tier 3
+:END:
+
+User-defined MCP tools from the literate file. Three execution
+backends, ranked by safety:
+
+a) *Shell-wrapped tools* (~3 days) — user declares shell command
+   + arg schema; host wraps it. Sandbox via existing shell
+   capability. Covers ~30% of "I wish I had a tool that..."
+   cases. RECOMMENDED MVP.
+b) *HTTP-wrapped tools* (~3 days) — user declares HTTP endpoint
+   + auth + arg schema. Behind external.network capability.
+   Personal API integrations (Linear, Todoist, weather alts).
+c) *Python-via-org-babel* (~1-2 weeks if responsible) —
+   user writes Python in an org-babel block; host evaluates.
+   Dangerous: arbitrary code becomes LLM-callable. DEFER until
+   tier 3a/b prove insufficient.
+
+*Gate-2/3 check:* this expands scope significantly — only
+proceed when tiers 1+2 prove insufficient AND a real user need
+surfaces. Phase 24 candidate, not 1.0.
+
+** TODO Get Claude set up with GitHub for daniel2501/org-llm     :plan:meta:infra:
+:PROPERTIES:
+:PRIORITY: A
+:SOURCE: 2026-05-03-test-session.org § Outstanding
+:END:
+
+Two scheduled remote routines need GitHub access to open draft
+PRs:
+- =trig_019bhYiLEzxMWF5UkcWBuf1j= (<2026-05-17>) — recipe
+  promotion review for remaining advisory recipes
+- (The 2026-05-04 morning resume routine — superseded but
+  example shape)
+
+Without it, agents can clone the public repo but fail the "open
+draft PR" step.
+
+*Action:* visit
+[[https://claude.ai/code/onboarding?magic=github-app-setup]] OR
+run =/web-setup= in Claude Code locally.
+
+** TODO P3 long-tail — track here, address post-1.0               :plan:longtail:
+:PROPERTIES:
+:PRIORITY: C
+:SOURCE: gap-analysis-alpha-to-beta.org P3
+:END:
+
+Held items, all low priority, address after 1.0:
+- Documentation generator (=org-llm man= exists; structured
+  generated docs would help)
+- Demo videos / animated terminal recordings
+- Plugin / extension model for user-added MCP tools
+- Multi-vault support (currently single =org_dir=)
+- Backup / restore beyond =self snapshot=
+- Progress bars for the doctor walkthrough's slow LLM probes
+- *Android / Termux port* — Termux quirks: arm64-only Ollama,
+  no =systemd= for auto-embedder daemon, =pass= via pkg manager,
+  /tmp on tmpfs with low ceiling, smaller hardware budget for
+  benchmarks
+
+*Gate check:* most of these would expand scope (gate 2). Pick
+selectively when a real user need surfaces.
+
+* Plan queue                                                    :@plan:
+
+# Forward-looking work that isn't a phase yet. Things to design,
+# decide, prototype.
+
+* Test campaigns                                                :@test:
+
+# Active or upcoming test campaigns. Each gets a sub-heading
+# linking to the campaign's detail file (in the wiki) and the
+# expected pass criteria.
+
+* Doc work                                                       :@doc:
+
+# Documentation updates not tied to a phase. Architecture
+# expansions, README sweeps, wiki gap-fills.
+
+* Held / waiting                                                :@hold:
+
+# HOLD = self-blocked, will return to.
+# WAITING = blocked on external (review, dependency, decision).
+
+* Done — last 30 days                                          :@done:
+
+# Recent DONE entries kept here for at-a-glance recall before
+# they migrate to Archive. Keep ~30 days; older roll into
+# Archive section below.
+
+* Archive — superseded files                                :@archive:
+
+** Migrated 2026-05-03                                        :archived:
+
+Active items folded into this tracker; original files marked
+=:archived:= at the top with banner pointing here. Files
+preserved as historical audits — do not edit.
+
+*** Vault files
+- =~/org/org-llm-test-session/INDEX.org= — north-star alpha→beta
+  framing; folded into [[*North star][North star]]. Per-phase journal files
+  (phase-1 through phase-16) preserved as session journals.
+- =~/org/org-llm-test-session/backlog.org= — --playful flag plan
+  + 7 deferred ideas → [[*Plan queue][Plan queue]] (--playful Phase A/B,
+  auto-capture, mcp call, capture --link-to, cloud-routing for
+  log --reflect, opencode DB path bug, title-phrase boost)
+- =~/org/org-llm-test-session/gap-analysis-alpha-to-beta.org= —
+  P0/P1/P2/P3 punch list → [[*Validation backlog][Validation backlog]] (load-bearing P0-1
+  install, P1.2 MCP fleet) + [[*Bugs / findings][Bugs]] (P0.2 SSL, P1.1 tests, P1.3
+  Pi-Node, P1.5 perf footer) + [[*Plan queue][Plan queue]] (P2 polish, P3 long-tail)
+- =~/org/20260502010556-phase18_test_plan.org= — Phase 18
+  hands-on; merged into the validation framework
+- =~/org/org-llm-test-report-2026-04-26.org= — multi-agent test
+  report; historical, no live items
+- =~/org/org-llm-walkthroughs-2026-04-26.org= — manual + LLM
+  walkthroughs; historical, no live items
+
+** Migrated 2026-05-03 (second pass)                       :archived:
+
+Triage of the 7 remaining pending files:
+
+*** Vault files
+- =~/org/session-dev-2026-04-27.org= — mixed personal journal
+  (Doom config + analytics + gifts); no org-llm action items;
+  archived as historical reference.
+- =~/org/org-analytics-2026-04-27.org= — point-in-time analytics
+  output; archived (future analytics live in dbt views).
+- =~/org/20260429185146-regroup_fix_hangs.org= — fix-session
+  report; all 5 chat()-timeout fixes shipped 2026-04-29; no live
+  items; archived.
+- =~/org/20260503155918-claude_scratchpad.org= — RICH content;
+  extracted MCP tool customization Tier 1+2 (PRIORITY B) and
+  Tier 3 (PRIORITY C) into [[*Plan queue][Plan queue]]; archived.
+
+*** Wiki files
+- [[file:2026-05-03-test-campaign-live.org][=2026-05-03-test-campaign-live.org=]] — campaign progress
+  tracker (20/20 done); superseded; archived.
+- [[file:2026-05-03-test-session.org][=2026-05-03-test-session.org=]] — extracted GitHub setup TODO
+  (PRIORITY A) into [[*Plan queue][Plan queue]]; findings 6-8 already in [[*Bugs / findings][Bugs]]
+  via recipes.org references; archived.
+
+** Kept as-is (reference material, sibling concepts)       :reference:
+- [[file:test-prompts.org][=test-prompts.org=]] — eval suite (reusable across campaigns)
+- [[file:audit-log.org][=audit-log.org=]] — wiki↔reality audit log (sibling concept;
+  audit-log tracks doc drift, this tracker tracks code/feature work)
+- [[file:2026-05-03-recipe-ab-ground-truth.org][=2026-05-03-recipe-ab-ground-truth.org=]] — A/B harness
+  ground-truth dataset (referenced by the A/B harness; canonical)
+- [[file:2026-05-03-test-campaign-detail.org][=2026-05-03-test-campaign-detail.org=]] — raw per-run detail
+  data (60 runs, 20 prompts × 3 models); ground-truth reference
+  for the test-session findings; not archived
+- =~/org/org-llm-test-session/phase-*.org= (17 files) — historical
+  per-phase session journals; not actionable; preserved as
+  session log
+
+** Consolidation status
+:PROPERTIES:
+:UPDATED: [2026-05-03]
+:END:
+
+Both passes complete. 11 source files archived, 4 reference files
+preserved, 17 historical phase journals untouched. All live items
+folded into the tracker sections above with =SOURCE:= properties
+for traceability.
+
+The next consolidation cycle will probably be triggered by the
+"automate this via =org-llm tracker review=" Meta TODO — the
+manual pattern done here is the spec for the future verb.
+
+* Meta — eat your own dog food
+
+This tracker is *intermediate state*. The end-goal is for
+**org-llm itself to take over the tracking work** — for this
+project AND for similar large solo / small-team org-mode
+initiatives. Every convention in this file is a candidate for
+the eventual template. Friction captured here becomes the spec
+for the app feature.
+
+** What "self-hosted tracking" means concretely
+
+- =org-llm tracker init= — scaffolds a tracker.org from a
+  template into any vault, with the schema (TODO states, tag
+  taxonomy, agenda views) baked in.
+- =org-llm tracker review= — scans the vault for scattered
+  planning files and proposes fold-in / archive (the
+  consolidation we just did, but automated).
+- =doctor -w= extension — surfaces tracker entries with
+  =:VALIDATED:= older than 30 days as "stale validation"
+  alerts.
+- LLM agents use the tracker as their priority surface —
+  recipes that read open TODOs and suggest what's next given
+  the three [[*The three quality gates][quality gates]].
+- Tutor onboarding step that introduces the tracker pattern.
+
+The migration we did 2026-05-03 (scattered → central) is itself
+the *spec* for what =tracker review= should automate.
+
+** Broader principle: dev artifacts are app candidates
+
+Every artifact built for org-llm's own development is a
+candidate user-facing feature. The two roles compose: dev-process
+tooling that works at n=1 today is a reference implementation
+of what we could ship to FOSS users running similar large
+org-mode projects.
+
+See =feedback_dev_artifacts_are_app_candidates.md= in the agent
+memory for the full policy. The TODOs below capture concrete
+shipping candidates from the dev work this sprint:
+
+** TODO Ship the tracker schema as a template + =tracker init= verb :research:vault:cli:
+:PROPERTIES:
+:PRIORITY: B
+:EFFORT:   half-day
+:END:
+
+The TODO/NEXT/STARTED/HOLD/WAITING/DONE/CANCELLED workflow,
+tag taxonomy (=:validation:= =:bug:= =:plan:= × =:proxy:=
+=:mcp:= × =:load-bearing:= =:polish:=), property conventions
+(=:PRIORITY:= =:VALIDATED:= =:EFFORT:= =:ACTUAL:= =:GATE:=
+=:SOURCE:=), and section layout (active / next / validation
+backlog / bugs / plan queue / archive) — all of this is what
+=tracker init= would scaffold. Ship the convention as a template
+under =docs/templates/dev-tracker.org.example= + a CLI verb that
+copies it into the user's vault and registers in agenda-files.
+
+** TODO Ship the agenda custom commands as a Doom bundle          :research:cli:emacs:
+:PROPERTIES:
+:PRIORITY: B
+:EFFORT:   2h
+:END:
+
+The 8 custom agenda commands we wired (=d n=, =d p=, =d v=, =d b=,
+=d h=, =d s=, =d w=, =d c=) plus the column-view default format
+are candidates for the org-llm Doom bundle (=doom/org-llm/=).
+=org-llm doom-sync= or a new =doom/agenda.el= module that the
+user opts into.
+
+** TODO Ship pace tracking as a tutor step + =tracker pace= verb  :research:cli:doc:
+:PROPERTIES:
+:PRIORITY: C
+:EFFORT:   half-day
+:END:
+
+The estimation buckets (trivial / quick / small / medium / big
+/ multi-day), the velocity log table, the sprint snapshot, the
+=:EFFORT:= / =:ACTUAL:= convention, and the calibration ratio —
+candidate for a tutor step + an =org-llm tracker pace= verb that
+prints the current sprint snapshot (rolled up from the
+tracker's section). Tutor introduces the discipline; the verb
+keeps it visible without leaving the CLI.
+
+** TODO Ship the validation framework's contribution-standard wording :doc:test:
+:PROPERTIES:
+:PRIORITY: B
+:EFFORT:   1h
+:END:
+
+The pattern "new LLM-mediated features need a =ValidationConfig=
+in =org_llm/validation_configs/=, plus a ground-truth file under
+=docs/wiki/<feature>-ground-truth.org=" is exactly the kind of
+contribution standard that could land as a CONTRIBUTING.md
+section + a =doctor= probe that flags features that lack a
+config. Worth wording carefully now while the rationale is fresh.
+
+** TODO Investigate: should =org-llm= ship a `dev-tracker.org` template?  :research:vault:
+:PROPERTIES:
+:PRIORITY: B
+:END:
+
+Every large org-mode project hits this same scattering problem
+(test plans / phase docs / scratchpads / campaign logs). If
+=org-llm= shipped:
+- A canonical schema (TODO states, tags, agenda views — like
+  this file)
+- A =org-llm tracker init= verb that scaffolds it from a
+  template
+- An =org-llm tracker review= verb that scans the vault for
+  scattered planning files and proposes a fold-in / archive
+- Agenda integration documented in the tutor
+
+…it would extend the value of the project to anyone running a
+sizable solo or small-team initiative in org-mode.
+
+** TODO Investigate: validation-status detection in `org-llm doctor`  :research:doctor:
+:PROPERTIES:
+:PRIORITY: B
+:END:
+
+=doctor -w= already runs LLM-driven probes. Extension: scan
+this tracker for items with =:VALIDATED:= older than 30 days
+and surface them as "stale validations." That closes the loop
+between the tracker and the existing self-care path.
+
+* Related
+
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] — the shape this tracker tracks
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — phase narrative; this tracker is the actionable
+  surface that points at it
+- [[id:9b012557-f592-4d1e-8dd1-464c2a4250c3][Audit log]] — wiki↔reality audits; sibling concept (this
+  tracker tracks code/feature work; audit log tracks doc drift)
+- [[file:test-prompts.org][test-prompts.org]] — the recipe-eval suite test campaigns
+  consume
+- [[file:2026-05-03-recipe-ab-ground-truth.org][2026-05-03-recipe-ab-ground-truth.org]] — A/B ground truth
+  dataset
