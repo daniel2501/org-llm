@@ -2008,6 +2008,432 @@ concrete Phase-25 requirement disqualifies it. The burden is
 on alternatives to *earn* the swap, per Gate 2 (not too
 complex).
 
+** TODO Investigate: Agor as worktree-isolated dev-stream layer (not stack adoption) :research:agor:worktrees:integration:phase25:
+:PROPERTIES:
+:PRIORITY: C
+:GATE:     2,3
+:SOURCE:   2026-05-04 — pro-Agor counter-evaluation; integration-not-fusion framing
+:END:
+
+*Status: parked at C* — but with concrete triggers and a
+pre-committed spike protocol (see synthesis section below).
+Default position remains "no Agor adoption" until a trigger
+fires; when one does, run the 1-day Path A spike with
+pre-committed success criteria, never proceed to Path D
+(fork) before 2029-01-15.
+
+*One-line takeaway:* Agor is the right *idea*; the wrong
+*substrate* for FOSS-distribution org-llm until 2029. Watch
+and steal principles; spike only when a concrete trigger
+fires; never fork; re-evaluate on 2029-01-15.
+
+*Concrete artifacts already extracted from this evaluation:*
+1. =architecture.org= 5th tool-surface property: "every user
+   action is also an MCP tool" (pinned design rule).
+2. SQLite-successor tracker entry above cites
+   =preset-io/agor= + libSQL as strongest non-speculative
+   prior on the libSQL trigger.
+3. This entry's full pro-case (Arguments 1-7) preserved for
+   re-evaluation when the Change Date approaches or a
+   trigger fires.
+
+The walkthrough that produced this entry: 4-page babystep
+synthesis (reframe → worktrees → orchestration + license →
+integration opportunities + agent fleet + risks → six paths
++ spike criteria → triggers + sequencing). Each Argument N
+subsection is one page of that walkthrough.
+
+*** Argument 1 — the reframe (integration, not fusion)
+
+The original "is Agor a component we plug in?" framing puts
+Agor *under* org-llm and is unwinnable: TS daemon vs Python
+CLI, web canvas vs Doom, multiplayer vs n=1. Six categorical
+mismatches.
+
+Inverted framing: *Agor is the workspace; org-llm runs inside
+it.* Agor is the meta-surface above our stack — "which
+sessions in which worktrees doing which work" — not a
+substrate. Doom stays primary on the host. Vault stays
+authoritative (or becomes so per Phase 25). Recipes,
+captain's log, opencode plugin all stay. Agor only adds the
+*air-traffic-control* layer above them.
+
+Under integration framing, original objections re-sort:
+- *Dissolve:* wrong runtime (TS vs Py is fine for sibling
+  dashboards), wrong UI premise (Doom is editor, Agor is
+  dashboard), "replaces what we built" (no, composes above).
+- *Narrower but real:* worktrees-as-anchor (turns into the
+  *strongest pro-Agor argument* — see argument 2),
+  multiplayer-as-non-need (partially defeated — see
+  argument 6).
+- *Survive:* off-the-rails-complexity, Doom-as-primary
+  mandate, Agor's youth (v0.7.x).
+
+Reframe doesn't *win* the argument. It makes it *winnable* —
+under fusion no spike is worth running; under integration a
+1-day spike has a real chance of paying off.
+
+*** Argument 2 — worktrees as the strongest pro-Agor argument
+
+Original con-eval dismissed worktrees as "wrong unit of
+work" in one line. Wrong; they fit problems we have *today*:
+
+- *Parallel dev streams collide on this repo weekly.* Current
+  =git status= shows 9 modified wiki files + 3 untracked Py
+  modules (avatars, validation) + untracked validation_configs
+  + test-campaign org files — at least 3 entangled streams in
+  one working copy. =feedback_reread_before_edits= exists
+  *because* of this exact pain. Worktree-per-stream
+  mechanically prevents collision instead of relying on
+  memory-assisted vigilance.
+- *Vault experiments without polluting =~/org/=.* Tag-rename
+  rehearsal, Phase 25 round-trip-fidelity proof, aggressive
+  =@curator= sweep with diff-then-decide — all today's
+  =git stash= + branch ceremony. Worktrees collapse to "open
+  experimental worktree, do experiment, close, live vault
+  never moved."
+- *"What did the agent break?" reproducibility.* Agor pins
+  =(worktree, commit, agent, prompt)= per session. Replay is
+  =git checkout <commit> && replay <session-log>=, not "I
+  think this happened Tuesday." We're trying to build this
+  manually via captain's log + audit log; Agor gives the
+  substrate for free.
+- *Forward-paying for n=many FOSS future.* When n=many lands,
+  worktree-per-experiment is exactly how FOSS users will
+  safely try things. Building toward it now is cheapest.
+
+*Surviving objection:* "we could just use =git worktree add=
+ourselves." True — but Agor adds *hygiene around* isolation:
+per-worktree dev-env + ports, per-worktree =.opencode= +
+agent registration, session↔worktree binding enforced, UI
+for "which worktrees are alive." The half-day spike question
+is whether that hygiene earns the TS-daemon cost.
+
+*** Argument 3 — Agor as orchestrator for org-llm's agent fleet
+
+Org-llm has a growing agent fleet (=@curator=, =@tracker=,
+=@doom=, =@agentsmith=, =@agentsmith-meta=, plus the
+manager/recipes layer). Today they're persona files +
+=delegate()= MCP tool + ad-hoc scheduling. Agor offers a
+ready-built orchestration substrate that maps almost 1:1.
+
+*Mapping (verified against agor.live/guide docs 2026-05-04):*
+
+| org-llm concept                  | Agor primitive                                          |
+|----------------------------------+---------------------------------------------------------|
+| Agent persona (e.g. @curator)    | Assistant =SOUL.md= + =IDENTITY.md= + =USER.md=          |
+| Agent memory (e.g. wiki sweep    | =memory/{YYYY-MM-DD}.md= chronological journals         |
+| state, validation history)       |                                                         |
+| Agent's allowed tools             | Skills (CLI tools + attached MCP servers per assistant) |
+| Manager =delegate()=              | =agor_sessions_prompt= (peer "btw") OR spawn subsession |
+| Cross-agent collaboration         | Spawn with cross-tool override (Claude Code → Codex etc.)|
+| Curator-on-launch drift check    | =HEARTBEAT.md= tick workflow, scheduler-driven          |
+| Captain's-log =--reflect= weekly  | Same — heartbeat config minutes-to-daily                |
+| =org-llm mcp= subprocess         | Per-session MCP server, adjustable mid-conversation     |
+| Multiple agents coexisting       | Multiple assistants — Agor docs show 12 in one workspace|
+| Spawn fresh-context vs continue  | Agor =spawn= (fresh + callback) vs =fork= (copy + diverge)|
+
+*What's confirmed:* multi-assistant coexistence, per-assistant
+persona/memory/skills, callability via =agor_assistants_list=,
+heartbeat-scheduled tick workflows, cross-tool delegation,
+spawn/fork as distinct primitives, =agor_sessions_prompt= for
+non-blocking peer calls, per-session attached MCP servers.
+
+*Unconfirmed (1-day spike to verify):*
+- Can agents *programmatically register* external MCP servers
+  (vs user-only via settings panel)? Matters for Phase 29
+  self-coded-tools loop where the app synthesizes new tools
+  with no human in the loop.
+- Can assistants directly call each other, or only via
+  session-spawn mechanics? Probably fine through spawn/
+  =agor_sessions_prompt=, just a different shape than our
+  current =delegate()= MCP tool.
+
+*Honest caveat:* each assistant lives in a worktree. A 5-agent
+fleet = 5+ on-disk worktrees. Real footprint, not hypothetical.
+
+*Why this matters more than worktrees alone:* Phase 30's
+"FOSS agent value-adds (always-on / multi-model / multi-judge)"
+is a build-it-ourselves plan that overlaps heavily with what
+Agor already ships. If the spike confirms agent-side MCP
+registration, Agor potentially absorbs ~30-50% of Phase 30's
+infrastructure work (always-on heartbeats, multi-model
+delegation, peer-call patterns) and we focus Phase 30 on the
+FOSS-agent-specific value (multi-judge consensus, local-model
+patterns cloud-can't-afford). That's a meaningful sequencing
+question.
+
+*** Argument 4 — license reality (BSL 1.1, not open source)
+
+Agor's =LICENSE= is *Business Source License 1.1*, not OSI
+open source. The license file itself states verbatim: "The
+Business Source License is *not an Open Source license*.
+However, the Licensed Work will eventually be made available
+under an Open Source License." Confirmed via:
+- =gh api repos/preset-io/agor/contents/LICENSE= (one file,
+  94 lines, BSL 1.1, no second license).
+- The README's "self-hosted" framing is about *self-hosting*,
+  not OSI-open-source. Distinct things.
+
+Material parameters:
+- *Licensor:* Maxime Beauchemin
+- *Additional Use Grant:* None — only non-production use
+  is permitted under BSL itself.
+- *Change Date:* 2029-01-15 → auto-converts to Apache 2.0.
+  Or 4 years after each version's release, whichever comes
+  first.
+- *Termination:* any use in violation auto-terminates rights
+  to *current and all other versions*. Sharp clause; matters
+  for any future contested production-use claim.
+
+*What this means for org-llm:*
+
+| use case                                    | allowed? |
+|---------------------------------------------+----------|
+| Personal eval spike on dev's machine        | yes      |
+| Personal mashup/fork for solo daily-driver  | yes      |
+| Maintaining a long-lived BSL fork           | yes (with maintenance cost) |
+| Hosted service / SaaS shipping Agor         | NO (commercial license needed) |
+| Bundling with org-llm's FOSS distribution   | NO until 2029-01-15 |
+| Re-licensing fork to MIT/Apache             | NO (BSL covenants forbid) |
+| Adopting design *principles* from Agor      | yes — principles aren't licensed |
+
+*User decision (2026-05-04):* personal use through 2029 to
+*incubate* the relationship is acceptable. n=many FOSS
+distribution stays blocked until the Change Date. Re-eval on
+2029-01-15 (or sooner if Beauchemin grants an Additional
+Use Grant covering self-hosted-personal-tools).
+
+*Why this argument matters more than the technical ones:*
+the original con-evaluation's "no adoption" verdict gets
+*sharper* under BSL — even if the worktree spike + agent-fleet
+orchestration both pass, FOSS-distribution is blocked anyway,
+which means anything we build deeply against Agor must be
+either (a) personal-only until 2029 or (b) abstracted enough
+that a non-Agor fallback exists. This constrains the spike's
+output, not whether to run it.
+
+*Forward-paying angle:* the MCP-everything design rule pinned
+in architecture.org IS the right kind of artifact — a
+principle, not code. Continue that pattern: extract
+principles + patterns from Agor, not bytes.
+
+*** Argument 5 — five additional integration opportunities (verified 2026-05-04)
+
+Read four more Agor docs (=scheduler=, =message-gateway=,
+=artifacts=, =cards=, =environment-configuration=) to test
+the integration framing. Five concrete opportunities surfaced:
+
+1. *Scheduler — direct overlap with /loop + CronCreate.* Cron
+   + Handlebars-templated prompt attached to a worktree;
+   firing spawns fresh session with full board/worktree
+   context, MCP-equipped. Adds over plain cron: full
+   transcript persistence, deduplication after downtime.
+   Worth borrowing as a pattern.
+2. *Message Gateway — Slack/GitHub as session portals.*
+   =@agor= mention on PR/issue creates session bound to
+   thread; bidirectional. Solves what the Pi bridge is
+   solving generically. Personal-incubation use; FOSS
+   distribution requires user to set up GitHub App + Slack
+   bot — high friction, blocked until 2029 anyway.
+3. *Artifacts — agent-rendered live React/JS apps on canvas.*
+   Sandpack-bundled, persistent at =.agor/artifacts/<id>/=,
+   created via =agor_artifacts_create= MCP tool. Concrete
+   high-value uses (artifact-charter applies — render-only,
+   never edit-surface):
+   - Theme-studio knob-preview (Phase 31 avatars)
+   - Recipe A/B comparison viewer (Phase 27 validation)
+   - Captain's-log filterable timeline
+   - Validation-framework dashboard (pre-Superset)
+   - Phase 29 self-coded-tools candidate explorer
+     w/ accept-reject UI
+   - Tutor renderer w/ live-fillable forms
+4. *Cards — generic non-code workflow entities.* "Dumb by
+   design" — assistants manage them. JSON-schema validated
+   data field. Org-mode automation features (card events,
+   zone triggers) listed as not-yet-implemented; today
+   weaker than =agenda= + =now.org=. *Watch list, not
+   adopt-now.*
+5. *Environment configuration — =.agor.yml= per worktree.*
+   Handlebars-templated start/stop/nuke/logs, port-collision
+   avoidance via =unique_id= math, health-check + app URLs.
+   Solves the recipe A/B harness reproducibility problem
+   (parallel runs without DB-clobber or port collision).
+
+*Bottom line:* worktrees + scheduler + env-config form a
+coherent dev-environment-isolation story for problems we
+have today. Message-gateway is BSL-blocked-but-personally-
+valuable. Artifacts give bounded visualization wins. Cards
+are watch-only. Minimum viable spike: =worktree + scheduler
++ env-config + org-llm mcp= attached to each session.
+
+*** Argument 6 — agent-fleet management (deepest pro-Agor argument)
+
+Today's agent layer = persona-files + recipes + ad-hoc cron
++ =delegate()= MCP tool. Agor's assistants make agents
+*first-class entities* — filesystem, memory, runtime,
+schedule, identity, skills.
+
+Eight ways this matters:
+
+1. *User-added agents become a workflow, not a code edit.*
+   FOSS-future ships @recipe-helper / @dad-mode /
+   @meeting-summarizer / @therapy-prep — wildly varying.
+   Today: edit Python. Agor: =agent create= + SOUL.md +
+   skills + heartbeat. Org-llm ships substrate + baseline
+   (@curator/@tracker/@doom); users compose. *This is the
+   architecture =project_personal_now_foss_later= needs.*
+2. *Per-agent memory namespacing.* @curator memory at
+   =memory/{date}.md= scoped to itself, no global collision
+   with @doom. Cleaner than today's global memory.
+3. *Per-agent skill scoping.* @curator gets =org_link_graph=
+   + =walk_*= but NOT =capture_note= or =delegate=. Today
+   every agent sees all 71 MCP tools.
+4. *Cross-tool delegation by agent role.* @curator → Claude
+   Code, @doom → Codex, @tracker → OpenCode. Today routes
+   by recipe; Agor routes by agent identity.
+5. *Heartbeat-driven autonomy at agent level.* Concrete
+   fleet: curator-stale-link-scan 6h, tracker-stuck-items
+   daily, captain-weekly-reflect Sun, user-defined oncall
+   every 30min M-F 9-5.
+6. *Async peer-questions via =agor_sessions_prompt=.* @doom
+   asks @curator "is [[id:abc]] valid?" non-blocking, gets
+   answer, continues. Today =delegate()= synchronous.
+7. *Agent provenance.* Every session pins =(worktree,
+   commit, agent, prompt)=. Phase 30 always-on needs this
+   for trust.
+8. *Sprawl problem solved.* User-added-agent fleet
+   management is what Agor's assistant model was built for.
+
+*Deepest insight:* Agor turns "agent" from
+=(persona-file, recipe, ad-hoc-cron)= tuple into a
+*first-class entity*. Phase 30 + Phase 31 are already
+drifting toward this; Agor is farther down the path.
+
+*** Risks + mitigations (across all arguments)
+
+| # | risk | mitigation |
+|---+------+------------|
+| R1 | BSL blocks FOSS distribution until 2029 | Extract principles not bytes; org-llm-native equivalents post-incubation |
+| R2 | TS daemon as second runtime | =org-llm mcp= as only bridge; no Python depending on Agor internals |
+| R3 | Doom-as-primary erosion (canvas pulls editing in) | Surface-role rule: Doom=author/edit, canvas=monitor/orchestrate. Editing migration → roll back |
+| R4 | Artifact proliferation → off-the-rails | Artifact charter: render-only, never authoritative, never edit-surface. 3-criteria gate |
+| R5 | Agor v0.7.x is young; API churn likely | Pin specific version per incubation; no auto-upgrade; re-eval on majors |
+| R6 | N assistants = N+ on-disk worktrees | Promote only @curator/@tracker/@doom initially. User-added = user cost |
+| R7 | Heartbeat agents drift silently | Every heartbeat writes captain's log; doctor sweep checks freshness |
+| R8 | Fork divergence one-way door under BSL | No fork during incubation. Bug-PRs only. Save divergence for post-2029 |
+| R9 | Cross-agent calls more verbose than =delegate()= | Shim: =org-llm delegate @curator ...= wraps spawn. User interface stable |
+| R10 | Vault-location ↔ worktree-location ambiguity | =~/org/= stays outside Agor worktree mgmt. Vault = host resource worktrees reference |
+
+*** Argument 7 — the rewire/mashup answer (six paths ranked)
+
+Original question: "could we not rewire, or add to it as
+desired for special mashup?" Legally yes (BSL grants
+modification rights); strategically only along certain paths.
+
+| path | shape | cost | when |
+|------+-------+------+------|
+| A | Vanilla Agor as black-box dashboard; register =org-llm mcp= per session | 1 day | spike now |
+| B | Vanilla Agor + new org-llm-side MCP tools shaped for Agor primitives | ~2 weeks | post-spike if A passes |
+| C | Vanilla Agor + =org-llm agor init= preset bundle (assistants, zones, =.agor.yml=, heartbeats) | ~3 weeks | post-B if validated daily-driver |
+| D | Fork Agor + selective rewiring | permanent maintenance | NO before 2029 |
+| E | Contribute upstream (bug PRs only) | free, slow | always available |
+| F | Build Agor-shaped layer *inside* org-llm (worktree+scheduler+env-config+assistants natively) | months | informed by A→C, not alternative |
+
+*Recommended sequence:* A → B → C through 2029-01-15, then
+re-evaluate. Never D before Change Date. F is post-incubation
+option informed by A→C lessons.
+
+*Spike pre-committed success criteria (gate before B):*
+
+| question | success | failure |
+|----------+---------+---------|
+| Worktree-per-stream cleans parallel-dev pain? | 3 concurrent streams ran 1wk without git-status cross-contamination | Worktree friction outweighs =git stash= discipline |
+| =org-llm mcp= attaches cleanly per session? | All 71 tools resolve; recipe pre-fetch works; =delegate()= works | Anything subtle breaks (proxy passthrough, opencode invariants, captain's log paths) |
+| Canvas earns attention vs distracts from Doom? | Canvas glanced for "what's alive" only; Doom stays where edits happen | I'm in canvas instead of Emacs, or canvas pulls me from =now.org= |
+| Heartbeat curator-drift fires usefully? | 1 week of drift-checks produces ≥1 finding I'd have missed | Noise, false positives, or missed fires |
+
+*If ≥2 of 4 fail, walk away.* B doesn't start until all 4 pass.
+
+*Mashup verdict, distilled:* every line we write stays in
+*our* repo, under *our* license, on *our* design rules. Agor's
+role is "useful BSL substrate during incubation." If Agor
+disappears tomorrow, we lose the runtime; we keep the
+principles, the MCP extensions, the preset configs
+(rewritable for any worktree manager), and the architectural
+lessons. Lock-in bounded by design.
+
+*** Synthesis — triggers, sequencing, what to actually do
+
+**** Triggers that wake this entry (C → B)
+
+Any one is sufficient:
+
+1. *Parallel-dev pain becomes acute* — a =git status=
+   cross-contamination incident wastes >2h, OR =git stash=
+   used >3 times in a single day. Worktree spike's gate-1
+   question becomes urgent.
+2. *Phase 30 is about to start* — Agor's heartbeat-scheduled
+   assistants potentially absorb 30-50% of the
+   "always-on / multi-model / multi-judge" infrastructure.
+   Spike before writing Phase 30 scaffolding from scratch.
+3. *Phase 31 needs live preview surface* — knob-tweaking via
+   CLI + Emacs reload becomes the slowest part of theme
+   iteration. Artifacts as preview goes from "interesting"
+   to "obvious win."
+4. *User-added agent friction* — when adding @oncall-helper
+   or @meeting-prep means editing source code, that's the
+   signal Agor's assistant model is the right substrate.
+5. *2028-Q4* (~6 months before BSL → Apache 2.0) — evaluate
+   even if no other trigger fires, so post-Change-Date
+   decisions are informed not reactive.
+6. *Beauchemin grants Additional Use Grant* covering
+   personal-tool / self-hosted-individual use. Watch
+   =preset-io/agor/LICENSE= for changes.
+
+**** This week — nothing about Agor
+
+Active sprint has higher-priority work (avatar render,
+validation framework, recipe tier system, route-preview).
+~5-min total action: star =preset-io/agor= on GitHub for
+release pings. Done.
+
+**** This quarter — answer one question without spiking
+
+By end of next sprint (~2026-06-15), track for 4 weeks:
+- How many =git stash= per session?
+- How often does a =git status= cross-contamination cost
+  real time?
+
+If answer is "rarely," trigger 1's strongest motivation
+evaporates and Agor stays parked indefinitely. If "weekly,"
+trigger 1 fires and spike moves up. *Cheapest possible test
+of the strongest pro-Agor argument; zero Agor code, zero
+new tooling.*
+
+**** Through 2029-01-15 — the policy
+
+- *Default:* no Agor adoption. Entry stays at C.
+- *If trigger fires:* 1-day Path A spike. If criteria pass,
+  escalate Path B → Path C. *Never* Path D.
+- *Always available:* Path E (upstream bug PRs).
+- *Continuously extract:* principles + patterns + vocabulary.
+  Already proven viable (architecture.org MCP-rule, libSQL
+  prior-art note).
+- *Watch for:* Additional Use Grant changes, major Agor
+  releases (esp. 1.0), agent-side MCP-server-registration
+  capability landing.
+
+**** Post-2029-01-15 — automatic unblock
+
+When =preset-io/agor= auto-converts to Apache 2.0, every
+constraint above re-evaluates. By then either:
+- Lived through Path A→B→C → empirical data → easy decisions
+- Stayed away → Path F (build natively) or "stay away" both
+  remain live
+
+No commitment needed in advance. Change Date is automatic.
+
 ** TODO Phase 27 — Apache Superset dashboards (optional)          :plan:db:dashboards:dbt:
 :PROPERTIES:
 :PRIORITY:        B
