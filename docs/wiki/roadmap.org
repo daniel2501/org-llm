@@ -270,6 +270,7 @@ Currently planned phases (links into catalog below):
 - [[*TODO [#A] Planned — Phase 19: built-in vault git-sync][Phase 19 — built-in vault git-sync]] (gates org-agenda-agent)
 - *Phase 21 deterministic inferrers* — Phase 21.1 shipped (=vault_facts=); further inferrers added as need surfaces (validated 2026-05-03 via =org-llm validate inferrers=)
 - *Phase 22.6 agent tools v2* — 13/12 shipped; remaining tool work tracked in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker]]
+- [[*TODO [#A] Planned — Phase 23.6: literate MCP tools (customize / manage / create)][Phase 23.6 — literate MCP tools]] (extends literate-config to the MCP surface)
 - [[*TODO [#B] Parked — Phase 20: full agent crew (manager + specialists)][Phase 20 — full agent crew]] (parked)
 
 Leftover sub-phases from earlier parents (B-priority unless
@@ -2090,7 +2091,8 @@ core install never requires it.
 ** Status
 
 Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 27. Ships post-1.0,
-post-Phase 25.
+post-Phase 25. Long-form companion: [[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]] (7-tier
+integration ladder; semantic-layer prototype already shipped).
 
 * TODO [#B] Planned — Phase 28: Containerization strategy    :planned:
 
@@ -2124,6 +2126,71 @@ Decision documented in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.or
 full table of which components containerize and which don't.
 No standalone sprint — specific containers ship alongside
 the components they serve.
+
+* TODO [#A] Planned — Phase 23.6: literate MCP tools (customize / manage / create) :planned:
+SCHEDULED: post-Phase 23.2 for tier-3 sub-phases; tier-1+2 sprint-eligible now
+
+Extend the existing literate-config pattern to the MCP tool
+surface. Same shape as =org-llm-config.org= /
+=org-llm-agents.org= / =org-llm-baselines.org=, fourth file at
+=~/org/org-llm-tools.org=. Three escalating capabilities:
+
+** 23.6.1 — Tier 1: customize (sprint-eligible, ~1 day)
+
+Per-tool defaults, descriptions the LLM sees, and enable flags.
+No new tools, no user code; just lets the user shape the existing
+surface without editing source. =org-llm tools --tangle= /
+=--apply= / =--show= reusing =literate_config.py='s
+infrastructure.
+
+** 23.6.2 — Tier 2: manage (sprint-eligible after 23.6.1, ~1 day)
+
+Tool groups + per-agent allow/deny. Agents declare =:TOOL_ROSTER:=
+referencing groups (e.g. =hygiene-tools, count-tools=) instead of
+hand-curated tool lists. New tools join groups and automatically
+reach the right agents. Necessary as the MCP surface grows past
+~50 tools and hand-rosters become brittle.
+
+** 23.6.3 — Tier 3a: shell-wrapped user tools (gates on Phase 23.2)
+
+User declares a shell command + arg schema in the literate file;
+host wraps it as an MCP function. Existing =shell= capability
+gates invocation. Arg shell-escaping, subprocess timeout. Most
+common "I wish I had a tool that…" requests fit this shape.
+
+** 23.6.4 — Tier 3b: HTTP-wrapped user tools
+
+User declares an HTTP endpoint + arg schema + env-var auth (no
+raw secrets in the literate file). =external.network= capability
+gate.
+
+** 23.6.5 — Tier 3c: Python-via-babel (deferred indefinitely)
+
+Arbitrary Python from a =#+begin_src python= block. Powerful but
+the security work (sandbox, AST allowlist, capability-locked env)
+is the bulk of the cost; value-to-risk ratio low until 3a + 3b
+prove insufficient. Open question whether to implement at all.
+
+** Why this matters
+
+- Honours the same-pattern-used-twice principle: users already
+  know the literate-config shape from knobs/agents/baselines.
+- Future-proofs the MCP surface as it grows. Per-agent rosters
+  become declarative (group references) instead of hand-edited
+  lists.
+- Natural prerequisite for *Phase 29 (self-coded tools)*: the
+  LLM-generated-tool synthesis pipeline writes its output to
+  =~/org/org-llm-tools.org= (Tier 3a format) where the user
+  reviews and applies. 23.6.3 lands the format; 29 lands the
+  generator.
+
+** Status
+
+Design page: [[file:literate-tools.org][literate-tools.org]] (full
+spec — file format, properties, security boundaries, sub-phase
+shipping order). Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] when work
+starts. 23.6.1 + 23.6.2 are sprint-eligible immediately; 23.6.3+
+blocks on Phase 23.2 (capability enforcement).
 
 * TODO [#A] Planned — Phase 29: Self-coded tools             :planned:
 SCHEDULED: post-Phase 25.4

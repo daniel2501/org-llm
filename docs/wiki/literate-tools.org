@@ -1,0 +1,324 @@
+:PROPERTIES:
+:ID:       c3e7a2f1-8b4d-4e9c-a1f2-d3e4b5a6c7d8
+:CREATED:  [2026-05-04]
+:END:
+#+TITLE: Literate MCP tools — customize, manage, create from ~/org/org-llm-tools.org
+#+FILETAGS: :wiki:tools:mcp:literate-config:phase-23-6:
+#+OPTIONS: toc:2 num:nil
+
+* What this is
+
+Org-llm already round-trips three configuration surfaces through
+literate org files:
+
+| file                            | shape                                           | what's there                                  |
+|---------------------------------+-------------------------------------------------+-----------------------------------------------|
+| =~/org/org-llm-config.org=      | one heading per knob                            | model choices, proxy settings, location, etc. |
+| =~/org/org-llm-agents.org=      | one heading per agent                           | persona, model_role, capabilities, triggers   |
+| =~/org/org-llm-baselines.org=   | one heading per baseline rule                   | shared cross-cutting agent defaults           |
+
+This page proposes a fourth file —
+=~/org/org-llm-tools.org= — that extends the same pattern to MCP
+tools. Three escalating capabilities: *customize* defaults on
+existing tools, *manage* the tool surface (groups + per-agent
+allow/deny), *create* new tools (deferred — separate sub-phase).
+
+The first two are cheap wins (~2 days). The third needs a real
+security pass and ships in a follow-up.
+
+* Why a literate file (vs. config knobs)
+
+Tools have richer per-instance configuration than knobs do. A
+single MCP tool has: a name, a description (what the LLM reads
+during tool-use), default arg values, a capability requirement,
+an enable/disable flag, optional grouping, optional per-agent
+overrides. Stuffing all that into flat =org-llm config tool.org_count_matches.path_glob=
+keys is ergonomically painful and not discoverable.
+
+A literate file gives:
+- *One section per tool* — discoverable and self-documenting.
+- *Free-text descriptions* — users can override the description
+  the LLM sees in tool-use without editing source.
+- *Round-trip via existing tangle/apply infrastructure* —
+  =literate_config.py= already handles this shape.
+- *Diff-friendly* — `git log ~/org/org-llm-tools.org` is the
+  audit trail of who-changed-which-tool-when.
+
+* Tier 1 — Customize (Phase 23.6.1)
+
+Per-tool defaults, descriptions, and enable flags. No new tools,
+no user code. Lets the user shape the existing surface.
+
+** File format
+
+#+begin_src org
+,#+TITLE: org-llm tool customization
+,
+,* org_count_matches                                              :tool:
+,:PROPERTIES:
+,:ENABLED:           true
+,:DEFAULT_PATH_GLOB: **/*.org
+,:DEFAULT_IGNORE_CASE: true
+,:CAPABILITY_REQ:    read.vault
+,:DESCRIPTION_OVERRIDE: Count regex matches in org files. [X]/DONE-anchored when the pattern starts with the anchor; otherwise raw match.
+,:GROUP:             count-tools
+,:END:
+,
+,Notes (optional, free-form):
+,Defaults to whole-vault scope. For dailies-only counts, the
+,call-site passes path_glob='daily/**/*.org'.
+,
+,* org_grep                                                       :tool:
+,:PROPERTIES:
+,:ENABLED:           true
+,:DEFAULT_PATH_GLOB: **/*.org
+,:DEFAULT_MAX_RESULTS: 50
+,:CAPABILITY_REQ:    read.vault
+,:GROUP:             search-tools
+,:END:
+#+end_src
+
+** Properties recognised
+
+| property                | effect                                                                     |
+|-------------------------+----------------------------------------------------------------------------|
+| =:ENABLED:=             | =false= → tool removed from MCP surface; LLM can't call it                |
+| =:DEFAULT_*:=           | when the LLM omits the arg, host fills from this row                      |
+| =:CAPABILITY_REQ:=      | minimum capability to invoke; documentation today, enforced when 23.2 lands |
+| =:DESCRIPTION_OVERRIDE:= | replaces the tool's bundled description in the MCP schema the LLM sees    |
+| =:GROUP:=               | declares membership in a tool group (see Tier 2)                          |
+
+Tools the user hasn't customised use shipped defaults — same
+mechanism as agents. The literate file is purely additive.
+
+** Round-trip
+
+#+begin_src bash
+,# Tangle: write the file from current shipped defaults + DB rows.
+,org-llm tools --tangle    # writes ~/org/org-llm-tools.org
+
+,# Apply: read the file, persist user customisations to db.Config.
+,org-llm tools --apply
+
+,# Show: print effective values per tool (built-in + user override).
+,org-llm tools --show
+#+end_src
+
+Same verb shape as =org-llm config= and =org-llm agents=.
+Implementation reuses =literate_config.py='s parsing
+infrastructure with a tool-shaped =_ConfigEntry= variant.
+
+* Tier 2 — Manage (Phase 23.6.2)
+
+Tool groups + per-agent allow/deny lists. Lets the user shape the
+*surface each agent sees* without editing tool implementations.
+
+** Tool groups
+
+A group is a heading at the top of the literate file with =:group:=
+in its tags. Member tools reference the group via their =:GROUP:=
+property (already shown above).
+
+#+begin_src org
+,* hygiene-tools                                                 :group:
+,:PROPERTIES:
+,:DESCRIPTION:    Vault hygiene + maintenance reads
+,:CAPABILITY_REQ: read.vault
+,:END:
+
+,* search-tools                                                  :group:
+,:PROPERTIES:
+,:DESCRIPTION:    Vault search + retrieval
+,:CAPABILITY_REQ: read.vault
+,:END:
+
+,* count-tools                                                   :group:
+,:PROPERTIES:
+,:DESCRIPTION:    Deterministic counting + tallying
+,:CAPABILITY_REQ: read.vault
+,:END:
+
+,* agenda-tools                                                  :group:
+,:PROPERTIES:
+,:DESCRIPTION:    Schedule + time + weather joins
+,:CAPABILITY_REQ: read.vault, external.network
+,:END:
+#+end_src
+
+** Per-agent allow/deny
+
+Agents declare their tool roster via the existing
+=:TOOL_ROSTER:= property in =~/org/org-llm-agents.org=. After
+this phase, that property accepts *group references* alongside
+individual tool names:
+
+#+begin_src org
+,* gardener                                                      :agent:
+,:PROPERTIES:
+,:TOOL_ROSTER: hygiene-tools, count-tools, vault_profile, search_notes
+,:DENY_TOOLS:  capture_note, write_file, append_to_file
+,:END:
+#+end_src
+
+Resolution order at launch:
+1. Start with the agent's =:TOOL_ROSTER:= (groups expanded to
+   members).
+2. Subtract anything in =:DENY_TOOLS:=.
+3. Filter by the agent's declared =:CAPABILITIES:= against each
+   tool's =:CAPABILITY_REQ:= (Phase 23.2 will enforce; today it's
+   advisory).
+
+Result: each agent has a tightly scoped tool surface visible to
+its LLM — fewer wrong-tool calls, more focused tool-use.
+
+** Why groups matter
+
+Today an agent's =TOOL_ROSTER= is a hand-curated list of 4-8
+tools. As the MCP surface grows past ~50 tools, hand-rosters
+become brittle (forget to add a new tool to the right agent).
+Groups let the host author tag tools by purpose; agents
+reference purposes; new tools join the right group and
+automatically reach the right agents.
+
+* Tier 3 — Create (deferred to Phase 23.6.3+)
+
+User-defined MCP tools. Three execution backends with different
+risk profiles:
+
+** Tier 3a — Shell-wrapped (Phase 23.6.3, the MVP)
+
+Cheapest, safest. User declares a shell command + arg schema; the
+host wraps it in an MCP function.
+
+#+begin_src org
+,* my_finance_query                                              :tool:
+,:PROPERTIES:
+,:KIND:        shell
+,:ENABLED:     true
+,:CMD:         beancount-query ~/finance/main.beancount {{query}}
+,:ARGS:        query:string:Beancount query language expression
+,:CAPABILITY_REQ: shell
+,:DESCRIPTION: Run a beancount query against the personal ledger.
+,:END:
+#+end_src
+
+Security boundary: the existing =shell= capability gates
+invocation. =CMD= templates use =Jinja-lite=
+(=\{\{name\}\}= → arg) with shell-escaping per arg. No raw
+interpolation. Host runs the resolved command in a subprocess
+with =timeout=30s=, captures stdout/stderr, returns as JSON.
+
+** Tier 3b — HTTP-wrapped (Phase 23.6.4)
+
+User declares an HTTP endpoint + auth + arg schema. Host issues
+the request, returns the JSON body.
+
+#+begin_src org
+,* my_linear_issues                                              :tool:
+,:PROPERTIES:
+,:KIND:           http
+,:ENABLED:        true
+,:METHOD:         POST
+,:URL:            https://api.linear.app/graphql
+,:AUTH_HEADER:    Authorization: Bearer ${LINEAR_API_KEY}
+,:BODY_TEMPLATE:  {"query": "{{query}}"}
+,:CAPABILITY_REQ: external.network
+,:DESCRIPTION:    Query Linear's GraphQL API.
+,:END:
+#+end_src
+
+Security: =external.network= capability gate. Auth via env-var
+substitution; the literate file never contains raw secrets.
+
+** Tier 3c — Python-via-org-babel (deferred indefinitely)
+
+User writes a Python =#+begin_src python ... #+end_src= block.
+Host evaluates and exposes as a tool. Powerful but the security
+work is the bulk of the cost (sandbox via subprocess + AST
+allowlist + capability-locked env), and the value-to-risk ratio
+is not great until 3a + 3b prove insufficient. Open question
+whether to implement at all.
+
+* Round-trip + lifecycle
+
+Tier 1 + 2 reuse =literate_config.py='s tangle/apply
+infrastructure verbatim. The tool customizations persist as
+=db.Config= rows (key-prefixed =tool.<name>.<property>=);
+restart-resilient.
+
+Tier 3 user tools register at startup by reading the literate
+file and dynamically wrapping each declaration as an MCP function.
+Hot-reload (=org-llm tools --apply= in a running session)
+deferred to Phase 24 — initial cut requires relaunch.
+
+* Security boundaries
+
+Each tier widens the attack surface. The host's stance:
+
+| tier | what user controls       | host enforces                                                      |
+|------+--------------------------+--------------------------------------------------------------------|
+| 1    | defaults + descriptions   | tool implementations unchanged; can only narrow LLM-visible surface |
+| 2    | tool→agent visibility     | capability gates still apply; can't grant a tool more capability   |
+| 3a   | shell command + arg shape | =shell= capability required; arg shell-escaping; subprocess timeout |
+| 3b   | HTTP endpoint + auth      | =external.network= required; env-var auth (no raw secrets in file) |
+| 3c   | arbitrary Python          | (deferred) sandboxed subprocess, AST allowlist, capability-locked env |
+
+User-defined tools cannot grant themselves capabilities the
+agent invoking them doesn't have. That stays a host-side
+enforcement concern.
+
+* Why this fits the standing direction
+
+Two principles this honours:
+
+- *Same pattern, used twice.* Literate org files for knobs +
+  agents + baselines is a known shape; users don't learn a new
+  format. The fourth file slots in.
+- *Customizability via opt-in, simplicity by default.* Default
+  tool surface ships in code; users add overrides only when
+  they have a real reason. Same posture as the agent
+  rationalization (Phase 23.0): umbrella defaults in the
+  built-in registry, specialists via the literate file.
+
+This is also a natural prerequisite for [[*TODO [#A] Planned — Phase 29: Self-coded tools][Phase 29 — self-coded
+tools]]: the LLM-generated-tool synthesis pipeline writes its
+output to =~/org/org-llm-tools.org= (Tier 3a) where the user
+reviews, optionally edits, and applies. Phase 29's auto-discovery
+needs Phase 23.6.3's shell-wrapped tool format to land tools
+without code edits.
+
+* Sub-phase shipping order
+
+| sub-phase | scope                                | gates           | size  |
+|-----------+--------------------------------------+-----------------+-------|
+| 23.6.1    | Tier 1 — customize defaults + descriptions | none           | ~1 day |
+| 23.6.2    | Tier 2 — groups + per-agent allow/deny | 23.6.1          | ~1 day |
+| 23.6.3    | Tier 3a — shell-wrapped user tools   | 23.2 (cap enforcement) | ~3 days |
+| 23.6.4    | Tier 3b — HTTP-wrapped user tools    | 23.6.3          | ~3 days |
+| 23.6.5    | Tier 3c — Python-via-babel (or skip) | 23.6.3 + sandbox design | ~1-2 weeks |
+
+23.6.1 + 23.6.2 are sprint-eligible immediately. 23.6.3+ blocks
+on Phase 23.2 (capability enforcement) — declarative capabilities
+exist today but the MCP layer doesn't gate yet, and shipping
+user-defined tools without enforcement is reckless.
+
+* See also
+
+- [[file:agents.org][agents.org]] — the agent surface literate
+  tools customizes
+- [[file:agent-framework.org][agent-framework.org]] — the Agent
+  dataclass + capability set the tool layer is gated by
+- [[file:agentsmith.org][agentsmith.org]] — the meta-agent that
+  designs new agents (sister surface; could one day design tools
+  too via the same conversational flow)
+- [[file:recipes.org][recipes.org]] — the deterministic-pre-fetch
+  layer; tools are the primitives recipes compose
+- =org_llm/literate_config.py= — the tangle/apply infrastructure
+  this design reuses
+- =org_llm/mcp_server.py= — the MCP server; new tools land here
+  via @server.tool() registration
+- =~/org/org-llm-config.org= — knobs file (model: this is one)
+- =~/org/org-llm-agents.org= — agents file (model: this is one)
+- =~/org/org-llm-baselines.org= — baselines file (model: this is one)
+- *Phase 29* (self-coded tools, see roadmap) — depends on
+  23.6.3's shell-wrapped tool format
