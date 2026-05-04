@@ -583,6 +583,72 @@ re-add.
   there. Either rename, redesign, or demote.
 
 
+**** 2026-05-04: W2 walkthrough — capture polish path is broken     :friction:w2:capture:gate-1:
+
+User accepted a placeholder thought:
+=Idea: lead the vault sidebar section with today readable date
++ schedule, push system-meta (embed %, file counts) below.=
+Ran =org-llm capture <thought>= (default polish=on). Four
+gate-1 fails surfaced from one capture.
+
+***** TODO Capture polish path latency: 48s vs <2s bar         :friction:w2:bug:gate-1:capture:perf:
+:PROPERTIES:
+:PRIORITY:  A
+:SOURCE:    W2 walkthrough 2026-05-04
+:END:
+=org-llm capture '<thought>'= with default =polish=on= took
+48.272s real-time. W2 failure-mode bar is ">2s" — hit 24× over.
+Cause: cloud LLM polish round-trip is on the hot path of the
+default capture verb. Fix candidates:
+- Flip default to =--no-polish=. Polish becomes opt-in.
+- Move polish to a background pass that updates the file in
+  place after capture returns instantly.
+- Use the local fast model for polish; cloud only on demand.
+
+***** TODO Capture polish hallucinates structure + content    :friction:w2:bug:gate-1:capture:
+:PROPERTIES:
+:PRIORITY:  A
+:SOURCE:    W2 walkthrough 2026-05-04
+:END:
+Polish was given a 1-sentence idea about a *future* sidebar
+design ("lead with today readable date + schedule …"). It
+wrote a SECOND top-level heading =* Vault Sidebar= containing
+*invented content*: a fake date ("2024-04-26"), fake meetings
+("10:00 AM - Meeting with Team", "11:00 AM - Project X -
+Review"), fake stats ("65% used, 1234 files, 12 folders").
+Polish prompt apparently lets the model fabricate examples
+instead of refining the input. Fix candidates:
+- Constrain polish prompt to "format the input, do not add
+  content."
+- A/B harness the new prompt vs. baseline to verify
+  hallucination rate drops.
+- Until fixed, polish=off should be the default (see above).
+
+***** TODO Capture title truncated mid-word                   :friction:w2:bug:capture:
+:PROPERTIES:
+:PRIORITY:  B
+:SOURCE:    W2 walkthrough 2026-05-04
+:END:
+Title rendered as =* Idea: lead the vault sidebar section
+with today readable dat= — final word ("date") truncated
+mid-word. Likely a hard-coded character limit in the
+title-derivation path that doesn't respect word boundaries.
+
+***** TODO Capture polish hallucinates today's date            :friction:w2:bug:capture:
+:PROPERTIES:
+:PRIORITY:  B
+:SOURCE:    W2 walkthrough 2026-05-04
+:END:
+Polish-generated content includes "Today's Date: 2024-04-26"
+in the body. Today is 2026-05-04. Model fills in "today" from
+training-data priors instead of reading a current-time signal
+from the prompt. Either:
+- Don't ask the polish path to include "today" content at all
+  (fixed by the hallucination fix above).
+- Inject CURRENT TIME into the polish system prompt (existing
+  AgentBaseline pattern).
+
+
 ** DONE Phase 23.1 + 23.5 — Agent dataclass + DB-backed registry  :plan:agents:db:cli:load-bearing:
 CLOSED: [2026-05-03]
 :PROPERTIES:
@@ -604,9 +670,9 @@ to the entire vault.
   (=birth_name=, =aliases=, =capabilities=, =recipes=,
   =hygiene_scan=, =origin=, =pack=, =addressable=) +
   =get_builtins()= + =resolve_alias()= + =agent_from_row()=.
-- 9 starfleet-core OOB agents with Trek birth-names
-  (=picard/spock/data/geordi/riker/janeway/scotty/soong/keiko=);
-  functional names (=crew/researcher/scribe/…=) ship as
+- 10 starfleet-core OOB agents with Trek birth-names
+  (=picard/spock/data/geordi/riker/janeway/scotty/soong/keiko/atoz=);
+  functional names (=crew/researcher/scribe/…/curator=) ship as
   aliases — both work as =@<name>= routes.
 - 8 legacy-extras retained in code, filtered out at launch
   unless =agents_include_legacy=true=.
@@ -1366,26 +1432,30 @@ Also touched: tangled-file shell-link at =cli.py=:7032 (now
 =--apply= for user-facing consistency) and the mutex error
 message at =cli.py=:6980.
 
-** TODO =format_prefetch_block= missing =agenda_overdue= branch    :bug:recipes:load-bearing:
+** DONE =format_prefetch_block= missing =agenda_overdue= branch    :bug:recipes:load-bearing:
+CLOSED: [2026-05-04 Mon]
 :PROPERTIES:
 :PRIORITY: A
 :SOURCE:   2026-05-03 weather_aware_agenda re-validation
+:ACTUAL:   20m
 :END:
-SCHEDULED: <2026-05-05 Tue>
 
-[[file:../../org_llm/recipe_runner.py][=recipe_runner.py=]]:467
-only renders =agenda_today= items in the pre-fetch block. When
-=agenda_today=0= but =agenda_overdue>0= (e.g. 22 overdue), the
-on-arm gets a count and nothing to cite — losing grounding
-quality vs the off-arm even though the hallucination trap is
-gone.
+*Resolution (2026-05-04):* replaced the single =agenda_today=-only
+branch at [[file:../../org_llm/recipe_runner.py][=recipe_runner.py=]]:540
+with a tuple iteration over all three buckets (today→8,
+overdue→5, upcoming→5). Each non-empty bucket now renders
+=[STATE] DATE  TEXT  (file:line)= per item — same shape as the
+=org_agenda= MCP tool at =mcp_server.py=:3621 so on-arm grounding
+matches what the off-arm tool-use path produces.
 
-*Fix:* mirror the =agenda_today= rendering for =agenda_overdue=
-(top-5 with file paths) when today is empty. Same fix for
-=agenda_upcoming= when both today and overdue are sparse. After
-patch, re-A/B weather_aware_agenda per the validation entry above
-(=scripts/recipe_ab_harness.py --only-prompt A7 --trials 5= → bar
-≥55% on-arm wins).
+Smoke verified: original failing case (today=0, overdue=22) now
+renders 5 overdue items with full file paths; all-buckets-populated
+case renders all three sections in priority order (today→overdue→
+upcoming); all-empty case still produces just counts (no spam).
+
+*Re-A/B is the next gate* — the [[*TODO Re-validate weather_aware_agenda post-hardening][weather_aware_agenda
+re-validation]] entry below depends on this fix, scheduled
+2026-05-10 Sun.
 
 ** TODO =delegate()= chat-completions path doesn't carry MCP tools  :bug:agents:proxy:load-bearing:
 :PROPERTIES:
