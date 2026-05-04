@@ -1,0 +1,126 @@
+:PROPERTIES:
+:ID:       d2a4fe88-890e-460a-93dd-de9d0590edbc
+:CREATED:  [2026-05-04]
+:END:
+#+TITLE: Now — single-view dashboard
+#+FILETAGS: :wiki:meta:dashboard:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* What this page is
+
+A flat at-a-glance view of *what's in flight + recently shipped*.
+Complementary to:
+
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] — long-form phase narrative ("what we're
+  building over months"). This page references it but doesn't
+  duplicate.
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] — structured actionable state (validation
+  backlog, bugs, plan queue, sprint snapshot, calibration). This
+  page summarises the in-flight slice.
+
+Use case: open this when you want one screen showing "what did
+I do this week + what's the queue". Open the tracker when you
+want filterable agenda views by tag / state / priority.
+
+* Update protocol
+
+This page is *always* stale relative to git. Refresh after
+each significant work block:
+
+1. Update the *Recently done* table from =git log --oneline=
+   (last ~10-20 commits). Drop entries older than ~2 weeks.
+2. Update the *Ahead* table from
+   [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]]'s
+   scheduled TODOs (this week + ~next 2 weeks).
+3. Update the *Standing* table when long-running STARTED items
+   change state.
+4. Bump the *As of* line at the top of each section so readers
+   can see when the snapshot was taken.
+
+No automation yet — manual refresh. A future =org-llm tracker
+snapshot= verb could regenerate this page from
+=dev-tracker.org='s state if it earns its keep.
+
+* Recently done                                                    :@done:
+
+# As of: 2026-05-04 — agent test campaign + post-fix triage arc
+
+| When  | Status | Item                                                        | Commit  |
+|-------+--------+-------------------------------------------------------------+---------|
+| 05-04 | ✓      | Wiki sweep — recipes.org + roadmap.org post-fix verdict     | 6212e4e |
+| 05-04 | ✓      | Close weather re-A/B + 2 new bugs found en route            | 277c279 |
+| 05-04 | ✓      | Close agentsmith meta-agent validation                      | 53cbf78 |
+| 05-04 | ✓      | =@agentsmith= trim 3177→1423 + cross-scope refusal          | 4bd81a4 |
+| 05-04 | ✓      | Close @journalist boundary-fix validation                   | 5ad4281 |
+| 05-04 | ✓      | =@journalist= stay-in-lane handoff bullet                   | 525fa31 |
+| 05-04 | ✓      | Close =format_prefetch_block= overdue-rendering bug         | 622f2d3 |
+| 05-04 | ✓      | =format_prefetch_block= renders all 3 agenda buckets        | 2b48ae5 |
+| 05-04 | ✓      | Close phantom-verb bug                                      | e0a547f |
+| 05-04 | ✓      | =agents --apply= alias + docstring fix                      | c4c507a |
+| 05-04 | ✓      | Land 9 agent-test findings + spread cluster                 | b5504da |
+
+* ▶ YOU ARE HERE — 2026-05-04 Mon, end of agent-test triage arc    :@here:
+
+#+begin_quote
+*Last action:* committed wiki sweep (=6212e4e=) closing the
+post-fix narrative on =weather_aware_agenda=.
+
+*Current move:* pushing into =@doom= pack decision (pulled
+forward from Sat 5-09).
+
+*State of play:*
+- 11 commits today, ~3h =:ACTUAL:= across 5 PRIO-A items shipped
+- Today's PRIO-A queue is clear; one PARTIAL verdict
+  (weather_aware_agenda quality 40% / bar 55%) with two cheap
+  lifts queued for Mon 5-11
+- 3 new B-priority bugs filed during the harness run
+- No PRIO-A item open within this week's window
+#+end_quote
+
+* Ahead                                                            :@queued:
+
+# As of: 2026-05-04
+
+| When     | Pri | Item                                                                  | Source        |
+|----------+-----+-----------------------------------------------------------------------+---------------|
+| Sat 5-09 | A   | Validate =@gardener= (routine re-test)                                | agent test    |
+| Sat 5-09 | B   | =@doom= pack decision — promote to starfleet-core OR document opencode-only | agent test    |
+| Sun 5-10 | —   | Routine re-test sweep — @journalist boundary, agentsmith multi-domain refusal | scheduled    |
+| Mon 5-11 | B   | Lift =weather_aware_agenda= 40% → ≥55% (top-5→10 + location hint)    | weather re-A/B|
+| Mon 5-11 | B   | Fix =recipe_ab_harness.py= shebang (silent sqlalchemy failure)        | weather re-A/B|
+| Mon 5-11 | B   | Fix =recipe_ab_judge.py --results= flag wiring                        | weather re-A/B|
+| Tue 5-12 | B   | =delegate()= chat-completions doesn't carry MCP tools                 | agent test    |
+| Sun 5-17 | A   | Routine re-test sweep — agentsmith multi-domain refusal               | scheduled     |
+| Sun 5-31 | B   | Routine re-test sweep — =@gardener=                                   | scheduled     |
+| Tue 6-02 | B   | Routine re-test sweep — =classify_items= MCP tool                     | scheduled     |
+
+* Beyond — open from earlier dev-tracker entries (samples)         :@beyond:
+
+These predate the current arc. Not exhaustive — see
+[[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] §
+Plan queue + Bugs / findings for the full list.
+
+| Pri | Item                                                          | State |
+|-----+---------------------------------------------------------------+-------|
+| A   | Phase 25 — invert authority: DB is truth, files are UI        | TODO  |
+| A   | Show-your-work mode — citations + grounding by default        | TODO  |
+| A   | Validate cross-platform install (macOS + Ubuntu)              | TODO  |
+| A   | Validate auto-embedder + staleness sweep cooperation          | NEXT  |
+| A   | Bare HTTPS urlopens bypass our SSL ctx wrapper                | TODO  |
+| B   | Theme-studio cache auto-regen on knob change                  | TODO  |
+| B   | Generalize A/B+judge to a standard validation framework       | STARTED |
+
+* Standing — long-running STARTED items                            :@standing:
+
+| Pri | Item                                                                | Started |
+|-----+---------------------------------------------------------------------+---------|
+| A   | Daily-drive org-llm + Doom as one Emacs distro                      | 2026-05-03 |
+| A   | Rationalize architecture + docs + dev tracking (current sprint)     | (sprint) |
+
+* See also
+
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] — narrative-level phase progression
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] — structured actionable state (the
+  authoritative source; this page is a derived view)
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] — the shape underlying all the work
