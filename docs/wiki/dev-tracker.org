@@ -1236,46 +1236,82 @@ ask agentsmith for a multi-domain agent (e.g. "ship me an agent
 that does keybinds AND mood journaling"); confirm it refuses +
 splits per the new bullet.
 
-*** TODO Re-validate weather_aware_agenda post-hardening             :validation:recipes:load-bearing:
+*** DONE Re-validate weather_aware_agenda post-hardening             :validation:recipes:load-bearing:
+CLOSED: [2026-05-04 Mon]
 :PROPERTIES:
-:PRIORITY: A
-:GATE:     1
-:EFFORT:   2h
+:PRIORITY:  A
+:GATE:      1
+:VALIDATED: [2026-05-04]
+:EFFORT:    2h
+:ACTUAL:    50m
+:VERDICT:   PARTIAL — hallucination fixed; quality bar not yet cleared
 :END:
-SCHEDULED: <2026-05-10 Sun>
 
-*Hallucination trap is fixed.* 3/3 =recipes_on= trials on the
-prior FAIL prompt ("given today's weather and my schedule, what
-should I prioritise today?") produced honest no-fabrication
-output. Sample: "Given that the weather is unavailable and you
-have 22 overdue items, prioritize clearing some of those overdue
-tasks today." Compare to prior FAIL evidence at
-[[*Findings (gate-1 critical)][line 327]]: "prioritize moving your
-outdoor meeting with Jane from 10 AM to 2 PM... morning rainy" —
-that shape is gone.
+*Hallucination trap is fixed.* 5/5 =recipes_on= A7 trials produced
+no fabricated meetings or forecasts. Both arms now cite the same
+real overdue files (=20220304170356-arka_lab.org=,
+=20220828082533-configuration_language_as_api_calls_stored_in_sql.org=).
+Compare to prior FAIL evidence at
+[[*Findings (gate-1 critical)][line 327]]:
+"prioritize moving your outdoor meeting with Jane from 10 AM to
+2 PM... morning rainy" — that shape is gone.
 
-Mechanism: (a) =_run_weather_aware_agenda= always returns a
-=RunResult= (never =None= on missing config); (b)
-=format_prefetch_block= renders =weather: unavailable
-(<reason>)= explicitly; (c) recipe body in
-[[file:../../org_llm/orchestration.py][=orchestration.py=]]:43
-adds "DO NOT invent forecasts or weather details — narrate ONLY
-from the pre-fetch."
+*Quality bar still not cleared.* Opus-blinded judge verdict on
+2026-05-04 over 5 A7 trial pairs:
 
-*Verdict is partial, not pass.* =recipes_on= still loses on
-grounding quality. Off-arm cited 5-7 specific overdue tasks with
-verbatim file paths
-(=20220304170356-arka_lab.org=, =vacation_weekend.org=, etc.);
-on-arm said only "22 overdue items" with no file references. Root
-cause: =format_prefetch_block=
-([[file:../../org_llm/recipe_runner.py][=recipe_runner.py=]]:467)
-has no branch for =agenda_overdue= (only renders =agenda_today=).
-See bug entry below.
+| metric                     | result                          | bar   | status |
+|----------------------------+---------------------------------+-------+--------|
+| recipes_on win rate        | 40% (was 0%)                    | ≥55%  | FAIL   |
+| recipes_off win rate       | 60% (was 100%)                  | ≤55%  | PASS   |
+| p50 latency reduction      | 51.5%                           | ≥30%  | PASS   |
+| median token reduction     | 86.9%                           | ≥20%  | PASS   |
 
-*Action:* patch overdue-rendering, then re-run
-=scripts/recipe_ab_harness.py --only-prompt A7 --trials 5= and
-=scripts/recipe_ab_judge.py= (Opus blinded). Bar: ≥55% on-arm
-wins per the restoration commit's pledge.
+Net: huge swing 0% → 40% on quality, but the bar ≥55% needs more
+lift. Latency + tokens already clear by wide margins.
+
+*What still drags on quality:* judge reasoning shows arm-B wins
+when it lists MORE overdue items and explains WHY weather is
+unavailable (config detail, not just status). Two cheap next
+moves to try:
+
+1. Bump =agenda_overdue= top-5 → top-10 in
+   [[file:../../org_llm/recipe_runner.py][=recipe_runner.py=]]:540
+   (more cite-able grounding, ~50 more tokens — still well under
+   off-arm's 5000).
+2. Replace "weather: unavailable (location not configured)" with
+   "weather: unavailable — set =location_lat=/=location_lon= via
+   =org-llm config=" (matches off-arm's helpful framing).
+
+Tracked as a follow-up entry below.
+
+*Resolution artefacts:*
+- Harness output: =/tmp/recipe_ab_a7_retest_2026-05-04.jsonl=
+- Judge output: =/tmp/recipe_ab_a7_summary_2026-05-04.md=
+- Original FAIL data preserved at =/tmp/recipe_ab_results_2026-05-03_original.jsonl=
+
+*** TODO Lift weather_aware_agenda quality 40% → ≥55%               :validation:recipes:load-bearing:
+:PROPERTIES:
+:PRIORITY: B
+:GATE:     1
+:SOURCE:   2026-05-04 weather_aware_agenda re-A/B (40% on, bar 55%)
+:EFFORT:   1h
+:END:
+SCHEDULED: <2026-05-11 Mon>
+
+Two cheap moves to try (per judge reasoning above):
+
+1. Bump =agenda_overdue= top-5 → top-10 in
+   =recipe_runner.py=:540 — judge consistently rewarded the
+   arm with more cite-able items.
+2. Tighten =weather: unavailable= line — surface the actionable
+   fix ("set =location_lat=/=location_lon=") rather than just
+   the bare reason. Off-arm's framing wins on the "why is
+   weather missing" axis.
+
+Validation gate: re-run =recipe_ab_harness.py --only-prompt A7
+--trials 5= + judge. Pass = on-arm ≥55% wins. If still under,
+escalate to a 3rd lift pass or accept the recipe as
+"safe-but-tied" infrastructure.
 
 *Re-test cadence:* <2026-05-17 Sun>.
 
@@ -1529,6 +1565,54 @@ agent's =tool_roster=); (b) document the constraint loudly in
 and require tool-leaning personas to refuse @-delegate
 invocation; (c) make =delegate()= refuse to run an agent whose
 persona promises unwired tools.
+
+** TODO recipe_ab_harness.py shebang silently fails on systems without sqlalchemy  :bug:test:tooling:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE:   2026-05-04 weather_aware_agenda re-A/B
+:EFFORT:   10m
+:END:
+SCHEDULED: <2026-05-11 Mon>
+
+[[file:../../scripts/recipe_ab_harness.py][=recipe_ab_harness.py=]]
+shebang is =#!/usr/bin/env python3=, which on this Guix system
+resolves to a python without sqlalchemy installed. The harness
+imports succeed (org_llm modules are pure-python at top level)
+but =_proxy_cfg_str= silently swallows the sqlalchemy
+=ImportError= and returns =""= for every config key, so
+=_resolve_cloud_failover_target()= returns =None= and the
+harness errors out with "cloud not configured" — even when
+=org-llm cloud --status= shows a configured + reachable cloud.
+
+*Workaround:* invoke explicitly via the uv-installed python:
+=/home/daniel/.local/share/uv/tools/org-llm/bin/python scripts/recipe_ab_harness.py …=
+
+*Fix options:* (a) change shebang to
+=#!/usr/bin/env -S uv run --script= or detect-and-relaunch in
+the org-llm venv; (b) make =_proxy_cfg_str= surface ImportError
+loudly (print a one-line warning before falling back) so the
+user sees the real cause; (c) change the harness to invoke via
+=org-llm validate recipes= as the canonical entry point and
+mark the script as deprecated.
+
+** TODO recipe_ab_judge.py --results flag is parsed but ignored    :bug:test:tooling:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE:   2026-05-04 weather_aware_agenda re-A/B
+:EFFORT:   5m
+:END:
+SCHEDULED: <2026-05-11 Mon>
+
+[[file:../../scripts/recipe_ab_judge.py][=recipe_ab_judge.py=]]
+defines =RESULTS = Path("/tmp/recipe_ab_results.jsonl")= as a
+module-level constant (line 54) and =_load_results()= reads from
+that constant. =argparse= adds =--results= (line 323) but the
+arg never reaches =_load_results()= — so passing
+=--results /tmp/other.jsonl= silently reads the default path
+anyway.
+
+*Fix:* thread the parsed =args.results= through
+=_load_results(path)=. One-line wire-up.
 
 * Plan queue                                                    :@plan:
 
@@ -2754,6 +2838,66 @@ selectively when a real user need surfaces.
 
 # HOLD = self-blocked, will return to.
 # WAITING = blocked on external (review, dependency, decision).
+
+* Dogfood ideas backlog                                      :@dogfood:
+
+Captured 2026-05-04 during the @curator dogfood session. Each
+is a way of pointing org-llm at its own dev process. Per the
+"Dev artifacts as app candidates" feedback rule, each is also a
+candidate user-facing feature.
+
+** TODO @tracker agent — owns this file
+Daily verb: "what's on deck?". End-of-session: "what shipped,
+what's blocked?". Foundation for the =tracker init= /
+=tracker review= self-hosting goal. STARTED 2026-05-04 as
+Stage 1 (persona + triggers).
+
+** TODO Phase-landing automation
+Git commit message matches =phase X.Y shipped= → app
+auto-proposes diffs to roadmap.org (status flip), audit-log.org
+(entry), 00-index.org (Status table row). Curator catches these
+manually today.
+
+** TODO Auto-EFFORT capture
+=org-clock-in= on a dev-tracker heading; the app records actual
+minutes; compare to EFFORT estimate at session end. Velocity
+drift becomes visible without manual tracking.
+
+** TODO Curator-on-launch drift check
+Every =org-llm launch= runs a fast curator drift check (numeric
++ status) against =_AGENT_META=, =DEFAULT_INTERCEPTORS=, MCP
+tool count. Surface stale wiki claims as insight cards.
+
+** TODO Captain's Log =--reflect= weekly cron
+Sunday evening: scan last week of CLI/MCP/doctor events;
+cluster failures; surface "you ran X 7 times with errors — fix?"
+as insight card. Already shipped manually; needs a schedule.
+
+** TODO A/B harness for agent personas
+Reuse =recipe_ab_harness.py= template: prompt set + two persona
+variants for one agent + blinded Opus judge. Run when persona
+drifts (curator's situation 2026-05-04).
+
+** TODO Self-coded-tools detector applied to dev sessions
+Phase 29's idea pointed inward: when the LLM does the same wiki
+sweep / drift check / roster lookup repeatedly, surface as a
+candidate tool. Curator's =wiki_link_audit= was discovered this
+exact way (manual sweep × N times this session).
+
+** TODO Audit-log =--next= verb
+Show what's deferred from past audits, ranked by age. Today the
+deferred list grows quietly. Verb makes the next sweep's
+agenda concrete.
+
+** TODO README ↔ wiki diff verb
+=org-llm doctor wiki-readme-sync= flags first-mention concepts
+in README that don't link to a wiki page (or vice versa).
+Memory rule today; no enforcement.
+
+** TODO Skill-shaped agent shipping
+Codify the @agentsmith 7-step flow as an org-babel skill. "Ship
+a new agent" becomes =:skill: ship_agent= with structured
+output. Tests the skills primitive against a real workflow.
 
 * Done — last 30 days                                          :@done:
 
