@@ -1188,22 +1188,39 @@ empty-items short-circuit would prevent wasted cloud roundtrip.
 
 *Re-test cadence:* monthly (~30d).
 
-*** NEXT Validate @doom keybind agent + fix legacy-pack default     :validation:agents:load-bearing:
+*** DONE Validate @doom keybind agent + fix legacy-pack default     :validation:agents:load-bearing:
+CLOSED: [2026-05-04 Mon]
 :PROPERTIES:
-:PRIORITY: B
-:GATE:     1
-:EFFORT:   45m
+:PRIORITY:  B
+:GATE:      1
+:VALIDATED: [2026-05-04]
+:EFFORT:    45m
+:ACTUAL:    20m
 :END:
-SCHEDULED: <2026-05-09 Sat>
 
-@doom smoke + boundary pass (refused mood-journaling drift,
-suggested org-journal/org-roam handoff). Two issues:
-=pack="legacy-extras"= so it doesn't load by default (commit
-84acc44's framing implied OOB); persona references =doom_packages=
-/ =doom_keybinds= but the =delegate()= chat-completions path can't
-reach MCP tools — narration hallucinates tool calls. Decide:
-promote pack to =starfleet-core=, OR document "@doom requires
-opencode invocation, not @-delegate".
+*Resolution (2026-05-04):* promoted @doom to =starfleet-core=
+([[file:../../org_llm/agents/_builtins.py][=_builtins.py=]]:148 —
+removed =pack="legacy-extras"=, defaults to starfleet-core).
+Reasoning: =doom/org-llm.el= ships in this repo as a first-class
+Doom integration; the user's daily-drive line in this tracker
+includes Doom-as-distro; the FOSS-first/Emacs-Doom rule applies;
+the 9 prior starfleet-core agents had no Doom specialist.
+=org-llm agents --list= now shows 12 resolved agents (was 11),
+@doom included.
+
+Added a 6th DEFAULTS bullet to the @doom persona at
+[[file:../../org_llm/cli.py][=cli.py=]]:4774 covering the
+@delegate-without-MCP failure mode: "If your tool roster isn't
+reachable... say so explicitly — don't narrate as if you ran
+the tools. Suggest opencode invocation for the live config;
+otherwise stay in DOOM-defaults territory and flag the guess."
+Soft mitigation; the structural fix is the separately-tracked
+[[*TODO =delegate()= chat-completions path doesn't carry MCP tools][delegate() bug]] (Tue 5-12).
+
+Original smoke-test findings preserved: smoke + boundary pass
+(refused mood-journaling drift, suggested org-journal/org-roam
+handoff), persona shape held, capabilities (=read.vault=, shell)
+match doc intent.
 
 *Re-test cadence:* <2026-05-17 Sun>.
 
@@ -3034,6 +3051,35 @@ selectively when a real user need surfaces.
 
 # Forward-looking work that isn't a phase yet. Things to design,
 # decide, prototype.
+
+** TODO Memory Alpha framing for Phase 25                  :phase25:naming:
+:PROPERTIES:
+:CAPTURED:  [2026-05-04]
+:DOC:       [[id:b91f980e-5699-4994-843a-00532f1770b3][memory-alpha.org]]
+:END:
+
+Naming + UX layer over the DB-authoritative inversion. Per the
+new wiki page: rename Phase 25's user-facing surface to "Memory
+Alpha mode"; pair with =memory-alpha sync= / =verify= /
+=snapshot= verbs; keep technical phrase "DB-authoritative
+inversion" valid in code comments + commit messages but lead
+with the metaphor in user-facing copy.
+
+Three of four mappings already shipped (=Captain's Log= /
+=@curator= / =vault_facts= as Memory Prime / MCP as the access
+protocol). Phase 25 is the fourth — making the DB canonical.
+
+Decisions to make before 25.1 lands:
+- Do we add the =memory-alpha= verb namespace, or fold the
+  three verbs (=sync= / =verify= / =snapshot=) into existing
+  groups (=context= / =doctor= / =backup=)?
+- Does the README's "What you get" panel mention "Memory Alpha
+  mode" or just "DB inversion (Phase 25)"?
+- Does the agent-roster icon palette get a Memory Alpha glyph
+  for the persona surface?
+
+Pending — not a Phase 25 blocker; can land mid-arc as the
+inversion progresses.
 
 * Test campaigns                                                :@test:
 
