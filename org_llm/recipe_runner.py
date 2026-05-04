@@ -541,12 +541,26 @@ def format_prefetch_block(recipe_name: str, run: RunResult,
             f"agenda_counts: today={len(today)}, "
             f"upcoming={len(upcoming)}, overdue={len(overdue)}"
         )
-        if today:
-            lines.append(f"agenda_today ({len(today)}):")
-            for it in today[:8]:
+        # Render each non-empty bucket with file:line so the agent
+        # can cite specific tasks (matches org_agenda MCP tool's
+        # format at mcp_server.py:3621). Without this, on-arm sees
+        # only counts and falls back to vague paraphrase while
+        # off-arm cites real files — measurable grounding gap on
+        # weather_aware_agenda's A7 prompt (overdue=22, today=0).
+        for label, items, top_n in (
+            ("agenda_today",    today,    8),
+            ("agenda_overdue",  overdue,  5),
+            ("agenda_upcoming", upcoming, 5),
+        ):
+            if not items:
+                continue
+            lines.append(f"{label} ({len(items)}):")
+            for it in items[:top_n]:
+                date = it.get("scheduled") or it.get("deadline") or "—"
+                text = (it.get("text", "") or "")[:60]
                 lines.append(
-                    f"  [{it.get('state','?')}] "
-                    f"{(it.get('text','') or '')[:60]}"
+                    f"  [{it.get('state','?')}] {date}  {text}  "
+                    f"({it.get('file','?')}:{it.get('line','?')})"
                 )
         body = "\n  ".join(lines)
     else:
