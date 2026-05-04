@@ -1918,16 +1918,47 @@ the dev's vault.
 
 ** TODO Investigate: databases that could replace SQLite          :research:db:foundation:phase25:
 :PROPERTIES:
-:PRIORITY: B
+:PRIORITY: C
 :GATE:     3
-:SOURCE:   2026-05-04 — Phase 25 says "SQLite (or successor)"; pick the successor before 25.1 lands
+:SOURCE:   2026-05-04 — Phase 25 says "SQLite (or successor)"; parked at C until a trigger fires
 :END:
+
+*Status: parked.* Default position is "stay on SQLite + extensions"
+until something concrete forces re-evaluation. Speculative engine
+shopping before that point fails Gate 2 (not too complex). This
+entry exists so the question is *queued, not forgotten* — and so the
+research format is pre-committed when a trigger fires.
+
+*Triggers that move this back to B (any one is sufficient):*
+
+- *Captain's log or embeddings table crosses ~1M rows* and WAL-mode
+  SQLite shows write-stall or query latency on the dev's actual vault
+  (not synthetic).
+- *A Phase 25 sub-phase hits a real SQLite limitation* — e.g. 25.4
+  git_sync needs row-level concurrent writes from multiple processes,
+  or 25.x needs streaming replication that Litestream can't provide.
+- *Multi-device sync becomes a 1.0 requirement* (laptop ↔ desktop ↔
+  phone) and the user-experience cost of "ship the .db file" is
+  judged unacceptable.
+- *dbt/Superset (Phase 12.7/27) demonstrably underperforms* against
+  SQLite as the read-side and a columnar engine would clearly help.
+  Most likely outcome here is "attach DuckDB as a read-only sibling,"
+  not "replace SQLite."
+- *libSQL/Turso ships a feature SQLite-proper can't match* and the
+  byte-compatible-file escape-hatch is still intact. 1-day spike is
+  warranted on this trigger alone.
+
+Until a trigger fires, the answer is: **SQLite + WAL +
+=sqlite-vec= + FTS5 + Litestream**, with DuckDB as a possible
+read-only attached sibling for analytics. No swap.
 
 Phase 25 inverts vault/DB authority and explicitly leaves the
 engine open ("SQLite or successor"). Once the DB carries raw
 bytes + parsed structure + embeddings + history + config +
 crew log + sensors + engagement + creds digest, the engine
-choice becomes load-bearing — not a swap-later detail.
+choice becomes load-bearing — not a swap-later detail. Hence
+the pre-committed format below, ready to execute when a
+trigger fires:
 
 Candidates worth a serious look (FOSS-first per
 [[id:][feedback_foss_emacs_first]]):
