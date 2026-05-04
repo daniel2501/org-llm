@@ -177,7 +177,13 @@ the =llm.chat()= layer.
 
 * Related
 
+- [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] —
+  =intercept_md_skills= runs =.md= slashes as subprocesses
+  through the proxy interceptor chain; the Phase 18 skill→slash
+  auto-bridge would generate one =.md= per =:skill:= block
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — skills are a
   Phase 1–3 foundation; nothing planned to change in the substrate
 - [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — =run_skill=
   is one of the 64 tools the MCP server exposes
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] §
+  Tool surface — where skills sit in the layer map

@@ -13,11 +13,11 @@ framework — Agent dataclass, capabilities, hygiene scans, recipes,
 inferrers, registration, the four invocation paths, migration
 plan.
 
-Status (2026-05-03):
+Status (2026-05-04):
 - Phase 23.1 *shipped* — Agent dataclass lives at
   =org_llm/agents/_types.py=; metadata + builtin registry at
   =org_llm/agents/_builtins.py=; alias-aware resolution wired
-  through proxy + MCP layer; OOB cut to 9 starfleet-core agents
+  through proxy + MCP layer; OOB cut to 12 starfleet-core agents
   with Trek birth-names + functional aliases.
 - Phase 23.2 (capability enforcement) — *declarative shipped*,
   enforcement still pending. Each Agent declares its
@@ -33,7 +33,7 @@ Status (2026-05-03):
 Companion docs (different audience, different scope):
 
 - [[file:agents.org][agents.org]] — *what's running today*: the
-  current 17-agent roster, how to invoke, customisation via the
+  current 19-agent roster, how to invoke, customisation via the
   literate file, design rules. Read this first if you just want
   to use agents or know which one to @-tag.
 - [[file:agent-roster.org][agent-roster.org]] — the
@@ -190,7 +190,7 @@ list.
 
 ** Inferrers
 
-An agent can register vault_facts inferrers. =routine_chores=
+An agent can register [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][vault_facts]] inferrers. =routine_chores=
 naturally belongs to the dailies-flavour scribe; weather wants
 its own =outdoor_items_pending= inferrer; budget wants
 =spending_by_category=. Inferrers stay in the unified vault_facts
@@ -330,8 +330,8 @@ improvement.
   keys (=crew=, =researcher=, …) → birth-names (=picard=,
   =spock=, …). =get_builtins()= joins with cli.py's persona +
   trigger dicts.
-- 9 starfleet-core OOB agents (Trek birth-names + functional
-  aliases); 8 legacy-extras retained but filtered out at launch
+- 12 starfleet-core OOB agents (Trek birth-names + functional
+  aliases); 7 legacy-extras retained but filtered out at launch
   unless =agents_include_legacy=true=.
 - Launcher writes one =opencode.json= entry per (birth_name +
   alias) with =x_org_llm_birth_name= so the proxy resolves any
@@ -409,8 +409,15 @@ MCP tool can sit in =life_support.py= until then; no rush.
 
 * See also
 
-- =docs/wiki/roadmap.org= — phase index.
-- =docs/wiki/tonight-rave-list.org= — current queue.
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][Agents]] — the user-facing roster + invocation paths.
+- [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][Agent roster]] — the catalogue + speculative roadmap.
+- [[id:b9e5d3c2-4a7f-48a6-9c1d-e2f3a4b5c6d7][@agentsmith]] — the design-and-ship-an-agent flow.
+- [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] — hosts =intercept_agent_prefix= where agent
+  routing actually lands.
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — the tool surface that capability checks gate.
+- [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][Recipes]] — the proxy-time pre-fetch recipes agents own.
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — phase index.
+- [[file:tonight-rave-list.org][tonight-rave-list.org]] — current queue.
 - =org_llm/cli.py::_PRECONFIGURED_AGENT_PROMPTS= — current registry.
 - =org_llm/db.py::AgentBaseline= — shared rules table.
 - [[file:../../org_llm/vault_facts.py][=org_llm/vault_facts.py=]] — inferrer registry pattern.

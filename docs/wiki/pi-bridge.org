@@ -126,5 +126,14 @@ flag; remove the bridge file from =~/.pi/extensions/= manually
 - [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — Pi speaks the
   same protocol as opencode + Claude; the bridge is Pi-specific
   glue, not a re-implementation
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] §
+  Surfaces — Pi sits beside opencode + Claude Code as the third
+  conversational interface; bypasses the LLM proxy
+- [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] — Pi
+  bypasses the proxy (its LLM transport is outside org-llm);
+  opencode is the proxy-aware host
+- [[id:510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08][Cloud-or-local routing]] —
+  Pi handles its own model routing; org-llm only owns Pi's tool
+  surface
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — Pi support
   landed pre-Phase 12; ongoing maintenance only

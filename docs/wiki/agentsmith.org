@@ -107,10 +107,10 @@ persona; a user who writes formal reports gets a formal one.
 
 ** 4. Tool roster
 
-Which existing MCP tools the agent reaches for first. The
+Which existing [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] tools the agent reaches for first. The
 persona NARROWS what's available; the MCP server still exposes
 everything. @agentsmith reads
-=docs/wiki/agent-framework.org= + the live tool list to suggest a
+[[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][agent-framework.org]] + the live tool list to suggest a
 roster, but you confirm.
 
 If a needed tool doesn't exist, that's a separate ticket — agents
@@ -157,7 +157,7 @@ Three optional power-up fields:
   for one task shape. Only worth adding if it clears the A/B bar
   ([[file:recipes.org][see recipes.org]]; the bar is ≥55% judge wins). Skip on
   first ship; add later when you observe a repeated task shape.
-- *Inferrer* — a vault_facts entry that caches a derived value
+- *Inferrer* — a [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][vault_facts]] entry that caches a derived value
   with a TTL. Worth adding when the agent reads the same
   derived value frequently (e.g. =mood_signal= for
   =@journalist=, =routine_chores= for chore-overlap detection).
@@ -306,5 +306,5 @@ agentsmith: Writing to ~/org/org-llm-agents.org … applying …
   inferrers, migration plan
 - [[file:agent-roster.org][agent-roster.org]] — the catalogue,
   including aspirational agents to inspire ideas
-- =org_llm/cli.py= — built-in registry
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]] — built-in registry
 - =~/org/org-llm-agents.org= — your literate override file

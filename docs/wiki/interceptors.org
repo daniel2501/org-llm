@@ -1,0 +1,257 @@
+:PROPERTIES:
+:ID:       daaf30cd-4316-4f20-befa-5831328708c6
+:CREATED:  [2026-05-03]
+:END:
+#+TITLE: Interceptors
+#+FILETAGS: :wiki:concept:proxy:interceptors:
+#+OPTIONS: toc:2 num:nil
+
+* What this is
+
+An /interceptor/ is a small function that the [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] runs against
+every chat-completion request before it reaches the upstream LLM.
+Each interceptor has the same shape:
+
+#+begin_src text
+    interceptor(ProxyRequest) -> ProxyResponse | None
+#+end_src
+
+Two return modes:
+
+- *Short-circuit* — return a =ProxyResponse=. The proxy sends that
+  back to opencode unchanged; the upstream is never touched.
+- *Mutation* — modify =req.body= in place, return =None=. The chain
+  falls through; subsequent interceptors (and ultimately the
+  forwarder) see the rewritten payload.
+
+Composition is by ordering: =DEFAULT_INTERCEPTORS= is a Python list,
+first match wins for short-circuits, mutations stack in declared
+order. The full enumerated list and audit-label semantics live in
+[[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] § Shipped interceptors. This page is the /concept/ — what
+an interceptor is, when to add one, how it differs from neighbouring
+mechanisms, and the standing rationalization opportunities.
+
+* Why a separate concept page
+
+The proxy page enumerates them; this page is for the questions that
+keep coming up:
+
+- "Isn't this redundant with [[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][proactive_doctor]]?" (no — different
+  layer, different trigger, see below)
+- "Should we add one or solve this somewhere else?"
+- "Are some of these worth retiring?"
+
+Putting those answers next to the enumeration would bloat the proxy
+page; putting them in =roadmap.org= would lose the conceptual frame.
+
+* Interceptors vs. =proactive_doctor=
+
+Both are "make the system smarter without the user asking", but they
+operate at completely different layers:
+
+| Axis     | Interceptors                                       | =proactive_doctor=                                 |
+|----------+----------------------------------------------------+----------------------------------------------------|
+| Layer    | HTTP boundary, before opencode talks to upstream   | MCP tool inside the model's turn                   |
+| Trigger  | Every chat-completion request, deterministically   | Model decides to call (3+ unconverged calls, lag…) |
+| Latency  | µs–ms, synchronous in the proxy thread             | Seconds; spawns =doctor --power-boost= + perf probe|
+| Effect   | Short-circuit / rewrite a single in-flight request | Diagnose + propose vetted apply-action             |
+| Scope    | Per-turn (this request only)                       | Session-wide remediation (model swap, restart…)    |
+
+They overlap in spirit, never on the same request. =cloud_failover=
+is the one place they touch — the interceptor saves the /current/
+turn while the slow-LLM watcher invokes =proactive_doctor= to
+propose a /session-level/ relaunch. Removing the interceptor layer
+would mean every =/sysmenu= keystroke wakes ollama, every PII leak
+reaches a remote provider, every gemma user loses tools — none of
+which =proactive_doctor= would catch, because none are "stuck"
+symptoms.
+
+See [[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][Doctor & self-heal]] for the doctor side.
+
+* Anatomy of an interceptor
+
+Minimal short-circuit (returns immediately, never forwards):
+
+#+begin_src python
+def intercept_demo(req: ProxyRequest) -> Optional[ProxyResponse]:
+    if not req.path.endswith("/chat/completions"):
+        return None
+    if not req.parsed_json:
+        return None
+    text = _last_user_text(req.parsed_json)
+    if not text.startswith("/demo"):
+        return None
+    streaming = bool(req.parsed_json.get("stream"))
+    model = req.parsed_json.get("model") or "unknown"
+    return _empty_assistant_response(model, streaming, content="demo!")
+#+end_src
+
+Minimal mutation (rewrites body, falls through):
+
+#+begin_src python
+def intercept_demo_mutate(req: ProxyRequest) -> Optional[ProxyResponse]:
+    if not req.parsed_json:
+        return None
+    req.parsed_json.setdefault("metadata", {})["demo"] = True
+    req.body = json.dumps(req.parsed_json).encode()
+    return None
+#+end_src
+
+Both register by appending to =DEFAULT_INTERCEPTORS= in
+[[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]]. Tests live in [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]]
+(56 black-box tests against an in-process proxy + fake upstream).
+
+* Audit & observability
+
+Every request emits one JSONL line to
+=~/.local/share/org-llm/llm-audit.jsonl= via =AuditLogger=. The
+=intercepted_by= field carries the function's =__name__= (or
+="forward"= when the chain falls all the way through, or one of the
+=_forward=-side labels =cloud_first= / =cloud_failover= /
+=cloud_failover_compressed_tools= / =cloud_failover_no_tools=).
+
+=/sysrecent= surfaces the tail in chat;
+[[file:../../scripts/audit_phase17.py][=scripts/audit_phase17.py=]] groups by =intercepted_by= for the
+periodic Phase 17 audit.
+
+* When to add one (and when not to)
+
+Add an interceptor when:
+
+- The request can be answered without the LLM and the LLM call
+  would be pure waste (=/sys*=, =/menu=, exact-prompt cache hits).
+- The request needs to be rewritten consistently across all models
+  (=time_grounding=, =pii_redact=, =prompt_slim=).
+- A model family needs a compatibility shim (=synth_tool_call=,
+  =tool_dialect_translate=, =qwen3_no_think=).
+- A typed prefix lets the user shape a turn deterministically
+  (=:tool=, =??:explain=, =?:cite=, =>raw=, =~<n>=, =!shell=,
+  =@<agent>=).
+
+Don't add an interceptor when:
+
+- The behaviour belongs in the TUI/plugin layer (cosmetic UI, sidebar
+  state). Interceptors are for /HTTP-side/ shortcuts.
+- The behaviour belongs in the model's turn (a tool the LLM might or
+  might not call → MCP tool, not interceptor).
+- The behaviour requires multi-turn state ([[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][=proactive_doctor=]]
+  territory) — interceptors see one request at a time.
+
+* Keep-worthiness — why we don't decide on hit-count yet
+
+The interceptor concept is days old as of [2026-05-03] and ~426
+audit entries. Some interceptors that show zero hits in the rolling
+window are intentional kill-switches (=intercept_no_llm_flag=,
+=intercept_local_only=) — zero is the success state. Others are
+infrastructure for /future/ vault state: applied tags, more
+auto-generated notes, the agent roster filling in. Culling on
+current hits would amputate features that exist for the next phase,
+not the current one.
+
+The right test (deferred, not abandoned):
+
+1. Wait for ≥30 days of audit data /and/ the next vault-content
+   milestone (more auto-notes + applied-tag rollout).
+2. For each interceptor, compute hits/week, ms saved or tokens
+   saved per hit, safety-class flag.
+3. Verdict: *keep* if hits ≥1/week and value crosses a small
+   threshold (or safety-class); *demote* to opt-in via config knob
+   if hits are there but value is low; *drop* only if zero hits
+   over 30 days /and/ not safety-class.
+4. Allowlist user-flagged kill-switches (=no_llm_flag=,
+   =local_only=) — their job is to /not/ fire.
+
+A scriptable form lives in the proxy roadmap; deferred per the
+"not enough data yet" caveat.
+
+* Standing consolidation opportunities
+
+These are structural cleanups that pay back regardless of telemetry.
+Today =DEFAULT_INTERCEPTORS= has 25 entries — enough that several
+near-duplicate functions could collapse without behavioural change.
+
+** Prefix family (7 → 1 + registry)
+
+=intercept_force_tool_call= (=:tool=), =intercept_explain_prose_only=
+(=??:explain=), =intercept_cite= (=?:cite=), =intercept_replay_history=
+(=~<n>=), =intercept_raw_passthrough= (=>raw=), =intercept_shell=
+(=!shell=), and =intercept_agent_prefix= (=@<agent>=) all do the same
+parse-strip-dispatch dance. Collapse into one
+=intercept_typed_prefix= owning a registry of
+=(pattern, handler, priority)=. Single ordering source (today
+=??:= must precede =?:= because of substring overlap, encoded only
+by list position), single place to add the next prefix.
+
+** Sys-handler family (3 → 1 with a handler map)
+
+=intercept_sys_commands=, =intercept_sysexport_command=,
+=intercept_sysscreenshot_command= are all "/sys…  does work". Fold
+into one with a handler map keyed on the subcommand; the
+plugin-vs-proxy split becomes a per-handler attribute.
+
+** Tool-call adapter trio (3 → 1 pipeline)
+
+=intercept_synth_tool_call=, =intercept_tool_dialect_translate=,
+=intercept_tool_call_repair= all "make tool use work across model
+families". One =intercept_tool_compat= keyed on the request's model
+centralises the model-family taxonomy that today is duplicated
+across the three.
+
+** Slash-handler family (2 → 1 registry)
+
+=intercept_static_slashes= (handwritten markdown for =/menu /help
+/config=) and =intercept_md_skills= (=.md= slash with =exec:= →
+subprocess) are both "handwritten slash → response". A unified
+registry where each entry is /either/ a markdown body /or/ an exec
+spec lines up with the Phase 18 "skill→slash auto-bridge" TODO
+already on the proxy roadmap.
+
+** Cache trio — share a key helper, don't merge
+
+=intercept_probe_cache=, =intercept_response_cache=,
+=intercept_prompt_cache= are different layers and shouldn't merge,
+but should share a =cache_key(parsed_json)= helper (each likely
+re-implements prompt hashing today).
+
+** Cross-cutting
+
+- *Audit-label decoupling.* =intercepted_by= is set from
+  =func.__name__=. A =@interceptor(label="synth_tool_call")=
+  decorator would let labels survive renames /and/ merges (e.g.
+  the prefix family could keep distinct labels after collapse).
+- *Explicit ordering.* With 25 entries the implicit list-position
+  contract gets fragile. A =priority= field (per interceptor or per
+  registry entry after the merges) makes drift visible.
+- *Sticky pair.* =intercept_agent_sticky= and
+  =intercept_agent_prefix= already act as a pair; trivially one
+  function with two responsibilities. Low priority.
+
+Net of the four merges: ~25 → ~14 interceptors, identical
+behaviour, one obvious seam per family for the next addition.
+
+* Source files
+
+- [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] —
+  =ProxyRequest=, =ProxyResponse=, all interceptor functions,
+  =DEFAULT_INTERCEPTORS=, =AuditLogger=, =start_proxy()=
+- [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]] —
+  black-box tests against an in-process proxy + fake upstream
+- [[file:../../scripts/audit_phase17.py][=scripts/audit_phase17.py=]] —
+  groups audit-log entries by =intercepted_by=
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]] —
+  =launch= wires the proxy in, conditionally appends
+  =intercept_local_only=
+
+* Related
+
+- [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] —
+  the host of the interceptor chain; enumerates every shipped
+  interceptor with its catch
+- [[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][Doctor & self-heal]] —
+  =proactive_doctor= operates one layer up (in-turn MCP tool, not
+  HTTP boundary); the two are complementary
+- [[id:9b012557-f592-4d1e-8dd1-464c2a4250c3][Audit log]] —
+  the JSONL stream every interceptor writes to via =AuditLogger=
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 18 —
+  the next-up interceptor list (skill→slash bridge, citation
+  post-processor, tool-result memoisation, per-turn routing)

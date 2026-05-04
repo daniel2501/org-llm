@@ -758,11 +758,12 @@ to the entire vault.
   (=birth_name=, =aliases=, =capabilities=, =recipes=,
   =hygiene_scan=, =origin=, =pack=, =addressable=) +
   =get_builtins()= + =resolve_alias()= + =agent_from_row()=.
-- 10 starfleet-core OOB agents with Trek birth-names
-  (=picard/spock/data/geordi/riker/janeway/scotty/soong/keiko/atoz=);
-  functional names (=crew/researcher/scribe/…/curator=) ship as
-  aliases — both work as =@<name>= routes.
-- 8 legacy-extras retained in code, filtered out at launch
+- 12 starfleet-core OOB agents with Trek birth-names
+  (=picard/spock/data/geordi/riker/janeway/scotty/soong/keiko/atoz/boothby=
+  + =@doom= as functional birth-name); functional names
+  (=crew/researcher/scribe/…/curator/tracker=) ship as aliases —
+  both work as =@<name>= routes.
+- 7 legacy-extras retained in code, filtered out at launch
   unless =agents_include_legacy=true=.
 - =db.AgentRow= mirrors every editable Agent field. Resolution
   is *Python builtins → DB* at runtime; the org file is a

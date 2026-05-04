@@ -14,7 +14,7 @@ opencode and the upstream LLM endpoint (ollama, OpenRouter, etc.).
 opencode's provider config so every chat-completion request flows
 through it.
 
-The proxy runs a chain of *interceptors* against each request:
+The proxy runs a chain of [[id:daaf30cd-4316-4f20-befa-5831328708c6][interceptors]] against each request:
 
 #+begin_src text
     interceptor(request_body) -> ProxyResponse | None
@@ -54,6 +54,11 @@ runs the action, and ollama stays asleep.
 
 * The interceptor model
 
+The conceptual frame — when to add one, how it differs from
+=proactive_doctor=, the standing rationalization opportunities —
+lives in [[id:daaf30cd-4316-4f20-befa-5831328708c6][interceptors.org]]. The summary below covers just the
+shape; the rest of this page enumerates them.
+
 Two roles in the chain:
 
 - *Short-circuit* interceptors return a =ProxyResponse= and the
@@ -89,7 +94,7 @@ flips =proxy_local_only=.
 |  3 | =intercept_sysscreenshot_command= | =/sysscreenshot= → run =org-llm screenshot=, return path                |
 |  4 | =intercept_shell=                | =!shell <cmd>= prefix → run cmd locally (gated by =proxy_allow_shell_prefix=) |
 |  5 | =intercept_agent_sticky=         | Carry =intent_agent= forward to the next un-prefixed user turn          |
-|  6 | =intercept_agent_prefix=         | =@<agent>= prefix → stub pending preconfigured-agents roadmap entry     |
+|  6 | =intercept_agent_prefix=         | =@<agent>= prefix → swap system prompt to the [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agent's]] persona + model for this turn |
 |  7 | =intercept_sys_commands=         | =/sys*= prefix in the latest user message → empty response              |
 |  8 | =intercept_synth_tool_call=      | Tool-incapable model (gemma, phi3) + =tools= → prompt-engineered tool calls |
 |  9 | =intercept_tool_dialect_translate= | Kimi/qwen3 tool-call dialect in assistant content → OpenAI =tool_calls= shape |
@@ -212,7 +217,7 @@ from what the LLM sees, so the model only gets the residual query.
 | =>raw <model> ...= | Strip system + tools + history; route to the named model with just the bare prompt        |
 | =~<n> [suffix]=    | Replay the Nth-most-recent prior user prompt; optional suffix appends                     |
 | =!shell <cmd>=     | Run =cmd= locally and return stdout as the assistant turn (gated by =proxy_allow_shell_prefix=) |
-| =@<agent> ...=     | Per-turn agent override — stub pending the preconfigured-agents roadmap entry             |
+| =@<agent> ...=     | Per-turn [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agent]] override — swap the system prompt to that agent's persona for this turn |
 
 Use cases:
 - =:tool code_search rotation matrix= — skip the model's wrong-
@@ -227,8 +232,8 @@ Use cases:
   small variation appended; useful for A/Bing models or knobs.
 - =!shell ls -la ~/org/.opencode= — quick file inspection from
   chat without leaving opencode (after enabling the gate).
-- =@scribe write today's daily entry= — once preconfigured
-  agents land, scope a single turn to a specific persona.
+- =@scribe write today's daily entry= — scope a single turn
+  to a specific [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agent]]'s persona + model.
 
 All seven are mutation/short-circuit interceptors — adding a new
 one is a single function plus an entry in =DEFAULT_INTERCEPTORS=.
@@ -312,6 +317,17 @@ CLOSED: [2026-05-02]
 
 * See also
 
+- [[id:daaf30cd-4316-4f20-befa-5831328708c6][Interceptors]] — the concept page: when to add one, when not
+  to, how it differs from =proactive_doctor=, the standing
+  consolidation opportunities. Complement to this page's
+  enumeration.
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][Agents]] — =intercept_agent_prefix= swaps the system prompt to
+  the named agent's persona; this page hosts the mechanism, that
+  page is the agent surface itself.
+- [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][Recipes]] — proxy-time pre-fetch composed inside
+  =intercept_agent_prefix=: when a recipe matches the request,
+  the manager runs the deterministic part in Python and the
+  agent narrates over the result in one cloud call.
 - [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — the proxy is HTTP-layer; MCP is JSON-RPC inside the
   conversation. The proxy's =intercept_prompt_slim= operates on the
   serialised MCP catalog before it reaches the local model.

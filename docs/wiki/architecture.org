@@ -1,0 +1,1111 @@
+:PROPERTIES:
+:ID:       30d4ee70-0472-4bcb-a02e-efde52bef3c6
+:CREATED:  [2026-05-03]
+:END:
+#+TITLE: Architecture — the shape of org-llm
+#+FILETAGS: :wiki:meta:architecture:overview:
+#+OPTIONS: toc:nil num:nil
+
+* What this page is
+
+The single source of truth for *how org-llm is shaped*: the
+layers, the data plane, the control plane, the seams between
+them, and which file owns which concern.
+
+This is the *map*. Every section links to the focused wiki page
+that owns the deep dive — embeddings, MCP, the LLM proxy,
+recipes, walk, etc. Read this page when you want the whole
+picture in one screen; follow the links when you want detail.
+
+The README's =## Architecture= section is the 60-second pitch
+(one ASCII diagram). This page is the next layer down.
+
+** Intended audience
+
+org-llm is in solo development today (n=1) but its eventual
+distribution is FOSS-for-everyone. This page is written for:
+
+1. *The current developer* — fast lookup for "where does X
+   live, why is it shaped this way?"
+2. *Future contributors* — context to make load-bearing
+   changes safely (the design rules + invariants exist for
+   reasons; the page documents the reasons).
+3. *Curious users tracing how a feature works* — agents may
+   surface this page in =org-llm ask= responses about the app
+   itself; it should read coherently to a stranger.
+
+A consequence of audience 2+3: design decisions on this page
+default to the *FOSS bar* — what's defensible for unknown
+users running on unknown vaults, not just what works on the
+dev's box. Two-track features (shared baseline vs user-personal
+literate config) get called out as such; "works for me at n=1"
+is never the verdict for a feature that ends up in the shared
+baseline.
+
+See =project_personal_now_foss_later.md= in the agent memory
+store for the underlying policy.
+
+* The 30-second mental model
+
+#+begin_example
+   ┌──────────────────────────────────────────────────────────────────────────┐
+   │  ON-DISK STATE                                                           │
+   │                                                                          │
+   │  ~/org/                          ← the vault (user's notes; SoT)         │
+   │   ├── *.org                        top-level notes (org-roam graph)      │
+   │   ├── daily/YYYY-MM-DD.org         dailies (walk targets, mood signal)   │
+   │   ├── 20260425230731-org_llm.org   literate source; tangles ALL code  ◀┐ │
+   │   ├── captains-log-*.org           rotated 5MB event logs (logbook.py) │ │
+   │   ├── org-llm-config.org           knobs round-trip ⟷ config table   │ │
+   │   ├── llm-context.org              user-asserted "current truth"       │ │
+   │   ├── llm-askbook.org              askbook — the user's questions      │ │
+   │   ├── org-llm-doctor-runs.org      doctor history (append)             │ │
+   │   ├── org-llm-self-mod.org         self-modification log               │ │
+   │   └── .opencode/                   surface-side runtime files          │ │
+   │        ├── AGENTS.md               project primer (regenerated on launch)│
+   │        ├── manager-log.jsonl       append-only orchestration trace     │ │
+   │        ├── sidebar-status.json     polled by TUI plugin (1.5s tick)    │ │
+   │        └── sidebar-runtime.json    /sysexport snapshot mirror          │ │
+   │                                                                        │ │
+   │  ~/.local/share/org-llm/         ← ALL engine state (rebuildable)      │ │
+   │   ├── org-llm.db                   THE SQLite db (tables ↓)            │ │
+   │   ├── theme-cache.json             theme_studio survivors              │ │
+   │   ├── auto-embedder.json           daemon heartbeat + last-run         │ │
+   │   ├── cloud_catalog.json           GPU provider catalog (refreshable)  │ │
+   │   ├── llm-audit.jsonl              every LLM call (append-only audit)  │ │
+   │   ├── perf_alerts.json             perf-regression buffer              │ │
+   │   ├── walk-undo-stack.json         walk navigation history             │ │
+   │   ├── setup.state.json             first-run setup progress            │ │
+   │   ├── snapshots/                   `self snapshot` rollback bundles    │ │
+   │   ├── askbook/                     askbook tangle artifacts            │ │
+   │   ├── dbt/                         dbt analytics (Phase 12.7)          │ │
+   │   └── apply-jobs/                  long-running --apply job state      │ │
+   │                                                                        │ │
+   │  ~/.password-store/org-llm/        cloud + provider creds (via `pass`) │ │
+   │                                                                        │ │
+   │  ~/repos/org-llm/                  the editable git checkout           │ │
+   │   └── (Python source — re-tangled FROM the literate org file ─────────┘ │
+   └──────────────────────────────┬───────────────────────────────────────────┘
+                                  │  index / embed / walk / log
+                                  ▼
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │  SQLite + sqlite-vec  (~/.local/share/org-llm/org-llm.db)               │
+   │                                                                         │
+   │  DURABLE  (rebuildable from the vault)                                  │
+   │   ┌───────────┐  1:N  ┌─────────────────────────────────┐               │
+   │   │ files     │◀──────│ nodes                           │               │
+   │   │ path,mtime│       │ title,body,tags,auto_tags,      │               │
+   │   └───────────┘       │ embedding ─────► sqlite-vec     │               │
+   │                       └─────────────────────────────────┘  vec_distance │
+   │                                                            _cosine()    │
+   │   ┌────────────┐    ⟷ ~/org/org-llm-config.org    (literate_config.py)  │
+   │   │ config     │       round-trips knob set/get                         │
+   │   └────────────┘                                                        │
+   │   ┌────────────────┐  ⟷ ~/org/org-llm-baselines.org  (same pattern)     │
+   │   │ agent_baseline │     per-rule prompts; applies_to = all|specialist  │
+   │   └────────────────┘     |manager|<name,…>; enabled + sort_order        │
+   │                                                                         │
+   │  CACHE  (deterministic; auto-refilled on miss / TTL expiry)             │
+   │   ┌────────────┐   value JSON · computed_at · inputs_mtime · ttl_secs   │
+   │   │ vault_fact │   inferrers in vault_facts.py (Phase 21.1)             │
+   │   └────────────┘                                                        │
+   │                                                                         │
+   │  EVENT LOGS  (append-only; mirrored to vault files)                     │
+   │   ┌──────────┐  →  ~/org/org-llm-log.org           (logbook.py)         │
+   │   │ history  │  kind ∈ cli|llm|mcp|config|doctor|crew                   │
+   │   └─────┬────┘                                                          │
+   │         │ every crew_log row also writes a mirror history row           │
+   │         ▼                                                               │
+   │   ┌──────────┐  →  ~/org/.opencode/manager-log.jsonl  +  sidebar files  │
+   │   │ crew_log │  action ∈ delegate|recipe|narration|repair|sanity|retry  │
+   │   └──────────┘                                                          │
+   │   ┌────────────┐  →  sidebar-status.json (recent slice)                 │
+   │   │ sensor_log │  probe ∈ battery|cpu|mem|disk|thermal|net|ollama|…     │
+   │   └────────────┘     ts · value · normalized · status · context         │
+   │   ┌─────────────────────┐  →  dbt views (Phase 12.7, planned)           │
+   │   │ insight_engagement  │  reaction ∈ good|bad|clicked|dismissed        │
+   │   └─────────────────────┘                                               │
+   └──────────────────────────────┬──────────────────────────────────────────┘
+                                  │  read/write via org_llm/*.py
+                                  ▼
+   ┌──────────────────────────────────────────────────────────────────────────┐
+   │  org_llm/  ── Python package (~50 modules)                               │
+   │                                                                          │
+   │  ENTRY POINTS  (separate processes; same library; same DB file)          │
+   │   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────┐   │
+   │   │ cli.py           │  │ mcp_server.py    │  │ llm_proxy.py         │   │
+   │   │ ~70 verbs        │  │ stdio · 71 tools│  │ HTTP · 23 interceptors│  │
+   │   │ user shell       │  │ subprocess of    │  │ subprocess of        │   │
+   │   │ entry            │  │ opencode/claude  │  │ `org-llm launch`     │   │
+   │   │                  │  │ /pi              │  │                      │   │
+   │   └──────────────────┘  └──────────────────┘  └──────────────────────┘   │
+   │   ┌──────────────────┐                                                   │
+   │   │ auto_embedder.py │                                                   │
+   │   │ background       │                                                   │
+   │   │ daemon           │                                                   │
+   │   └──────────────────┘                                                   │
+   │                                                                          │
+   │   (pi_extension/ is bundled TypeScript, not a Python entry point —       │
+   │    see Surfaces section below for how it reaches the MCP server.)        │
+   │                                                                          │
+   │            │   │              │   │      │                               │
+   │            ▼   ▼              ▼   ▼      ▼                               │
+   │   ─────────────────────────────────────────────────────────────────────  │
+   │  SHARED LIBRARY  (called by every entry point; one process per caller)   │
+   │                                                                          │
+   │   data plane     │ db (engine + migrations + sqlite-vec load)            │
+   │                  │ logbook (history mirror; org-llm-log.org tangle)      │
+   │   model boundary │ llm (chat + embed) · cloud (provider routing) · creds │
+   │   knowledge      │ indexer · search · walk · insights · code_index       │
+   │                  │ context (llm-context.org overlay) · askbook           │
+   │   orchestration  │ orchestration (recipe registry) · recipe_runner       │
+   │                  │ vault_facts (Phase 21.1 deterministic cache)          │
+   │   tools          │ org_tools (pure-python; called by mcp + recipes)      │
+   │                  │ weather · doom_introspect                             │
+   │   self-care      │ rescue · life_support · perf · performance            │
+   │   personalisation│ theme_studio · knobs · palettes · style_infer · ui    │
+   │   self-mod       │ self_mod (snapshots) · literate_config (config ⟷ org) │
+   │   skills         │ skills · cli_skills (org-babel registration + run)    │
+   │   discovery      │ discover (filesystem probes) · models (FOSS catalog)  │
+   │                  │ personalize · manpage                                 │
+   │   access         │ access (granted FS allowlist) · creds (pass)          │
+   │                  │                                                       │
+   │   one detail worth pinning: `org_tools` is the seam between the MCP      │
+   │   server and the recipe runner — both call it directly so a recipe       │
+   │   pre-fetch and a real MCP tool call hit the same Python function.       │
+   └──────────────────────────────┬───────────────────────────────────────────┘
+                                  │
+            ┌─────────────────────┼─────────────────────┐
+            ▼                     ▼                     ▼
+   ┌────────────────┐   ┌──────────────────┐   ┌────────────────┐
+   │  MCP server    │   │  LLM proxy       │   │  Direct CLI    │
+   │  (stdio)       │   │  (HTTP shim)     │   │  (org-llm …)   │
+   │  71 tools     │   │  23 interceptors │   │  splash + verbs│
+   └───────┬────────┘   └─────────┬────────┘   └────────────────┘
+           │                      │
+           │  tool calls          │  chat / stream
+           ▼                      ▼
+   ┌─────────────────────────────────────────────────────────────┐
+   │  Surfaces — opencode TUI · Claude Code · Pi bridge · Emacs  │
+   └─────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼  cloud-or-local routing
+                       ┌─────────────────────┐
+                       │ Ollama (local)      │
+                       │ OpenRouter / cloud  │
+                       └─────────────────────┘
+#+end_example
+
+Six things are non-obvious from this diagram and worth saying
+out loud:
+
+1. *The vault is authoritative; SQLite is derived.* Re-running
+   =org-llm index= + =embed= rebuilds the whole engine state
+   from =~/org/=. Nothing in =~/.local/share/org-llm/= is
+   load-bearing for the user's data — only for the engine's
+   speed and convenience. Wiping it loses caches, snapshots,
+   audit logs; it never loses notes.
+2. *The literate source IS a vault note.* =~/org/20260425230731-
+   org_llm.org= is both the canonical source for every
+   Python/SQL/elisp file AND a regular org-roam node — so
+   =org-llm ask "how does the recipe runner work?"= can retrieve
+   the implementation by RAG just like any other concept. Tangle
+   direction is one-way: literate org → repo files. The repo
+   checkout under =~/repos/org-llm/= is the editable mirror, not
+   a second source of truth.
+3. *=org-llm-config.org= round-trips with the =config= table.*
+   [[file:../../org_llm/literate_config.py][=literate_config.py=]] tangles =config= rows out to the vault
+   file (so you can edit knobs in Emacs) AND parses them back in.
+   Knob =config_org_autosync= controls whether every =org-llm
+   config set= re-tangles automatically.
+4. *Code corpus and skills do NOT have separate storage.* The
+   code corpus reuses the =files= + =nodes= tables — each
+   indexed source file becomes a node tagged =code:<lang>=,
+   sharing the same embedding pipeline as notes. Skills are
+   org-babel blocks living inside vault notes (registered by
+   =:SKILL_NAME:= properties), executed in-place; no skills
+   directory, no skills DB.
+5. *The LLM proxy is the orchestration seam.* It sits between
+   the surface (opencode) and the model (Ollama / cloud). All
+   agent-prefix routing, recipe pre-fetch, tool-call repair,
+   slow-model watchdog, and =/sys*= short-circuits happen here
+   — not in the surface, not in the model.
+6. *Tags have two buckets, never one.* =nodes.tags= is the
+   source-of-truth from the org file — the indexer rewrites it
+   on every =index= run and the auto-tagger never touches it.
+   =nodes.auto_tags= is the LLM layer, written ONLY by =tag
+   --apply= and never touched by the indexer. Reads that want
+   "all tags" use =merged_tags()=. The split is what makes =tag
+   --redo= safe — re-tagging previously-auto-tagged nodes can't
+   clobber hand-curated org-file tags. Same idea will likely
+   apply if/when other LLM-layered metadata lands (auto-titles,
+   auto-summaries): keep the source-of-truth column and the
+   LLM-derived column separate.
+
+Most code is one big Python package: =org_llm/= is ~50 modules.
+The only TypeScript is the opencode TUI plugin
+([[file:../../extensions/opencode/src/][=extensions/opencode/src/=]]) plus the bundled Pi adapter
+([[file:../../org_llm/pi_extension/pi-org-llm.ts][=pi_extension/pi-org-llm.ts=]]); the only elisp is the Emacs
+companion ([[file:../../extensions/emacs/][=extensions/emacs/=]]). The MCP server, LLM proxy,
+CLI, indexer, and recipe runner are all Python in the same
+package — but each is its own OS process when running, sharing
+the same SQLite *file* (not a single connection — see [[*Concurrency — many writers, one DB file, no WAL][concurrency]]).
+
+* The four layers
+
+** 1. Substrate — vault → engine state
+
+The user's =~/org/*.org= files are parsed by
+[[file:../../org_llm/indexer.py][=org_llm/indexer.py=]] into the =files= and =nodes= tables.
+Embeddings are produced by =nomic-embed-text-v1.5= via Ollama and
+stored as =float32[768]= blobs in the =nodes.embedding= column.
+[[file:../../org_llm/auto_embedder.py][=org_llm/auto_embedder.py=]] is a background daemon that keeps the
+index fresh.
+
+Deep dives:
+[[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][embeddings]] ·
+[[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][vector similarity]] ·
+[[id:338485eb-1669-4966-82fb-03607f5f0c64][task-instruction prefixes]] ·
+[[id:4df57d95-0e31-41cb-b973-5f41706901c0][auto-embedder]] ·
+[[id:e3333333-4444-5555-6666-cccccccccccc][staleness]].
+
+** 2. Engine — Python modules grouped by concern
+
+| concern                        | module(s)                                                   |
+|--------------------------------+-------------------------------------------------------------|
+| CLI dispatch + splash menu     | [[file:../../org_llm/cli.py][=cli.py=]], [[file:../../org_llm/cli_skills.py][=cli_skills.py=]]                                       |
+| Vault parsing + embedding      | [[file:../../org_llm/indexer.py][=indexer.py=]], [[file:../../org_llm/llm.py][=llm.py=]]                                          |
+| Retrieval                      | [[file:../../org_llm/search.py][=search.py=]] (vector + rerank), [[file:../../org_llm/walk.py][=walk.py=]] (graph)               |
+| Insight cards                  | [[file:../../org_llm/insights.py][=insights.py=]]                                                |
+| Code corpus                    | [[file:../../org_llm/code_index.py][=code_index.py=]]                                              |
+| Schema + history + crew_log    | [[file:../../org_llm/db.py][=db.py=]] (SQLAlchemy)                                          |
+| MCP tool surface               | [[file:../../org_llm/mcp_server.py][=mcp_server.py=]], [[file:../../org_llm/org_tools.py][=org_tools.py=]]                              |
+| LLM proxy + interceptors       | [[file:../../org_llm/llm_proxy.py][=llm_proxy.py=]]                                               |
+| Orchestration (recipes)        | [[file:../../org_llm/orchestration.py][=orchestration.py=]] (registry), [[file:../../org_llm/recipe_runner.py][=recipe_runner.py=]] (runners) |
+| Vault facts (deterministic)    | [[file:../../org_llm/vault_facts.py][=vault_facts.py=]]                                             |
+| Doctor + self-heal             | [[file:../../org_llm/rescue.py][=rescue.py=]] (and =doctor= verbs in [[file:../../org_llm/cli.py][=cli.py=]])                    |
+| Life support / sensors / EMH   | [[file:../../org_llm/life_support.py][=life_support.py=]], [[file:../../org_llm/perf.py][=perf.py=]], [[file:../../org_llm/performance.py][=performance.py=]]                |
+| Cloud routing + creds          | [[file:../../org_llm/cloud.py][=cloud.py=]], [[file:../../org_llm/creds.py][=creds.py=]] (=pass=)                                  |
+| Theme studio + LCARS palettes  | [[file:../../org_llm/theme_studio.py][=theme_studio.py=]], [[file:../../org_llm/palettes.py][=palettes.py=]], [[file:../../org_llm/knobs.py][=knobs.py=]]                  |
+| Captain's log + event mirror   | [[file:../../org_llm/logbook.py][=logbook.py=]]                                                 |
+| Granted filesystem access      | [[file:../../org_llm/access.py][=access.py=]]                                                  |
+| Skills (org-babel)             | [[file:../../org_llm/skills.py][=skills.py=]]                                                  |
+| Pi bridge (bundled TS asset)   | [[file:../../org_llm/pi_extension/pi-org-llm.ts][=pi_extension/pi-org-llm.ts=]] (not Python; copied to Pi by =org-llm pi --install=) |
+| Self-modification (snapshots)  | [[file:../../org_llm/self_mod.py][=self_mod.py=]], [[file:../../org_llm/literate_config.py][=literate_config.py=]]                              |
+
+Each of these modules is library code. The CLI, MCP server, LLM
+proxy, and auto-embedder daemon are *separate OS processes* that
+each import this library and open their own SQLAlchemy engine
+against the shared SQLite file. See [[*Concurrency — many writers, one DB file, no WAL][concurrency]] for the
+implications.
+
+** 3. Surfaces — how org-llm reaches the user
+
+Five surfaces; only one (opencode) routes its LLM traffic through
+the proxy. The others use MCP for tools but reach their model
+directly. This is the single most important fact about the
+surfaces — it shapes which features each one gets.
+
+#+begin_example
+                                       ╔═══════════════════════════════╗
+   SURFACE      BRIDGE                  ║  org-llm Python package       ║
+   ═══════      ══════                  ║                               ║
+                                        ║                               ║
+   org-llm  ──── direct (in-proc) ─────▶║  llm.py (chat + embed)        ║
+   CLI                                  ║                               ║
+                                        ║                               ║
+   opencode ──┬── stdio  (MCP) ────────▶║  mcp_server.py  (71 tools)    ║
+              │                         ║                               ║
+              └── HTTP   (proxy) ──────▶║  llm_proxy.py   (23 intcps) ◀┐║
+                                        ║                              ║
+   Claude   ───── stdio  (MCP) ────────▶║  mcp_server.py  (71 tools)   ║
+   Code                                 ║                              ║
+              ╳ proxy bypassed → Anthropic API (uses ANTHROPIC_API_KEY)║
+                                        ║                              ║
+   Pi       ───── stdio  (MCP) ────────▶║  mcp_server.py  (71 tools)   ║
+            (via bundled TS adapter)    ║                              ║
+              ╳ proxy bypassed → Pi's own model selection              ║
+                                        ║                              ║
+   Emacs    ───── direct (planned) ────▶║  llm.py          (Phase 16.3) ║
+   companion                            ║                               ║
+                                        ║  ─────────────────────────────║
+                                        ║  ONLY opencode sees the proxy ║
+                                        ║  → recipes, /sys*, repair,    ║
+                                        ║    agent-prefix all live here ║
+                                        ╚═══════════════════════════════╝
+                                                       │
+                                                       ▼
+                                              upstream models
+                                       (Ollama / cloud / Anthropic /
+                                        Pi's configured provider)
+#+end_example
+
+*** Capability matrix
+
+| capability                            | CLI    | opencode | Claude Code | Pi          | Emacs      |
+|---------------------------------------+--------+----------+-------------+-------------+------------|
+| MCP tools (71)                        | n/a    | ✓        | ✓           | ✓ (prefixed)| planned    |
+| LLM-proxy interceptor chain           | ✗      | *✓*      | ✗           | ✗           | ✗          |
+| Recipe pre-fetch (zero round-trip)    | ✗      | *✓*      | ✗           | ✗           | ✗          |
+| =@<agent>= per-turn persona swap      | ✗      | *✓*      | ✗           | ✗           | ✗          |
+| =/sys*= short-circuit family          | n/a    | *✓*      | ✗           | ✗           | ✗          |
+| Markdown-JSON tool-call repair        | n/a    | *✓*      | n/a         | n/a         | ✗          |
+| Slow-LLM watcher + cloud failover     | n/a    | ✓        | ✗           | ✗           | ✗          |
+| AGENTS.md project primer              | n/a    | ✓        | ✓           | dynamic     | n/a        |
+| Per-turn dynamic system prompt        | n/a    | ✗        | ✗           | *✓*         | n/a        |
+| LCARS sidebar (5 cards)               | n/a    | *✓*      | ✗           | status line | planned    |
+| Insight cards on session open         | n/a    | *✓*      | ✗           | ✗           | n/a        |
+| Themed splash + slash menu            | ✓      | ✓        | ✗           | ✗           | n/a        |
+| Direct shell ergonomics (=org-llm …=) | *✓*    | ✗        | ✗           | ✗           | via babel  |
+
+Bold = surface where this capability is the differentiator. The
+matrix exposes a key tradeoff: *opencode is the only host with
+the full orchestration stack* because it's the only one whose
+LLM traffic goes through =llm_proxy.py=. Claude Code and Pi are
+fine for tool-driven Q&A but don't get recipes, =@<agent>= swap,
+=/sys*= shortcuts, or repair.
+
+*** Bridge mechanics per surface
+
+| surface       | LLM transport                              | MCP wiring                                  | Plugin / extension                            |
+|---------------+--------------------------------------------+---------------------------------------------+-----------------------------------------------|
+| =org-llm= CLI | =llm.py= → Ollama (or cloud per knob)      | n/a (CLI uses Python directly)              | n/a                                           |
+| opencode      | =.opencode.json= baseURL → =llm_proxy.py=  | =mcpServers= entry → =org-llm mcp= stdio    | [[file:../../extensions/opencode/src/][=extensions/opencode/src/=]] (TS, separate)        |
+| Claude Code   | Anthropic API directly (=ANTHROPIC_API_KEY=) | =.claude/settings.json= → =org-llm mcp=     | none (Claude has no plugin model)             |
+| Pi            | Pi's configured model                      | TS bridge spawns =org-llm mcp= subprocess   | [[file:../../org_llm/pi_extension/pi-org-llm.ts][=pi_extension/pi-org-llm.ts=]] (bundled in package) |
+| Emacs         | =llm.py= via elisp shim (planned)          | planned                                     | [[file:../../extensions/emacs/][=extensions/emacs/=]]                              |
+
+*** Why only one host gets the proxy
+
+opencode lets us write the baseURL into its config, so we can
+point it at =http://127.0.0.1:<proxy-port>= and run our 23
+interceptors before traffic hits Ollama. Claude Code talks to
+its own Anthropic backend with no equivalent override; Pi
+manages its own provider plumbing. Phase 22's design bet was
+*"orchestration without round-trips"* — recipes only work when
+we control the request seam. That's why opencode is the
+primary host and why we don't try to retrofit the proxy onto
+the other surfaces.
+
+*** Two TypeScript adapters
+
+- [[file:../../extensions/opencode/src/][=extensions/opencode/src/=]] (top-level, separate from the Python
+  package) — opencode TUI plugin: insight cards on open, slot
+  overrides ([[file:../../extensions/opencode/src/slots.tsx][=slots.tsx=]]), LCARS sidebar ([[file:../../extensions/opencode/src/panel.tsx][=panel.tsx=]] /
+  [[file:../../extensions/opencode/src/sidebar.tsx][=sidebar.tsx=]]), [[file:../../extensions/opencode/src/auto-session.tsx][auto-session opener]], [[file:../../extensions/opencode/src/slow-llm-watch.tsx][slow-LLM watchdog]],
+  =/sys*= [[file:../../extensions/opencode/src/sys-commands.tsx][slash family]].
+- [[file:../../org_llm/pi_extension/pi-org-llm.ts][=org_llm/pi_extension/pi-org-llm.ts=]] (bundled inside the Python
+  package as a data file) — the Pi bridge. =org-llm pi --install=
+  copies it out to =~/.pi/extensions/=. Pi loads the .ts and the
+  bridge spawns =org-llm mcp= as a subprocess, registers each MCP
+  tool as a Pi tool prefixed =org_llm_=, and re-injects the
+  org-llm system prompt on every turn (Pi's win — opencode
+  freezes the prompt at session start).
+
+Deep dives:
+[[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] ·
+[[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] ·
+[[id:ddfb74ae-3c16-45e3-b1be-df3c2b03966b][Pi bridge]] ·
+[[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][Insight cards]] ·
+[[id:39c17d6a-b502-4d9a-adc9-3cf71f776ad2][Tutor]].
+
+** 4. Personalisation — the voice and look
+
+[[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][LCARS theming]] is the visual language (palettes, chunky bars,
+ASCII fonts). [[id:c88b2ddc-33bc-4b58-bd16-993c48b91209][Theme studio]] is the voice layer — themed
+phrasings driven by 0–3 user-defined knobs (e.g. =rave=,
+=dinosaur=, =coffee=). Both apply across CLI, sidebar, and
+narrated agent output.
+
+* Data plane — what's in SQLite
+
+Defined in [[file:../../org_llm/db.py][=db.py=]]. The file [[file:../../schema.sql][=schema.sql=]] is generated
+from the literate org file and is descriptive, not authoritative.
+
+| table                | owns                                                                  |
+|----------------------+-----------------------------------------------------------------------|
+| =files=              | One row per indexed =.org= file (mtime + node count).                 |
+| =nodes=              | One row per org-roam node (title, body, tags, =embedding= blob).      |
+| =history=            | Unified event log — CLI invocations, MCP calls, crew actions.         |
+| =config=             | Single source of truth for runtime knobs (key/value).                 |
+| =crew_log=           | Manager-log entries: recipes matched, narrations, delegates, repairs. |
+| =vault_fact=         | DB-backed deterministic inferrer cache (Phase 21.1) — see [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]].   |
+| =sensor_log=         | Life-support telemetry (battery, CPU, thermal, …).                    |
+| =insight_engagement= | Whether the user opened/dismissed each insight card (Phase 12.5).     |
+| =agent_baseline=     | Central registry of agent persona fragments.                          |
+
+Two on-disk supplements to the DB:
+
+- =~/org/captains-log-*.org= — rotated 5 MB org event logs
+  written by [[file:../../org_llm/logbook.py][=logbook.py=]]; not indexed by org-roam.
+- =~/org/.opencode/manager-log.jsonl= +
+  =~/org/.opencode/sidebar-{runtime,status}.json= — the file
+  surface the TUI sidebar's MANAGER row polls.
+
+The literate org file at =~/org/20260425230731-org_llm.org= is
+the *literate-programming* source: every Python/SQL/elisp file
+in this repo can be re-tangled from it. It is the source of
+truth for the code itself, not for runtime data.
+
+** Design rule — events vs metrics vs feedback
+
+Specialised tables look like one pattern but actually serve three
+different needs. New tables should be classified up-front:
+
+| category     | shape                          | mirrors history?       | examples                        |
+|--------------+--------------------------------+------------------------+---------------------------------|
+| *Events*     | one row per system action      | yes — keep history full | =crew_log=, future audit tables |
+| *Metrics*    | timeseries; high-volume        | no — would flood        | =sensor_log=                    |
+| *Feedback*   | user reaction; qualitatively   | no — different signal   | =insight_engagement=            |
+|              |   different from system action |                        |                                 |
+
+Why the distinction matters: a query like "what did the system do
+at 14:32?" should hit =history= and get clean event rows. If we
+mirrored metrics or feedback into =history=, that query would
+conflate "doctor ran a probe" with "user dismissed an insight
+card" with "battery dropped 3%" — three legitimately different
+signals. Each gets its own specialised table; only events
+maintain a unified-log mirror.
+
+The same rule applies to specialised slice tables (like
+=crew_log=): mirror to =history= so the unified log is complete,
+but keep the specialised columns for fast queries.
+
+** Concurrency — many writers, one DB file, no WAL
+
+Each entry point ([[file:../../org_llm/cli.py][=cli.py=]], [[file:../../org_llm/mcp_server.py][=mcp_server.py=]], [[file:../../org_llm/llm_proxy.py][=llm_proxy.py=]],
+[[file:../../org_llm/auto_embedder.py][=auto_embedder.py=]]) is a separate OS process. They open their
+own SQLAlchemy engines but write to the same =org-llm.db= file.
+
+[[file:../../org_llm/db.py][=db.py=]]'s =_load_sqlite_vec= sets only =PRAGMA foreign_keys =
+ON= — *not* =PRAGMA journal_mode = WAL=. SQLite therefore runs
+in default rollback-journal mode, which means concurrent writes
+serialise via file-level locking. Reads can run in parallel with
+reads, but a write while another write is in progress blocks
+with =SQLITE_BUSY=.
+
+In practice this works because writes are short (~1 ms each) and
+the Python sqlite3 driver retries =SQLITE_BUSY= for up to 5
+seconds by default. The latent risk: if the auto-embedder ever
+holds a write transaction across an embed loop (currently it
+doesn't — it commits per-batch), it would lock out the user's
+=org-llm capture= for seconds. If we add a long-running writer
+(e.g. dbt build), enabling WAL would be the right move:
+
+#+begin_src python
+# In _load_sqlite_vec, add:
+dbapi_conn.execute("PRAGMA journal_mode = WAL")
+#+end_src
+
+WAL allows readers and one writer to operate concurrently without
+blocking, at the cost of a =-wal= and =-shm= sidecar file. Until
+we have a long-running writer, the simpler default is fine.
+
+* Control plane — the LLM proxy is the seam
+
+Every cloud or local model call from a surface goes through
+[[file:../../org_llm/llm_proxy.py][=llm_proxy.py=]] (concept page: [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]]). The proxy declares
+=DEFAULT_INTERCEPTORS=, a list of 23 functions ([[id:daaf30cd-4316-4f20-befa-5831328708c6][interceptors]])
+run in order against every chat-completions request. Each
+function inspects the request and either returns a =ProxyResponse=
+(short-circuit — synthesise a reply, never call the upstream
+model) or returns =None= (fall-through — possibly having mutated
+the request).
+
+** Pattern note — chain of responsibility, with middleware mixed in
+
+This is the *Chain of Responsibility* pattern (GoF). It shows up
+across the industry under several names — servlet filters
+(Java), Express / Koa middleware (Node), Django middleware
+(Python), Spring's =HandlerInterceptor=, Angular's
+=HttpInterceptor=, gRPC interceptors, axios hooks. The shapes
+are all variants of "a request flows through a chain; each link
+either handles it or passes."
+
+Strict terminology distinguishes:
+
+- *Interceptor* — can short-circuit (return early without
+  calling the next link).
+- *Middleware* — always passes through, only mutates the
+  request or response.
+
+Org-llm's chain has both. Phase 1 entries in the diagram below
+are interceptors-strict-sense — each one *can* short-circuit by
+returning a =ProxyResponse=. Phase 2 entries are middleware —
+they always fall through with mutations only. We call all 23
+"interceptors" colloquially because the type signature is
+shared (=Interceptor = Callable[[ProxyRequest], Optional[ProxyResponse]]=),
+but the behavioural split matters: it's why the diagram
+distinguishes the two phases.
+
+Important scoping note: this chain runs against opencode's
+chat-completions traffic only. Claude Code and Pi bypass the
+proxy entirely (their LLM transport is outside our control — see
+[[*3. Surfaces — how org-llm reaches the user][surfaces]]). The =/sys*= short-circuits, recipe pre-fetch,
+=@<agent>= persona swap, and tool-call repair all live inside
+this chain — meaning they only fire when the user is in
+opencode.
+
+#+begin_example
+   HTTP request from opencode → llm_proxy.py
+                          │
+                          ▼
+   ┌───────────────────────────────────────────────────────────────────┐
+   │  PHASE 1 — short-circuit / dispatch                               │
+   │  Recognise local-only patterns; reply WITHOUT touching upstream.  │
+   │                                                                   │
+   │  no_llm_flag        --no-llm  hard bypass                          │
+   │  sysexport          /sysexport — write file + inline sidebar      │
+   │  sysscreenshot      /sysscreenshot — capture via backend          │
+   │  shell              !shell <cmd> — gated local subprocess         │
+   │  agent_sticky       carry @<agent> intent to next unprefixed turn │
+   │  agent_prefix † ────── @<agent> swap persona + RECIPE MATCH HERE  │
+   │  sys_commands       /sys* family                                  │
+   │  synth_tool_call ‡  fake tool calls for gemma-class models        │
+   │  tool_dialect_translate ‡  Kimi/qwen3 dialect → OpenAI            │
+   │  md_skills          .md `exec:` blocks → subprocess               │
+   │  static_slashes     /menu /help /config (deterministic content)   │
+   │  probe_cache        /api/tags, /api/show — cache shape probes     │
+   │  response_cache     identical-prompt LRU                          │
+   │                                                                   │
+   │  † agent_prefix mutates persona + may inject MANAGER PRE-FETCH    │
+   │    via match_recipe(); then falls through (one cloud call).       │
+   │  ‡ tool-dialect adapters short-circuit when they fully resolve    │
+   │    the call locally (markdown-JSON repair); otherwise fall through│
+   └────────────────────────────┬──────────────────────────────────────┘
+                                │ no match → fall through
+                                ▼
+   ┌───────────────────────────────────────────────────────────────────┐
+   │  PHASE 2 — mutate (always falls through to upstream)              │
+   │                                                                   │
+   │  Prompt directives                                                │
+   │   force_tool_call    `:tool <name>` pins tool_choice              │
+   │   explain_prose_only `??:explain` forces tool_choice="none"       │
+   │   cite               `?:cite` forces search_notes + raw overlay   │
+   │   replay_history     `~N` replays Nth-prior user prompt           │
+   │   raw_passthrough    `>raw <model>` strips system+tools+history   │
+   │                                                                   │
+   │  Safety + grounding                                               │
+   │   pii_redact      redact secrets when target is non-localhost     │
+   │   time_grounding  inject current date/time into system prompt     │
+   │                                                                   │
+   │  Routing + repair + cache                                         │
+   │   model_routing       content-based (code → coder, etc.)          │
+   │   tool_call_repair    markdown-JSON {tool_calls:…} → real call    │
+   │   qwen3_no_think      append /no_think for qwen3                  │
+   │   prompt_cache        keep_alive + Anthropic cache_control headers│
+   │   prompt_slim         strip tools from simple-chat prompts        │
+   │                                                                   │
+   │  Conditional (only when proxy_local_only=true)                    │
+   │   local_only          refuse if any non-localhost target          │
+   └────────────────────────────┬──────────────────────────────────────┘
+                                │ forward
+                                ▼
+                          upstream model
+                    (Ollama local / cloud GPU)
+                                │
+                                ▼ stream response back to surface
+                          (audited via AuditLogger → llm-audit.jsonl;
+                           narrations captured via log_crew_action
+                           into manager-log.jsonl + sidebar files)
+#+end_example
+
+Five things worth knowing about this chain:
+
+1. *Recipe matching is inside =intercept_agent_prefix=, not its
+   own interceptor.* When a user types =@scribe summarise my
+   dailies=, the agent_prefix interceptor parses the prefix,
+   swaps in scribe's persona, calls =match_recipe()= against the
+   residual text, and — if a recipe matches — calls
+   =execute_recipe()= to pre-fetch the data and inject a
+   =MANAGER PRE-FETCH= block into the system prompt. The proxy
+   then falls through and the agent narrates in ONE cloud call.
+   See [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes.org]] for the three layers of that mechanism.
+2. *First match wins for short-circuits; mutations stack.* The
+   ordering in =DEFAULT_INTERCEPTORS= is significant: e.g.
+   =sysexport= runs before =sys_commands= so =/sysexport= hits
+   the dedicated handler instead of being swept up by the
+   generic =/sys*= short-circuit. Mutations in Phase 2 each
+   touch a different field of the request, so order matters less
+   — but =pii_redact= deliberately runs before =model_routing=
+   so we don't route a redacted prompt to the wrong model.
+3. *Several interceptors are knob-gated.* =proxy_repair_markdown_tools=
+   gates =tool_call_repair=; =proxy_capture_narration= gates
+   stream-buffering for narration capture; =proxy_local_only=
+   conditionally appends =local_only= to the chain at startup.
+   All knobs live in the =config= table and round-trip via
+   =org-llm-config.org=.
+4. *Tool-call adapters split the work between dialects.*
+   =synth_tool_call= teaches non-tool-supporting models (gemma)
+   to emit tool calls via prompt-engineered XML. =tool_dialect_translate=
+   converts Kimi/qwen3 dialect output to OpenAI format.
+   =tool_call_repair= extracts tool calls from markdown-JSON
+   blocks (a common malformation across small local models) and
+   either executes locally (if the tool is in [[file:../../org_llm/org_tools.py][=org_tools.py=]]) or
+   forwards a clean tool_calls array upstream.
+5. *Audit is universal.* Every request — short-circuited or
+   forwarded — writes one =AuditEntry= JSONL line via =AuditLogger=
+   to =~/.local/share/org-llm/llm-audit.jsonl=, with the matching
+   interceptor's name in =intercepted_by= (or =forward= if none
+   matched). This is how we attribute behaviour to interceptors
+   when something goes wrong.
+
+The proxy is what keeps orchestration *zero extra round-trips* in
+the common case: =agent_prefix= → =match_recipe= → =execute_recipe=
+→ pre-fetch block → ONE cloud call. No separate "manager turn"
+exists in the chain because there doesn't need to be one.
+
+Deep dive: [[id:47ba2143-c53a-409a-8286-2b3759794608][llm-proxy.org]] (per-interceptor knobs + extension
+points); [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes.org]] (the three layers inside agent_prefix).
+
+* Tool surface — MCP
+
+[[file:../../org_llm/mcp_server.py][=mcp_server.py=]] exposes 71 tools over JSON-RPC 2.0 / MCP
+2024-11-05 stdio. Each tool is one =@server.tool()= decorator with
+a typed signature; the MCP server is otherwise stateless — all
+implementation lives in other modules. opencode, Claude Code, and
+the Pi bridge each spawn =org-llm mcp= as a subprocess at session
+start.
+
+#+begin_example
+   ┌─────────────────────────────────────────────────────────────────────────┐
+   │  MCP SERVER ── org_llm/mcp_server.py                                    │
+   │   71 tools registered as @server.tool() decorators.                     │
+   │   Spawned as stdio subprocess by opencode / Claude Code / Pi.           │
+   │   The MCP `instructions` field carries the search-first contract that   │
+   │   the Pi bridge re-injects per turn (others snapshot at session start). │
+   │                                                                         │
+   │  TOOL FAMILIES  (count · representative tools)                          │
+   │                                                                         │
+   │   vault search / RAG    (10) search_notes · get_node · list_dailies     │
+   │                              list_recent_nodes · vault_facts ·          │
+   │                              vault_profile · find_stale_notes …         │
+   │                                                                         │
+   │   org-tools (pure-py)   (17) org_grep · org_count_matches · org_agenda  │
+   │     ──── SEAM ──┐            org_link_graph · org_backlinks ·           │
+   │                 │            org_orphans · org_id_find · org_outline …  │
+   │                 │                                                       │
+   │   capture / context     (5) capture_note · add_context · get_context ·  │
+   │                              refresh_context · infer_capture_style      │
+   │                                                                         │
+   │   walk (stateful graph) (7) walk_pick_targets · walk_extract_facts ·    │
+   │                              walk_save_facts · walk_review_pending …    │
+   │                                                                         │
+   │   agents / orchestration(4) list_agents · delegate ·                    │
+   │                              export_manager_history ·                   │
+   │                              export_sidebar_snapshot                    │
+   │                                                                         │
+   │   self-care             (3) doctor_health · performance_status ·        │
+   │                              battery_status                             │
+   │                                                                         │
+   │   filesystem (gated)    (6) read_file · list_directory · list_grants ·  │
+   │                              request_access · discover_filesystem ·     │
+   │                              tangle_file                                │
+   │                                                                         │
+   │   external integrations (7) open_url · browser_command ·                │
+   │                              open_in_emacs · close_emacs_frames ·       │
+   │                              weather_forecast · weather_for_agenda …    │
+   │                                                                         │
+   │   doom emacs            (2) doom_keybinds · doom_packages               │
+   │                                                                         │
+   │   skills + code corpus  (3) list_skills · run_skill · code_search       │
+   │                                                                         │
+   │   meta / discovery      (6) get_config · set_config · list_models ·     │
+   │                              list_slash_commands · list_tutor_steps ·   │
+   │                              get_tutor_step                             │
+   │                                                                         │
+   │   insight cards         (1) insight_card_feedback                       │
+   └──────────────────────────────────────┬──────────────────────────────────┘
+                                          │
+                                          │ org-tools family is reached via
+                                          │ TWO call paths — see the seam ↓
+                                          ▼
+                            ┌──────────────────────────────────┐
+                            │ org_llm/org_tools.py             │
+                            │  pure-python implementations of  │
+                            │  the 17 org_* tools (no I/O      │
+                            │  beyond reading the vault)       │
+                            │                                  │
+                            │  Called by:                      │
+                            │   • mcp_server.py @server.tool() │
+                            │     (when an agent invokes a tool│
+                            │      through MCP transport)      │
+                            │                                  │
+                            │   • recipe_runner.py             │
+                            │     (when a recipe pre-fetches   │
+                            │      deterministically — same    │
+                            │      Python function, no MCP hop)│
+                            └──────────────────────────────────┘
+#+end_example
+
+Four properties of the tool surface worth pinning:
+
+1. *The org-tools seam is what makes recipe pre-fetch zero-cost.*
+   When [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][a recipe matches]], the runner calls the same Python
+   function the MCP server would have called — but in-process, in
+   the proxy, before the LLM ever sees the message. The agent
+   then narrates over the result in ONE cloud call.
+2. *Some families are stateful; most aren't.* The =walk_*=
+   family carries a per-session graph-traversal state (which
+   nodes have been visited, which facts pending review). =capture_note=
+   and =add_context= mutate the vault. The other families
+   (=search_notes=, =org_*=, =get_*=) are pure reads — same input
+   gives same output, safe to call repeatedly during pre-fetch.
+3. *Filesystem access is gated, not blanket.* =read_file=,
+   =list_directory=, =tangle_file= all consult [[file:../../org_llm/access.py][=access.py=]]'s
+   user-controlled allowlist. Out-of-allowlist reads return a
+   structured error so the agent can prompt the user to grant
+   access via =org-llm grant=. See [[id:11029de4-2780-4169-9f3b-2fd1a3a73e6a][granted-filesystem-access]].
+4. *External integrations are deliberately narrow.* =open_url= +
+   =browser_command= are the only outbound web tools; both gated
+   by =browser_grant=. =weather_*= calls a single configured
+   provider with cached results (=weather_cache_ttl_secs=).
+   =open_in_emacs= / =close_emacs_frames= use =emacsclient= for
+   the running daemon. No HTTP, no shell-out, no eval beyond
+   what's enumerated.
+
+Deep dive: [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]].
+
+* Cloud-or-local routing — many decision points, FOSS-first
+
+The cloud-vs-local choice is *not* made in one place. It's the
+result of a fall-through chain that combines knobs, CLI flags,
+runtime probes, and per-turn streaming heuristics. The chain
+runs top-to-bottom; the first decision that fires wins.
+
+#+begin_example
+   user request reaches org-llm (CLI verb / opencode chat / MCP tool)
+                                  │
+                                  ▼
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │ 1. proxy_local_only = true?                                         │
+   │      → intercept_local_only refuses any non-localhost target       │
+   │        and returns an error; cloud is dead for this session.        │
+   │      Use case: travel / privacy / offline.                          │
+   └────────────────────────────────────┬────────────────────────────────┘
+                                        │ false
+                                        ▼
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │ 2. CLI flag on the verb?                                            │
+   │      --cloud  → force cloud for THIS invocation                    │
+   │      --local  → force local for THIS invocation                    │
+   │      Affects: org-llm launch / code / review-emacs / ask /         │
+   │               capture --polish / doctor -w                          │
+   └────────────────────────────────────┬────────────────────────────────┘
+                                        │ no flag
+                                        ▼
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │ 3. proxy_cloud_first = true?                                        │
+   │      → every chat-completion skips local, goes straight to the     │
+   │        configured cloud provider via _failover_to_cloud machinery. │
+   │      Set automatically by `doctor --power-boost` when the chosen   │
+   │      chat_model + 1 GB headroom doesn't fit measured free RAM.     │
+   │      Audit label: cloud_first.                                      │
+   └────────────────────────────────────┬────────────────────────────────┘
+                                        │ false (the common case)
+                                        ▼
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │ 4. intercept_model_routing — content-based MODEL pick (still local)│
+   │      Code-shaped queries → code_model (e.g. qwen2.5-coder)         │
+   │      Reasoning-heavy   → reason_model (e.g. deepseek-r1)           │
+   │      Tagging / quick   → fast_model (e.g. phi4)                    │
+   │      Choice doesn't change cloud-vs-local; it picks the role.       │
+   └────────────────────────────────────┬────────────────────────────────┘
+                                        │
+                                        ▼
+   ┌─────────────────────────────────────────────────────────────────────┐
+   │ 5. Forward request to LOCAL Ollama                                 │
+   │      proxy opens stream; starts TTFB timer (proxy_first_byte_     │
+   │      timeout_ms, default 30000).                                    │
+   └─────────────────────┬─────────────┬─────────────────────────────────┘
+            ✓ first byte │             │ stall past TTFB
+              arrives    │             │ (or upstream error)
+              in time    ▼             ▼
+                    stream completes  ┌──────────────────────────────┐
+                    locally           │ 6. proxy_cloud_failover_     │
+                                      │      enabled = true?         │
+                                      │   → abort local; re-issue    │
+                                      │     SAME body to cloud for   │
+                                      │     THIS turn only.          │
+                                      │   Audit: cloud_failover.     │
+                                      │                              │
+                                      │ 7. cloud says context        │
+                                      │    overflow?                 │
+                                      │    → retry with tool         │
+                                      │      descriptions trimmed    │
+                                      │      (cloud_failover_        │
+                                      │       compressed_tools)      │
+                                      │    → retry with tools        │
+                                      │      stripped entirely       │
+                                      │      (cloud_failover_no_     │
+                                      │       tools)                 │
+                                      └──────────────┬───────────────┘
+                                                     ▼
+                                          stream returns to surface
+
+   ┌─ Parallel signals ─────────────────────────────────────────────────┐
+   │ Slow-LLM watcher (extensions/opencode/src/slow-llm-watch.tsx)      │
+   │   monitors tokens/sec; if local stays slow turn after turn,        │
+   │   nudges the user to relaunch with --cloud or run                  │
+   │   `doctor --power-boost`. Per-turn failover (#6) is cover for     │
+   │   ONE stuck turn; the watcher targets a session-wide switch.       │
+   └────────────────────────────────────────────────────────────────────┘
+#+end_example
+
+** The provider catalog (9 providers, FOSS-friendly only)
+
+[[file:../../org_llm/cloud.py][=org_llm/cloud.py=]]'s =PROVIDERS= list. Two categories:
+
+| #  | slug         | name           | type             | API compat   | endpoint shape                                  |
+|----+--------------+----------------+------------------+--------------+-------------------------------------------------|
+| 1  | =runpod=     | RunPod         | GPU rental       | both         | =https://{pod_id}-11434.proxy.runpod.net=       |
+| 2  | =vast=       | Vast.ai        | GPU rental (spot) | ollama       | =http://{host}:{port}=                          |
+| 3  | =lambda=     | Lambda Labs    | GPU rental       | openai       | =https://api.lambdalabs.com/v1=                 |
+| 4  | =tensordock= | TensorDock     | GPU rental (spot) | ollama       | =http://{host}:{port}=                          |
+| 5  | =salad=      | Salad Cloud    | GPU rental       | openai       | =https://{container_id}.salad.cloud=            |
+| 6  | =paperspace= | Paperspace     | GPU rental       | both         | =https://{deployment_url}=                      |
+| 7  | =coreweave=  | CoreWeave      | GPU rental       | openai       | =https://{service}.coreweave.cloud=             |
+| 8  | =openrouter= | OpenRouter     | hosted gateway   | openai       | =https://openrouter.ai/api/v1= (FREE tier)      |
+| 9  | =huggingface= | HF Inference  | hosted gateway   | openai       | =https://router.huggingface.co/v1= (FREE tier)  |
+
+*Default suggestion:* =openrouter= — it's the most flexible
+(multi-model gateway, FREE Llama 3.1 8B tier, per-token billing).
+=runpod= is the fallback when the user needs a dedicated GPU
+they control.
+
+*Excluded by policy:* Groq is not in the catalog and won't be
+added. (See =feedback_no_groq.md= in the agent memory.)
+
+** Model-license gating — FOSS-first by default
+
+Cloud models in [[file:../../org_llm/cloud.py][=cloud.py=]]'s =CloudModelInfo= rows carry a
+=license_tier= field with three values:
+
+| tier            | examples                                                   | gated by                       |
+|-----------------+------------------------------------------------------------+--------------------------------|
+| =foss=          | Apache 2.0, MIT, GPL — DeepSeek R1, Llama 3.3, Qwen 2.5    | always available               |
+| =open_weight=   | Llama / Qwen / Moonshot community licenses                 | always available               |
+| =proprietary=   | =anthropic/=, =openai/= (closed API), Gemini               | knob =proprietary_models_enabled= |
+
+When =proprietary_models_enabled=false= (the default), the cloud
+catalog filters out closed-API rows; =org-llm models --tune=
+won't suggest them. Users who want Sonnet / GPT-5 explicitly
+flip the knob.
+
+The textual =license= field on each row is fed through
+=_classify_license_tier()= when =license_tier= isn't explicit;
+the heuristic is *conservative — anything ambiguous becomes
+proprietary* so the FOSS gate doesn't accidentally leak closed
+models.
+
+** Credentials — `pass` is the only store
+
+API keys for cloud providers live in
+=~/.password-store/org-llm/<provider>/api_key= and are read by
+[[file:../../org_llm/creds.py][=creds.py=]]. =pass= unwraps the gpg-encrypted entry on demand
+so the keys never sit in plaintext on disk.
+
+[[file:../../org_llm/creds.py][=creds.py=]] is Guix-aware: it tries =~/.guix-profile/bin/pass=,
+=~/.guix-home/profile/bin/pass=, then falls back to whichever
+=pass= is on =PATH=. =gpg= lookups follow the same pattern.
+There is no env-var fallback by design — if =pass= can't unlock
+the key, the proxy refuses cloud rather than prompting or
+crashing mid-request.
+
+** Where the decisions are knob-tunable
+
+| knob                            | default | controls                                                       |
+|---------------------------------+---------+----------------------------------------------------------------|
+| =proxy_local_only=              | false   | session kill switch — refuses every cloud target               |
+| =proxy_cloud_first=             | false   | route every chat-completion to cloud, skip local entirely      |
+| =proxy_cloud_failover_enabled=  | true    | per-turn fallback when local stalls past TTFB                  |
+| =proxy_first_byte_timeout_ms=   | 30000   | TTFB threshold; 0 disables                                     |
+| =proprietary_models_enabled=    | false   | gate that includes/excludes closed-API rows from the catalog    |
+| =cloud_provider=                | (unset) | active provider slug (must be in =PROVIDERS=)                  |
+| =cloud_model=                   | (unset) | active cloud model id (provider-specific)                      |
+
+All knobs round-trip via =org-llm-config.org= (per the
+[[*Source-of-truth conventions][source-of-truth conventions]]).
+
+Deep dive: [[id:510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08][cloud-or-local-routing.org]].
+
+* Self-care — keeping the system honest
+
+Four loops keep the engine, the index, and the host healthy.
+Three are deterministic with optional LLM polish; one is
+on-demand. All write through to =history= (kind = =doctor= /
+=auto_embedder= / =stale=) so a unified =org-llm history= query
+shows the full self-care trail.
+
+#+begin_example
+   ┌──────────────────────────────────────────────────────────────────────────┐
+   │  SELF-CARE LOOPS                                                         │
+   │                                                                          │
+   │  ┌─────────────────────────────────────────────────────────────────────┐ │
+   │  │  1. DOCTOR  (on-demand — rescue.py + cli.py doctor verbs)           │ │
+   │  │                                                                     │ │
+   │  │   org-llm doctor               deep health check (deterministic)    │ │
+   │  │   org-llm doctor -w            13 LLM-driven probes + cloud verdict │ │
+   │  │   org-llm doctor --power-boost RAM-fit probe → may auto-set         │ │
+   │  │                                proxy_cloud_first when local can't   │ │
+   │  │                                fit the chosen model                 │ │
+   │  │   org-llm doctor --diagnose-cards   Phase 12.5 insight diagnosis    │ │
+   │  │                                                                     │ │
+   │  │   rescue.py: match_structured(exc, traceback_tail) → known-failure  │ │
+   │  │              dispatch (regex + type matchers)                       │ │
+   │  │              sanitize_llm_advice() → strip eval/shell-out from      │ │
+   │  │              suggested commands before showing to user              │ │
+   │  │                                                                     │ │
+   │  │   Writes: org-llm-doctor-runs.org (vault) + history (kind=doctor)   │ │
+   │  └─────────────────────────────────────────────────────────────────────┘ │
+   │                                                                          │
+   │  ┌─────────────────────────────────────────────────────────────────────┐ │
+   │  │  2. LIFE SUPPORT  (continuous polling — life_support.py)            │ │
+   │  │                                                                     │ │
+   │  │   8 probes, each returning a Reading:                               │ │
+   │  │     battery · cpu · memory · disk · thermal · network ·             │ │
+   │  │     ollama · auto_embedder                                          │ │
+   │  │                                                                     │ │
+   │  │   Reading = (probe, value, normalized 0..1, status, label,          │ │
+   │  │              message, context)                                      │ │
+   │  │   status ∈ nominal | watch | alert | critical                       │ │
+   │  │   context = activity summary (last ~30s of history rows) so the     │ │
+   │  │             reading can later correlate "CPU pegged" with "what     │ │
+   │  │             was the user doing"                                     │ │
+   │  │                                                                     │ │
+   │  │   record_readings() → sensor_log (one row per probe per cycle)      │ │
+   │  │   power_profile()   → saver | balanced | performance                │ │
+   │  │     (cascades into agent decisions — e.g. @gardener defers heavy    │ │
+   │  │      vault scans when power_profile = saver)                        │ │
+   │  │                                                                     │ │
+   │  │   org-llm life-support            — one-shot probe set              │ │
+   │  │   org-llm life-support --interval N   live polling panel            │ │
+   │  │   org-llm life-support --analyze  deterministic floor + LLM advice  │ │
+   │  │   org-llm sensors                 LCARS dashboard with sparklines   │ │
+   │  │   org-llm ask --emh "Q"           Voyager EMH agent grounded in     │ │
+   │  │                                   sensor_log (not the org vault)    │ │
+   │  └────────────────────────┬────────────────────────────────────────────┘ │
+   │                           │  every reading → sensor_log                  │
+   │                           │  recent slice → sidebar-status.json          │
+   │                           ▼                                              │
+   │  ┌─────────────────────────────────────────────────────────────────────┐ │
+   │  │  3. AUTO-EMBEDDER  (background daemon — auto_embedder.py)           │ │
+   │  │                                                                     │ │
+   │  │   run_forever() loop:                                               │ │
+   │  │     sleep _interval_secs()                                          │ │
+   │  │     _do_one_pass() → indexer.index_directory() (mtime-gated)        │ │
+   │  │                  → llm.embed_nodes() for new/changed nodes          │ │
+   │  │     write_status()  → ~/.local/share/org-llm/auto-embedder.json     │ │
+   │  │       (heartbeat — read by life_support.probe_auto_embedder)        │ │
+   │  │                                                                     │ │
+   │  │   Knobs: auto_embedder_enabled · auto_embedder_interval_secs ·      │ │
+   │  │          auto_embedder_quiet                                        │ │
+   │  │   Started by: `org-llm launch` (subprocess) or as standalone daemon │ │
+   │  └────────────────────────┬────────────────────────────────────────────┘ │
+   │                           │  index/embed updates → files / nodes tables  │
+   │                           │  fresh embeddings unblock walks + retrieval  │
+   │                           ▼                                              │
+   │  ┌─────────────────────────────────────────────────────────────────────┐ │
+   │  │  4. STALENESS SWEEP  (on-demand — org-llm stale)                    │ │
+   │  │                                                                     │ │
+   │  │   LLM-driven content-vs-truth audit over uncategorised notes        │ │
+   │  │   (find_stale_notes MCP tool wraps the same logic for agent use)    │ │
+   │  │                                                                     │ │
+   │  │   Dry-run by default (no edits unless --apply)                      │ │
+   │  │   Stale candidates  →  surfaced as Phase 12 insight cards           │ │
+   │  │   User reaction     →  insight_engagement table                     │ │
+   │  │   --diagnose-cards  →  doctor reads insight_engagement to surface   │ │
+   │  │                        per-generator quality patterns               │ │
+   │  └─────────────────────────────────────────────────────────────────────┘ │
+   └──────────────────────────────────────────────────────────────────────────┘
+#+end_example
+
+Three properties of the self-care layer worth pinning:
+
+1. *Deterministic-first, LLM second.* Every loop computes a
+   deterministic answer first (probe values, file mtime deltas,
+   exception-pattern matches), then optionally lets the LLM
+   polish or contextualise. Examples:
+   =deterministic_summary()= runs before =llm_optimization_advice()=;
+   =rescue.match_structured()= is consulted before
+   =sanitize_llm_advice()= is shown. This means self-care still
+   works when the LLM is offline or rate-limited — the LLM only
+   adds prose around already-correct facts.
+2. *Activity context turns metrics into events.* =sensor_log='s
+   =context= column carries a summary of the last few =history=
+   rows alongside each reading. So the LLM advice path can say
+   "your CPU was pegged at 8.0 while =ask --reason deepseek-r1=
+   ran for 240s — consider routing reasoning to cloud" instead
+   of just "your CPU is high." Crosses the events-vs-metrics
+   boundary in a controlled way (see the [[*Design rule — events vs metrics vs feedback][design rule]]).
+3. *Loops compose.* Auto-embedder keeps the index fresh →
+   staleness sweep audits the freshened data → insight cards
+   surface the candidates → the user reacts → doctor reads
+   =insight_engagement= via =--diagnose-cards= to surface
+   per-generator quality patterns → suggests config changes.
+   The chain only works because each loop writes its result
+   somewhere downstream loops can read.
+
+Deep dives:
+[[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][doctor-self-heal.org]] ·
+[[id:4df57d95-0e31-41cb-b973-5f41706901c0][auto-embedder.org]] ·
+[[id:e3333333-4444-5555-6666-cccccccccccc][staleness.org]].
+(Life support / sensors / EMH currently has no dedicated wiki
+page — it's documented in the README's Life-support section and
+slated as TODO in [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][the wiki index]].)
+
+* Source-of-truth conventions
+
+| concern                     | authoritative location                                  |
+|-----------------------------+---------------------------------------------------------|
+| User's notes                | =~/org/*.org= (the vault)                               |
+| Code                        | =~/org/20260425230731-org_llm.org= (literate org file)  |
+| Schema                      | [[file:../../org_llm/db.py][=org_llm/db.py=]] (SQLAlchemy); =schema.sql= is generated  |
+| Runtime knobs               | =config= table; mirrored to =org-llm-config.org=        |
+| Agent personas              | =agent_baseline= table + [[file:agent-roster.org][agent-roster.org]]              |
+| Recipes                     | =_RECIPES= list in [[file:../../org_llm/orchestration.py][=orchestration.py=]]                  |
+| MCP tool list               | [[file:../../org_llm/mcp_server.py][=mcp_server.py=]] (registration is the manifest)          |
+| Roadmap                     | [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]]                                            |
+| Architecture (this page)    | =docs/wiki/architecture.org=                            |
+| Concept docs                | =docs/wiki/*.org= (per-concept; this page links them)   |
+
+Two rules from [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki conventions]] apply here:
+
+- *Consult before paraphrasing.* When asked an architectural
+  question, the LLM reads this page, quotes the load-bearing
+  line, and links =docs/wiki/architecture.org=.
+- *Update when you spot drift.* If a new module lands or a
+  layer's shape changes (e.g. a new SQLite table, a fifth
+  surface, a sixth recipe runner shape), this page gets the
+  same-commit edit.
+
+* What this page is NOT
+
+- *Not the implementation tutorial.* For "how do I add a recipe"
+  see [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes]]. For "how do I add a wiki page" see [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki
+  conventions]].
+- *Not the phase log.* The roadmap holds shipped/planned phases
+  with commit anchors; this page only mentions phase numbers
+  when they explain a structural choice (e.g. "the LLM proxy is
+  the seam — Phase 17.1 + Phase 22").
+- *Not the tool catalogue.* MCP holds the tool list; recipes
+  holds the recipe registry; this page points at both.
+
+* Related
+
+- [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][Wiki index]] — full concept map
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — phase catalog + project plan
+- [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] — the orchestration seam
+- [[id:daaf30cd-4316-4f20-befa-5831328708c6][Interceptors]] — the concept the proxy chain runs
+- [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][Recipes]] — proxy-time orchestration
+- [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]] — Phase 21 deterministic-fact cache (=vault_fact= table)
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][Agents]] — the persona surface that runs on the proxy
+- [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][Agent framework]] — Agent dataclass, capabilities, hygiene scans
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — the tool surface
+- [[id:e4444444-5555-6666-7777-dddddddddddd][RAG]] — how retrieval grounds answers
+- [[id:47c84cd6-1cba-457d-a947-9c482d392991][Walk]] — graph traversal retrieval mode
+- [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's Log]] — the unified event log
+- [[id:9b012557-f592-4d1e-8dd1-464c2a4250c3][Audit log]] — bidirectional wiki↔reality audits
+- [[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][Doctor & self-heal]] — health checks + LLM rescue
+- [[id:510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08][Cloud-or-local routing]] — privacy-first model selection
+- [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][Wiki conventions]] — the self-updating contract

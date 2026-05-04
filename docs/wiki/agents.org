@@ -21,7 +21,7 @@ prompt):
 1. *Persona* — a paragraph telling the LLM who it is, what tools
    it owns, and what defaults to apply (lead with a tool call,
    never invent vault content, hedge unless certain, etc.).
-2. *Tool roster* — the subset of MCP tools the agent is told to
+2. *Tool roster* — the subset of [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] tools the agent is told to
    reach for. The MCP server exposes everything; the persona
    *narrows* what the agent reaches for first.
 3. *Model role* — which configured model handles the agent's
@@ -31,12 +31,12 @@ prompt):
    bigger one.
 
 The unit is *cheap*: one entry in =_PRECONFIGURED_AGENT_PROMPTS=
-in =org_llm/cli.py= (built-in) or one heading in
+in [[file:../../org_llm/cli.py][=org_llm/cli.py=]] (built-in) or one heading in
 =~/org/org-llm-agents.org= (user-editable, literate). No new
 runtime, no extra process. Adding an agent is 4-5 lines of
 persona text.
 
-* The current roster (17 agents, 2026-05-03)
+* The current roster (19 agents, 2026-05-04)
 
 ** Vault-content (read + reason)
 
@@ -79,6 +79,8 @@ persona text.
 |-----------------+---------------------------------------------------------------------------------------------+------------|
 | =@crew=         | The manager. Decompose → delegate → sanity-check → synthesise. Default when no agent tagged | chat_model |
 | =@agentsmith=   | Meta-agent: interviews you about a new agent and ships it (persona + tools + literate entry) | chat_model |
+| =@curator=      | Wiki concept-graph specialist: sweeps =docs/wiki/= for missing cross-links, broken =[[id:…]]= / file: links, and numeric drift between wiki tables and code | chat_model |
+| =@tracker=      | Dev-process steward: owns =dev-tracker.org=. Daily what's-on-deck, end-of-session what-shipped/what's-blocked, EFFORT-vs-actual drift. Birth-name =boothby= | chat_model |
 
 ** What used to be agents but isn't now
 
@@ -148,7 +150,7 @@ agent then narrates over the pre-fetched data in one cloud call
 instead of round-tripping to call the tool itself. Two recipes
 ship today: =count_across_vault= and =weather_aware_agenda=. The
 mechanism is opt-in per recipe, validated via the A/B harness in
-=scripts/recipe_ab_harness.py= before any new entry is added.
+[[file:../../scripts/recipe_ab_harness.py][=scripts/recipe_ab_harness.py=]] before any new entry is added.
 
 * How agents compose with the rest of the stack
 
@@ -262,11 +264,14 @@ for future calls):
   agent in one conversation.
 - [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes.org]] — the
   proxy-time pre-fetch mechanism agents compose with.
+- [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][vault-facts.org]] — the
+  cached deterministic knowledge agents read as authoritative
+  (=routine_chores=, =mood_signal=, =tag_taxonomy=, …).
 - [[id:47ba2143-c53a-409a-8286-2b3759794608][llm-proxy.org]] —
   the interceptor chain that hosts the agent layer.
-- =org_llm/cli.py= — =_PRECONFIGURED_AGENT_PROMPTS= (built-in
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]] — =_PRECONFIGURED_AGENT_PROMPTS= (built-in
   registry) + =_AGENT_TRIGGERS= (auto-route).
-- =org_llm/mcp_server.py= — =delegate()= (manager → specialist)
+- [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] — =delegate()= (manager → specialist)
   + =classify_items()= (the demoted classifier tool) +
   =list_agents()= (run-time agent introspection).
 - =~/org/org-llm-agents.org= — the user's literate override

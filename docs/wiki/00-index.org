@@ -71,6 +71,21 @@ for the full convention.
 - [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] —
   HTTP shim between opencode and the LLM; the seam where =/sys*=
   short-circuits, prompts get slimmed, and bad tool calls get repaired
+- [[id:daaf30cd-4316-4f20-befa-5831328708c6][Interceptors]] —
+  the concept the proxy chain runs: short-circuit vs. mutation,
+  when to add one, how they differ from =proactive_doctor=,
+  consolidation opportunities
+- [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][Recipes]] —
+  proxy-time orchestration; manager pre-fetches deterministically,
+  agent narrates in ONE cloud call (Phase 22 v2)
+- [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]] —
+  deterministic regex-derived knowledge (=routine_chores=,
+  =mood_signal=, =tag_taxonomy=, …) cached in SQLite; agents
+  treat as authoritative (Phase 21)
+- [[id:b91f980e-5699-4994-843a-00532f1770b3][Memory Alpha]] —
+  Trek framing for Phase 25's DB-authoritative inversion: the
+  DB becomes the central library, files are renders, vault facts
+  are Memory Prime
 - [[id:ddfb74ae-3c16-45e3-b1be-df3c2b03966b][Pi bridge]] —
   third conversational interface; per-turn dynamic system prompts
 - [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][Insight cards]] —
@@ -84,6 +99,25 @@ for the full convention.
 - [[id:39c17d6a-b502-4d9a-adc9-3cf71f776ad2][Tutor]] —
   23-step interactive walkthrough for first-time users
 
+** Agent surface (specialists you can talk to)
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][Agents]] — what's
+  running today: the 19-agent roster, invocation paths, design
+  rules. Read first if you just want to use agents.
+- [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][Agent framework]] —
+  the architecture: =Agent= dataclass, capabilities, hygiene
+  scans, recipes/inferrers per agent, migration plan.
+- [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][Agent roster]] —
+  the catalogue + speculative roadmap (=@coach=, =@medic=,
+  =@bookkeeper=, …) sorted by interestingness.
+- [[id:b9e5d3c2-4a7f-48a6-9c1d-e2f3a4b5c6d7][@agentsmith]] —
+  the meta-agent that ships new agents in one conversation.
+- =@curator= — wiki concept-graph specialist (covered in agents
+  + agent-roster); sweeps =docs/wiki/= for missing cross-links,
+  numeric drift between tables and code, new-page candidates.
+- =@tracker= — dev-process steward (covered in agents +
+  agent-roster); owns =dev-tracker.org=; daily what's-on-deck,
+  end-of-session what-shipped/what's-blocked, EFFORT drift.
+
 ** Visual + voice personalization
 - [[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][LCARS theming]] —
   the visual language: palettes, chunky bars, ASCII fonts
@@ -91,6 +125,16 @@ for the full convention.
   the voice layer: themed phrasings driven by 0-3 dials
 
 ** Meta
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] —
+  the single source of truth for the shape of org-llm: layers,
+  data plane, control plane, decision points, file ownership
+- [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][Now]] —
+  single-view dashboard ("YOU ARE HERE") of in-flight + recently
+  shipped; complement to roadmap (long-form) and dev-tracker
+  (work surface)
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] —
+  central agenda hub for active development, validation
+  backlog, prioritisation; complements the roadmap
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] —
   detailed phase catalog + project plan
 - [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][Wiki conventions]] —
@@ -113,8 +157,8 @@ the link to the source:
 - [[file:../../org_llm/search.py][org_llm/search.py]] — vector_search() and the rerank stack
 - [[file:../../org_llm/insights.py][org_llm/insights.py]] — Phase 12 insight pre-mount
 - [[file:../../org_llm/walk.py][org_llm/walk.py]] — Phase 13 graph walk
-- [[file:../../org_llm/mcp_server.py][org_llm/mcp_server.py]] — MCP server + ~64 tools
-- [[file:../../org_llm/llm_proxy.py][org_llm/llm_proxy.py]] — Phase 17.1 HTTP proxy + 13 interceptors
+- [[file:../../org_llm/mcp_server.py][org_llm/mcp_server.py]] — MCP server + 71 tools
+- [[file:../../org_llm/llm_proxy.py][org_llm/llm_proxy.py]] — HTTP proxy + 23 interceptors (Phase 17.1 + 18)
 - [[file:../../org_llm/auto_embedder.py][org_llm/auto_embedder.py]] — background freshness daemon
 - [[file:../../org_llm/theme_studio.py][org_llm/theme_studio.py]] — themed-phrasing cache
 - [[file:../../org_llm/db.py][org_llm/db.py]] — the SQLAlchemy schema
@@ -145,6 +189,11 @@ the link to the source:
 | RAG                       | [[id:e4444444-5555-6666-7777-dddddddddddd][retrieval-augmented-generation.org]] | full       |
 | MCP                       | [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][mcp.org]] | full       |
 | LLM proxy (Phase 17.1)    | [[id:47ba2143-c53a-409a-8286-2b3759794608][llm-proxy.org]] | full       |
+| Interceptors (concept)    | [[id:daaf30cd-4316-4f20-befa-5831328708c6][interceptors.org]] | full       |
+| Recipes (Phase 22 v2)     | [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes.org]] | full       |
+| Vault facts (Phase 21)    | [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][vault-facts.org]] | full       |
+| Memory Alpha (Phase 25 framing) | [[id:b91f980e-5699-4994-843a-00532f1770b3][memory-alpha.org]] | full       |
+| Now (single-view dashboard) | [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]]                | full       |
 | Insight cards (Phase 12)  | [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][insight-cards.org]] | full       |
 | Walk (Phase 13)           | [[id:47c84cd6-1cba-457d-a947-9c482d392991][walk.org]] | full       |
 | Skills (org-babel)        | [[id:001a2e03-30e8-49c5-a813-e774f58b6a0e][skills.org]] | full       |
@@ -152,6 +201,8 @@ the link to the source:
 | LCARS theming             | [[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][lcars-theming.org]] | full       |
 | Theme studio + knobs      | [[id:c88b2ddc-33bc-4b58-bd16-993c48b91209][theme-studio.org]] | full       |
 | Captain's Log             | [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][captains-log.org]] | full       |
+| Architecture              | [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] | full       |
+| Dev tracker               | [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] | scaffold (migration in progress) |
 | Roadmap                   | [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] | full       |
 | Wiki conventions          | [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki-conventions.org]] | full       |
 | Audit log                 | [[id:9b012557-f592-4d1e-8dd1-464c2a4250c3][audit-log.org]] | full       |
@@ -165,6 +216,10 @@ the link to the source:
 | Granted filesystem access | [[id:11029de4-2780-4169-9f3b-2fd1a3a73e6a][granted-filesystem-access.org]] | full       |
 | Task-instruction prefixes | [[id:338485eb-1669-4966-82fb-03607f5f0c64][task-instruction-prefixes.org]] | full       |
 | AGENTS.md primer          | (covered in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] § Phase 16.2) | partial |
+| Agents (roster + invocation) | [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]]              | full       |
+| Agent framework            | [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][agent-framework.org]]    | full       |
+| Agent roster               | [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]]       | full       |
+| @agentsmith                | [[id:b9e5d3c2-4a7f-48a6-9c1d-e2f3a4b5c6d7][agentsmith.org]]         | full       |
 
 * How to contribute / extend
 

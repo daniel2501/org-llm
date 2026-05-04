@@ -159,5 +159,13 @@ The walk_* MCP tool family (in [[file:../../org_llm/mcp_server.py][=org_llm/mcp_
   staleness's =+0.6= retrieval penalty references
 - [[id:e4444444-5555-6666-7777-dddddddddddd][RAG]] — walk doesn't
   retrieve; it CAPTURES the facts that downstream RAG calls cite
+- [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][Embeddings]] — walk
+  picks attention-worthy notes via embedding similarity over the
+  same =sqlite-vec= surface RAG uses
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — the seven
+  =walk_*= tools (=walk_pick_targets=, =walk_extract_facts=,
+  =walk_save_facts=, …) are MCP tools, addressable from any host
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] §
+  Knowledge plane — where walk fits beside indexer + search
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 13
   for the chronology + planned 13.2-13.5 work

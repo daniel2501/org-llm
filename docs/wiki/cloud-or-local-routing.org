@@ -205,11 +205,17 @@ org-llm launch -n                        # dry-run; key is REDACTED in output
 
 * Related
 
+- [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] —
+  =proxy_cloud_first= and the cloud-failover path live inside
+  the proxy; this page is the routing-policy half, the proxy is
+  the execution half
 - [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][Embeddings]] — embed
   calls also route cloud-or-local; the same logic applies
 - [[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][Doctor + self-heal]] —
   =proactive_doctor= calls the hardware probes that drive
   power-boost routing decisions
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] §
+  Cloud-or-local routing — where this fits in the bigger map
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — the
   cloud catalog has been a moving target since Phase 5;
   Phase 15 added schema-compliant provider blocks for opencode

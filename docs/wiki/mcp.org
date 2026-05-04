@@ -190,8 +190,16 @@ landing chronology.
 
 * Related
 
-- [[file:retrieval-augmented-generation.org][Retrieval-Augmented Generation]] —
+- [[id:e4444444-5555-6666-7777-dddddddddddd][Retrieval-Augmented Generation]] —
   the model uses =search_notes= / =ask_notes= as the retrieval
   half of RAG; MCP is how those tools reach the model.
-- [[file:roadmap.org][Roadmap]] — Phase 16.x is the current MCP +
-  TUI plugin landing.
+- [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] — the HTTP layer that pairs with this JSON-RPC
+  layer; =intercept_prompt_slim= operates on the serialised MCP
+  catalog before it reaches the local model.
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][Agents]] — agents narrow the MCP tool set into per-persona
+  rosters; the server still exposes everything.
+- [[id:11029de4-2780-4169-9f3b-2fd1a3a73e6a][Granted filesystem access]] — gates the =read_file= /
+  =list_directory= MCP tools.
+- [[id:001a2e03-30e8-49c5-a813-e774f58b6a0e][Skills]] — org-babel skills register as MCP tools at launch.
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — Phase 16.x is the current MCP + TUI plugin
+  landing.

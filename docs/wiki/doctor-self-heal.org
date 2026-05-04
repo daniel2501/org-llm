@@ -222,6 +222,12 @@ org-llm doctor diagnose-cards             # Phase 12.5 — cluster insight engag
 
 * Related
 
+- [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] — the
+  slow-LLM watcher fires =doctor --power-boost= when the proxy
+  notices a stuck request
+- [[id:daaf30cd-4316-4f20-befa-5831328708c6][Interceptors]] —
+  contrasts =proactive_doctor= (in-turn MCP tool) with
+  interceptors (HTTP boundary); two complementary layers
 - [[id:510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08][Cloud-or-local routing]] —
   power-boost decisions consume routing config
 - [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][Insight cards]] —
@@ -230,3 +236,5 @@ org-llm doctor diagnose-cards             # Phase 12.5 — cluster insight engag
 - [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's Log]] —
   doctor verdicts log themselves so =--reflect= can spot
   patterns over time
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] §
+  Self-care — where doctor + self-heal sits in the data plane

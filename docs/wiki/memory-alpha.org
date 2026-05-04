@@ -1,0 +1,150 @@
+:PROPERTIES:
+:ID:       b91f980e-5699-4994-843a-00532f1770b3
+:CREATED:  [2026-05-04]
+:END:
+#+TITLE: Memory Alpha — the Trek framing for DB-authoritative inversion
+#+FILETAGS: :wiki:concept:phase25:naming:framing:
+#+OPTIONS: toc:1 num:nil
+
+* What this is
+
+A naming + conceptual frame for the Phase 25 inversion. Instead
+of describing Phase 25 in dry shop-talk ("DB-authoritative
+inversion"), describe it via the Trek concept of *Memory
+Alpha* — the Federation's central library, a planetoid that
+houses all cultural and scientific knowledge, accessible to any
+member from any starship.
+
+In Trek (TOS S3E18 /The Lights of Zetar/), Memory Alpha is the
+central source of truth; planetary archives are local mirrors;
+individual research databases (Memory Prime, in extended
+fiction) are specialised authoritative subsets. Real-world: the
+Trek wiki at memory-alpha.fandom.com is itself named after the
+in-universe library — fans built the in-universe repository as a
+real-world DB. That recursion is the spirit org-llm wants for
+its own state.
+
+* The mapping (Trek → org-llm)
+
+Three of four mappings are already in the codebase. The fourth
+(the DB inversion itself) is Phase 25.
+
+| Trek concept                      | org-llm equivalent                          | status                  |
+|-----------------------------------+---------------------------------------------+-------------------------|
+| *Memory Alpha* (central library)  | the SQLite DB ([[file:../../org_llm/db.py][=db.py=]]) — canonical store    | Phase 25 inversion lands this |
+| Planetary archives (local mirrors) | =~/org/*.org= files — renders of DB state   | Phase 25.6 inversion    |
+| *Memory Prime* (specialised archive) | [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]] — deterministic regex-derived subsets | Phase 21 — *shipped*    |
+| Captain's Log (event stream)      | [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's Log]] (=History= table)             | already named — *shipped* |
+| Memory Alpha librarians           | [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][@curator]] (birth_name =atoz= — Mr. Atoz, TOS S3E23) | shipped 2026-05-04      |
+| Federation-wide access protocol   | [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — opencode / Claude Code / Pi / Emacs  | Phase 16 — *shipped*    |
+
+The core re-frame: org-llm's DB is your *personal Memory
+Alpha*. Your =~/org/*.org= files are the printed extracts you
+carry between starships. The Phase 25 work is teaching the
+system that the library is canonical, not the printed extracts.
+
+* Why this naming
+
+"DB-authoritative inversion" is technically precise and dry.
+"Memory Alpha mode" carries:
+
+1. *A coherent vocabulary* — pairs naturally with names already
+   in the codebase (=Captain's Log=, =@curator=/Mr. Atoz, the
+   starfleet-core agent pack with Trek birth-names like
+   =picard=, =spock=, =data=, =janeway=, =boothby=).
+
+2. *An accessible mental model* — most users will grasp "central
+   library + planetary mirrors" faster than "vault-authoritative
+   vs DB-authoritative inversion + round-trip-fidelity canary".
+
+3. *Built-in survival theme* — Memory Alpha was attacked in /The
+   Lights of Zetar/; the survival of knowledge is a recurring
+   Trek beat. Maps cleanly to backup, audit, recovery — exactly
+   what =doctor=, =log --reflect=, and the audit-log loop
+   already do.
+
+4. *No commitment to over-renaming* — the technical phrase "DB
+   inversion" stays valid in code, commit messages, and
+   developer-facing docs. The metaphor lives in user-facing
+   surfaces (verbs, persona language, README).
+
+* The Phase 25 arc as Memory Alpha construction
+
+Mapping the six sub-phases (per [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 25) onto
+the metaphor:
+
+| sub-phase | technical name              | Memory Alpha framing                                                         |
+|-----------+-----------------------------+------------------------------------------------------------------------------|
+| 25.1      | DB as full mirror            | The library ingests all extant printed extracts. Round-trip byte-equal.      |
+| 25.2      | backup + restore             | Memory Alpha gets disaster-recovery procedures. =memory-alpha snapshot=.     |
+| 25.3      | WAL + concurrency hardening | Multiple researchers + agents can query simultaneously without corruption.   |
+| 25.4      | git ingestion as audit/history | Every edit is preserved as a versioned record — Memory Alpha gains *time*.   |
+| 25.5      | DB-authoritative engine ops | Mass operations happen in the library; printed extracts re-render from it.   |
+| 25.6      | full inversion              | The library is canonical. Printed extracts become a UI surface. Phase done.  |
+| (Phase 26)| beyond SQLite (DuckDB / Postgres) | Memory Alpha gets a new substrate when the planetoid runs out of room.  |
+
+Round-trip fidelity is the survival check. Per the roadmap:
+"if 25.1 can't achieve byte-equal on the dev's vault within ~5
+days, reconsider." That's the canary the Memory Alpha frame
+inherits — if extracts and the library disagree, the library
+isn't ready to be canonical.
+
+* Verb proposals (UX surface)
+
+Three verbs that the Memory Alpha frame motivates and that
+nothing in the current verb space fills cleanly:
+
+| verb                          | what it does                                                                |
+|-------------------------------+-----------------------------------------------------------------------------|
+| =org-llm memory-alpha sync=   | Re-render =~/org/*.org= files from current DB state. The "extract" verb.    |
+| =org-llm memory-alpha verify= | Walk every file ↔ DB row and report disagreements. The audit verb.          |
+| =org-llm memory-alpha snapshot= | DB Online-Backup-API dump before destructive ops; pairs with restore.     |
+
+These compose with Phase 25.2's =backup= / =restore= verbs
+rather than replacing them: =memory-alpha snapshot= is the
+*pre-mutation* gesture (snapshot before a risky verb runs);
+=backup= is the *scheduled* / cron-flavour version.
+
+* What this is NOT
+
+- *Not a code-wide rename.* The =VaultFact=, =History=,
+  =CrewLog= tables keep their names. The =db.py= module stays
+  =db.py=. Memory Alpha is a metaphor for the user-facing
+  framing, not a refactor mandate.
+- *Not a marketing layer that hides the technical reality.* The
+  inversion still has all the same constraints (round-trip
+  fidelity, WAL concurrency, conflict resolution via git
+  merge). The Trek naming should never elide a real engineering
+  decision.
+- *Not a Federation cosplay.* The wiki should *use* the metaphor
+  where it carries weight, not pile on Trek references for
+  flavour. One coherent layer (DB framing + agent birth-names +
+  Captain's Log + Mr. Atoz) is the budget.
+
+* Source files
+
+The mapping touches existing surfaces; no new code-side concept
+ships with this naming pass.
+
+- [[file:../../org_llm/db.py][=org_llm/db.py=]] — the DB layer that becomes Memory Alpha
+- [[file:../../org_llm/db.py][=org_llm/db.py=]] :: =VaultFact= — the Memory Prime subset
+- [[file:../../org_llm/db.py][=org_llm/db.py=]] :: =History= — the Captain's Log table
+- [[file:../../org_llm/agents/_builtins.py][=org_llm/agents/_builtins.py=]] — the starfleet-core agent
+  registry, birth-name source for =atoz= / =boothby= / etc.
+
+* Related
+
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 25 —
+  the six-sub-phase arc this naming wraps
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] § Phase 25 —
+  active work surface for the inversion
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] §
+  Source-of-truth conventions — what flips during 25.6
+- [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's Log]] — the
+  event-stream half of Memory Alpha; already named after the
+  Trek convention
+- [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]] —
+  Memory Prime: the specialised authoritative subset
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][Agents]] § agent
+  framework — Mr. Atoz / =@curator= is the Memory Alpha
+  librarian role

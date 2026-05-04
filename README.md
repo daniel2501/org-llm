@@ -254,6 +254,9 @@ org-llm ask "what did I write about cooperative governance last month?"
 The org file at `~/org/20260425230731-org_llm.org` is the literate-programming
 source of truth — every Python/SQL/elisp file in this repo is tangled from it.
 
+For the full picture — entry points, SQLite tables, the LLM-proxy interceptor
+chain, MCP tool families — see [docs/wiki/architecture.org](docs/wiki/architecture.org).
+
 ---
 
 ## Commands at a glance
@@ -278,7 +281,7 @@ candidates listed.
 | `org-llm models` | Discover, tune (catalog-based), assign, or pull FOSS LLMs |
 | `org-llm performance` | Hardware-aware tuner — uses *free* RAM + measured tok/s (`--benchmark`) |
 | `org-llm cloud` | Multi-provider GPU cloud — signup, configure, status, cost, `--quick-start` |
-| `org-llm launch [-w WORKSPACE] [--cloud/--local]` | Open themed opencode TUI: 38+ MCP tools, LCARS theme, 51+ slash commands, auto cloud-or-local routing, stall watcher, optional auto-embedder daemon |
+| `org-llm launch [-w WORKSPACE] [--cloud/--local]` | Open themed opencode TUI: 71 MCP tools, LCARS theme, 51+ slash commands, auto cloud-or-local routing, stall watcher, optional auto-embedder daemon |
 | `org-llm claude` | Same, but Claude Code (`ANTHROPIC_API_KEY` from `pass`) |
 | `org-llm doctor` | Deep health check + LLM diagnosis (Dr. Crusher persona, live vitals folded in); `--install all` bulk-installs FOSS tools |
 | `org-llm doctor -w` | LLM-driven self-test: 13 read-only probes + cloud-LLM judgement |
@@ -582,7 +585,7 @@ org-llm palette reset                      # back to classic
 `org-llm pi --install` auto-installs Pi (pi.dev) if missing, copies a
 TypeScript MCP-bridge extension to `~/.pi/extensions/`, and registers
 it in `~/.pi/config.json`. Once installed, every Pi session starts with
-all 40+ org-llm MCP tools registered as `org_llm_<name>` Pi tools, plus
+all 71 org-llm MCP tools registered as `org_llm_<name>` Pi tools, plus
 a per-turn dynamic system prompt (something opencode itself can't do).
 
 ```sh
@@ -1858,10 +1861,12 @@ parent theme.
   auto-doctor. Full TNG-styled status panel (5 cards) on both
   welcome + session views; `/sys*` slash family that bypasses
   ollama via the new `org_llm/llm_proxy.py` HTTP shim
-  (13 interceptors: `/sys*` short-circuit, response/probe cache,
-  static slash handwrites, time-grounding, PII redact, tool-call
-  repair, model routing, `.md`-skill exec, qwen3 `/no_think`,
-  prompt slim, local-only kill switch); slow-LLM watcher that
+  (23 interceptors today — see [docs/wiki/architecture.org](docs/wiki/architecture.org)
+  for the full chain: `/sys*` short-circuit, `@<agent>` persona swap
+  + recipe match, response/probe/prompt cache, static slash handwrites,
+  time-grounding, PII redact, tool-call repair, synth-tool for
+  gemma-class models, dialect translation, model routing, `.md`-skill
+  exec, qwen3 `/no_think`, prompt slim, local-only kill switch); slow-LLM watcher that
   auto-runs `doctor --power-boost` and offers a one-keystroke
   `/syscloud` failover (with auto-relaunch); auto-session opener
   so the sidebar appears on launch without typing.

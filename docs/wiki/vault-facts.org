@@ -1,0 +1,173 @@
+:PROPERTIES:
+:ID:       af4cea86-a3a6-4dbf-ab7c-b53a9da3e909
+:CREATED:  [2026-05-04]
+:END:
+#+TITLE: Vault facts — deterministic inferrers + DB cache
+#+FILETAGS: :wiki:concept:phase21:facts:
+#+OPTIONS: toc:1 num:nil
+
+* What this is
+
+A *vault fact* is a deterministic, regex-sweep-derived piece of
+knowledge about the user's vault — things the LLM tends to guess
+wrong about, but that are mechanically computable. The shipped
+fact for "what are this user's recurring routine chores?" is a
+ranked-by-frequency list mined from =[X]/DONE= checkboxes in
+dailies, not an LLM impression of the user's habits.
+
+Each fact has:
+
+  - a *name* (=routine_chores=, =tag_taxonomy=, =mood_signal=, …)
+  - a *function* that recomputes the fact from a directory scan
+    (no LLM call)
+  - a *TTL ceiling* in seconds (24h default)
+  - a *DB row* in =vault_fact= caching the last computed value
+
+Together they form the deterministic substrate every agent reads
+when it needs a load-bearing fact about the user, instead of
+guessing.
+
+* Why this exists
+
+A pre-Phase-21 transcript of "what's my morning routine?" would
+have the LLM open a few dailies, eyeball patterns, and produce a
+plausible-sounding list with no provenance. Two of the items
+would usually be wrong. The user knows they're wrong because the
+user is the user — but the loop didn't.
+
+Vault facts move the answer to the deterministic side of the
+seam. =routine_chores= is the literal regex-counted top of the
+user's =[X]= checkboxes in =daily/*.org= for the last 90 days.
+The agent narrates over the cached fact; the fact is the answer.
+
+This is the same idea as a [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipe]]: do the deterministic part in
+Python, hand the agent a structured pre-fetch, narrate in one
+cloud call. Vault facts are the *cached* form — once computed,
+every subsequent call inside the TTL is free.
+
+* The shipped inferrers (Phase 21)
+
+Order matches registration in [[file:../../org_llm/vault_facts.py][=org_llm/vault_facts.py=]]:
+
+| name                       | TTL    | what it answers                                                          |
+|----------------------------+--------+--------------------------------------------------------------------------|
+| =vault_stats=              | 1h     | file count, total size, dailies count — vault dimensions                 |
+| =tag_taxonomy=             | 1h     | every tag in use + frequency; the user's actual taxonomy, not aspirational |
+| =routine_chores=           | 12h    | top recurring =[X]/DONE= chore patterns from dailies                     |
+| =priority_usage=           | 6h     | how the user actually uses =[#A]/[#B]/[#C]= priorities                   |
+| =date_format=              | 24h    | which date conventions the user writes (active vs inactive timestamps)   |
+| =scheduling_pattern=       | 6h     | typical SCHEDULED window, how far ahead the user plans                   |
+| =capture_section_titles=   | 12h    | the section headings the user captures into (=Inbox=, =Captures=, …)    |
+| =voice_register=           | 24h    | tone/register the user writes in (terse fragments vs full sentences)     |
+| =mood_signal=              | 6h     | weekly mood-marker buckets across 6 categories from last 42 days         |
+
+Adding a new inferrer is three lines (decorator + function):
+
+#+begin_src python
+@register_inferrer("my_fact", ttl_secs=3600)
+def _infer_my_fact() -> dict:
+    # regex sweep, return JSON-serialisable dict
+    return {"some": "data"}
+#+end_src
+
+The DB row is created lazily on the first =get_fact("my_fact")=
+call — no migration, no manual seed.
+
+* Cache invalidation
+
+Every =get_fact(name)= call checks two conditions, in order:
+
+1. *mtime mismatch* — the newest mtime among sampled files
+   differs from the row's =inputs_mtime= → recompute.
+2. *TTL exceeded* — =computed_at + ttl_secs < now= → recompute.
+
+Either trips a recompute. Both checks are sub-millisecond on a
+typical vault (single keyed lookup + O(N) directory scan). The
+TTL ceiling matters because some facts are time-relative
+(=mood_signal='s 42-day window slides regardless of file
+edits) — without a hard refresh ceiling the fact would only
+update on a file change.
+
+=force=True= skips the cache entirely. The CLI verb
+=org-llm inferrer-cache= surfaces the cache contents +
+freshness for diagnostics.
+
+* How agents read facts
+
+Agents reach facts through the [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] surface — never by importing
+=vault_facts= directly:
+
+| MCP tool         | shape                                                       |
+|------------------+-------------------------------------------------------------|
+| =vault_facts=    | =vault_facts(name="routine_chores")= → that fact's JSON     |
+|                  | =vault_facts()= → roll-up of all registered facts           |
+|                  | =vault_facts(name=…, force=True)= → bypass cache            |
+| =vault_profile=  | synthesised human-readable digest across all inferrers — startup primer for "who is this user?" |
+
+The persona-level rule (in agent prompts): *facts are
+authoritative*. When the user asks "what's my morning routine?",
+the =routine_chores= fact is the answer; the agent narrates
+over it and does not re-derive.
+
+* How recipes use facts
+
+[[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][Recipes]] can compose facts into their pre-fetch block. The
+=count_across_vault= recipe joins its regex match counts against
+=routine_chores= to add a =user_context= addendum when the count
+target overlaps a known chore pattern. The fact becomes inline
+context, not a separate tool call.
+
+This is the same pattern at a different layer: recipe pre-fetch
+is per-turn deterministic computation; vault facts are
+*amortised* deterministic computation cached across turns. A
+single agent turn can use both.
+
+* How agents own facts (Phase 23.4)
+
+The [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][agent framework]] gives each =Agent= an optional list of
+inferrers it owns. =mood_signal= belongs to =@journalist=;
+=routine_chores= belongs to the dailies-flavour scribe. Today
+ownership is documentation-only: the global =_INFERRERS= dict in
+=vault_facts.py= remains the active source of truth. Phase 23.4
+plans to move inferrer registration into the agent definition so
+adding an agent ships its facts with it; the dict stays as the
+runtime registry.
+
+* Why DB, not a JSON cache
+
+A pre-Phase-21 alternative would have been
+=~/.cache/org-llm/inferrer-cache.json=. The DB row was chosen
+because:
+
+- It's queryable (=org-llm config-show=, sqlite CLI, dbt models).
+- It backs up alongside the rest of the user's state.
+- It integrates with =Config= / =History= / =CrewLog= audit
+  surfaces — facts that drove a decision are co-located with the
+  decision.
+- The speed cost is negligible: keyed lookup vs. JSON parse,
+  both sub-millisecond on a ~10-row table.
+
+* Where it lives
+
+- [[file:../../org_llm/vault_facts.py][=org_llm/vault_facts.py=]] — registry, =get_fact= / =get_all_facts=,
+  every shipped inferrer
+- [[file:../../org_llm/db.py][=org_llm/db.py=]] :: =VaultFact= — the cache schema (=name= PK,
+  =value= JSON, =computed_at=, =inputs_mtime=, =inputs_count=,
+  =ttl_secs=)
+- [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] :: =vault_facts= / =vault_profile= —
+  the two MCP tools agents call
+- =org_llm/cli.py= — =org-llm inferrer-cache= verb for diagnostics
+
+* Related
+
+- [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][Recipes]] — recipe pre-fetch is the per-turn analog; facts
+  are the cached, amortised analog
+- [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][Agent framework]] — Phase 23.4 plans to move inferrer
+  ownership onto the =Agent= dataclass
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][Agents]] — every agent is told "facts are authoritative; do
+  not re-derive"
+- [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — =vault_facts= and =vault_profile= are the agent-facing
+  tool surface
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] § Data plane — where =VaultFact= sits in the
+  SQLite schema
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 21 — the shipping chronology
