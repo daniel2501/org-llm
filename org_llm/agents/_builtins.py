@@ -102,6 +102,21 @@ _AGENT_META: dict[str, _AgentMeta] = {
         birth_name="soong", aliases=("agentsmith",),
         capabilities=(_R, _W, _SH),
     ),
+    "curator":    _AgentMeta(
+        # Mr. Atoz — librarian on Sarpeidon ("All Our Yesterdays",
+        # TOS S3E23). The most-direct curator/archivist character
+        # in canon. Functional alias `curator` is what users type.
+        birth_name="atoz", aliases=("curator",),
+        capabilities=(_R, _W, _SH),
+    ),
+    "tracker":    _AgentMeta(
+        # Boothby — Starfleet Academy groundskeeper (TNG/VOY,
+        # recurring). Knew every cadet's progress; gave plain-
+        # spoken advice from quiet observation. The canonical
+        # "watches your progress, calls you on it" character.
+        birth_name="boothby", aliases=("tracker",),
+        capabilities=(_R, _W, _SH),
+    ),
     "gardener":   _AgentMeta(
         birth_name="keiko", aliases=("gardener",),
         capabilities=(_R, _SH),
@@ -131,7 +146,6 @@ _AGENT_META: dict[str, _AgentMeta] = {
                                    pack="legacy-extras",
                                    capabilities=(_R,)),
     "doom":           _AgentMeta(birth_name="doom",
-                                   pack="legacy-extras",
                                    capabilities=(_R, _SH)),
     "almanac":        _AgentMeta(birth_name="almanac",
                                    pack="legacy-extras",
