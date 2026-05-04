@@ -477,7 +477,110 @@ than 14 days, triage anything new in the friction log below.
 # Plain notes (no TODO state) for observations that aren't
 # actionable yet.
 
-# (none yet — start logging on the first walkthrough)
+**** 2026-05-04: W1 walkthrough — sidebar UI is the lever      :friction:w1:sidebar:gate-1:
+
+User's #1 takeaway: sidebar needs UI improvements. Main pane
+("terminally blank slate") feels right; sidebar carries the
+load and currently underperforms. Walked sidebar top-to-bottom;
+findings consolidated below.
+
+Positive (keep):
+- Main pane blank-slate feel is good — calm, clean, ready.
+- Manager section's empty-state has helpful "how to invoke
+  history" copy.
+- Engage section's *content* (suggested commands) is helpful.
+
+***** TODO Stardate without a regular date — can't read today  :friction:w1:bug:gate-1:sidebar:
+:PROPERTIES:
+:PRIORITY:  A
+:SOURCE:    W1 walkthrough 2026-05-04
+:END:
+Vault section leads with a Trek-themed stardate string. User
+cannot read it as a date. No regular date ("Sunday, May 4")
+appears anywhere in the morning view. Gate-1 fail for "what
+does today look like." Fix candidates: pair stardate with
+ISO/locale date, or move stardate to a less load-bearing slot
+and lead with the readable date.
+
+***** TODO Health section cut off in default frame size       :friction:w1:bug:sidebar:
+:PROPERTIES:
+:PRIORITY:  B
+:SOURCE:    W1 walkthrough 2026-05-04
+:END:
+Health section visibly truncated; user had to scroll / squint.
+Either sections need to fit in the default frame, or the
+sidebar needs density / collapse / scroll affordance.
+
+***** TODO Top section unbounded — no clear border            :friction:w1:bug:sidebar:
+:PROPERTIES:
+:PRIORITY:  B
+:SOURCE:    W1 walkthrough 2026-05-04
+:END:
+Top of view (scroll instructions, token use, context size)
+runs without a visual boundary into the sidebar / chat below.
+Needs a clear separator or its own panel.
+
+***** TODO Top section is opencode meta, not today-content    :friction:w1:plan:sidebar:
+:PROPERTIES:
+:PRIORITY:  B
+:SOURCE:    W1 walkthrough 2026-05-04
+:END:
+First thing the eye lands on: scroll-instructions + token use +
+context size. Useful info, wrong place. Morning view's prime
+real estate should lead with TODAY (date, agenda, weather
+peek), not opencode runtime meta.
+
+***** TODO Vault section is system-meta, not today-relevant   :friction:w1:plan:sidebar:
+:PROPERTIES:
+:PRIORITY:  B
+:SOURCE:    W1 walkthrough 2026-05-04
+:END:
+Vault section currently shows: stardate + embedding progress +
+file counts. User: "could be more useful." For morning open,
+the section should answer "what's in my vault that matters
+today" — recent captures, today's SCHEDULED items, drift since
+yesterday — not embedding %.
+
+***** TODO Active section is read-only — should be actionable :friction:w1:plan:sidebar:cli:
+:PROPERTIES:
+:PRIORITY:  B
+:SOURCE:    W1 walkthrough 2026-05-04
+:END:
+Active section shows palette / theme / agent / model — user
+called this "very good to know," but wants to be able to USE
+it: click / key to change model, swap theme, switch agent
+inline. Currently info-only.
+
+***** TODO Engage buried at bottom — prominent + context-aware + configurable  :friction:w1:plan:sidebar:
+:PROPERTIES:
+:PRIORITY:  B
+:SOURCE:    W1 walkthrough 2026-05-04
+:END:
+Engage shows suggested commands — user said "looks very
+helpful" but it's at the very bottom of the sidebar. Needs:
+(a) higher placement, (b) context-aware suggestions (not a
+static list), (c) updates as new features are added,
+(d) configurable.
+
+***** TODO `agent` sidebar section missing from default order :friction:w1:bug:sidebar:
+:PROPERTIES:
+:PRIORITY:  C
+:SOURCE:    W1 walkthrough 2026-05-04
+:END:
+DB default for =sidebar_sections= per =_PROMOTED_DEFAULTS= is
+=vault,active,manager,agent,health,archive,engage=. User's
+sidebar shows =vault,active,manager,health,archive,engage= —
+no =agent= section. Either: (a) the user's DB has a customised
+value, (b) the section was removed without updating the
+default, (c) bug. Investigate before fixing — don't just
+re-add.
+
+***** Notes (non-actionable observations):
+- Health section content (system stats) is low signal for
+  morning-open specifically. Possibly fine in a general status
+  view but doesn't earn morning real estate.
+- Archive section content unclear — user "honestly idk" what's
+  there. Either rename, redesign, or demote.
 
 
 ** DONE Phase 23.1 + 23.5 — Agent dataclass + DB-backed registry  :plan:agents:db:cli:load-bearing:
@@ -1238,32 +1341,30 @@ dump) time out sub-4B local models at 60s NAR_TIMEOUT.
 *Fix:* extend =_strip_count_question= with a
 =_SCOPE_MODIFIER_RES= strip pass mirroring =_TIME_MODIFIER_RES=.
 
-** TODO =org-llm agents --apply= verb missing — 4 wikis + agentsmith persona reference it  :bug:cli:doc:agents:
+** DONE =org-llm agents --apply= verb missing — 4 wikis + agentsmith persona reference it  :bug:cli:doc:agents:
+CLOSED: [2026-05-04 Mon]
 :PROPERTIES:
 :PRIORITY: A
 :SOURCE:   2026-05-03 agentsmith smoke test
+:ACTUAL:   25m
 :END:
-SCHEDULED: <2026-05-04 Mon>
 
-agentsmith persona
-([[file:../../org_llm/cli.py][=cli.py=]]:4941-5023) and four wiki
-pages instruct users to run =org-llm agents --apply= after
-writing a new agent file. *That flag does not exist* — =cli.py='s
-=agents= verb only ships =--tangle=, =--apply-from-org=
-(read-only diff), =--list=, =--seed=. Auto-apply happens at the
-next =org-llm launch= via =_maybe_auto_apply_org_file=
-(cli.py:5498-5520).
+*Resolution (2026-05-04):* Smoke test mis-classified
+=--apply-from-org= as read-only because of a misleading
+docstring. Code path at [[file:../../org_llm/cli.py][=cli.py=]]:7074
+already calls =_apply_org_file_to_db= and writes to the DB.
 
-References to fix:
-- [[file:../../docs/wiki/agentsmith.org][=agentsmith.org=]]:197
-- [[file:../../docs/wiki/agent-framework.org][=agent-framework.org=]]:204-205, 340, 405
-- [[file:../../docs/wiki/agents.org][=agents.org=]]:215, 274
-- agentsmith persona prompt (cli.py:4941-5023)
+Fixed by adding =--apply= as an alias to the existing
+=--apply-from-org= flag (=cli.py=:6945) and rewriting the
+docstring to reflect what the code actually does. The 4 wiki
+pages and the agentsmith persona that say =--apply= are now
+correct without doc edits. Old =--apply-from-org= still works
+(kept as alias) so README, manpage, gallery, doom-parity test,
+and =config --apply-from-org= references keep working.
 
-*Fix:* either (a) add a real =--apply= flag that calls
-=_apply_agents_org_file= deterministically, OR (b) update all 4
-references to say "write the file; relaunch picks it up via
-=_maybe_auto_apply_org_file=".
+Also touched: tangled-file shell-link at =cli.py=:7032 (now
+=--apply= for user-facing consistency) and the mutex error
+message at =cli.py=:6980.
 
 ** TODO =format_prefetch_block= missing =agenda_overdue= branch    :bug:recipes:load-bearing:
 :PROPERTIES:
