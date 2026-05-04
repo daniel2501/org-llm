@@ -4934,6 +4934,12 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "    short paraphrases by default.\n"
             "  • Never recommend therapy, medication, or any "
             "    intervention. You're a mirror, not a prescriber.\n"
+            "  • Stay in your lane. If the user asks about Doom "
+            "    keybinds, point to @doom; weather or seasons, "
+            "    @almanac; agenda or schedule, @agenda; vault "
+            "    hygiene, @gardener. Decline politely + redirect "
+            "    — don't answer from training-data guesses about "
+            "    other domains.\n"
             "  • If the data is too thin (<3 dailies, no clear "
             "    signal), say so plainly. Don't invent patterns."
         ),
@@ -5026,52 +5032,47 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
         "model_role":  "chat_model",
         "prompt": (
             "You are curator — org-llm's wiki concept-graph "
-            "specialist. The user comes to you for sweeps and "
-            "drift across docs/wiki/: missing cross-links between "
-            "pages, terms used in many pages without a concept "
-            "page, broken [[id:…]] or file: links, and numeric "
-            "drift between wiki tables and source-of-truth code.\n"
+            "specialist. Scope: docs/wiki/ ONLY. You sweep for "
+            "missing cross-links, broken [[id:…]] / file: links, "
+            "and numeric drift between wiki tables and source code.\n"
             "\n"
             "TOOL ROSTER:\n"
-            "  • read_file — every wiki page (docs/wiki/*.org) is "
-            "    yours to audit. Read 00-index.org first; it's the "
-            "    canonical concept-graph header.\n"
-            "  • search_notes — semantic search across the wiki "
-            "    when grep won't catch a phrasing variant.\n"
-            "  • shell — run `grep -nE` across docs/wiki/ and "
+            "  • read_file — read docs/wiki/00-index.org first; "
+            "    it's the canonical concept-graph header.\n"
+            "  • search_notes — semantic match when grep misses a "
+            "    phrasing variant.\n"
+            "  • shell — `grep -nE` across docs/wiki/, "
             "    `python scripts/link_wiki_files.py` for verbatim "
-            "    path → file: link sweeps. Do NOT edit files via "
-            "    shell — go through Edit/Write so the user sees "
-            "    the diff.\n"
+            "    path → file: link sweeps. Never edit via shell.\n"
             "  • org-llm_delegate — when wiki claims drift from "
-            "    code (e.g. a table says '12 interceptors' but "
-            "    DEFAULT_INTERCEPTORS has 25), delegate to "
-            "    engineer for the code-side check.\n"
+            "    code, delegate to engineer for the code-side fix.\n"
             "\n"
             "DEFAULTS:\n"
-            "  • SCOPE — docs/wiki/ ONLY. Whole-vault hygiene is "
-            "    @gardener; tag taxonomy is @librarian.\n"
-            "  • PROPOSE THEN APPLY — never edit silently. State "
-            "    the diff one-line + rationale BEFORE saving (per "
-            "    wiki-conventions.org Rule 2).\n"
-            "  • LINK FORM — [[id:<uuid>][title]] for cross-page "
-            "    references; [[file:../../path][=path=]] for "
-            "    code-file links. Convert verbatim mentions of "
-            "    either form.\n"
+            "  • PROPOSE THEN APPLY — announce the diff + "
+            "    rationale inline, then apply immediately. Never "
+            "    edit silently; never wait for user approval "
+            "    ('OK?') — the user reviews the diff in the "
+            "    transcript, not the prompt for it. "
+            "    (wiki-conventions.org Rule 2 = transparency, "
+            "    not an approval gate.)\n"
+            "  • LINK FORM — [[id:<uuid>][title]] for cross-page; "
+            "    [[file:../../path][=path=]] for code files.\n"
             "  • NEW PAGES — ground every claim in source code "
-            "    (Read the actual file before writing the wiki). "
-            "    Pre-trained knowledge of the project is stale by "
-            "    default. Generate a fresh :ID: UUID; register in "
-            "    00-index.org Concept map + Status table.\n"
-            "  • DRIFT — when wiki tables claim numbers, verify "
-            "    against the canonical source list before signing "
-            "    off. Numeric drift is the most common audit miss.\n"
-            "  • BITE-SIZED CHUNKS — propose changes 1-3 files at "
-            "    a time so the user can review without scrolling.\n"
-            "  • AGENTSMITH HANDOFF — when @agentsmith ships a new "
-            "    agent, do the wiki integration as the last step: "
-            "    00-index.org Status row + agents.org See-also + "
-            "    agent-roster.org row when applicable."
+            "    (Read the actual file first; pre-trained "
+            "    knowledge is stale). Generate a fresh :ID: UUID; "
+            "    register in 00-index.org Concept map + Status "
+            "    table.\n"
+            "  • DRIFT — verify numeric claims (interceptors, "
+            "    agents, MCP tools) AND status claims (shipped vs "
+            "    planned vs doesn't-exist) against the canonical "
+            "    source list before signing off.\n"
+            "  • BITE-SIZED — propose 1-3 file edits at a time.\n"
+            "  • NEIGHBOURS — whole-vault hygiene is @gardener; "
+            "    tag taxonomy is @librarian. Stay in your lane.\n"
+            "  • AGENTSMITH HANDOFF — when a new agent ships, "
+            "    integrate into the wiki as the last step "
+            "    (00-index.org row + agents.org See-also + "
+            "    agent-roster.org row when applicable)."
         ),
     },
     "ops": {
@@ -5113,6 +5114,34 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
         ),
     },
 }
+
+
+# Persona whitespace normalisation.
+# Adjacent string literals concatenate without inserting whitespace,
+# but most personas use leading 4-space indents on continuation lines
+# for source readability — those indents become real mid-sentence
+# whitespace runs in the runtime string ("diff +     rationale"
+# instead of "diff + rationale"). Collapse mid-sentence runs of
+# 2+ spaces to a single space; preserve leading-of-line whitespace
+# (which carries bullet indents and intentional sub-bullet
+# alignment after \n).
+#
+# Caught 2026-05-04 by @curator dogfood; fix here keeps source
+# readable while normalising what the LLM actually sees. Future
+# personas don't need to think about this — write with the
+# indented continuations that read well in source; the loader
+# normalises.
+def _normalise_persona_whitespace() -> None:
+    import re
+    pat = re.compile(r'(?<=\S) {2,}(?=\S)')
+    for entry in _PRECONFIGURED_AGENT_PROMPTS.values():
+        prompt = entry.get("prompt")
+        if isinstance(prompt, str):
+            entry["prompt"] = pat.sub(' ', prompt)
+
+
+_normalise_persona_whitespace()
+del _normalise_persona_whitespace
 
 
 # Fallback chains for the finer-grained Phase 18.7 model roles.
@@ -11813,7 +11842,7 @@ _TUTOR_STEPS = [
         "[lcars1]Commands:[/lcars1]\n"
         "  [bold]org-llm capture[/bold]                           — interactive prompts\n"
         "  [bold]org-llm capture --title 'Meeting notes' --body 'Discussed X'[/bold]\n"
-        "  [bold]org-llm capture --no-polish[/bold]               — skip LLM formatting\n"
+        "  [bold]org-llm capture --polish[/bold]                  — opt into LLM formatting (slow)\n"
         "  [bold]org-llm capture --file 'projects/work.org'[/bold] — custom target file\n\n"
         "[lcars1]Output format (appended to inbox.org):[/lcars1]\n"
         "  * Your Title\n"
@@ -13365,7 +13394,10 @@ def capture(
             help="Raw content / prompt (alternative to the bare positional)")] = "",
     file:   Annotated[str,  typer.Option("--file",   "-f", help="Target org file (relative to org_dir)")] = "inbox.org",
     polish: Annotated[bool, typer.Option("--polish/--no-polish", "-p/-P",
-            help="Let LLM structure the note (default: on; --no-polish writes raw body)")] = True,
+            help="Let LLM structure the note (default: OFF; --polish opts in). "
+                 "Default flipped 2026-05-04 after W2 walkthrough caught "
+                 "polish at 48s latency + hallucinated content. Use --polish "
+                 "explicitly when you want a polished pass.")] = False,
 ):
     """Capture a new note into your org vault, optionally polished by an LLM.
 
@@ -13373,6 +13405,11 @@ def capture(
         org-llm capture 'a quick thought'                # bare positional
         org-llm capture --body 'a thought' --title 'X'   # explicit
         org-llm capture                                  # interactive prompts
+
+    Polish defaults to OFF — capture should be FAST. Pass --polish
+    when you want the LLM to structure the body (slow; can
+    hallucinate content). The polish prompt + latency are tracked
+    as TODOs in dev-tracker.org under W2's friction log.
     """
     import uuid
     from datetime import datetime
