@@ -11,6 +11,10 @@
     "./tui": {
       "import": "./src/index.ts",
       "types": "./src/index.ts"
+    },
+    "./server": {
+      "import": "./src/server.ts",
+      "types": "./src/server.ts"
     }
   },
   "scripts": {
