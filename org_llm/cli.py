@@ -5021,6 +5021,59 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "    instead of building a duplicate."
         ),
     },
+    "curator": {
+        "description": "Wiki concept-graph specialist — sweeps docs/wiki/ for missing cross-links, drift, and new-page candidates.",
+        "model_role":  "chat_model",
+        "prompt": (
+            "You are curator — org-llm's wiki concept-graph "
+            "specialist. The user comes to you for sweeps and "
+            "drift across docs/wiki/: missing cross-links between "
+            "pages, terms used in many pages without a concept "
+            "page, broken [[id:…]] or file: links, and numeric "
+            "drift between wiki tables and source-of-truth code.\n"
+            "\n"
+            "TOOL ROSTER:\n"
+            "  • read_file — every wiki page (docs/wiki/*.org) is "
+            "    yours to audit. Read 00-index.org first; it's the "
+            "    canonical concept-graph header.\n"
+            "  • search_notes — semantic search across the wiki "
+            "    when grep won't catch a phrasing variant.\n"
+            "  • shell — run `grep -nE` across docs/wiki/ and "
+            "    `python scripts/link_wiki_files.py` for verbatim "
+            "    path → file: link sweeps. Do NOT edit files via "
+            "    shell — go through Edit/Write so the user sees "
+            "    the diff.\n"
+            "  • org-llm_delegate — when wiki claims drift from "
+            "    code (e.g. a table says '12 interceptors' but "
+            "    DEFAULT_INTERCEPTORS has 25), delegate to "
+            "    engineer for the code-side check.\n"
+            "\n"
+            "DEFAULTS:\n"
+            "  • SCOPE — docs/wiki/ ONLY. Whole-vault hygiene is "
+            "    @gardener; tag taxonomy is @librarian.\n"
+            "  • PROPOSE THEN APPLY — never edit silently. State "
+            "    the diff one-line + rationale BEFORE saving (per "
+            "    wiki-conventions.org Rule 2).\n"
+            "  • LINK FORM — [[id:<uuid>][title]] for cross-page "
+            "    references; [[file:../../path][=path=]] for "
+            "    code-file links. Convert verbatim mentions of "
+            "    either form.\n"
+            "  • NEW PAGES — ground every claim in source code "
+            "    (Read the actual file before writing the wiki). "
+            "    Pre-trained knowledge of the project is stale by "
+            "    default. Generate a fresh :ID: UUID; register in "
+            "    00-index.org Concept map + Status table.\n"
+            "  • DRIFT — when wiki tables claim numbers, verify "
+            "    against the canonical source list before signing "
+            "    off. Numeric drift is the most common audit miss.\n"
+            "  • BITE-SIZED CHUNKS — propose changes 1-3 files at "
+            "    a time so the user can review without scrolling.\n"
+            "  • AGENTSMITH HANDOFF — when @agentsmith ships a new "
+            "    agent, do the wiki integration as the last step: "
+            "    00-index.org Status row + agents.org See-also + "
+            "    agent-roster.org row when applicable."
+        ),
+    },
     "ops": {
         "description": "CLI + config + diagnostics expert. Knows every org-llm verb.",
         "model_role":  "instruct_model",
@@ -5272,6 +5325,14 @@ _AGENT_TRIGGERS: dict[str, list[str]] = {
                        "design an agent", "i need an agent",
                        "wish there was an agent", "agent for tracking",
                        "agent that handles", "spin up an agent"],
+    "curator":        ["wiki audit", "audit the wiki", "audit wiki",
+                       "wiki sweep", "wiki review",
+                       "missing wiki link", "missing cross-link",
+                       "cross-link the wiki", "link the wiki",
+                       "wiki concept", "concept graph",
+                       "new wiki page", "write a wiki page",
+                       "docs/wiki", "wiki drift",
+                       "wiki status table"],
 }
 
 
@@ -6942,11 +7003,14 @@ def agents(
                  "agent set (defaults + any existing user overrides "
                  "merged). Edit there to customise — the next launch "
                  "picks up your changes.")] = False,
-    apply_from_org: Annotated[bool, typer.Option("--apply-from-org", "-A",
-            help="Read ~/org/org-llm-agents.org and report which "
-                 "agents differ from defaults (read-only check; "
-                 "the launcher already auto-loads the file if it "
-                 "exists).")] = False,
+    apply_from_org: Annotated[bool, typer.Option("--apply", "--apply-from-org", "-A",
+            help="Read ~/org/org-llm-agents.org and upsert every "
+                 ":agent:-tagged heading into the `agent` DB table. "
+                 "Use this after editing the file (or after "
+                 "@agentsmith ships an agent) to land changes "
+                 "immediately. Otherwise the next `org-llm launch` "
+                 "auto-applies if the file's mtime is newer than "
+                 "the DB.")] = False,
     list_:  Annotated[bool, typer.Option("--list", "-l",
             help="Show the resolved agent set (defaults + any "
                  "active user overrides) — same as what the next "
@@ -6977,7 +7041,7 @@ def agents(
     """
     flags = sum(1 for f in (tangle, apply_from_org, list_, seed) if f)
     if flags > 1:
-        red_alert("--tangle / --apply-from-org / --list / --seed are mutually exclusive.")
+        red_alert("--tangle / --apply / --list / --seed are mutually exclusive.")
         raise typer.Exit(1)
     if seed:
         n_added = _seed_agents_table()
@@ -7029,7 +7093,7 @@ def agents(
             "",
             "Generated by [[shell:org-llm agents --tangle][org-llm agents --tangle]].",
             "Edit the headings below — on the next [[shell:org-llm launch][org-llm launch]] (or",
-            "[[shell:org-llm agents --apply-from-org][org-llm agents --apply-from-org]]) the file is",
+            "[[shell:org-llm agents --apply][org-llm agents --apply]]) the file is",
             "auto-applied into the =agent= DB table when its mtime is newer than the",
             "newest DB row's =updated_at=. The DB is the live config; this file is",
             "a tangled mirror for human editing + version control.",
@@ -7674,6 +7738,156 @@ def crew_log(
                        title=f"[lcars1]crew-log · last {len(rows)}[/lcars1]",
                        border_style="lcars2",
                        padding=(1, 1)))
+
+
+@app.command(name="validate", rich_help_panel="Maintenance")
+def validate_cmd(
+    feature: Annotated[str, typer.Argument(
+        help="Registered feature name. Use --list to see all.")] = "",
+    list_features: Annotated[bool, typer.Option("--list", "-l",
+        help="List registered validation configs and exit.")] = False,
+    trials: Annotated[int, typer.Option("--trials", "-t",
+        help="Trials per (prompt × arm × model). Default 3.")] = 3,
+    harness_only: Annotated[bool, typer.Option("--harness-only",
+        help="Run the A/B harness only; skip the judge.")] = False,
+    judge_only: Annotated[bool, typer.Option("--judge-only",
+        help="Skip the harness; just judge the existing results "
+             "JSONL.")] = False,
+):
+    """Run A/B + blinded-judge validation for an LLM-mediated feature.
+
+    The framework lives in =org_llm/validation.py=; registered configs
+    in =org_llm/validation_configs/=. Each config defines two arms,
+    a prompt set, optional ground-truth file, and bars.
+
+    Run =org-llm validate --list= to see what's registered.
+    Run =org-llm validate <name>= to run the full pipeline.
+
+    Output lands under =~/.local/share/org-llm/validation/<name>/=
+    (results.jsonl, judgments.jsonl, summary.md).
+
+    Heavyweight — each run costs cloud calls. Not for every commit;
+    run periodically as a regression check or after touching a
+    feature's implementation."""
+    from . import validation as _val
+    # Trigger config registrations at first call.
+    from . import validation_configs as _vcfg  # noqa: F401
+
+    if list_features:
+        names = _val.list_registered()
+        if not names:
+            on_screen("[dim]No validation configs registered.[/dim]")
+            return
+        from rich.table import Table as _Tbl
+        from rich.panel import Panel as _Pn
+        tbl = _Tbl(show_header=True, header_style="bold cyan",
+                    box=None, padding=(0, 2))
+        tbl.add_column("name", style="bold")
+        tbl.add_column("kind")
+        tbl.add_column("description")
+        tbl.add_column("scope", justify="right")
+        for n in names:
+            cfg = _val.get(n)
+            if cfg.kind == "deterministic":
+                scope = f"{len(cfg.checks)} checks"
+            else:
+                anchor = sum(1 for _, b, _ in cfg.prompts if b == "anchor")
+                scope = f"{len(cfg.prompts)} prompts ({anchor} anchor)"
+            tbl.add_row(n, cfg.kind, cfg.description[:60], scope)
+        console.print()
+        console.print(_Pn(tbl,
+                          title="[lcars1]validate · registered configs[/lcars1]",
+                          border_style="lcars2",
+                          padding=(1, 1)))
+        on_screen("[dim]Run [bold]org-llm validate <name>[/bold] to validate.[/dim]")
+        return
+
+    if not feature:
+        on_screen("[lcars2]Specify a feature or pass --list. "
+                  "Example: [bold]org-llm validate recipes[/bold][/lcars2]")
+        raise typer.Exit(code=2)
+
+    cfg = _val.get(feature)
+    if cfg is None:
+        on_screen(f"[lcars2]No validation config registered for "
+                  f"[bold]{feature}[/bold].[/lcars2]")
+        avail = ', '.join(_val.list_registered()) or '(none)'
+        on_screen(f"[dim]Available: {avail}[/dim]")
+        raise typer.Exit(code=2)
+
+    paths = _val.output_paths(feature)
+    on_screen(f"[lcars1]validate · {feature}[/lcars1]")
+    on_screen(f"  {cfg.description}")
+    on_screen(f"  kind:     {cfg.kind}")
+    if cfg.kind == "deterministic":
+        on_screen(f"  checks:   {len(cfg.checks)}")
+    else:
+        on_screen(f"  prompts:  {len(cfg.prompts)}")
+        on_screen(f"  trials:   {trials}")
+    on_screen(f"  output:   {paths['results'].parent}")
+
+    # Deterministic configs run a different pipeline — no A/B, no judge.
+    if cfg.kind == "deterministic":
+        if harness_only or judge_only:
+            on_screen("[lcars2]--harness-only / --judge-only ignored "
+                      "for deterministic configs.[/lcars2]")
+        try:
+            summary = _val.run_deterministic(
+                cfg, progress=lambda s: on_screen(f"  · {s}"))
+        except Exception as e:
+            on_screen(f"[red]Deterministic run failed: "
+                      f"{type(e).__name__}: {e}[/red]")
+            raise typer.Exit(code=1) from e
+        on_screen("")
+        passed = summary["summary"]["passed"]
+        total  = summary["summary"]["total"]
+        verdict_color = "green" if summary["verdict"] == "PASS" else "red"
+        on_screen(f"[{verdict_color}]{summary['verdict']}[/{verdict_color}]"
+                  f"  {passed}/{total} checks passed")
+        on_screen(f"[dim]Summary: {paths['summary']}[/dim]")
+        # Surface failing checks inline so the user doesn't need to open
+        # the file to see what's broken.
+        if summary["verdict"] == "FAIL":
+            on_screen("")
+            on_screen("[lcars2]Failures:[/lcars2]")
+            for group, entries in summary["groups"].items():
+                for e in entries:
+                    if not e["passed"]:
+                        msg = e["message"] or e["error"] or "(no message)"
+                        on_screen(f"  [red]✗[/red] {group} · {e['check']}: {msg}")
+        # Exit code: 0 on PASS, 1 on FAIL — useful for cron / CI.
+        if summary["verdict"] != "PASS":
+            raise typer.Exit(code=1)
+        return
+
+    if not judge_only:
+        on_screen("[lcars2]Running A/B harness — this calls cloud per "
+                  "trial × arm × prompt.[/lcars2]")
+        # NOTE: cloud_endpoint + api_key sourcing is feature-specific
+        # in the current shape; the recipe arms read them via the
+        # scripts/recipe_ab_harness module's own env probes. Future
+        # configs that want framework-managed cloud creds can grow a
+        # ValidationConfig.cloud_provider hint.
+        try:
+            results_path = _val.run_validation(
+                cfg, trials=trials,
+                progress=lambda s: on_screen(f"  · {s}"))
+            on_screen(f"[lcars1]✓ Harness wrote {results_path}[/lcars1]")
+        except Exception as e:
+            on_screen(f"[red]Harness failed: {type(e).__name__}: {e}[/red]")
+            raise typer.Exit(code=1) from e
+
+    if harness_only:
+        return
+
+    try:
+        summary_path = _val.run_judge(cfg)
+        on_screen(f"[lcars1]✓ Judge summary: {summary_path}[/lcars1]")
+    except NotImplementedError as e:
+        on_screen(f"[lcars2]Judge: {e}[/lcars2]")
+    except Exception as e:
+        on_screen(f"[red]Judge failed: {type(e).__name__}: {e}[/red]")
+        raise typer.Exit(code=1) from e
 
 
 @app.command(name="doom-sync", rich_help_panel="Maintenance")
