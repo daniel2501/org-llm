@@ -28,50 +28,55 @@ Activated by =proxy_orchestration_mode = "recipe"= (the default).
 
 Phase 22 v2 shipped six recipes. The 2026-05-03 A/B run (90
 judged pairs over qwen-2.5-72b cloud, blinded Claude Opus 4.7
-judge, see =scripts/recipe_ab_harness.py= + the [[file:2026-05-03-recipe-ab-ground-truth.org][ground-truth doc]])
+judge, see [[file:../../scripts/recipe_ab_harness.py][=scripts/recipe_ab_harness.py=]] + the [[file:2026-05-03-recipe-ab-ground-truth.org][ground-truth doc]])
 found that *only* =count_across_vault= consistently beat the
 agent-tool-use baseline on quality:
 
-| recipe                       | judge wins | verdict      |
-|------------------------------+------------+--------------|
-| =count_across_vault=         | 60% (12/20) | KEEP         |
-| =dailies_general=            | 20% (2/10)  | drop         |
-| =recent_activity_summary=    | 10% (1/10)  | drop         |
-| =dailies_routine_filter=     | 0% (0/5)    | drop         |
-| =weather_aware_agenda=       | 0% (0/5)    | KEEP (latent) |
-| =weekly_mood_review=         | 0% (0/5)    | drop         |
+| recipe                       | 2026-05-03   | 2026-05-04 post-fix | verdict          |
+|------------------------------+--------------+---------------------+------------------|
+| =count_across_vault=         | 60% (12/20)  | —                   | KEEP             |
+| =dailies_general=            | 20% (2/10)   | —                   | drop             |
+| =recent_activity_summary=    | 10% (1/10)   | —                   | drop             |
+| =dailies_routine_filter=     | 0% (0/5)     | —                   | drop             |
+| =weather_aware_agenda=       | 0% (0/5)     | 40% (2/5)           | KEEP (post-fix)  |
+| =weekly_mood_review=         | 0% (0/5)     | —                   | drop             |
 
 ** Why =weather_aware_agenda= survived
 
-Its 0% A/B win rate was a *data-starvation* failure, not a design
-failure: the user hadn't configured a weather location and had
-sparse outdoor agenda items, so the runner fell through to
-advisory mode and the agent hallucinated forecasts. With expected
-vault growth (more notes / tags / agenda items) and a configured
-location, the recipe earns its keep — pre-fetching forecast +
-outdoor-flag join is exactly the kind of multi-tool composition
-that justifies a deterministic shortcut.
+The original 0% A/B win rate had two compounding causes — only
+one was data-starvation. The advisory-mode fallback (no weather
+configured + sparse outdoor items) let the agent hallucinate
+forecasts, AND =format_prefetch_block= had no =agenda_overdue=
+branch (only rendered =agenda_today=), so even after hardening
+the runner the on-arm received counts and nothing to cite while
+the off-arm still listed real overdue tasks.
 
-The runner has been *hardened* against the original failure shape:
-it ALWAYS returns a result (never None except on a true
-exception), embeds an explicit =weather: unavailable= marker when
-the location isn't configured, and renders agenda data as a
-floor. The recipe body forbids inventing forecasts when they're
-missing. The result: the recipe is currently a no-op-or-better
-relative to agent-tool-use on every input, and will silently
-upgrade to a clear win once weather is configured + agenda has
-weather-sensitive items.
+Both have been fixed. The runner now ALWAYS returns a result
+(never None on missing config), embeds explicit =weather:
+unavailable= markers, and the prefetch block renders all three
+agenda buckets (today→8, overdue→5, upcoming→5) with =[STATE]
+DATE  TEXT  (file:line)= per item — same shape as the
+=org_agenda= MCP tool, so on-arm grounding matches what off-arm
+tool-use produces.
 
-Re-run the A/B (=scripts/recipe_ab_harness.py --only-prompt A7=)
-once weather is configured; the bar to keep firing is the same
-≥55% judge wins on its own prompts.
+*2026-05-04 re-A/B (5 trials × A7, blinded Opus judge):* on-arm
+went 0% → 40% on quality, latency stayed ahead (+51.5%), tokens
+stayed ahead (+86.9%). 5/5 trials produced no fabricated meetings
+or forecasts; both arms now cite the same real overdue files.
+Quality bar (≥55%) not yet cleared — judge consistently rewards
+the arm that lists more cite-able items + explains *why* weather
+is missing. Two cheap lifts queued (top-5 → 10 overdue, surface
+=location_lat=/=location_lon= hint in the unavailable line); see
+[[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] §
+"Lift weather_aware_agenda quality 40% → ≥55%".
 
-The headline wins on latency (-48%) and tokens (-89%) were real
-but partly inflated — the recipes-on arm often "won" those metrics
-by *short-circuiting on incomplete data* (e.g. =weather_aware_agenda=
-fell back to advisory mode and the agent hallucinated a "Jane
-meeting" with no agenda data; arm-B looked at real overdue
-tasks and answered honestly).
+The headline wins on latency (-48%) and tokens (-89%) from the
+original 2026-05-03 run were real but partly inflated — the
+recipes-on arm often "won" those metrics by *short-circuiting
+on incomplete data* (the hallucinated "Jane meeting" used zero
+real-data lookup time). Post-fix the metrics are honest: arm-A
+genuinely is faster + leaner than the tool-use loop while
+producing comparably-grounded output.
 
 The five dropped recipes were removed in the same change that
 fixed =finding-6= (the scope-modifier leak that lost A2 5/5
@@ -96,6 +101,60 @@ Add one only when:
 The bar isn't "this is a recipe-shaped problem". It's "the
 deterministic version produces a *better* answer than the
 agent-with-tools".
+
+* Two tiers: shared baseline + user-personal
+
+Recipes come in two tiers, with different bars and load paths:
+
+| tier      | source                              | bar                                                     |
+|-----------+-------------------------------------+---------------------------------------------------------|
+| shared    | =_RECIPES= in =orchestration.py=    | high — must pass A/B + robustness on unknown vaults     |
+| personal  | =~/org/org-llm-recipes.org=          | whatever the user wants; only affects their proxy       |
+
+*Personal wins on overlap.* When a personal recipe pattern AND a
+shared recipe pattern both match the same input, the personal
+recipe is selected. The user's literate config beats the default —
+this is how you override =count_across_vault= for a query shape
+where you want different behaviour without touching engine code.
+
+** Personal recipes file format
+
+The user creates =~/org/org-llm-recipes.org= (sample at
+[[file:../templates/org-llm-recipes.org.example][=docs/templates/org-llm-recipes.org.example=]]). Each
+=:recipe:=-tagged heading is one recipe:
+
+#+begin_src org
+,* my_finance_summary                                              :recipe:
+:PROPERTIES:
+:NAME:    my_finance_summary
+:TARGET:  researcher
+:PATTERN: \\b(net worth|balance|spending|budget)\\b
+:END:
+
+RECIPE — finance summary:
+  1. Call my_finance_query with the user's window.
+  2. Format result with currency.
+Run STEP 1 → STEP 2.
+#+end_src
+
+The body (after =:END:=) becomes the recipe's advisory text. No
+relaunch needed — =_load_personal_recipes()= is mtime-cached, so
+edits land on the next request.
+
+A malformed entry (missing required property, invalid regex) is
+silently skipped — a personal recipe must never crash the proxy.
+
+** When to use personal vs shared
+
+- *Personal* — your specific workflow, your tools, your tags. If
+  it assumes domain knowledge a stranger wouldn't have, it
+  belongs here.
+- *Shared* — universal vault operations defensible on unknown
+  vaults (currently: counting checked-off entries). Goes through
+  A/B + robustness check before shipping.
+
+If a personal recipe is being used by multiple people and clears
+the FOSS bar, it's a candidate for promotion to shared.
 
 * The current recipes
 
@@ -132,7 +191,7 @@ What the runner does:
 5. =format_prefetch_block= renders =total_hits=N, files_with_hits=M=
    plus top-3 files, plus an optional =user_context= addendum
    when the count target overlaps a known routine chore (uses
-   the =routine_chores= vault fact).
+   the =routine_chores= [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][vault fact]]).
 
 ** =weather_aware_agenda=
 
@@ -191,8 +250,8 @@ if recipe and (recipe.target == agent or recipe.target == "*"):
 | pre-fetch block formatter  | [[file:../../org_llm/recipe_runner.py][org_llm/recipe_runner.py]] :: =format_prefetch_block=   |
 | recipe injection point     | [[file:../../org_llm/llm_proxy.py][org_llm/llm_proxy.py]] :: =intercept_agent_prefix=      |
 | manager-log entries        | [[file:../../org_llm/db.py][org_llm/db.py]] :: =log_crew_action= (table =crew_log=) |
-| A/B harness                | =scripts/recipe_ab_harness.py=                        |
-| Blinded judge              | =scripts/recipe_ab_judge.py=                          |
+| A/B harness                | [[file:../../scripts/recipe_ab_harness.py][=scripts/recipe_ab_harness.py=]]                        |
+| Blinded judge              | [[file:../../scripts/recipe_ab_judge.py][=scripts/recipe_ab_judge.py=]]                          |
 
 The MANAGER buffer / sidebar card surfaces every recipe + tool_call
 + delegate + narration entry — the user-visible audit trail.

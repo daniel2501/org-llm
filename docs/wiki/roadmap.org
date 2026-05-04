@@ -8,10 +8,21 @@
 
 * What this is
 
-The detailed phase catalog and forward-looking project plan for
-=org-llm=. The README has a short overview pointing here; this is
-the source of truth for "what's done, what's next, what's
-later."
+The *narrative phase catalog* for =org-llm=. Each phase is a
+chapter: scope, why it shipped that way, what survived A/B,
+what's left, commit anchors. Read this when you want to
+understand how org-llm got to where it is, or what direction
+it's headed.
+
+For *active work surface* — what to do today, this week,
+sprint pace, validation backlog, bugs in flight — see
+[[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]].
+
+The split:
+- *roadmap* = book of phases (narrative, durable, updated at
+  phase boundaries)
+- *dev-tracker* = kanban (work state, continuous, updated
+  per-session)
 
 Phases are organic milestones, not a calendar cadence. A phase
 advances when a chunk of work feels done and the next chunk has
@@ -29,6 +40,25 @@ cards" = Phase 12) ship in slices without renumbering the world.
 - *Sub-phases stay open* until the parent retires; a Phase 12.6
   that's still =planned= doesn't block a Phase 13 that already
   shipped.
+
+** What goes here vs in the dev-tracker
+
+Items that get a *phase entry on this page* (with TODO/NEXT/DONE
++ scope + rationale) are work meaningful enough to want to
+remember the *why* later. Bug fixes don't qualify; recipe-tier
+system does. Validation campaigns don't; the validation
+*framework* does.
+
+Items that *don't* get a roadmap entry — sprint TODOs, validation
+checks, polish bugs, follow-up findings — live entirely in the
+dev-tracker.
+
+Cross-reference convention:
+- Tracker items destined to become roadmap entries: tag
+  =:PHASE_CANDIDATE: yes= so a future routine can promote them.
+- Roadmap entries with active sub-work: link forward to the
+  tracker section that owns the granular tasks; don't duplicate
+  the task list here.
 
 * Status snapshot                                              :snapshot:
 
@@ -65,7 +95,7 @@ cards" = Phase 12) ship in slices without renumbering the world.
     =location_lon=, =weather_enabled=,
     =weather_cache_ttl_secs=, =power_profile=.
   - *Phase 21.1 — DB-backed vault fact store (first cut).*
-    New =vault_fact= table + =org_llm/vault_facts.py= with
+    New =vault_fact= table + [[file:../../org_llm/vault_facts.py][=org_llm/vault_facts.py=]] with
     =register_inferrer= / =get_fact= / =get_all_facts= and
     mtime / ttl-aware invalidation. Three inferrers:
     =vault_stats= (572 files, 138 dailies, 182k nodes for this
@@ -124,7 +154,7 @@ cards" = Phase 12) ship in slices without renumbering the world.
     prompt as a compact =MANAGER PRE-FETCH= block, then lets the
     agent narrate in ONE cloud call. Tool use is enforced because
     the result is already in context — the agent doesn't have to
-    "decide" to call the tool. New module: =org_llm/recipe_runner.py=
+    "decide" to call the tool. New module: [[file:../../org_llm/recipe_runner.py][=org_llm/recipe_runner.py=]]
     (=_run_count_across_vault= + =format_prefetch_block=). Validated
     end-to-end: "in dailies, how many times have I made my bed?"
     → 17ms manager pre-fetch + ~6s qwen3:4b narration → "Based on
@@ -141,7 +171,7 @@ cards" = Phase 12) ship in slices without renumbering the world.
     =mcp_server.py=. Six of twelve tools queued in 22.6 done.
   - *Sidebar plugin disk-read squash.* Canonical
     =readOrgLlmJson= / =readOrgLlmJsonAt= helpers in
-    =extensions/opencode/src/panel.tsx=. Static
+    [[file:../../extensions/opencode/src/panel.tsx][=extensions/opencode/src/panel.tsx=]]. Static
     =import { createSignal } from "solid-js"= replaces
     =require("solid-js")= which silently failed in opencode's
     bun ESM runtime. Self-driving =SectionManager= with own
@@ -151,62 +181,63 @@ cards" = Phase 12) ship in slices without renumbering the world.
     =SectionCard= for clean borders. Fix root-causes the
     recurring "(idle — no recent actions)" bug across 4+ prior
     fix attempts.
-- *Active focus:* Phase 22.5a (thought-process capture in
-  manager log), Phase 19.1 (=org-llm sync= MVP — gates the
-  weekly GTD remote routine), Phase 22.6.2 (CLOCK summary +
-  drill review + attach list — three more tools to round out
-  the toolbelt).
+- *Active focus:* see [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] for current sprint state,
+  STARTED items, validation backlog, and pace. Roadmap status
+  reflects narrative-level milestones; the tracker is the
+  source for actionable state.
 - *Phase 22 recipe-expansion: REVERSED 2026-05-03.* The
-  90-judged-pair A/B (=scripts/recipe_ab_harness.py= +
-  =scripts/recipe_ab_judge.py=, blinded Claude Opus judge) found
+  90-judged-pair A/B ([[file:../../scripts/recipe_ab_harness.py][=scripts/recipe_ab_harness.py=]] +
+  [[file:../../scripts/recipe_ab_judge.py][=scripts/recipe_ab_judge.py=]], blinded Claude Opus judge) found
   that 5 of 6 shipped recipes (=recent_activity_summary=,
   =dailies_general=, =dailies_routine_filter=,
   =weekly_mood_review=, =weather_aware_agenda=) lost or tied to
   the agent-tool-use baseline. Catalog trimmed to two:
   =count_across_vault= (60% wins; KEEP) and =weather_aware_agenda=
-  (0% wins, but the failure was data-starvation — no weather
-  configured, sparse outdoor items — not a design flaw; KEPT as
-  latent infra with a hardened runner that can no longer
-  hallucinate forecasts). The 2026-05-17 recipe-promotion remote
-  agent is now obsolete; future recipes must clear the bar in the
-  A/B harness before adding. See [[file:2026-05-03-recipe-ab-ground-truth.org][ground-truth doc]] + [[file:recipes.org][recipes.org]]
-  for detail.
+  (kept as latent infra with a hardened runner). The
+  =weather_aware_agenda= initial 0% had two compounding causes —
+  data-starvation + a render bug in =format_prefetch_block= that
+  hid =agenda_overdue= items — both fixed 2026-05-04; the post-fix
+  re-A/B moved on-arm from 0% → 40% with hallucination eliminated
+  (5/5 trials, no fabrication; both arms cite the same real
+  overdue files), latency/token wins both clear by wide margins,
+  quality bar ≥55% not yet cleared (two cheap lifts queued; see
+  [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]]).
+  The 2026-05-17 recipe-promotion remote agent is now obsolete;
+  future recipes must clear the bar in the A/B harness before
+  adding. See [[file:2026-05-03-recipe-ab-ground-truth.org][ground-truth doc]] + [[file:recipes.org][recipes.org]] for detail.
 - *Punch list before 1.0:* cross-platform install validation
   (macOS / Ubuntu), Termux/Android port, smoke coverage on
   less-walked verbs, MCP-kind tool-call logging.
 
-** Priority order (current → wishlist)
+** Phases planned (forward-looking, narrative)
 
-Orchestration items (22.5, 22, 22.6) are pinned to the top.
-Standing constraint: smooth + beneficial + faster + higher quality
-than the solo path; no orchestration ships if it fails any of
-the four. Tools (22.6) precede inferrers (21) because they're
-load-bearing for recipe expansion (22).
+Standing direction: orchestration items pinned ahead of
+infrastructure work. Constraint stays smooth + beneficial +
+faster + higher quality than solo (the four bars). Tools
+generally precede inferrers because they're load-bearing for
+the consumers downstream.
 
-| #  | when         | phase                                    | priority | jump          |
-|----+--------------+------------------------------------------+----------+---------------|
-| 1  | <2026-05-09> | 22.5 thought-process capture             | A NEXT   | jump to ↓     |
-| 2  | <2026-05-10> | 22 orchestration v2 (recipe expansion)   | A active | ↓             |
-| 3  | <2026-05-12> | 19 built-in vault git-sync               | A        | ↓             |
-| 4  | <2026-05-13> | 22.6 agent tools v2 (6/12 shipped)       | A active | ↓             |
-| 5  | <2026-05-15> | 21 deterministic vault inferrers         | A        | ↓             |
-| 6  | <2026-05-18> | 18 proxy expansion follow-ups            | A        | ↓             |
-| 7  | <2026-05-20> | 16.5 Doom config introspection           | A        | ↓             |
-| 8  | <2026-05-22> | 16.4 extension polish                    | A        | ↓             |
-| 9  | <2026-05-30> | Punch list — beta → 1.0                  | A        | ↓             |
-| 10 | <2026-06-01> | org-agenda-agent (depends on 19)         | B        | wishlist      |
-| 11 | <2026-06-08> | 13.2 dailies as walk targets             | B        | leftover 13.x |
-| 12 | <2026-06-13> | Co-edit org files                        | B        | wishlist      |
-| 13 | <2026-06-15> | 12.6 cached gather persistence           | B        | leftover 12.x |
-| 14 | <2026-06-22> | 12.7 dbt analytics over engagement       | B        | leftover 12.x |
-| 15 | <2026-06-29> | 13.4 per-slug routing / fact replacement | B        | leftover 13.x |
-| 16 | <2026-07-06> | 13.5 follow-up questions in walk         | B        | leftover 13.x |
-| 17 | <2026-07-15> | 20 full agent crew (parked)              | B parked | ↓             |
+The forward-looking phase entries live below as TODO/NEXT
+sub-headings in the catalog — each carries scope and
+rationale. For sprint-level priority and active work state,
+see [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]].
 
-Single-table, single-glance roadmap. =A NEXT= = currently in
-progress. =A= = scheduled for the date shown. =B= = scheduled
-but not blocking. =B parked= = on hold pending architectural
-prereq. Wishlist below is =[#C]= — nothing scheduled.
+Currently planned phases (links into catalog below):
+
+- [[*TODO [#A] Active — Phase 16.3: Emacs companion][Phase 16.3 — Emacs companion]] (NEXT, in progress)
+- [[*TODO [#A] Planned — Phase 16.4+: extension polish][Phase 16.4+ — extension polish]]
+- [[*TODO [#A] Planned — Phase 16.5: Doom config introspection][Phase 16.5 — Doom config introspection]]
+- [[*TODO [#A] Planned — Phase 18: proxy expansion (follow-ups)][Phase 18 — proxy expansion follow-ups]]
+- [[*TODO [#A] Planned — Phase 19: built-in vault git-sync][Phase 19 — built-in vault git-sync]] (gates org-agenda-agent)
+- *Phase 21 deterministic inferrers* — Phase 21.1 shipped (=vault_facts=); further inferrers added as need surfaces (validated 2026-05-03 via =org-llm validate inferrers=)
+- *Phase 22.6 agent tools v2* — 13/12 shipped; remaining tool work tracked in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker]]
+- [[*TODO [#B] Parked — Phase 20: full agent crew (manager + specialists)][Phase 20 — full agent crew]] (parked)
+
+Leftover sub-phases from earlier parents (B-priority unless
+otherwise noted): 12.6 (cached gather persistence), 12.7 (dbt
+analytics), 13.2 (dailies as walk targets), 13.4 (per-slug
+routing), 13.5 (follow-up questions in walk), Co-edit org
+files, org-agenda-agent.
 
 * Shipped — pre-beta foundations                             :shipped:
 
@@ -862,7 +893,7 @@ this (=org-directory=, =org-roam-directory=,
   files). org-llm-only knobs (=chat_model=, =proxy_*=) stay
   untouched. =--yes= skips the prompt; =--dry-run= prints the
   diff and exits 0.
-- Lives in =org_llm/doom_introspect.py= so the helpers (=_emacs_eval=,
+- Lives in [[file:../../org_llm/doom_introspect.py][=org_llm/doom_introspect.py=]] so the helpers (=_emacs_eval=,
   =_static_parse=, =gather_doom_config=) are reusable from the
   daemon, =config --check=, and the doom companion later.
 
@@ -1269,7 +1300,7 @@ call. Result: zero hits, no count, robotic dump of fake JSON.
 Phase 22 v2 pulls the deterministic step UP into the manager.
 
 ** What changed
-- *New module* =org_llm/recipe_runner.py= with =execute_recipe()=
+- *New module* [[file:../../org_llm/recipe_runner.py][=org_llm/recipe_runner.py=]] with =execute_recipe()=
   and the =_run_count_across_vault= runner. Strips the
   =@<agent>= routing tag at the parse site (not via a second
   regex strip downstream), tokenises the user phrase with
@@ -1405,7 +1436,7 @@ MANAGER card bug — at least four prior fix attempts (commits
 without finding the root cause.
 
 Two compounding silent failures lived in
-=extensions/opencode/src/panel.tsx=:
+[[file:../../extensions/opencode/src/panel.tsx][=extensions/opencode/src/panel.tsx=]]:
 
 1. =require("solid-js")= returned =undefined= in opencode's bun
    ESM plugin runtime. The wrapping try/catch swallowed the
@@ -1629,7 +1660,7 @@ Hard constraints for Phase 22:
 * TODO [#A] Active — Phase 22.6: agent tools v2 (org/doom toolbelt expansion) :in_progress:
 SCHEDULED: <2026-05-13 Wed>
 
-The seed shipped 2026-05-02: =org_llm/org_tools.py= + seven MCP
+The seed shipped 2026-05-02: [[file:../../org_llm/org_tools.py][=org_llm/org_tools.py=]] + seven MCP
 wrappers (=org_grep=, =org_count_matches=, =org_file_meta=,
 =org_outline=, =org_tag_index=, =org_tag_suggest=,
 =org_agenda=) — deterministic, read-only helpers that answer
@@ -1693,7 +1724,7 @@ structurally instead of guessing from prose.
 
 *** DONE 22.6.1 — Pure-python tools (1, 2, 3, 5, 8, 10) :shipped:
 CLOSED: [2026-05-03]
-Six functions added to =org_llm/org_tools.py= +
+Six functions added to [[file:../../org_llm/org_tools.py][=org_llm/org_tools.py=]] +
 =mcp_server.py= wrappers. Built on a shared
 =_vault_id_index()= helper (~30-80ms scan returning
 ={id: {file, title, kind}}=). Validated against the live
@@ -1790,7 +1821,7 @@ invalidates only when the underlying files actually change.
 | voice_register          | sentence-length distribution, formal/casual tells |
 | code_language_mix       | for code corpora — top languages by file count |
 
-Each lives as a function in =org_llm/style_infer.py= (or sibling
+Each lives as a function in [[file:../../org_llm/style_infer.py][=org_llm/style_infer.py=]] (or sibling
 modules), exposed via a single MCP tool family
 =org-llm_infer_<topic>(...)= so agents can call them by name
 without needing to know the internals.
@@ -1941,6 +1972,235 @@ Three downstream features can't ship cleanly without it:
   the user thinking about it.
 - *Multi-vault federation* (wishlist) is unbuildable without
   a working single-vault sync first.
+
+* TODO [#A] Planned — Phase 25: DB-authoritative inversion   :planned:
+SCHEDULED: <2026-05-17 Sun>
+
+Foundation shift: invert the vault-authoritative principle. DB
+becomes source of truth; =~/org/*.org= becomes rendered UI
+surface. One DB file = the entire org-llm state.
+
+** Why
+
+- Mass operations via SQL (rename tag, bulk content edit)
+  instead of disk walks
+- Cross-file queries become one-liners
+- Single backup target — DB dump = full state (today =self
+  snapshot= bundles package + DB but *not* the vault)
+- Atomic transactions across content + tags + embeddings
+- Vault history queryable via git ingestion (Phase 25.4)
+- Multi-device sync via DB replication
+- dbt + Phase 27 Superset analytics over vault content directly
+
+** Sub-phases (6 + optional)
+
+- *25.1 — DB as full mirror.* Add =File.raw_content=; round-
+  trip validated byte-equal disk → DB → disk. Foundation.
+- *25.2 — backup + restore tooling.* =org-llm backup= /
+  =restore= using SQLite's Online Backup API.
+- *25.3 — WAL + concurrency hardening.* =PRAGMA journal_mode
+  = WAL=; busy_timeout; document the new concurrency model.
+- *25.4 — git ingestion as audit/history layer.* Snowflake-
+  style "git repo as DB" pattern, FOSS-implemented via
+  =pygit2= (libgit2). Tables =git_commits= + =file_versions=;
+  branches/tags as queryable state; engine writes stay
+  gitignored.
+- *25.5 — DB-authoritative engine ops.* Mass ops read/write
+  DB and re-render to disk; conflict resolution uses git
+  merge primitives from 25.4.
+- *25.6 — full inversion.* Architecture.org's "vault
+  authoritative" principle becomes "DB authoritative; vault
+  is rendered UI."
+- *(Phase 26 optional) — beyond SQLite.* DuckDB hybrid
+  (analytics overlay) or Postgres+pgvector (full migration)
+  if perf demands.
+
+Round-trip fidelity is the canary: if 25.1 can't achieve byte-
+equal on the dev's vault within ~5 days, reconsider.
+
+** Status
+
+Active state, sub-phase plans, decision points, and pass
+criteria live in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 25. This roadmap
+entry is the narrative; the tracker is the work surface.
+
+* TODO [#A] Planned — Phase 27: Apache Superset dashboards   :planned:
+SCHEDULED: post-1.0
+
+Optional analytics surface on top of org-llm.db.
+
+** Why
+
+- Apache 2.0, self-hostable, FOSS-aligned
+- Speaks SQLAlchemy natively → connects to org-llm.db with
+  zero glue code
+- Pairs with dbt (Phase 12.7 expanded) — Superset over dbt
+  models is the standard "modern data stack"
+- Composes with Phase 25.4 (git history) for time-travel
+  analytics over vault content
+
+** Scope
+
+Pre-built dashboard pack (vault, activity, self-care,
+validation, sprint metrics) shipped as
+=docs/superset/dashboards.json=. =org-llm superset --start=
+spins up Superset via docker-compose with =org-llm.db=
+mounted + dashboards pre-imported. Optional component —
+core install never requires it.
+
+** Status
+
+Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 27. Ships post-1.0,
+post-Phase 25.
+
+* TODO [#B] Planned — Phase 28: Containerization strategy    :planned:
+
+Decision-mostly-already-made phase: native install stays the
+*primary* path for org-llm; containers ship for specific use
+cases only (Superset, cloud GPU side, headless variant).
+
+** Why asymmetric
+
+Org-llm structurally wraps the user's local environment
+(vault, password store, gpg-agent, Emacs daemon, local
+Ollama). Containerization fights that design for the laptop /
+personal-vault path. But containerized Superset, cloud GPU
+templates, and a future =org-llm/server= image for
+headless / Pi / NAS deployments all make sense.
+
+The asymmetry: containerizing too little is recoverable (ship
+images later); too much makes native users hit friction on
+every file/editor workflow.
+
+** What we are NOT adding
+
+- Redis as a core dep (only relevant for Superset, which is
+  optional)
+- docker as a default install dependency
+- Kubernetes
+
+** Status
+
+Decision documented in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 28 with the
+full table of which components containerize and which don't.
+No standalone sprint — specific containers ship alongside
+the components they serve.
+
+* TODO [#A] Planned — Phase 29: Self-coded tools             :planned:
+SCHEDULED: post-Phase 25.4
+
+Generative meta-feature: when the LLM does a pattern of work
+repeatedly, the app detects it, proposes a deterministic
+tool, validates the tool against the LLM's output, and
+registers it so future invocations skip the LLM entirely.
+
+** Why this is gate-1, gate-2, AND gate-3 healthy
+
+- *Gate 1:* the app gets faster + more deterministic over
+  time for the user's actual workflows
+- *Gate 2:* every tool is a *complexity reduction* (replaces
+  expensive cloud call with a 10ms DB query)
+- *Gate 3:* audit log + validation framework already in
+  place; this consolidates them into a generative loop
+
+** Sub-phases
+
+- *29.0 — sync verb proof-of-concept.* Concrete first instance:
+  =org-llm tracker sync= keeps roadmap.org + dev-tracker.org
+  in lockstep deterministically. The simplest possible
+  demonstration of self-coded-tools; ships *standalone*
+  before the full discover/synth/replace loop.
+- *29.1 — pattern detection.* =org-llm tools auto-discover=
+  walks =llm-audit.jsonl=, ranks repeated query shapes as
+  tool candidates.
+- *29.2 — tool synthesis with validation.* LLM generates a
+  Python implementation; =ValidationConfig= (deterministic
+  kind) compares output against past LLM invocations; pass →
+  register, fail → reject.
+- *29.3 — registration + replacement.* Validated tools land
+  in MCP server with =@auto_generated= decorator; future
+  matching calls bypass the LLM.
+
+** Status
+
+Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 29. 29.0 is sprint-
+eligible (~half-day); 29.1+ depends on Phase 25.4.
+
+* TODO [#A] Planned — Phase 30: FOSS agent value-adds        :planned:
+SCHEDULED: parallel-shippable
+
+Five concrete value-adds that make FOSS-agent orchestration
+worth its keep — wins the user can't get from a single solo
+agent. The unifying thread: *FOSS agents add value when
+they're cheap enough to run in patterns cloud can't afford.*
+
+** Sub-features (parallel-shippable)
+
+- *30.1 — Local-only flows.* Agents that should never need
+  cloud — auto-tagger, hygiene, daily summary. Pure local;
+  zero cost; max privacy. Identified by =cloud_eligible:
+  false= persona field.
+- *30.2 — Specialized small models per domain.* Multi-agent
+  ≠ multi-call; multi-MODEL. 1B-class models for narrow
+  tasks. =model_size_hint= field on personas.
+- *30.3 — Background continuous work.* Local agents run free
+  24/7. =@gardener nightly= drafts hygiene cleanups onto a
+  =org-llm/gardener= branch (uses Phase 25.4) for morning
+  review.
+- *30.4 — Multi-judge validation.* Validation framework's
+  =judge_models= becomes a list; FOSS judges (Llama 3.3,
+  Qwen 2.5, DeepSeek R1) vote; reduces single-judge bias.
+- *30.5 — Self-validation.* Agent A drafts; Agent B
+  (=@validator=) checks against ground truth (citations,
+  paths, factual claims). Catches hallucinations at agent
+  layer, not at user-review time.
+
+** Status
+
+Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 30. 30.4 (multi-judge)
+is sprint-eligible (~1d, A/B framework upgrade); others
+depend on Phase 25.x foundations.
+
+* TODO [#B] Planned — Phase 31: Theme-driven agent avatars   :planned:
+SCHEDULED: post-1.0
+
+Theme-driven generation pipeline that produces PNG avatars for
+agents based on (agent metadata) × (user-selectable theme).
+Trek by default; fully user-themable to anything (Garfield,
+anime, 80s sci-fi, custom). LLM agent (=@avatarsmith=) supports
+conversational tuning ("more J.J. Abrams reboot").
+
+** Why it's a system, not artifacts
+
+Hand-pixel avatars don't scale: 23 agents × N themes × ongoing
+tuning = unmaintainable. The pipeline takes (agent metadata,
+theme) → image-gen prompt → backend → cached PNG → display
+layer. Conversational refinement composes naturally with LLM
+agents.
+
+** Sub-phases
+
+- *31.1 — agent visual metadata.* Add =visual= field to agent
+  registry (archetype, narrative_role, signature_traits,
+  default_seed). Sprint-eligible.
+- *31.2 — themes as literate config.*
+  =~/org/org-llm-themes.org= with =:theme:= headings; default
+  =trek= theme ships in repo. Sprint-eligible.
+- *31.3 — image-gen backend abstraction.* Pluggable: local SDXL
+  / Together / Replicate (FOSS-aligned defaults) / DALL-E
+  (gated by =proprietary_models_enabled=).
+- *31.4 — Emacs display path* (image buffer / inline; works on
+  all Emacs).
+- *31.5 — terminal protocol path* (kitty / iTerm2 / sixel
+  detect; ASCII fallback for terminals without protocol — uses
+  the existing =avatars.py= hand-pixel work).
+- *31.6 — conversational tuning* via =@avatarsmith= agent.
+
+** Status
+
+Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 31. 31.1 + 31.2 are
+sprint-eligible schema groundwork (~2d combined); full pipeline
+is post-1.0.
 
 * TODO [#A] Punch list — beta → 1.0                          :planned:
 SCHEDULED: <2026-05-30 Sat>
