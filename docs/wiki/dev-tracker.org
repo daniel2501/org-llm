@@ -1958,6 +1958,265 @@ sprint *after* this one closes (~2026-05-17 onward). The first
 concrete deliverable should be: round-trip fidelity proof on
 the dev's vault.
 
+*** Phase 25.4 design notes (expanded 2026-05-04)
+
+Expands the 25.4 bullet in "Recommended ship order" above
+into concrete design decisions, MCP tool surface, and a
+migration stub. Goal: ~2-3 hours of additional design work
+before any production code; this section is the durable
+output of that work so 25.4 can start cold.
+
+**** Mental model
+
+Git is already a database — content-addressed object store on
+disk. "Git-to-SQL" flattens that object graph into normalized
+tables SQLite can query. Nothing about git's authority changes
+in 25.4; SQL becomes a *materialized view* of git's history.
+Idempotent because git is content-addressed: same SHA always
+means same content, so re-running sync is a no-op past the
+cutoff.
+
+**** Decisions — Tier 1 (load-bearing, blocking)
+
+- *T1 — Authority: cache for 25.4.* SQL is a derived view
+  of git's object graph. Engine reads from SQL but writes
+  go through git (commits → next sync). Round-trip-fidelity
+  boss fight stays in 25.5/25.6 where it belongs. 25.4 ships
+  pure value (queryability, history) without owning the
+  inversion.
+- *T2 — Scope: vault only for v1.* =repos= table supports
+  multi-repo; opt-in for =~/repos/org-llm= self-tracking via
+  config in v2. Keeps the @tracker query surface clean.
+- *T3 — Working-tree: committed history only.* Working-tree
+  state is a separate concern (mtime tracking, dirty-flag
+  invalidation, diff-against-HEAD). Engine can already read
+  the working tree directly today; SQL projection of WIP is
+  not blocking. =working_tree_files= table arrives later as
+  25.4-extension or 25.5 prerequisite.
+- *T4 — Rebase / amend: soft-delete with 30d retention.*
+  Rewritten commits get =abandoned_at TIMESTAMP=. Time-travel
+  queries return useful errors instead of phantom-row
+  failures. 30 days matches =:VALIDATED:= staleness threshold
+  elsewhere. GC: =DELETE WHERE abandoned_at < date('now',
+  '-30 days')=, weekly.
+- *T5 — Sync trigger: capture + doctor + manual.*
+  =org-llm capture= (most common write path) keeps sync
+  fresh; =org-llm doctor= catches drift; =org-llm git-sync=
+  manual fallback. *No file-watcher in v1* (debounce/
+  concurrency complexity, marginal benefit). *No heartbeat
+  in v1* (couples to unresolved scheduler-choice question
+  per Agor entry above).
+
+**** Decisions — Tier 2 (must-answer-before-ship)
+
+- *T6 — Blob storage:* =*.org= / =*.md= / =*.txt= always
+  (full content); binaries metadata-only; configurable
+  allow/deny via =repos.blob_patterns= JSON column. No zstd
+  in v1 (premature). Revisit if storage hurts.
+- *T7 — Concurrency: snapshot-and-walk.* Read refs at sync
+  start, walk those SHAs, ignore newer commits until next
+  sync. Slightly stale but simple; eventually-consistent with
+  trigger frequency. libgit2 transactions only if it bites.
+- *T8 — MCP tool surface:* 5 tools, see =MCP tool surface=
+  subsection below.
+- *T9 — Schema migration:* existing =db.py= +
+  =_migrate_in_place= pattern. New SQLAlchemy
+  =DeclarativeBase= classes; =Base.metadata.create_all=
+  handles table creation idempotently. No Alembic.
+- *T10 — Privacy:* trust =.gitignore=. Secrets never reach
+  vault git history; therefore never reach SQL. No
+  content-pattern denylist in v1.
+
+**** Decisions — Tier 3 (defer to v2 / nice-to-have)
+
+- Rename/copy detection (libgit2 supports; runtime cost; v1
+  treats rename as delete+add).
+- Submodules (vault has none).
+- Git LFS pointers (no large binaries in vault).
+- Org-mode-aware semantic diffs ("what changed in =:tags:= of
+  this heading") — separate Phase 25.x layer over parsed
+  structure, NOT 25.4 scope.
+- Blob GC for orphaned (no =commit_files= row) blobs —
+  =org-llm git-sync --vacuum= verb later.
+- Multi-branch policy beyond default branch — opt-in per
+  repo via =repos.tracked_branches=.
+
+**** MCP tool surface (v1 — 5 tools)
+
+#+begin_src python
+def vault_history(
+    path: str,
+    since: str | None = None,
+    limit: int = 20,
+) -> list[CommitRef]:
+    """Commits that touched `path`, newest first. `since` is an
+    ISO date or relative ('-30d'). Returns sha + author + ts +
+    short message + insertions/deletions."""
+
+def vault_co_edits(
+    path: str,
+    top_n: int = 10,
+) -> list[CoEdit]:
+    """Paths that change in the same commits as `path`, ranked
+    by co-change count. Returns (path, count, last_co_edit_at)
+    tuples. The relationship signal that today is implicit in
+    agent reasoning."""
+
+def vault_velocity(
+    window_days: int = 30,
+) -> VelocityStats:
+    """Commits, insertions, deletions, files-changed over a
+    rolling window. For @tracker sprint metrics + Phase 27
+    Superset rollups."""
+
+def file_at_revision(
+    path: str,
+    sha: str | None = None,
+    at: str | None = None,
+) -> FileSnapshot:
+    """Content of `path` at a specific commit SHA or as of a
+    timestamp. `sha` and `at` are mutually exclusive. Returns
+    content + commit metadata. Time-travel without a working-
+    tree checkout."""
+
+def commits_since(
+    timestamp: str,
+    repo: str | None = None,
+) -> list[CommitRef]:
+    """All commits since `timestamp`, optionally filtered by
+    repo. For @tracker heartbeat + drift-detection patterns."""
+#+end_src
+
+*Optional v1.5:* =note_first_appearance(path)= (when was this
+note actually created — git knows, mtime doesn't);
+=vault_authors(since)= (multi-author future).
+
+**** Migration stub (lift into =org_llm/db.py= when 25.4 starts)
+
+#+begin_src python
+class GitRepo(Base):
+    __tablename__ = "git_repos"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    path: Mapped[str] = mapped_column(unique=True)
+    default_branch: Mapped[str]
+    last_synced_sha: Mapped[str | None]
+    last_synced_at: Mapped[datetime | None]
+    blob_patterns: Mapped[str] = mapped_column(default="*.org\n*.md\n*.txt")
+    tracked_branches: Mapped[str] = mapped_column(default="")  # "" = default only
+
+class GitCommit(Base):
+    __tablename__ = "git_commits"
+    sha: Mapped[str] = mapped_column(primary_key=True)
+    repo_id: Mapped[int] = mapped_column(ForeignKey("git_repos.id"))
+    author_email: Mapped[str]
+    authored_at: Mapped[datetime]
+    committer_email: Mapped[str]
+    committed_at: Mapped[datetime]
+    message: Mapped[str]
+    tree_sha: Mapped[str]
+    abandoned_at: Mapped[datetime | None]  # T4 soft-delete
+
+class GitCommitParent(Base):
+    __tablename__ = "git_commit_parents"
+    child_sha: Mapped[str] = mapped_column(ForeignKey("git_commits.sha"), primary_key=True)
+    parent_index: Mapped[int] = mapped_column(primary_key=True)
+    parent_sha: Mapped[str] = mapped_column(ForeignKey("git_commits.sha"))
+
+class GitCommitFile(Base):
+    __tablename__ = "git_commit_files"
+    commit_sha: Mapped[str] = mapped_column(ForeignKey("git_commits.sha"), primary_key=True)
+    path: Mapped[str] = mapped_column(primary_key=True)
+    blob_sha: Mapped[str]
+    mode: Mapped[str]
+    size: Mapped[int]
+
+class GitCommitDiff(Base):
+    __tablename__ = "git_commit_diffs"
+    commit_sha: Mapped[str] = mapped_column(ForeignKey("git_commits.sha"), primary_key=True)
+    path: Mapped[str] = mapped_column(primary_key=True)
+    change_type: Mapped[str]  # 'A','M','D','R','C','T'
+    old_blob_sha: Mapped[str | None]
+    new_blob_sha: Mapped[str | None]
+    old_path: Mapped[str | None]  # rename/copy source
+    insertions: Mapped[int | None]
+    deletions: Mapped[int | None]
+
+class GitBlob(Base):
+    __tablename__ = "git_blobs"
+    sha: Mapped[str] = mapped_column(primary_key=True)
+    size: Mapped[int]
+    content: Mapped[bytes | None]  # selectively populated per T6
+    is_binary: Mapped[bool] = mapped_column(default=False)
+    encoding: Mapped[str | None]
+
+class GitRef(Base):
+    __tablename__ = "git_refs"
+    repo_id: Mapped[int] = mapped_column(ForeignKey("git_repos.id"), primary_key=True)
+    name: Mapped[str] = mapped_column(primary_key=True)  # "refs/heads/main"
+    kind: Mapped[str]  # 'branch', 'tag', 'note', 'remote'
+    target_sha: Mapped[str]
+
+# Indexes for common query patterns
+Index("ix_git_commits_repo_time", GitCommit.repo_id, GitCommit.committed_at.desc())
+Index("ix_git_commits_author_time", GitCommit.author_email, GitCommit.authored_at.desc())
+Index("ix_git_commit_files_path", GitCommitFile.path)
+Index("ix_git_commit_diffs_path", GitCommitDiff.path, GitCommitDiff.commit_sha)
+#+end_src
+
+*Migration mechanics:* drop these into =db.py= as additional
+classes; =_migrate_in_place= already calls
+=Base.metadata.create_all(engine)=, which creates new tables
+on existing DBs idempotently. Zero changes to existing migration
+code.
+
+**** Implementation prerequisites
+
+- *=pygit2= dependency.* Not currently in =pyproject.toml=
+  (verified 2026-05-04: =python -c "import pygit2"= → ImportError).
+  Adds libgit2 as a system-level dependency. *Guix install
+  caveat:* libgit2 must be available via Guix profile or
+  pkg-config; verify with =pkg-config --modversion libgit2=
+  before relying on pygit2. *Fallback:* =dulwich= (pure-Python
+  git, MIT, no system deps) — ~30% slower but installs
+  cleanly anywhere. Decision deferred to install spike.
+- *=git_sync= module structure.* Sketch:
+  =org_llm/git_sync.py= with =sync_repo(path) -> SyncResult=,
+  called from =capture=, =doctor=, and the new =git-sync=
+  CLI verb.
+- *MCP server registration.* Add the 5 tools to
+  =mcp_server.py= as =@server.tool()= decorators reading from
+  the new tables. Backed by =org_tools.py=-style pure-Python
+  helpers so recipe pre-fetch can call them in-process (the
+  org-tools seam pattern from architecture.org).
+- *dbt source declarations.* =git_commits=, =git_commit_diffs=,
+  =git_commit_files= become dbt sources for Phase 12.7
+  models. Trivial — one block in =sources.yml=.
+
+**** Implementation checklist (when 25.4 starts)
+
+1. Verify pygit2 installs cleanly under Guix; fall back to
+   dulwich if fragile (~15 min).
+2. Add 7 SQLAlchemy classes to =db.py= per migration stub above
+   (~30 min).
+3. Implement =git_sync.py= with =sync_repo()= using pygit2 walk
+   from refs → commits → trees → blobs → INSERT OR IGNORE
+   (~1d).
+4. Add 5 MCP tools per signatures above; pure-Python
+   implementations in =org_tools.py= (~1d).
+5. Wire sync into =capture= verb + =doctor= verb +
+   =org-llm git-sync= CLI verb (~half-day).
+6. Add =sources.yml= dbt declarations + one starter dbt model
+   (=vault_velocity_weekly.sql=) as proof-of-end-to-end
+   (~half-day).
+7. Validation: round-trip a known commit through SQL, verify
+   =file_at_revision= returns byte-equal content. Run on dev's
+   vault for sizing reality-check (~half-day).
+
+*Total:* ~3-4 days focused work to ship 25.4 v1, roughly
+matching the original estimate in "Recommended ship order"
+above (~3-5d). Design work above takes that estimate from
+"sketched" to "ready to start cold."
+
 ** TODO Investigate: databases that could replace SQLite          :research:db:foundation:phase25:
 :PROPERTIES:
 :PRIORITY: C
@@ -3769,6 +4028,99 @@ output. Tests the skills primitive against a real workflow.
 # Recent DONE entries kept here for at-a-glance recall before
 # they migrate to Archive. Keep ~30 days; older roll into
 # Archive section below.
+
+** DONE Ship =@curator= + =@tracker= meta-agents              :agents:meta:wiki:dogfood:
+:PROPERTIES:
+:CLOSED:    [2026-05-04]
+:COMMITS:   3369a8a (ship) + ffcd111 (visual verification queue) + e14acf8 (route preview Stage 1)
+:OUTCOME:   shipped + dogfooded + persona-refined in one session
+:END:
+
+Two new meta-agents in starfleet-core:
+
+- =@curator= — birth_name =atoz= (Mr. Atoz, TOS S3E23 librarian
+  on Sarpeidon). Wiki concept-graph specialist. Scope
+  =docs/wiki/= ONLY. Sweeps for missing cross-links, broken
+  =[[id:…]]= / =file:= links, and numeric/status drift between
+  wiki tables and source code. Delegates to engineer for
+  code-side fixes. Capabilities =read.vault + write.vault + shell=.
+- =@tracker= — birth_name =boothby= (Starfleet Academy
+  groundskeeper, TNG/VOY recurring). Dev-process steward.
+  Owns =dev-tracker.org=. Daily what's-on-deck (every STARTED
+  heading, any section), shipped detection from =git log=,
+  EFFORT-vs-actual drift, phase-landing handoff to =@curator=.
+
+Both shipped at commit =3369a8a= and immediately dogfooded:
+
+- @curator caught its own missed AGENTSMITH HANDOFF rule when
+  shipping (failed to integrate itself into 00-index +
+  agent-roster) → applied
+- @tracker caught its own DAILY VIEW miss (was scoped to
+  =:@active:= section only; user's mental model is by
+  TODO-state regardless of section) → persona refined
+- Persona whitespace normalizer added (=cli.py:5111=) to
+  collapse mid-sentence space runs across all 19 personas —
+  caught by curator dogfood
+
+Total scope at commit time: 22 files, +1921/-71 lines. Wiki
+cross-link sweep across 14 pages; 4 new concept pages
+(=vault-facts.org=, =memory-alpha.org=, =architecture.org=,
+=interceptors.org=); README numeric sync (38+/40+ → 71 MCP
+tools); drift fixes synced to canonical =_AGENT_META=
+(19 agents / 12 starfleet-core / 7 legacy-extras).
+
+Stage 2 work queued: @curator MCP tools (=wiki_link_audit=,
+=wiki_drift_check=, =wiki_orphan_terms=); @tracker
+=tracker review= verb (self-hosting goal).
+
+** DONE Route-preview Stage 1 — ghost text in opencode prompt :ui:opencode:plugin:
+:PROPERTIES:
+:CLOSED:    [2026-05-04]
+:COMMITS:   af705c0 (design) + e14acf8 (ship) + ffcd111 (verify queue)
+:EFFORT_EST: 5-7h
+:EFFORT_ACTUAL: ~2h (faster than estimate — registries already in place)
+:STAGE:     1 of 2 (preview today; full autocomplete needs upstream PR)
+:END:
+
+Fish-inspired route preview via the opencode plugin's
+=<Prompt hint={…}>= slot — passive ghost text showing what
+would happen if the user submits their current input right
+now. Explicitly NOT autocomplete (no acceptance gesture);
+that label waits for Stage 2 when an upstream opencode PR
+adds =onInput= + prompt-scoped Tab keybind hooks.
+
+Three pieces shipped at =e14acf8=:
+- =cli.py:_emit_routes_json()= — snapshots 19 agents + 2
+  recipes + 7 prefixes + 77 slashes to
+  =.opencode/routes.json= on launch
+- =extensions/opencode/src/route-preview.tsx= (new, 235 lines)
+  — Solid component, polls =ref.current.input= @80ms
+  (focus-gated, debounced), scores against the same algorithm
+  as =cli.py:route_prompt=
+- =slots.tsx= — wires =<RoutePreview/>= into both
+  =home_prompt= + =session_prompt= via =hint= prop
+
+Verified: =tsc --noEmit= clean, =bun build= 6.93 KB,
+launcher emits the four registries correctly, dry-run
+output lists "Would write routes:". Visual verification
+queued in =:@next:= — TUI takeover means automated tools
+can't see the actual ghost text render; needs an interactive
+opencode session.
+
+Drift risk between Python =route_prompt= and TS scorer
+mitigated by routes.json being single source of truth.
+Algorithm is trivial substring count.
+
+** DONE Promote =@doom= to starfleet-core                     :agents:doom:
+:PROPERTIES:
+:CLOSED:    [2026-05-04]
+:COMMITS:   b70dd00 (promote) + 786b907 (validation close)
+:END:
+
+=@doom= moved out of =legacy-extras= and into =starfleet-core=
+in =_AGENT_META=. Tool-unreachable case (when the user lacks
+local ollama) handled. Boundary validation closed. Drove the
+roster recount: 11→12 starfleet-core, 8→7 legacy-extras.
 
 * Archive — superseded files                                :@archive:
 
