@@ -127,6 +127,19 @@ for the full convention.
   specialists their domain conventions without bloating spawn
   prompts. Names =@curator= / =@tracker= / =@agentsmith= as
   the meta stewards each owning a primer namespace.
+- [[id:7dcbce8b-0941-48ec-a17d-c623ba00883a][Side-quests]] —
+  the captain's disposition for off-thread work: spawn a
+  registry specialist, specialist emits a =docs/notes/=
+  agent-report, receipt back is the report path + Objective
+  line. Reuses orientation + =delegate()= + the agent-report
+  template; no new agent type.
+- [[id:739868a9-f62c-43de-ac1d-1671d483a2c1][Standing orders]] —
+  cross-agent shared memory for user-authoritative decisions;
+  every spawn's manifest carries a digest, specialists fetch
+  the body for namespaces their task touches, @curator's sweep
+  promotes long-lived orders to wiki pages. Extends
+  =AgentBaseline=; vault placeholder at =~/org/standing-orders.org=
+  until the schema-extension lands.
 - =@curator= — wiki concept-graph specialist (covered in agents
   + agent-roster); sweeps =docs/wiki/= for missing cross-links,
   numeric drift between tables and code, new-page candidates.

@@ -1,0 +1,354 @@
+:PROPERTIES:
+:ID:       739868a9-f62c-43de-ac1d-1671d483a2c1
+:CREATED:  [2026-05-04]
+:END:
+#+TITLE: Standing orders — shared memories agents check before acting
+#+FILETAGS: :wiki:concept:agents:memory:standing-orders:
+#+OPTIONS: toc:nil num:nil
+
+* What this is
+
+*Summary.* A *standing order* is a user-authoritative
+decision the captain captures into a versioned, namespaced DB
+table that every specialist's spawn-prompt digests. They're
+the cross-agent shared-memory layer that lets a decision the
+user made in one conversation propagate to every subsequent
+specialist spawn — without waiting for the decision to graduate
+to a wiki page. The Trek surface for the technical concept
+"shared memories"; named after the Starfleet pattern where the
+captain issues a directive crew check before acting and that
+persists until rescinded.
+
+*Expanded.* Org-llm has multiple layers of memory: the user's
+=~/org/= vault (canonical user-data), [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][vault_facts]] (deterministic
+inferrer outputs derived from the vault), per-agent observations
+(an agent's notes about its own past work), and now standing
+orders (the user's *decisions* about how the team should act).
+These are different categories of memory with different
+read/write disciplines. Standing orders are specifically the
+gap [[https://agor.live/guide/assistants][Agor's per-assistant memory model]] doesn't fill: each Agor
+assistant has its own =USER.md= built from its own sessions,
+with no cross-assistant policy broadcast. Org-llm's captain +
+specialist topology already implies the broadcast mechanism;
+standing orders make it real.
+
+The driving observation: in any active design conversation —
+this very page included — the user makes decisions ("from now
+on X," "stop doing Y," "wiki policy is now Z") that the
+captain must propagate to every subsequent specialist spawn,
+*even if* those specialists are spawned an hour later in a
+different session. Without standing orders, that propagation
+either happens by transcript replay (slow, expensive) or
+fails silently (specialist does the old thing).
+
+* The pattern
+
+*Summary.* User decides → captain writes a standing-order row
+→ every subsequent spawn's manifest carries a
+=standing_orders_digest= line listing changed orders by
+=(namespace, key, version)= → specialist fetches the body for
+namespaces its task touches → specialist acts on the current
+order, not the spawn-time-frozen prompt → @curator's next
+sweep proposes graduating long-lived orders to wiki pages →
+graduated orders retire (=status=superseded=).
+
+*Expanded.* The four-beat lifecycle:
+
+1. *Capture.* User says "from now on, X" mid-conversation.
+   Captain calls =standing_orders_set(namespace, key, body,
+   authored_by=user)=. The row appears in the DB
+   immediately; no LLM round-trip needed — the captain's
+   reflex layer handles the write deterministically.
+2. *Broadcast.* Every subsequent specialist spawn includes a
+   =standing_orders_digest= line in the manifest: a list of
+   =(namespace, key, version, one_line_summary)= for orders
+   that changed since some baseline (ideally since the
+   specialist's last sync; in practice, since some recent
+   tick). Cheap SQLite read; well below the ~80ms resolver
+   budget per [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation]].
+3. *Consume.* The specialist sees the digest at spawn. If
+   any namespace touches its task, it calls
+   =standing_orders_get(namespace, key)= for the body —
+   same lazy-loading discipline as primers. If no namespace
+   touches, the specialist proceeds without further fetch.
+4. *Promote.* @curator's periodic sweep finds standing
+   orders that have survived N weeks (default: 3) without
+   retraction. For each, it proposes a canonical home — a
+   wiki page edit, a baseline rule, an =org-llm-config.org=
+   knob — and on landing, retires the order
+   (=status=superseded=, =supersedes=<canonical_id>=). The
+   manifest digest stops carrying retired orders.
+
+The promotion ladder is the load-bearing part. Without it,
+the standing-orders table grows unbounded and starts
+overlapping with wiki content. With it, standing orders are
+the *staging ground* for decisions on their way to canonization
+— ephemeral by default, durable only when graduation lands.
+
+* Where standing orders sit in the memory model
+
+*Summary.* Three layers, three disciplines. Standing orders
+are *Layer 2b* — cross-agent broadcast of user-authoritative
+decisions. Distinct from per-agent observations (Layer 2a:
+agent-private notes) and from the vault (Layer 3: user's
+canonical life data).
+
+*Expanded.*
+
+| layer | what                                                              | who reads/writes                            | example                                                |
+|-------+-------------------------------------------------------------------+---------------------------------------------+--------------------------------------------------------|
+| 1     | Developer-process memory (Claude Code style)                       | only the dev's harness, NOT the app         | =~/.claude/projects/.../memory/= — stays out of org-llm |
+| 2a    | Per-agent observations (an agent's notes about its own past work)  | one agent reads/writes; not broadcast        | "@curator: last sweep 2026-05-02; 7 drift items found" |
+| 2b    | *Standing orders (this page)*                                      | captain + curator/tracker write; all read    | "wiki policy: every concept leads with *Summary.*"     |
+| 3     | Vault (canonical user-data)                                        | user writes; all agents read                 | =~/org/dailies/2026-05-04.org=, =~/org/projects/=      |
+
+Layer 2a (per-agent observations) is partially served today by
+=crew_log= + the captain's log; a clean per-agent journal
+table is open work. Layer 2b is what this page introduces.
+Layer 3 is the vault, unchanged by this page.
+
+The cleanest test for "is this a standing order?": *did the
+user explicitly decide it, AND would multiple agents need to
+honor it, AND does it not yet have a canonical source-file
+home?* Yes to all three → standing order. Any "no" → wrong
+slot.
+
+* Schema + MCP surface
+
+*Summary.* Extend the existing [[file:../../org_llm/db.py][=AgentBaseline=]] table rather
+than introducing a parallel one. Four MCP tools: digest, get,
+set, retire — each with narrow capability gating.
+
+*Expanded.* Schema (extending =AgentBaseline=):
+
+#+begin_src python
+class AgentBaseline(Base):
+    __tablename__ = "agent_baseline"
+    id           = Column(String, primary_key=True)   # UUID
+    namespace    = Column(String, nullable=False)      # "wiki" | "tracker" | …
+    key          = Column(String, nullable=False)      # "rule_2b" | "groq_ban" | …
+    body         = Column(Text,   nullable=False)      # the rule/decision body
+    version      = Column(Integer, default=1)          # bumped on update
+    authored_by  = Column(String, nullable=False)      # "user" | "@curator" | …
+    status       = Column(String, default="active")    # active | superseded | retracted | stale
+    supersedes   = Column(String, nullable=True)       # → wiki page UUID or another order ID
+    applies_to   = Column(JSON,   default=list)        # specialist names; empty = all
+    created_at   = Column(DateTime, server_default=func.now())
+    updated_at   = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("namespace", "key", name="uq_ns_key"),)
+#+end_src
+
+MCP surface:
+
+| tool                                                    | who can call         | shape                                                  |
+|---------------------------------------------------------+----------------------+--------------------------------------------------------|
+| =standing_orders_digest(since=None)=                    | all specialists      | =[(namespace, key, version, one_line)]= since baseline |
+| =standing_orders_get(namespace, key)=                   | all specialists      | full body of the active order                          |
+| =standing_orders_set(namespace, key, body, authored_by)= | captain + curator + tracker | upsert; bumps version; broadcasts to next-spawn digest |
+| =standing_orders_retire(id, supersedes_url)=            | curator + tracker    | =status=superseded=; drops from digest                |
+
+Capability gating uses the existing [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][agent-framework.org]] machinery
+— the four tools live behind a new =write.standing_orders=
+capability that only the captain + curator + tracker carry. No
+specialist can author a standing order without going through
+the captain.
+
+* Write authority + the promotion ladder
+
+*Summary.* Only the user (via the captain) authors a standing
+order; @curator and @tracker can retire/supersede when
+canonization lands; specialists *consume* orders, never write
+them. This narrowness is what keeps the table from sprawling.
+
+*Expanded.* The promotion ladder in concrete steps:
+
+1. *User-authored.* User says "from now on X" → captain writes
+   =standing_orders_set("design", "shared-memories-shape", body,
+   authored_by="user")=. Order is active immediately.
+2. *Auto-survival.* Order persists across sessions, across
+   spawns. Specialists honor it. No expiration unless the user
+   retracts.
+3. *Sweep + propose.* @curator's periodic sweep (or a
+   side-quest spawn after N standing orders accumulate) lists
+   orders with no canonical-home pointer and proposes:
+   - "Order =design/shared-memories-shape= has been active 21
+     days; propose graduating to a wiki page at
+     =docs/wiki/<slug>.org=. Apply?"
+3. *Canonize + retire.* User accepts → @curator drafts the
+   wiki page (this is itself a [[id:7dcbce8b-0941-48ec-a17d-c623ba00883a][side-quest]] producing an
+   agent-report) → on landing, =standing_orders_retire(id,
+   supersedes=<wiki_page_id>)=. The manifest digest stops
+   carrying it; primer-resolvers pick it up from the wiki page
+   instead.
+4. *Auto-stale.* An order with no fetches in M weeks (default:
+   8) auto-transitions to =status=stale= and drops from the
+   digest. The row remains for audit; if needed it can be
+   reactivated. This is the safety valve against accidental
+   permanence.
+
+The promotion ladder is a special case of [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Phase 29]]'s
+self-coded-tools loop: a recurring pattern (LLM keeps
+re-deriving the same rule) gets detected and promoted to a
+deterministic artifact (the wiki page becomes the
+authoritative source the primer reads). Standing orders are
+the staging table for that promotion.
+
+* Polling discipline (or: not literal polling)
+
+*Summary.* Specialists don't poll on a timer. The manifest at
+spawn carries the digest; that's the cheap default. For
+in-flight specialists who need to notice mid-task changes,
+each MCP tool call can include a "X standing orders changed
+since spawn — refresh?" hint in its response wrapper. Heavy
+mid-task re-orientation is opt-in, not default.
+
+*Expanded.* Three tiers of polling:
+
+| tier                | when                              | cost                  | use                                      |
+|---------------------+-----------------------------------+-----------------------+------------------------------------------|
+| At spawn (default)  | every =delegate()= call           | 1 SQLite read (~5ms)  | most spawns                              |
+| At tool call (opt-in) | every MCP-tool response wrapper carries a digest-version delta | 1 int compare per call | side-quests with long expected duration  |
+| Mid-stream (manual) | specialist explicitly calls =standing_orders_digest()= | same as at-spawn | when a task spans a known policy boundary |
+
+The "changed since spawn — refresh?" hint deserves its own
+note: when the digest version at tool-call time differs from
+the version captured at spawn, the tool-call response wrapper
+includes a one-line note: =[standing_orders changed: 2 in
+"wiki", 1 in "agents" — fetch and re-orient?]=. The specialist
+can ignore (default) or call =standing_orders_get= for affected
+namespaces. This makes mid-task re-orientation cheap and
+optional rather than expensive and forced.
+
+The staleness window — a specialist that ignores the hint and
+proceeds with stale orientation — is bounded by @curator's
+sweep, which catches non-conformant artifacts post-hoc. Cost
+of one missed re-orientation is one redo, not silent drift.
+
+* Risks and boundaries
+
+*Summary.* Five risks: table sprawl, write-authority leak,
+silent drift, primer overlap, and Layer-2a confusion. All have
+mitigations in the existing capability + sweep + promotion
+machinery.
+
+*Expanded.*
+
+- *Table sprawl.* Without auto-stale + the promotion ladder,
+  standing orders accumulate indefinitely. Mitigations: M-week
+  auto-stale; @curator promotion sweep proposes graduation;
+  user retraction always available.
+- *Write-authority leak.* If specialists could author orders,
+  the table becomes a chat log. Mitigation: =write.standing_orders=
+  capability is captain + curator + tracker only; enforced at
+  MCP dispatch (Phase 23.2 capability enforcement).
+- *Silent drift.* In-flight specialist proceeds with
+  pre-change orientation. Mitigation A: the "changed since
+  spawn — refresh?" hint above. Mitigation B: @curator catches
+  non-conformant artifacts in next sweep. Cost is one redo.
+- *Primer overlap.* A standing order whose body duplicates a
+  wiki rule is a promotion-ladder failure. Mitigation:
+  primers always read source files at fetch time; if a wiki
+  page exists, the primer wins. Standing orders are for
+  decisions *without* a source-file home yet.
+- *Layer-2a confusion.* Tempting to write per-agent observations
+  ("@curator last sweep results") into standing orders. They
+  belong in Layer 2a (per-agent journal), not 2b. Standing
+  orders are *user-authoritative*; observations are
+  *agent-derived*. Different write paths.
+- *MCP-attach-time constraint.* Per Agor's architecture (see
+  [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Agor evaluation), MCP servers attach at
+  session creation; mid-session registration is unconfirmed.
+  For org-llm's native runtime this is fine — standing orders
+  are SQLite rows, not MCP servers. If the captain ever runs
+  inside an Agor-style host, the digest tool needs to be
+  attached at session creation, not spawn time.
+
+* Composition with existing primitives
+
+*Summary.* Standing orders sit *between* user input and primer
+fetches. They feed the manifest at spawn (one new digest line);
+they feed @curator's sweep (the source for graduation
+proposals); they feed primers indirectly (graduated orders
+land in source files primers read). Nothing they touch is new.
+
+*Expanded.*
+
+| primitive                                          | relationship to standing orders                                    |
+|----------------------------------------------------+--------------------------------------------------------------------|
+| [[id:32fe7314-0a69-4945-aef3-7105d507b201][Orientation manifest]]                                  | gains one digest line at spawn; everything else unchanged          |
+| [[id:cf466e65-0fa1-4f23-8103-8205f67a6ca3][Lazy loading]]                                          | standing orders inherit the policy: deterministic reads, no LLM    |
+| [[id:7dcbce8b-0941-48ec-a17d-c623ba00883a][Side-quests]]                                          | the canonization step is itself a side-quest (@curator drafts wiki) |
+| =AgentBaseline=                                    | the table standing orders extend; existing rows become "system" authored |
+| [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]]                                          | parallel mechanism for vault-derived facts; standing orders are user-derived decisions |
+| [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's log]]                                        | every =standing_orders_set= call logs an event for replay          |
+| [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Phase 29 self-coded tools]]                            | the promotion ladder is one branch of Phase 29's promotion-detection |
+
+* Status
+
+*Summary.* Pattern named 2026-05-04. Full implementation is
+Phase 25-or-later territory (it intersects DB-authoritative
+inversion). Today: the wiki page itself is the only artifact;
+a placeholder vault file at =~/org/standing-orders.org= holds
+hand-written entries until the AgentBaseline schema-extension
+and MCP tools land.
+
+*Expanded.* Implementation slices:
+
+1. *Vault placeholder (today).* =~/org/standing-orders.org=
+   carries hand-written entries in literate-config style (one
+   heading per order, PROPERTIES drawer for namespace/key/
+   author/status). Not machine-read yet; just the durable
+   record. ~now.
+2. *AgentBaseline schema extension.* Add =version=, =authored_by=,
+   =status=, =supersedes=, =created_at=, =updated_at= columns;
+   migration. ~half-day.
+3. *MCP tools.* =standing_orders_digest=, =get=, =set=,
+   =retire=. Capability =write.standing_orders=. ~1d.
+4. *Manifest integration.* Orientation layer pre-pends a
+   digest line to every =delegate()= call. ~1h.
+5. *"Changed since spawn" hint.* MCP tool wrappers include a
+   delta note when the digest version moves. ~half-day.
+6. *@curator promotion sweep.* New scheduled job:
+   list-active-orders > N weeks → propose canonical home.
+   ~1d, gated on having ≥3 long-lived orders to sweep over.
+7. *Auto-stale transition.* Background job
+   =status=stale= rows with zero recent fetches. ~1h.
+
+This sequencing is a draft; only slices 1-2 are blocking. The
+rest can land incrementally as load justifies.
+
+* Source files (vault + repo)
+
+- =~/org/standing-orders.org= — the user-facing literate file;
+  hand-edited today, machine round-trip later. The first
+  entry is the meta-decision adopting this very pattern.
+- [[file:../../org_llm/db.py][=org_llm/db.py=]] — =AgentBaseline= table; extension target
+  for slice 2.
+- [[file:../../org_llm/orchestration.py][=org_llm/orchestration.py=]] — orientation manifest assembly;
+  digest-line injection target for slice 4.
+- [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] — MCP-tool registration site for
+  slice 3.
+
+* Related
+
+- [[id:7dcbce8b-0941-48ec-a17d-c623ba00883a][Side-quests]] —
+  the canonization step (@curator drafts the wiki page) is
+  itself a side-quest emitting an agent-report.
+- [[id:32fe7314-0a69-4945-aef3-7105d507b201][Agent orientation]] —
+  the manifest gains one new line; everything else about the
+  manifest is unchanged.
+- [[id:cf466e65-0fa1-4f23-8103-8205f67a6ca3][Lazy loading]] —
+  the policy standing-order reads + writes obey.
+- [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]] —
+  parallel mechanism for vault-derived facts; standing orders
+  are user-derived decisions.
+- [[id:b91f980e-5699-4994-843a-00532f1770b3][Memory Alpha]] —
+  the broader Trek framing for the DB-side of the memory
+  model; standing orders are the third Trek slot alongside
+  Memory Alpha and Memory Prime.
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] —
+  long-running phase entries; the canonical home for
+  arc-scoped standing orders that graduate.
+- =docs/notes/= — the agent-report directory; @curator's
+  graduation side-quests land their reports here.

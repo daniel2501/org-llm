@@ -1,0 +1,373 @@
+:PROPERTIES:
+:ID:       7dcbce8b-0941-48ec-a17d-c623ba00883a
+:CREATED:  [2026-05-04]
+:END:
+#+TITLE: Side-quests — spawning specialists for off-thread work
+#+FILETAGS: :wiki:concept:agents:orchestration:side-quests:
+#+OPTIONS: toc:nil num:nil
+
+* What this is
+
+*Summary.* A *side-quest* is work the captain spins off to a
+specialist instead of handling inline, because the work would
+either crowd out the main thread's context, benefit from a
+specialist persona/tool roster the caller doesn't have, or
+produce an artifact (capture, doc, fix) rather than narrative
+the caller needs to read. The captain spawns the specialist
+via [[file:../../org_llm/mcp_server.py][=delegate()=]], the specialist does the work AND emits a
+post-action [[file:../templates/agent-report.org][agent-report]] under =docs/notes/=, and the
+receipt back to the captain is the report path + Objective
+line — not the full reasoning trace.
+
+*Expanded.* Side-quest spawning is not a new agent class or a
+new orchestration layer; it's a *disposition* the captain
+takes when a request contains work that doesn't belong in the
+main thread. The mechanism reuses three things that already
+exist: the [[id:32fe7314-0a69-4945-aef3-7105d507b201][orientation manifest]] at spawn, the
+=delegate()= MCP tool for cross-agent invocation, and the
+[[file:../templates/agent-report.org][=docs/templates/agent-report.org=]] template canonized 2026-05-04.
+What this page adds is the *naming* and the *heuristic*: when
+to spawn vs. inline, what target to spawn, what the receipt
+shape is, and how this composes with everything around it.
+
+The pattern was implicitly practiced in the 2026-05-04
+promotions arc — see =docs/notes/2026-05-04-promotions-slice-report.org=
+and =docs/notes/2026-05-04-promotions-wiki-report.org=, two
+parallel side-quest specialists on one arc, sister-linked.
+This page lifts that practice into a stated rule.
+
+* The pattern
+
+*Summary.* Captain detects side-quest in the user's request
+→ chooses a target specialist from the [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent roster]] →
+=delegate(target, prompt)= → specialist gets the manifest +
+fetches =primer("agent-report")= + does the work + writes
+=docs/notes/YYYY-MM-DD-<slug>.org= + returns to the captain
+with =(report_path, Objective_line)= → captain surfaces the
+receipt to the user.
+
+*Expanded.* The flow in seven beats:
+
+1. *Detect.* The captain (in Deliberation mode) parses the
+   user's request and notices a side-quest signal: a sub-task
+   with its own scope, a deliverable that's an artifact rather
+   than narrative, a domain a specialist owns better. (In
+   Reflex mode a recipe may pre-fire the spawn — see
+   composition below.)
+2. *Pick a target.* The captain picks an agent from the
+   [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][existing roster]] — =@scribe= for captures, =@gardener= for
+   vault hygiene, =@curator= for wiki edits, =@engineer= for
+   slice-shaped code work, etc. Side-quests do *not* introduce
+   a new agent type; the registry is the source of truth.
+3. *Spawn.* The captain calls =org-llm_delegate(target,
+   prompt, context)= per [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org § Manager-mediated
+   delegation]]. The MCP layer attaches the orientation
+   manifest, applies capability checks, and runs the
+   specialist with its own persona + model.
+4. *Orient.* The specialist's spawn-prompt includes the
+   manifest. For side-quests the manifest's prerequisite
+   phrasing kicks in: *"call =primer("agent-report")= before
+   writing the post-action note."* (When the side-quest also
+   touches the wiki or dev-tracker, the relevant primers are
+   fetched too.)
+5. *Work.* The specialist executes its task using its own
+   tools and capabilities. Behavior in this beat is the
+   specialist's normal behavior — side-quest framing doesn't
+   change *how* the work is done.
+6. *Report.* The specialist writes
+   =docs/notes/YYYY-MM-DD-<slug>.org= using the template at
+   [[file:../templates/agent-report.org][=docs/templates/agent-report.org=]]. *Objective* and
+   *Dev-tracking* are load-bearing per the template; other
+   sections (*Verification*, *Decisions*, …) are filled if
+   applicable, deleted if not.
+7. *Receipt.* The specialist returns to the captain with the
+   report path + the Objective line (not the full report
+   body). The captain surfaces "I forked =@scribe= to do X;
+   the report is at =docs/notes/<...>.org= — Objective: <…>."
+   The user can drill into the report or accept the receipt
+   as-is.
+
+* When to spawn vs. handle inline
+
+*Summary.* Spawn when the side-quest would crowd the main
+thread, produce an artifact rather than narrative, or benefit
+from a specialist persona/tool roster the caller doesn't have.
+Inline when it's one MCP-tool call away or the caller is
+already the right specialist. "Always spawn for side-quests"
+is the captain's default *disposition*, not a hard rule — the
+cost-benefit check is real.
+
+*Expanded.* Concretely:
+
+| signal                                                       | spawn? |
+|--------------------------------------------------------------+--------|
+| Side-quest produces an artifact (capture, file, fact entry)  | yes    |
+| Side-quest needs a specialist persona caller doesn't have    | yes    |
+| Loading the side-quest's context would derail the main task  | yes    |
+| Side-quest is heavy enough to warrant Objective + Dev-track  | yes    |
+| Side-quest is one MCP-tool call away (=capture_note=, etc.)  | no     |
+| Caller is already the right specialist for the side-quest    | no     |
+| Side-quest result is needed *immediately* in caller context  | maybe  |
+
+The "warrant a report" floor is the cleanest threshold: if the
+work is too small to deserve an Objective + Dev-tracking
+section, it's too small to warrant a spawn. The captain calls
+the MCP tool inline and moves on.
+
+The captain's heuristic is testable: any side-quest spawn
+where the resulting agent-report has empty *Decisions* and
+empty *What landed* should not have been a spawn. Audit-log
+review (Phase 24.2 family) catches these and tunes the
+disposition.
+
+* Who gets spawned
+
+*Summary.* Default target = a registry agent — Trek crew
+member or functional alias from the [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][19-agent roster]]. There
+is no "runner" or "side-quest-worker" type; that would be
+exactly the plugin abstraction [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][agent-framework.org § 63]]
+explicitly rejected. When no specialist matches, the captain
+spawns *itself* (=@picard=) — recursion-as-fallback is fine.
+
+*Expanded.* The mapping in practice:
+
+| side-quest shape                              | target             |
+|-----------------------------------------------+--------------------|
+| capture this aside / draft this paragraph     | =@scribe=          |
+| fix a stray TODO / sweep an orphan            | =@gardener=        |
+| edit a wiki page / fix a broken link          | =@curator=         |
+| add/edit a dev-tracker phase entry            | =@tracker=         |
+| design a new agent persona                    | =@agentsmith=      |
+| code slice — bounded module change            | =@engineer=        |
+| review a code slice                           | =@reviewer=        |
+| inspect Doom config / keybind question        | =@doom=            |
+| ops/diagnostics drift                         | =@ops=             |
+| no fit — bespoke task with no specialist      | =@picard= (recurse)|
+
+When the captain recurses on itself, the inner =@picard=
+treats the side-quest as a new top-level Deliberation. The
+return shape is the same — agent-report at =docs/notes/=,
+receipt back to the outer caller. The cost is one extra cloud
+roundtrip; the benefit is no premature abstraction.
+
+If a recurring side-quest pattern lacks a specialist, that's
+a signal to *add* one (the [[id:b9e5d3c2-4a7f-48a6-9c1d-e2f3a4b5c6d7][@agentsmith]] flow), not to
+introduce a generic runner type. The bar matches gate-1/2/3 —
+the new agent has to earn its keep.
+
+* Sync vs. async (one mechanism, currently)
+
+*Summary.* Today side-quest spawning is *synchronous* — the
+captain calls =delegate()=, waits for the specialist to
+finish, returns the receipt. An async flavor (fire and
+let the report land later) is plausible but unproven; not
+introducing it until latency hurts.
+
+*Expanded.* The hypothetical second flavor:
+
+| flavor          | when                                       | shape                                                |
+|-----------------+--------------------------------------------+------------------------------------------------------|
+| =delegate=      | today — sync                                | block until specialist finishes; return report ref   |
+| =delegate.fork= | speculative — when sync blocks the captain | return immediately; report lands in =docs/notes/=    |
+
+The async flavor matters when the captain wants to keep
+narrating to the user *while* a heavy side-quest runs in the
+background. Until that pain shows up, sync is enough — the
+specialist finishes, the captain surfaces the receipt, the
+user can drill in.
+
+If async ships later, the receipt shape stays the same
+=(report_path, Objective_line)=; only the timing changes. No
+new return-value vocabulary needed.
+
+* Composition with existing primitives
+
+*Summary.* Side-quest spawning sits *on top of* primitives
+that already work. It doesn't replace =delegate=, manifests,
+primers, recipes, or =crew_log= — it composes them.
+
+*Expanded.*
+
+| primitive                                | what it does for side-quests                                     |
+|------------------------------------------+------------------------------------------------------------------|
+| [[id:32fe7314-0a69-4945-aef3-7105d507b201][Orientation manifest]]                       | Tells the specialist to fetch =primer("agent-report")= before writing |
+| =primer("agent-report")=                 | Returns the [[file:../templates/agent-report.org][template]] structure (Objective, Dev-tracking, …)         |
+| =primer("dev-tracker-entry")=            | Fetched if the side-quest threads to a tracker phase             |
+| =primer("wiki-authorship")=              | Fetched if the side-quest writes a wiki page                     |
+| [[file:../../org_llm/mcp_server.py][=delegate()=]]                              | The actual spawn mechanism — captain → specialist hop            |
+| =crew_log=                               | Records every spawn (caller, target, prompt, report_path)        |
+| Capability checks                        | Specialist's =capabilities= still gate every tool call           |
+| [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][Recipes]]                                    | A recipe may pre-fire a spawn for a known intent class           |
+| [[file:../templates/agent-report.org][agent-report template]]                       | The artifact shape; the receipt is its path + Objective          |
+
+What's *new* here is only the *naming + heuristic + receipt
+convention*. Every implementation primitive already exists or
+is queued in Phase 24.5.
+
+* Risks and boundaries
+
+*Summary.* Three risks: spawn-thrash (captain spawns for
+trivial work), report-skipping (specialist works but doesn't
+report), and target drift (captain picks the wrong specialist
+because the registry doesn't fit). All three have mitigations
+in the existing audit + capability + roster machinery.
+
+*Expanded.*
+
+- *Spawn-thrash.* If the captain spawns for one-MCP-call work,
+  the cost-benefit inverts (one cloud roundtrip + a noise
+  agent-report for a 30ms tool call). Mitigation: the "warrant
+  a report" floor in §When-to-spawn — if the agent-report
+  would have empty *Decisions* and empty *What landed*, the
+  spawn was wrong. Audit log surfaces these for the captain's
+  disposition tuning.
+- *Report-skipping.* The specialist may finish the work
+  without writing the report. Mitigation A: the manifest
+  injects =primer("agent-report")= as a *prerequisite*. Mitigation
+  B: a tool-failure recovery hook (Phase 24.2) on the
+  =delegate=-return path that detects a missing report and
+  returns a recovery suggestion.
+- *Target drift.* Captain spawns =@gardener= for what should
+  have been =@curator= work. Mitigation: the [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent roster's]]
+  steward namespacing — each specialist has a clear domain;
+  recurring mis-routes mean either a roster gap (new
+  specialist needed) or a manifest gap (steward namespace
+  unclear).
+- *Recursion runaway.* If =@picard= recurses on itself, the
+  inner instance might recurse again. Mitigation: depth cap
+  on =delegate()= (open — currently no enforcement). Until
+  capped, the captain's prompt should treat self-recursion as
+  a once-per-turn affordance, not a default.
+- *Async ambition.* Tempting to ship =delegate.fork= before
+  feeling sync pain. Don't — see §Sync-vs-async. The cost of
+  introducing two flavors before they're both needed is a
+  permanent bifurcation in the orchestration layer.
+
+* Status
+
+*Summary.* Pattern named 2026-05-04. Mechanism is fully
+present today (=delegate()= ships, manifest queued for Phase
+24.5a, =primer("agent-report")= queued for Phase 24.5b,
+template canonized). What's left is the captain's *disposition
+tuning* — adding the spawn-vs-inline heuristic to =@picard='s
+persona and validating it against audit-log review.
+
+*Expanded.* Implementation slices:
+
+1. *Captain disposition.* Add a Side-quest-detection paragraph
+   to =@picard='s persona (in =cli.py::_PRECONFIGURED_AGENT_PROMPTS=,
+   pending the lift to [[file:../../org_llm/agents/_builtins.py][=org_llm/agents/_builtins.py=]])
+   describing the heuristic and the receipt convention. ~1h.
+2. *Receipt rendering.* When a =delegate()= return contains a
+   =report_path=, =@picard= surfaces it with the Objective
+   line rather than re-narrating the body. Persona-only;
+   no code change. ~30min.
+3. *Audit-log review pass.* Once 5+ side-quest spawns have
+   landed, run the spawn-thrash audit (empty *Decisions* +
+   empty *What landed* → false-positive spawn). Tune the
+   heuristic. ~1h, gated on having data.
+4. *(Speculative) =delegate.fork=.* Only when sync blocks
+   the captain visibly. Open-ended.
+
+This sequencing is a draft — the captain-disposition slice is
+the only one that touches code; everything else is observation.
+
+* Agor as conceptual prior art
+
+*Summary.* [[https://github.com/preset-io/agor][preset-io/agor]] independently arrived at the
+same concept under nearly the same name — its docs explicitly
+list "forks, spawns, or *side questions*" as the three ways a
+session can branch — and ships =agor_sessions_spawn= +
+=agor_sessions_prompt(mode: "btw")= as production primitives.
+Adoption is parked at C (BSL 1.1 license blocks FOSS
+distribution until 2029-01-15 — see [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § "Agor
+as worktree-isolated dev-stream layer"); but the
+*vocabulary*, the *callback receipt shape*, and the
+*worktree-isolation* idea are worth borrowing without adopting
+the substrate.
+
+*Expanded.* Four concrete things Agor's design validates for
+this page (verified against agor.live/guide and
+agor.live/guide/architecture, 2026-05-04):
+
+1. *Independent convergence on the name.* Agor's session model
+   names "side questions" as a first-class branching mode
+   alongside forks and spawns. Two systems naming the same
+   pattern within months of each other is a real signal — the
+   abstraction is load-bearing, not folksonomy.
+2. *=spawn= is real today; =fork= is roadmap.* =agor_sessions_spawn(prompt,
+   title)= ships and returns a session ID; the child runs with
+   a fresh context window, and on completion sends a callback
+   to the parent containing status + completion summary +
+   tool-usage count + optional final message. =agor_sessions_fork=
+   (preserve genealogy at a decision point) is documented but
+   not yet implemented. This validates the §Sync-vs-async
+   sequencing here: ship sync first, defer fork until pain
+   shows up — Agor itself didn't lead with fork.
+3. *The callback shape is the agent-report shape.* Agor's
+   spawn callback (status, summary, tool count, final
+   message) is a strict subset of the agent-report
+   (Objective + Dev-tracking + What landed + Verification +
+   …). Org-llm's receipt convention =(report_path,
+   Objective_line)= is the same idea expressed as a vault
+   artifact rather than an in-memory message. Two systems
+   converging on "specialist returns a structured receipt,
+   not a transcript" is a strong signal.
+4. *=agor_sessions_prompt(mode: "btw")= as the async receipt
+   primitive.* Agor's "BTW" mode lets a session ask a sibling
+   a question non-blockingly; the answer injects back into
+   the caller's timeline when complete. If org-llm ships
+   =delegate.fork=, that's the shape — confirmed as a real
+   production primitive, not a research idea.
+5. *Worktree-per-stream isolation.* Agor binds sessions to
+   git worktrees one-to-many: every session lives in exactly
+   one worktree, multiple sessions can share a worktree and
+   the same filesystem. For org-llm, "the side-quest
+   specialist works in a worktree the main thread doesn't
+   share" maps to the parallel-dev-streams discipline already
+   captured in the re-read-before-edits feedback rule. *Today*
+   the captain and side-quest specialists share one working
+   copy under that rule; *if* heavy side-quest volume makes
+   the rule load-bearing, worktree isolation becomes the
+   substrate fix and a concrete trigger for the dev-tracker's
+   1-day Path A spike.
+
+One material constraint Agor's architecture surfaces that
+matters for org-llm: MCP servers attach at session creation
+with a 64-char hex token; *no runtime registration mechanism
+is documented*. If Phase 29's self-coded-tools loop wants
+agents to register newly-synthesized tools mid-conversation,
+that's a known unconfirmed in the dev-tracker spike protocol.
+
+What this section does *not* propose: adopting Agor as a
+runtime dependency. The dev-tracker entry's verdict stands —
+*"the right idea, the wrong substrate for FOSS-distribution
+org-llm until 2029."* This page only borrows principles +
+vocabulary, which aren't licensed.
+
+* Related
+
+- [[id:32fe7314-0a69-4945-aef3-7105d507b201][Agent orientation]] —
+  manifest at spawn + primers on demand; the substrate
+  side-quest specialists use to find their bearings.
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][Agents]] — the 19-agent roster + the four invocation paths
+  (Direct, Auto-route, Manager-mediated delegation, Recipe
+  pre-fetch); side-quest spawning is a disposition layered on
+  Manager-mediated delegation.
+- [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][Agent framework]] — the Agent dataclass + capabilities +
+  hygiene scans; no new agent type is introduced for side-quests.
+- [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][Agent roster]] — the catalogue of available specialists
+  side-quest spawning targets.
+- [[id:cf466e65-0fa1-4f23-8103-8205f67a6ca3][Lazy loading]] — the policy primer fetches obey; agent-report
+  primer is one instance.
+- [[file:../templates/agent-report.org][=docs/templates/agent-report.org=]] — the canonical post-action
+  report template; the spawn return-shape collapses to its
+  Objective + path.
+- =docs/notes/2026-05-04-promotions-slice-report.org= — exemplar
+  side-quest report (code slice).
+- =docs/notes/2026-05-04-promotions-wiki-report.org= — exemplar
+  side-quest report (wiki draft); sister-linked to the slice
+  above.
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] § "Agor as worktree-isolated dev-stream layer"
+  — the parked-at-C investigation that produced the §Agor
+  prior-art mapping above.

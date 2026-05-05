@@ -197,6 +197,29 @@ Concretely, a specialist spawned to "draft a wiki page about
    the recipe for that intent class — collapsing what's a
    per-spawn fetch today into a zero-round-trip pre-fetch.
 
+[[id:7dcbce8b-0941-48ec-a17d-c623ba00883a][Side-quests]] is the
+canonical worked example of a specialist consuming all five
+mechanisms at once: AGENTS.md is already in the host context,
+the manifest pre-pends at spawn, resolvers fire per-prompt,
+and the specialist explicitly fetches =primer("agent-report")=
+(plus =primer("dev-tracker-entry")= and =primer("wiki-authorship")=
+if the work threads to those domains). The receipt convention
+=(report_path, Objective_line)= flows back to the captain when
+the specialist finishes. See that page for the spawn → orient
+→ work → report → receipt cycle.
+
+[[id:739868a9-f62c-43de-ac1d-1671d483a2c1][Standing orders]]
+adds a sixth mechanism on the same composition seam: every
+spawn-prompt's manifest gains a =standing_orders_digest= line
+listing user-authoritative decisions by =(namespace, key,
+version)=. The specialist fetches the body for any namespace
+its task touches — same lazy-loading discipline as primers,
+different write path (captain authors, primers don't). Where
+primers serve *conventions* (deterministic, source-file
+backed), standing orders serve *decisions* (user-authored,
+DB-backed, eligible for graduation to source files via
+@curator's promotion sweep).
+
 * Risks and boundaries
 
 *Summary.* Three risks worth pinning before starting: primers
