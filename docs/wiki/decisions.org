@@ -554,6 +554,10 @@ problem is "every agent dispatch deserves enrichment." The
 :DECIDERS: Daniel, Claude/opus-C
 :END:
 
+/Updated 2026-05-05 by [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014]]: cap expanded ≤6 → ≤7 (Magnificent
+Seven), binary core/extension framing extended to ternary +
+agent-ify default. Body below preserved as original framing./
+
 *Summary.* Org-llm ships an *opinionated curated core team*
 of agents (manager + a small set of specialists — initial
 likely =@picard= manager, =@spock= researcher, =@data= scribe,

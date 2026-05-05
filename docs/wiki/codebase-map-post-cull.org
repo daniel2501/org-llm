@@ -1,0 +1,88 @@
+:PROPERTIES:
+:ID:       a5dedfd4-591d-431a-9190-6392de12140b
+:END:
+#+title: Codebase map — post-cull (Phase 26.1)
+#+filetags: :phase26:cull:codebase:map:
+
+* Summary
+
+*Summary.* Per-module post-Phase-26.1 status of =/home/daniel/repos/org-llm/org_llm/=.
+Tells a contributor (human or agent) at a glance: which modules survive as CORE, which
+ship CORE_DISABLED, which retire (SUBSUMED), which move to community extension path,
+and which weren't in the cull and need future review.
+
+*Expanded.* Single-table map. Phase 26.2 (physical extraction) reads from this map.
+After 26.2 completes, this page becomes the "what's in the install" reference for
+new contributors.
+
+* Module map
+
+| Module                | LoC   | Verdict        | Source cull entry                          | Notes                       |
+|-----------------------+-------+----------------+--------------------------------------------+-----------------------------|
+| __init__.py           |     3 | CORE           | (package init)                             | trivial                     |
+| access.py             |   414 | NOT IN CULL    | -                                          | request_access plumbing     |
+| askbook.py            |   405 | NOT IN CULL    | -                                          | book/log helpers; review    |
+| auto_embedder.py      |   306 | CORE_DISABLED  | Auto-embedder daemon                       | off-default                 |
+| avatar_render.py      |    91 | COMMUNITY      | Avatars                                    | aesthetic polish            |
+| avatars.py            |   640 | COMMUNITY      | Avatars                                    | aesthetic polish            |
+| cli.py                | 24050 | NOT IN CULL    | -                                          | verbs split: see cull §Subs |
+| cli_skills.py         |   374 | CORE_DISABLED  | Skills (org-babel slash commands)          | off-default                 |
+| cloud.py              |  1617 | CORE           | Cloud-or-local routing                     | FOSS-first routing          |
+| code_index.py         |   185 | COMMUNITY      | Code-corpus indexing                       | secondary domain            |
+| context.py            |  1519 | NOT IN CULL    | -                                          | context cards; review       |
+| creds.py              |   350 | CORE           | Cloud-or-local routing                     | provider creds              |
+| db.py                 |  1385 | CORE           | DB authoritative storage                   | substrate, no agent         |
+| discover.py           |   166 | NOT IN CULL    | -                                          | discoverability; review     |
+| doom_introspect.py    |   175 | CORE_DISABLED  | Doom config introspection                  | off-default for non-Doom    |
+| fixer_bench.py        |   291 | NOT IN CULL    | -                                          | bench harness; review       |
+| indexer.py            |   194 | CORE           | Vault parsing + indexing                   | substrate                   |
+| insights.py           |   826 | SUBSUMED+SPLIT | Insight cards                              | 6 generators → dbt models   |
+| knobs.py              |   278 | CORE           | Config layer                               | knob registry               |
+| life_support.py       |   966 | NOT IN CULL    | -                                          | rescue-adjacent; review     |
+| literate_config.py    |   759 | CORE           | Config layer                               | literate-config surface     |
+| llm.py                |   154 | CORE           | LLM proxy + interceptor chain              | thin LLM client             |
+| llm_proxy.py          |  5054 | CORE           | LLM proxy + interceptor chain              | core seam                   |
+| logbook.py            |   418 | CORE           | Captain's log                              | substrate, no agent         |
+| manpage.py            |   239 | NOT IN CULL    | -                                          | help/manpage; review        |
+| mcp_server.py         |  4094 | CORE+SUBSUMED  | MCP server base tool set / long-tail       | base ~15 stay; ~28 retire   |
+| metrics.py            |   239 | NOT IN CULL    | -                                          | metrics scaffold; review    |
+| models.py             |   898 | CORE           | Cloud-or-local routing                     | provider catalog            |
+| notices.py            |    61 | NOT IN CULL    | -                                          | UX notices; review          |
+| orchestration.py      |   259 | CORE           | Recipe registry infrastructure             | losers retire; ~100 LoC cut |
+| org_tools.py          |  1174 | SUBSUMED       | Modules subsumed (top retirement)          | dbt parsed_* takes over     |
+| palettes.py           |   144 | CORE_DISABLED  | LCARS theming + theme studio               | off-default                 |
+| perf.py               |   393 | NOT IN CULL    | -                                          | perf instrumentation        |
+| performance.py        |   274 | NOT IN CULL    | -                                          | perf surface; review        |
+| personalize.py        |   641 | COMMUNITY      | Style-infer / personalize                  | polish layer                |
+| recipe_runner.py      |   593 | CORE+SUBSUMED  | Recipe registry infrastructure             | 5 loser runners retire      |
+| report.py             |   335 | NOT IN CULL    | -                                          | report rendering; review    |
+| rescue.py             |   347 | CORE           | Doctor + self-heal                         | distro deliverability       |
+| search.py             |   573 | CORE+SUBSUMED  | Embeddings + search                        | vector stays; ~150 LoC cut  |
+| self_mod.py           |   456 | CORE           | Self-coded tools (Phase 29)                | auto-promotion pipeline     |
+| skills.py             |   138 | CORE_DISABLED  | Skills (org-babel slash commands)          | off-default                 |
+| style_infer.py        |   267 | COMMUNITY      | Style-infer / personalize                  | polish layer                |
+| theme_studio.py       |   771 | CORE_DISABLED  | LCARS theming + theme studio               | off-default                 |
+| ui.py                 |   886 | NOT IN CULL    | -                                          | TUI substrate; review       |
+| validation.py         |   357 | CORE+SUBSUMED  | Validation framework                       | runtime stays; YAML → dbt   |
+| vault_facts.py        |   951 | SUBSUMED       | Vault-facts inferrers (top retirement)     | 9 inferrers → 9 dbt models  |
+| walk.py               |   316 | SUBSUMED+SPLIT | Walk graph traversal                       | selectors → SQL view        |
+| weather.py            |   718 | NOT IN CULL    | -                                          | foreign data; review        |
+
+* Tally
+
+20 CORE (incl. 4 with SUBSUMED-partial overlap), 7 CORE_DISABLED, 4 SUBSUMED (incl.
+2 SPLIT), 5 COMMUNITY, 13 NOT IN CULL.
+
+* Phase 26.2 work surface
+
+- =org_tools.py= (1174 LoC) — SUBSUMED; delete after dbt =parsed_*= + =agenda_view= + =link_graph= + =tag_taxonomy= ship.
+- =vault_facts.py= (951 LoC) — SUBSUMED; migrate 9 inferrers to 9 dbt models, then delete (~600 LoC cut).
+- =insights.py= (826 LoC) — SPLIT; 6 =_gen_*= → dbt models (~250 LoC cut); narration + sidebar UX stays CORE_DISABLED.
+- =recipe_runner.py= / =orchestration.py= (~850 LoC together) — delete 5 loser recipe runners (~350 LoC cut).
+- =walk.py= (316 LoC) — SPLIT; track-selection → =walk_candidates= view (~140 LoC cut); narrative orchestration stays CORE_DISABLED.
+
+* Connections
+
+- [[file:cull.org][cull.org]] — verdict source (38 components)
+- [[file:dbt-pipeline.org][dbt-pipeline.org]] — what subsumes most of the SUBSUMED set
+- [[file:dev-tracker.org][dev-tracker.org]] § Phase 26 — extraction work

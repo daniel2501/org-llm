@@ -20,6 +20,17 @@ work. The [[file:agent-framework.org][agent-framework architecture
 doc]] describes HOW agents compose; this page describes WHICH
 agents exist (and which we want next).
 
+* Magnificent Seven — curated core (≤7)
+
+Locked 2026-05-05 by [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014]] (extends [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009]]; cap ≤6 → ≤7):
+=@picard= (manager) · =@spock= (researcher) · =@data= (scribe) ·
+=@gardener= (hygiene) · =@analyst= (analytics — dbt + Superset) ·
+=@curator= (wiki) · =@tracker= (general-purpose project tracking).
+=@analyst=, =@curator=, =@tracker= promoted from legacy-extras /
+non-core. Every other persona below (=@journalist=, =@doom=,
+=@ops=, =@agentsmith=, =@drillmaster=, …) is *extension-path /
+community* per DEC-009 + DEC-014.
+
 * The roster
 
 | feature                                                 | today                                         | agent recast                               | why it matters / what's juicy                                                                                                                                                                                                                                                                   |
@@ -58,7 +69,7 @@ agents exist (and which we want next).
 | voice + TTS bridge                                      | doesn't exist                                 | new *=@oracle=* agent (different I/O)      | dictation IN, narration OUT — different sensory channel entirely                                                                                                                                                                                                                                |
 | agent-creation assistant                                | doesn't exist                                 | new *=@agentsmith=* agent (META)           | THE agent that builds other agents — interviews user, drafts persona, picks tool roster from existing MCP entries, suggests triggers, pulls icon sets (nerd / utf-8 / ascii), validates the new agent against a test prompt before it lands. Self-bootstrapping: the framework's own onboarding |
 | wiki concept-graph specialist                           | shipped 2026-05-04                            | shipped — refine                            | =@curator= (birth_name =atoz=, after Mr. Atoz, TOS S3E23). META. Sweeps =docs/wiki/= for missing cross-links, broken =[[id:…]]= / file: links, and numeric drift between wiki tables and source code (e.g. "17 agents" → 18). Owns the agentsmith handoff: integrates new agents into 00-index.org + agents.org See-also + this roster. Owns the =wiki-authorship= and =agent-report= primer namespaces in [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]] — teaches new specialists wiki-page conventions and post-action report shape on demand. Stage 1 = persona + triggers; future stages add =wiki_link_audit= / =wiki_drift_check= / =wiki_orphan_terms= MCP tools.    |
-| dev-process steward                                     | shipped 2026-05-04                            | shipped — refine                            | =@tracker= (birth_name =boothby=, after the Starfleet Academy groundskeeper — knew every cadet's progress). META. Owns =dev-tracker.org=. Daily 'what's on deck', end-of-session 'what shipped/what's blocked', EFFORT-vs-actual drift. Phase-landing handoff: detects shipped commits, moves :@active: → :@done:, delegates wiki cascade to =@curator=. Owns the =dev-tracker-entry= primer namespace in [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]] — teaches specialists the property block + Recommended ship order convention before they edit dev-tracker entries. Stage 1 = persona + triggers; future stages add a =tracker review= verb (self-hosting goal).         |
+| general-purpose project tracker                         | shipped 2026-05-04 (scope expanded 2026-05-05)| Magnificent Seven (DEC-014)                | =@tracker= (birth_name =boothby=, after the Starfleet Academy groundskeeper — knew every cadet's progress). META. *General-purpose project tracker* — DIY builds, lab work, book-writing, sprints, dev work; not dev-only. Owns =dev-tracker.org= today; future projects get their own tracker files. Daily 'what's on deck', end-of-session 'what shipped/what's blocked', EFFORT-vs-actual drift. Phase-landing handoff: detects shipped commits, moves :@active: → :@done:, delegates wiki cascade to =@curator=. Owns the =dev-tracker-entry= primer namespace in [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]]. Stage 1 = persona + triggers; future stages add a =tracker review= verb (self-hosting goal).         |
 |                                                         |                                               |                                            |                                                                                                                                                                                                                                                                                                 |
 
 * Reading the table

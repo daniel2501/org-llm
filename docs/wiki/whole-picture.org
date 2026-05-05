@@ -1,0 +1,332 @@
+:PROPERTIES:
+:ID:       20d84cf7-2506-47c5-90ff-d666f4fbc66d
+:CREATED:  [2026-05-05]
+:END:
+#+TITLE: Whole picture — end-to-end navigation through org-llm
+#+FILETAGS: :wiki:meta:overview:navigation:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* org-llm is /Claude Code for Org Mode/ — agent-driven life
+management built as an opinionated FOSS-anti-capitalist distro on top
+of Doom Emacs + opencode + a dbt-shaped data layer. The lead value
+(β) is *dream-state vault via agents*; α is /coherence over time/;
+γ is /the app gets faster + more deterministic for your specific
+workflows over time/. Everything else descends from those three.
+
+*Expanded.* This page is the *navigation surface* — high-density
+tour of the canonical layers in order, with deep-dive cross-refs to
+the pages that own each concept. Not a re-explainer; not the
+canonical reference for any one layer. Read this when you need
+end-to-end comprehension fast (human onboarding, agent orientation,
+cross-section reasoning); follow the cross-refs when you need depth.
+
+* The mission (β)
+
+*Summary.* The β statement, locked 2026-05-04: org-llm exists to
+make a dream-state vault — one that thinks /with/ you — achievable
+via agents, packaged as an opinionated dbt-shaped distro.
+
+| Lead value | What the user GETS that they can't get elsewhere |
+|------------+--------------------------------------------------|
+| α          | Coherence over time across thousands of nodes    |
+| β          | Dream-state vault — agents make the vault think  |
+| γ          | App gets faster + more deterministic per /your/ workflows |
+| substrate  | Org-is-Code — same toolchain as code applies     |
+
+*Three first-usable criteria* (all required for v1.0):
+
+1. Agents reliably high-quality — not flaky, not hallucinatory
+2. Agent team coherent — defined roles, not 19 overlapping personas
+3. Substantial user value demonstrably delivered (n=1 today, n=many later)
+
+Cross-refs: [[file:../../README.md][README.md]], [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § status snapshot,
+[[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-003 (agents-as-SDLC), DEC-009 (curated core
+team), DEC-010 (anti-capitalist FOSS).
+
+* The philosophy
+
+*Summary.* Three load-bearing principles + two operational
+paradoxes. Each principle is a one-line claim; expansion lives in
+the page it's canonized in.
+
+| Principle                                          | Where canonized |
+|----------------------------------------------------+-----------------|
+| /Org is Code/ — files literally are code, not "documents" | [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] § Design rule — Org is Code |
+| /Supervision is deterministic by default/          | [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-006 + Phase 24                  |
+| /Anti-capitalist FOSS/ — copyleft, no enclosure    | [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-010                             |
+
+*Operational paradoxes* (held in tension, both true):
+
+- *Opinionated EXPERIENCE × agnostic SUBSTRATE* — Doom + opencode +
+  dbt is the curated UX; runs on any OS, any git host, any cloud
+  provider. /dbt-shape/.
+- *Curated CORE × first-class EXTENSION path* — the Magnificent
+  Seven ship in core; everything else is community-developable per
+  [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-009]]/[[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014]].
+
+Cross-refs: [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] § design rules; [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]]
+DEC-006/009/010/014.
+
+* The architecture (data + sync + supervision)
+
+*Summary.* Three layers, three deep-read pages.
+
+** Data — files canonical, DB universal interface
+
+| Layer                | Owns                                            |
+|----------------------+-------------------------------------------------|
+| Vault (=~/org/*.org=) | Canonical, durable storage; user edits in Emacs |
+| dbt pipeline         | Forward direction: files → parsed tables → derived models |
+| SQLite + sqlite-vec  | Universal SQL query/write interface; regenerable cache |
+| Render hook          | Backward direction: DB writes → deterministic file rewrite |
+
+Per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011]]: at the bytes level /everything is files/; the real
+choice is which interface you put on the bytes. Per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-013]]: that
+interface splits cleanly into two tiers (next section).
+
+** Sync — git is the entire mechanism
+
+| Mechanism | Notes                                               |
+|-----------+-----------------------------------------------------|
+| =git push/pull= | Full multi-device sync; no custom protocol    |
+| Per-device DB | Each device regenerates from synced files       |
+| Per-device config | =Config(key, device, value)= per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-012]]      |
+| Conflict ladder | =merge=union= → org-format → org-aware merge driver |
+
+Catastrophic loss is a re-clone event, not a data-loss event.
+Mobile capture latency stays at local-disk speed.
+
+** Supervision — deterministic trinity (Phase 24)
+
+| Registry              | Status            | Wiring                  |
+|-----------------------+-------------------+-------------------------|
+| Pre-flight resolvers  | 24.1 *shipped*    | =intercept_agent_prefix= ([[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-008]]) |
+| Tool-failure recovery | 24.2 *pending*, v1.0-gating | =@recover= decorator at MCP tool sites |
+| Confusion detector    | 24.3 *pending*, v1.0-gating | Signal registry over =crew_log= |
+| Manager quorum        | 24.4 open question | Async-only; never on critical path |
+
+Each layer is a /registry/ — adding entries is one file/decorator,
+not core surgery. Per the architecture design rule: pattern-matchable
+confusions belong to code; reasoning-required confusions are reserved
+for LLMs and prefer async/off-critical-path.
+
+Cross-refs: [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] § /Org is Code/ + /supervision is
+deterministic by default/, [[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]],
+[[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]], [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-006/011/012/013.
+
+* The agents (Magnificent Seven + extension)
+
+*Summary.* The curated core agent team — locked at ≤7 in [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014]]:
+
+| Agent       | Role                                          |
+|-------------+-----------------------------------------------|
+| =@picard=   | Manager — decompose / delegate / synthesise   |
+| =@spock=    | Researcher — workhorse over the vault         |
+| =@data=     | Scribe — capture-flow + drafting              |
+| =@gardener= | Hygiene — orphans, drift, broken links        |
+| =@analyst=  | Analytics — owns dashboards + Superset surface |
+| =@curator=  | Wiki concept-graph specialist (birth-name =atoz=) |
+| =@tracker=  | General-purpose project tracker (birth-name =boothby=, scope expanded 2026-05-05 — DIY/lab/book/sprints, not just dev) |
+
+Two patterns to know:
+
+- *Agent-as-manager* — the agent /manages/ a substrate (resolver
+  registry, recipe registry, doctor checks, config schema) without
+  /becoming/ the substrate. Substrate stays deterministic code.
+- *Spawned subagents ≠ @-agents* — different concept layer. Spawned
+  subagents are ephemeral one-shot workers from the host (Claude Code
+  / opencode); @-agents are durable personas with registry entries.
+  They compose; they're not subsets.
+
+*Extension path is first-class* (not afterthought) — Phase 23.5
+user-supplied agents + Phase 23.6 literate MCP tools. Anything beyond
+the Seven is community-developable per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-009]]/[[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014]].
+
+Cross-refs: [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][agent-framework.org]] (esp. § Spawned subagents — a
+different concept layer), [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]], [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]],
+[[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-009/014, [[id:65c67408-a0de-4f93-9ffa-6800ea0f436f][cull.org]].
+
+* The tools (data tier + effect tier)
+
+*Summary.* Per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-013]] — two named tiers, default strongly toward
+the first.
+
+** Data tools (dbt-tools, ~90% of surface)
+
+| dbt mechanism | Used for                                   |
+|---------------+--------------------------------------------|
+| models        | read-side queries (views or tables)        |
+| operations    | write-side; INSERT/UPDATE + render hook    |
+| snapshots     | append-only history capture (retrospection) |
+| tests         | declarative contracts agents trust         |
+| macros        | parameterised SQL chunks                   |
+
+Examples: =search_notes=, =ask_notes=, =count_across_vault=,
+=recent_activity=, =agenda_view=, =mood_arc=, =tag_taxonomy=,
+=capture_note= (operation + render hook), vault facts, hygiene scans.
+
+** Effect tools (MCP-tools, ~10%)
+
+| Surface     | Examples                                    |
+|-------------+---------------------------------------------|
+| dispatch    | =delegate=, spawn-subagent                  |
+| browser     | =open_url=, =browser_command=               |
+| shell       | subprocess, file ops                        |
+| granted-fs  | =read_file=, =list_directory= (allowlist)   |
+| network     | http fetches, webhooks                      |
+
+** Self-coded tools (Phase 29)
+
+LLM observes pattern → proposes dbt model → tests pass → register.
+Future invocations skip the LLM. =org-llm tracker sync= (29.0) is
+the seed.
+
+Cross-refs: [[id:3a986238-898c-4298-a3e3-47157f502c48][tools-as-dbt-models.org]], [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-013,
+[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 29.
+
+* The quality story (Three Laws + trinity + tests)
+
+*Summary.* Quality is enforced at four levels — write-time, run-time,
+build-time, and meta-time.
+
+** Three Laws of Data Integrity (Asimov + plain)
+
+| Law | Plain version |
+|-----+---------------|
+| 0th | An agent may not propagate vault state inconsistent with user intent — Phase 24 trinity enforces |
+| 1st | Agent defers to user (open dirty buffer = queue the change)   |
+| 2nd | Agent must propagate to canonical files unless 1st blocks      |
+| 3rd | Agent preserves its own past via git audit; retry on regression |
+
+Default mode is =auto-revert-mode= for clean buffers; user always
+wins on collision; git remembers; engine retries.
+
+** Supervision trinity (Phase 24)
+
+Three registries — pre-flight resolvers, tool-failure recovery hooks,
+confusion detector. Each accepts new entries the way the recipe
+registry accepts recipes. 24.1 shipped; 24.2 + 24.3 are v1.0-gating.
+
+** dbt tests as agent contracts
+
+Declarative tests in =schema.yml= run on every build. Agents trust
+=SELECT * FROM recent_activity= because tests pass. =@gardener='s job
+sharpens from "vague hygiene" to "read failing tests, propose fixes."
+
+** Phase 30.4 multi-judge (the meta-quality gate)
+
+Validation framework's =judge_models= becomes a list; FOSS judges
+(Llama 3.3, Qwen 2.5, DeepSeek R1) vote; reduces single-judge bias.
+Sprint-eligible (~1d).
+
+Cross-refs: [[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][data-integrity-laws.org]], [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 24 + § Phase 30.4.
+
+* The versioning shape
+
+*Summary.* "First usable" is a sequential ladder, not exclusive
+checkpoints.
+
+| Level | What it means                                          |
+|-------+--------------------------------------------------------|
+| (a)   | Personally usable by the maintainer (today, daily-driver) |
+| (b)   | Personally great — quality bar high enough to fully rely on |
+| (c)   | Stranger-installable — someone else can adopt unaided   |
+| (d)   | Multi-user community of practice                        |
+| (e)   | Self-sustaining ecosystem with external contributors    |
+
+*Where we are 2026-05-05:* late (a), reaching (b). v1.0 ≈ (c).
+
+*v1.0 gates:*
+
+- Phase 24.2 (recovery hooks) + 24.3 (confusion detector)
+- Phase 26.2 (extraction — physical cull)
+- Retrieval-bug sweep
+- Cross-platform install validation (macOS + Ubuntu)
+
+*Open:* version-number scheme not nailed yet (DEC-pending).
+
+Cross-refs: [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Punch list — beta → 1.0,
+[[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]].
+
+* The phase map (24 → 31)
+
+*Summary.* Compact phase index — narrative depth lives in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]].
+
+| Phase | Name                                        | Status            | Role in the thesis |
+|-------+---------------------------------------------+-------------------+--------------------|
+| 22 v2 | Manager pre-fetch + agent narrates          | *shipped*         | Zero-round-trip orchestration; loadbearing |
+| 23.1  | Agent dataclass + birth-names               | *shipped*         | Agent framework spine |
+| 23.5  | User-supplied agents (library)              | design pending    | Extension path leg 1 |
+| 23.6  | Literate MCP tools                          | tier 1 sprint-eligible | Extension path leg 2 |
+| 24.1  | Pre-flight resolver registry                | *shipped*         | Supervision trinity 1/3 |
+| 24.2  | Tool-failure recovery hooks                 | *pending* (v1.0-gating) | Supervision trinity 2/3 |
+| 24.3  | Confusion detector                          | *pending* (v1.0-gating) | Supervision trinity 3/3 |
+| 24.4  | Manager quorum (async-only)                 | open question     | Reasoning-required exception |
+| 25    | DB-as-cache + git-canonical pipeline        | planned (rewritten 2026-05-05 per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011]]) | Universal SQL interface |
+| 26.1  | Cull walkthrough                            | *complete* (38/38) | Curated core team boundary |
+| 26.2  | Physical extraction                         | next              | ~3000 LoC retire / move |
+| 27    | Apache Superset dashboards                  | planned (CORE_DISABLED) | Analytics surface |
+| 28    | Containerization (asymmetric)               | planned           | Native primary; containers selective |
+| 29    | Self-coded tools                            | planned (29.0 sprint-eligible) | App gets faster over time (γ) |
+| 30    | FOSS agent value-adds (5 sub)               | parallel-shippable | Local-only / small-models / continuous / multi-judge / self-validation |
+| 31    | Theme-driven agent avatars                  | planned (COMMUNITY) | Aesthetic system |
+
+Cross-refs: [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] (per-phase deep read), [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]]
+(active-work granularity).
+
+* The stack (partner apps)
+
+*Summary.* Org-llm composes existing FOSS tools; "opinionated
+distro" means picking partners and shipping a cohesive experience.
+
+| Surface          | Partner               | Status / DEC alignment              |
+|------------------+-----------------------+-------------------------------------|
+| Editor           | Doom Emacs            | CORE_DISABLED experience (daily-driver dogfood) |
+| LLM frontend     | opencode              | CORE                                |
+| LLM frontend     | Claude Code           | CORE                                |
+| LLM frontend     | Pi (pi.dev — TS CLI)  | COMMUNITY                           |
+| Local LLM        | ollama                | CORE                                |
+| Cloud LLM        | openrouter            | CORE                                |
+| Cloud LLM        | Anthropic / others    | effect-tier MCP                     |
+| /Excluded/       | Groq                  | banned per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-010]] anti-cap        |
+| Data pipeline    | dbt-core (local; no dbt-cloud) | CORE                       |
+| Dashboards       | Apache Superset       | CORE_DISABLED (Phase 27)            |
+| Infra            | OpenTofu              | planned (anti-cap aligned)          |
+| Vault transport  | git                   | CORE; substrate-agnostic per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011]] |
+| Vault host       | Forgejo / Codeberg / GitHub / USB | any (substrate-agnostic) |
+| Multi-agent      | Agor                  | research candidate                  |
+
+Cross-refs: [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § OpenTofu + § Phase 28,
+[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 27 / 28, [[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]].
+
+* What's next (live state)
+
+*Summary.* As of 2026-05-05: cull walkthrough complete (38/38);
+DEC-014 just locked; Magnificent Seven roster locked; ~3000 LoC
+retirement candidates queued for Phase 26.2; 24.1 shipped + verified
+live. Mobile + 24.2/24.3 are the v1.0 gates.
+
+Recent shipped (2026-05-04 → 2026-05-05):
+- 4 new wiki concept pages: data-integrity-laws, sync-architecture,
+  dbt-pipeline, tools-as-dbt-models
+- DEC-006 through DEC-014 (10 architectural decisions in 36h)
+- Phase 24.1 motivating bug closed end-to-end
+- Phase 25 scope rewrite (DB-as-cache, not DB-authoritative inversion)
+- Phase 26.1 cull verdicts complete
+
+Cross-refs: [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] § YOU ARE HERE, [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]],
+[[id:65c67408-a0de-4f93-9ffa-6800ea0f436f][cull.org]] § Subsumed / dead code.
+
+* See also
+
+- [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][00-index.org]] — full concept graph entry point
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] — single-source-of-truth shape doc
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-001 through DEC-014, the directional record
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] — narrative phase catalog
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] — structured actionable state
+- [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] — single-view dashboard ("YOU ARE HERE")
+- [[id:65c67408-a0de-4f93-9ffa-6800ea0f436f][cull.org]] — Phase 26.1 walkthrough; Magnificent Seven boundary
+- [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki-conventions.org]] — Rule 2b summary+expanded format applies here
