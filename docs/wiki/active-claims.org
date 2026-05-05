@@ -45,6 +45,12 @@ chronological ordering — append to the bottom; the next
 # When done: change STARTED → DONE, add :CLOSED: timestamp, move
 # the entry to "Recently closed" below.
 
+** STARTED Claude/opus-C — Phase 24.1 finish-line wrap
+   :PROPERTIES:
+   :CLAIM:    org_llm/llm_proxy.py docs/wiki/decisions.org docs/wiki/roadmap.org docs/wiki/dev-tracker.org docs/wiki/active-claims.org
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-04 Mon 21:38]
+   :END:
 
 * Recently closed                                              :@closed:
 

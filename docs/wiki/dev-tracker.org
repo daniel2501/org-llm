@@ -1787,18 +1787,34 @@ layers each fix this bug at a different point in the call.
 
 *** Recommended ship order (3 sub-phases + 1 open)
 
-1. *Phase 24.1 — Pre-flight resolver registry.* New package
-   =org_llm/resolvers/= with one file per resolver
-   (=path.py=, =repo.py=, =agent.py=, =time.py=,
-   =org_node.py=). Each is a pure function
-   =(prompt, context) → ResolvedFact[]=. =resolve_all()= runs
-   them in parallel with a per-resolver time budget (~80ms)
-   and concatenates output into a ~RESOLVED CONTEXT~ block
-   injected into the sub-LLM's user message. Wired into
-   [[file:../../org_llm/mcp_server.py][=mcp_server.py=]] =delegate()= just before =user_msg=
-   composition (line ~1000). Initial entries: =PathResolver=,
-   =RepoResolver=, =AgentResolver=. Closes the motivating bug
-   alone. ~1d.
+1. *Phase 24.1 — Pre-flight resolver registry.* *Shipped
+   2026-05-04* (commit =9c75bb5= framework + =delegate()=
+   wiring + tests; proxy-side wiring + eager-import follow-up
+   commit). New package =org_llm/resolvers/= with one file
+   per resolver (=path.py=, =repo.py=, =agent.py=). Each is
+   a pure function =(prompt, context) → ResolvedFact[]=.
+   =resolve_all()= runs them in parallel with an 80ms
+   wall-clock budget and concatenates output into a
+   ~RESOLVED CONTEXT~ block.
+
+   /Wiring location:/ primarily at =intercept_agent_prefix= in
+   [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] (per [[id:8aa9e7d2-9f63-4ef3-9b25-3b1c7d2e8f5a][DEC-008]] —
+   the @-prefix persona-swap seam is the broad dispatch
+   surface; enrichment compounds across every @-routed turn,
+   not just manager-mediated =delegate()=). Defensive
+   secondary wiring lives in =mcp_server.py= =delegate()= for
+   programmatic delegate calls that don't traverse @-prefix.
+   =org_llm.resolvers= eager-imports at proxy module-load so
+   the prewarm thread completes before the first user prompt;
+   steady-state calls 1–2ms.
+
+   /Coverage limitation:/ pronoun-only follow-ups ("read it")
+   don't get path resolution because there's no token to
+   extract. Resolution from conversation history is a
+   separate enhancement, filed as a candidate 24.1.x. Verified
+   live: =@curator read wiki/superset.org and ...= → first
+   tool call hit =/home/daniel/repos/org-llm/docs/wiki/superset.org=
+   with no guessing.
 
 2. *Phase 24.2 — Tool-failure recovery hooks.* =@recover=
    decorator at each MCP tool's registration site. On tool

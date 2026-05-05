@@ -355,6 +355,197 @@ ceremony needed for parallel work.
   recur despite the escape hatch, escalate the file to
   per-section locks or split it.
 
+** DEC-006 — Supervision is deterministic by default
+:PROPERTIES:
+:ID:       cf17c89e-2a9e-46b0-9e3f-7c44d6f1bd92
+:STATUS:   accepted
+:DATE:     [2026-05-04]
+:DECIDERS: Daniel, Claude/opus-C
+:END:
+
+*Summary.* When the agent layer needs supervision —
+disambiguating a prompt, recovering from a wrong tool call,
+spotting a confusion loop — that supervision runs as
+*deterministic code* unless the confusion genuinely requires
+reasoning. An LLM-based observer is an extra round-trip per
+turn and the orchestration top priority (smoother + faster +
+higher-quality than solo) fails the moment supervision taxes
+latency. Sharply: /if a confusion can be detected by code, it
+must be; LLM-based supervision is reserved for confusions that
+genuinely need reasoning./ Implemented as the Phase 24
+[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][supervision trinity]] —
+three registries (pre-flight resolvers, tool-failure recovery
+hooks, confusion detector) that each accept new entries the
+way the recipe registry accepts new recipes.
+
+*Context.* The 2026-05-04 =@curator= bug surfaced the gap:
+user said "@curator in org-llm, =wiki/superset.org=, fix it
+up"; agent looked in cwd then =~/org/=, gave up. The actual
+file was =docs/wiki/superset.org= in the repo. The user
+asked for a generalizable fix — manager spotting the problem
+without taxing speed — and pushed back on bandaiding the
+specific path-resolution case. The conversation surfaced the
+broader rule: pattern-matchable confusions are code's job;
+reasoning-required confusions are the LLM's. Most agent
+confusion is pattern-matchable.
+
+*Decision.*
+
+1. *Default mode is deterministic.* Pre-flight enrichment,
+   recovery hooks, and confusion detection all run as pure
+   code in registry-shaped modules. Adding a new resolver /
+   hook / signal is one entry, not core surgery.
+
+2. *LLM-based supervision is the exception.* Reserved for
+   confusions that genuinely need reasoning — semantic
+   equivalence judgments, cross-phrasing intent matching,
+   subjective output quality. When invoked, prefer
+   /async/off-the-critical-path/ shapes (manager quorum
+   reviewing the audit log retrospectively) over inline
+   round-trips.
+
+3. *The trinity is the implementation surface.* Phase 24
+   ships three registries: 24.1 pre-flight resolvers, 24.2
+   tool-failure recovery hooks, 24.3 confusion detector
+   (24.4 manager quorum is the open-question slot for the
+   exception case, async-only). Future supervision needs
+   choose which registry to extend, not whether to spin a
+   new layer.
+
+*Consequences.*
+- Architecture rule canonized in
+  =docs/wiki/architecture.org= § /Design rule —
+  supervision is deterministic by default/.
+- Phase 24 trinity is the load-bearing surface;
+  later phases (29 self-coded tools, 30 FOSS agent value-adds)
+  treat the registries as the auto-promotion targets.
+- Forecloses LLM-observer-per-turn shapes — those
+  break the orchestration top priority and won't ship.
+- Triggers revisit: if a class of confusion proves
+  /unambiguously/ to need reasoning AND can't tolerate async,
+  add a 4th registry slot (with the same shape) rather than
+  abandoning the rule.
+
+** DEC-007 — Wiki Rule 2b: every concept entry is Summary + Expanded
+:PROPERTIES:
+:ID:       7be1d9c4-4f50-4f6b-bbf8-69152f3a68a4
+:STATUS:   accepted
+:DATE:     [2026-05-04]
+:DECIDERS: Daniel, Claude/opus-C
+:END:
+
+*Summary.* Every new concept, design rule, or architectural
+decision in the wiki must lead with a =*Summary.*= paragraph
+(1–3 sentences, the load-bearing claim) followed by
+=*Expanded.*= prose. Both, every time. Not just one. Canonized
+as Rule 2b in
+[[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki conventions]].
+
+*Context.* Every wiki concept is read at two speeds: by a
+future LLM/human looking up one fact (wants the summary), and
+by someone learning the system (wants the full context). The
+status quo (single prose section) buried the load-bearing
+sentence inside the body, costing both audiences. Forcing the
+author to write both up-front means the summary actually
+exists and isn't just the first paragraph by accident.
+
+*Decision.* Triggers (require both blocks): new design rule,
+new top-level architecture section, new recipe / agent / tool
+getting its own wiki page, substantial revision of an
+existing concept page. Anti-triggers (one block fine): typo
+fixes, link repairs, passing edits.
+
+*Consequences.*
+- Author cost: writing the summary forces clarification of
+  the load-bearing claim. Five extra minutes; cheap.
+- Reader cost: the summary covers ~80% of lookup needs in
+  ~10% of the page; the rest stays available.
+- The supervision rule (DEC-006) was the worked example of
+  this convention applied to itself.
+- Triggers revisit: if the summary/expanded split feels
+  redundant on small pages, allow Summary-only on entries
+  under ~150 words. Today's call: keep the rule strict
+  to build the habit.
+
+** DEC-008 — Phase 24.1 wires at the @-prefix seam, not delegate-only
+:PROPERTIES:
+:ID:       8aa9e7d2-9f63-4ef3-9b25-3b1c7d2e8f5a
+:STATUS:   accepted
+:DATE:     [2026-05-04]
+:DECIDERS: Daniel, Claude/opus-C
+:END:
+
+*Summary.* The pre-flight resolver enrichment fires inside
+=intercept_agent_prefix= in [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] (the
+@-prefix persona-swap seam), not only inside =delegate()=
+in [[file:../../org_llm/mcp_server.py][=mcp_server.py=]]. The
+=delegate()= wiring stays as a defensive belt-and-suspenders
+for programmatic delegate calls; the proxy wiring is the
+load-bearing path because every @-prefix-routed turn flows
+through it. Eager-imports =org_llm.resolvers= at proxy
+module-load time so the prewarm thread is finished before
+the first user prompt and the cold-start budget never bites.
+
+*Context.* The first cut of Phase 24.1 wired the resolver
+into =delegate()= only. Live verify against the motivating
+=@curator/superset.org= bug failed to fire enrichment because
+curator (running on cloud =qwen-2.5-72b= via the @-prefix
+swap) called tools directly without going through
+=delegate()=. The =manager-log.jsonl= was empty; my resolver
+never ran. Reading
+[[id:47ba2143-c53a-409a-8286-2b3759794608][llm-proxy.org]]
+made the seam location obvious: =intercept_agent_prefix= (#6
+in =DEFAULT_INTERCEPTORS=) is where every @-prefix turn gets
+its persona swap, and the recipe pre-fetch (Phase 22 v2)
+already mutates =agent_prompt= here. Resolver enrichment
+slots in cleanly using the same pattern.
+
+This is also the user's "don't bandaid" feedback applied:
+wiring at =delegate()= solved a narrow case; the general
+problem is "every agent dispatch deserves enrichment." The
+@-prefix seam is that general dispatch surface.
+
+*Decision.*
+
+1. Resolver call moves to (or is duplicated in)
+   =intercept_agent_prefix=, immediately after the recipe
+   pre-fetch block, mutating =agent_prompt= the same way.
+2. =delegate()= call site keeps its resolver call as a
+   defensive layer for programmatic delegate invocations
+   that don't traverse @-prefix.
+3. =org_llm.resolvers= is eager-imported at module load
+   in =llm_proxy.py= so =_prewarm_caches()= fires at proxy
+   startup. First user prompt sees warm caches; the 80ms
+   wall-clock budget stays comfortable.
+4. The same wiring lesson applies forward: future Phase 24
+   sub-phases (recovery hooks, confusion detector) wire at
+   the *broadest dispatch seam available*, not the narrowest
+   convenient call site. The trinity's value compounds when
+   each layer hits every turn, not just manager-mediated
+   ones.
+
+*Consequences.*
+- Phase 24.1 closes the motivating bug end-to-end via the
+  @-prefix path; verified live (third turn of 2026-05-04
+  session: agent's first tool call hit the absolute path).
+- Resolver enrichment is now a shared seam with recipe
+  pre-fetch; both mutate =agent_prompt= at the same site.
+  Future contributors expecting ONE pre-flight surface get
+  it.
+- Sticky turns (=intercept_agent_sticky= prepends @<intent>)
+  benefit transitively — sticky chains into agent_prefix and
+  the resolver fires there.
+- Pronoun-only follow-ups ("read it") still don't get path
+  resolution because there's no token to extract. That's a
+  separate enhancement (resolve from conversation history),
+  noted but not in 24.1 scope.
+- Forecloses the "wire at the most convenient site" lazy
+  default. Future trinity work explicitly evaluates seam
+  breadth before choosing wire-in.
+- Triggers revisit: if pronoun-resolution becomes a recurring
+  need, file as a 24.1.x sub-phase that pulls the last N
+  user turns into the resolver's input.
+
 * See also
 
 - [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] —
