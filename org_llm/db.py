@@ -97,6 +97,137 @@ class Config(Base):
     value = Column(Text, nullable=False)
 
 
+class ConfigOverride(Base):
+    """Per-(device, env) overrides that layer on top of the base Config row.
+
+    DEC-012 added per-device knobs; this table extends that to (key, device,
+    env) so dev / acpt / prod can carry different values for the same key.
+    Lookup precedence (see `get_config_value`):
+
+        (key, device, env)         — most specific
+        (key, device, '(any)')     — device-pinned, any env
+        (key, '(any)', env)        — env-pinned, any device
+        (key, '(any)', '(any)')    — base Config row
+        MODEL_DEFAULTS[key]        — code default
+
+    Special sentinel '(any)' is stored literally so a uniqueness constraint
+    over (key, device, env) is well-defined; you can't write that value as
+    a "real" device or env name. The base row in the legacy Config table is
+    treated as equivalent to (key, '(any)', '(any)'), so existing call sites
+    using `s.get(Config, key)` keep working unchanged.
+    """
+    __tablename__ = "config_overrides"
+    __table_args__ = (
+        Index("idx_config_overrides_key", "key"),
+    )
+
+    key    = Column(Text, primary_key=True)
+    device = Column(Text, primary_key=True, default="(any)")
+    env    = Column(Text, primary_key=True, default="(any)")
+    value  = Column(Text, nullable=False)
+
+
+# Sentinel for "matches any device" / "matches any env" in ConfigOverride.
+ANY_SCOPE = "(any)"
+
+
+def current_env() -> str:
+    """Return the active SDLC environment per ORG_LLM_ENV (defaults to 'dev').
+
+    Whitelisted to {dev, acpt, prod}; anything else is treated as 'dev' so
+    a typo in the shell can't silently switch a user into prod-scoped knobs.
+    """
+    import os
+    raw = (os.environ.get("ORG_LLM_ENV") or "").strip().lower()
+    return raw if raw in ("dev", "acpt", "prod") else "dev"
+
+
+def current_device() -> str:
+    """Return the active device id (DEC-012). Override via ORG_LLM_DEVICE.
+
+    Falls back to the OS hostname so per-laptop knobs work out of the box.
+    Empty / unresolvable -> '(any)' so the lookup degrades to the global row.
+    """
+    import os, socket
+    raw = (os.environ.get("ORG_LLM_DEVICE") or "").strip()
+    if raw:
+        return raw
+    try:
+        host = socket.gethostname().strip()
+        return host or ANY_SCOPE
+    except Exception:
+        return ANY_SCOPE
+
+
+def get_config_value(session, key: str, *,
+                       device: str | None = None,
+                       env: str | None = None,
+                       default: str | None = None) -> str | None:
+    """Resolve a config value with (device, env) precedence.
+
+    Precedence (first hit wins):
+        1. (key, device,    env)       — fully specific
+        2. (key, device,    '(any)')   — device-pinned, any env
+        3. (key, '(any)',   env)       — env-pinned, any device
+        4. (key, '(any)',   '(any)')   — base Config row
+        5. MODEL_DEFAULTS[key]         — code default
+        6. supplied `default` argument
+
+    Pass explicit device/env to test in isolation; otherwise the active
+    runtime values from current_device() / current_env() are used.
+    """
+    dev = device if device is not None else current_device()
+    en  = env    if env    is not None else current_env()
+    # 1..3 — scoped overrides
+    candidates = (
+        (dev,        en),
+        (dev,        ANY_SCOPE),
+        (ANY_SCOPE,  en),
+    )
+    for d, e in candidates:
+        if d == ANY_SCOPE and e == ANY_SCOPE:
+            continue   # base row covers this; handled below
+        row = session.get(ConfigOverride, (key, d, e))
+        if row is not None:
+            return row.value
+    # 4 — base Config row
+    base = session.get(Config, key)
+    if base is not None:
+        return base.value
+    # 5 — code defaults (avoid circular: MODEL_DEFAULTS lives below)
+    if key in MODEL_DEFAULTS:
+        return MODEL_DEFAULTS[key]
+    return default
+
+
+def set_config_value(session, key: str, value: str, *,
+                       device: str | None = None,
+                       env: str | None = None) -> None:
+    """Upsert a config value at the given (device, env) scope.
+
+    `device=None` and `env=None` mean "any" — writes the base Config row,
+    which is what plain `org-llm config <key> <value>` has always done.
+    Pass explicit device/env to write a scoped override that wins for
+    matching runtimes only.
+    """
+    dev = ANY_SCOPE if device is None else device
+    en  = ANY_SCOPE if env    is None else env
+    if dev == ANY_SCOPE and en == ANY_SCOPE:
+        row = session.get(Config, key)
+        if row is None:
+            session.add(Config(key=key, value=value))
+        else:
+            row.value = value
+    else:
+        row = session.get(ConfigOverride, (key, dev, en))
+        if row is None:
+            session.add(ConfigOverride(key=key, device=dev, env=en,
+                                          value=value))
+        else:
+            row.value = value
+    session.commit()
+
+
 def log_crew_action(action: str, agent_from: str = "crew",
                      agent_to: str = "", model: str = "",
                      prompt: str = "", result: str = "",
@@ -528,6 +659,11 @@ def _migrate_in_place(engine) -> None:
             additions.append(
                 "ALTER TABLE sensor_log ADD COLUMN context TEXT"
             )
+    # ── config_overrides table — per-(device, env) scoped knobs.
+    # Created by Base.metadata.create_all() above; nothing to ALTER on
+    # the base config table because back-compat keeps Config keyed
+    # purely on `key` and treats every existing row as the
+    # (device='(any)', env='(any)') scope.
     if not additions:
         return
     with engine.begin() as conn:
