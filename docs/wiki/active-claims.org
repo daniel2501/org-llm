@@ -47,6 +47,14 @@ chronological ordering — append to the bottom; the next
 
 * Recently closed                                              :@closed:
 
+** DONE Claude/opus-C — final wrap: DEC-013 + tools-as-dbt-models synthesis
+   :PROPERTIES:
+   :CLAIM:    docs/wiki/decisions.org docs/wiki/tools-as-dbt-models.org docs/wiki/active-claims.org
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-05 Tue 02:31]
+   :CLOSED:   [2026-05-05 Tue 02:38]
+   :END:
+
 ** DONE Claude/opus-C — wrap mission walk: DEC-011/012 + sync arch + dbt pipeline + Phase 25 revision
    :PROPERTIES:
    :CLAIM:    docs/wiki/decisions.org docs/wiki/sync-architecture.org docs/wiki/dbt-pipeline.org docs/wiki/roadmap.org docs/wiki/dev-tracker.org docs/wiki/active-claims.org

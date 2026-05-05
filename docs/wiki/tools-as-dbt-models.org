@@ -1,0 +1,402 @@
+:PROPERTIES:
+:ID:       3a986238-898c-4298-a3e3-47157f502c48
+:CREATED:  [2026-05-05]
+:END:
+#+TITLE: Tools as dbt models — the love story between dbt and agent tools
+#+FILETAGS: :wiki:architecture:agents:dbt:tools:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* A dbt model *is* an agent tool — same input/output/contract/
+docs shape under different names. Org-llm runs a *two-tier tool
+architecture* (per [[id:e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63][DEC-013]]): *data tools* (dbt-tools, ~90% of
+the surface) and *effect tools* (MCP-tools, ~10%). The 90% inherit
+all dbt machinery — tests, lineage, materializations, snapshots,
+auto-docs, federation, Phase-29-promotability. The 10% bridge to
+foreign systems (LLM dispatch, browser, shell, network) where dbt
+doesn't fit. The split unifies human + agent perf vocabulary, makes
+agent-generated tools first-class artifacts in git, and closes
+*Org is Code* recursively all the way down.
+
+*Expanded.* This page is the synthesized walk of dbt × agent tools
+from the 2026-05-05 mission walk. Eight bites (A–H) covered the
+symmetry, the split, contracts, orientation, retrospection, perf,
+federation, and the recursive principle. The walk is reproduced
+below as durable canon for future readers (humans + agents).
+
+* The foundational symmetry: dbt model = agent tool
+
+A tool, abstractly, has:
+- *Input* — typed parameters
+- *Output* — typed result
+- *Contract* — assertions about valid invocations
+- *Documentation* — what it does, when to call
+
+A dbt model has:
+- *Input* — Jinja parameters / =ref()= upstream models
+- *Output* — typed columns
+- *Contract* — =tests:= block (declarative invariants)
+- *Documentation* — =description:= field, auto-rendered in =dbt
+  docs=
+
+These are the same thing under two names. When an agent calls
+=SELECT * FROM recent_activity= it's invoking a tool whose
+signature is the model's schema, contract is the model's tests,
+docs are the model's column descriptions.
+
+This is why /Claude Code for Org Mode/ works as a literal claim,
+not metaphor: code IDEs gained agent layers because code is
+structured + parseable + documented; dbt models share those three
+properties; the same agent affordances transfer.
+
+The deep implication: instead of designing two parallel systems
+("agent tools" with their own registry/signatures/docs, separate
+from "data models" with theirs), there is *one* system. Every dbt
+model is automatically discoverable as a tool; every tool
+registration in the data category is automatically a dbt model
+with all dbt machinery attached.
+
+* Two-tier architecture: data tools + effect tools
+
+Per [[id:e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63][DEC-013]], org-llm tools split into two categories with strong
+default-toward-the-first-category:
+
+** Data tools (dbt-tools, ~90%)
+
+Mechanism: dbt project artifacts. Function: data manipulation
+(read, write, transform, aggregate).
+
+| dbt mechanism | Used for |
+|---------------+--------------------------------------------|
+| *models*      | read-side queries (views or tables)        |
+| *operations*  | write-side; INSERT/UPDATE + render hook    |
+| *snapshots*   | append-only history capture                |
+| *tests*       | declarative contracts agents trust         |
+| *macros*      | parameterised SQL chunks                   |
+
+Examples already shipped or imminent: =search_notes=,
+=ask_notes=, =count_across_vault=, =recent_activity=,
+=agenda_view=, =mood_arc=, =link_graph_walk=, =tag_taxonomy=,
+=capture_note= (write-side via dbt operation + render hook),
+=tag_rename_across_vault= (mass op via dbt operation), vault
+facts, drift checks, hygiene scans (tests).
+
+** Effect tools (MCP-tools, ~10%)
+
+Mechanism: MCP tool registration. Function: side effects on
+foreign systems (LLM dispatch, browser, shell, network, granted
+filesystem).
+
+| Tool | Why non-dbt |
+|------+----------------------------------------|
+| =delegate(agent, prompt)= | LLM dispatch; output unstructured |
+| =open_url=, =browser_command= | Pure side-effect |
+| =shell= | Arbitrary, foreign, not data-shaped |
+| =request_access= | Permission state — could be dbt seed but tiny |
+| Direct git ops | Better as separate library |
+
+** The default rule
+
+#+begin_quote
+Tool's primary purpose is *data manipulation* (read, write,
+transform, aggregate) → *data tool* (dbt: model / operation
+/ macro / snapshot).
+Tool's primary purpose is *side effect on something foreign*
+(LLM, browser, shell, network) → *effect tool* (MCP).
+#+end_quote
+
+The 90/10 split is the pragmatic reality of org-llm's surface.
+The data majority gets all the testing + lineage + docs +
+Phase-29-promotability machinery for free. The effect minority
+stays simple and bounded; forcing dbt onto pure-side-effect tools
+is Rube Goldberg.
+
+* The write-side trick
+
+Pure dbt models are read-only by design. Write-side tools could
+have stayed in the effect category, but dbt has *operations*
+(=run-operation=) and *macros* — parameterised SQL files callable
+by name. Pair them with a post-run hook that triggers the
+deterministic file renderer (per [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]] + [[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]])
+and write-side tools become dbt-shaped too:
+
+#+begin_example
+agent calls dbt operation
+        ↓
+INSERT/UPDATE on parsed_* tables
+        ↓
+render hook fires: writes affected ~/org/*.org files
+        ↓
+git commit (Three Laws apply — see
+[[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][data-integrity-laws.org]])
+#+end_example
+
+This is why ~90% of tools fit in the data category instead of
+~70% — the write-side fits via operations + render hook.
+
+* Tests as contracts agents trust
+
+Without dbt tests, an agent calling =SELECT * FROM recent_activity=
+has to /trust the implementation/. With dbt tests declared in YAML
+and validated at build time, the agent can *reason about preconditions*:
+
+#+begin_src yaml
+models:
+  - name: recent_activity
+    description: "Nodes touched in last 7 days, joined w/ clocks"
+    columns:
+      - name: id
+        tests: [unique, not_null]
+      - name: file
+        tests:
+          - not_null
+          - relationships: { to: ref('files'), field: path }
+      - name: last_touched_at
+        tests: [not_null]
+    tests:
+      - dbt_utils.expression_is_true:
+          expression: "last_touched_at >= datetime('now', '-7 days')"
+#+end_src
+
+The deep loop: agents trust models because tests pass. Tests pass
+because they're validated on every build. Build runs on every
+save. Agents read from a *constantly validated data substrate.*
+
+Three downstream effects:
+1. */@gardener/'s job description sharpens dramatically.* From
+   "vague hygiene" to "read failing tests, propose fixes." Each
+   failing test is a concrete actionable bug.
+2. *Drift visible at write time, not query time.* A bad commit
+   immediately fails the next build; the regression is unambiguous.
+3. *Tests are versioned with models.* Same git commit captures
+   schema + invariants. Code review on a model PR includes its
+   contracts. /Org is Code/ extends down to data tests.
+
+The contrast with effect tools: they can't have contracts this
+rich because their behavior depends on foreign systems. Their
+guarantees are best-effort + retry. This reliability-profile
+difference is *why* data tools are first-class and effect tools
+are bridge.
+
+* Lineage + auto-docs as agent orientation
+
+=dbt docs serve= auto-generates a navigable schema reference from
+column descriptions, lineage edges, test invariants, and sample
+data. This is the *data-layer orientation primer* —
+complementary to Phase 24.5b's agent-orientation pattern.
+
+Concrete agent flow with lineage:
+
+#+begin_example
+Task: rename tag :work: to :professional: across vault
+
+Step 1 → reads tag_taxonomy model description
+Step 2 → reads lineage:
+   tag_taxonomy → consumed by:
+       recent_activity, mood_arc, project_arc
+Step 3 → constructs dbt operation:
+   UPDATE parsed_tags SET tag = 'professional' WHERE tag='work';
+   + render hook (writes affected org files)
+Step 4 → runs: dbt build --select +tag_taxonomy+
+   downstream models rebuild + re-test
+Step 5 → commits
+#+end_example
+
+Without lineage: agent greps/searches, hopes nothing important is
+missed. With lineage: a *typed dependency graph* the agent can
+reason about. Same primitive Claude Code uses for code
+(=xref-find-references=); applied to data.
+
+Three loops this closes:
+1. */@curator/* gains a complete checkable target — sweep model
+   descriptions for drift, missing tests, undocumented columns.
+2. *Users become legible to themselves at the schema level* —
+   open dbt-docs, see the vault's queryable shape.
+3. *Phase 26 cull gets a lineage map* — "if I extract this model
+   to addable, what core breaks?" answered by =dbt list= queries.
+
+* Snapshots make agent retrospection cheap
+
+Without snapshots, an agent asking "how has X changed over time?"
+has to reconstruct from git log (slow) or query a hand-rolled
+table (high engineering cost per question). With dbt snapshots,
+every model becomes time-aware via a 5-line config. Retrospection
+becomes a uniform query primitive:
+
+#+begin_src sql
+-- @journalist
+SELECT day, score, note_count
+FROM snap_mood_arc
+WHERE day >= date('now', '-30 days');
+
+-- @gardener
+SELECT tag, first_seen, total_uses
+FROM snap_tag_taxonomy
+WHERE first_seen >= date('now', '-90 days');
+
+-- @curator
+SELECT path, fields_changed, valid_from
+FROM snap_wiki_metadata
+WHERE valid_from >= date('now', '-7 days');
+
+-- @tracker
+SELECT valid_from, status, valid_to
+FROM snap_project_status
+WHERE phase_id = 'Phase 24'
+ORDER BY valid_from;
+#+end_src
+
+The shift: agents speak in /time/ not just present-state. Without
+snapshots, every retrospection-shaped query is bespoke. With
+snapshots, retrospection is a typed query against typed schema.
+
+Mission connections:
+- *α (coherence over time)* finally has structured backing.
+- *β (dream-state vault)* gains a retrospection surface.
+- */@journalist/* becomes a real specialist.
+- *Phase 30 FOSS agent value-adds* gains a flagship — the agent
+  that lives in the vault's history (Phase 30.3 background
+  continuous, Phase 30.1 local-only — snapshots don't need cloud).
+
+* Materialization decisions unify human + agent perf
+
+When an agent finds a query slow, the fix is the same primitive a
+human reaches for: flip =materialized: view → table= in YAML.
+Same vocabulary. Same dial. Same docs.
+
+Concrete agent flow:
+1. Agent runs =SELECT FROM recent_activity=, takes 4.2s.
+2. Inspects model lineage + materialization → currently view.
+3. Proposes =materialized: table=; estimates +200KB storage,
+   ~50ms query.
+4. =dbt run= rebuilds; tests still pass (same contract); query
+   now 47ms.
+5. Commit lands.
+
+The agent did what a senior data engineer would have done.
+*Same primitive a human uses; the agent didn't need a special
+tool.*
+
+Phase 29 × materialization is a particularly tight self-coded
+loop: detect repeated slow queries → propose materialization
+upgrade → validate via timing harness → apply.
+
+Per [[id:b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1][DEC-012]] (per-device config), =dbt_materialization_profile=
+becomes a knob — same models, lighter cache strategy on phone.
+
+*Deep observation:* when human and agent share the *exact same
+vocabulary* for a problem, the agent inherits all the human's
+accumulated wisdom. No retraining; no special agent guidance.
+The shared dialect IS the shared knowledge.
+
+* Federation extends the love
+
+When cross-vault federation lights up (post-1.0, Phase 26+), the
+*same SQL vocabulary* extends across vaults:
+
+#+begin_src sql
+-- household-aware agent query
+SELECT vault_name, task, due_date
+FROM federation.combined_chores
+WHERE due_date <= date('now', '+3 days')
+  AND assigned_to IN ('me', 'us');
+#+end_src
+
+Three implications:
+
+1. *Agent intelligence transfers.* Agent that knows how to query
+   /your/ vault knows how to query /household/ + /work/
+   federations. Same primitives, same materialization knobs, same
+   tests. Federation is just "more rows in tables you already
+   understand."
+
+2. *Privacy stays clean automatically.* Federation models read
+   with the user's existing credentials. =:private:= tag excludes
+   from federated views. SQL =WHERE= naturally enforces vault
+   scope. No new permission system.
+
+3. *The dbt project's structure becomes shareable.* A household
+   running org-llm has /one/ federation dbt project; each
+   member's vault is a source. New family member joins → add
+   their vault → models work unchanged. No bespoke "household
+   app."
+
+For the FOSS-public future: a contributor publishes their org-llm
+dbt models alongside their vault → others clone both → instantly
+gain the same query primitives + dashboards. Models become
+*shareable artifacts* — like dbt-hub does for warehouses, but
+for org-mode personal-life data. Agent intelligence accumulates
+across the FOSS commons.
+
+* Agent-generated artifacts inherit "Org is Code" (recursive)
+
+When an agent proposes a dbt model (Phase 29 self-coded loop), the
+artifact lives in git. The /same toolchain/ used for human-written
+tools applies — there is no second-class agent-generated tier.
+
+Lifecycle of an agent-generated dbt model:
+
+#+begin_example
+1. Agent detects pattern    (Phase 29 audit log)
+        ↓
+2. Agent generates files    (models/foo.sql + schema.yml + tests)
+        ↓
+3. PR-shaped commit         (git log: 🤖 @gardener proposed foo)
+        ↓
+4. Multi-judge review       (Phase 30.4: blinded judges score)
+        ↓                  OR CODEOWNERS routing (DEC-004 future)
+        ↓
+5. Test suite runs          (dbt build --select +foo+)
+        ↓
+6. Pass: merge              (file enters main; future calls use it)
+   Fail: revert + retry     (agent gets feedback, iterates)
+        ↓
+7. Later: refactor          (agent proposes changes to its past
+                             models)
+        ↓
+8. Eventual deprecation     (agent recognises obsolescence;
+                             proposes removal)
+#+end_example
+
+Each step has direct human-written-code analogues — code review,
+CI, test gates, refactor cycles, deprecation. None are
+special-cased for agent provenance.
+
+The principle closes recursively:
+- /Org is Code/ → org files get code-style toolchain.
+- /Tools are dbt/ → tools get code-style toolchain.
+- /Agent-generated tools are dbt/ → agent work gets code-style
+  toolchain.
+- /Agent-generated meta-tools (reviewers, judges) are also dbt/
+  → meta-work gets code-style toolchain.
+- ... all the way down.
+
+Three downstream consequences:
+
+1. *No "agent governance" surface to design.* The mechanism is
+   just git + dbt + CODEOWNERS + multi-judge. Already exists.
+2. *Agent provenance is auditable.* =git blame= on a model line
+   tells you which agent (or human) wrote it; =git log
+   --author=@gardener= shows everything that agent has proposed.
+3. *Agents review each other uniformly.* No "is this human or
+   agent?" branching — same review primitives apply.
+
+*Mission-shape check:* if an agent proposes something the
+toolchain /can't/ validate via standard primitives (test, lint,
+review, deploy), that's a code smell — fix the pattern before it
+ships, not the toolchain. /Org is Code/ is a constraint that
+protects from agent-special-case sprawl.
+
+* Connections
+
+- [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011 — DB as universal interface]]
+- [[id:b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1][DEC-012 — Per-device configuration]]
+- [[id:e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63][DEC-013 — Two-tier tool architecture (data tools + effect tools)]]
+- [[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][Three Laws of org-llm Data Integrity]]
+- [[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]] — git-canonical multi-device sync
+- [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]] — dbt as the data pipeline layer
+- [[file:architecture.org][architecture.org]] § Org is Code design rule
+- [[file:roadmap.org][roadmap.org]] § Phase 29 (self-coded tools), § Phase 30 (FOSS
+  agent value-adds), § Phase 26 (cull and extract)

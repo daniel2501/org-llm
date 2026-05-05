@@ -873,6 +873,111 @@ which is wrong. DEC-012 makes per-device variance first-class.
   =Config(key, vault, device, value)=. Today's call: device
   only.
 
+** DEC-013 — Two-tier tool architecture: data tools (dbt) + effect tools (MCP)
+:PROPERTIES:
+:ID:       e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63
+:STATUS:   accepted
+:DATE:     [2026-05-05]
+:DECIDERS: Daniel, Claude/opus-C
+:END:
+
+*Summary.* Org-llm tools split into two named tiers: *data tools*
+(implemented via dbt; ~90% of the surface) and *effect tools*
+(implemented via MCP registration; ~10%). Data tools manipulate
+data through SQL — read queries (dbt models), write operations
+(dbt operations + render hook), history capture (dbt snapshots),
+quality contracts (dbt tests), reusable SQL chunks (dbt macros).
+Effect tools cause side effects on foreign systems — LLM dispatch
+(=delegate=), browser (=open_url=), shell, granted-fs reads,
+network. Default *strongly toward dbt* unless the tool's primary
+purpose is foreign-system effect. Mechanistic name (dbt-tools,
+MCP-tools) is used in code/grep; functional name (data tools,
+effect tools) is used in docs/architecture/conversation.
+
+*Context.* The 2026-05-05 mission walk surfaced the symmetry:
+a dbt model has the exact shape of an agent tool (input/output/
+contract/docs). When 90% of the existing tool surface (search,
+ask, count, walk, capture, hygiene, vault facts) is data-shaped,
+unifying it under one substrate (dbt) collapses two parallel
+systems into one. The remaining 10% (LLM dispatch, browser,
+shell) bridges to foreign systems where dbt doesn't fit and
+stays as MCP. Daniel locked it: "dbt/mcp is now an architectural
+policy."
+
+*Decision.*
+
+1. *Two tiers, named both ways.* Mechanistic = dbt-tools /
+   MCP-tools (where the code lives, what registers them).
+   Functional = data tools / effect tools (what they do, what
+   guarantees they offer).
+
+2. *Default is dbt.* If a new tool's primary purpose is data
+   manipulation (read, write, transform, aggregate), it ships as
+   a dbt model / operation / macro / snapshot. Justifying the
+   exception is the cost; defaulting is free.
+
+3. *MCP is reserved for foreign-system effects.* LLM dispatch,
+   browser drive, shell, network calls, FS-side-effects. These
+   stay non-dbt because forcing dbt onto pure-side-effect tools
+   is Rube Goldberg.
+
+4. *Write-side trick.* Pure dbt models are read-only by design,
+   but data tools include write surfaces via *dbt operations*
+   (=run-operation=) + *render hook* (DEC-011 deterministic
+   file rendering). This keeps write-side tools in the data
+   tier, not pushed to MCP.
+
+5. *Three Laws apply differently.* Data tools enforce the Three
+   Laws automatically — operations on local DB don't touch open
+   user buffers until the render hook fires; the render hook IS
+   the enforcement point. Effect tools enforce the Three Laws
+   per-tool (each tool decides its own policy: =delegate= can't
+   overwrite a buffer, =shell= could clobber anything, etc.).
+
+6. *Substructure inside each tier* is the standard dbt /
+   MCP catalog:
+
+   #+begin_example
+   data tools (dbt-tools)
+   ├── models       — read-side queries; views or tables
+   ├── operations   — write-side; INSERT/UPDATE + render hook
+   ├── snapshots    — append-only history capture
+   ├── tests        — declarative contracts agents trust
+   └── macros       — parameterised SQL chunks
+
+   effect tools (MCP-tools)
+   ├── dispatch     — delegate, spawn-subagent
+   ├── browser      — open_url, browser_command
+   ├── shell        — subprocess, file ops
+   ├── granted-fs   — read_file, list_directory (allowlist)
+   └── network      — http fetches, webhooks
+   #+end_example
+
+*Consequences.*
+- *Phase 26 cull becomes operationally clearer.* Every "tool"
+  candidate gets categorized: data → dbt, effect → MCP, then
+  either core (gates lead value) or addable (per DEC-009).
+- *Phase 29 self-coded tools target dbt by default.* The
+  promotion path (audit-log → propose model → tests pass →
+  register) is dbt's natural shape. Effect-tool synthesis is
+  rarer + harder; dbt majority makes the loop tractable.
+- *Phase 30.4 multi-judge applies cleanly to data tools* —
+  comparing model output against past LLM-produced answers is
+  the dbt-natural validation. Effect-tool validation is
+  per-tool bespoke.
+- *Federation across vaults extends only the data tier* (per
+  [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]]); effect tools stay per-device because
+  their foreign systems do.
+- *Captain's log gains a kind=data vs kind=effect dimension*
+  — analytics over agent tool use becomes natural.
+- *Forecloses* one-off "agent tool registry" parallel to dbt's
+  model registry; everything goes through one of these two
+  surfaces.
+- *Triggers revisit* if a third tier emerges that doesn't fit
+  either (e.g. some streaming/realtime use case where dbt's
+  build cycle doesn't apply and MCP isn't right either). Today
+  the binary split is a strict win.
+
 * See also
 
 - [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] —
