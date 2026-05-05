@@ -3117,6 +3117,36 @@ template + tone guide are written. *Don't auto-dispatch — too
 much risk of clobbering canonical wiki state without review.*
 Review tomorrow per user's plan.
 
+** TODO Scout pattern — send agents ahead to prep user review     :plan:agents:meta:pattern:
+:PROPERTIES:
+:PRIORITY: A
+:SOURCE:   2026-05-05 mid-cull — user-named pattern after the
+           "spawn agents to research while we talk" working mode
+:END:
+
+Meta-pattern complementing manager-pre-fetch (Phase 22 v2) and
+the supervision trinity (Phase 24): when the user is about to
+review / decide / walk a substantial surface, *send a scout
+agent ahead* to (a) summarize the surface, (b) suggest paths,
+(c) gather needed info, (d) flag blockers / deps / contradictions
+before the user arrives. The user-facing walk uses the scout's
+output as the surface, not raw material.
+
+Worked examples (2026-05-05 sessions): cull.org template prepped
+by scout before the walk; subsumption scan identified ~3000 LoC
+retirement candidates before re-walk; OpenTofu researcher
+enumerated 10 use cases before user-facing walk; doc-rewrite
+scout classified 54 pages + dispatch order. Pattern compounds
+across walkthroughs.
+
+Tight table-shaped scout output is the load-bearing constraint
+(see =feedback_condense_long_outputs= memory); scouts that
+produce 400-line prose-walls defeat the pattern.
+
+Sprint-eligible: ~1d to formalize as verb + registerable recipe.
+Connections: Phase 22 v2, Phase 24, Phase 30.3, condense-outputs
+memory.
+
 ** TODO Clarify @-agents vs spawned subagents in agent-framework.org :doc:agent-framework:
 :PROPERTIES:
 :PRIORITY: B

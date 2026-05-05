@@ -330,78 +330,101 @@ ownership is the routing layer below.
 - *Walkthrough notes:*
 
 *** Skills (org-babel slash commands) — pre-classified ADDABLE
+- *Decision:* CORE_DISABLED_BY_DEFAULT (2026-05-05) — framework ships; off
+  default for security; user-defined skills load on opt-in.
 - *Where it lives:* skills surface (org-babel-driven slash commands).
 - *What it does:* Lets users define personal slash commands in org-babel blocks.
 - *What depends on it:* Power-user workflow only.
 - *Cut-criterion test:* β ships without; skills are a power-user extension.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Insight cards — pre-classified ADDABLE
+- *Decision:* SPLIT (2026-05-05) — 6 generators in =insights.py= (~826 LoC) are
+  SUBSUMED per scan (each =_gen_*= is SQL aggregate + structuring → dbt models).
+  Card *narration + sidebar UX* layer stays as CORE_DISABLED_BY_DEFAULT
+  (off-default; user enables).
 - *Where it lives:* =org_llm/insights.py=
 - *What it does:* Periodic generated "insight" cards surfaced in the sidebar.
 - *What depends on it:* Sidebar UI only.
 - *Cut-criterion test:* β ships without; nice-to-have surface.
-- *Decision:*
-- *Walkthrough notes:*
+- *Walkthrough notes:* Generators move to dbt aggregates; narration → effect tool.
 
 *** Walk graph traversal — pre-classified ADDABLE
+- *Decision:* SPLIT (2026-05-05) — track-selection logic (~140 LoC: orphan +
+  recent + untagged scoring) SUBSUMED per scan; replaces with one SQL view
+  (=connection_density × recent_activity=). Walk *narrative orchestration*
+  layer (the "tour-style" UX) stays as CORE_DISABLED_BY_DEFAULT.
 - *Where it lives:* =org_llm/walk.py=
 - *What it does:* Traverses link-graph between nodes for narrative walkthroughs.
 - *What depends on it:* link_graph_walk recipe; specific narrative recipes.
 - *Cut-criterion test:* β ships without; graph traversal is a recipe-level feature.
-- *Decision:*
-- *Walkthrough notes:*
+- *Walkthrough notes:* link_graph_walk recipe already SUBSUMED; track-selection
+  follows.
 
 *** dbt analytics — pre-classified ADDABLE
+- *Decision:* RESOLVED (2026-05-05) — entry was conflated. Post-Phase-25-
+  rewrite: dbt-pipeline (parsing, derived models, tests, snapshots) is CORE.
+  dbt analytics *layer* = Apache Superset dashboards (CORE_DISABLED_BY_DEFAULT,
+  see entry). @analyst agent owns this surface (Magnificent Seven, locked).
+  No standalone "dbt analytics" component remains.
 - *Where it lives:* Phase 27 target.
 - *What it does:* dbt models over captain's log + DB for analytic queries.
 - *What depends on it:* Superset dashboards; analyst agent.
 - *Cut-criterion test:* β ships without; analytics is a downstream lens, not lead value.
-- *Decision:*
-- *Walkthrough notes:*
+- *Walkthrough notes:* Disambiguated: dbt-pipeline = CORE; Superset = CORE_DISABLED.
 
 *** Pi bridge — pre-classified ADDABLE
+- *Decision:* COMMUNITY IDEA (2026-05-05) — host bridges are long-tail;
+  community / user develops new ones (Pi, Aider, Cline, etc).
 - *Where it lives:* =pi_extension/= (TypeScript bundle; Mario Zechner's pi.dev CLI).
 - *What it does:* Bridges org-llm to the pi.dev extensible CLI agent.
 - *What depends on it:* Cross-tool workflows; not core.
 - *Cut-criterion test:* β ships without; bridge is integration surface.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Doom config introspection — pre-classified ADDABLE
+- *Decision:* CORE_DISABLED_BY_DEFAULT (2026-05-05) — Doom is core experience
+  per memory (daily-driver dogfood); ships for Doom users; off-default for
+  non-Doom users; @doom agent stays in extension path (Magnificent Seven
+  doesn't include @doom).
 - *Where it lives:* =org_llm/doom_introspect.py=
 - *What it does:* Reads Doom Emacs config so agents can reason about the user's setup.
 - *What depends on it:* @doom agent.
 - *Cut-criterion test:* β ships without; Doom-specific lens.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Avatars — pre-classified ADDABLE
+- *Decision:* COMMUNITY IDEA (2026-05-05) — pure aesthetic; community / user
+  develops if they want (image-gen pipeline + theme metadata is well-trodden).
 - *Where it lives:* =org_llm/avatars.py= + =org_llm/avatar_render.py= (Phase 31).
 - *What it does:* Theme × metadata → image-gen pipeline for agent avatars.
 - *What depends on it:* TUI rendering; conversational tuning loop.
 - *Cut-criterion test:* β ships without; avatars are personality polish.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Style-infer / personalize — pre-classified ADDABLE
+- *Decision:* COMMUNITY IDEA (2026-05-05) — niche; not load-bearing for β;
+  user/community can build a personalization layer on top of the base agent
+  surface if desired.
 - *Where it lives:* style inference + personalization layer.
 - *What it does:* Learns user's writing style + preferences and adapts agent output.
 - *What depends on it:* Quality-of-life for daily-driver use.
 - *Cut-criterion test:* β ships without; personalization is a polish layer.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Non-core agents — pre-classified ADDABLE
+- *Decision:* SPLIT per Magnificent Seven (2026-05-05) — three agents promoted
+  to CORE roster: @analyst (analytics), @curator (wiki), @tracker (project
+  tracking). Remaining agents → COMMUNITY IDEA: @journalist, @doom, @ops,
+  @agentsmith, @drillmaster, plus future legacy-extras.
 - *Where it lives:* =org_llm/agents.py= (subset): @journalist, @doom, @ops,
   @agentsmith, @tracker, @curator, @analyst, @drillmaster.
 - *What it does:* Specialized agents beyond the curated core roster.
 - *What depends on it:* Specific recipes + user workflows.
 - *Cut-criterion test:* β ships with manager + researcher + scribe + gardener; these
   are extension-path agents.
-- *Decision:*
-- *Walkthrough notes:*
+- *Walkthrough notes:* DEC-009's ≤6 cap expanded to ≤7 mid-walk (Magnificent
+  Seven). Update DEC-009 candidate text post-cull.
 
 *** Specific recipes — pre-classified ADDABLE
 - *Decision:* SPLIT — see Subsumed / dead code section for the 6 losers
@@ -417,58 +440,73 @@ ownership is the routing layer below.
 - *Walkthrough notes:*
 
 *** Apache Superset dashboards — pre-classified ADDABLE
+- *Decision:* CORE_DISABLED_BY_DEFAULT (2026-05-05 per user direction) —
+  ship the launcher (=org-llm superset --start=); off-default; user enables;
+  @analyst owns the surface.
 - *Where it lives:* Phase 27 target.
 - *What it does:* Web dashboards over dbt analytics tables.
 - *What depends on it:* dbt analytics; analyst workflows.
 - *Cut-criterion test:* β ships without; dashboards are downstream of analytics.
-- *Decision:*
-- *Walkthrough notes:*
+- *Walkthrough notes:* User explicitly chose Superset over a "community-only"
+  framing; dashboards are part of the dbt-distro experience even if off-default.
 
 *** Containerization — pre-classified ADDABLE
+- *Decision:* COMMUNITY IDEA (2026-05-05) — native primary per memory;
+  containers are deployment optionality; community / user develops.
 - *Where it lives:* Phase 28 target.
 - *What it does:* Optional container packaging for asymmetric deployment.
 - *What depends on it:* Specific deployment scenarios; native is primary.
 - *Cut-criterion test:* β ships native; containers are deployment optionality.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Manager quorum — pre-classified ADDABLE
+- *Decision:* COMMUNITY IDEA (2026-05-05) — speculative; defer; community /
+  user can develop a multi-judge orchestration on top of the existing manager
+  surface if a use case proves out.
 - *Where it lives:* Phase 24.4 target.
 - *What it does:* Multi-agent quorum step in manager orchestration for high-stakes calls.
 - *What depends on it:* Specific high-stakes recipes.
 - *Cut-criterion test:* β ships with single-manager; quorum is a quality lever for edge
   cases.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Auto-embedder daemon — pre-classified ADDABLE
+- *Decision:* CORE_DISABLED_BY_DEFAULT (2026-05-05) — daemon ships;
+  off-default (battery + privacy concern on mobile); user enables via knob.
 - *Where it lives:* daemon that re-embeds vault changes in the background.
 - *What it does:* Keeps embeddings fresh without manual reindex.
 - *What depends on it:* Embeddings + search; user expectation of "just works".
 - *Cut-criterion test:* β ships with manual reindex; daemon is convenience.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Code-corpus indexing — pre-classified ADDABLE
+- *Decision:* COMMUNITY IDEA (2026-05-05) — secondary domain; org-llm is
+  life-management thesis (β); coding-adjacent indexing is community territory.
 - *Where it lives:* =org_llm/code_index.py=
 - *What it does:* Indexes code repos alongside the vault for cross-corpus search.
 - *What depends on it:* Coding-adjacent recipes.
 - *Cut-criterion test:* β ships vault-only; code-corpus is extension surface.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Long-tail MCP tools (~50 of 71) — pre-classified ADDABLE
+- *Decision:* SPLIT (2026-05-05 per subsumption-scan) — the "~50 long tail"
+  refines to: ~28 SUBSUMED (delete; capability is one SQL line over a dbt
+  model), ~7 PARTIAL (thin wrappers stay; impl moves to dbt), ~15 genuine
+  COMMUNITY IDEA (effect tools — host-specific verbs, browser, shell-shape).
+  See § Subsumed for the per-tool tables.
 - *Where it lives:* MCP tool registry beyond the base ~15.
 - *What it does:* Specialized verbs (Phase-specific, agent-specific, vault-specific)
   that aren't part of the base agent vocabulary.
 - *What depends on it:* Specific agents + recipes.
 - *Cut-criterion test:* β ships with the base ~15; the long tail is plugin surface.
-- *Decision:*
-- *Walkthrough notes:*
+- *Walkthrough notes:* Refines DEC-009's "15 core / 50 long-tail" to
+  "15 core + 28 subsumed + 7 partial + 15 community".
 
 ** EDGE — needs argument
 
 *** @gardener — EDGE
+- *Decision:* CORE + agent-ify (2026-05-05) — confirmed core via Magnificent
+  Seven roster decision; hygiene is load-bearing for β.
 - *Where it lives:* =org_llm/agents.py= (gardener agent).
 - *What it does:* Hygiene agent — fixes broken links, normalizes tags, archives stale
   nodes, keeps the vault tidy.
@@ -479,6 +517,10 @@ ownership is the routing layer below.
 - *Walkthrough notes:*
 
 *** Validation framework — EDGE
+- *Decision:* CORE + agent-ify (2026-05-05) — partial subsumption: schema-shape
+  YAML checks (no orphans, no broken file: links, TODO has priority) migrate
+  to dbt tests per dbt-pipeline.org § Tests. Runtime agent-output validation
+  (semantic gates, A/B harness, multi-judge per Phase 30.4) stays.
 - *Where it lives:* =org_llm/validation.py= + =org_llm/validation_configs/=
 - *What it does:* Pre/post-check framework for agent outputs and vault writes.
 - *What depends on it:* Capture flow; agent quality bar.
@@ -488,6 +530,10 @@ ownership is the routing layer below.
 - *Walkthrough notes:*
 
 *** LLM-proxy interceptor chain depth — EDGE
+- *Decision:* SPLIT (2026-05-05) — base ~5 interceptors (cache, redact, route,
+  log, supervision) are part of the already-CORE LLM-proxy entry. Long-tail
+  interceptors (=/sysscreenshot=, =intercept_replay_history=, etc.) →
+  CORE_DISABLED_BY_DEFAULT with per-interceptor knobs.
 - *Where it lives:* =org_llm/llm_proxy.py= interceptor list.
 - *What it does:* The chain itself is core (above); the question is which interceptors
   ship in core vs. plugin — base ~5 (cache, log, redact, route, rate-limit) likely core;
@@ -498,6 +544,9 @@ ownership is the routing layer below.
 - *Walkthrough notes:*
 
 *** Captain's log =--reflect= weekly cron — EDGE
+- *Decision:* SUBSUMED (2026-05-05 per subsumption-scan) — reflection
+  capability lives as =snap_captains_log= snapshot + Superset dashboard
+  (CORE_DISABLED). The cron + verb retire.
 - *Where it lives:* logbook.py + scheduled reflect verb.
 - *What it does:* Periodic auto-generated reflection on the captain's log.
 - *What depends on it:* Retro workflow; dbt analytics downstream.
@@ -507,6 +556,9 @@ ownership is the routing layer below.
 - *Walkthrough notes:*
 
 *** Auto-tagger — EDGE
+- *Decision:* CORE_DISABLED_BY_DEFAULT + agent-ify (2026-05-05) — ships with
+  distro; off-default (privacy-respecting); user enables via knob. When on,
+  =@gardener= (steady-state) or =@scribe= (capture-time) manages.
 - *Where it lives:* tagging pipeline (auto-tag on capture / on index).
 - *What it does:* Suggests or applies tags automatically based on content + vault facts.
 - *What depends on it:* Capture flow; search quality.
@@ -516,6 +568,12 @@ ownership is the routing layer below.
 - *Walkthrough notes:*
 
 *** Tracker self-hosting (=tracker init= / =tracker review=) — EDGE
+- *Decision:* CORE + agent-ify (2026-05-05) — =@tracker= confirmed core via
+  Magnificent Seven; verbs (=tracker init= / =tracker review= / =tracker pace=)
+  are how the agent operates; ships on. *Scope expanded 2026-05-05:* @tracker
+  is *general-purpose project tracker*, not dev-only. Home DIY, lab work,
+  book-writing, personal projects, sprints — anything sustained tracked in
+  org-mode. Emacs users put everything in Emacs; @tracker tracks all of it.
 - *Where it lives:* future tracker verbs (currently dev-tracker.org is the stepping
   stone; end goal is org-llm owning tracking).
 - *What it does:* Lets org-llm own its own tracking via verbs rather than an external
@@ -526,7 +584,22 @@ ownership is the routing layer below.
 - *Decision:*
 - *Walkthrough notes:*
 
-*** [Reserved 7th EDGE slot] — EDGE
+*** @tracker scope expansion — EDGE
+- *Decision:* DIRECTIONAL — @tracker is a *general-purpose project tracker*,
+  not dev-only. Tracks any sustained org-mode activity: home DIY, lab work,
+  book-writing, personal projects, sprints. Emacs users put everything in
+  Emacs; @tracker tracks all of it. Locked 2026-05-05 mid-cull. Implication:
+  agent persona, recipe set, and verb surface (=tracker init/review/pace=)
+  must be domain-agnostic from day one. Captured here to make the directional
+  call visible alongside the @tracker component verdict (EDGE 6).
+- *Where it lives:* @tracker persona + tracker verbs (=tracker init=, =tracker review=).
+- *What it does:* Generalized project tracking over org-mode artifacts.
+- *What depends on it:* User trust in @tracker for any sustained activity.
+- *Cut-criterion test:* β requires the tracker to be /general/ — narrowing to
+  dev-only would lock the app to one user shape.
+- *Walkthrough notes:* File as a small DEC or wiki update post-cull.
+
+*** [Removed 7th EDGE slot] — EDGE
 - *Where it lives:* (placeholder — mission walk listed 7 EDGE; 6 enumerated above. Add
   the 7th at walkthrough start if recovered, or close this slot.)
 - *What it does:*
