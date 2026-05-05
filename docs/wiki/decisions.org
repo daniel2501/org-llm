@@ -546,6 +546,76 @@ problem is "every agent dispatch deserves enrichment." The
   need, file as a 24.1.x sub-phase that pulls the last N
   user turns into the resolver's input.
 
+** DEC-009 — Curated core agent team + extension path
+:PROPERTIES:
+:ID:       a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5
+:STATUS:   accepted
+:DATE:     [2026-05-04]
+:DECIDERS: Daniel, Claude/opus-C
+:END:
+
+*Summary.* Org-llm ships an *opinionated curated core team*
+of agents (manager + a small set of specialists — initial
+likely =@picard= manager, =@spock= researcher, =@data= scribe,
+=@gardener= hygiene) and provides an *extension path* for any
+agent the user (or community) writes via Phase 23.5
+user-supplied agents and Phase 23.6 literate-tools. Two-tier
+population by design: out-of-the-box clarity from the
+opinionated team; long-tail value from the extension surface.
+
+*Context.* During the 2026-05-04 mission walk, Daniel named
+"the right mix of agents for the job" as a guiding principle
+and surfaced the inherent paradox: the app must ship with a
+specific team (so users get the dbt-shaped opinionated default
+that makes /first usable/ achievable) AND must remain
+extensible (so any agent anyone could write becomes a
+first-class citizen). Today's roster of 19 agents is too many
+for "core" — most are specialists or experiments and don't
+gate the dream-state-vault thesis (β). The cull (Phase 26 —
+core/addable extract) decides which stay core; this decision
+captures the principle that drives the cull.
+
+*Decision.*
+
+1. *Curated core team is the OUT-OF-THE-BOX experience.*
+   Ship ≤6 agents preconfigured. They cover the lead value
+   (β: dream-state vault via agents) end-to-end. Selection
+   criterion mirrors DEC-006: each core agent earns its keep
+   against the lead thesis or it goes to the extension path.
+
+2. *Extension path is first-class, not afterthought.*
+   Phase 23.5 (user-supplied agents) and Phase 23.6 (literate
+   MCP tools) are not "advanced" features — they are the
+   mechanism by which the long tail of agent value lands.
+   They get the same surface polish as the core team.
+
+3. *Versioning lens.* /First usable/ for agents (criterion 2
+   of Daniel's three: "agent team is a true team with defined
+   roles that work as a whole") = curated core team is solid
+   AND the extension path has been proven by at least one
+   external (or external-shaped) agent landing successfully.
+
+*Consequences.*
+- Phase 26 (cull) becomes load-bearing for v1.0 — without it,
+  the curated core team is undefined.
+- The Phase 23.5 user-supplied-agents work moves from
+  "design pending / nice-to-have" toward gating, since the
+  extension path is half of this decision.
+- Most of today's 19-agent roster moves to the extension
+  path. Specific calls happen during Phase 26.
+- Mirrors the substrate paradox (opinionated experience +
+  agnostic substrate) — same shape applied to agents:
+  opinionated core team + extensible roster.
+- Forecloses adding new agents directly into core without
+  passing the criterion. New ideas land in the extension
+  path first; promotion to core requires the same earn-keep
+  test.
+- Triggers revisit: if "the right mix of agents" turns out
+  to need *contextual* (per-task) selection rather than a
+  fixed core team, this decision evolves into a routing /
+  team-composition principle. Today's call is fixed core +
+  long tail.
+
 * See also
 
 - [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] —
