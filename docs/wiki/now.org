@@ -100,8 +100,25 @@ snapshot= verb could regenerate this page from
 * ▶ THIS AFTERNOON — 2026-05-05 Tue, EDT (set 11:18 EDT pre-nap)   :@here:
 
 #+begin_quote
-*Committed deadline:* @tracker migration build finish-time
-*15:00 EDT today* (Claude/opus-C, agent in flight).
+*Committed deadline:* @tracker migration build —
+*LANDED 11:28 EDT* (3.5h ahead of 15:00 EDT deadline). Commit
+=8ec72d0=. 29 tracker tests + 130 cli tests pass. Vault cut-over
+deferred — user runs =org-llm tracker init= interactively post-nap.
+
+*Pre-sleep capture (11:30 EDT, second nap):*
+
+- Spell-check in the prompt box — friction point, file as TODO under
+  =@dev-tracker= once user runs init. Friction is real ("desperately").
+- Twin-framing nudge: org-llm is "Claude Code for Org Mode" *and* also
+  Claude-Code/opencode-shaped for **life-as-code** —
+  =personal-live-budget-with-all-trx.org=, GPS, "text me that info",
+  phone-as-Emacs workflows. Memory =project_app_purpose.md= updated to
+  carry both lenses; consider promoting into =whole-picture.org= or a
+  fresh =life-as-code.org= page when user has bandwidth.
+- *CLI hygiene directive:* keep =org-llm= CLI pristine + up-to-date as
+  arch + opencode main-face take focus; don't let it rot. Circle-back
+  CLI-love opportunities flagged: OpenTofu integration, =pass=
+  integration, "tofu-y" CLI verbs in general. Saved as feedback memory.
 
 *Recommended afternoon block (post-nap):*
 
