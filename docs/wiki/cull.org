@@ -1,0 +1,444 @@
+:PROPERTIES:
+:ID:       65c67408-a0de-4f93-9ffa-6800ea0f436f
+:END:
+#+title: Cull — Phase 26.1 per-component decisions
+#+filetags: :phase26:cull:core:addable:walkthrough:
+
+* Summary
+
+*Summary.* This page is the live walkthrough surface for Phase 26.1 — per-component
+core-vs-addable decisions. Each component is a heading with the cut criterion applied;
+the user walks through one at a time, lands a decision (CORE / ADDABLE / EDGE), and
+commits this page as the persistent record of the cut.
+
+*Expanded.* The cut criterion comes from DEC-009 (curated core agents + extension path)
+sharpened by the 2026-05-05 mission walk: /if this disappeared from core, would the lead
+value (β: dream-state vault via agents + dbt-shaped opinionated distro) still ship?/
+Yes → not core; route to extension path. No → core, earns its keep. The mission walk
+produced an initial split of ~30 components: ~15 pre-classified CORE, ~16 pre-classified
+ADDABLE, and 7 EDGE components that need argument. Protocol is one component per turn —
+decide together, fill the Decision + Walkthrough notes fields, repeat. This page is the
+persistent record of the cut; once complete, follow-up extraction TODOs land in
+dev-tracker.org under Phase 26.
+
+* The cut criterion
+
+DEC-009 framing, sharpened:
+
+#+begin_quote
+If this component disappeared from core, would the lead value still ship?
+- Yes → not core; move to extension path.
+- No  → core, earns its keep.
+#+end_quote
+
+Lead value (β):
+- Dream-state vault via agents (the vault thinks with you)
+- dbt-shaped opinionated distro (curated, composable, FOSS-first)
+
+Tier model (DEC-013, two-tier tools):
+- Tier 1 — core: ships with the distro, load-bearing for β.
+- Tier 2 — addable: discoverable, installable, not required for β.
+
+EDGE means we haven't yet agreed which tier; it gets argued explicitly in this page.
+
+* Decision protocol
+
+- Walk one component at a time.
+- Decide together: CORE / ADDABLE / EDGE.
+- Annotate decision below the component heading with:
+  - Timestamp (ISO date)
+  - Agreed outcome (CORE / ADDABLE / EDGE)
+  - Brief rationale (1–2 sentences)
+  - Follow-up if any (extract path, refactor needed, plugin loader entry)
+- When all components decided, file follow-up TODOs for the actual extractions in
+  dev-tracker.org § Phase 26.
+- Don't re-categorize during walkthrough — EDGE stays EDGE until argued.
+
+* Components
+
+** CORE candidates
+
+*** Vault parsing + indexing — pre-classified CORE
+- *Where it lives:* =org_llm/indexer.py=
+- *What it does:* Parses the org vault into a structured node graph (headings, IDs,
+  links, tags); maintains the index that every other subsystem reads from.
+- *What depends on it:* search.py, mcp tools (read_file, search_notes, get_node),
+  every agent, vault_facts.py, recipe runners, doctor.
+- *Cut-criterion test:* If this disappeared, would β still ship? — No agent could read
+  the vault; β collapses entirely.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** LLM proxy + interceptor chain — pre-classified CORE
+- *Where it lives:* =org_llm/llm_proxy.py=
+- *What it does:* Single seam through which all LLM calls flow; enables interceptors
+  (caching, logging, redaction, routing, rate-limiting) without touching call sites.
+- *What depends on it:* All cloud calls, agents, recipes, capture flow, doctor.
+- *Cut-criterion test:* Without it, every cloud call goes raw; no observability, no
+  caching, no swap. β still ships but the dbt-distro thesis weakens sharply.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** MCP server base tool set (~15 tools) — pre-classified CORE
+- *Where it lives:* =org_llm/mcp_server.py= + tool registry; base set:
+  =read_file, search_notes, ask_notes, get_node, capture_note, request_access,
+  delegate, list_agents= (and ~7 more base verbs).
+- *What it does:* Minimum tool surface every agent needs to read, search, capture,
+  delegate, and self-describe.
+- *What depends on it:* Every agent; recipes; manager pre-fetch pattern.
+- *Cut-criterion test:* Without these, agents can't act on the vault. β does not ship.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Agent framework + ≥3 core agents — pre-classified CORE
+- *Where it lives:* =org_llm/agents.py= (Agent dataclass, registry, baselines,
+  builtins) + manager + researcher + scribe + gardener.
+- *What it does:* Defines what an agent /is/ (system prompt, tools, baselines, role)
+  and ships the curated core roster that delivers β.
+- *What depends on it:* Recipes, manager orchestration, MCP delegate tool, capture flow.
+- *Cut-criterion test:* Without the framework + core roster, "vault thinks with you"
+  has no thinker. β does not ship.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Captain's log — pre-classified CORE
+- *Where it lives:* =org_llm/logbook.py= (writes =~/org/captains-log-*.org=)
+- *What it does:* Rotated event log capturing every agent turn, tool call, decision,
+  and recipe run; the substrate for retro/reflect verbs and dbt analytics later.
+- *What depends on it:* dbt analytics (Phase 27), retro recipes, doctor, audit trail.
+- *Cut-criterion test:* Without it, agents act in amnesia and nothing analytic can be
+  layered on top. β ships but the dbt-distro thesis loses its data spine.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Vault-facts inferrers — pre-classified CORE
+- *Where it lives:* =org_llm/vault_facts.py= (Phase 21)
+- *What it does:* Derives per-vault facts (active projects, recurring tags, agenda
+  shape, capture habits) used as deterministic context for agents.
+- *What depends on it:* Manager pre-fetch, resolver registry, recipes, capture flow.
+- *Cut-criterion test:* Without it, agents are uncalibrated to /this/ vault; β still
+  technically ships but quality degrades to "generic LLM with file access".
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Pre-flight resolver registry — pre-classified CORE
+- *Where it lives:* Phase 24.1 — resolver seam at @-prefix expansion.
+- *What it does:* Resolves @-prefixed references (agents, nodes, facts) deterministically
+  before they hit the LLM; enriches prompts at the seam.
+- *What depends on it:* Manager pre-fetch pattern, every recipe, capture flow.
+- *Cut-criterion test:* Without it, manager pre-fetch becomes either ad-hoc or LLM-driven
+  again; quality + speed both regress. β ships but degraded.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Config layer — pre-classified CORE
+- *Where it lives:* DB-backed config + knobs.py + literate-config (org-mode source).
+- *What it does:* Single source of truth for runtime config; literate-config makes the
+  distro inspectable + tweakable from inside the vault.
+- *What depends on it:* Everything reads config; literate-config is part of the
+  dbt-distro UX.
+- *Cut-criterion test:* Without it, no consistent runtime behavior. β does not ship.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Capture flow — pre-classified CORE
+- *Where it lives:* capture pipeline + =capture_note= MCP tool + scribe agent path.
+- *What it does:* Turns a freeform thought into a structured org node landed in the
+  right place with the right metadata; the primary write-path into the vault.
+- *What depends on it:* Scribe agent, manager delegation, mobile/quick-capture entries.
+- *Cut-criterion test:* Without it, the vault is read-only from the agent's POV. β
+  collapses to "agents that read but don't write".
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Doctor + self-heal — pre-classified CORE
+- *Where it lives:* =org_llm/rescue.py= + doctor verbs.
+- *What it does:* Detects + repairs common breakage (DB drift, index staleness, missing
+  IDs, broken links); makes the distro trustable on someone else's machine.
+- *What depends on it:* Onboarding, recovery from crashes, dbt-distro deliverability.
+- *Cut-criterion test:* Without it, the FOSS distro thesis weakens — every user hits
+  unrecoverable state. β ships but distro doesn't.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** DB authoritative storage — pre-classified CORE
+- *Where it lives:* =org_llm/db.py= (current SQLite) + Phase 25 inversion target.
+- *What it does:* Persistent state for agents, runs, captures, derived facts; under
+  Phase 25 it becomes the truth and the vault becomes rendered UI.
+- *What depends on it:* Logbook, vault_facts, search, recipes, dbt analytics.
+- *Cut-criterion test:* Without it, no durable state across runs. β does not ship in
+  any meaningful sense.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Embeddings + search — pre-classified CORE
+- *Where it lives:* =org_llm/search.py=
+- *What it does:* Semantic + lexical search over the vault index; backs =search_notes=
+  and =ask_notes=.
+- *What depends on it:* Researcher agent, ask_notes tool, recipes that walk the graph.
+- *Cut-criterion test:* Without it, agents fall back to grep — usable but β quality
+  drops. Probably load-bearing for "vault thinks with you".
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Cloud-or-local routing — pre-classified CORE
+- *Where it lives:* =org_llm/cloud.py= + =org_llm/creds.py=
+- *What it does:* Routes LLM calls between cloud providers and local models based on
+  task, credentials, and policy; underpins FOSS-first stance.
+- *What depends on it:* LLM proxy, every agent call, recipe runner.
+- *Cut-criterion test:* Without it, no FOSS-first story; locks the distro to one
+  provider. β ships but dbt-distro thesis weakens.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Recipe registry infrastructure — pre-classified CORE
+- *Where it lives:* =org_llm/orchestration.py= + =org_llm/recipe_runner.py=
+- *What it does:* The "dbt models" surface — declarative recipes that compose agents,
+  tools, and resolvers into reproducible runs.
+- *What depends on it:* All recipes; manager orchestration; the dbt-distro thesis.
+- *Cut-criterion test:* Without it, agents run ad-hoc only. β ships partially; the
+  dbt-distro half does not.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Self-coded tools (Phase 29) — pre-classified CORE
+- *Where it lives:* Phase 29 target — meta-feature on top of tool registry.
+- *What it does:* When the LLM does X repeatedly, the app detects, proposes a
+  deterministic tool, validates it, and registers it; runtime calls then skip the LLM.
+- *What depends on it:* The dbt-distro thesis; long-term cost + speed + quality.
+- *Cut-criterion test:* Without it, the distro can't grow itself; remains a static
+  toolbox. β ships but the /opinionated FOSS distro/ half is a static product.
+- *Decision:*
+- *Walkthrough notes:*
+
+** ADDABLE candidates
+
+*** LCARS theming + theme studio — pre-classified ADDABLE
+- *Where it lives:* =org_llm/palettes.py=, =org_llm/knobs.py=, =org_llm/theme_studio.py=
+- *What it does:* Visual theming for the TUI/sidebar; theme studio is interactive
+  palette tuning.
+- *What depends on it:* TUI rendering only.
+- *Cut-criterion test:* β still ships in monochrome. Cool, not load-bearing.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Skills (org-babel slash commands) — pre-classified ADDABLE
+- *Where it lives:* skills surface (org-babel-driven slash commands).
+- *What it does:* Lets users define personal slash commands in org-babel blocks.
+- *What depends on it:* Power-user workflow only.
+- *Cut-criterion test:* β ships without; skills are a power-user extension.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Insight cards — pre-classified ADDABLE
+- *Where it lives:* =org_llm/insights.py=
+- *What it does:* Periodic generated "insight" cards surfaced in the sidebar.
+- *What depends on it:* Sidebar UI only.
+- *Cut-criterion test:* β ships without; nice-to-have surface.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Walk graph traversal — pre-classified ADDABLE
+- *Where it lives:* =org_llm/walk.py=
+- *What it does:* Traverses link-graph between nodes for narrative walkthroughs.
+- *What depends on it:* link_graph_walk recipe; specific narrative recipes.
+- *Cut-criterion test:* β ships without; graph traversal is a recipe-level feature.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** dbt analytics — pre-classified ADDABLE
+- *Where it lives:* Phase 27 target.
+- *What it does:* dbt models over captain's log + DB for analytic queries.
+- *What depends on it:* Superset dashboards; analyst agent.
+- *Cut-criterion test:* β ships without; analytics is a downstream lens, not lead value.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Pi bridge — pre-classified ADDABLE
+- *Where it lives:* =pi_extension/= (TypeScript bundle; Mario Zechner's pi.dev CLI).
+- *What it does:* Bridges org-llm to the pi.dev extensible CLI agent.
+- *What depends on it:* Cross-tool workflows; not core.
+- *Cut-criterion test:* β ships without; bridge is integration surface.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Doom config introspection — pre-classified ADDABLE
+- *Where it lives:* =org_llm/doom_introspect.py=
+- *What it does:* Reads Doom Emacs config so agents can reason about the user's setup.
+- *What depends on it:* @doom agent.
+- *Cut-criterion test:* β ships without; Doom-specific lens.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Avatars — pre-classified ADDABLE
+- *Where it lives:* =org_llm/avatars.py= + =org_llm/avatar_render.py= (Phase 31).
+- *What it does:* Theme × metadata → image-gen pipeline for agent avatars.
+- *What depends on it:* TUI rendering; conversational tuning loop.
+- *Cut-criterion test:* β ships without; avatars are personality polish.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Style-infer / personalize — pre-classified ADDABLE
+- *Where it lives:* style inference + personalization layer.
+- *What it does:* Learns user's writing style + preferences and adapts agent output.
+- *What depends on it:* Quality-of-life for daily-driver use.
+- *Cut-criterion test:* β ships without; personalization is a polish layer.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Non-core agents — pre-classified ADDABLE
+- *Where it lives:* =org_llm/agents.py= (subset): @journalist, @doom, @ops,
+  @agentsmith, @tracker, @curator, @analyst, @drillmaster.
+- *What it does:* Specialized agents beyond the curated core roster.
+- *What depends on it:* Specific recipes + user workflows.
+- *Cut-criterion test:* β ships with manager + researcher + scribe + gardener; these
+  are extension-path agents.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Specific recipes — pre-classified ADDABLE
+- *Where it lives:* recipe registry (subset): =weather_aware_agenda=, =busy_week=,
+  =link_graph_walk=, =recent_activity_summary=.
+- *What it does:* Concrete recipe instances on top of the recipe infrastructure.
+- *What depends on it:* User taste; not core.
+- *Cut-criterion test:* β ships with the recipe /infrastructure/; specific recipes
+  are extension-path.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Apache Superset dashboards — pre-classified ADDABLE
+- *Where it lives:* Phase 27 target.
+- *What it does:* Web dashboards over dbt analytics tables.
+- *What depends on it:* dbt analytics; analyst workflows.
+- *Cut-criterion test:* β ships without; dashboards are downstream of analytics.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Containerization — pre-classified ADDABLE
+- *Where it lives:* Phase 28 target.
+- *What it does:* Optional container packaging for asymmetric deployment.
+- *What depends on it:* Specific deployment scenarios; native is primary.
+- *Cut-criterion test:* β ships native; containers are deployment optionality.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Manager quorum — pre-classified ADDABLE
+- *Where it lives:* Phase 24.4 target.
+- *What it does:* Multi-agent quorum step in manager orchestration for high-stakes calls.
+- *What depends on it:* Specific high-stakes recipes.
+- *Cut-criterion test:* β ships with single-manager; quorum is a quality lever for edge
+  cases.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Auto-embedder daemon — pre-classified ADDABLE
+- *Where it lives:* daemon that re-embeds vault changes in the background.
+- *What it does:* Keeps embeddings fresh without manual reindex.
+- *What depends on it:* Embeddings + search; user expectation of "just works".
+- *Cut-criterion test:* β ships with manual reindex; daemon is convenience.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Code-corpus indexing — pre-classified ADDABLE
+- *Where it lives:* =org_llm/code_index.py=
+- *What it does:* Indexes code repos alongside the vault for cross-corpus search.
+- *What depends on it:* Coding-adjacent recipes.
+- *Cut-criterion test:* β ships vault-only; code-corpus is extension surface.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Long-tail MCP tools (~50 of 71) — pre-classified ADDABLE
+- *Where it lives:* MCP tool registry beyond the base ~15.
+- *What it does:* Specialized verbs (Phase-specific, agent-specific, vault-specific)
+  that aren't part of the base agent vocabulary.
+- *What depends on it:* Specific agents + recipes.
+- *Cut-criterion test:* β ships with the base ~15; the long tail is plugin surface.
+- *Decision:*
+- *Walkthrough notes:*
+
+** EDGE — needs argument
+
+*** @gardener — EDGE
+- *Where it lives:* =org_llm/agents.py= (gardener agent).
+- *What it does:* Hygiene agent — fixes broken links, normalizes tags, archives stale
+  nodes, keeps the vault tidy.
+- *What depends on it:* Vault hygiene; long-term β quality.
+- *Cut-criterion test:* Hygiene is plausibly load-bearing for β — a vault that decays
+  is one that stops thinking with you. Probably core; needs explicit argument.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Validation framework — EDGE
+- *Where it lives:* =org_llm/validation.py= + =org_llm/validation_configs/=
+- *What it does:* Pre/post-check framework for agent outputs and vault writes.
+- *What depends on it:* Capture flow; agent quality bar.
+- *Cut-criterion test:* Could be core (quality gate is part of "earns its keep") or
+  opt-in plugin (only some workflows need it). Argue.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** LLM-proxy interceptor chain depth — EDGE
+- *Where it lives:* =org_llm/llm_proxy.py= interceptor list.
+- *What it does:* The chain itself is core (above); the question is which interceptors
+  ship in core vs. plugin — base ~5 (cache, log, redact, route, rate-limit) likely core;
+  the long tail (custom rewriters, A/B harness, etc.) likely plugin.
+- *What depends on it:* All cloud calls.
+- *Cut-criterion test:* Per-interceptor: does β need it? Argue interceptor by interceptor.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Captain's log =--reflect= weekly cron — EDGE
+- *Where it lives:* logbook.py + scheduled reflect verb.
+- *What it does:* Periodic auto-generated reflection on the captain's log.
+- *What depends on it:* Retro workflow; dbt analytics downstream.
+- *Cut-criterion test:* The /log/ is core; the /weekly cron/ is a UX layer on top.
+  Probably addable; argue whether reflect is part of the core promise.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Auto-tagger — EDGE
+- *Where it lives:* tagging pipeline (auto-tag on capture / on index).
+- *What it does:* Suggests or applies tags automatically based on content + vault facts.
+- *What depends on it:* Capture flow; search quality.
+- *Cut-criterion test:* If β depends on tag quality (likely), auto-tagger is core. If
+  manual tagging suffices, addable. Argue.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** Tracker self-hosting (=tracker init= / =tracker review=) — EDGE
+- *Where it lives:* future tracker verbs (currently dev-tracker.org is the stepping
+  stone; end goal is org-llm owning tracking).
+- *What it does:* Lets org-llm own its own tracking via verbs rather than an external
+  org file.
+- *What depends on it:* Dogfood story; "Claude Code for Org Mode" thesis.
+- *Cut-criterion test:* Could be flagship core (proves the thesis) or just an addable
+  verb. Argue whether self-hosting is part of the core promise.
+- *Decision:*
+- *Walkthrough notes:*
+
+*** [Reserved 7th EDGE slot] — EDGE
+- *Where it lives:* (placeholder — mission walk listed 7 EDGE; 6 enumerated above. Add
+  the 7th at walkthrough start if recovered, or close this slot.)
+- *What it does:*
+- *What depends on it:*
+- *Cut-criterion test:*
+- *Decision:*
+- *Walkthrough notes:*
+
+* Follow-up extractions (placeholder)
+
+To be filled with concrete TODOs once the walkthrough completes. Format:
+
+#+begin_example
+TODO Move <component> from org_llm/<path> to plugins/<path>; update imports;
+     ship plugin loader entry. (Phase 26.2)
+#+end_example
+
+* Connections
+
+- [[id:DEC-009][DEC-009]] — curated core agents + extension path (the source rule)
+- [[id:DEC-013][DEC-013]] — two-tier tools (core / addable tier model)
+- [[file:dev-tracker.org][dev-tracker.org]] § Phase 26 (Core/addable cull and extract)
+- [[file:tools-as-dbt-models.org][tools-as-dbt-models.org]] (the dbt-distro thesis)
+- [[file:agents.org][agents.org]] (curated core roster)
+- [[file:roadmap.org][roadmap.org]] (Phase 26 placement)

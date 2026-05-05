@@ -1,0 +1,354 @@
+:PROPERTIES:
+:ID:       9c8d7e6f-4b3a-2c1d-8e7f-6a5b4c3d2e1f
+:CREATED:  [2026-05-05]
+:END:
+#+TITLE: Doc rewrite plan — multi-agent stress test scope
+#+FILETAGS: :wiki:meta:rewrite:phase-30-4:multi-agent:eval:
+#+OPTIONS: toc:2 num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* This page scopes the eventual multi-agent doc rewrite. It
+enumerates every page in =docs/wiki/=, classifies each, identifies the
+highest-leverage rewrite candidates, and proposes a rewrite style
+template + dispatch protocol. User reviews this page, picks a subset,
+then a pool of agents executes the rewrite against it.
+
+*Expanded.* The rewrite is a Phase 30.4-flavored stress test
+(multi-agent A/B) on a real doc-quality task — not a synthetic eval.
+Three surfaces compared head-to-head: Claude Code subagent pool,
+=org-llm= CLI agents, opencode session. Each surface gets the same
+scoped batch of pages, produces independent rewrites, and the Phase
+30.4 multi-judge scores faithfulness, tone, conciseness, and
+cross-reference integrity. Best output replaces the original; losing
+outputs are kept as review notes. This page is the *dispatchable
+artifact* — once the user picks a subset and weights the rubric, an
+agent pool can execute against it without further scoping.
+
+The dev-tracker TODO under "Doc rewrite stress test" (Phase 30.4
+candidate) is the parent ticket; this page scopes its inputs.
+
+* The dispatch protocol
+
+** Three surfaces, one job per page
+
+For each page in the chosen subset:
+
+| Surface           | Spawn shape                                       | Sandbox / branch                          |
+|-------------------+---------------------------------------------------+-------------------------------------------|
+| Claude Code pool  | =Task= subagent per page (one shot, then exit)    | Worktree per agent OR distinct branch     |
+| org-llm CLI       | =@curator= or =@docsmith= dispatch via MCP        | Distinct branch; coordination claim       |
+| opencode session  | Single user-driven session, page-by-page          | Distinct branch; coordination claim       |
+
+Each surface produces *one rewritten file per page*. Three outputs per
+page total. None overwrites the original until judging.
+
+** Phase 30.4 multi-judge scores each output
+
+The judge is one Opus-class call per page-output triple, blinded to
+which surface produced which file. The judge returns a structured
+verdict on:
+
+- *Faithfulness* — does the rewrite preserve every load-bearing claim
+  and reference from the source? No invented features, no dropped
+  details that downstream pages rely on.
+- *Tone match* — anti-capitalist FOSS framing per DEC-010, technical
+  voice consistent with current wiki, no SaaS/funnel/MRR bleed.
+- *Conciseness* — bloat down, signal up; aim 200–500 lines for concept
+  pages.
+- *Cross-ref integrity* — every =[[id:...]]= resolves to an existing
+  node; every =[[file:...]]= path exists; no broken links introduced.
+- *Wiki Rule 2b compliance* — Summary + Expanded blocks present and
+  formatted correctly; this is a hard gate, not a soft preference.
+- *Org-is-Code inheritance* — a rewrite must respect the design rule
+  that org files are part of the toolchain (commit-able, lintable,
+  diff-reviewable). No prose that breaks that contract.
+
+** Best output replaces the original
+
+- Winner overwrites =docs/wiki/<page>.org= on a single rewrite branch.
+- The two losing outputs are saved to =docs/wiki/_rewrite-notes/<page>-<surface>.org=
+  for human review (kept out of the active wiki via filename prefix).
+- Judge verdict + per-criterion scores are appended to a campaign log
+  at =docs/wiki/_rewrite-notes/_campaign-log.org=.
+
+** Coordination
+
+- Each surface holds a claim in
+  [[id:281ddc58-169b-4f35-bab6-03f59c1df359][active-claims.org]] for the
+  pages it's rewriting; surfaces work on distinct branches; merge
+  happens after judging, not during rewriting.
+- Re-Read every page immediately before editing — parallel streams
+  invalidate session caches.
+
+* Style template
+
+The rewrite is bound by these rules. A rewrite that violates any of
+these is a regression, regardless of how good the prose reads.
+
+- *Wiki Rule 2b — Summary + Expanded.* Every concept page leads with
+  =* Summary= containing =*Summary.*= (1–3 sentences, top-of-page
+  abstract) and =*Expanded.*= (one paragraph context, why-this-matters
+  framing). Canonized in
+  [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki-conventions.org]]
+  Rule 2b. Existing TL;DR / "What this is" / "What this page is"
+  blocks should be folded into the Summary block, not duplicated
+  alongside it.
+- *Cross-ref integrity.* Every =[[id:...]]= must resolve. Every
+  =[[file:...]]= path must exist. The rewrite agent runs a link sweep
+  before declaring done; broken links are a hard fail.
+- *Tone — technical, tight, anti-capitalist.* Per DEC-010 in
+  [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]]: no
+  funnel, no SaaS, no MRR, no growth-hacking copy. The wiki describes
+  a FOSS tool a user installs and owns; copy reflects that.
+- *Org-is-Code inheritance.* Per architecture.org § design rule: org
+  files are toolchain primitives. They're committed, diffed, linted,
+  reviewed. Rewrites preserve that — no decorative whitespace,
+  consistent property block ordering, no inline timestamps that churn
+  every commit.
+- *Length budget.* Concept pages: 200–500 lines. Pages over 500 lines
+  must justify the bulk (e.g. roadmap, dev-tracker, decisions are
+  catalogs, not concepts). Pages under 200 lines are fine if they're
+  genuinely small concepts.
+- *Cull stale Phase-X early notes.* Phase descriptions that have
+  shipped should be replaced with a one-line status + commit ref, not
+  preserved in their original speculative shape.
+- *Preserve =:ID:= properties.* Never regenerate a page's =:ID:= —
+  those are addressable from elsewhere in the wiki. Rewrite the body,
+  keep the property block.
+- *Preserve =:CREATED:= dates; bump =:UPDATED:=.* The created date is
+  history; the updated date marks the rewrite.
+
+* Page enumeration
+
+54 .org files in =docs/wiki/= (excluding this scoping page). Classified
+into four buckets below. Counts: 5 skip-recently-shipped, 4 phase-log,
+3 index-meta, 42 active concept (rewrite candidates).
+
+** Active concept pages — rewrite candidates
+
+Sorted within bucket by REWRITE PRIORITY (high → low). PRIORITY signal:
+
+- *high* — load-bearing concept doc, no Summary block (or non-2b
+  Summary), older than 2026-05-04, OR known-drifted vs code.
+- *medium* — concept doc that's serviceable but would benefit from
+  tightening / 2b-block / cross-ref sweep.
+- *low* — recently-edited or already-tight; rewrite is polish, not
+  rescue.
+
+| filename                          | title                                                   | lines | mtime       | Summary 2b? | brief topic                                                                              | priority | notes                                                              |
+|-----------------------------------+---------------------------------------------------------+-------+-------------+-------------+------------------------------------------------------------------------------------------+----------+--------------------------------------------------------------------|
+| embeddings.org                    | Embeddings                                              |   236 | Apr 29      | no (TL;DR)  | what an embedding is, why org-llm uses 768-dim nomic vectors                              | high     | oldest concept page; no Summary block; cornerstone for retrieval   |
+| retrieval-augmented-generation.org | Retrieval-Augmented Generation (RAG)                    |   268 | Apr 29      | no (TL;DR)  | RAG loop, ask = RAG, vault grounding                                                     | high     | foundational; old; back-link to embeddings + cosine                |
+| vector-similarity.org             | Vector similarity & cosine distance                     |   199 | Apr 29      | no (TL;DR)  | cosine vs euclidean, sqlite-vec, math primer                                             | high     | oldest; pure concept; trivial 2b conversion + tighten              |
+| staleness.org                     | Staleness                                               |   247 | Apr 29      | no (TL;DR)  | filesystem-staleness vs content-staleness disambiguation                                 | high     | old; hygiene-critical concept; useful 2b summary                   |
+| tutor.org                         | Tutor — onboarding + walkthrough                        |   114 | Apr 29      | no          | 45-step stateless tutor; named-step addressing                                           | high     | oldest; small page; ripe for 2b conversion + status check vs code  |
+| mcp.org                           | Model Context Protocol (MCP)                            |   205 | Apr 30      | no          | MCP roles, why org-llm uses it, server/host/client                                       | high     | foundational; widely linked; no Summary block                      |
+| auto-embedder.org                 | Auto-embedder — background freshness daemon            |   111 | Apr 30      | no          | opt-in daemon thread for index/embed freshness                                           | high     | small; tight rewrite candidate; verify status vs current code      |
+| captains-log.org                  | Captain's Log — vault-wide event log                    |   153 | May 3       | no          | History table + ~/org/captains-log.org dual surface                                      | high     | high cross-ref load (architecture, memory-alpha); needs 2b         |
+| insight-cards.org                 | Insight cards (Phase 12)                                |   190 | May 3       | no          | "I noticed N things" cards; uniform shape; phase-12                                      | high     | Phase 12 — likely shipped; status section needs cull               |
+| skills.org                        | Skills — org-babel-driven LLM workflows                 |   189 | May 3       | no          | org-babel :skill: blocks → MCP tool registry                                             | high     | needs 2b + status check vs current skill loader                    |
+| code-corpus.org                   | Code corpus — cross-repo semantic search                |   153 | May 3       | no          | second corpus alongside notes; code+notes one DB                                         | high     | small; 2b conversion + verify against current verbs                |
+| cloud-or-local-routing.org        | Cloud-or-local routing                                  |   221 | May 3       | no          | decision tree for cloud vs Ollama; provider catalog                                      | high     | DEC-Groq applies — verify Groq isn't mentioned anywhere            |
+| doctor-self-heal.org              | Doctor & self-heal                                      |   240 | May 3       | no          | three doctor layers: doctor, proactive_doctor, LLM-rescue                                | high     | needs 2b; verify all three layers actually shipped                 |
+| pi-bridge.org                     | Pi bridge — third conversational interface              |   139 | Apr 30      | no          | Pi.dev TS extension; third surface alongside opencode + Claude                            | high     | small; clear 2b candidate; check pi_extension/ status              |
+| walk.org                          | Walk — LLM-driven knowledge capture (Phase 13)          |   171 | Apr 30      | no          | walk vs ask; LLM-driven note review + atomic claim extraction                             | high     | Phase 13 status check; needs 2b                                    |
+| audit-log.org                     | Wiki ↔ reality audit log                                |   315 | May 2       | no          | bidirectional audit log between wiki claims + code reality                                | high     | meta; deferred-list curation needed; long but structured          |
+| theme-studio.org                  | Theme studio + knobs — voice personalization            |   147 | May 2       | no          | knob model 0–3 levels; theme_studio.get_themed                                            | medium   | small; check for SaaS-tone bleed in copy                           |
+| lcars-theming.org                 | LCARS theming + palette system                          |   141 | May 2       | no          | three role colors; "honest LCARS" not just orange-on-black                                | medium   | small visual-language doc; 2b-able                                 |
+| granted-filesystem-access.org     | Granted filesystem access                               |   133 | May 2       | no          | path allowlist; user-controlled grants; request_access tool                                | medium   | small permissions doc; 2b-able                                     |
+| task-instruction-prefixes.org     | Task-instruction prefixes (the nomic-embed gotcha)      |   152 | May 2       | no (TL;DR)  | search_document: / search_query: prefixes; Phase 11 audit story                            | medium   | gotcha doc; small; 2b-able                                         |
+| recipes.org                       | Recipes — proxy-time pre-fetch (curated set)            |   270 | May 4       | no          | recipe = manager's "I've already done it" pattern; phase-22                                | medium   | recently edited; check 2b conversion                               |
+| interceptors.org                  | Interceptors                                            |   257 | May 3       | no          | proxy interceptor shape; short-circuit vs mutation                                       | medium   | structural; cross-refs llm-proxy heavily                           |
+| llm-proxy.org                     | LLM proxy                                               |   343 | May 4       | no          | the proxy server; phase-17 + 18 interceptor catalog                                      | medium   | recently edited; large; 2b conversion + section ordering           |
+| now.org                           | Now — single-view dashboard                             |   177 | May 4       | no          | flat in-flight + recently-shipped dashboard                                              | medium   | recently edited; meta page; 2b-able                                |
+| test-prompts.org                  | End-to-end test prompts                                 |   354 | May 4       | no          | natural-language regression suite; recipe + MCP coverage                                  | medium   | testing reference; 2b + recipe-name freshness check                |
+| vault-facts.org                   | Vault facts — deterministic inferrers + DB cache        |   173 | May 4       | no          | Phase 21; routine_chores, tag_taxonomy, mood_signal facts                                 | medium   | small; 2b-able                                                     |
+| tonight-rave-list.org             | Tonight's rave-coding list                              |   451 | May 4       | no          | queue of late-night-knockable items; effort estimates                                    | medium   | living planning doc; possible auto-prune of DONEs                  |
+| literate-tools.org                | Literate MCP tools — customize, manage, create          |   324 | May 4       | no          | proposal for ~/org/org-llm-tools.org as fourth literate file                              | medium   | proposal-stage; 2b + check what's shipped since                    |
+| 00-index.org                      | org-llm wiki — concepts index                           |   288 | May 4       | no          | wiki entry point; concept map; how to symlink to your vault                              | medium   | INDEX — see "index/meta" handling below                            |
+| agent-roster.org                  | Agent roster — classification & rave-coding stack       |   204 | May 4       | no          | classified inventory of every domain in org-llm                                          | medium   | data-heavy; 2b-able; cross-ref dense                               |
+| agentsmith.org                    | @agentsmith — design and ship new agents                |   310 | May 4       | no          | meta-agent for designing new specialists; one-conversation onboarding                       | medium   | 2b-able; verify against current builtin agent shape                |
+| agents.org                        | Agents — what they are and how they work                |   279 | May 4       | no          | agent = persona + tool roster + model choice; via @-tag                                  | medium   | foundational; 2b-able                                              |
+| superset.org                      | Apache Superset in org-llm — integration ladder         |   273 | May 4       | no          | 7-tier integration ladder; semantic layer first piece                                    | medium   | Phase 27 longer-form; 2b-able                                      |
+| coordination.org                  | Coordination — parallel-instance protocol               |   371 | May 4       | YES         | the contract between humans + agents working in parallel                                  | low      | already 2b-compliant + recently edited; light polish only          |
+| active-claims.org                 | Active claims — parallel-instance live board            |   161 | May 5       | YES         | the live state half of coordination.org                                                  | low      | live-board; 2b-compliant; meant to churn                           |
+| memory-alpha.org                  | Memory Alpha — Trek framing for DB-authoritative inversion |   150 | May 4    | no          | naming + conceptual frame for Phase 25                                                   | medium   | 2b-able; Phase 25 framing                                          |
+| promotions.org                    | Promotions & See-something-say-something                |   254 | May 4       | YES         | Phase 29 top-down + bottom-up signal-to-artifact                                          | low      | already 2b-compliant; mature                                       |
+| side-quests.org                   | Side-quests — spawning specialists for off-thread work  |   373 | May 4       | YES         | captain spawns specialist via delegate(); agent-report                                    | low      | already 2b-compliant                                               |
+| standing-orders.org               | Standing orders — shared memories agents check          |   354 | May 4       | YES         | user-authoritative decisions in versioned DB table                                       | low      | already 2b-compliant                                               |
+| agent-orientation.org             | Agent orientation — manifest at spawn, primer on demand |   316 | May 4       | YES         | manifest + on-demand primers pattern for specialists                                     | low      | already 2b-compliant                                               |
+| lazy-loading.org                  | Lazy loading — load context when relevance established  |   221 | May 4       | YES         | policy: lazy beats eager for primers/recipes/conventions                                 | low      | already 2b-compliant; recently authored                            |
+| agent-framework.org               | Agent framework architecture                            |   467 | May 5       | no          | Agent dataclass; capabilities; phase-23 architecture                                      | medium   | recently edited; 2b conversion + phase-status cull                 |
+| walkthroughs.org                  | Walkthroughs — small-step explainers agents drive       |   104 | May 4       | no          | small-step explainer pattern; one file per topic                                          | medium   | small; 2b-able                                                     |
+
+** Phase logs — skip from rewrite (historical)
+
+These are session/campaign-specific records. They're already archived
+or marked time-bound; rewriting them would erase historical signal.
+List for completeness, =skip — historical=:
+
+| filename                                  | lines | mtime  | status                                                       |
+|-------------------------------------------+-------+--------+--------------------------------------------------------------|
+| 2026-05-03-recipe-ab-ground-truth.org     |   349 | May 4  | hand-computed ground truth for recipe A/B; reference-only    |
+| 2026-05-03-test-campaign-detail.org       |   703 | May 3  | per-run detail for the 2026-05-03 evening campaign           |
+| 2026-05-03-test-campaign-live.org         |    56 | May 3  | ARCHIVED tracker; do-not-edit banner                         |
+| 2026-05-03-test-session.org               |   661 | May 4  | ARCHIVED test session; findings extracted to dev-tracker     |
+
+** Index / meta pages — special handling
+
+These pages need *careful curation*, not free rewrite. They aggregate
+or reference many other pages, so a rewrite that drifts breaks
+multiple downstream consumers. Recommended: rewrite *only after* the
+target pages are settled, and only by an agent given explicit
+"index-touch" capability.
+
+| filename             | lines | mtime       | role                                                              | special handling                                                           |
+|----------------------+-------+-------------+-------------------------------------------------------------------+----------------------------------------------------------------------------|
+| 00-index.org         |   288 | May 4       | wiki entry point; concept map                                     | rewrite LAST; must reflect every shipped page; needs 2b + concept-map sync |
+| wiki-conventions.org |   215 | May 4       | the conventions the rewrite is bound by                           | rewrite ONLY by a curator agent; touching this changes the rules           |
+| dev-tracker.org      |  5034 | May 5       | central agenda; live state; 5K lines                              | NOT a candidate — kanban surface, not a concept doc                         |
+| roadmap.org          |  2673 | May 5       | narrative phase catalog                                           | NOT a candidate — narrative artifact, not a concept doc                     |
+| decisions.org        |   995 | May 5       | ADR-ish decision record                                           | NOT a candidate — append-only record; rewrite would erase history          |
+| audit-log.org        |   315 | May 2       | bidirectional audit log                                           | append-only meta; consider for *deferred-list curation pass*, not rewrite  |
+
+** Skip — already canonical (2026-05-05 mission walk)
+
+These pages are fresh from the 2026-05-05 mission walk and represent
+current best-thinking on system architecture. =skip — recently shipped=
+applies; revisit only after the surrounding wiki is rewritten.
+
+| filename                  | lines | mtime  | role                                                          |
+|---------------------------+-------+--------+---------------------------------------------------------------|
+| architecture.org          |  1390 | May 4  | top-level architecture spec                                   |
+| sync-architecture.org     |   419 | May 5  | sync semantics across surfaces                                |
+| dbt-pipeline.org          |   335 | May 5  | dbt analytics pipeline shape                                  |
+| data-integrity-laws.org   |   116 | May 5  | invariants the system must hold                               |
+| tools-as-dbt-models.org   |   402 | May 5  | tool surface modeled as dbt sources                           |
+
+* Recommended dispatch order
+
+A multi-agent stress test wants the *biggest readable signal per
+dispatch*. Order accordingly.
+
+** Wave 1 — easy 2b conversions (highest leverage per agent-hour)
+
+Pages with no Summary block where the body is already solid; rewrite
+is mostly "extract Summary + Expanded from existing prose, light
+tightening." These are high-quality training data for the multi-judge
+because the variance between surfaces shows up cleanly when the
+underlying material is similar.
+
+Suggested batch:
+
+- =embeddings.org=
+- =vector-similarity.org=
+- =retrieval-augmented-generation.org=
+- =staleness.org=
+- =tutor.org=
+- =mcp.org=
+- =auto-embedder.org=
+- =pi-bridge.org=
+- =theme-studio.org=
+- =lcars-theming.org=
+- =granted-filesystem-access.org=
+- =task-instruction-prefixes.org=
+
+12 pages. ~2 K lines total. Spans foundational concepts (embeddings /
+RAG / MCP) plus small surface-area pages.
+
+** Wave 2 — concept pages with status drift
+
+Pages where the rewrite must verify shipped-status against current
+code (Phase 12 insight cards, Phase 13 walk, Phase 21 vault-facts,
+Phase 22 recipes, Phase 23 agent-framework). These pages are higher
+risk because the rewrite must cull stale phase notes and replace with
+status + commit ref.
+
+Suggested batch:
+
+- =insight-cards.org=
+- =walk.org=
+- =skills.org=
+- =code-corpus.org=
+- =doctor-self-heal.org=
+- =captains-log.org=
+- =cloud-or-local-routing.org=
+- =recipes.org=
+- =interceptors.org=
+- =llm-proxy.org=
+
+10 pages. ~2 K lines total. Demands more cross-ref discipline.
+
+** Wave 3 — agents + meta concepts
+
+Touch only after Wave 1+2 are stable, because these pages reference
+many of those:
+
+- =agents.org=
+- =agentsmith.org=
+- =agent-roster.org=
+- =agent-framework.org= (large; consider splitting)
+- =memory-alpha.org=
+- =vault-facts.org=
+- =literate-tools.org=
+- =superset.org=
+- =now.org=
+- =test-prompts.org=
+- =tonight-rave-list.org=
+- =walkthroughs.org=
+
+** Wave 4 — index/meta last
+
+After everything else is rewritten, sweep:
+
+- =00-index.org= — concept map must reflect every shipped page
+- =wiki-conventions.org= — touch only by a curator agent
+
+** Skip from any wave
+
+- The 5 mission-walk pages (architecture, sync-architecture,
+  dbt-pipeline, data-integrity-laws, tools-as-dbt-models)
+- The 4 phase logs (2026-05-03-*.org)
+- =roadmap.org=, =dev-tracker.org=, =decisions.org=, =audit-log.org=
+- =coordination.org=, =active-claims.org=, =promotions.org=,
+  =side-quests.org=, =standing-orders.org=, =agent-orientation.org=,
+  =lazy-loading.org= — already 2b-compliant + fresh
+
+* Open questions for user
+
+The dispatch can't run until these are answered. Suggested defaults
+in parens; user picks or overrides.
+
+1. *Subset to dispatch?* (Default suggestion: Wave 1 only as pilot —
+   12 pages, foundational concepts, lowest-risk learning signal.)
+2. *All three surfaces in parallel, or one as pilot?* (Default: pilot
+   one surface — Claude Code subagent pool — on Wave 1, then add
+   org-llm + opencode for Wave 2 once the protocol is debugged.)
+3. *Scoring rubric weights?* The judge has six criteria; default
+   weighting is equal. Likely better: faithfulness × 2.0,
+   cross-ref-integrity × 1.5, Wiki Rule 2b × 1.5, others × 1.0.
+4. *Auto-merge winning output, or human-review first?* (Default:
+   human-review the first wave; if win-rate per surface stabilises,
+   auto-merge subsequent waves with the gating criterion that no
+   judge score drops below 0.7.)
+5. *Where do losing outputs live?* (Default proposed:
+   =docs/wiki/_rewrite-notes/<page>-<surface>.org=, gitignored from
+   org-roam indexing via filename prefix.)
+6. *Branch strategy?* One branch per surface, or one branch per page?
+   (Default: one branch per surface for the wave, merge per-page after
+   judging.)
+7. *Judge model?* Opus 4.7 is the default Claude judge in Phase 30.4
+   eval. Confirm or override.
+
+* Connections
+
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § "Doc rewrite stress test" — parent TODO
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 30.4 — multi-judge validation
+- [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki-conventions.org]] — Rule 2b is the binding contract
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-010 — anti-capitalist FOSS framing
+- [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] — claim discipline for the rewriting agents
+- [[id:281ddc58-169b-4f35-bab6-03f59c1df359][active-claims.org]] — live board where each surface declares its claim
+- [[file:../../scripts/recipe_ab_harness.py][scripts/recipe_ab_harness.py]] — A/B harness pattern reusable for the rewrite campaign
+- [[file:../../scripts/recipe_ab_judge.py][scripts/recipe_ab_judge.py]] — judge template

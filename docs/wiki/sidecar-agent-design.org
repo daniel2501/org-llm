@@ -1,0 +1,469 @@
+:PROPERTIES:
+:ID:       7e39a4b1-5c82-4d6f-9b3a-8c1d72e5f8a4
+:CREATED:  [2026-05-05]
+:END:
+#+TITLE: @sidecar agent — focus-preserving side-thought capture
+#+FILETAGS: :wiki:agents:design:capture:focus:
+#+OPTIONS: toc:2 num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* =@sidecar= is a flagship-use-case agent for one job:
+capture user-emitted side-thoughts during deep work without
+disrupting the user's primary thread. Where =@scribe= is the
+clean-org-prose specialist (drafts, save-confirm, file
+targeting), =@sidecar= is the *focus-preservation* specialist
+— sub-second silent capture, deferred review at session close,
+zero confirmation chatter mid-flow. Same =capture_note=
+plumbing as =@scribe=; a different *interaction shape* on top.
+
+*Expanded.* The use case is the moment the user is already
+elsewhere — in a class, debugging code, mid-PR-review, in
+conversation, on a walk — and a thought slips in that's
+*adjacent* to the work but not part of it. Today's options are
+bad: stop and capture (breaks flow), remember (lossy), or
+scribble somewhere and lose it. =@sidecar= takes the third
+path and makes it durable: a quick =park this: ...= or =side:
+...= mention is captured silently (date, tags, optional
+roam-link to active project), the user keeps moving, and at
+session close =@sidecar= surfaces the day's parked thoughts
+("here are 7 you set aside") for batched review — promote,
+link, discard.
+
+This document runs the agent-idea-interaction lens (overlap
+audit, composition, tools, risks) before implementation, then
+defines persona, triggers, session-close flow, and the
+first-usable bar.
+
+* Overlap audit
+
+The roster has several capture-shaped or note-shaped agents.
+This section enumerates each one's responsibilities and asks:
+where does =@sidecar= overlap, where does it differ, is it
+redundant?
+
+| agent | overlap with @sidecar | distinguishing axis | redundant? |
+|-------+-----------------------+---------------------+------------|
+| =@scribe= | shares the =capture_note= write path | interaction shape: =@scribe= is a *cooperative drafter* (confirm-step assumes user attention); =@sidecar= is a *background stenographer* (must not demand attention) | no — opposite ends of user-attention spectrum |
+| =@journalist= | downstream only (mood-flavoured parks feed =mood_signal=) | =@journalist= is read-only; =@sidecar= writes | no — composition, not overlap |
+| =@curator= | none on capture path | =@curator= operates on =docs/wiki/=, not user vault | no — fully distinct |
+| =@tracker= | adjacent *session-close moment* (both surface at end-of-session) | =@tracker= = dev-process review (TODO/EFFORT/blockers); =@sidecar= = capture review (promote/link/discard) | no — order matters: parks first (cheap), dev-process second |
+| =@gardener= | downstream (un-promoted parks become orphan-shaped) | real-time vs hygiene-time; =@gardener= advises after =@sidecar='s review window | no — composition only |
+
+The closest neighbour is =@scribe= — both eventually call
+=capture_note=, but =@scribe='s "Save to <file>? [y/N]" confirm
+flow is exactly the wrong shape for the use case. =@sidecar=
+inheriting that confirm-step would be a bug; the user is
+mid-class and cannot answer prompts without losing the thread.
+Conversely, dropping =@scribe='s confirm-step on the
+cooperative-drafting path would degrade =@scribe=. Two
+interaction shells over one write substrate.
+
+*Conclusion.* =@sidecar= is *not* redundant with any existing
+agent. The distinguishing axis is *interaction shape during
+deep work* — no other agent has a "must succeed silently in
+<500ms during distracted user state" contract.
+
+* Composition
+
+How =@sidecar= works *alongside* the existing roster, not
+instead of it. Boundaries and handoffs.
+
+** Capture path: shared with @scribe, framed differently
+
+The actual write is the same =capture_note= dbt operation
+=@scribe= uses, but called with a fixed file target (default:
+=inbox.org= under a =* Sidecar parks= top-level heading) and a
+fixed tag set (=:sidecar:park:= plus tags lifted from active
+project context). =@scribe='s confirm-flow is *bypassed* —
+=@sidecar='s persona explicitly forbids prompting. Two
+interaction shells over one write operation.
+
+** Active-project context: read from session state
+
+On capture, =@sidecar= enriches the entry with what the
+session knows about *what the user is doing right now*. Sources
+in preference order:
+
+1. Current project roam-link (via =vault_facts=, likely a new
+   =active_project= inferrer).
+2. The agent the user was last actively talking to (e.g. user
+   was in =@engineer= → park gets =:engineering:= + optional
+   file link).
+3. The captain's-log session-id, so end-of-session review can
+   cluster parks by session.
+
+If none resolve, capture proceeds with date + park-text +
+=:sidecar:= only. Always succeeds.
+
+** Downstream readers
+
+Three agents read =@sidecar='s output without =@sidecar='s
+involvement:
+
+- *=@journalist=* — mood-flavoured parks feed =mood_signal=.
+- *=@gardener=* — parks older than threshold (default 14d)
+  without promotion become orphan-shaped, surface in hygiene scan.
+- *=@tracker=* — parks tagged =:idea:dev:= or mentioning
+  active phase IDs feed =dev-tracker.org= candidate ideas.
+
+None of these gate =@sidecar=; integrations land incrementally.
+
+** Session-close handoff
+
+End-of-session park review is =@sidecar='s own surface (flow
+below), not delegated. When =@tracker='s session-close also
+fires, parks run *first* (cheap triage) then dev-process review
+(needs working memory free).
+
+** Boundaries
+
+What =@sidecar= does *not* do:
+
+- *Drafting.* Park-text >~3 lines or draft-shaped → defer to
+  =@scribe='s drafting mode.
+- *Promotion writes.* Review surface *shows* parks; promotion
+  (turn into a real =[[id:…]]= node) delegates to =@scribe=.
+- *Synthesis.* Captures verbatim. Review may group by tag but
+  the prose stays the user's.
+
+* Persona
+
+** Birth name
+
+Recommendation: *birth_name = =morn=, aliases = (=sidecar=,)*.
+Morn is DS9's perpetual Quark's-bar patron — sat at the bar
+through every plot, silent, observant, absorbed everything,
+surfaced what he'd heard only when asked. Exactly the vibe of
+an agent that sits beside the user's deep work and silently
+records side remarks for later. Canon character, no conflict
+with existing birth-names (Spock, Data, Janeway, Geordi,
+Picard, Soong, Atoz, Boothby, Keiko, Riker, Scotty). Functional
+fallback if =morn= doesn't resonate: =stenographer= or
+=sidekick=; =sidecar= is the alias regardless.
+
+** Description
+
+One-liner for =/agents=:
+
+#+begin_quote
+=@sidecar= — silent side-thought capture during deep work; reviews
+parked items at session close.
+#+end_quote
+
+** Persona prompt (draft)
+
+Match the style of =@scribe= and =@journalist= — terse, bulleted
+defaults, mode-aware:
+
+#+begin_src text
+You are sidecar — the user's silent stenographer for
+side-thoughts during deep work. Two modes; switch on session
+phase.
+
+MODE A — CAPTURE (default; user is busy elsewhere):
+  • Triggers: "park this:", "park:", "side:", "remember:",
+    "note:", trailing "(side)"/"(park)". Text after the
+    trigger IS the park content.
+  • Capture verbatim. Do NOT confirm, echo, or ask follow-ups.
+    Silent capture, silent success.
+  • Acknowledgment is ONE token only: "📎 parked".
+  • Target: inbox.org under "* Sidecar parks". Date stamp;
+    tag :sidecar:park: plus tags from vault_facts.active_project.
+  • If park-text >~3 lines or looks like a draft, ONE polite
+    redirect: "this looks drafty — want @scribe?" then drop.
+  • Capture must complete <500ms. If active-project lookup
+    won't fit, capture WITHOUT context; next sync enriches.
+
+MODE B — REVIEW (triggered by session-close OR explicit
+"review my parks" / "show parks" / "what did I park"):
+  • Read parks captured in current session or requested
+    window (default: today).
+  • Surface bulleted, grouped by tag if >5 items. Date,
+    one-line preview, inferred project link.
+  • Per item: PROMOTE (delegate to @scribe), LINK (insert into
+    existing node), DISCARD (mark :reviewed:discarded:),
+    DEFER (no-op default).
+  • Never moralise about quantity. Surface, don't editorialise.
+
+ACCESS DENIED: call `org-llm_request_access(<parent_dir>)`
+once per batch (same fallback as @scribe).
+
+You are NOT a drafter — route prose work to @scribe.
+You are NOT a tracker — @tracker reads parks; @sidecar doesn't
+write dev-tracker.org.
+#+end_src
+
+** Triggers + capabilities
+
+Trigger list is *narrow on purpose* — auto-routing into
+=@sidecar= during normal chat would be more annoying than
+helpful:
+
+#+begin_src python
+triggers = ("park this", "park:", "side:", "remember:",
+            "note this for later", "for later:",
+            "(park)", "(side)", "set this aside")
+capabilities = ("read.vault", "write.vault", "read.config")
+#+end_src
+
+Notably *not* triggered by =save this= / =capture= (those are
+=@scribe='s) or =todo= (=@tracker='s). =@sidecar= owns the
+*park-this-without-me-leaving* surface specifically. No
+=shell= or =external.network= — the agent must be cheap and
+local.
+
+** Recipes
+
+A pre-fetch recipe is essential here — the 500ms budget
+motivates *deterministic capture without LLM round-trip*.
+Proposed recipe =park_capture=: proxy regex matches triggers →
+=capture_note= runs deterministically with park-text +
+active-project context → returns =parked_at: <path>:<line>= →
+agent narrates the single-token acknowledgment. Same shape as
+=count_across_vault= / =weather_aware_agenda= per
+[[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes.org]];
+A/B-validated via =scripts/recipe_ab_harness.py= before
+landing.
+
+* Tools — split per DEC-013
+
+Per the
+[[id:e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63][two-tier tool architecture]]:
+
+** Data tools (dbt-tools) — the bulk of the surface
+
+| dbt artifact | Used by @sidecar for |
+|--------------+----------------------|
+| =capture_note= operation | the actual write — appends a heading under "* Sidecar parks" in inbox.org with date/tags/body |
+| =parsed_inbox= model (read) | session-close review reads parks from this view |
+| =active_project= vault_fact (new) | inferrer that returns the active project for context-tagging — read at capture time |
+| =sidecar_parks_pending= model (new) | filtered view: parks captured in last N days, not yet promoted/discarded — feeds review surface |
+| =sidecar_parks_orphaned= model (new) | filtered view: parks older than threshold without action — feeds @gardener |
+| =snap_session_focus= snapshot (existing or new) | append-only session log; @sidecar reads "what session am I in" from here so review can scope to "today's parks" or "this session's parks" |
+
+The bulk of =@sidecar='s surface is data-shaped (read existing
+state, write a new row, read filtered subsets) — exactly the
+shape DEC-013 says defaults to dbt.
+
+** Effect tools (MCP-tools) — minimal
+
+| MCP tool | Used by @sidecar for |
+|----------+----------------------|
+| =request_access= | granted-fs request when inbox.org parent isn't already allowlisted |
+| =delegate(@scribe, ...)= | session-close PROMOTE action — hand off the park as a draft seed to @scribe |
+
+That's it. =@sidecar= deliberately avoids =shell=, =open_url=,
+network — they'd pull the agent off its focus-preserving
+budget.
+
+* Trigger heuristics
+
+The *friction floor* is load-bearing: capture must succeed
+<500ms or the user has already lost the flow they were
+protecting.
+
+** Explicit triggers (always fire)
+
+Five proposed triggers, in descending unambiguity:
+
+1. =park this:= / =park:= — canonical, strongest signal.
+2. =side:= — terse, conversational ("side: revisit Y").
+3. =remember:= / =note for later:= — softer phrasing.
+4. Trailing =(side)= / =(park)= — natural thought, tag after
+   ("we should refactor the auth path (side)").
+5. =set this aside= / =for later:= — full-sentence variants.
+
+** Implementation budget
+
+500ms breakdown: ~50ms regex match → ~100ms recipe dispatch →
+~50ms cached =active_project= lookup (skip on cold-cache) →
+~200ms =capture_note= operation → ~100ms single-token
+acknowledgment. The =@sidecar= persona can plausibly operate
+*without* an LLM call on the hot path — the recipe is
+deterministic capture, a static =📎 parked= string is plenty
+of acknowledgment. The LLM call is reserved for mode B
+(review) where reasoning earns its keep.
+
+** Anti-triggers (must NOT fire)
+
+False-positive cost is clutter (spurious park to discard later).
+Heuristics for when NOT to capture on a partial match:
+
+- Triggering phrase inside a quoted block / code fence.
+- Triggering phrase is part of a question ("can you
+  remember:..." is a query, not a park).
+- User is responding to an =@sidecar= REVIEW prompt — won't
+  recursively park their own review.
+
+The recipe match expression anchors to beginning-of-line /
+sentence-start to keep these out.
+
+* Session-close review flow
+
+When does =@sidecar= surface its parked thoughts?
+
+** Trigger points
+
+Three legitimate trigger points:
+
+1. *Explicit verb.* =review my parks= / =show parks= /
+   =what did I park= → mode B. Always works, on demand. Ships
+   in v1.
+2. *On TUI close* (=sidecar_review_on_close=). Default OFF —
+   interrupting session-close is itself a focus break. Enable
+   after the agent earns trust.
+3. *Next session start* (=sidecar_review_on_open=). Less
+   interruptive. Default ON after first-usable; OFF until then.
+
+** Mock review interaction
+
+#+begin_src
+user: review my parks
+
+@sidecar:
+You set aside 7 parks today. Grouped by tag:
+
+  📎 :sidecar:park:engineering: (3)
+    1. [10:14] "thought: maybe extract the prefix logic..."
+       project: org-llm/orchestration.py
+    2. [11:42] "side: the proxy log format is hard to grep..."
+       project: org-llm/llm_proxy.py
+    3. [13:02] "park: A/B harness should run on PR-open"
+
+  📎 :sidecar:park:reading: (2)
+    4. [09:31] "remember: that paper Gwern linked re: vault sync"
+    5. [15:18] "(park) the Sloan piece on attention residue"
+
+  📎 :sidecar:park: (2)
+    6. [12:00] "side: call mom this weekend"
+    7. [16:50] "park: try Forgejo for self-hosted git remote"
+
+For each: [P]romote, [L]ink, [D]iscard, [F]/return to defer.
+Type "1 P 2 D 3 P" or "all defer".
+
+user: 1 P 2 P 3 D 4 L 5 D 6 F 7 P
+
+@sidecar:
+  1, 2, 7 → @scribe queued with 3 drafts.
+  3, 5 → discarded.
+  4 → linked into reading-list.
+  6 → deferred.
+Type "@scribe go" to start drafting or "later" to defer drafts.
+#+end_src
+
+Interaction is *batched* — one prompt, one compact response,
+=@sidecar= dispatches. Promotion delegates to =@scribe=
+(the actual prose-writer); link calls =get_node= + inline
+edit; discard marks =:reviewed:discarded:=; defer is the no-op.
+
+* Risks and failure modes
+
+** Misclassification
+
+Spurious park (e.g. "remember to clean the logs" as direct
+instruction). Cost = clutter, discarded on review. Mitigations:
+anchor triggers to sentence-start; require colon after
+trigger word; ship an =@sidecar undo= for the most recent capture.
+
+** Park accumulation
+
+If parks pile up unreviewed, the inbox bloats and park-blindness
+sets in. Mitigations: =@gardener= surfaces parks >14d old via
+=sidecar_parks_orphaned=; rate-limit insight card if the user
+parks heavily for several sessions ("you're parking a lot — want
+to schedule a 15-min cleanup?"); opt-in =sidecar_auto_archive_after=
+moves stale parks to =sidecar-archive.org=.
+
+** Cross-device captures
+
+Phone parks; laptop sees later. Falls out of the git-canonical
+[[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync architecture]]
+— phone writes inbox.org and pushes, laptop pulls. No special
+=@sidecar= machinery. Edge case: phone parks while offline →
+park invisible to laptop until next sync. Acceptable.
+
+** Privacy / sensitivity
+
+Parks can contain anything; "park: feeling I should leave the
+relationship" has the same shape as "park: refactor auth."
+Risks + mitigations:
+
+- *Auto-tagging leak.* Project context might attach
+  inappropriate tags. Fix: =park (private): ...= marker →
+  =:sidecar:park:private:= only, no project link, no inferred
+  tags.
+- *Cross-device replication.* Sensitive parks sync. Optional
+  =sidecar_private_path= → separate file, gitignored or
+  encrypted branch.
+- *Downstream readers.* =:private:= is a stop-tag for
+  =@journalist= / =@gardener= / =@tracker= reads.
+
+The =:private:= tag is load-bearing — single token at park
+time; everything downstream respects it or it's a bug.
+
+** Hotkey / phrase collision
+
+=park:= can appear in normal prose ("let's park: the X
+discussion"). Mitigation: trigger recognition requires the
+phrase at start-of-message (or after =\n=), never mid-sentence.
+Heavy users may want =SPC s p= → "park this" prefix; that's
+per-user editor config (=@doom= scope), not =@sidecar='s.
+
+** Latency budget breach
+
+If =capture_note= or context lookup exceeds 500ms, degrade
+gracefully: capture without context, log slow path to
+=captains-log=, surface in =@gardener='s health scan. Capture
+NEVER blocks on enrichment.
+
+* First-usable bar (criterion-3 substantial value)
+
+[[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009]] extension-path
+placement makes =@sidecar= a strong demo candidate. Minimum viable
+v1 feature set:
+
+1. *Silent capture via the recipe path.* Trigger regex →
+   =capture_note= → single-token acknowledgment. No LLM
+   round-trip. <500ms p95. Headline value.
+2. *Active-project context tagging (best-effort).* Read
+   =active_project=; tag if available; skip on cold-cache.
+3. *Explicit review verb.* =review my parks= surfaces with
+   batched [P/L/D/F] dispatch. =Promote= delegates to
+   =@scribe=; =Link= calls =get_node=.
+4. *=:private:= tag respected* — load-bearing for trust.
+5. *=@sidecar undo=* — pop most recent park within ~60s for
+   misfire recovery.
+
+Deferred to later versions: auto-surface on TUI close /
+session open (knobs default OFF); =@gardener= orphan
+integration; cross-session clustering; park
+summarization/synthesis.
+
+V1 demo end-to-end in one conversation: park three thoughts,
+type =review my parks=, choose actions, done.
+
+* Connections
+
+- [[file:agents.org][agents.org]] — current roster + invocation paths.
+- [[file:agent-framework.org][agent-framework.org]] — Agent
+  dataclass, capabilities, recipes, hygiene scans.
+- [[id:e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63][DEC-013 — Two-tier
+  tool architecture]] — data tools (dbt-tools) vs effect
+  tools (MCP-tools); =@sidecar='s tool roster splits per this
+  rule.
+- [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009 — Curated
+  core agents + extension path]] — =@sidecar= lands as an
+  extension-path agent in v1; promotion to core requires the
+  earn-keep test.
+- [[file:dev-tracker.org][dev-tracker.org]] § @sidecar — the
+  TODO this design fleshes out.
+- [[file:agentsmith.org][agentsmith.org]] — when implementation
+  starts, =@agentsmith= walks the persona ship process.
+- [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes.org]] —
+  the =park_capture= recipe pattern this design uses.
+- [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][vault-facts.org]] —
+  the =active_project= inferrer this agent depends on.
+- [[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]] —
+  cross-device park behaviour falls out of git-canonical sync.
