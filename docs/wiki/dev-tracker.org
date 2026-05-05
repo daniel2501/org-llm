@@ -3221,6 +3221,139 @@ complexity) compound positively; gate 2 is the immediate win.
 sequentially. Likely runs in parallel with Phase 24
 (supervision trinity) since they're independent surfaces.
 
+*** OpenTofu use cases (filed 2026-05-05 from research)
+
+# Cluster of three actionable OpenTofu/HCL use cases distilled
+# from the 2026-05-05 research (full doc at
+# /tmp/opentofu-recommendations-2026-05-05.md). Selection
+# criterion: directly load-bearing for committed phases (24/25
+# DEC-012; 26 onboarding; 26+ anti-cap provider routing).
+# Speculative ideas (agent self-deployment provider, federated
+# infra plans) deliberately deferred until n=many lights up.
+
+** TODO Per-device knob materialization via OpenTofu          :plan:infra:tofu:dec012:dbt:
+:PROPERTIES:
+:PRIORITY:        B
+:GATE:            2,3
+:EFFORT:          ~2-3d (HCL scaffold + dbt source + doctor wire-up)
+:SOURCE:          2026-05-05 OpenTofu research findings; full
+                  doc at /tmp/opentofu-recommendations-2026-05-05.md
+:END:
+
+[[id:b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1][DEC-012]] makes knobs like =agent.write_active=,
+=sync.push_interval_minutes=, =dbt_materialization_profile=,
+=embed.model= device-keyed. OpenTofu's *early evaluation*
+(1.8+) lets =var.device_role= (laptop|phone|server) drive
+module + profile selection deterministically. One HCL run per
+device writes =~/.local/share/org-llm/device.toml= via
+=local_file= + =templatefile=; literate-config round-trip
+stays intact; =org-llm doctor= verifies the device matches
+the committed plan.
+
+- *Lead-value fit (β):* dream-state vault means devices stop
+  guessing their role — declarative role assignment replaces
+  the "every device assumes laptop defaults" failure mode that
+  bites mobile + server installs today.
+- *dbt fit:* parsed =tofu_resources= joins on =device_id= to
+  surface "this device differs from the committed plan" as a
+  dbt test failure, same shape as =stale_drafts=.
+- *Why it earns its keep over a hand-rolled TOML emitter:*
+  one declarative surface for fleet-wide knobs + plan-diff
+  audit trail + composes with the rest of the infra layer
+  (DNS, ACLs, Forgejo) for free.
+
+Cross-references:
+- [[file:decisions.org][decisions.org]] § [[id:b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1][DEC-012]] (per-device config)
+- [[file:decisions.org][decisions.org]] § [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]] (DB universal interface — =tofu_resources= becomes a dbt source)
+- [[file:dbt-pipeline.org][dbt-pipeline.org]] (parsing pipeline; =tofu show -json= or =hcl2json= as upstream source)
+- [[file:sync-architecture.org][sync-architecture.org]] (write-active device discipline)
+
+*Scheduling:* gated on Phase 25.x device-config plumbing
+landing; sprint-eligible after that (~2-3d).
+
+** TODO Vault repo bootstrap from bare OS via OpenTofu        :plan:infra:tofu:onboarding:phase26:
+:PROPERTIES:
+:PRIORITY:        B
+:GATE:            1,2
+:EFFORT:          ~3-5d (bootstrap.tf + provider wiring + tutor docs)
+:SOURCE:          2026-05-05 OpenTofu research findings; full
+                  doc at /tmp/opentofu-recommendations-2026-05-05.md
+:END:
+
+[[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]] thesis is "phone wipe is a re-clone event" — but
+bootstrapping a *new* device today is many manual steps
+(Forgejo repo, deSEC DNS record, Tailscale ACL entry, SSH key
+in =pass=, vault clone, doctor pass). One =bootstrap.tf=
+declares all of it: =svalabs/forgejo= for the repo,
+=tailscale/tailscale= for the ACL entry, =timofurrer/desec= or
+=cloudflare/cloudflare= for DNS, =external= provider for =pass=
+secrets. =tofu apply= walks the user from "bare OS" to "fully
+wired org-llm."
+
+- *Lead-value fit (β):* this is the v0 install experience for
+  n=many — without it, FOSS distribution is "git clone +
+  follow 14 README steps." Phase 26 onboarding gate-1 is
+  "stranger can install in <30min"; this is the path.
+- *dbt fit:* =tofu_resources= is the schema of "what exists in
+  your homelab" — agents answer /"what would I lose if my
+  laptop died right now?"/ with SQL, not panicked grep.
+- *Anti-capitalist alignment ([[id:2c8f6b1d-4e9a-4c3f-86b7-9d5e1f2a8c47][DEC-010]]):* Forgejo (Codeberg
+  e.V.), deSEC (non-profit DNS), headscale (FOSS Tailscale
+  drop-in) all preferred-tier; corporate fallbacks documented
+  but not default.
+
+Cross-references:
+- [[file:decisions.org][decisions.org]] § [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]] (re-clone event thesis)
+- [[file:decisions.org][decisions.org]] § [[id:2c8f6b1d-4e9a-4c3f-86b7-9d5e1f2a8c47][DEC-010]] (anti-capitalist FOSS provider tiering)
+- [[*Phase 26 — Core/addable cull and extract][Phase 26]] (this is the install-experience companion to the cull)
+- [[file:sync-architecture.org][sync-architecture.org]] (multi-device fabric this bootstraps into)
+
+*Scheduling:* depends on Phase 26 cull landing (so we know
+which components to bootstrap) + a self-hosted vault stack
+existing somewhere to point at. Earliest: Phase 26.4 or post-26.
+
+** TODO LLM cost guardrails as infrastructure (HCL-declared budgets) :plan:infra:tofu:llm:anticap:
+:PROPERTIES:
+:PRIORITY:        B
+:GATE:            1,3
+:EFFORT:          ~2d (HCL schema + llm_audit dbt join + plan-diff CLI)
+:SOURCE:          2026-05-05 OpenTofu research findings; full
+                  doc at /tmp/opentofu-recommendations-2026-05-05.md
+:END:
+
+=cloud_catalog.json= is data, but rate limits, token budgets,
+and provider weighting currently live in code. Lift them into
+HCL: =http= provider + a custom =local_file= resource declares
+budget-as-code ("OpenRouter $X/month cap, fallback to Ollama
+after daily $Y"). =tofu plan= shows the change before it lands
+— the diff is the audit trail. =random_shuffle= over the
+FOSS-aligned provider list (DeepInfra, Together, Lambda —
+*never* Groq per project memory) gives deterministic-but-fair
+rotation.
+
+- *Lead-value fit (β):* dream-state vault depends on cloud
+  routing being trustworthy; "did we honor the committed cap?"
+  is a question users + agents both want answered, not a
+  question buried in code.
+- *Anti-capitalist alignment ([[id:2c8f6b1d-4e9a-4c3f-86b7-9d5e1f2a8c47][DEC-010]]):* provider tiering
+  (preferred / fallback / never) becomes declarative + dbt-
+  testable; "committed HCL uses a never-tier provider" is a
+  failing dbt test, not a prose policy.
+- *dbt fit:* =tofu_resources= ✕ =llm_audit= join answers "did
+  we honor committed budget caps last week?" as a dbt test;
+  same shape as engagement/snapshot health checks.
+
+Cross-references:
+- [[file:decisions.org][decisions.org]] § [[id:2c8f6b1d-4e9a-4c3f-86b7-9d5e1f2a8c47][DEC-010]] (anti-capitalist FOSS tiering — the provider tier list IS this entry's schema)
+- [[file:decisions.org][decisions.org]] § [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]] (=tofu_resources= as dbt source)
+- [[file:dbt-pipeline.org][dbt-pipeline.org]] (audit + budget models)
+- =feedback_no_groq.md= (Groq exclusion is enforced at the HCL provider list, not just at runtime)
+
+*Scheduling:* Phase 26+ once cloud-routing maturity stabilizes
+and the provider catalog has tier metadata. Sprint-eligible
+(~2d) once the underlying =tofu_resources= dbt source exists
+(shared dependency with the per-device knob entry above).
+
 ** TODO Phase 27 — Apache Superset dashboards (optional)          :plan:db:dashboards:dbt:
 :PROPERTIES:
 :PRIORITY:        B
