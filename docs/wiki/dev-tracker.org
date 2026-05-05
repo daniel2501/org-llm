@@ -2941,6 +2941,86 @@ constraint above re-evaluates. By then either:
 
 No commitment needed in advance. Change Date is automatic.
 
+** TODO Phase 26 — Core/addable cull and extract                 :plan:meta:agents:tooling:load-bearing:
+:PROPERTIES:
+:PRIORITY:        A
+:GATE:            2
+:EFFORT:          multi-day (3 sub-phases — decide / extract / stabilize)
+:PHASE_CANDIDATE: yes
+:SOURCE:          2026-05-04 — mission walk surfaced "too many
+                  cool features"; DEC-009 captures the
+                  curated-core + extension-path principle
+                  this phase implements
+:END:
+
+*Generative principle:* the lead value (β: dream-state vault
+via agents, dbt-shaped opinionated distro) ships with a
+*curated core* of components and agents. Today's surface has
+~70% gravy by rough count (see mission walk draft). v1.0
+requires the cut. Per [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009]]
+the principle is: *opinionated curated core team
+out-of-the-box + first-class extension path for everything
+else.*
+
+*Cut criterion (per the mission walk):*
+
+#+begin_quote
+If this disappeared from core, would the lead value (β +
+dbt-distro) still ship?
+#+end_quote
+
+Yes → not core; move to extension path. No → core.
+
+*Why gate-2 healthy:* the entire phase is a complexity
+*reduction*. Removes optional features from core, sharpens
+the install footprint, makes "first usable" a meaningful
+target. Gate 1 (lead-value performance) and gate 3 (managed
+complexity) compound positively; gate 2 is the immediate win.
+
+*** Sub-phases
+
+1. *Phase 26.1 — Finalize the cut list.* Walk every
+   component in the mission-walk draft (the ~30 items split
+   core / addable / edge); decide each through DEC-009
+   criterion. Edge cases (gardener, validation framework,
+   tracker self-hosting, etc.) get explicit DECs or live
+   under existing ones. Ship: =docs/wiki/cull.org= with
+   per-component decisions + rationale. ~1 day.
+
+2. *Phase 26.2 — Physical extraction.* Move addables out of
+   =org_llm/= core into a sibling namespace (=plugins/= or
+   =extras/= TBD). Update imports, ship a plugin loader,
+   make sure =org-llm doctor= still passes for a
+   minimum-install (core only) and a full-install (core +
+   all extras). ~3-5 days; the bulk of the work.
+
+3. *Phase 26.3 — Stabilize the extension boundary.* The
+   extension path becomes first-class — Phase 23.5
+   user-supplied agents + Phase 23.6 literate-tools land
+   under this surface. Documented in
+   =docs/wiki/extensions.org=. Ship: at least one external
+   (or external-shaped) agent demonstrably loaded via the
+   extension path. ~2-3 days.
+
+*** Connections
+
+- *DEC-009 (curated core + extension)* is the directional
+  principle this phase implements.
+- *DEC-006 (supervision is deterministic by default)* applies:
+  the cut criterion is itself a deterministic rule, not a
+  judgment call.
+- *Phase 23.5 (user-supplied agents)* gets pulled forward
+  alongside 26.3 — they're the same surface.
+- *Phase 23.6 (literate MCP tools)* same — extension path for
+  user tools is the same shape.
+- *Versioning:* "first usable" v1.0 plausibly requires
+  Phase 26 done. Without the cull, core is too noisy to
+  describe to a stranger.
+
+*Scheduling:* 26.1 sprint-eligible (~1d). 26.2/26.3 follow
+sequentially. Likely runs in parallel with Phase 24
+(supervision trinity) since they're independent surfaces.
+
 ** TODO Phase 27 — Apache Superset dashboards (optional)          :plan:db:dashboards:dbt:
 :PROPERTIES:
 :PRIORITY:        B
@@ -4227,6 +4307,32 @@ Captured 2026-05-04 during the @curator dogfood session. Each
 is a way of pointing org-llm at its own dev process. Per the
 "Dev artifacts as app candidates" feedback rule, each is also a
 candidate user-facing feature.
+
+** TODO @sidecar agent — capture side-thoughts during focused work
+Use case: user is taking a class, deep in code, reviewing a PR,
+in a conversation — anything where breaking flow is costly. The
+user emits a quick mention ("park this: thought about X",
+"side: revisit Y next week"); =@sidecar= captures it as a proper
+linked org entry (date, tags, optional roam-link to the active
+project) without disrupting the user's primary thread. At
+session-close the agent surfaces the day's parked thoughts
+("here are 7 you set aside") for review/promotion/discard.
+
+Adjacent to =@scribe= but with a *focus-preservation* framing.
+Distinct trigger surface: not "save this draft" but "park this
+without me leaving where I am."
+
+Mission-walk surfaced this 2026-05-04 as a flagship use case —
+"agent for taking a class for instance" — and as the meta-need
+during this very planning conversation ("help me save the ideas
+while remaining focused"). Likely an extension-path agent
+(per DEC-009), not core team — but a strong demo candidate for
+"first usable" criterion 3 (substantial user value).
+
+Per agent-idea-interaction-lens: read =docs/wiki/agents.org=
+before fleshing out persona; consider overlap with =@scribe=,
+=@journalist=, =@tracker= (each captures something — different
+entry surface).
 
 ** TODO @tracker agent — owns this file
 Daily verb: "what's on deck?". End-of-session: "what shipped,

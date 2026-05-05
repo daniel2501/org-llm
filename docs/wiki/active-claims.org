@@ -47,6 +47,17 @@ chronological ordering — append to the bottom; the next
 
 * Recently closed                                              :@closed:
 
+** DONE Claude/opus-C — capture tonight's planning convo
+   :PROPERTIES:
+   :CLAIM:    docs/wiki/decisions.org docs/wiki/dev-tracker.org docs/wiki/active-claims.org
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-04 Mon 22:35]
+   :CLOSED:   [2026-05-04 Mon 22:50]
+   :SCOPE:    DEC-009 (curated core agents + extension) +
+              Phase 26 cull-and-extract entry +
+              @sidecar agent idea
+   :END:
+
 ** DONE Claude/opus-C — Phase 24.1 finish-line wrap
    :PROPERTIES:
    :CLAIM:    org_llm/llm_proxy.py docs/wiki/decisions.org docs/wiki/roadmap.org docs/wiki/dev-tracker.org docs/wiki/active-claims.org
