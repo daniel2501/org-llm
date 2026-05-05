@@ -616,6 +616,88 @@ captures the principle that drives the cull.
   team-composition principle. Today's call is fixed core +
   long tail.
 
+** DEC-010 — Anti-capitalist FOSS, not just FOSS
+:PROPERTIES:
+:ID:       2c8f6b1d-4e9a-4c3f-86b7-9d5e1f2a8c47
+:STATUS:   accepted
+:DATE:     [2026-05-04]
+:DECIDERS: Daniel, Claude/opus-C
+:END:
+
+*Summary.* Org-llm is FOSS *and* anti-capitalist — the
+tighter cut. Permissive FOSS (MIT/BSD) allows commercial
+enclosure and is not the spirit; the project moves toward
+copyleft (AGPL-shape — definitive license deferred but the
+family is fixed) and explicit anti-enclosure framing. Marketing
+exists, but only to *spread the practice*, not to capture
+market share, grow MRR, or cultivate a profit funnel.
+
+*Context.* During the 2026-05-04 mission walk Daniel surfaced
+this as standing policy when discussing whether "Claude Code
+for Org Mode" goes on the README front page. The framing
+clarification: this is anti-capitalist, not just FOSS. The
+existing Groq exclusion (in =memory feedback_no_groq=) is
+already an instance of this principle — Groq is excluded not
+because the tech is bad but because the company shape
+(YC-backed, profit-extraction-oriented) doesn't align. DEC-010
+makes the principle explicit so future vendor / dependency /
+contribution decisions use the same lens.
+
+*Decision.*
+
+1. *License family is copyleft.* Specific license (AGPLv3,
+   GPLv3, or stronger) is deferred to a separate decision but
+   the *family* is fixed: anti-enclosure, share-alike,
+   require-source-on-derivatives. Permissive licenses
+   (MIT/BSD/Apache-2) are explicitly out.
+
+2. *Vendor exclusion lens.* Profit-extraction-shaped vendors
+   (VC-funded, valuation-chasing, anti-FOSS in spirit even if
+   technically FOSS-compatible) are excluded from the cloud
+   catalog, default integrations, and doc copy. Groq is the
+   first instance; future calls test against the same lens.
+   FOSS-first, then anti-capitalist-first within FOSS.
+
+3. *Marketing tone.* Project communications optimise for
+   *spreading the practice* — explaining what org-llm IS and
+   how to adopt it — not for funnel mechanics. No
+   pricing/tiers/MRR/SaaS-shaped framing in any user-facing
+   surface. README, CONTRIBUTING, and onboarding docs lead
+   with what the user *gets* (dream-state vault, agent
+   ergonomics) and how to join — never with growth metrics
+   or competitive positioning.
+
+4. *Contributor model.* Future FOSS-public phase (per
+   personal-now-FOSS-later memory) accepts contributions
+   under the same copyleft. No CLA that lets a corporate
+   sponsor relicense. No "open-core with proprietary plus"
+   shape.
+
+5. *No commercial sponsorship that would compromise the
+   above.* Donations, grants from anti-capitalist-aligned
+   sources, mutual-aid funding are fine. VC-aligned or
+   surveillance-capital sponsorship is not.
+
+*Consequences.*
+- License decision becomes a focused follow-up (likely
+  AGPLv3 + commitment-to-source clauses; defer to a separate
+  DEC when the choice is being made).
+- The Groq ban is now policy-derived, not ad hoc; future
+  vendor exclusions reference DEC-010.
+- Marketing copy across README / CONTRIBUTING / AGENTS.md /
+  onboarding gets a tone audit — anything funnel-shaped flips
+  to practice-shaped.
+- The "first usable" target (criterion-3 substantial value)
+  is measured against *practice spread*, not user count.
+  Five users who really get value beats 500 who tried it once.
+- Forecloses commercial open-core / SaaS shapes. Forecloses
+  YC-backed sponsorship. Forecloses license changes that
+  would weaken anti-enclosure.
+- Triggers revisit: if a reflexively-anti-capitalist license
+  proves to block something genuinely valuable (e.g. an
+  aligned non-profit needs a temporary relicense), revisit
+  in a separate DEC. Default stays anti-enclosure.
+
 * See also
 
 - [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] —
