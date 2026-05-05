@@ -1,0 +1,116 @@
+:PROPERTIES:
+:ID:       50f49d19-6f98-4d03-85d5-87dfa19951ff
+:CREATED:  [2026-05-05]
+:END:
+#+TITLE: Data integrity laws — agent vs human edits
+#+FILETAGS: :wiki:architecture:agents:sync:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Three policies govern what happens when an agent
+and a human both want to edit the same org file at the same
+time. The plain-English version is the contract every agent
+write path is designed against; the Asimov-style Three Laws
+restate the same thing in priority order, for the love of the
+bit. Both versions are normative — when designing agent write
+flows, the law set is the contract.
+
+*Expanded.*
+
+* The Three Laws (Asimov edition)
+
+#+begin_quote
+*First Law.* An agent may not overwrite an in-progress human
+edit, or through inaction (a stale read) allow a human edit
+to come to harm.
+#+end_quote
+
+#+begin_quote
+*Second Law.* An agent must propagate its changes to the
+canonical files, except where such propagation would conflict
+with the First Law. (Then it queues, defers, retries.)
+#+end_quote
+
+#+begin_quote
+*Third Law.* An agent must preserve its own past work via the
+git audit trail, so long as such preservation does not
+conflict with the First or Second Law. (If a stale user save
+overwrites the agent's edit, git remembers; the engine
+notices the regression on next sync and re-attempts.)
+#+end_quote
+
+#+begin_quote
+*Zeroth Law* (with apologies to Asimov). An agent may not,
+through any combination of edits, propagate a state
+inconsistent with the user's intent across the vault as a
+whole. The Phase 24 supervision trinity is the enforcement
+mechanism: pre-flight resolvers + tool-failure recovery hooks
++ confusion detector.
+#+end_quote
+
+* The plain-English version
+
+Three policies, in priority order:
+
+** (a) Agent defers to user
+
+The engine checks for open Emacs buffers on the file before
+writing. If a buffer is open and dirty, the agent's change is
+queued (DB-side or as a =.staged= file). When the user saves,
+the engine applies the staged change on top of the user's
+save and re-renders.
+
+Best UX, most engineering. Reserved for files with
+known-active concurrent flows (the user is actively writing
+in the file the agent wants to edit).
+
+** (b) =auto-revert-mode= handles the read-only-buffer case
+
+When a file changes on disk and the user's open buffer is
+*not* dirty, Emacs reloads transparently. When the buffer
+*is* dirty, Emacs warns and lets the user pick (revert /
+keep-yours / merge). Out-of-the-box behavior; covers the
+bulk of agent-vs-user collisions with no custom code.
+
+This is the default mode of operation.
+
+** (c) User always wins; agent retries
+
+If a stale user save overwrites the agent's edit (race
+between read and write), git history retains the agent's
+commit. The engine notices the regression on the next sync
+cycle (file content drifted from DB-rendered expectation)
+and re-attempts the change.
+
+Acceptable safety net. Agents become eventually-consistent;
+no permanent data loss because git is the audit.
+
+** Combined defaults
+
+Default to (b). Upgrade to (a) for files with active
+concurrent flows. (c) is the always-on safety net underneath.
+
+* Connections
+
+- *[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 24 supervision trinity* — the
+  enforcement mechanism for the Zeroth Law.
+- *DEC-011 (DB as universal interface)* — every agent write
+  goes through SQL on the way in or out, regardless of
+  durable storage location. The laws apply at the DB
+  interface, not just the file write.
+- *DEC-012 (per-device configuration)* — knobs that govern
+  agent-write-active behavior per device (e.g. the laptop
+  runs =@gardener= nightly; the phone is read-only) live in
+  the device-keyed Config table.
+- *=Org is Code= design rule* (architecture.org) — the same
+  way concurrent edits to a code repo are handled by git
+  primitives, the same way the laws apply.
+
+* See also
+
+- [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][Wiki index]]
+- [[file:agent-framework.org][agent-framework.org]]
+- [[file:llm-proxy.org][llm-proxy.org]]
+- [[file:architecture.org][architecture.org]]
