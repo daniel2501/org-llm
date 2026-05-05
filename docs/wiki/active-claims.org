@@ -47,6 +47,14 @@ chronological ordering — append to the bottom; the next
 
 * Recently closed                                              :@closed:
 
+** DONE Claude/opus-C — file DEC-014 (cull framework lock-in)
+   :PROPERTIES:
+   :CLAIM:    docs/wiki/decisions.org docs/wiki/active-claims.org
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-05 Tue 09:22]
+   :CLOSED:   [2026-05-05 Tue 09:31]
+   :END:
+
 ** DONE Claude/opus-C — cull walk: 15 CORE verdicts + (c) verdict-vocabulary refinement
    :PROPERTIES:
    :CLAIM:    docs/wiki/cull.org docs/wiki/active-claims.org

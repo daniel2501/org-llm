@@ -978,6 +978,127 @@ policy."
   build cycle doesn't apply and MCP isn't right either). Today
   the binary split is a strict win.
 
+** DEC-014 — Cull rubric framework: ternary verdicts + agent-ify default + Magnificent Seven
+:PROPERTIES:
+:ID:       573550f8-a6ee-4581-b16f-20cc4645df21
+:STATUS:   accepted
+:DATE:     [2026-05-05]
+:DECIDERS: Daniel, Claude/opus-C
+:END:
+
+*Summary.* The Phase 26.1 cull walkthrough produced four
+load-bearing framework decisions that extend [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009]] (curated
+core + extension path) and need explicit canon: (1) cull
+verdicts are *ternary* — CORE / CORE_DISABLED_BY_DEFAULT /
+COMMUNITY IDEA — not binary; (2) every CORE / CORE_DISABLED
+verdict implies *agent-ify* by default — surface as an
+@-agent representative; (3) the curated core team cap
+expanded from ≤6 (DEC-009) to *≤7 — the Magnificent Seven*
+(picard, spock, data, gardener, analyst, curator, tracker);
+(4) *subsumption* (capability moot because architecture moved
+past it) is *not* a 4th verdict — it's a delete-as-you-go
+consequence tracked in a separate "Subsumed / dead code"
+section, per the 2026-05-05 verdict-vocabulary refinement
+(recommendation (c)).
+
+*Context.* DEC-009 framed the agent population as a binary
+("curated core out-of-the-box + first-class extension path").
+The 2026-05-05 cull walk surfaced two gaps: (a) some components
+should *ship* but be *off by default* — bundled but quiet (LCARS
+theming, Skills, Auto-embedder daemon, Doom config introspection,
+Apache Superset dashboards). DEC-009's binary forced these into
+"ship in core" or "extension path" — neither fit. (b) When a
+CORE component lands, who owns it operationally? The @-agent
+layer is the natural answer, but DEC-009 didn't make that
+default explicit. Plus, mid-walk the user expanded the agent
+roster cap to fit @analyst (analytics owner) alongside @curator
+(wiki) and @tracker (project tracking) — three additions to the
+DEC-009 baseline of manager + researcher + scribe + gardener.
+Finally, the recipe A/B harness + dbt-pipeline-as-CORE made
+several existing recipes *moot* (subsumed); the cull rubric
+needed a way to mark them without polluting the verdict
+vocabulary.
+
+*Decision.*
+
+1. *Ternary verdicts.* Every culled component lands in exactly
+   one of:
+   - *CORE* — ships, on by default. Mandatory part of the lead
+     value (β: dream-state vault via agents + dbt-distro shape).
+   - *CORE_DISABLED_BY_DEFAULT* — ships in the install, off by
+     default. User opts in via a knob. Bundled but quiet — they
+     get the tooling without it nagging or being a footprint
+     cost.
+   - *COMMUNITY IDEA* — does NOT ship in core. Lives in the
+     extension path. User or community can develop. The
+     decision is "we won't carry this in core" — *not* "we
+     won't allow this."
+
+2. *Agent-ify default.* Every CORE / CORE_DISABLED verdict
+   *also* means "surface this component as an @-agent
+   representative" — an agent persona responsible for /
+   knowledgeable about / able to drive the component. Default
+   applies unless: (a) verdict is COMMUNITY IDEA (community
+   decides representation), or (b) explicit "no agent" call
+   on a substrate component (captain's log, DB storage are the
+   2026-05-05 examples — pure data structures don't need a
+   persona). Mapping component → agent is a *separate design
+   exercise* (post-cull); one agent may own multiple components
+   (the routing layer below the cap).
+
+3. *Magnificent Seven — agent roster cap.* DEC-009's ≤6
+   curated core cap expands to *≤7*. The Magnificent Seven:
+   =@picard= (manager), =@spock= (researcher), =@data= (scribe),
+   =@gardener= (hygiene), =@analyst= (analytics), =@curator=
+   (wiki), =@tracker= (general-purpose project tracking).
+   Other existing personas (@journalist, @doom, @ops,
+   @agentsmith, @drillmaster, future legacy-extras) move to
+   COMMUNITY IDEA / extension path.
+
+4. *Subsumption is not a verdict.* Capabilities made *moot* by
+   accepted architecture (per [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]] + [[id:e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63][DEC-013]]) — where
+   the wrapper is dead code because the dbt-pipeline expresses
+   the capability natively in SQL — are tracked in a separate
+   "Subsumed / dead code (out of cull scope)" section in
+   =cull.org=. Subsumption is *delete-as-you-go* (lands when
+   the subsumer ships, not as a Phase 26 cut). The cull rubric
+   answers "what shape does this ship in?"; subsumption answers
+   "is this a thing anymore?" — different question types, kept
+   separate to keep the rubric honest. Recommendation (c) per
+   the mid-walk verdict-vocabulary research agent.
+
+*Consequences.*
+
+- Phase 26.1 cull walk now has its persistent record in
+  =cull.org= with all 38 components verdicted; Phase 26.2
+  (physical extraction) inherits the verdicts as its work
+  surface. The Subsumed section enumerates the ~3000 LoC of
+  delete candidates (=org_tools.py= 1174, =vault_facts.py=
+  951, =insights.py= generators 826, =walk.py= track-selection
+  140, 5 loser recipe runners 350).
+- DEC-009 candidate text needs an update: "≤6 curated" → "≤7
+  Magnificent Seven", and binary core/extension → ternary +
+  agent-ify default. File-and-forget; the body of DEC-009's
+  reasoning still applies.
+- @tracker's *general-purpose project tracker* scope (DIY,
+  lab work, book, sprints — not just dev) was locked
+  alongside this in the 2026-05-05 walk; captured in the
+  cull.org @tracker entry. Worth a small follow-up wiki
+  refresh on =agents.org= / =agent-roster.org= to make the
+  scope canonical.
+- Future component additions get triaged through the ternary +
+  agent-ify default automatically; no per-feature rubric
+  invention.
+- Forecloses: the binary "core / extension" bucketing for new
+  features; flat agent rosters that keep growing; ad-hoc
+  REMOVED-style verdict creep.
+- Triggers revisit: if "Magnificent Seven" can't accommodate
+  a genuinely-new agent class that doesn't fit existing seven
+  (hard to imagine, given the Seven cover read / write /
+  hygiene / analytics / wiki / tracking + manager), the cap
+  re-opens for one explicit decision. The ternary + agent-ify
+  default are stable; only the cap is contingent.
+
 * See also
 
 - [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] —
