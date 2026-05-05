@@ -1103,6 +1103,104 @@ vocabulary.
   re-opens for one explicit decision. The ternary + agent-ify
   default are stable; only the cap is contingent.
 
+** DEC-016 — Three-tier SDLC starter: dev / acpt / prod (branches + install slots)
+:PROPERTIES:
+:ID:       e2c47df1-3a86-4f9e-9d13-7c4b8e2f5a91
+:STATUS:   accepted
+:DATE:     [2026-05-05]
+:DECIDERS: Daniel, Claude/opus-C
+:END:
+
+*Summary.* Org-llm gets a lightweight three-tier SDLC: =dev= (active
+work), =acpt= (staged for stability test), =prod= (tagged releases).
+Two axes — *code branches* (trunk → acpt → main) AND *install slots*
+(editable / acpt-pinned / tag-pinned). Daily-driver runs prod; risky
+work (Phase 26.2 LoC delete, Phase 24.2/24.3, etc.) runs in dev.
+Promotion gates: =trunk → acpt= on smoke + author-ready; =acpt → prod=
+on ≥24h dogfood-without-surprise + tag bump. Agent-vs-human dogfood
+marking (per user, 2026-05-05): test items carry =:test:agent-runnable:=
+or =:test:requires-human:=; agents run as much of acpt-tier dogfood as
+possible. Promotion provenance recorded in captain's log
+(=promoted_by=agent-X | daniel=). Per-environment Config keying
+(=Config(key, device, env, value)= per [[id:b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1][DEC-012]]+this).
+
+*Context.* The 2026-05-05 cull walk surfaced a parallelism need:
+Phase 26.2 (~3000 LoC delete) is high-risk for daily-driver
+stability; other dev work (Phase 24.2/24.3, mobile build, DEC-015
+chat surface) shouldn't block on it. DEC-001 (trunk + PR-to-main)
+covers code-branch isolation but not *runtime* isolation — the user
+daily-drives the same install they develop on, which means risky
+dev work and stable use share runtime state. The user named the
+gap explicitly: "want to develop the LoC delete while allowing
+other work in parallel… also a concept of dev/acpt/prod."
+
+The Phase 26.2 use case is the trigger; the framework generalises
+to all future risky work and to org-llm's use *as a dev tool* for
+the user's own projects (per [[id:8e0c3b71-1f75-4a0f-9d3e-9b85f29c4ed1][DEC-003]] agents-as-SDLC).
+
+*Decision.*
+
+1. *Three tiers, two axes.*
+   - Code branches: =trunk= (dev) → =acpt= → =main= (prod).
+   - Install slots: editable (=dev=) / =uv tool install --from
+     git@…@acpt= / =uv tool install --from git@…@v0.X.Y= (prod).
+   - Daily-driver = prod by default. Risky work = dev.
+
+2. *Promotion gates (lightweight).*
+   - =trunk → acpt=: smoke tests pass + author calls "ready".
+   - =acpt → prod + tag=: ≥24h dogfood-without-surprise + semver bump
+     + signed tag.
+
+3. *Agent-vs-human dogfood marking.*
+   - Test items carry =:test:agent-runnable:= or =:test:requires-human:=.
+   - Agents run all =agent-runnable= as part of acpt promotion.
+   - =requires-human= blocks prod promotion until user signs off
+     (=org-llm self test --signoff=test-id=).
+
+4. *Promotion provenance.*
+   - Every promotion writes to captain's log (=kind=promotion=) with
+     =promoted_by= field: =agent-X= or =daniel= (or human handle).
+   - Distinguishes agent-promoted (low-stakes auto-promotion) from
+     human-promoted (high-stakes sign-off).
+
+5. *Per-environment Config.*
+   - Schema: =Config(key, device, env, value)= — extends DEC-012.
+   - Lookup precedence: full-match > device-only > any > MODEL_DEFAULTS.
+   - =ORG_LLM_ENV= env var per uv tool slot (defaults to =dev=).
+
+6. *First baseline.* =acpt= branch created from current trunk =bfb9c48=
+   on 2026-05-05; tagged =v0.1.0-acpt0=. First =trunk → acpt= promotion
+   is implicit (initial baseline). First =acpt → prod= awaits the
+   24h dogfood window + agent-runnable test pass.
+
+*Consequences.*
+
+- *Phase 26.2 unblocks.* Extraction work runs on =dev/26-2-extraction=
+  branch off main; promotes to trunk → acpt → prod through the gates.
+  Other dev work continues on trunk in parallel; conflicts resolved at
+  promotion time, not edit time.
+- *Daily-driver stability protected.* User can roll back to a prior
+  prod tag if a promotion goes sideways; risky dev never touches prod
+  install.
+- *Agent-driven acpt dogfood scales* without user attention bottleneck.
+  Most acpt promotions can happen "lights-out" (agent-promoted); only
+  human-required sign-off blocks prod.
+- *Generic framework applies to user projects too.* When org-llm is
+  used as a dev tool (per DEC-003), the same three-tier model + agent/
+  human marking applies to user-project tests. =@tracker= (Magnificent
+  Seven, per DEC-014) understands the framework.
+- *Config key-space explodes by 3×.* Mitigations: lookup precedence
+  + sensible defaults at "(any)" mean most knobs only ever land at
+  the broadest scope; only env-divergent ones (like =cloud_first=,
+  =agent_write_active=, =log_level=) need explicit per-env values.
+- *Forecloses* "one slot, one branch" assumption; "trust the editable
+  install for production" assumption; auto-merge-without-acpt-gate.
+- *Triggers revisit.* If the gate ceremony slows a one-person team down
+  more than it saves, collapse acpt → trunk and use only main+tags.
+  If 5+ humans regularly merge, we'll already have CI gates on PRs to
+  main per DEC-005's trigger condition; the SDLC tiers compose with
+  that, not replace it.
+
 * See also
 
 - [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] —

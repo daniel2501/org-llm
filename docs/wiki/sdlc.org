@@ -1,0 +1,149 @@
+:PROPERTIES:
+:ID:       4f17b7c0-9d3e-4d2c-8aff-2e7f8b1c4a3d
+:END:
+#+title: SDLC Framework
+#+filetags: :sdlc:process:decisions:
+
+* Summary
+*Summary.* Three-tier SDLC for org-llm: =dev= (active work,
+fast-moving), =acpt= (staged for stability test), =prod= (tagged
+releases). Two axes — *code branches* (trunk → acpt → main) and
+*install slots* (editable / acpt-pinned / tag-pinned). Promotion is
+gated by tests + dogfood-OK signal; promotion events recorded in
+captain's log with provenance (agent-promoted vs human-promoted).
+Agents run as much of acpt-tier dogfood as possible; user hands-on
+dogfood reserved for items explicitly marked human-required.
+
+*Expanded.* This page is the canonical reference for the SDLC
+framework canonized as DEC-016 (filed alongside this page). Generic
+enough to apply to org-llm's own development AND to user projects
+when org-llm is used as a dev tool (per DEC-003 agents-as-SDLC +
+DEC-014 cull rubric).
+
+* The two axes
+** Axis B — code branches
+- trunk = dev (active integration; fast-moving; per DEC-001)
+- acpt = staged for stability test (fast-forward from trunk after
+  smoke + author-ready)
+- main = prod (tagged releases only; promoted from acpt after
+  dogfood-OK)
+
+Diagram (ASCII):
+#+begin_src text
+  trunk  ─────────────────────────
+             ↓ (smoke + author-ready)
+  acpt   ─────────────────────────
+             ↓ (dogfood-OK + semver bump)
+  main   ─── tag v0.X.Y ──────────
+#+end_src
+
+** Axis A — install slots
+- dev → editable install of ~/repos/org-llm (=uv tool install -e=)
+- acpt → =uv tool install --from git@…@acpt= (separate slot)
+- prod → =uv tool install --from git@…@v0.X.Y= (tag-pinned)
+
+Daily-driver runs prod. Risky work (e.g. Phase 26.2 LoC delete) runs
+in dev. Acpt is the gate.
+
+Per-slot identification: ENV variable =ORG_LLM_ENV=dev|acpt|prod=,
+set per uv tool slot. Engine reads on startup; sidebar shows current
+env.
+
+* Promotion gates
+** trunk → acpt
+- All =pytest= passes (full suite + life-support + battery)
+- Author calls "ready for acpt" via =org-llm self promote
+  --to=acpt= verb (writes captain's log; fast-forwards branch)
+
+** acpt → main + tag
+- Acpt has been the user's daily-driver for ≥24h without surprise
+- All agent-runnable acpt tests pass
+- All human-required tests are signed off
+- Promotion command: =org-llm self promote --to=prod
+  --version=v0.X.Y=
+- Tag is signed; captain's log captures provenance
+
+* Agent-vs-human dogfood marking (user-named 2026-05-05)
+Test items (in =tests/= or =acpt-tests/=) carry a marker:
+- =:test:agent-runnable:= — agent can execute via CI / scout
+  dispatch
+- =:test:requires-human:= — must be human (UI verification, vibe
+  check, mobile flow, anything not deterministically scriptable)
+
+Agents run all =agent-runnable= as part of acpt promotion.
+Human-required tests block prod promotion until the user signs off
+(=org-llm self test --signoff=test_id=).
+
+Practical rule: if the test can be scripted + asserted,
+agent-runnable. If the test requires "does this *feel* right", human.
+
+* Promotion provenance
+Every promotion event writes to captain's log with kind=promotion:
+
+| Field          | Value                       |
+|----------------+-----------------------------|
+| kind           | =promotion=                 |
+| from_env       | dev / acpt                  |
+| to_env         | acpt / prod                 |
+| promoted_by    | agent-X / daniel / human    |
+| tests_passed   | count + summary             |
+| dogfood_window | ≥24h / N-sessions           |
+
+The =promoted_by= field distinguishes *agent-promoted* from
+*human-promoted*. Both are valid; the marker tells future readers
+which gate fired.
+
+* Per-environment configuration
+Per [[id:b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1][DEC-012]] (per-device Config), extend keying to include env:
+=Config(key, device, env, value)= with lookup precedence specific >
+"(any)".
+
+Examples:
+- cloud_first = true in dev / false in prod
+- log_level = debug in dev / info in prod
+- agent_write_active = false in prod (read-only daily-driver
+  default)
+
+* The Phase 26.2 use case (worked example)
+- Extraction work happens on a =dev/26-2-extraction= branch off
+  main
+- Author tests + CIs on that branch; merges to trunk when functional
+- trunk → acpt promotion runs the test suite + smoke
+- User daily-drives acpt for 24h; if no regressions, promote to prod
+- During the 24h: other dev work continues on trunk in parallel
+- Conflicts resolved at promotion time (rare), not edit time
+
+* The Claude / multi-agent angle
+This SDLC also applies to Claude / agent-driven development of
+org-llm itself:
+- When agents (Claude Code subagents, future Agor instances) run in
+  parallel, they target trunk by default
+- Acpt branch is *the surface where agents test their changes
+  against each other* before promoting to prod
+- Agent-promoted (kind=promotion, promoted_by=agent-X) is fine for
+  low-stakes changes; high-stakes need human sign-off
+
+* Generic framework — applies beyond org-llm self-dev
+When org-llm is used as a *dev tool for user's own projects* (per
+DEC-003 agents-as-SDLC), the same three-tier model applies:
+- User's project has trunk / acpt / main branches (or equivalents
+  in their VCS)
+- org-llm's @tracker agent (per DEC-014 Magnificent Seven)
+  understands the model
+- The tracker can score "is this acpt-ready?" against the user's
+  tests + dogfood signals
+- User's projects inherit org-llm's SDLC discipline as a default —
+  opt-out, not opt-in
+
+* Connections
+- [[id:1f3eaffe-3edd-4d8f-9aa7-9aa9c5e35d9e][DEC-001]] — branching (trunk + PR-to-main; acpt added between)
+- [[id:54843097-3bf9-447e-b8b8-54cbc0a0ed6b][DEC-005]] — strict claim + commit hygiene (compose with
+  promotion)
+- [[id:8e0c3b71-1f75-4a0f-9d3e-9b85f29c4ed1][DEC-003]] — agents-as-SDLC (this is the implementation)
+- [[id:b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1][DEC-012]] — per-device Config (env extends the keying)
+- DEC-016 (filed alongside) — locks the SDLC framework as
+  directional
+
+* See also
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 26.2 (the first big SDLC use case)
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]]

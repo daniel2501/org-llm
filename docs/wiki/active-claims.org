@@ -47,6 +47,18 @@ chronological ordering — append to the bottom; the next
 
 * Recently closed                                              :@closed:
 
+** DONE Claude/opus-C — SDLC starter (axes A + B) shipped
+   :PROPERTIES:
+   :CLAIM:    docs/wiki/sdlc.org docs/wiki/decisions.org docs/wiki/active-claims.org org_llm/db.py
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-05 Tue 10:32]
+   :CLOSED:   [2026-05-05 Tue 10:42]
+   :NOTES:    acpt branch created from trunk=bfb9c48; v0.1.0-acpt0
+              tag pushed; DEC-016 filed; sdlc.org + Config env-dim
+              dispatched to background agents (will land
+              independently). First baseline ready.
+   :END:
+
 ** DONE Claude/opus-C — small-wins pool dispatch + 6-item triage + DEC-015 candidate
    :PROPERTIES:
    :CLAIM:    docs/wiki/dev-tracker.org docs/wiki/now.org docs/wiki/decisions.org docs/wiki/agents.org docs/wiki/agent-roster.org docs/wiki/active-claims.org docs/wiki/whole-picture.org docs/wiki/codebase-map-post-cull.org
