@@ -561,11 +561,13 @@ agent-ify default. Body below preserved as original framing./
 *Summary.* Org-llm ships an *opinionated curated core team*
 of agents (manager + a small set of specialists — initial
 likely =@picard= manager, =@spock= researcher, =@data= scribe,
-=@gardener= hygiene) and provides an *extension path* for any
-agent the user (or community) writes via Phase 23.5
-user-supplied agents and Phase 23.6 literate-tools. Two-tier
-population by design: out-of-the-box clarity from the
-opinionated team; long-tail value from the extension surface.
+=@gardener= hygiene) capped at ≤7 (per DEC-014; originally ≤6)
+and provides an *extension path* for any agent the user (or
+community) writes via Phase 23.5 user-supplied agents and
+Phase 23.6 literate-tools. Two-tier population by design
+(extended to ternary by DEC-014): out-of-the-box clarity from
+the opinionated team; long-tail value from the extension
+surface.
 
 *Context.* During the 2026-05-04 mission walk, Daniel named
 "the right mix of agents for the job" as a guiding principle
@@ -582,7 +584,8 @@ captures the principle that drives the cull.
 *Decision.*
 
 1. *Curated core team is the OUT-OF-THE-BOX experience.*
-   Ship ≤6 agents preconfigured. They cover the lead value
+   Ship ≤7 agents preconfigured (expanded from ≤6 by DEC-014 —
+   the Magnificent Seven). They cover the lead value
    (β: dream-state vault via agents) end-to-end. Selection
    criterion mirrors DEC-006: each core agent earns its keep
    against the lead thesis or it goes to the extension path.

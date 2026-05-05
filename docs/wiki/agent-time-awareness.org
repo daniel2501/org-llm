@@ -1,0 +1,163 @@
+:PROPERTIES:
+:ID:       c4e2d3a1-7f9b-4c5e-8d6a-2b3f4e9c1d57
+:CREATED:  [2026-05-05]
+:END:
+#+TITLE: Agent time awareness
+#+FILETAGS: :wiki:concept:scheduling:time:airflow:
+#+OPTIONS: toc:2 num:nil
+
+* Summary
+
+*Summary.* Time awareness in org-llm has three layers: (1) /current-time
+grounding/ — every agent prompt is anchored to the current date+time
+(shipped via =intercept_time_grounding=); (2) /org-mode scheduling
+primitives/ — =SCHEDULED=, =DEADLINE=, =CLOCK=, =org-habit=, recurrence
+rules — the native substrate every agent already understands because
+it reads org files; (3) /cross-cutting orchestration/ — when work needs
+to fire on a cadence independent of any single org file (nightly
+hygiene, weekly snapshots, monthly retros). Layer 3 is where Airflow,
+cron, =systemd= timers, and dbt-cloud-style schedulers live; today
+org-llm's scheduling at that layer is ad-hoc cron / launchd /
+scheduled remote agents.
+
+*Expanded.* This page describes the three layers, what's shipped
+today, what's missing, and where Apache Airflow plausibly fits (or
+doesn't). The tl;dr is: Layers 1 and 2 are done and free; Layer 3 is
+where infrastructure questions live, and Airflow is a candidate but
+not a near-term one.
+
+* Layer 1 — current-time grounding (shipped)
+
+| Aspect          | Today                                                             |
+|-----------------+-------------------------------------------------------------------|
+| Mechanism       | =intercept_time_grounding= (proxy interceptor)                    |
+| Payload         | Current date + time injected into system prompt of every call     |
+| Implication     | Agents reason about "today" / "yesterday" / "next Tuesday" anchored |
+| Failure mode    | Without it: hallucinated dates, drift to training-cutoff           |
+| Cross-ref       | [[file:llm-proxy.org][llm-proxy.org]] § interceptor chain                                |
+
+User-facing times in this page are *EST* (per house convention).
+
+* Layer 2 — org-mode scheduling primitives (shipped + native)
+
+org-mode itself is the substrate. Every agent that reads org files
+inherits these for free.
+
+| Primitive             | Shape                              | Who reads it today           |
+|-----------------------+------------------------------------+------------------------------|
+| =SCHEDULED:=          | When a task should start           | @tracker (Boothby), agenda   |
+| =DEADLINE:=           | Hard due-by                        | @tracker, @gardener (drift)  |
+| =TIMESTAMP=           | Point-in-time event                | @analyst, agenda             |
+| =CLOCK= blocks        | Time spent on a task               | @analyst (rolls)             |
+| =org-habit=           | Recurrence (=+1d=, =++1w=, =.+1d=) | @gardener, @tracker          |
+| =org-agenda= dispatch | Query/view layer                   | All agents via babel/SQL     |
+
+Per [[file:dbt-pipeline.org][dbt-pipeline.org]] § derived models, these primitives get
+materialized as queryable columns (=parsed_clocks=, =parsed_dates=,
+=scheduled_at=, =deadline_at=) — agents query them via SQL. No new
+infrastructure needed; this layer is just /reading what's there/.
+
+* Layer 3 — cross-cutting orchestration (the gap)
+
+Work that needs to fire on a cadence independent of any single org
+file. Today's mechanisms are ad-hoc.
+
+| Work                          | Cadence                  | Today's mechanism             |
+|-------------------------------+--------------------------+-------------------------------|
+| @gardener nightly hygiene     | nightly                  | (planned) cron / scheduled remote |
+| dbt build on save             | event-driven             | save-hook                     |
+| dbt build incremental         | every save               | (in-flight per Phase 25.x DB-authoritative) |
+| Snapshot table refresh        | per snapshot strategy    | dbt-managed                   |
+| Captain's-log rotation        | size threshold (5MB)     | =org_llm/logbook.py= internal |
+| Recipe A/B re-test            | weekly/monthly           | scheduled remote agent (=trig_019...=) |
+| Recipe-promotion review       | one-shot 2026-05-17      | scheduled remote agent        |
+| Weather refresh               | hourly                   | (knob)                        |
+| Embeddings backfill           | event-driven             | auto-embedder daemon          |
+| Promotion gate (acpt → prod)  | manual + ≥24h dogfood    | DEC-016 (dogfood window is itself a scheduling primitive) |
+
+* Airflow tie-in — when does it earn its keep?
+
+[[https://airflow.apache.org][Apache Airflow]] (Apache 2.0 — FOSS-aligned per DEC-010) is a DAG-shaped
+dataflow + workflow scheduler. Strengths: dependencies, sensors,
+retries, observability, backfills. Weaknesses: heavy for small
+per-machine cron-shape work where =systemd= timers or cron suffice.
+
+** Real candidates (Airflow earns its keep)
+
+| Candidate                                    | Why Airflow                                |
+|----------------------------------------------+--------------------------------------------|
+| Cross-vault federation (post-1.0)            | Joins household / work / personal vaults — DAG of joins, sensors per vault |
+| Heavy daily snapshot rolls (=snap_*=)        | When computed across multiple data sources, retries + observability matter |
+| Cross-app pipelines (org → dbt → Superset → email) | Multi-step with dependencies            |
+| Multi-device coordination                    | Laptop nightly with phone-aware fallback   |
+
+** Anti-candidates (don't reach for Airflow)
+
+| Anti-candidate                | Right tool                                 |
+|-------------------------------+--------------------------------------------|
+| Single-vault @gardener nightly | cron / =systemd= timer                    |
+| Save-hook dbt build           | file-watch / babel                         |
+| Recipe A/B harness            | scheduled remote agent / cron              |
+| Captain's-log rotation        | in-process size check                      |
+
+** Recommendation
+
+Airflow becomes plausible at /n=many users/ or /cross-vault
+federation/. For n=1 today, simpler primitives win. *Defer Airflow
+integration; revisit once cross-vault federation lights up* (Phase 30+
+— federation). Filed in [[file:dev-tracker.org][dev-tracker.org]] § Hosting matrix as a TODO.
+
+* Two-tier tools and scheduling (DEC-013)
+
+Per DEC-013 (two-tier tools: data + effect), scheduling sits exactly
+on the boundary:
+
+| Tier   | Example scheduling tool             | Notes                          |
+|--------+-------------------------------------+--------------------------------|
+| Data   | =next_run(rule)=, =list_schedules()= | Pure query — when does X next fire? |
+| Effect | =schedule_cron(spec, agent)=         | Mutates host state — cron entry, =systemd= unit, remote agent |
+
+Layer 2 (org-mode primitives) is mostly /data/ — agents read
+=SCHEDULED=. Layer 3 (cross-cutting orchestration) is mostly
+/effect/ — schedules fire host-side jobs.
+
+* The "agents that schedule themselves" pattern (deferred)
+
+An agent reading captain's-log + tracker.org + agenda could /propose
+its own schedule/. Examples:
+
+- @gardener observes hygiene runs land cleanest at 02:00 EST; proposes
+  its own cron entry.
+- @journalist offers "want a weekly mood review every Sunday morning
+  09:00 EST?"
+- @tracker proposes "sprint review every other Friday 16:00 EST."
+
+Phase 29 — self-coded tools is the natural home: LLM observes a
+recurring need, proposes a deterministic tool (here: a schedule
+entry), validates it, registers it; runtime calls skip LLM.
+
+Today: out of scope. Filed for the future.
+
+* Connections
+
+| Topic                                                      | Why it links                                  |
+|------------------------------------------------------------+-----------------------------------------------|
+| [[file:llm-proxy.org][llm-proxy.org]] § interceptor chain                          | Layer 1 substrate (=intercept_time_grounding=) |
+| [[file:dbt-pipeline.org][dbt-pipeline.org]] § Snapshots                               | Layer 2's relational view of scheduling       |
+| [[file:cull.org][cull.org]] § Subsumed                                        | Captain's-log =--reflect= weekly cron as subsumed example |
+| DEC-013 — two-tier tools                                   | Scheduling sits at the data/effect boundary   |
+| DEC-014 — cull rubric (Magnificent Seven)                  | Time-aware @tracker, @analyst, @gardener      |
+| [[file:dev-tracker.org][dev-tracker.org]] § Hosting matrix                           | Airflow integration TODO                      |
+| [[file:sdlc.org][sdlc.org]] — DEC-016 promotion gates                         | "≥24h dogfood" is itself a scheduling primitive |
+| [[file:agents.org][agents.org]] — agent roster                                  | Which agents are time-shaped                  |
+
+* Open questions
+
+| Question                                                                    | Status            |
+|-----------------------------------------------------------------------------+-------------------|
+| Should @tracker own a /schedule registry/ — meta-agent surface for cadence? | Open              |
+| Per DEC-012 (per-device Config keying), do schedules need device-aware semantics? (mobile defers nightly @gardener to laptop) | Open |
+| Where does cron / launchd / =systemd= timer config live? (vault-committed = synced; per-device = local) | Open |
+| When does dbt-cloud-shape scheduling earn its keep over Airflow?            | Open              |
+| Captain's-log rotation: Layer 2 (vault-shape) or Layer 3 (cross-cutting)?   | Open — leans Layer 3 |
+| Should Layer 1 grounding include /timezone/ explicitly, not just "now"?     | Open              |

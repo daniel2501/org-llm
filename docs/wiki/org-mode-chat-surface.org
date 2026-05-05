@@ -1,0 +1,252 @@
+:PROPERTIES:
+:ID:       6b8e2d3a-9c47-4f1e-8a52-7d3b6c4e9f81
+:CREATED:  [2026-05-05]
+:END:
+#+TITLE: Org-mode chat surface — DEC-015 candidate design detail
+#+FILETAGS: :wiki:design:emacs:chat:dec-015:phase-16-3:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* The canonical interaction surface for org-llm is a
+scrolling org-mode buffer. Prompt input is org-shape; agent
+responses are org-shape (=#+begin_src= blocks tangleable, tables,
+headings, links, TODO items, properties); editing the chat IS
+editing org. =C-c C-c= runs blocks; =org-babel-tangle= lands code
+in real files; =[[id:UUID]]= links resolve; refile to vault works;
+agenda sees the TODOs. Phase 16.3 — Emacs companion is the home;
+opencode and Claude Code TUI become *secondary* surfaces.
+
+*Expanded.* This is a *design-detail* page, written to be
+reviewable BEFORE the implementation commits. Three implementation
+paths are weighed (native Emacs UI, Emacs wrapper around opencode,
+opencode plugin rendering into Emacs). MVP scope is identified
+and sprint-shaped (≤2 weeks). The candidate decision is filed in
+[[file:dev-tracker.org][dev-tracker.org]] as DEC-015 (TODO).
+
+* The user-facing experience (mock)
+
+A faux session — what an actual chat buffer looks like at rest:
+
+#+begin_example
+,* Capture from chat — 2026-05-06 (sample session)
+
+,** Me
+Can you find recent activity tagged :resolve-2025: and summarise?
+
+,** @analyst
+Pulled the recent activity:
+
+,#+begin_src sql :results table
+SELECT day, file, count
+  FROM recent_activity
+  WHERE tags LIKE '%resolve-2025%'
+  ORDER BY day DESC LIMIT 10;
+,#+end_src
+
+,#+RESULTS:
+| day        | file                 | count |
+|------------+----------------------+-------|
+| 2026-05-04 | dailies/05-04.org    |     3 |
+| 2026-05-03 | dailies/05-03.org    |     2 |
+| 2026-05-01 | resolve-tracker.org  |     1 |
+
+Top file: [[id:abc-123][dailies/05-04.org]]. Want me to roll
+these up as a weekly summary at [[file:summaries.org]]?
+
+,** Me [Y]
+Yes please, also tangle that SQL into snap_resolve.sql.
+
+,** @analyst
+,#+begin_src sql :tangle ~/org/dbt/models/marts/snap_resolve.sql
+-- snap_resolve: resolve-2025 tagged activity
+SELECT * FROM recent_activity WHERE tags LIKE '%resolve-2025%';
+,#+end_src
+
+Tangled. Built model passes 4 tests; latest row 2026-05-04.
+
+,*** TODO follow-up — schedule the weekly rollup
+SCHEDULED: <2026-05-12 Tue>
+:PROPERTIES:
+:OWNER: @analyst
+:END:
+#+end_example
+
+Properties of this transcript:
+- Every turn is a level-2 heading (=** Me= / =** @<agent>=).
+- Every code block is a real org-babel block. =C-c C-c= on it runs it.
+- Every table is a real org table. Columns sort, fields recalc.
+- Every =[[id:...]]= is a real link. =RET= jumps to the node.
+- Every =TODO= is a real org TODO. Agenda picks it up.
+- Editing the chat IS editing the file.
+
+* The three implementation paths
+
+| Path | Substrate                          | Speed-to-ship | Architecture purity              |
+|------+------------------------------------+---------------+----------------------------------|
+| 1    | Native Emacs UI to MCP/proxy       | slowest       | cleanest fit (DEC-011 aligned)   |
+| 2    | Emacs wrapper around opencode subprocess (=vterm= or pipe) | medium | inherits opencode recipes |
+| 3    | opencode plugin to render in Emacs buffer | fastest in concept, hardest in practice | doesn't really fit |
+
+** Path 1 — native Emacs UI to MCP/proxy
+
+Org-llm's Python core already exposes its agent-routing logic as a
+library + MCP server. =org-llm.el= grows a chat command that
+streams responses through the MCP session and renders into an org
+buffer. No vterm, no second process tree. The buffer is a real
+file on disk.
+
+** Path 2 — Emacs wrapper around opencode subprocess
+
+A vterm or pipe-driven companion that lets opencode keep running
+its existing dispatcher (recipes, /sys* surface, sidebar JSON),
+but Emacs intercepts the chat traffic and re-renders it as an org
+buffer. Bridges what we already have today; loses the "edit chat
+= edit org" property unless we tee the buffer back over.
+
+** Path 3 — opencode plugin rendering into Emacs
+
+A SolidJS-side renderer that opens an Emacs frame and writes into
+it via emacsclient. Demonstrably brittle — opencode plugins run
+in the bun ESM runtime where =require("node:fs")= silently fails
+(panel.tsx feedback), and the plugin can't own buffer state in
+Emacs. Listed for completeness; not recommended.
+
+* Recommended path: 1 (with 2 as bridge if needed)
+
+*Summary.* Build path 1. =org-llm.el= already has the keybinding
+spine, vterm bridge code, and live-tailing buffer infrastructure
+(=org-llm-manager-buffer=). The MCP server already exposes the
+right verbs. The gap is rendering into a live org buffer instead
+of a vterm.
+
+What =org-llm.el= already does that's reusable:
+- Per-buffer side-window management (=*org-llm: …*= namespace).
+- Live-tail rerender pattern (mtime polling at 2s, see
+  =org-llm-manager-buffer= + =org-llm--manager-rerender=).
+- Side-channel JSON action bridge (=sidebar-action.json=) — same
+  shape works for chat-buffer commands.
+- Org-syntax rendering of agent activity (manager-log JSONL →
+  org headings + =#+begin_src= bodies).
+
+What gaps to close:
+1. New command =org-llm-chat= that creates / pops a chat buffer.
+2. Stream MCP responses into the buffer at point.
+3. Bind =C-c C-c= in chat-buffer to "submit prompt under heading."
+4. Persist the buffer to disk (it's a real org file).
+5. Wire =@<agent>= prefix → MCP routing call.
+
+Path 2 stays available as a fallback if MCP-streaming proves
+slower to ship than re-using opencode's already-running dispatcher.
+
+* MVP scope (≤2 weeks of work, sprint-shaped)
+
+Concrete pieces, in dependency order:
+
+1. =M-x org-llm-chat= opens (or pops to) a chat buffer.
+   - Buffer is a live org-mode file at
+     =~/org/.opencode/sessions/<YYYY-MM-DD>-<short-id>.org=.
+   - Contains an =#+TITLE:= and an initial =* Capture from chat —
+     <date>= heading.
+2. Type a prompt under =** Me=. =C-c C-c= submits.
+   - Submit captures the heading body, sends to MCP, streams
+     response back as a sibling =** @<agent>= heading.
+3. Agent response renders as org content.
+   - Plain text goes as paragraph text.
+   - Code goes as =#+begin_src <lang>= blocks.
+   - Tabular results go as org tables.
+   - Links go as =[[id:UUID]]= or =[[file:…]]=.
+4. Each turn is a level-2 heading; chat scrolls forever.
+5. Persistence: buffer auto-saves on every turn (no surprise loss).
+6. =org-babel-tangle= works on returned src blocks (free — they're
+   real babel blocks).
+7. =[[id:UUID]]= resolution via existing =org-roam= machinery
+   (free — it's a real link in a real org file).
+8. The Magnificent Seven all dispatchable via =@<name>= prefix
+   in the prompt body. =@picard= / =@analyst= / =@curator= / etc.
+   route to the corresponding agent handler.
+
+Out of MVP (explicitly):
+- Inline image rendering, voice input, side-window status panel,
+  multi-buffer history navigation. All belong to "beyond MVP."
+
+* Beyond MVP (post-v1.0)
+
+| Area                | Shape                                                |
+|---------------------+------------------------------------------------------|
+| Inline charts       | =iimage-mode= / xwidget per [[file:embedded-dashboards.org][embedded-dashboards.org]] § Layer 1 |
+| Activity sidebar    | Side window mirroring the LCARS card (Emacs-native)  |
+| Multi-buffer history| One buffer per session; org-roam-style discovery     |
+| Voice input         | Emacs babel + dictation                              |
+| Mobile adaptation   | Termux-x11 / sway already running; same Emacs UI     |
+
+* Implications
+
+- Phase 16.3 — Emacs companion becomes load-bearing for v1.0.
+- opencode + Claude Code TUI become *secondary* surfaces — still
+  shipped, still useful for "no Emacs available" / "developer
+  preferring TUI" cases, but not the canonical mental model.
+- The LCARS sidebar relocates from inside the TUI to a side
+  window in Emacs (or retires entirely if the chat buffer
+  carries the load on its own — open question below).
+- Mobile build composes naturally (Doom + termux-x11 + sway
+  already running on Pixel; same Emacs UI, different layout).
+  Aligns with the personal-mobile-org holy-grail framing.
+
+* Sprint shape
+
+| Week | Pieces                                                      |
+|------+-------------------------------------------------------------|
+| 1    | =org-llm-chat= command + buffer layout + send-prompt + render response (no babel yet) |
+| 2    | =org-babel-tangle= integration + =[[id:…]]= link resolution + persistence + =@<name>= dispatch |
+| 3    | Dogfood the daily-driver flow on org-llm itself for ~1 week before wider claim |
+| 4    | Promote per [[file:sdlc.org][sdlc.org]] / DEC-016 — three-tier SDLC (trunk → acpt → main + tag) |
+
+Validation gate: dogfood ≥1 week before promoting. If the chat
+buffer can't host a real coding session on org-llm itself, the
+design fails the "really good at the job" gate.
+
+* Open questions for user
+
+1. *Path 1 vs path 2 for v0?* Native MCP-streaming is cleaner;
+   opencode-wrapping ships sooner. If shipping speed matters more
+   than architectural purity for the first dogfood loop, path 2
+   first then path 1 as the v1.0 cut.
+2. *Persistence location?* =~/org/.opencode/sessions/= (under
+   vault, syncs via git, agents can grep prior sessions) or
+   =~/.local/share/org-llm/sessions/= (per-device, not synced,
+   doesn't pollute vault)?
+3. *Default agent for unspecified prompts?* =@picard= (manager
+   dispatches) or no default (force user to pick =@<name>=)?
+4. *Sidebar continuation strategy?* Keep an LCARS-shape side
+   window? Replace with an org-mode status block at the top of
+   the chat? Drop entirely and let the chat carry the load?
+
+* Connections
+
+- DEC-015 candidate (the principle this implements) — see
+  [[file:dev-tracker.org][dev-tracker.org]].
+- Phase 16.3 — Emacs companion (the home) — see [[file:roadmap.org][roadmap.org]].
+- DEC-014 — cull rubric (the Magnificent Seven roster the chat
+  dispatches to).
+- DEC-011 — DB as universal interface (chat persists as org files
+  in the vault, indexed like any other node).
+- DEC-013 — two-tier tools (data + effect; chat surfaces both
+  naturally as src-blocks vs. invocations).
+- [[file:embedded-dashboards.org][embedded-dashboards.org]] § Layer 1 (chart inline rendering composes
+  on top of the chat buffer once available).
+- [[file:literate-tools.org][literate-tools.org]] (agent dispatching dbt-tools renders results
+  inline as babel-block output).
+- =project_mobile_is_full_graphical_emacs= (mobile inherits this
+  UI verbatim).
+
+* See also
+
+- [[file:architecture.org][architecture.org]] § Org is Code — the principle that "every
+  artifact is an org file" terminates here at the chat surface.
+- [[file:data-integrity-laws.org][data-integrity-laws.org]] — the Three Laws govern agent edits
+  to chat just like agent edits to vault: agents must respect
+  user-authored content, mark provenance, and not silently
+  overwrite.
+- [[file:../../doom/org-llm.el][=doom/org-llm.el=]] — the file path 1 extends.
