@@ -56,6 +56,19 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+# Phase 24.1 — eager import of the resolver registry. Importing
+# the package at proxy module-load time triggers
+# `_prewarm_caches()` (a daemon thread that warms the slow
+# DB-backed allowlist read, repo scandir, and agent index). By
+# the time the proxy accepts its first user prompt — typically
+# seconds after this module is imported — the resolver caches
+# are populated and the 80ms wall-clock budget covers steady-
+# state calls (~1-2ms) with comfortable margin. Without this,
+# the FIRST @-prefix turn after proxy boot pays a ~600ms
+# cold-start penalty that exceeds the budget and silently
+# loses enrichment for that one turn.
+from . import resolvers as _resolvers  # noqa: F401
+
 
 # ── Types ───────────────────────────────────────────────────────────
 
@@ -1336,6 +1349,28 @@ def intercept_agent_prefix(req: ProxyRequest) -> Optional[ProxyResponse]:
                         pass
         except Exception:
             # Recipe match must never break agent dispatch.
+            pass
+
+    # Phase 24.1 — pre-flight resolver enrichment. Mirrors the
+    # recipe pre-fetch pattern above: the registry resolves
+    # ambiguous tokens (paths, repos, @-handles) in the user's
+    # request to absolute facts, then concatenates them into the
+    # agent's system prompt so the swapped-in specialist starts
+    # with the right answer instead of guessing. Wired here (at
+    # the @-prefix seam) so EVERY agent dispatch gets enrichment
+    # — not just turns where the agent later calls delegate().
+    # Failure is silent: the rule says supervision must never
+    # block the user's turn, including its own warmup.
+    if agent_prompt:
+        try:
+            from .resolvers import (
+                resolve_all as _resolve_all,
+                format_resolved_context as _fmt_resolved,
+            )
+            _resolved_block = _fmt_resolved(_resolve_all(request_text))
+            if _resolved_block:
+                agent_prompt = agent_prompt + "\n\n" + _resolved_block
+        except Exception:
             pass
 
     # Scribe-only behaviour knob: skip the confirm-before-capture
