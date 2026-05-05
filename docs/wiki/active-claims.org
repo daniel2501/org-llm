@@ -45,14 +45,16 @@ chronological ordering — append to the bottom; the next
 # When done: change STARTED → DONE, add :CLOSED: timestamp, move
 # the entry to "Recently closed" below.
 
-** STARTED Claude/opus-C — Phase 24.1 finish-line wrap
+* Recently closed                                              :@closed:
+
+** DONE Claude/opus-C — Phase 24.1 finish-line wrap
    :PROPERTIES:
    :CLAIM:    org_llm/llm_proxy.py docs/wiki/decisions.org docs/wiki/roadmap.org docs/wiki/dev-tracker.org docs/wiki/active-claims.org
    :BRANCH:   trunk
    :STARTED:  [2026-05-04 Mon 21:38]
+   :CLOSED:   [2026-05-04 Mon 21:46]
+   :COMMITS:  f417132 (proxy wiring) 4828f94 (DEC-006/007/008 + status)
    :END:
-
-* Recently closed                                              :@closed:
 
 # Move closed claims here. Compact periodically — entries older
 # than ~2 weeks can be deleted; the captain's log retains the
