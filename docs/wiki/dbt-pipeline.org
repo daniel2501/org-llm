@@ -1,0 +1,335 @@
+:PROPERTIES:
+:ID:       20046fc6-8b1e-4211-911b-b96f431d1f9e
+:CREATED:  [2026-05-05]
+:END:
+#+TITLE: dbt pipeline — org files as queryable data
+#+FILETAGS: :wiki:architecture:data:dbt:pipeline:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* dbt-core is org-llm's data pipeline layer — it parses
+org files into queryable relational tables, runs declarative
+tests on every build, materializes derived models for
+cross-cutting queries, snapshots state over time for
+retrospection, and provides the auto-generated schema docs that
+make the vault legible to itself. dbt is the implementation of
+DEC-011's "DB as universal interface" — every domain object
+reaches the agent and user via dbt-managed SQL.
+
+*Expanded.* dbt-core runs locally on each device — no
+dbt-cloud, which is proprietary SaaS and excluded by DEC-010.
+The dbt project itself is a hybrid of app-bundled defaults
+plus user extensions in the vault repo, merged at runtime in
+the same pattern as agent personas, recipes, and config. dbt's
+incremental builds, declarative tests, and lineage graph are
+what make Phase 29 self-coded tools realistic — when an LLM
+proposes a new derived model, dbt is the substrate that
+validates it, ships it, and serves it deterministically from
+then on.
+
+* Architecture: where dbt sits
+
+#+begin_example
+   org files (canonical)         user customization
+   ─────────────────────         ─────────────────────
+   ~/org/*.org                   ~/org/dbt/
+        │                              │
+        ▼                              ▼
+   ┌─────────── dbt project ───────────┐
+   │  app-bundled defaults             │
+   │  (~/.local/share/org-llm/dbt/)    │
+   │  + user extensions merged         │
+   └────────────────┬──────────────────┘
+                    │ dbt build
+                    ▼
+            SQLite (local cache)
+                    │
+                    ▼
+         agents · recipes · dashboards · search
+#+end_example
+
+The app-bundled and user-extended layers are merged at runtime
+via =dbt_project.yml= nested project references — same shape
+as agent baseline + user overrides elsewhere in the codebase.
+
+* Forward direction: org → tables
+
+dbt's standard concepts map cleanly onto the org-llm vault:
+
+| dbt concept           | org-llm mapping                                                                        |
+|-----------------------+----------------------------------------------------------------------------------------|
+| Sources               | Org files in the vault repo                                                            |
+| Models (parsed)       | Parsed org → relational tables (nodes, headings, properties, links, tags, content, embeddings) |
+| Materialization target| SQLite (replaces Snowflake/BigQuery in usual dbt setups)                               |
+| Incremental           | Only changed files re-process on save                                                  |
+| Tests                 | Declarative quality bar — see § Tests below                                            |
+| DAG / lineage         | Visible: file → parsed → enriched → vector-indexed                                     |
+| Documentation         | Auto-generated schema docs via =dbt docs serve=                                        |
+
+* Derived models — the immediate payoff
+
+Derived models are SQL views composing multiple sources for
+cross-cutting queries. Each is roughly 30 lines of SQL.
+
+| Model               | What it does                                                                    |
+|---------------------+---------------------------------------------------------------------------------|
+| recent_activity     | nodes + clocks + dailies joined → last-7-days input                             |
+| stale_drafts        | TODO nodes, age > 30d, no recent edit → "what's rotting"                        |
+| connection_density  | node + outgoing_links + incoming_links count → orphan & hub map                 |
+| mood_arc            | daily entries + sentiment inferrer → time-series of vibe                        |
+| agenda_view         | TODO + scheduled + deadline + priority → personalized "next" view               |
+| clock_summary       | clock blocks aggregated by project/week → time accounting                       |
+| tag_taxonomy        | tag usage frequency + first-seen + last-seen → tag-drift detection              |
+
+The point: agents stop re-implementing the same join logic in
+every recipe — they =SELECT * FROM recent_activity= and trust
+the model. The Phase 21 vault-fact inferrers map naturally to
+dbt models. Cross-cutting queries collapse to one-line agent
+prompts.
+
+* Tests — quality bar at build time
+
+dbt ships a small set of built-in test types declared in YAML:
+
+- =unique= — every node =:ID:= is unique
+- =not_null= — every TODO node has a non-null priority
+- =accepted_values= — =todo_state= is one of (TODO, NEXT, DONE, CANCELLED)
+- =relationships= — every =roam_link.target_id= exists in =nodes=
+
+On top of that, custom data tests are arbitrary SQL that
+return failing rows:
+
+- "no orphans except in inbox.org"
+- "no captures older than 24h still in inbox"
+- "no broken =file:= links"
+- "no tags outside canonical tag list"
+- "every clock block is closed"
+- "every node with =:DEADLINE:= has a future-or-recent date"
+
+The build cycle: file save → save-hook commits → =dbt build=
+→ re-runs affected models + tests → if any fail, alert in the
+HEALTH card and captain's log.
+
+Why this changes the shape of the system: drift gets caught at
+write-time rather than query-time; agents trust the data layer
+unconditionally; tests are version-controlled alongside the
+models they guard; the @gardener job sharpens (read failing
+tests → propose fixes); and the supervision rule from DEC-006
+extends naturally into the data layer.
+
+* Snapshots — the retrospection layer
+
+dbt snapshots capture point-in-time state of a model,
+append-only. They are how org-llm earns a memory of its own
+shape over time.
+
+| Snapshot                   | Captures                                | Answers                                                       |
+|----------------------------+-----------------------------------------+---------------------------------------------------------------|
+| snap_project_status        | every project's :STATUS: weekly         | "How did Project X evolve from ideation to shipped?"          |
+| snap_tag_taxonomy          | tag-usage frequency monthly             | "When did :climate: emerge? When did :resolve-2025: die out?" |
+| snap_vault_size            | node count, embed coverage, file count daily | "What's my note-velocity over 12 months?"                |
+| snap_todo_age_distribution | open TODOs by age bucket weekly         | "Are my TODOs getting older?"                                 |
+| snap_connection_density    | link-in-degree per node monthly         | "Which notes are becoming hubs?"                              |
+
+Mechanism (one-liner per snapshot):
+
+#+begin_src sql
+{% snapshot snap_project_status %}
+  {{ config(strategy='check', check_cols=['status']) }}
+  SELECT id, status FROM {{ ref('parsed_nodes') }}
+  WHERE properties.kind = 'project'
+{% endsnapshot %}
+#+end_src
+
+dbt runs on a schedule — cron, the auto-embedder daemon
+piggyback, or =dbt build= on save — appending a new row only
+when the watched columns changed and preserving prior rows
+forever.
+
+Why this matters for the lead value: β (dream-state) gains a
+retrospection surface — agents can reflect on the *arc* of
+state, not just the current snapshot. α (coherence over time)
+finally has structured backing. @journalist becomes a real
+specialist with mood-arc, project-arc, and energy-arc all
+expressible as window queries over snapshots.
+
+* Materializations — perf tuning as declarative config
+
+Every dbt model gets a =materialized:= knob in YAML — flipping
+strategies requires no code changes.
+
+| Materialization | Behavior                                                  | When to use                                       |
+|-----------------+-----------------------------------------------------------+---------------------------------------------------|
+| view            | recomputed on every query                                 | small / cheap, always-fresh                       |
+| table           | built once at =dbt run=, queried fast                     | heavy aggregations, snapshot rolls, dashboards    |
+| incremental     | only new/changed rows reprocessed since last run          | large parsed-org tables on a 10k-file vault       |
+| ephemeral       | inlined into downstream models, never persisted           | throwaway intermediate logic                      |
+
+Practical plan for org-llm: parsed_nodes and parsed_links go
+incremental; recent_activity and agenda_view stay views;
+=snap_*= become tables; clock_summary and mood_arc become
+tables with daily refresh; helper logic stays ephemeral.
+
+Why this matters: no code changes when perf becomes a problem
+— flip view → table in YAML. The auto-embedder daemon already
+runs on a schedule and can piggyback =dbt build --select
+state:modified+=. Per DEC-012, =dbt_materialization_profile=
+becomes a per-device knob: =mobile= and =laptop= run the same
+models with different cache strategies.
+
+* Lineage + auto-docs — the system explains itself
+
+dbt produces an auto-generated DAG of every model and every
+column showing exactly what feeds what.
+
+#+begin_example
+  sources/                    models/                       consumers
+
+    org_files ──┐         ┌── parsed_nodes ──┐         ┌── @journalist
+                ├──parse──┤                  ├──join── @gardener
+    attachments ┘         └── parsed_links ──┘         └── @scribe
+                                                            recipes/
+                                                            dashboards/
+                                                            captain's log
+#+end_example
+
+Two payoffs:
+
+- *Impact analysis.* "If I change this source, what models and
+  agents break?" — answered by =dbt list --select +my_model+=.
+  Like a typed dependency graph, but for data.
+- *Self-documenting schema.* =dbt docs serve= generates a
+  navigable site with column descriptions, lineage, tests,
+  sample data, and search.
+
+Specific to org-llm:
+
+- Agents become orientation-aware (compatible with the Phase
+  24.5b primer) — dbt-docs is the schema reference they cite.
+- Users become legible to themselves at the schema level —
+  the vault has a queryable shape, documented.
+- @curator gains a complete checkable target — sweep model
+  descriptions for drift the same way it sweeps wiki pages.
+
+Cost: roughly free. dbt-docs ships with dbt. Adding column
+descriptions is a few hundred lines of YAML, written once.
+
+* Phase 29 self-coded tools land here
+
+When an agent runs the same complex query repeatedly, the
+audit log notices, and the Phase 29 detector flags it as a
+candidate. The LLM is asked: "express this as a dbt model" —
+producing =models/some_model.sql= plus =schema.yml= plus
+tests. dbt validates the proposal: builds the model, runs the
+tests, samples the output against past LLM-produced answers.
+Match rate above threshold? PASS. Else REJECT. The
+PR-shaped commit lands the model file in the dbt project, and
+future invocations are agent calls of =SELECT * FROM
+that_model= — instant, deterministic, no LLM round-trip.
+
+Why dbt makes this realistic:
+
+- The artifact is a SQL file, and LLMs are good at SQL.
+- Validation is built-in — dbt tests plus sample comparison.
+- Promotion is just a file commit — no registration ceremony.
+- It's reversible — a bad model is one =git revert= away.
+
+The shift this enables: the app gets *faster and more
+deterministic over time for your specific workflows*. That's
+the differentiator γ promised. dbt is the substrate that
+makes Phase 29 not just feasible but easy.
+
+* Dashboards — Phase 27 Superset connection
+
+With dbt models as the schema, Superset gets a clean
+dashboarding target. Phase 27 stops being optional and starts
+being load-bearing for the third quality criterion (substantial
+user value).
+
+| Dashboard         | Reads from                                       | What you see                                                  |
+|-------------------+--------------------------------------------------+---------------------------------------------------------------|
+| Vault life signs  | snap_vault_size, snap_todo_age_distribution      | growth + freshness over months                                |
+| Mood arc          | snap_mood_arc, parsed_nodes (dailies)            | weekly mood, annotated with project events                    |
+| Project arcs      | snap_project_status                              | each project's lifecycle (ideation → done / dropped)          |
+| Activity heatmap  | parsed_clocks, captain's_log                     | hours-per-day, projects, agents                               |
+| Tag galaxy        | snap_tag_taxonomy, connection_density            | which tags emerged, died, connect what                        |
+| Agent activity    | captain's_log                                    | who did what across all devices                               |
+| Drift watch       | failing dbt tests                                | hygiene issues across the vault                               |
+
+Mobile angle: Superset has mobile-friendly dashboards. The
+phone home screen becomes "your vault's pulse."
+
+@journalist upgrade: the agent references dashboards directly
+in narratives — "Your mood arc this month tracks closely with
+Project X's delivery cycle."
+
+Cost: Superset has a setup learning curve, but minimal once
+running. Phase 29 means an LLM can propose dashboards the same
+way it proposes models.
+
+* Cross-vault federation — the n=many future
+
+dbt sources can point at multiple repos.
+
+#+begin_example
+  ~/repos/my-vault/              shared/household-vault/         work/team-vault/
+    ~/org/                          ~/org/                          ~/org/
+         ↓ dbt sources              ↓                               ↓
+         └────── federation dbt project ──────┘
+                models that join across vaults
+#+end_example
+
+Real cases:
+
+- *Household.* Your vault + partner's + shared chores → "what
+  chores are due this week across the household."
+- *Work + personal.* Unified agenda, vault boundaries
+  respected for privacy.
+- *Team.* Your vault + three teammates' — shared project
+  rollup, individual scratchpads stay private.
+- *Self-multi-vault.* One person, three repos, federated
+  dashboards.
+
+Privacy: each vault is its own repo with its own access
+control. Federation reads with the user's existing
+credentials. The =:private:= tag excludes nodes from
+federated views. FOSS-public posture: federations are
+invitation, not extraction.
+
+When this lights up: post-1.0. Single-vault has to be solid
+first. But knowing it's coming shapes today's design — the
+parsed-org schema is portable across vaults, device-keyed
+config extends to vault-keyed, and agent reasoning respects
+vault scope. Cheap to bake in early; expensive to retrofit.
+
+* Where dbt is hosted in our arch
+
+dbt-core runs locally on each device. It's already in the
+=pyproject.toml= dependencies. There is no dbt-cloud — that's
+proprietary SaaS, excluded by DEC-010.
+
+The dbt project location is hybrid, mirroring the
+agent-baseline pattern:
+
+- *App-bundled layer* (=~/.local/share/org-llm/dbt/=) —
+  opinionated defaults: parsed-org models, baseline tests,
+  standard snapshots, canonical macros. Updated with app
+  upgrades.
+- *User-extended layer* (=~/org/dbt/=) — user overrides and
+  additions: custom models, custom dashboards, personal
+  snapshots. Committed in the vault repo, syncs across
+  devices via git.
+
+Both merged at runtime via =dbt_project.yml= nested project
+references. Same shape as agent personas, config, and recipes
+— consistent across the project.
+
+* Connections
+
+- [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011 — DB as universal interface]]
+- [[id:b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1][DEC-012 — Per-device configuration]]
+- [[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]] — git-canonical multi-device sync
+- [[file:architecture.org][architecture.org]] § Org is Code design rule
+- [[file:roadmap.org][roadmap.org]] § Phase 25 (DB-authoritative — scope revised by DEC-011), § Phase 27 (Superset), § Phase 29 (self-coded tools)

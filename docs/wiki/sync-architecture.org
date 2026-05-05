@@ -1,0 +1,419 @@
+:PROPERTIES:
+:ID:       5890fad2-9ba1-4801-ae8c-20daae475a8a
+:CREATED:  [2026-05-05]
+:END:
+#+TITLE: Sync architecture — git-canonical, DB-as-cache, multi-device
+#+FILETAGS: :wiki:architecture:sync:multi-device:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Files in a git repo are the canonical, durable
+storage of org-llm state; the DB is a regenerable local query
+cache; multi-device sync is git push/pull. The "two-way state
+change" problem dissolves because git already solves
+multi-writer distributed sync. Each device has its own DB
+derived from the synced files; loss of any device's DB is a
+re-derive event, not a data-loss event.
+
+*Expanded.* This collapses Phase 25's original "DB-authoritative
+inversion" framing into the simpler, narrower "DB-as-cache +
+git-canonical" shape per [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]]. The vault stays canonical;
+the DB becomes a universal query interface re-derived on demand.
+Sync stops being an org-llm concern and becomes a git concern,
+which is the right abstraction layer because git has already
+solved the hard parts (commit log as queue, three-way merge,
+distributed refs, history-preserving conflict resolution).
+
+* The architecture in one picture
+
+#+begin_example
+              ┌──────────────┐
+              │  git remote  │ ← canonical source of truth
+              └──────┬───────┘
+                     │ push / pull
+            ┌────────┴────────┐
+            │                 │
+        ┌───┴────┐       ┌────┴────┐
+        │ laptop │       │  phone  │
+        │ ~/org  │       │ ~/org   │  ← working copies (committed)
+        │  DB*   │       │  DB*    │  ← local query cache (gitignored)
+        └────────┘       └─────────┘
+                * regenerable on demand
+#+end_example
+
+What each layer is responsible for:
+
+- *git remote* — the durable, canonical source of truth.
+  Self-hosted (Forgejo, Gitea), GitHub, or a USB drive; org-llm
+  is agnostic. Holds every committed =.org= file, the dbt
+  project, agent personas, the literate config, the captain's
+  log, and any committed attachments.
+- *working copy (=~/org=)* — per-device checkout. Same files
+  on every device, by virtue of git. This is what the user
+  edits in Emacs (or an org-mode-aware editor on the phone).
+- *local DB (=~/.local/share/org-llm/org-llm.db=)* —
+  per-device SQLite cache. Parsed structure, embeddings,
+  derived metrics, agent traces, sidebar state. Gitignored.
+  Re-derivable from the working copy via =org-llm init=.
+- *org-llm runtime* — reads from the DB for speed; writes to
+  files (which the DB then re-ingests). Sync is delegated
+  entirely to git: a save hook commits, a sync layer pushes
+  and pulls.
+
+* The cycle: edit on one device, see it on another
+
+The happy path:
+
+#+begin_example
+  T0   laptop ─── synced ─── phone
+                  (same commit on remote)
+
+  T1   user edits ~/org/foo.org on laptop in Emacs
+
+  T2   on save (post-save hook):
+         git add foo.org
+         git commit -m "edit foo.org"
+         git push                        ← async; non-blocking
+
+  T3   phone next opens org-llm app
+         git pull                        ← auto-pull on app open
+         (or: timer fires every N min, or user runs `org-llm sync`)
+
+  T4   phone's local DB regenerates incrementally:
+         - which files changed since last DB ingest? (git diff)
+         - re-parse those files only, update DB rows
+         - sidebar refreshes, captures show up
+#+end_example
+
+The trigger for pull is a design knob, not a fixed rule:
+
+- *Default* — pull on app open and on capture-flow entry. Cheap,
+  user-visible, low surprise.
+- *Opt-in* — pull every N minutes (background timer) for users
+  who keep the app foreground.
+- *Manual* — =org-llm sync= always available; the explicit
+  control path for paranoid moments.
+
+Push is one-shot per save hook, fire-and-forget on a queue (see
+scenario 2). The user does not wait on a network round trip
+after pressing =C-x C-s=.
+
+* Scenarios — what happens when things get harder
+
+** Scenario 1 — happy path (laptop → phone, no conflicts)
+
+User saves =foo.org= on laptop; save hook commits + pushes;
+phone pulls on next app open; phone's DB regenerates
+incrementally for the changed files; phone sidebar shows the
+edit. No conflicts, no LLM calls, no special-casing — just the
+cycle above.
+
+** Scenario 2 — phone offline, 5 edits, reconnect
+
+The key insight: *git's commit log IS the queue*. There is no
+separate org-llm "outbox" to design.
+
+The save hook is split:
+
+- *commit* — always succeeds, runs synchronously on save. Local,
+  no network.
+- *push* — deferred to a sync layer that picks its moment.
+
+The sync layer triggers on:
+
+- network-up event (NetworkManager dispatcher on laptop;
+  Termux:API connectivity callback on phone),
+- app-foreground event,
+- a periodic timer (knob: =sync.push_interval_minutes=),
+- a manual =org-llm sync= invocation.
+
+When the phone reconnects after 5 offline edits, =git push=
+ships all 5 commits in a single round trip. Each commit
+remembers its own message and parent, so history is intact.
+
+The LCARS sidebar surfaces an unpushed-count icon ("3 commits
+pending push") so the user knows what's local-only. Tapping
+it triggers a manual sync.
+
+** Scenario 3 — concurrent same-file edits, non-overlapping
+
+Two devices edit different parts of the same =.org= file
+between syncs. Git's text-level three-way merge handles this
+for free: when both sides push and the second one pulls, git
+auto-merges the diffs and produces a clean commit.
+
+The caveat: line-region overlap creates *spurious* conflicts
+(both sides touched the line above the same heading; no
+semantic conflict, but the line ranges overlap). Mitigation
+ladder, cheapest first:
+
+- =.gitattributes merge=union= for append-shaped files
+  (=inbox.org=, =captains-log-*.org=, doctor-runs). Both sides'
+  lines get concatenated; spurious conflicts disappear.
+- An =org-format= step in =org-llm doctor= for whitespace
+  canonicalization (consistent indent, trailing newlines, tag
+  alignment). Removes the dumbest sources of spurious diff.
+- For real semantic conflicts, fall through to scenario 4.
+
+** Scenario 4 — concurrent same-heading edits (the hard one)
+
+Both devices edit the *same heading* in the same file between
+syncs — the laptop sets =:tags:= while the phone changes
+=TODO= state, for example. Git's line-based merge can't tell
+these are semantically compatible; it just sees overlapping
+line ranges and produces a conflict.
+
+*Target solution:* an *org-aware merge driver* registered via
+=.gitattributes=:
+
+#+begin_example
+  *.org    merge=org-aware
+#+end_example
+
+The driver:
+
+1. Parses base, local, and remote into an org-element AST.
+2. Walks heading-by-heading, matching by stable property
+   =:ID:= where present.
+3. For each heading, compares (title, priority, todo state,
+   tags, properties drawer, body) as independent slots.
+4. Different slots changed on each side → union (apply both).
+5. Same slot changed on both sides with different values →
+   emit a standard git conflict marker scoped to that slot.
+6. Bodies that are paragraph-shaped fall back to the standard
+   text three-way merge.
+
+Implementation cost: ~200–500 lines of Python wrapping
+=orgparse= for parse, a deterministic renderer for round-trip,
+and a thin git driver shim. Phase 25.x sub-phase or sibling
+Phase 32 candidate; the cost is manageable because the parser
+already exists in =org_llm/= and the renderer is an
+inverse-function unit-test target.
+
+*Fallback:* until the org-aware driver lands, standard git
+conflict markers are always available. The user resolves in
+Emacs with =smerge-mode=. This is degraded but correct.
+
+** Scenario 5 — agent edits via DB while user edits file (single device)
+
+This is the agent-vs-human case, *within* a single device. Sync
+across devices is not the issue; the question is whether the
+agent's intended write collides with the user's open buffer.
+
+This is governed by the [[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][Three Laws of org-llm Data Integrity]];
+that page is the canonical statement. Brief recap of the three
+policies:
+
+- *(a) Agent defers to user* — the engine checks for an open
+  dirty Emacs buffer; if found, the agent's change is queued
+  and applied after the user's save. Best UX, most engineering.
+- *(b) =auto-revert-mode= handles read-only buffers* —
+  out-of-the-box Emacs behavior covers the bulk of cases; this
+  is the *default*.
+- *(c) User always wins; agent retries* — if a stale user save
+  overwrites the agent's edit, git history keeps the agent's
+  commit, and the engine re-attempts on the next sync cycle.
+  The always-on safety net.
+
+Default to (b); upgrade to (a) for files with active concurrent
+flows; (c) is structural.
+
+** Scenario 6 — phone edit + laptop's nightly @gardener
+
+This composes scenarios 4 and 5. The phone makes a quick
+hand-edit at 10pm; the laptop's nightly =@gardener= run kicks
+off at 3am, pulls, edits, pushes. If phone-edit and gardener-edit
+land in the same heading → scenario 4. If different headings →
+scenario 3 / clean merge. If the phone is offline at 3am →
+scenario 2 (gardener's commits queue on the laptop's push, phone
+pulls them on next app open).
+
+The orthogonality is the design payoff: *phone-vs-laptop and
+human-vs-agent compose independently*. Each axis is solved by
+its own mechanism (git for device sync; the Three Laws for
+human/agent collision); they do not need a joint solution.
+
+Operational rule (per [[id:b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1][DEC-012]]): schedule write-active agents
+on a single primary device (laptop is the default). Mobile
+devices run agents read-only by default via the
+=agent.write_active=false= per-device knob. The user can flip
+this on the phone for short-lived "phone is primary today"
+windows; the knob lives in the device-keyed Config table.
+
+** Scenario 7 — phone offline, capture a quick thought
+
+Capture must work without an LLM. The capture flow:
+
+1. User taps capture, types text, hits save.
+2. Local write to =inbox.org= (or daily file): raw text +
+   timestamp + minimal metadata (capture device, capture id).
+3. Save hook commits locally; push deferred (scenario 2).
+4. The capture row in the DB is flagged =enriched=false= (or
+   simply has nulls in the enrichment columns).
+
+When the phone reconnects:
+
+- Push commits.
+- A background job (the same one that runs nightly =@scribe=)
+  scans for unenriched captures, calls cloud LLM for
+  classification / linking / tagging, and commits the
+  enrichments as a separate commit ("📝 enriched 3 inbox
+  captures"). The two-commit shape preserves the user's raw
+  text as a clean diff and makes enrichment auditable.
+- A user-triggered =@scribe enrich inbox= verb is also
+  available for "do it now" moments.
+
+The point: *capture latency is local-disk latency, never
+network latency*. This is non-negotiable for the daily-driver
+leg.
+
+** Scenario 8 — DB drift across devices
+
+If every device re-derives its DB from the same files, in
+principle every device's DB should be identical. In practice:
+
+*What stays identical:*
+
+- Parsed structure (headings, bodies, properties, tags) —
+  pure function of the org files.
+- Embeddings — *if* every device pins the same embed model and
+  version (=embed.model=, =embed.version= as committed config
+  knobs).
+- Captain's log (per [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]]) — the log file itself is
+  committed, so its rendered form is the same on every device.
+
+*What stays per-device:*
+
+- Local sidebar caches and ephemeral runtime state.
+- Insight engagement state (which insights this device has
+  shown, when, for how long).
+- Per-device configs ([[id:b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1][DEC-012]]) — the laptop runs nightly
+  agents; the phone has GPS context; etc.
+
+*What could drift, and how to mitigate:*
+
+- Embedding drift if devices run different model versions →
+  pin =embed.model= and =embed.version= in committed config;
+  =org-llm doctor= warns on mismatch.
+- Inferrer drift if a derivation function isn't pure in the
+  synced state → design rule: every inferrer reads only from
+  committed files + pinned config. No clock, no
+  non-deterministic model temperatures, no device-local random
+  seeds in the cache columns.
+
+The DB cannot corrupt in a way the files cannot: worst case,
+re-derive. Zero permanent data loss. This is the *thesis* of
+the architecture.
+
+** Scenario 9 — image attached to a node
+
+Three storage choices, ladder by complexity:
+
+- *(a) Commit images directly* — simplest. Default for
+  attachments under ~1MB. =git= handles it; nothing special.
+- *(b) =git-lfs=* — knob =vault_lfs=true= for media-heavy
+  vaults. Standard tooling, supported on Termux for the phone
+  case. Recommended once the vault crosses ~100MB total.
+- *(c) External object store* (S3-compatible / MinIO / Garage)
+  — power users with large media archives. The commit holds a
+  manifest entry; the object store holds the bytes. Out of
+  scope for the default install.
+
+Mobile caveat: Termux handles git-lfs and image viewers;
+*live recording* (audio/video capture from inside the app)
+is deferred to a later phase.
+
+The DB-as-universal-interface payoff: attachments live in an
+=attachments(node_id, kind, path, size, hash)= table that is
+queryable identically on laptop and phone, regardless of which
+storage tier the bytes are on. Agents query the table; the
+storage tier is an implementation detail.
+
+** Scenario 10 — catastrophic loss (phone wipe)
+
+Phone is wiped or lost. Recovery:
+
+#+begin_example
+  $ git clone <remote> ~/org
+  $ org-llm init                 # re-derives DB from files
+#+end_example
+
+Everything that was committed is back. *What is NOT recovered:*
+in-flight unpushed commits at the time of the wipe. Those are
+gone with the device. Mitigation: =sync.push_interval_minutes=
+defaulted to a tight value on mobile (push frequently).
+
+Per [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]] the captain's log is committed, so it survives a
+wipe. Insight engagement state is per-device and is not
+recovered, but that is a feature: a wiped phone is a fresh
+device that hasn't seen any insights yet.
+
+This scenario is the test of the thesis. *"Files canonical,
+every device interchangeable"* means a phone wipe is not a
+data-loss event; it is a re-clone event. The architecture
+either passes this test or it doesn't, and it does.
+
+* Conflict resolution: git's tools, an org-aware upgrade path
+
+A summary of the conflict-resolution stack in priority order:
+
+1. *Standard git auto-merge* — non-overlapping line edits,
+   resolved automatically. Free.
+2. *=.gitattributes merge=union=* — for append-shaped files
+   (=inbox.org=, =captains-log-*.org=, doctor runs). Both
+   sides' lines concatenated. Removes spurious overlap
+   conflicts on logs.
+3. *=org-format= canonicalization step* — =org-llm doctor=
+   normalizes whitespace, tag alignment, trailing newlines.
+   Removes the dumbest sources of spurious diff.
+4. *Org-aware merge driver* (target) — heading-aware,
+   slot-by-slot three-way merge. Handles the same-heading
+   different-aspect case cleanly. Phase 25.x or Phase 32.
+5. *Standard git conflict markers* — always-on fallback. User
+   resolves in Emacs =smerge-mode=. Degraded but correct.
+
+* What goes in the synced repo vs what stays local
+
+| Committed (canonical, in git)         | Local only (regenerable, gitignored)   |
+|---------------------------------------+----------------------------------------|
+| =*.org= notes (the vault)             | SQLite DB (=org-llm.db=)               |
+| =dbt= project + models + tests        | Embeddings cache                       |
+| Agent personas (=*.persona.org=)      | =opencode= session caches              |
+| Literate config (=org-llm-config.org= | Computed search / walk results         |
+| with device-aware properties)         | LCARS sidebar runtime state            |
+| =captains-log-*.org=                  | Daemon heartbeats / lockfiles          |
+| Attachments (committed or LFS)        | =/tmp= scratch, transient orchestration|
+
+The rule is mechanical: *if you cannot re-derive it from the
+committed state plus a fresh =org-llm init=, it must be
+committed*. If you can, it should not be.
+
+* Open design questions
+
+- *Trigger frequency for pull.* App-open is good for the phone,
+  but the laptop runs Emacs continuously — does it need a
+  periodic pull, an =auto-revert-mode=-style file-watch over
+  =.git/refs=, or something else? Test under daily-driver use.
+- *Org-aware merge driver — implementation timing.* Phase 25.x
+  sub-phase, sibling Phase 32, or post-1.0? Depends on how
+  often scenario 4 actually fires under real two-device use.
+- *Per-device captain's log entry IDs.* Today the log is
+  per-device-rotated; if both devices commit log entries the
+  IDs need to be globally unique (UUIDs or device-prefixed) to
+  avoid join collisions in the DB.
+- *Attachment storage default.* Commit-direct vs git-lfs vs
+  external object store — what is the right default for the
+  FOSS install, and what are the upgrade paths?
+- *Mobile background-sync battery cost.* Aggressive push +
+  pull on the phone is a battery question; needs measurement.
+
+* Connections
+
+- [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011 — DB as universal interface]]
+- [[id:b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1][DEC-012 — Per-device configuration]]
+- [[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][Three Laws of org-llm Data Integrity]]
+- [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]] — the forward-direction implementation
+- [[file:architecture.org][architecture.org]] § Org is Code design rule
+- [[file:roadmap.org][roadmap.org]] § Phase 25 (DB-authoritative inversion — scope revised by DEC-011)
