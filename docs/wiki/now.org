@@ -119,6 +119,16 @@ deferred — user runs =org-llm tracker init= interactively post-nap.
   arch + opencode main-face take focus; don't let it rot. Circle-back
   CLI-love opportunities flagged: OpenTofu integration, =pass=
   integration, "tofu-y" CLI verbs in general. Saved as feedback memory.
+- *Conversational-discoverability question* (third-nap pre-sleep):
+  classical UI teaches via tooltips / placeholder / pre-filled prompts.
+  Conversation is now our primary UI — how do we deliver those teach-
+  features right up front? Quick directional sketch given pre-sleep:
+  (1) first-touch persona self-intros, (2) trailing teach ("next time
+  you can…"), (3) suggested-follow-up chips post-response, (4) "what
+  can you do here?" as first-class context-aware verb. Stub
+  =conversational-discoverability.org= post-nap; this connects directly
+  to DEC-015 (org-mode-aware chat surface) — the chat buffer is where
+  most of these affordances will live.
 
 *Recommended afternoon block (post-nap):*
 
