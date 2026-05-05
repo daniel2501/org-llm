@@ -170,18 +170,22 @@ ownership is the routing layer below.
   "no agent" / "DB object" / similar.
 
 *** Vault-facts inferrers — pre-classified CORE
-- *Decision:* CORE + agent-ify (2026-05-05) — agent is *not* an inferrer;
-  agent /manages and deploys/ inferrers (registers them, monitors freshness,
-  proposes new ones). Useful general pattern: agent-as-manager-of-substrate,
-  distinct from agent-as-substrate.
+- *Decision:* SUBSUMED (re-walk 2026-05-05 per subsumption-scan) — Phase 21
+  inferrer engine (=vault_facts.py=, 951 LoC of register/cache/TTL machinery)
+  was "dbt without dbt"; it retires. The /capability/ (per-vault facts)
+  survives as dbt models with =materialized: table=, landing in Phase 25.x.
+  Earlier "CORE + agent-ify (agent-as-manager pattern)" verdict still holds
+  in spirit — the agent now manages dbt models, not a custom inferrer
+  registry.
 - *Where it lives:* =org_llm/vault_facts.py= (Phase 21)
 - *What it does:* Derives per-vault facts (active projects, recurring tags, agenda
   shape, capture habits) used as deterministic context for agents.
 - *What depends on it:* Manager pre-fetch, resolver registry, recipes, capture flow.
 - *Cut-criterion test:* Without it, agents are uncalibrated to /this/ vault; β still
   technically ships but quality degrades to "generic LLM with file access".
-- *Decision:*
-- *Walkthrough notes:*
+- *Walkthrough notes:* See § Subsumed / dead code for the engine retirement.
+  Capability lives on as dbt models per dbt-pipeline.org § Snapshots / derived
+  models.
 
 *** Pre-flight resolver registry — pre-classified CORE
 - *Decision:* CORE + agent-ify (agent-as-manager pattern, 2026-05-05) — agent
@@ -256,14 +260,17 @@ ownership is the routing layer below.
   manages embed-model pinning (sync-arch Scenario 8 mitigation), scoring
   strategies, retrieval quality monitoring; proposes scoring-fn upgrades from
   captain's-log retrieval-failure patterns. Embedding pipeline + ann-index
-  stay deterministic code.
+  stay deterministic code. *Re-walk 2026-05-05 per subsumption-scan:* PARTIAL
+  subsume — vector search + ann-index are real (effect-tier MCP); ranking
+  helpers + score-aggregation may move to dbt (data-tier). Verdict stands.
 - *Where it lives:* =org_llm/search.py=
 - *What it does:* Semantic + lexical search over the vault index; backs =search_notes=
   and =ask_notes=.
 - *What depends on it:* Researcher agent, ask_notes tool, recipes that walk the graph.
 - *Cut-criterion test:* Without it, agents fall back to grep — usable but β quality
   drops. Probably load-bearing for "vault thinks with you".
-- *Walkthrough notes:*
+- *Walkthrough notes:* Ranking helpers retire to dbt at Phase 25.x; vector +
+  ann-index remain. See § Subsumed § Modules subsumed for specific candidates.
 
 *** Cloud-or-local routing — pre-classified CORE
 - *Where it lives:* =org_llm/cloud.py= + =org_llm/creds.py=
@@ -282,14 +289,18 @@ ownership is the routing layer below.
 - *Decision:* CORE + agent-ify (agent-as-manager pattern, 2026-05-05) — agent
   manages the recipe registry (proposes new recipes from captain's-log
   patterns, retires unused, audits A/B-bar compliance per memory). Recipe
-  execution stays deterministic via recipe_runner.
+  execution stays deterministic via recipe_runner. *Re-walk 2026-05-05 per
+  subsumption-scan:* infra stays CORE; the *content* shrinks dramatically —
+  ~350 LoC of loser-recipe runners retires (see § Subsumed). Verdict stands.
 - *Where it lives:* =org_llm/orchestration.py= + =org_llm/recipe_runner.py=
 - *What it does:* The "dbt models" surface — declarative recipes that compose agents,
   tools, and resolvers into reproducible runs.
 - *What depends on it:* All recipes; manager orchestration; the dbt-distro thesis.
 - *Cut-criterion test:* Without it, agents run ad-hoc only. β ships partially; the
   dbt-distro half does not.
-- *Walkthrough notes:*
+- *Walkthrough notes:* Loser-recipe runners (5 of them, ~350 LoC) move to
+  Subsumed § CLI verbs / Modules. =count_across_vault= + =weather_aware_agenda=
+  remain in core.
 
 *** Self-coded tools (Phase 29) — pre-classified CORE
 - *Decision:* CORE + agent-ify (agent-as-manager pattern, 2026-05-05) — agent
@@ -556,13 +567,104 @@ Both reasons (paid-for-and-lost vs agent-tool-use baseline +
 subsumed by dbt-pipeline) make these dead code. Delete when
 the corresponding dbt models ship in Phase 25.1.
 
-** Other subsumed items (TBD)
+** Other subsumed items (2026-05-05 scan)
 
-The 2026-05-05 broader subsumption scan (background subagent,
-output at =/tmp/subsumption-scan-2026-05-05.md=) is identifying
-additional CLI verbs / MCP tools / module utilities that the
-dbt-pipeline makes moot. Findings will be transcribed here on
-completion.
+Tally: 35 clearly subsumed, 21 partially. Top retirements (~3000 LoC):
+=org_tools.py=, =vault_facts.py=, =insights.py= generators, =walk.py=
+track-selection, 5 loser recipe runners. =**= flags top-5 retirements.
+
+*** CLI verbs subsumed
+
+| Verb                          | Lives           | LoC | dbt replacement                                      | Class     | Notes |
+|-------------------------------+-----------------+-----+------------------------------------------------------+-----------+-------|
+| =org-llm search=              | cli.py:3453     |   - | =parsed_nodes= + sqlite-vec join                     | clear     |       |
+| =org-llm walk=                | cli.py:13152    |   - | =walk_candidates= view                               | clear     | **    |
+| =org-llm stale=               | cli.py:21709    |   - | =stale_drafts= model                                 | clear     |       |
+| =org-llm tag=                 | cli.py:13738    |   - | =tag_taxonomy= + =org_tag_suggest=                   | clear     |       |
+| =org-llm history b/s/tangle=  | cli.py:21591    |   - | =cli_invocations= / =llm_calls= / =recent_activity=  | clear     |       |
+| =org-llm crew-log=            | cli.py:7734     |   - | =recent_activity= model                              | partial   |       |
+| =org-llm baselines=           | cli.py:7660     |   - | =agent_baselines= model                              | partial   |       |
+| =org-llm performance=         | cli.py:6788     |   - | =llm_calls= model                                    | partial   |       |
+| =org-llm context show=        | cli.py:20102    |   - | context-card model                                   | partial   |       |
+| =org-llm splash=              | cli.py:2916     |   - | aggregate model + shim                               | partial   |       |
+
+*** MCP tools subsumed (clear)
+
+| Tool                  | Line  | LoC | dbt replacement                                     | Class | Notes |
+|-----------------------+-------+-----+-----------------------------------------------------+-------+-------|
+| =org_grep=            | 3515  |   - | =parsed_content= regex SELECT                       | clear | **    |
+| =org_count_matches=   | 3536  |   - | =parsed_content= aggregate                          | clear |       |
+| =org_outline=         | 3573  |   - | =parsed_nodes WHERE file=?=                         | clear |       |
+| =org_tag_index=       | 3592  |   - | =tag_taxonomy=                                      | clear |       |
+| =org_agenda=          | 3620  |   - | =agenda_view=                                       | clear |       |
+| =org_link_graph=      | 3647  |   - | =link_graph= recursive CTE                          | clear |       |
+| =org_backlinks=       | 3673  |   - | =parsed_links WHERE target_id=?=                    | clear |       |
+| =org_orphans=         | 3692  |   - | =connection_density= filter                         | clear |       |
+| =org_property_search= | 3715  |   - | =parsed_properties=                                 | clear |       |
+| =org_id_find=         | 3739  |   - | =parsed_nodes= LIKE                                 | clear |       |
+| =org_clock_summary=   | 3945  |   - | =clock_summary=                                     | clear |       |
+| =org_drill_review_due=| 3969  |   - | =parsed_properties= filter                          | clear |       |
+| =org_attach_list=     | 3987  |   - | =attachments= table                                 | clear |       |
+| =org_refile_candidates=| 4061 |   - | =refile_candidates= model (proposed)                | clear |       |
+| =org_tag_suggest=     | 3606  |   - | =tag_taxonomy= JOIN tokens                          | clear |       |
+| =org_file_meta=       | 3559  |   - | =parsed_nodes= aggregate                            | clear |       |
+| =list_recent_nodes=   | 486   |   - | =recent_activity= (already exists)                  | clear |       |
+| =list_dailies=        | 510   |   - | =daily_notes= (already exists)                      | clear |       |
+| =list_nodes_by_tag=   | 462   |   - | =nodes_by_tag= (already exists)                     | clear |       |
+| =get_vault_stats=     | 581   |   - | =parsed_nodes= + =files= aggregate                  | clear |       |
+| =find_stale_notes=    | 1440  |   - | =stale_drafts=                                      | clear |       |
+| =recent_files=        | 1878  |   - | =recent_activity= per-file                          | clear |       |
+| =vault_profile/facts= | 3896  |   - | =vault_facts= table                                 | clear |       |
+| =code_search=         | 1839  |   - | =code_index= model                                  | clear |       |
+| =doom_packages/binds= | 4020  |   - | =doom_config= source + model                        | clear |       |
+| =recent_perf_alerts=  | 2313  |   - | =llm_calls= aggregate                               | clear |       |
+| =reflect_on_log=      | 2925  |   - | =recent_activity= + =llm_calls= join                | clear |       |
+| =export_log_to_org=   | 2954  |   - | =recent_activity= + render                          | clear |       |
+
+*** MCP tools partially subsumed (wrapper survives)
+
+| Tool                                    | Line       | What stays                                           | Class   |
+|-----------------------------------------+------------+------------------------------------------------------+---------|
+| =search_notes=                          | 271        | hybrid scoring + signal-boost; body becomes SELECT   | partial |
+| =ask_notes=                             | 304        | LLM narration; search half subsumed                  | partial |
+| =infer_capture_style=                   | 843        | inference offline; read becomes model                | partial |
+| =walk_pick_targets= / =walk_review_pending= | 3139,3487 | session-state stays; SQL → =walk_candidates=      | partial |
+| =get_node=                              | 430        | LLM-friendly framing as 5-line wrapper               | partial |
+| =weather_for_agenda= / =weather_tag_suggest= | 3830,3863 | weather foreign; agenda half is =agenda_view=    | partial |
+| =dbt_*= (status/doctor/run/test/build…) | 1982–2109  | drives dbt; effect-shaped wrapper                    | partial |
+
+*** Modules subsumed
+
+| Module                              | LoC  | dbt replacement                                            | Class   | Notes |
+|-------------------------------------+------+------------------------------------------------------------+---------+-------|
+| =org_llm/org_tools.py=              | 1174 | =parsed_*= + =agenda_view= + =link_graph= + =tag_taxonomy= | clear   | **    |
+| =org_llm/walk.py= selectors         | ~120 | =walk_candidates= view                                     | clear   | **    |
+| =org_llm/vault_facts.py=            |  951 | 9 inferrers → 9 dbt models; ~600 LoC cut                   | partial | **    |
+| =org_llm/insights.py=               |  826 | 6 =_gen_*= → 6 models; narration stays; ~250 LoC cut       | partial | **    |
+| =org_llm/search.py=                 |  573 | recent/keyword/tag → views; vector stays; ~150 LoC cut     | partial |       |
+| =org_llm/recipe_runner.py=          |  593 | 5 loser runners delete; ~250 LoC cut                       | partial | **    |
+| =org_llm/orchestration.py=          |  259 | =_RECIPES= losers delete; ~100 LoC cut                     | partial |       |
+| =org_llm/code_index.py=             |    - | becomes dbt source + models                                | partial |       |
+
+*** Utility helpers subsumed
+
+| Helper                                | Where               | dbt replacement                                | Class   |
+|---------------------------------------+---------------------+------------------------------------------------+---------|
+| =_vault_id_index=                     | org_tools.py:431    | SELECT id,title,file,line FROM =parsed_nodes=  | clear   |
+| =_file_outlinks=                      | org_tools.py:475    | =parsed_links WHERE source_file=?=             | clear   |
+| =merged_tags_sql=                     | db.py               | promote to dbt macro                           | clear   |
+| =_score= / =_apply_signal_boosts=     | search.py:251       | =boosted_search_results= model                 | clear   |
+| =org_llm/data/= fact-card data        | -                   | dbt seed                                       | partial |
+| =_cfg(session, …)= reads              | mcp_server.py       | once Config is a dbt model → SELECT            | partial |
+
+** Cross-cutting note
+
+Codebase has 6 parallel "dbt-without-dbt" subsystems — recipes, =walk=,
+=insights=, =vault_facts=, =org_tools=, and MCP =list_*=/=get_*= tools — each
+implementing manager-pre-fetch via bespoke SQL. Post-cull all six collapse to
+=SELECT * FROM <model>=, leaving one query primitive, one test target, one set
+of column descriptions. Separate scan owed: do =validation_configs/*.yaml=
+vault-shape checks migrate to dbt =schema.yml= tests?
 
 * Follow-up extractions (placeholder)
 
