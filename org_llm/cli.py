@@ -20839,6 +20839,167 @@ def self_log():
     console.print(p.read_text())
 
 
+# ── tracker: @tracker (Boothby) self-hosted dev/project tracking ──────────
+#
+# Phase 29.0 — self-coded tools seed. Three deterministic verbs that flip
+# dev-tracker.org from a wiki page the user manually edits to a vault-
+# resident surface @tracker can own:
+#
+#   org-llm tracker init   — bootstrap ~/org/org-llm-dev-tracker.org from
+#                            the wiki copy (idempotent; --force overwrites).
+#   org-llm tracker review — read-only "what's in flight": STARTED claims,
+#                            :@active:/:@plan: TODOs, recent commits,
+#                            blockers / surprises.
+#   org-llm tracker pace   — read-only EFFORT vs. actual; flags drift.
+#
+# Per project_tracker_self_hosting_goal: end goal is org-llm itself owning
+# the tracking via @tracker. These verbs are the deterministic skeleton
+# the persona narrates on top of.
+# Per DEC-011: vault files are canonical; DB is universal interface.
+
+tracker_app = typer.Typer(
+    help="@tracker — self-hosted dev/project tracking (init / review / pace).",
+    cls=PrefixGroup,
+    invoke_without_command=True,
+)
+app.add_typer(tracker_app, name="tracker", rich_help_panel="Maintenance")
+
+
+@tracker_app.callback(invoke_without_command=True)
+def _tracker_root(ctx: typer.Context):
+    """@tracker — self-hosted dev/project tracking.
+
+    Bare `org-llm tracker` shows this help. Verbs:
+        org-llm tracker init     — bootstrap vault tracker from wiki copy
+        org-llm tracker review   — what's in flight (read-only)
+        org-llm tracker pace     — EFFORT vs. actual (read-only)
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    click_cmd = typer.main.get_command(tracker_app)
+    try:
+        click_cmd.main(args=["--help"], prog_name="org-llm tracker",
+                        standalone_mode=False)
+    except SystemExit:
+        pass
+
+
+def _tracker_target_path() -> Path:
+    """Resolve the canonical vault tracker path.
+
+    Priority:
+      1. $ORG_LLM_TRACKER_PATH (explicit override; mostly for tests)
+      2. $ORG_LLM_ORG_DIR / org-llm-dev-tracker.org
+      3. ~/org/org-llm-dev-tracker.org
+    """
+    from .tracker import DEFAULT_TRACKER_FILENAME
+    override = os.environ.get("ORG_LLM_TRACKER_PATH")
+    if override:
+        return Path(override).expanduser()
+    org_dir = os.environ.get("ORG_LLM_ORG_DIR") or "~/org"
+    return Path(org_dir).expanduser() / DEFAULT_TRACKER_FILENAME
+
+
+def _tracker_claims_path() -> Path:
+    """Resolve the active-claims file used by `tracker review`.
+
+    Priority:
+      1. $ORG_LLM_CLAIMS_PATH (test override)
+      2. $ORG_LLM_ORG_DIR/.opencode/active-claims.org if it exists
+      3. The wiki copy (current canonical source per active-claims.org)
+    """
+    override = os.environ.get("ORG_LLM_CLAIMS_PATH")
+    if override:
+        return Path(override).expanduser()
+    org_dir = os.environ.get("ORG_LLM_ORG_DIR")
+    if org_dir:
+        candidate = Path(org_dir).expanduser() / ".opencode" / "active-claims.org"
+        if candidate.exists():
+            return candidate
+    from .tracker import WIKI_ACTIVE_CLAIMS
+    return WIKI_ACTIVE_CLAIMS
+
+
+def _tracker_repo_root() -> Path:
+    """Repo root for `git log` calls — the org-llm checkout."""
+    return Path(__file__).resolve().parent.parent
+
+
+@tracker_app.command("init")
+def tracker_init(
+    force: Annotated[bool, typer.Option("--force", "-f",
+            help="Overwrite an existing tracker file at the target path")] = False,
+    target: Annotated[str, typer.Option("--target", "-t",
+             help="Override target path (default: $ORG_LLM_ORG_DIR/"
+                  "org-llm-dev-tracker.org or ~/org/org-llm-dev-tracker.org)")] = "",
+    source: Annotated[str, typer.Option("--source", "-s",
+             help="Override source path (default: docs/wiki/dev-tracker.org "
+                  "in the org-llm checkout)")] = "",
+):
+    """Bootstrap ~/org/org-llm-dev-tracker.org from the wiki copy.
+
+    Idempotent: if the target file already exists, prints a warning
+    and bails (exit 0). Pass --force to overwrite.
+    """
+    from .tracker import init_tracker, WIKI_DEV_TRACKER
+    target_p = Path(target).expanduser() if target else _tracker_target_path()
+    source_p = Path(source).expanduser() if source else WIKI_DEV_TRACKER
+    result = init_tracker(target_p, source_p, force=force)
+    if result.created:
+        hail(f"@tracker initialized at {result.target}")
+        on_screen(f"  source: {result.source}")
+        on_screen(f"  bytes:  {result.bytes_written}")
+        on_screen("[dim]Next:[/dim] [bold]org-llm tracker review[/bold]")
+        return
+    # Not created — figure out why
+    if "source missing" in result.skipped_reason:
+        red_alert(result.skipped_reason)
+        raise typer.Exit(1)
+    on_screen(f"[yellow]@tracker init skipped:[/yellow] {result.skipped_reason}")
+    raise typer.Exit(0)
+
+
+@tracker_app.command("review")
+def tracker_review(
+    commits_n: Annotated[int, typer.Option("--commits", "-n",
+                help="How many recent commits to surface (default 20)")] = 20,
+    target: Annotated[str, typer.Option("--target", "-t",
+             help="Override tracker file to read (default: vault tracker, "
+                  "or wiki copy if vault tracker missing)")] = "",
+):
+    """What's in flight: STARTED claims, @active/@plan TODOs, recent commits, blockers."""
+    from .tracker import review_tracker, WIKI_DEV_TRACKER
+    if target:
+        tracker_p = Path(target).expanduser()
+    else:
+        # Prefer vault tracker if it exists; fall back to wiki copy
+        tracker_p = _tracker_target_path()
+        if not tracker_p.exists():
+            tracker_p = WIKI_DEV_TRACKER
+    claims_p = _tracker_claims_path()
+    repo_root = _tracker_repo_root()
+    report = review_tracker(tracker_p, claims_p, repo_root, commits_n=commits_n)
+    on_screen(report)
+
+
+@tracker_app.command("pace")
+def tracker_pace(
+    target: Annotated[str, typer.Option("--target", "-t",
+             help="Override tracker file to read (default: vault tracker, "
+                  "or wiki copy if vault tracker missing)")] = "",
+):
+    """EFFORT vs. actual: flags drift, surfaces top-3 worst overruns."""
+    from .tracker import pace_tracker, WIKI_DEV_TRACKER
+    if target:
+        tracker_p = Path(target).expanduser()
+    else:
+        tracker_p = _tracker_target_path()
+        if not tracker_p.exists():
+            tracker_p = WIKI_DEV_TRACKER
+    report = pace_tracker(tracker_p)
+    on_screen(report)
+
+
 # ── dbt: SQL transformations on top of the indexer schema ─────────────────
 #
 # org-llm ships a starter dbt project that materializes analytics-ready

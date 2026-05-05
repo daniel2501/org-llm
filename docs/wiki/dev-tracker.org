@@ -61,7 +61,13 @@ on [2026-05-05]. It is kept for historical reference only —
 DO NOT EDIT. All live tracking happens in
 =~/org/org-llm-dev-tracker.org=.
 
-** What this is
+The original sections of the dev tracker follow as top-level
+siblings of this Archive marker (rather than nested under it) so
+the underlying outline structure stays unchanged from what
+=tracker init= bootstrapped into the vault — the wiki snapshot
+and the vault file remain byte-for-byte the same outline.
+
+* What this is
 
 The single source of truth for *active* org-llm development —
 what to do next, what's blocked, what needs validating, what
