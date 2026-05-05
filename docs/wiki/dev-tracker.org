@@ -1,17 +1,67 @@
 :PROPERTIES:
 :ID:       9096622a-689c-4bb1-8e32-1654bce48d1c
 :CREATED:  [2026-05-03]
+:MOVED:    [2026-05-05]
 :END:
-#+TITLE: Dev tracker — central hub for all org-llm development
-#+FILETAGS: :wiki:meta:tracker:agenda:
-#+OPTIONS: toc:2 num:nil
+#+TITLE: Dev tracker — MOVED to ~/org/org-llm-dev-tracker.org
+#+FILETAGS: :wiki:meta:tracker:moved:
+#+OPTIONS: toc:1 num:nil
 #+TODO: TODO(t) NEXT(n) STARTED(s!) HOLD(h@) WAITING(w@) | DONE(d!) CANCELLED(c@)
 #+PRIORITIES: A B C
 #+CATEGORY: dev
 
 #+STARTUP: overview content
 
-* What this is
+* Moved                                                          :redirect:
+
+*Summary.* The dev tracker's canonical location is now
+=~/org/org-llm-dev-tracker.org= (vault-resident, syncs via git per
+DEC-011 in [[file:decisions.org][decisions.org]]).
+Phase 29.0 — self-hosted via @tracker (Boothby).
+
+*Expanded.* This file used to be the live tracker. As of
+[2026-05-05] it's a redirect stub kept here so:
+
+- the =:ID:= above stays valid for cross-refs from
+  [[file:now.org][now.org]], [[file:cull.org][cull.org]],
+  [[file:decisions.org][decisions.org]], [[file:sdlc.org][sdlc.org]], etc.
+- the wiki keeps a discoverable breadcrumb pointing at the new
+  canonical surface
+- the historical pre-migration snapshot is preserved as
+  =* Archive= below for anyone walking the repo's history
+
+** How to use the new tracker
+
+#+begin_src sh
+# Bootstrap (one-time; run after `git pull`):
+org-llm tracker init
+
+# Daily verbs:
+org-llm tracker review     # what's in flight
+org-llm tracker pace       # EFFORT vs. actual
+#+end_src
+
+The =org-llm tracker= verbs are the deterministic skeleton; the
+=@tracker= persona narrates on top of them. See
+[[file:agents.org][agents.org]] § @tracker for the persona spec.
+
+** See also
+
+- =~/org/org-llm-dev-tracker.org= — the canonical live tracker
+- [[file:agents.org][agents.org]] — @tracker persona (Boothby — TNG/VOY groundskeeper)
+- [[file:roadmap.org][roadmap.org]] § Phase 29.0 — self-coded tools (this is the seed)
+- [[file:decisions.org][decisions.org]] DEC-011 — vault-and-DB symmetry; files canonical
+- [[file:active-claims.org][active-claims.org]] — live coordination half (sibling of this)
+
+* Archive (pre-migration snapshot)                                :archive:
+
+The remainder of this file is a verbatim snapshot of the dev
+tracker as it stood when the migration to vault-canonical happened
+on [2026-05-05]. It is kept for historical reference only —
+DO NOT EDIT. All live tracking happens in
+=~/org/org-llm-dev-tracker.org=.
+
+** What this is
 
 The single source of truth for *active* org-llm development —
 what to do next, what's blocked, what needs validating, what
@@ -3150,6 +3200,51 @@ Extension to dbt:
   consumes the tangled SQL.
 
 Likely worth a small DEC + wiki concept page once design firms.
+
+** TODO HashiCorp FOSS toolset matrix (FOSS-only, post-BSL)        :plan:research:hashicorp:foss:dec-10:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE:   2026-05-05 user side-quest dump
+:END:
+
+Side-quest: enumerate the FOSS-still-available HashiCorp toolset,
+their FOSS forks (post-BSL relicense), and possible org-llm
+integration points. Per DEC-010 — anti-capitalist FOSS, not
+just FOSS: BSL-licensed HashiCorp tools (Terraform, Consul,
+Nomad, Vault, Boundary, Packer 1.13+) are *out*; their FOSS
+forks (OpenTofu, OpenBao, etc.) are *in*; remaining genuine
+HashiCorp FOSS (Vagrant — MIT) is *in*.
+
+Map to enumerate:
+| Tool      | License post-2023        | FOSS fork                 | Status      |
+|-----------+--------------------------+---------------------------+-------------|
+| Terraform | BSL (excluded)           | =OpenTofu=                | Filed (3 use cases) |
+| Vault     | BSL (excluded)           | =OpenBao= (LF FOSS fork)  | TODO        |
+| Consul    | BSL (excluded)           | (community fork ?)        | research    |
+| Nomad     | BSL (excluded)           | (no major fork yet)       | research    |
+| Boundary  | BSL (excluded)           | (no fork)                 | excluded    |
+| Packer    | BSL post-1.13            | =OpenBuildr= / =vagrant=? | research    |
+| Vagrant   | MIT (still FOSS)         | n/a                       | usable      |
+
+Use-case candidates per tool (org-llm fit):
+- *OpenBao* — secrets management for org-llm's =creds.py= +
+  =pass=; per-device + per-env (DEC-016 SDLC) credential
+  rotation. Could replace =pass= in some contexts.
+- *Nomad fork (if any)* — job scheduler for cross-cutting
+  agent work (per agent-time-awareness.org § Layer 3); compares
+  with Airflow + cron + systemd-timer.
+- *Consul fork (if any)* — service discovery for multi-device
+  org-llm fleet (laptop + phone + homelab box); KV store for
+  ephemeral coordination.
+- *Vagrant* — reproducible test env builder for =org-llm doctor=
+  smoke tests + acpt-tier dogfood VMs.
+- *Packer fork* — building org-llm distro images (Phase 28 —
+  containerization strategy + future bare-metal installer).
+
+Spawn a research agent post-nap (if user wants depth);
+output: =/tmp/hashicorp-foss-toolset-2026-05-05.md= or a wiki
+page =hashicorp-foss-stack.org=. Cross-ref dev-tracker §
+hosting matrix + DEC-010.
 
 ** TODO Hosting matrix — where can org-llm run?                   :plan:research:hosting:partner-apps:
 :PROPERTIES:

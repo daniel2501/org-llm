@@ -97,7 +97,61 @@ snapshot= verb could regenerate this page from
 - *@doom* promoted to starfleet-core; tool-unreachable case
   handled.
 
-* ▶ YOU ARE HERE — 2026-05-05 Tue, post Phase-26.1 cull walk    :@here:
+* ▶ THIS AFTERNOON — 2026-05-05 Tue, EDT (set 11:18 EDT pre-nap)   :@here:
+
+#+begin_quote
+*Committed deadline:* @tracker migration build finish-time
+*15:00 EDT today* (Claude/opus-C, agent in flight).
+
+*Recommended afternoon block (post-nap):*
+
+|       Time | Item                                                       | State                       |
+|------------+------------------------------------------------------------+-----------------------------|
+| post-wake  | Coffee + read =/tmp/= drops (license, versioning, Agor)    | reviewable artifacts ready  |
+|     ~13:30 | Review the four landed artifacts (≤30 min)                 | ratify + ask drill-downs    |
+|     ~14:00 | Agor walk (use =/tmp/agor-walkthrough-2026-05-05.md=)      | 5 bites pre-prepped         |
+|      15:00 | =@tracker= migration build deadline — review agent output  | committed; verify + cut-over|
+|     ~15:30 | Pick one: ratify license + tag, OR start DEC-015 v0 build  | sprint-shape decision       |
+|     ~17:00 | Phase 24.2 — recovery hooks build kickoff (v1.0 gate)      | only if energy permits      |
+|     ~18:00 | Wrap, commit, dogfood note in captain's log                | acpt-promotion check        |
+
+*Reviewable artifacts queued for post-nap:*
+
+| Path                                                | What                                                |
+|-----------------------------------------------------+-----------------------------------------------------|
+| =docs/wiki/org-mode-chat-surface.org=               | DEC-015 design detail (252 lines, 11 sections)      |
+| =docs/wiki/agent-time-awareness.org=                | Layer 1/2/3 + Airflow tie-in (163 lines)            |
+| =/tmp/agor-walkthrough-2026-05-05.md=               | 14 connection points + 5 walk bites                 |
+| =/tmp/license-decision-2026-05-05.md=               | 8 licenses; rec = AGPLv3 (fallback EUPL v1.2)       |
+| =/tmp/versioning-scheme-2026-05-05.md=              | 6 schemes; rec = Hybrid SemVer + acpt suffix        |
+| =/tmp/emacs-superset-embed-options-2026-05-05.md=   | xwidget-webkit + Superset Public-role works live    |
+| =/tmp/subsumption-scan-2026-05-05.md=               | ~3000 LoC retirement candidates (cull source)       |
+| =/tmp/opentofu-recommendations-2026-05-05.md=       | 10 OpenTofu use cases (3 already filed as TODOs)    |
+
+*Today's commits so far (12 total):* SDLC starter (DEC-016 + sdlc.org +
+acpt branch + v0.1.0-acpt0 tag + Config env-dim) · battery alert build
+(life_support + sidebar HEALTH row + 3 knobs) · Phase 26.1 cull
+walkthrough complete · DEC-014 — cull rubric framework · DEC-015
+candidate filed (org-mode-chat-surface) · Magnificent Seven canon
+refresh · Wiki Rule 2b sweep wave 1 (12 pages) · whole-picture.org
+synthesis (332 lines) · codebase-map-post-cull (49 modules) ·
+embedded-dashboards.org (3-layer chart embedding) · 4 morning-dump
+TODOs · acpt branch + v0.1.0-acpt0 baseline tag.
+
+*Open right now (background agents finishing while user naps):*
+
+- =@tracker= migration build (finish 15:00 EDT)
+- =agent-time-awareness.org= → just landed
+- =org-mode-chat-surface.org= (DEC-015 design) → landed
+- =/tmp/license-decision-2026-05-05.md= → landed
+- =/tmp/versioning-scheme-2026-05-05.md= → landed
+- =/tmp/agor-walkthrough-2026-05-05.md= → landed
+
+All artifacts pushed (or imminent commit) to trunk; first acpt
+baseline = =v0.1.0-acpt0=.
+#+end_quote
+
+* ▶ Earlier today (2026-05-05 Tue) — pre-nap snapshot
 
 #+begin_quote
 *Last action:* DEC-014 filed (=a5d59a0=). Cull walkthrough

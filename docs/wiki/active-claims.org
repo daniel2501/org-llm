@@ -45,6 +45,14 @@ chronological ordering — append to the bottom; the next
 # When done: change STARTED → DONE, add :CLOSED: timestamp, move
 # the entry to "Recently closed" below.
 
+** STARTED Claude/opus-C — @tracker migration build (finish-time: today 15:00 EDT)
+   :PROPERTIES:
+   :CLAIM:    org_llm/cli.py org_llm/db.py docs/wiki/dev-tracker.org docs/wiki/active-claims.org tests/test_cli.py
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-05 Tue 11:30 EDT]
+   :DEADLINE: [2026-05-05 Tue 15:00 EDT]
+   :END:
+
 * Recently closed                                              :@closed:
 
 ** DONE Claude/opus-C — embedded-dashboards.org + iframe research dispatch
