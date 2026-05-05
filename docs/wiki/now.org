@@ -97,54 +97,76 @@ snapshot= verb could regenerate this page from
 - *@doom* promoted to starfleet-core; tool-unreachable case
   handled.
 
-* ▶ YOU ARE HERE — 2026-05-04 Mon, end of wiki-concept-graph arc    :@here:
+* ▶ YOU ARE HERE — 2026-05-05 Tue, post Phase-26.1 cull walk    :@here:
 
 #+begin_quote
-*Last action:* committed route-preview Stage 1 visual-
-verification entry to dev-tracker (=ffcd111=). 23 commits
-today.
+*Last action:* DEC-014 filed (=a5d59a0=). Cull walkthrough
+complete (38 components, 14 commits day-over-day).
 
-*Current move:* nothing in flight. Stage 1 of route-preview
-ships but the visual render in a real opencode session is the
-only un-verified piece — single =:@next:= entry queued for the
-next launch.
+*State of play (2026-05-04 → 2026-05-05):*
+- Mission walk locked the lead value (β: dream-state vault via
+  agents + dbt-distro shape) + Org-is-Code design rule + DEC-006
+  through DEC-014 (10 architectural decisions in 36h).
+- 4 new wiki concept pages: data-integrity-laws (Three Laws),
+  sync-architecture (multi-device git-canonical), dbt-pipeline
+  (data layer), tools-as-dbt-models (synthesis), plus cull.org
+  + doc-rewrite-plan + sidecar-agent-design from parallel scouts.
+- Phase 24.1 shipped + verified live (motivating @curator/
+  superset.org bug closed end-to-end via proxy-side resolver
+  enrichment).
+- Phase 25 scope rewritten (DB-as-cache + git-canonical pipeline,
+  not DB-authoritative inversion).
+- Phase 26.1 cull walk complete: 38 components verdicted; ~3000
+  LoC retirement candidates identified (=org_tools.py= 1174,
+  =vault_facts.py= 951, =insights.py= 826, =walk.py= 140, 5
+  loser recipe runners 350).
+- Magnificent Seven agent roster locked: =@picard, @spock, @data,
+  @gardener, @analyst, @curator, @tracker= (DEC-014).
+- Scout pattern named + canonized (this morning's working mode is
+  the worked example).
 
-*State of play:*
-- 23 commits today across 3 cohesive arcs:
-  agent-test triage → @doom + meta-agents → route-preview Stage 1
-- Two new agents in starfleet-core (=@curator= /
-  =@tracker=) — both shipped + dogfooded + persona-refined
-  in the same session
-- 4 new wiki concept pages, 14-page cross-link sweep
-- Route-preview Stage 1 ready for visual verification (TUI
-  takeover means no automated render-check); Stage 2 gated
-  on Stage 1 passing
-- Memory Alpha framing queued in dev-tracker as a Phase 25
-  naming/UX layer (not a blocker)
-- weather_aware_agenda still PARTIAL (40% vs 55% bar) — two
-  lifts queued for Mon 5-11
+*Today's starter options* (saved 2026-05-05 morning):
+
+| # | Option                              | Cost   | Notes                                          |
+|---+-------------------------------------+--------+------------------------------------------------|
+| 1 | Phase 26.2 prep / actual extraction | days   | ~3000 LoC delete; biggest physical impact      |
+| 2 | Versioning scheme                   | hours  | small, locks v0.X / v1.0 line                  |
+| 3 | Agor walk                           | hours  | user has a list; multi-agent leveling          |
+| 4 | Doc rewrite dispatch                | days   | doc-rewrite-plan.org ready; pool of agents     |
+| 5 | =@sidecar= design review            | hours  | 469-line design ready; ratify or revise        |
+| 6 | DEC-009 + agents.org refresh        | small  | propagate Magnificent Seven + tracker scope    |
+| 7 | End-to-end comprehension walk       | hours  | spawn synthesis scout → tight tiny-bite walk   |
+| 8 | Phase 24.2 + 24.3                   | days   | recovery hooks + confusion detector (v1.0 gate)|
+| 9 | License decision (DEC-010 deferred) | small  | AGPLv3 vs others                               |
+
+*Open follow-ups* (filed but not yet engaged):
+- Battery alert (filed yesterday)
+- Wiki Rule 2b sweep (12-page wave 1 from doc-rewrite-plan)
+- Captain's-log sync per DEC-011
+- Live verify Phase 24.1 still works post-relaunch
+- AGENTS.md tone audit per DEC-010 anti-cap
 #+end_quote
 
 * Ahead                                                            :@queued:
 
 # As of: 2026-05-04
 
-| When     | Pri | Item                                                                          | Source                |
-|----------+-----+-------------------------------------------------------------------------------+-----------------------|
-| Imminent | A   | Visual-verify route-preview Stage 1 in real opencode (15-30 min)              | route-preview         |
-| Sat 5-09 | A   | Validate =@gardener= (routine re-test)                                        | agent test            |
-| Sun 5-10 | —   | Routine re-test sweep — @journalist boundary, agentsmith multi-domain refusal | scheduled             |
-| Mon 5-11 | B   | Lift =weather_aware_agenda= 40% → ≥55% (top-5→10 + location hint)           | weather re-A/B        |
-| Mon 5-11 | B   | Fix =recipe_ab_harness.py= shebang (silent sqlalchemy failure)                | weather re-A/B        |
-| Mon 5-11 | B   | Fix =recipe_ab_judge.py --results= flag wiring                                | weather re-A/B        |
-| Tue 5-12 | B   | =delegate()= chat-completions doesn't carry MCP tools                         | agent test            |
-| Sun 5-17 | A   | Routine re-test sweep — agentsmith multi-domain refusal                       | scheduled             |
-| Sun 5-31 | B   | Routine re-test sweep — =@gardener=                                           | scheduled             |
-| Tue 6-02 | B   | Routine re-test sweep — =classify_items= MCP tool                             | scheduled             |
-| Pending  | B   | Route-preview Stage 2 — upstream opencode PR (=onInput= + Tab hooks)          | route-preview Stage 1 |
-| Pending  | B   | Memory Alpha framing — verb-namespace + README copy decisions                 | Phase 25 mid-arc      |
-| Pending  | B   | @curator MCP tools — =wiki_link_audit= / =wiki_drift_check= / =wiki_orphan_terms= | Stage 2 of @curator |
-| Pending  | B   | @tracker =tracker review= verb (self-hosting goal)                            | Stage 2 of @tracker   |
+| When     | Pri | Item                                                                              | Source                |
+|----------+-----+-----------------------------------------------------------------------------------+-----------------------|
+| Imminent | A   | Visual-verify route-preview Stage 1 in real opencode (15-30 min)                  | route-preview         |
+| Sat 5-09 | A   | Validate =@gardener= (routine re-test)                                            | agent test            |
+| Sun 5-10 | —   | Routine re-test sweep — @journalist boundary, agentsmith multi-domain refusal     | scheduled             |
+| Mon 5-11 | B   | Lift =weather_aware_agenda= 40% → ≥55% (top-5→10 + location hint)               | weather re-A/B        |
+| Mon 5-11 | B   | Fix =recipe_ab_harness.py= shebang (silent sqlalchemy failure)                    | weather re-A/B        |
+| Mon 5-11 | B   | Fix =recipe_ab_judge.py --results= flag wiring                                    | weather re-A/B        |
+| Tue 5-12 | B   | =delegate()= chat-completions doesn't carry MCP tools                             | agent test            |
+| Sun 5-17 | A   | Routine re-test sweep — agentsmith multi-domain refusal                           | scheduled             |
+| Sun 5-31 | B   | Routine re-test sweep — =@gardener=                                               | scheduled             |
+| Tue 6-02 | B   | Routine re-test sweep — =classify_items= MCP tool                                 | scheduled             |
+| Pending  | B   | Route-preview Stage 2 — upstream opencode PR (=onInput= + Tab hooks)              | route-preview Stage 1 |
+| Pending  | B   | Memory Alpha framing — verb-namespace + README copy decisions                     | Phase 25 mid-arc      |
+| Pending  | B   | @curator MCP tools — =wiki_link_audit= / =wiki_drift_check= / =wiki_orphan_terms= | Stage 2 of @curator   |
+| Pending  | B   | @tracker =tracker review= verb (self-hosting goal)                                | Stage 2 of @tracker   |
 
 * Beyond — open from earlier dev-tracker entries (samples)         :@beyond:
 
