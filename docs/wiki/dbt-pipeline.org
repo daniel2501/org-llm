@@ -244,9 +244,16 @@ makes Phase 29 not just feasible but easy.
 * Dashboards — Phase 27 Superset connection
 
 With dbt models as the schema, Superset gets a clean
-dashboarding target. Phase 27 stops being optional and starts
-being load-bearing for the third quality criterion (substantial
-user value).
+dashboarding target. Phase 27 — Apache Superset dashboards
+stops being optional and starts being load-bearing for the
+third quality criterion (substantial user value).
+
+For *embedding charts directly into org docs* (live in Emacs
+buffer, exported to HTML, or inline via babel-SQL), see
+[[id:57fcf1a9-9bc5-46d4-92ea-ea0d07ede16d][embedded-dashboards.org]] — the canonical reference for the
+three embedding layers (live xwidget / babel-SQL / HTML iframe).
+The babel-SQL layer is the most org-llm-aligned (queries dbt
+models directly, no Superset round-trip).
 
 | Dashboard         | Reads from                                       | What you see                                                  |
 |-------------------+--------------------------------------------------+---------------------------------------------------------------|

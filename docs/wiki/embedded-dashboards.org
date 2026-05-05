@@ -1,0 +1,203 @@
+:PROPERTIES:
+:ID:       57fcf1a9-9bc5-46d4-92ea-ea0d07ede16d
+:CREATED:  [2026-05-05]
+:END:
+#+TITLE: Embedded dashboards — chart + dashboard rendering in org buffers
+#+FILETAGS: :wiki:dashboards:embed:emacs:superset:dbt:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Three layers for embedding charts / dashboards into an
+org-mode document — pick the layer that matches the surface where
+the user reads the doc. *(3) babel-SQL inline* against the
+dbt-pipeline is the canonical org-llm-aligned path: SQL block
+executes against the dbt-built tables, results render as an
+org-mode table or sparkline inline, no Superset round-trip needed.
+*(1) live in Emacs buffer* via xwidget-webkit / inline image is
+under research (background agent dispatch 2026-05-05). *(2) HTML
+export iframe* is the standard Superset embedded SDK path for
+when the doc is exported to HTML / PDF.
+
+*Expanded.* This page details option (3) authoritatively today;
+options (1) and (2) get added once the iframe-research agent
+returns findings on how Emacs xwidget-webkit composes with
+Superset's embedding paths. Page is referenced from
+[[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]] § Dashboards.
+
+* Layer 3 — babel-SQL inline (canonical for daily-driver Emacs)
+
+The most org-llm-aligned path. Skip Superset for the embedding
+case — query the dbt-built tables directly via =org-babel-execute-sqlite=
+and render results inline as org tables or sparklines. Re-evaluate
+the block (=C-c C-c=) → table refreshes against the latest dbt
+build.
+
+** Why this is canonical
+- Per [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]] (DB as universal interface; files canonical), dbt-built
+  tables are the canonical query surface — *agents* query them via
+  SQL; *users* querying them from babel is the same primitive at
+  the human layer.
+- Per [[id:e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63][DEC-013]] (two-tier tools — data + effect), this lives in the
+  data-tools tier; no foreign-system dependency.
+- Per the architecture.org § /Org is Code/ design rule, this
+  treats the org doc as code (SQL is code; org buffer is the IDE).
+- No Superset deploy required — works against the local SQLite
+  cache that dbt builds.
+
+** Worked example — mood arc
+
+Embed a 30-day mood arc as an inline org table:
+
+#+begin_src org
+,#+begin_src sql :db ~/.local/share/org-llm/org-llm.db :results table :colnames yes
+SELECT day, score, note_count
+  FROM snap_mood_arc
+  WHERE day >= date('now', '-30 days')
+  ORDER BY day;
+,#+end_src
+#+end_src
+
+Re-evaluating refreshes against the latest snapshot; the result
+becomes an inline =#+RESULTS:= block the user reads as a normal
+org table. Sortable, foldable, exportable.
+
+** Sparkline variant
+
+For inline trend visualization (not full-table), use the sparkline
+helper from =babel-sql-postprocess= (or a small custom renderer):
+
+#+begin_src org
+,#+begin_src sql :db ~/.local/share/org-llm/org-llm.db :results value :post sparkline
+SELECT score FROM snap_mood_arc
+  WHERE day >= date('now', '-14 days')
+  ORDER BY day;
+,#+end_src
+#+end_src
+
+Result: a single Unicode sparkline glyph row inline (=▂▃▅▆▆▅▆█▇▅▄▃▂▁=).
+
+** Tabular vs visual tradeoff
+
+Babel-SQL gets you data + tables natively; for *visual chart*
+rendering that's not a sparkline, fall back to layer (1) — the
+chart needs canvas/svg/iframe rendering, not text.
+
+** Linked dbt model docs
+
+Reference the dbt model the SQL queries so the reader can jump
+to its definition + tests + lineage:
+
+#+begin_quote
+Source: [[file:../../dbt/models/marts/snap_mood_arc.sql][snap_mood_arc.sql]]
+| Tests: 4 | Last build: 5min ago
+#+end_quote
+
+Per the [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]] § Lineage + auto-docs, this gives the
+reader a navigable path from dashboard query → underlying model
+→ source data.
+
+** Refresh cadence
+
+The dbt build happens on every save (per
+[[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]] sync model — file save → commit → dbt
+re-run). So the SQL block always queries against fresh data
+within seconds of any vault edit.
+
+For *snapshot tables* (=snap_*=), refresh frequency depends on
+the snapshot's =strategy= config (=check= per change vs daily
+=timestamp=); see [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]] § Snapshots.
+
+** Agent integration
+
+@analyst (Magnificent Seven per [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014]] — cull rubric) can
+*propose* SQL blocks for a given query intent (=insert a chart of
+my last 30 days mood= → drops the babel-SQL block in place). The
+user evaluates; @analyst can also validate the block produces
+results before insertion.
+
+* Layer 1 — live in Emacs buffer (under research)
+
+⏸️ /Pending research agent output as of 2026-05-05 11:08./
+
+The 2026-05-05 dispatch is investigating:
+- =xwidget-webkit-browse-url= — Emacs's embedded WebKit browser (GTK+webkit2 build); plausibly hosts a Superset embedded-SDK iframe live in a buffer
+- =eww= / =w3m= — text browsers; image rendering yes, JS dashboards no
+- Inline image of Superset chart-export PNG, refreshed by agent on a schedule — the static fallback when interactive isn't viable
+- =emacs-webkit= (third-party) — direct WebKit integration
+
+Output expected at =/tmp/emacs-superset-embed-options-2026-05-05.md=.
+This section gets filled in with the matrix once findings land.
+
+** Placeholder pattern (until research returns)
+
+For now, the static-image fallback works:
+
+#+begin_src org
+,#+ATTR_ORG: :width 600
+[[file:.attach/chart-mood-arc.png]]
+#+end_src
+
+Refreshed by =@analyst= via the Superset chart-export API; saved
+under =~/org/.attach/<id>/= and committed as part of normal vault
+sync (per [[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][data-integrity-laws.org]] Three Laws).
+
+* Layer 2 — HTML export iframe
+
+When the org doc is published / exported to HTML (org-publish,
+ox-hugo, etc.), Superset's standard *embedded SDK* with guest
+tokens works via raw HTML passthrough:
+
+#+begin_src org
+,#+BEGIN_EXPORT html
+<iframe
+  src="https://superset.local/embedded/<dashboard-id>?token=<guest>"
+  width="800" height="600" frameborder="0"></iframe>
+,#+END_EXPORT
+#+end_src
+
+Constraints:
+- Requires Superset's *Embedded Dashboard* feature flag enabled
+- Guest token must be minted server-side (short TTL, scoped to
+  user/dashboard) — needs a small token-minting endpoint
+- Auth/CSRF setup is non-trivial; see Superset docs for the
+  embedded SDK pattern
+- Anonymous public dashboards are simpler but less private
+
+This layer ONLY works for the exported-HTML surface. *In the
+Emacs buffer itself, the =#+BEGIN_EXPORT html= block is invisible*
+until export. For live in-buffer, see Layer 1.
+
+* Decision tree
+
+#+begin_example
+Where am I reading this doc?
+├── Live in Emacs buffer
+│   ├── Need data + tables → Layer 3 (babel-SQL inline)
+│   └── Need a visual chart → Layer 1 (xwidget / image)
+└── Exported to HTML / PDF
+    └── Layer 2 (iframe via embedded SDK)
+#+end_example
+
+Most flows = Layer 3 (the most org-llm-shaped). Fall up to 1
+or 2 only when the chart is genuinely visual + the surface
+supports it.
+
+* Connections
+
+- [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]] — query substrate (the dbt models behind every
+  babel-SQL block)
+- [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011 — DB as universal interface]]
+- [[id:e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63][DEC-013 — Two-tier tool architecture]]
+- [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014 — Cull rubric]] (positions @analyst as the agent that
+  proposes SQL blocks)
+- =roadmap.org= § /Phase 27 — Apache Superset dashboards/
+  (CORE_DISABLED per cull)
+- =dev-tracker.org= § /Babel + tangle as core concept/ — this
+  page is one of the worked examples
+* See also
+
+- [[file:architecture.org][architecture.org]] § /Org is Code/ design rule
+- [[file:cull.org][cull.org]] § Subsumed (the loser recipes that this
+  pattern subsumed)

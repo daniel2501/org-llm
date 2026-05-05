@@ -47,6 +47,20 @@ chronological ordering — append to the bottom; the next
 
 * Recently closed                                              :@closed:
 
+** DONE Claude/opus-C — embedded-dashboards.org + iframe research dispatch
+   :PROPERTIES:
+   :CLAIM:    docs/wiki/embedded-dashboards.org docs/wiki/dbt-pipeline.org docs/wiki/active-claims.org
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-05 Tue 11:08]
+   :CLOSED:   [2026-05-05 Tue 11:14]
+   :NOTES:    embedded-dashboards.org shipped with layer 3
+              (babel-SQL) detailed authoritatively + layer 1
+              (live in Emacs buffer) marked pending iframe-
+              research agent output. dbt-pipeline.org § Dashboards
+              now links to it. Research agent dispatched in
+              background; output post-nap.
+   :END:
+
 ** DONE Claude/opus-C — SDLC starter (axes A + B) shipped
    :PROPERTIES:
    :CLAIM:    docs/wiki/sdlc.org docs/wiki/decisions.org docs/wiki/active-claims.org org_llm/db.py
