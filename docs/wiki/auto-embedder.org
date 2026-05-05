@@ -6,16 +6,22 @@
 #+FILETAGS: :wiki:concept:daemon:embeddings:
 #+OPTIONS: toc:nil num:nil
 
-* What it is
+* Summary
 
-An opt-in daemon thread that keeps the vault's index +
-embeddings fresh without manual =org-llm index= / =embed= runs.
-Surfaces stats in CLI footers so the user knows it's working.
+*Summary.* The auto-embedder is an opt-in daemon thread that keeps
+the vault's index + embeddings fresh without manual =org-llm index= /
+=embed= runs, and surfaces stats in CLI footers so the user knows
+it's working. It's the one long-running substrate in an otherwise
+stateless CLI.
 
-The CLI is mostly stateless — every verb opens the DB, does its
-thing, closes. The auto-embedder is the one long-running
-substrate, and it's careful about it: opt-in, background-only,
-defers to user-driven I/O, never blocks a CLI invocation.
+*Expanded.* It's careful about that role: opt-in, background-only,
+defers to user-driven I/O, never blocks a CLI invocation. Without it,
+captures and edits land in the vault but stay unsearchable until the
+next manual =index + embed= run — symptomatically =ask= returns 0
+hits even though the user just wrote the relevant note. The daemon
+watches via mtime poll (portable to macOS / Termux), runs incremental
+=index + embed_pending= cycles, and emits =sensor_log= rows so trends
+are visible in =org-llm performance=.
 
 * Why a daemon?
 

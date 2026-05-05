@@ -8,18 +8,22 @@
 
 [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][← back to wiki index]]
 
-* TL;DR
+* Summary
 
-RAG = "ground the LLM's answer in retrieved documents." Instead
-of asking a chat model from cold ("What did I write about Kafka
-last month?" — the model has no idea), we first SEARCH the
-user's vault using [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][embeddings]] + [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][cosine
-distance]], then INJECT the most relevant notes into the prompt
-as context. The model now has actual material to work from. Less
-hallucination, citable sources.
+*Summary.* RAG = "ground the LLM's answer in retrieved documents."
+Instead of cold-prompting a chat model, =org-llm= first searches the
+vault using [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][embeddings]] + [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][cosine distance]] and then injects the
+most relevant notes into the prompt as context. The result: less
+hallucination, citable sources, answers grounded in what *you*
+actually wrote.
 
-In =org-llm=, =org-llm ask "..."= is RAG. So is most of what the
-in-opencode workspace LLM does when it reaches for your notes.
+*Expanded.* In =org-llm=, =org-llm ask "..."= is RAG. So is most of
+what the in-opencode workspace LLM does when it reaches for your
+notes. The rest of this page walks the loop (embed → cosine-rank →
+rerank → prompt-build → chat), the prompt structure with the
+=llm-context.org= "current truth" overlay, and the failure modes
+(missed retrieval, model ignoring context, stale content surfacing
+despite tags).
 
 * The basic loop
 

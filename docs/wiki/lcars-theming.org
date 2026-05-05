@@ -6,18 +6,21 @@
 #+FILETAGS: :wiki:concept:visual:lcars:
 #+OPTIONS: toc:nil num:nil
 
-* What LCARS is
+* Summary
 
-LCARS — Library Computer Access Retrieval System — is the visual
-language of Star Trek: TNG-era starship UIs. Asymmetric U-shape
-borders, chunky horizontal bars in a small palette of colours,
-block-letter labels, "elbow" connectors. It's =org-llm='s
-default visual identity.
+*Summary.* LCARS — Library Computer Access Retrieval System — is the
+visual language of Star Trek: TNG-era starship UIs, and =org-llm='s
+default visual identity. The implementation is *honest LCARS*, not
+just "orange-on-black": three role colors (primary / secondary /
+accent), five swappable palettes, varied bar widths, ASCII-font
+labels, and asymmetric chrome.
 
-The =org-llm= LCARS implementation is *honest LCARS*, not just
-"orange-on-black." It picks a tight palette per role, varies bar
-widths, uses ASCII fonts for labels, and renders chrome to
-suggest the asymmetric console layouts.
+*Expanded.* Slot overrides + the opencode theme JSON both reference
+the role colors by name so palette swaps propagate without
+hard-coded hex. LCARS is the visual layer; [[id:c88b2ddc-33bc-4b58-bd16-993c48b91209][theme studio]] is the
+parallel voice layer — they compose, so =org-llm palette green= +
+=queer_level: 3= = green LCARS chrome with maximally-queer-coded
+persona language.
 
 * Three role colors
 

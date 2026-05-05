@@ -7,16 +7,21 @@
 #+FILETAGS: :wiki:concept:onboarding:tutor:
 #+OPTIONS: toc:nil num:nil
 
-* What it is
+* Summary
 
-A 45-step interactive walkthrough that teaches first-time users
-the org-llm flow. Each step is a themed Rich panel printed to
-stdout when the user runs =org-llm tutor <step-name>=.
+*Summary.* The tutor is a 45-step interactive walkthrough that
+teaches first-time users the org-llm flow, exposed both as the
+=org-llm tutor <step-name>= CLI verb and as MCP tools so the
+in-opencode LLM can quote it. It's *stateless by design* — steps are
+addressed by name, readable in any order, with no completion tracking
+or "next step" pointer.
 
-The tutor is *stateless by design* — there's no completion
-tracking, no resume position, no "next step" pointer. You
-address steps by name; you can read them in any order; you can
-re-read freely. =--all= dumps the whole curriculum.
+*Expanded.* Each step is a themed Rich panel printed to stdout. =--all=
+dumps the whole curriculum. Numeric step state would force users into
+a single linear path; named addressing lets the tutor double as a
+reference manual — when the user gets confused about =embed=, they
+run =org-llm tutor embed= and read that one panel without having to
+have done =index= and =stats= first.
 
 * Why named, not numbered
 

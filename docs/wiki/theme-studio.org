@@ -6,14 +6,21 @@
 #+FILETAGS: :wiki:concept:theming:personalization:
 #+OPTIONS: toc:nil num:nil
 
-* What it is
+* Summary
 
-The *voice* layer of =org-llm= personalization. Where
-[[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][LCARS]] tints the
-visual chrome, theme studio tints the *words* — every prompt,
-greeting, error message, and themed phrasing routes through
-=theme_studio.get_themed(surface_key, default)= so the LLM can
-pre-cache personalized variants per knob configuration.
+*Summary.* Theme studio is the *voice* layer of =org-llm=
+personalization. Where [[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][LCARS]] tints the visual chrome, theme studio
+tints the *words* — every prompt, greeting, error message, and
+themed phrasing routes through =theme_studio.get_themed(surface_key,
+default)= so the LLM can pre-cache personalized variants per knob
+configuration.
+
+*Expanded.* A *knob* is a named dial with a 0-3 cumulative level
+(=trek_level=, =commie_level=, =queer_level=, =synthwave_level=,
+=cottagecore_level=, =homelab_level=, plus user-defined). Surface
+keys cover ~30 spots across the codebase. =org-llm personalize=
+scans the vault for recurring themes and proposes new knobs — what
+makes the install feel personal after a few weeks of capturing.
 
 * The knob model
 

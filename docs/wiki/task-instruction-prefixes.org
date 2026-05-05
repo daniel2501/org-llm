@@ -6,21 +6,23 @@
 #+FILETAGS: :wiki:concept:embeddings:gotcha:phase-11:
 #+OPTIONS: toc:nil num:nil
 
-* TL;DR
+* Summary
 
-[[https://huggingface.co/nomic-ai/nomic-embed-text-v1.5][nomic-embed-text-v1.5]],
-the default embedding model, REQUIRES task-instruction
-prefixes to embed text correctly:
+*Summary.* [[https://huggingface.co/nomic-ai/nomic-embed-text-v1.5][nomic-embed-text-v1.5]],
+the default embedding model, REQUIRES task-instruction prefixes
+(=search_document:= for stored content, =search_query:= for queries).
+Without them, the model returns plausible-looking vectors that don't
+actually retrieve well — a silent failure mode the Phase 11 audit
+caught when single capitalized words (=Kafka=, =Marx=, =Subjects=)
+were all collapsing to the same near-garbage vector.
 
-- =search_document:= for stored content (notes, code)
-- =search_query:= for query strings
-
-Without these prefixes the model returns plausible-looking
-vectors that don't actually retrieve well. The Phase 11 audit
-caught this — single capitalized words (=Kafka=, =Marx=,
-=Subjects=) were collapsing to the same near-garbage vector.
-
-This page documents what happened, why, and what we do now.
+*Expanded.* This page documents what happened, why, and what we do
+now: every embed call site (indexer, search, code-index) passes a
+=task= argument, the model → prefix mapping lives in
+=llm.py:_EMBED_PREFIXES=, and =tests/test_embed.py= pins the
+regression. When swapping embed models, =org-llm embed --force= is
+mandatory because stored vectors from the old prefix-space silently
+degrade against the new query-space.
 
 * The bug
 

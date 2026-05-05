@@ -8,21 +8,21 @@
 
 [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][← back to wiki index]]
 
-* TL;DR
+* Summary
 
-"Staleness" in =org-llm= refers to *two distinct* phenomena that
-share a word but solve different problems:
+*Summary.* "Staleness" in =org-llm= refers to two distinct phenomena
+that share a word: *file-system staleness* (DB row points at a file
+that no longer exists on disk — plumbing) and *content staleness* (a
+note reflects an out-of-date understanding — meaning). Both matter,
+and they're handled by different code paths.
 
-- *File-system staleness* — the database has a row for a file that
-  no longer exists on disk (renamed, moved, deleted). A plumbing
-  concern. Fixed by =org-llm index=.
-- *Content staleness* — a note's content reflects an out-of-date
-  understanding the user has since revised. Not wrong-on-disk;
-  out-of-sync with current truth. Fixed by =org-llm stale --apply=
-  + =:stale:= tagging.
-
-Both matter. They're handled by different code paths and serve
-different needs.
+*Expanded.* File-system staleness is fixed by =org-llm index=, which
+self-prunes orphan rows on every run. Content staleness is fixed by
+the =:stale:= tag plus the =llm-context.org= "current truth" overlay
+plus a +0.6 retrieval penalty that downranks tagged notes — except
+when the query mentions history words ("before", "previously",
+"formerly"), at which point the penalty is suppressed so historical
+threads remain reachable.
 
 * File-system staleness — keeping the index honest
 

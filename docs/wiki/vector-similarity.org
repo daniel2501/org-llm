@@ -8,13 +8,21 @@
 
 [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][← back to wiki index]]
 
-* TL;DR
+* Summary
 
-Once we have [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][embeddings]] (text → 768-dim vectors), we need a
-way to ask "how similar are these two vectors?". The answer is
-*cosine distance* — a number from 0 (identical direction) to 2
-(opposite direction). Lower is better. =sqlite-vec='s
-=vec_distance_cosine= computes it for us, fast, in SQL.
+*Summary.* Once we have [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][embeddings]] (text → 768-dim vectors), we
+compare them with *cosine distance* — a number from 0 (identical
+direction) to 2 (opposite direction), where lower is better.
+=sqlite-vec='s =vec_distance_cosine= computes it for us in SQL, fast
+enough to brute-force every node per query.
+
+*Expanded.* Cosine wins over Euclidean for text embeddings because
+magnitude is mostly noise — two notes about the same topic, one short
+and one long, will have vectors of different length but the same
+direction, and we want to count those as similar. The rest of this
+page walks the geometry, the formula, the failure modes (zero-vectors,
+mismatched sub-spaces, tied scores), and how the same query becomes
+one =vec_distance_cosine= call per node inside =org_llm/search.py=.
 
 * Why "cosine" specifically
 

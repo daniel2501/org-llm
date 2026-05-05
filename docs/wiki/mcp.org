@@ -6,18 +6,20 @@
 #+FILETAGS: :wiki:concept:bridge:
 #+OPTIONS: toc:nil num:nil
 
-* What MCP is
+* Summary
 
-[[https://modelcontextprotocol.io][Model Context Protocol]] is an open
-JSON-RPC standard for exposing *tools, resources, and prompts* from a
-host process to an LLM-driven client. The client (e.g. opencode, Claude
-Code, Pi) discovers what's available, calls tools by name, and gets
-typed responses back.
+*Summary.* [[https://modelcontextprotocol.io][Model Context Protocol]]
+is an open JSON-RPC standard for exposing tools, resources, and
+prompts from a host process to an LLM-driven client. =org-llm mcp= is
+the server; opencode / Claude Code / Pi / Emacs are hosts that spawn
+it and wire its 64+ tools into the LLM's tool-call loop.
 
-It's the same idea as a function-calling API like OpenAI's
-"tools" parameter, but generalised to a protocol any LLM client
-can speak. The server says "here are the things you can do"; the
-client wires them into its tool-call loop.
+*Expanded.* It's the same idea as a function-calling API like
+OpenAI's "tools" parameter, but generalised to a protocol any LLM
+client can speak. The server says "here are the things you can do";
+the client wires them into its tool-call loop. The server doesn't
+talk to the LLM directly — the host is the mediator, which is why the
+same MCP server works unchanged across opencode, Claude Code, and Pi.
 
 ** Three roles
 

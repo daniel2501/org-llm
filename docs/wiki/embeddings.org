@@ -8,15 +8,19 @@
 
 [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][← back to wiki index]]
 
-* TL;DR
+* Summary
 
-An embedding is a fixed-length vector of floating-point numbers
-that represents the *meaning* of a piece of text. In =org-llm=,
-every node in your vault gets an embedding — 768 floats, one
-vector per heading. Notes about similar topics land near each
-other in that 768-dimensional space, even when they share no
-literal words. This is what lets =org-llm ask= find a note about
-"bureaucratic absurdity" when you query "Kafka."
+*Summary.* An embedding is a fixed-length vector of floating-point
+numbers that represents the *meaning* of a piece of text. In
+=org-llm=, every node in your vault gets a 768-dim vector via
+=nomic-embed-text=, and notes about similar topics land near each
+other in that space even when they share no literal words.
+
+*Expanded.* This is what lets =org-llm ask= find a note about
+"bureaucratic absurdity" when you query "Kafka." Embeddings are the
+substrate behind the project's "you ask in your words; we search in
+meaning" line — query text and stored vault text both get mapped into
+the same geometry, and cosine distance picks the nearest neighbours.
 
 * Why we use them
 

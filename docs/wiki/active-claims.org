@@ -47,6 +47,23 @@ chronological ordering — append to the bottom; the next
 
 * Recently closed                                              :@closed:
 
+** DONE Claude/opus-C — small-wins pool dispatch + 6-item triage + DEC-015 candidate
+   :PROPERTIES:
+   :CLAIM:    docs/wiki/dev-tracker.org docs/wiki/now.org docs/wiki/decisions.org docs/wiki/agents.org docs/wiki/agent-roster.org docs/wiki/active-claims.org docs/wiki/whole-picture.org docs/wiki/codebase-map-post-cull.org
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-05 Tue 09:48]
+   :CLOSED:   [2026-05-05 Tue 10:02]
+   :NOTES:    5 parallel agents dispatched; 5/5 landed clean.
+              Outputs: whole-picture.org (332 lines), codebase-
+              map-post-cull.org (88 lines, 49 modules),
+              Magnificent Seven canon refresh, Wiki Rule 2b
+              sweep (12 pages), battery-alert build (separate
+              STARTED claim if implementation-shipped).
+              Plus 4 dev-tracker TODOs filed (babel/tangle,
+              hosting, mobile/Termux, org-mode-aware chat
+              surface = DEC-015 candidate).
+   :END:
+
 ** DONE Claude/opus-C — file DEC-014 (cull framework lock-in)
    :PROPERTIES:
    :CLAIM:    docs/wiki/decisions.org docs/wiki/active-claims.org

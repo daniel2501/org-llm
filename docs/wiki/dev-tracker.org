@@ -3206,6 +3206,13 @@ Why load-bearing:
 - *Plugin-framework angle* — could ship as a meta-extension
   surface (fish-fisher / oh-my-zsh shape), letting community
   add their own org-mode chat extensions.
+- *Org-mode links in chat are real and clickable.* =[[id:UUID]]=
+  jumps to that node; =[[file:foo.org]]= opens that file;
+  =[[file:foo.org::*Heading]]= jumps to a specific heading.
+  Agent can cite a node; user clicks to inspect. Agenda
+  capture works on TODOs in chat if user wants. Continuous
+  hyperlinked surface across vault + chat — not "chat that
+  references vault" but "chat that IS in vault."
 
 Implications if accepted as CORE:
 - opencode / Claude Code TUI become *secondary* surfaces (not

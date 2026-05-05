@@ -6,13 +6,21 @@
 #+FILETAGS: :wiki:concept:bridge:pi:
 #+OPTIONS: toc:nil num:nil
 
-* What it is
+* Summary
 
-A TypeScript MCP-bridge extension that wires =org-llm='s tools
-into [[https://pi.dev][Pi]] — Anthropic's IDE-adjacent CLI agent.
-Pi is the third conversational interface alongside opencode and
-Claude Code; the bridge gives Pi sessions full access to all
-~64 org-llm MCP tools as Pi-native =org_llm_<name>= tools.
+*Summary.* The Pi bridge is a TypeScript MCP-bridge extension that
+wires =org-llm='s tools into [[https://pi.dev][Pi]] — Mario Zechner's
+TS-extensible CLI agent. Pi is the third conversational interface
+alongside opencode and Claude Code; the bridge gives Pi sessions full
+access to all ~64 org-llm MCP tools as Pi-native =org_llm_<name>=
+tools.
+
+*Expanded.* What Pi adds over the other two surfaces is *per-turn
+dynamic system prompts* — every turn the bridge re-renders the
+org-llm system prompt with current vault stats, recent activity,
+active knob mix, and power-boost verdict. opencode and Claude Code
+only resolve the system prompt once at session start, so Pi's the
+surface where context updates land mid-session without a relaunch.
 
 * Why Pi when opencode + Claude already exist
 

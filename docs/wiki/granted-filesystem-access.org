@@ -6,12 +6,20 @@
 #+FILETAGS: :wiki:concept:permissions:filesystem:
 #+OPTIONS: toc:nil num:nil
 
-* What it is
+* Summary
 
-A user-controlled allowlist of filesystem paths the LLM can
-read or operate on through MCP tools. The model can ask
-("=request_access(path)=") but can't grant. Every grant is
-explicit; the user is the gate.
+*Summary.* Granted filesystem access is a user-controlled allowlist
+of paths the LLM can read or operate on through MCP tools. The model
+can ask via =request_access(path)= but can't grant; every grant is
+explicit, and the user is the gate.
+
+*Expanded.* The default install only grants the =org_dir= itself;
+everything else is request-based, with two scopes (=read= for
+=read_file= / =list_directory= / =discover_filesystem=, =execute= for
+browser / shell tools). Sensitive paths (=~/.ssh=, =~/.gnupg=, key
+files) are auto-denied even before the user is asked, and require a
+=grant add --force= to override. Every grant + access event writes
+to History so =log --reflect= can spot recurring requests.
 
 * Why an allowlist instead of "wide open"
 
