@@ -45,6 +45,13 @@ chronological ordering — append to the bottom; the next
 # When done: change STARTED → DONE, add :CLOSED: timestamp, move
 # the entry to "Recently closed" below.
 
+** STARTED Claude/opus-C — wrap mission walk: DEC-011/012 + sync arch + dbt pipeline + Phase 25 revision
+   :PROPERTIES:
+   :CLAIM:    docs/wiki/decisions.org docs/wiki/sync-architecture.org docs/wiki/dbt-pipeline.org docs/wiki/roadmap.org docs/wiki/dev-tracker.org docs/wiki/active-claims.org
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-05 Tue 01:34]
+   :END:
+
 * Recently closed                                              :@closed:
 
 ** DONE Claude/opus-C — Three Laws of org-llm Data Integrity wiki page

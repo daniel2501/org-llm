@@ -698,6 +698,181 @@ contribution decisions use the same lens.
   aligned non-profit needs a temporary relicense), revisit
   in a separate DEC. Default stays anti-enclosure.
 
+** DEC-011 — DB is the universal interface; files are canonical storage
+:PROPERTIES:
+:ID:       9b73e26d-5c84-4f1a-bd35-2af18e4c7c93
+:STATUS:   accepted
+:DATE:     [2026-05-05]
+:DECIDERS: Daniel, Claude/opus-C
+:END:
+
+*Summary.* Org files in a git repo are the *canonical, durable
+storage*. The DB (SQLite + sqlite-vec) is the *universal
+query/write interface* — every domain object has a SQL
+representation, regardless of whether it durably lives in a
+file or only in the DB. Some writes have higher latency
+because they round-trip through file/git (e.g. captain's log
+entries that need a commit before another device sees them);
+that latency is explicit, not a leak. This collapses the
+two-pillar tension between "Org is Code" and "DB-maximalism":
+they're layered, not opposed.
+
+*Context.* The original Phase 25 framing said "DB becomes
+truth, files become rendered UI" — pure DB-authoritative
+inversion. The 2026-05-05 mission walk surfaced two related
+clarifications: (1) at the bytes level, *everything is files*
+(SQLite is a file, postgres is files, cloud buckets are
+files-elsewhere), so "files vs database" was always a category
+error; the real choice is which interface you put on the
+bytes; (2) the user's lived requirement is multi-device sync
+(laptop ↔ phone ↔ work-laptop), and git already solves
+multi-writer distributed sync — using it would dissolve a
+custom-sync engineering problem we'd otherwise have to build.
+DEC-011 codifies the resolution: files are canonical (git
+gives sync + history + auditability for free), DB is universal
+interface (gives SQL power, mass-ops, observability,
+introspectability — all the DB-max wins).
+
+*Decision.*
+
+1. *Files are canonical.* All durable state lives in committed
+   files. Org content in =~/org/*.org=, configs in literate
+   org files, dbt models in =dbt/=, tofu config in =infra/=,
+   etc. Git is the version control + sync + audit substrate.
+
+2. *DB is the universal interface.* Every domain object is
+   queryable via SQL — including captain's log, configs,
+   embeddings, agent baselines, vault facts, validation runs.
+   No piece of state bypasses the DB query layer.
+
+3. *DB is regenerable.* Each device maintains its own local
+   DB, derived from the (synced) files via dbt + ingestion.
+   The DB is in =.gitignore=. Loss of DB = re-derive from
+   files. Zero permanent data loss.
+
+4. *Latency tradeoffs are explicit.* Some writes have higher
+   latency because they have to round-trip through file/git
+   (commit, push, pull-on-other-device, re-derive DB). This
+   is acknowledged, not hidden. UX accommodates it (e.g.
+   mobile capture is offline-friendly; LLM enrichment defers
+   to reconnect).
+
+5. *Forward direction goes through dbt.* Files → parsed
+   tables → derived models. dbt provides the schema, tests,
+   incremental builds, lineage. See companion wiki:
+   [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]].
+
+6. *Backward direction is a deterministic renderer.* Agents
+   write via DB; engine renders the affected files
+   deterministically (whole-file rewrite for now; surgical
+   later). See [[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]] for the full cycle and
+   [[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][data-integrity-laws.org]] for agent-vs-human edit policies.
+
+*Consequences.*
+- *Phase 25 scope rewrites.* Was "DB becomes truth, files
+  become rendered UI"; now "files canonical, DB-as-cache, dbt
+  pipeline." Narrower, safer, ships sooner. Captures most of
+  the original DB-max wins without the bidirectional-sync
+  complexity.
+- *Multi-device sync becomes git, full stop.* No custom event
+  log, no CRDT layer, no bespoke sync protocol. =git pull/push=
+  is the entire mechanism. Conflict resolution = git's tools
+  (with an org-aware merge driver as an upgrade path).
+- *Catastrophic loss is recoverable for free.* Phone wipe →
+  =git clone= + =org-llm init= + re-derive. Property cloud SaaS
+  charges for; we get from layering.
+- *Captain's log moves to a synced committed file* (per this
+  decision) so it's regenerable from canonical state and
+  visible across devices.
+- *DB schema can evolve without migration ceremony* — drop
+  the local DB, re-derive from files. Same file → same DB
+  modulo the schema delta.
+- *Forecloses* "DB is the durable home for X" for any state
+  not also expressible as files. Anything that goes in the DB
+  must round-trip to a file representation.
+- *Triggers revisit:* if multi-device sync stress-tests reveal
+  a write pattern git can't handle, escalate (CRDT layer, event
+  log) — but only after demonstrating the gap. Default stays
+  git-as-sync.
+
+** DEC-012 — Per-device configuration via device-keyed Config
+:PROPERTIES:
+:ID:       b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1
+:STATUS:   accepted
+:DATE:     [2026-05-05]
+:DECIDERS: Daniel, Claude/opus-C
+:END:
+
+*Summary.* The =Config= table primary key shifts from =(key)=
+to =(key, device)=, with =device='(any)'= for global defaults.
+Lookup picks the most-specific device match (current device >
+=(any)=). Lets the same logical knob hold different values per
+device — phone font size differs from work-laptop screen;
+theme can be less-commie on the work machine; agent-write-active
+defaults true on laptop, false on mobile. Drift between device
+configs is the *feature*, not the bug.
+
+*Context.* The 2026-05-05 mission walk surfaced this when
+discussing multi-device shapes. The user's lived case: phone
+needs large font; work laptop needs muted theme; laptop runs
+=@gardener= nightly but phone shouldn't. Today the =Config=
+table is keyed by =(key)= alone, so a knob change on one
+device propagates to all (via committed literate config),
+which is wrong. DEC-012 makes per-device variance first-class.
+
+*Decision.*
+
+1. *Schema change.* =Config(key, value)= →
+   =Config(key, device, value)=, primary key =(key, device)=.
+   =device='(any)'= is the global default. Each device knows
+   its own identifier (hostname or fixed
+   =~/.config/org-llm/device-id=).
+
+2. *Lookup precedence.* Current device > =(any)= default.
+   Engine reads the most-specific value at runtime.
+
+3. *Literate config respects device-specificity.* Device-aware
+   =:DEVICE:= property on headings and/or per-device override
+   files (=org-llm-config.phone.org=,
+   =org-llm-config.work-laptop.org=). Round-trip preserves
+   device.
+
+4. *Migration.* Existing =Config= rows become
+   =(key, '(any)', value)= rows; no semantic change for users
+   without per-device customization.
+
+5. *Pattern reuse.* Same shape extends as needed:
+   =AgentBaseline=, =SidebarOverlay=, etc. — anything that
+   should plausibly differ per device gets the =device=
+   column.
+
+*Consequences.*
+- *Schema migration on =Config= table* (and any table that
+  inherits the pattern). Per [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]] DB regenerates from
+  files; user-facing migration is invisible (literate config
+  is the source of truth and the new schema reads it
+  unchanged).
+- *Device identity becomes a load-bearing concept.* Hostname
+  works for unique machines; a generated device-id covers
+  edge cases (multiple machines with same hostname,
+  ephemeral containers). Worth a small TODO to specify.
+- *Sync semantics stay clean.* Files (literate config) sync
+  via git like everything else; each device picks its own
+  rows on read. No custom per-device sync logic.
+- *Agent-write-active becomes per-device by default* —
+  =@gardener= runs nightly on laptop, read-only on mobile.
+  Avoids "two agents on two devices fighting over the same
+  drift on the same night" (per scenario 6 of the mission
+  walk).
+- *Forecloses* "one global config for everything" assumption
+  in code paths that read knobs. Every read must pass the
+  current device identifier.
+- *Triggers revisit:* if vault-keyed config (separate from
+  device-keyed) becomes a need (e.g. one user, multiple
+  vaults, different theme per vault), extend the same shape:
+  =Config(key, vault, device, value)=. Today's call: device
+  only.
+
 * See also
 
 - [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] —
