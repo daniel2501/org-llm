@@ -41,6 +41,57 @@ Tier model (DEC-013, two-tier tools):
 
 EDGE means we haven't yet agreed which tier; it gets argued explicitly in this page.
 
+* Decision categories (revised 2026-05-05 mid-walk)
+
+The original cull rubric was binary (CORE / ADDABLE) plus an
+explicit EDGE bucket for cases needing argument. Mid-walk the
+user sharpened to a *ternary*:
+
+#+begin_quote
+- *CORE* — ships, *on by default*. Mandatory part of the lead
+  value (β: dream-state vault via agents + dbt-distro shape).
+- *CORE_DISABLED_BY_DEFAULT* — ships in the install, *off by
+  default*. User opts in via a knob. Bundled but quiet — they
+  get the tooling without it nagging or being a footprint
+  cost.
+- *COMMUNITY IDEA* — does NOT ship in core. Lives in the
+  extension path (per [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009]]). User or community can
+  develop. The decision is "we won't carry this in core" —
+  not "we won't allow this."
+#+end_quote
+
+This three-way split extends DEC-009 (curated core + extension
+path) from binary to ternary; the middle category collapses
+the prior "ADDABLE" + "EDGE" buckets when the answer is
+"keep, but quiet." Filed as DEC-014 candidate when the walk
+wraps.
+
+* Walkthrough convention
+
+- *p* (or *preclassified*) — ratify the pre-classified verdict
+  as-is. Tight shorthand for the common case where the
+  pre-classification holds up.
+- *CORE* / *CORE_DISABLED_BY_DEFAULT* / *COMMUNITY IDEA* —
+  explicit verdict, possibly with a one-line rationale.
+- *flip → <X>* — re-classify against the pre-class (e.g.
+  "flip → COMMUNITY IDEA"); rationale required.
+
+*Agent-ification default* (added 2026-05-05 mid-walk): every
+CORE / CORE_DISABLED_BY_DEFAULT verdict also means *"surface
+this component as an @-agent representative"* — an
+agent persona responsible for / knowledgeable about / able to
+drive the component. Default applies unless: (a) verdict is
+COMMUNITY IDEA (community decides representation), or (b) user
+explicitly says "no agent" on the component.
+
+Mapping component → agent is a *separate design exercise*
+(post-cull). One agent may own multiple components (e.g. a
+=@librarian= owning indexer + search + vault_facts), so
+agent-ifying 15 CORE components doesn't mean 15 new agents.
+The curated core team stays ≤6 (per [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009]]); component
+ownership is the routing layer below.
+
+
 * Decision protocol
 
 - Walk one component at a time.
@@ -66,10 +117,11 @@ EDGE means we haven't yet agreed which tier; it gets argued explicitly in this p
   every agent, vault_facts.py, recipe runners, doctor.
 - *Cut-criterion test:* If this disappeared, would β still ship? — No agent could read
   the vault; β collapses entirely.
-- *Decision:*
+- *Decision:* CORE + agent-ify (=p= — ratified pre-class, 2026-05-05)
 - *Walkthrough notes:*
 
 *** LLM proxy + interceptor chain — pre-classified CORE
+- *Decision:* CORE + agent-ify (=p= — ratified pre-class, 2026-05-05)
 - *Where it lives:* =org_llm/llm_proxy.py=
 - *What it does:* Single seam through which all LLM calls flow; enables interceptors
   (caching, logging, redaction, routing, rate-limiting) without touching call sites.
@@ -80,6 +132,7 @@ EDGE means we haven't yet agreed which tier; it gets argued explicitly in this p
 - *Walkthrough notes:*
 
 *** MCP server base tool set (~15 tools) — pre-classified CORE
+- *Decision:* CORE + agent-ify (=p= — ratified pre-class, 2026-05-05)
 - *Where it lives:* =org_llm/mcp_server.py= + tool registry; base set:
   =read_file, search_notes, ask_notes, get_node, capture_note, request_access,
   delegate, list_agents= (and ~7 more base verbs).
@@ -98,7 +151,7 @@ EDGE means we haven't yet agreed which tier; it gets argued explicitly in this p
 - *What depends on it:* Recipes, manager orchestration, MCP delegate tool, capture flow.
 - *Cut-criterion test:* Without the framework + core roster, "vault thinks with you"
   has no thinker. β does not ship.
-- *Decision:*
+- *Decision:* CORE + agent-ify (=p= — ratified pre-class, 2026-05-05)
 - *Walkthrough notes:*
 
 *** Captain's log — pre-classified CORE
@@ -108,10 +161,19 @@ EDGE means we haven't yet agreed which tier; it gets argued explicitly in this p
 - *What depends on it:* dbt analytics (Phase 27), retro recipes, doctor, audit trail.
 - *Cut-criterion test:* Without it, agents act in amnesia and nothing analytic can be
   layered on top. β ships but the dbt-distro thesis loses its data spine.
-- *Decision:*
-- *Walkthrough notes:*
+- *Decision:* CORE, NO agent (DB object / substrate, 2026-05-05) — captain's log is
+  a queryable data structure (file canonical + dbt-derived =captains_log= table per
+  dual-write pattern); doesn't need an @-persona representative.
+- *Walkthrough notes:* Established the principle that CORE substrate components
+  don't auto-trigger agent-ify default. Going forward: when a CORE component is
+  pure data structure / event log / config layer, user can opt out with
+  "no agent" / "DB object" / similar.
 
 *** Vault-facts inferrers — pre-classified CORE
+- *Decision:* CORE + agent-ify (2026-05-05) — agent is *not* an inferrer;
+  agent /manages and deploys/ inferrers (registers them, monitors freshness,
+  proposes new ones). Useful general pattern: agent-as-manager-of-substrate,
+  distinct from agent-as-substrate.
 - *Where it lives:* =org_llm/vault_facts.py= (Phase 21)
 - *What it does:* Derives per-vault facts (active projects, recurring tags, agenda
   shape, capture habits) used as deterministic context for agents.
@@ -122,104 +184,138 @@ EDGE means we haven't yet agreed which tier; it gets argued explicitly in this p
 - *Walkthrough notes:*
 
 *** Pre-flight resolver registry — pre-classified CORE
+- *Decision:* CORE + agent-ify (agent-as-manager pattern, 2026-05-05) — agent
+  manages the resolver registry (proposes new resolvers from captain's-log
+  patterns, scores effectiveness, deregisters stale ones, audits 80ms budget),
+  doesn't BECOME a resolver (resolvers stay pure deterministic code).
 - *Where it lives:* Phase 24.1 — resolver seam at @-prefix expansion.
 - *What it does:* Resolves @-prefixed references (agents, nodes, facts) deterministically
   before they hit the LLM; enriches prompts at the seam.
 - *What depends on it:* Manager pre-fetch pattern, every recipe, capture flow.
 - *Cut-criterion test:* Without it, manager pre-fetch becomes either ad-hoc or LLM-driven
   again; quality + speed both regress. β ships but degraded.
-- *Decision:*
-- *Walkthrough notes:*
+- *Walkthrough notes:* Established the canonical "agent-as-manager pattern" that
+  pre-resolves the remaining 8 CORE candidates (config, capture, doctor,
+  embeddings, cloud-routing, recipes, self-coded tools — all fit; DB storage
+  is the no-agent exception per substrate-pattern from captain's log).
 
 *** Config layer — pre-classified CORE
+- *Decision:* CORE + agent-ify (agent-as-manager pattern, 2026-05-05) — agent
+  manages config schema, validates entries, proposes new knobs, audits drift
+  between literate-config and DB. Knobs themselves stay declarative.
 - *Where it lives:* DB-backed config + knobs.py + literate-config (org-mode source).
 - *What it does:* Single source of truth for runtime config; literate-config makes the
   distro inspectable + tweakable from inside the vault.
 - *What depends on it:* Everything reads config; literate-config is part of the
   dbt-distro UX.
 - *Cut-criterion test:* Without it, no consistent runtime behavior. β does not ship.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Capture flow — pre-classified CORE
+- *Decision:* CORE + agent-ify (agent-as-manager pattern, 2026-05-05) — @scribe
+  is the natural manager (already in core team); manages capture pipeline
+  (decides where to land, when to enrich, validates metadata) without BEING the
+  capture mechanism itself (deterministic write-path stays code).
 - *Where it lives:* capture pipeline + =capture_note= MCP tool + scribe agent path.
 - *What it does:* Turns a freeform thought into a structured org node landed in the
   right place with the right metadata; the primary write-path into the vault.
 - *What depends on it:* Scribe agent, manager delegation, mobile/quick-capture entries.
 - *Cut-criterion test:* Without it, the vault is read-only from the agent's POV. β
   collapses to "agents that read but don't write".
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Doctor + self-heal — pre-classified CORE
+- *Decision:* CORE + agent-ify (agent-as-manager pattern, 2026-05-05) — agent
+  (probably =@bones= / doctor persona) manages the registry of checks +
+  remediations; proposes new ones from captain's-log failure patterns; doesn't
+  BECOME the deterministic checks themselves.
 - *Where it lives:* =org_llm/rescue.py= + doctor verbs.
 - *What it does:* Detects + repairs common breakage (DB drift, index staleness, missing
   IDs, broken links); makes the distro trustable on someone else's machine.
 - *What depends on it:* Onboarding, recovery from crashes, dbt-distro deliverability.
 - *Cut-criterion test:* Without it, the FOSS distro thesis weakens — every user hits
   unrecoverable state. β ships but distro doesn't.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** DB authoritative storage — pre-classified CORE
+- *Decision:* CORE, NO agent (substrate, like captain's log, 2026-05-05) — DB
+  is pure data structure; doesn't fit agent-as-manager (DB schema is owned by
+  code + dbt models, not a runtime registry an agent curates). Per DEC-011,
+  files are canonical and DB is universal SQL interface; the *contents* are
+  managed by upstream component-agents (vault facts, captain's log, etc).
 - *Where it lives:* =org_llm/db.py= (current SQLite) + Phase 25 inversion target.
 - *What it does:* Persistent state for agents, runs, captures, derived facts; under
   Phase 25 it becomes the truth and the vault becomes rendered UI.
 - *What depends on it:* Logbook, vault_facts, search, recipes, dbt analytics.
 - *Cut-criterion test:* Without it, no durable state across runs. β does not ship in
   any meaningful sense.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Embeddings + search — pre-classified CORE
+- *Decision:* CORE + agent-ify (agent-as-manager pattern, 2026-05-05) — agent
+  manages embed-model pinning (sync-arch Scenario 8 mitigation), scoring
+  strategies, retrieval quality monitoring; proposes scoring-fn upgrades from
+  captain's-log retrieval-failure patterns. Embedding pipeline + ann-index
+  stay deterministic code.
 - *Where it lives:* =org_llm/search.py=
 - *What it does:* Semantic + lexical search over the vault index; backs =search_notes=
   and =ask_notes=.
 - *What depends on it:* Researcher agent, ask_notes tool, recipes that walk the graph.
 - *Cut-criterion test:* Without it, agents fall back to grep — usable but β quality
   drops. Probably load-bearing for "vault thinks with you".
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Cloud-or-local routing — pre-classified CORE
 - *Where it lives:* =org_llm/cloud.py= + =org_llm/creds.py=
+- *Decision:* CORE + agent-ify (agent-as-manager pattern, 2026-05-05) — agent
+  manages routing rules + provider catalog (per DEC-010 anti-cap tiering),
+  proposes new providers, retires deprecated ones, audits compliance with
+  budget caps (per OpenTofu bite 3). Routing decisions stay deterministic.
 - *What it does:* Routes LLM calls between cloud providers and local models based on
   task, credentials, and policy; underpins FOSS-first stance.
 - *What depends on it:* LLM proxy, every agent call, recipe runner.
 - *Cut-criterion test:* Without it, no FOSS-first story; locks the distro to one
   provider. β ships but dbt-distro thesis weakens.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Recipe registry infrastructure — pre-classified CORE
+- *Decision:* CORE + agent-ify (agent-as-manager pattern, 2026-05-05) — agent
+  manages the recipe registry (proposes new recipes from captain's-log
+  patterns, retires unused, audits A/B-bar compliance per memory). Recipe
+  execution stays deterministic via recipe_runner.
 - *Where it lives:* =org_llm/orchestration.py= + =org_llm/recipe_runner.py=
 - *What it does:* The "dbt models" surface — declarative recipes that compose agents,
   tools, and resolvers into reproducible runs.
 - *What depends on it:* All recipes; manager orchestration; the dbt-distro thesis.
 - *Cut-criterion test:* Without it, agents run ad-hoc only. β ships partially; the
   dbt-distro half does not.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Self-coded tools (Phase 29) — pre-classified CORE
+- *Decision:* CORE + agent-ify (agent-as-manager pattern, 2026-05-05) — agent
+  manages the auto-promotion pipeline (pattern detection → proposed tool →
+  validation → registration). The pipeline IS the agent's job description;
+  this is the most native fit for the agent-as-manager pattern in the entire
+  cull.
 - *Where it lives:* Phase 29 target — meta-feature on top of tool registry.
 - *What it does:* When the LLM does X repeatedly, the app detects, proposes a
   deterministic tool, validates it, and registers it; runtime calls then skip the LLM.
 - *What depends on it:* The dbt-distro thesis; long-term cost + speed + quality.
 - *Cut-criterion test:* Without it, the distro can't grow itself; remains a static
   toolbox. β ships but the /opinionated FOSS distro/ half is a static product.
-- *Decision:*
 - *Walkthrough notes:*
 
 ** ADDABLE candidates
 
 *** LCARS theming + theme studio — pre-classified ADDABLE
+- *Decision:* CORE_DISABLED_BY_DEFAULT (2026-05-05) — theme IS the org-llm
+  aesthetic; ships in distro for identity; default off (plain) so install is
+  unopinionated; user enables via knob.
 - *Where it lives:* =org_llm/palettes.py=, =org_llm/knobs.py=, =org_llm/theme_studio.py=
 - *What it does:* Visual theming for the TUI/sidebar; theme studio is interactive
   palette tuning.
 - *What depends on it:* TUI rendering only.
 - *Cut-criterion test:* β still ships in monochrome. Cool, not load-bearing.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Skills (org-babel slash commands) — pre-classified ADDABLE
@@ -297,13 +393,16 @@ EDGE means we haven't yet agreed which tier; it gets argued explicitly in this p
 - *Walkthrough notes:*
 
 *** Specific recipes — pre-classified ADDABLE
+- *Decision:* SPLIT — see Subsumed / dead code section for the 6 losers
+  (subsumed by dbt-pipeline CORE). =count_across_vault= and =weather_aware_agenda=
+  remain CORE under the recipe registry infrastructure entry. Specific recipes
+  beyond those two are COMMUNITY IDEA (extension-path).
 - *Where it lives:* recipe registry (subset): =weather_aware_agenda=, =busy_week=,
   =link_graph_walk=, =recent_activity_summary=.
 - *What it does:* Concrete recipe instances on top of the recipe infrastructure.
 - *What depends on it:* User taste; not core.
 - *Cut-criterion test:* β ships with the recipe /infrastructure/; specific recipes
   are extension-path.
-- *Decision:*
 - *Walkthrough notes:*
 
 *** Apache Superset dashboards — pre-classified ADDABLE
@@ -424,6 +523,46 @@ EDGE means we haven't yet agreed which tier; it gets argued explicitly in this p
 - *Cut-criterion test:*
 - *Decision:*
 - *Walkthrough notes:*
+
+* Subsumed / dead code (out of cull scope)
+
+This section tracks capabilities made *moot* by accepted
+architectural decisions (DEC-011 + DEC-013, primarily) — not
+verdicts in the cull rubric. Subsumption is a *consequence* of
+architecture moving past a wrapper; the cull rubric answers
+"what shape does this ship in?" while subsumption answers
+"is this a thing anymore?" — different question types per the
+2026-05-05 verdict-vocabulary refinement (recommendation (c)).
+
+Items here are scheduled for *delete-as-you-go* — the deletion
+lands when the subsumer ships, not as a Phase 26 cut decision.
+A captain's-log entry captures each pruning event for audit.
+
+** Recipes subsumed by dbt-pipeline (CORE)
+
+The 6 recipes that lost the recipe A/B harness AND map cleanly
+to a dbt-pipeline derived model:
+
+| Recipe                       | Subsumed by (dbt model)            |
+|------------------------------+------------------------------------|
+| =recent_activity_summary=    | =recent_activity= view             |
+| =dailies_general=            | =parsed_dailies= view              |
+| =dailies_routine_filter=     | =parsed_nodes= + routine taxonomy  |
+| =weekly_mood_review=         | =snap_mood_arc= snapshot + window  |
+| =link_graph_walk=            | =parsed_links= + recursive CTE     |
+| =busy_week=                  | =clock_summary= model              |
+
+Both reasons (paid-for-and-lost vs agent-tool-use baseline +
+subsumed by dbt-pipeline) make these dead code. Delete when
+the corresponding dbt models ship in Phase 25.1.
+
+** Other subsumed items (TBD)
+
+The 2026-05-05 broader subsumption scan (background subagent,
+output at =/tmp/subsumption-scan-2026-05-05.md=) is identifying
+additional CLI verbs / MCP tools / module utilities that the
+dbt-pipeline makes moot. Findings will be transcribed here on
+completion.
 
 * Follow-up extractions (placeholder)
 

@@ -47,6 +47,19 @@ chronological ordering — append to the bottom; the next
 
 * Recently closed                                              :@closed:
 
+** DONE Claude/opus-C — cull walk: 15 CORE verdicts + (c) verdict-vocabulary refinement
+   :PROPERTIES:
+   :CLAIM:    docs/wiki/cull.org docs/wiki/active-claims.org
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-05 Tue 09:25]
+   :CLOSED:   [2026-05-05 Tue 09:32]
+   :NOTES:    15/15 CORE bucket walked + ratified;
+              ADDABLE bucket partial (LCARS applied, rest pending);
+              EDGE bucket pending; verdict vocabulary refined per
+              recommendation (c) — Subsumed section instead of
+              REMOVED-as-4th-verdict.
+   :END:
+
 ** DONE Claude/opus-C — parallel dispatch: OpenTofu TODOs + @sidecar design + cull template + doc-rewrite plan
    :PROPERTIES:
    :CLAIM:    docs/wiki/dev-tracker.org docs/wiki/sidecar-agent-design.org docs/wiki/cull.org docs/wiki/doc-rewrite-plan.org docs/wiki/active-claims.org
