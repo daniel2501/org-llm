@@ -47,6 +47,14 @@ chronological ordering — append to the bottom; the next
 
 * Recently closed                                              :@closed:
 
+** DONE Claude/opus-C — quick wins: spawned-vs-@ clarification
+   :PROPERTIES:
+   :CLAIM:    docs/wiki/agent-framework.org docs/wiki/active-claims.org
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-05 Tue 08:30]
+   :CLOSED:   [2026-05-05 Tue 08:34]
+   :END:
+
 ** DONE Claude/opus-C — final wrap: DEC-013 + tools-as-dbt-models synthesis
    :PROPERTIES:
    :CLAIM:    docs/wiki/decisions.org docs/wiki/tools-as-dbt-models.org docs/wiki/active-claims.org

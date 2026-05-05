@@ -15,8 +15,8 @@ plan.
 
 Status (2026-05-04):
 - Phase 23.1 *shipped* — Agent dataclass lives at
-  =org_llm/agents/_types.py=; metadata + builtin registry at
-  =org_llm/agents/_builtins.py=; alias-aware resolution wired
+  [[file:../../org_llm/agents/_types.py][=org_llm/agents/_types.py=]]; metadata + builtin registry at
+  [[file:../../org_llm/agents/_builtins.py][=org_llm/agents/_builtins.py=]]; alias-aware resolution wired
   through proxy + MCP layer; OOB cut to 12 starfleet-core agents
   with Trek birth-names + functional aliases.
 - Phase 23.2 (capability enforcement) — *declarative shipped*,
@@ -78,7 +78,7 @@ surface for asking domain questions. One concept, used twice.
 * The Agent
 
 An *Agent* is the unit of org-llm's specialist behaviour.
-Defined as a frozen dataclass at =org_llm/agents/_types.py=:
+Defined as a frozen dataclass at [[file:../../org_llm/agents/_types.py][=org_llm/agents/_types.py=]]:
 
 #+begin_src python
 @dataclass(frozen=True)
@@ -273,6 +273,49 @@ reference them.
 
 All four are implemented today.
 
+* Spawned subagents — a different concept layer
+
+A point of frequent confusion: *spawned subagents* (the kind
+Claude Code or opencode delegates to via their built-in
+sub-agent tool) are *not* the same as *@-agents* (the org-llm
+personas this page describes). Two different concept layers
+that happen to share the word "agent."
+
+| | =@<name>= agents (org-llm) | Spawned subagents (Claude Code / opencode) |
+|---+----------------------------+--------------------------------------------|
+| *Identity* | Persona with name, persona prompt, tool roster, recipes | None — generic ephemeral context |
+| *Lifecycle* | Long-lived definition; invoked many times | Ephemeral; one shot per spawn |
+| *Brief* | Lives in =AgentBaseline= + persona prompt + per-device knobs | Hand-written prompt per spawn |
+| *Composition* | Routed via =@<name>= proxy interceptor | Spawned via host-side sub-agent tool |
+| *Observability* | Captain's log + sidebar =intent_agent= | Per-task output file |
+| *Registry* | =BUILTIN_AGENTS= + =AgentRow= (DB) | None |
+| *Persistence* | Agent definitions persist; specific calls are just events | No persistence beyond their one task |
+
+*How they compose.* An =@<name>= agent's =delegate= MCP call
+*could* spawn a Claude Code subagent under the hood as a
+model-layer choice (instead of going direct-to-proxy). Today
+the dispatch goes through the proxy; spawning a subagent for
+delegation is a future model-routing option.
+
+*The 2026-05-04 / 2026-05-05 mission walk used spawned
+subagents directly* (without an =@<name>= persona) to write
+two new wiki concept pages and research OpenTofu in parallel
+during the architectural discussion. Those agents were
+"ephemeral writers" briefed per-call — no =@<name>= identity,
+no persona, no entry in any agent registry. That's the
+canonical example of spawned subagents working *alongside*
+@-agents rather than as a subset of them.
+
+*Practical rule for which to reach for:*
+
+- *@-agent* — when the task is recurring and benefits from a
+  consistent persona (=@curator= sweeping wiki drift,
+  =@gardener= running nightly hygiene). Persona is the value.
+- *Spawned subagent* — when the task is one-off and
+  self-contained, briefed per-call (research a library, write
+  a single doc, run a parallelisable computation). Brief is
+  the value.
+
 * Cross-agent collaboration model
 
 The user's standing position: "agents help other agents per the
@@ -323,10 +366,10 @@ improvement.
 * Migration plan
 
 ** Phase 23.1 — Agent dataclass + registry refactor *[shipped 2026-05-03]*
-- =Agent= dataclass shipped at =org_llm/agents/_types.py=
+- =Agent= dataclass shipped at [[file:../../org_llm/agents/_types.py][=org_llm/agents/_types.py=]]
   (frozen, with =birth_name=, =aliases=, =pack=, =origin=,
   =addressable=).
-- =_AGENT_META= at =org_llm/agents/_builtins.py= maps legacy
+- =_AGENT_META= at [[file:../../org_llm/agents/_builtins.py][=org_llm/agents/_builtins.py=]] maps legacy
   keys (=crew=, =researcher=, …) → birth-names (=picard=,
   =spock=, …). =get_builtins()= joins with cli.py's persona +
   trigger dicts.
