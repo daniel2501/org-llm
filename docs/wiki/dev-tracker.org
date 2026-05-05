@@ -2941,6 +2941,179 @@ constraint above re-evaluates. By then either:
 
 No commitment needed in advance. Change Date is automatic.
 
+** TODO Dogfood — migrate dev-tracker to ~/org/ via tracker self-host  :plan:dogfood:tracker:self-host:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:GATE:     1,3
+:SOURCE:   2026-05-05 — user: "really using the app to take notes
+           for myself"; dogfood-as-sprint-tracker forces the
+           tracker self-hosting goal forward
+:END:
+
+Migrate this very file (=docs/wiki/dev-tracker.org=) to live in
+=~/org/org-llm-dev-tracker.org=, accessed via =org-llm tracker
+review= / =tracker init= / =tracker pace= verbs. Dogfood the
+app's own self-hosting (per project_tracker_self_hosting_goal
+memory). Cross-references DEC-011: dev-tracker becomes a
+queryable dbt source like any other org file.
+
+*The dogfood claim:* if I won't use my own app for my own
+project tracking, why would anyone else use it for theirs?
+Forcing the migration is the stress test.
+
+*Sub-items (now that the architecture is clearer):*
+
+*** TODO New Phase 27 Superset applications                     :phase27:dashboards:
+"Vault life signs" pulse, project arcs, mood arc, activity
+heatmap, drift watch (failing dbt tests). Specific dashboards
+sketched in [[file:dbt-pipeline.org][dbt-pipeline.org]] § Dashboards. Each is a TODO
+once Phase 27 lights up.
+
+*** TODO New Phase 26+ Agor partner-app applications            :agor:phase26:
+With DEC-009 (curated core + extension) and tonight's
+parallel-agent experience: Agor as orchestration substrate
+under the extension path. Specific apps to investigate: Agor
+× spawned-subagent-coordination, Agor × @-agent persona
+distribution, Agor × tofu-stack management. See entry below.
+
+*** TODO Apache Airflow integration?                            :airflow:research:
+Question whether dbt-on-cron + dbt-cloud-shape needs
+escalation to Airflow for: scheduled cross-vault federation
+(post-1.0), heavy daily snapshot rolls, cross-app pipelines
+(org → dbt → Superset → email summary). Needs scope evaluation
+against DEC-010 anti-capitalist alignment (Airflow itself is
+ASF/FOSS — fine; managed Airflow is the question).
+
+*Scheduling:* the migration itself is sprint-eligible (~1d) once
+Phase 29.0 (=tracker sync= verb) lands. Sub-items are research
+queue entries.
+
+** TODO Agor — multi-agent orchestration substrate (tonight's framing) :research:agor:multi-agent:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE:   2026-05-05 mission walk; complements existing
+           "Agor as worktree-isolated dev-stream layer" entry
+           with the multi-agent-leveling-up framing
+:END:
+
+Tonight's parallel-agent dispatch (3 background subagents
+during the mission walk: sync-architecture writer, dbt-pipeline
+writer, OpenTofu researcher) was a successful proof-of-concept
+that Claude Code's native subagent spawning works for
+documentation-shaped tasks. Open question: where does Agor add
+value *over native Claude Code subagents + DEC-005 strict claim
+hygiene*?
+
+Specific questions to investigate:
+1. Does Agor coordinate ACROSS instances (multiple Claude Code
+   sessions / multiple opencode windows / mixed)? If yes, that's
+   a meaningful win over per-instance subagents.
+2. How does Agor's worktree isolation interact with org-llm's
+   git-as-sync model (per [[file:sync-architecture.org][sync-architecture.org]])? The two
+   may be redundant or complementary.
+3. Per Phase 26 cull: does Agor become a CORE component or
+   extension-path-only?
+4. DEC-009 fit: is Agor the substrate that PROVES the extension
+   path is real (per criterion-2 of "first usable")?
+
+Cross-references:
+- =dev-tracker.org= line ~2494 (existing "Agor as
+  worktree-isolated dev-stream layer" entry)
+- =roadmap.org= § Agor walkthrough (commit =8586bc5=)
+- DEC-009 (curated core agents + extension path)
+- DEC-005 (strict claim-before-touch + worktree escape hatch —
+  Agor's exact territory)
+
+** TODO Cull walkthrough — actually do Phase 26.1                :plan:meta:cull:
+:PROPERTIES:
+:PRIORITY: A
+:SOURCE:   2026-05-05 user reminder ("Weren't we going to do a
+           feature core or spin off as optional agent
+           walkthrough?"); the per-component decisions deferred
+           to "after the mission walk"
+:END:
+
+Phase 26.1 (finalize the cut list) was scheduled to be walked
+component-by-component, one at a time, but deferred during the
+2026-05-05 mission walk to keep momentum. Schedule the actual
+walk: per the cut criterion (DEC-009: would the lead value still
+ship without this?), decide each of the ~30 components in the
+mission-walk draft. Ship: =docs/wiki/cull.org= with per-component
+decisions + rationale.
+
+Format: walk one component per turn, tiny-bites style (per the
+=feedback_small_chunks_for_big_questions= memory). User pushes
+back on borderline calls; landing decisions become DEC entries
+where directional, plain dev-tracker rows where operational.
+
+Sprint-eligible (~1d, possibly split across 2 sessions).
+
+** TODO Doc rewrite stress test — multi-agent + multi-surface A/B :plan:test:docs:multi-agent:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE:   2026-05-05 user: "dispatch a pool of agents to
+           rewrite docs… use org-llm cli too… test opencode"
+:END:
+
+Architecture-wide doc rewrite as a stress test of three agent
+surfaces in parallel:
+
+1. *Spawned-subagent pool* (Claude Code general-purpose agents,
+   one per wiki page or doc chapter; brief includes existing
+   page + target tone + cross-ref policy)
+2. *org-llm CLI* (=ask= or =@curator= workflow, one
+   pass over each doc)
+3. *opencode session* (org-llm-launch'd, with full proxy +
+   recipe stack; @curator agent runs the same rewrite)
+
+Compare outputs:
+- Faithfulness to source content
+- Tone match against existing wiki style (Rule 2b discipline,
+  conciseness, cross-refs)
+- Throughput (time per page)
+- Failure modes (hallucinations, wrong cross-refs, dropped
+  Summary blocks)
+- Cost (cloud spend per page)
+
+This is also a Phase 30.4 (multi-judge validation) candidate —
+each output is judged by Opus blinded. Outcome is a real signal
+on which agent surface to invest in for high-stakes content
+work.
+
+*Scope:* start with =docs/wiki/= (~40 pages); skip the heavy
+mission-walk pages (=architecture.org=, =sync-architecture.org=,
+=dbt-pipeline.org=, =data-integrity-laws.org=) since those are
+fresh — focus on older pages that may have drifted.
+
+*Sequencing:* defer dispatch until scope is locked + rewrite
+template + tone guide are written. *Don't auto-dispatch — too
+much risk of clobbering canonical wiki state without review.*
+Review tomorrow per user's plan.
+
+** TODO Clarify @-agents vs spawned subagents in agent-framework.org :doc:agent-framework:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE:   2026-05-05 user Q ("are spawned agents their own
+           one-off type? Subset of agent types?")
+:END:
+
+Add a section to =docs/wiki/agent-framework.org= clarifying the
+two concept layers:
+
+- *@-agents* — org-llm personas with name, persona prompt, tool
+  roster, recipes; long-lived definition; invoked many times via
+  =@<name>= proxy interceptor.
+- *Spawned subagents* — Claude Code / opencode generic LLM
+  delegations to a fresh context; ephemeral, briefed per-spawn;
+  no persona of their own.
+
+How they compose: @-agents' =delegate= tool *could* spawn
+Claude Code subagents under the hood as a model layer (vs
+direct-to-proxy). Tonight's three writer agents (no @-agent
+persona) demonstrated the pure ephemeral-writer pattern.
+
+Quick wiki edit (~30 lines). Sprint-eligible (~30 min).
+
 ** TODO Phase 26 — Core/addable cull and extract                 :plan:meta:agents:tooling:load-bearing:
 :PROPERTIES:
 :PRIORITY:        A
