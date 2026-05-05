@@ -421,6 +421,44 @@ class InsightEngagement(Base):
     narration_model = Column(Text)                       # "deterministic" | model name
 
 
+class Notice(Base):
+    """Bottom-up observation log — substrate for the "see-something-
+    say-something" loop. Specialists call `org_llm.notices.notice(...)`
+    to record one-off signals like "user asked the same question four
+    times this week" or "I had to call the LLM 4 times to finish a
+    single delegation". Nothing reads this table yet; the goal is to
+    accumulate ~4 weeks of evidence in production before designing
+    the threshold/dispatch layer that will eventually turn salient
+    notices into promotions, recipes, or tool synthesis tasks.
+
+    Why a separate table rather than another History.kind: notices
+    are observation-shaped, not event-shaped. A notice carries an
+    intent_class (caller-supplied bucket — "repetition",
+    "tool_thrash", "user_friction", ...), an observation_kind (the
+    typed sub-shape within that bucket), and a JSON payload with
+    whatever the caller thinks future-us will need. Mixing those
+    into History would either bloat the History columns or push
+    everything into args, making the dbt staging models harder to
+    read. Keeping it sidecar means the substrate can evolve without
+    churning History's downstream consumers.
+
+    Best-effort write semantics — the helper swallows DB errors by
+    design (audit-only sidecar). dedup_key lets callers collapse
+    repeats at the read layer once that exists; for now it's just
+    captured.
+    """
+    __tablename__ = "notice"
+
+    id               = Column(Integer, primary_key=True)
+    timestamp        = Column(Text, nullable=False)         # ISO-8601 UTC
+    source_agent     = Column(Text, nullable=False, default="")
+    intent_class     = Column(Text, nullable=False)         # caller-supplied bucket
+    observation_kind = Column(Text, nullable=False)         # caller-supplied typed kind
+    payload          = Column(Text, nullable=False, default="{}")  # JSON
+    session_id       = Column(Text, nullable=False, default="")
+    dedup_key        = Column(Text, nullable=False, default="")
+
+
 def _load_sqlite_vec(dbapi_conn, _):
     dbapi_conn.enable_load_extension(True)
     sqlite_vec.load(dbapi_conn)
@@ -556,6 +594,14 @@ MODEL_DEFAULTS = {
     "weather_cache_ttl_secs":         "3600",   # forecast cache TTL.
     # Power profile (battery-aware behaviour).
     "power_profile":                  "auto",   # auto | performance | balanced | saver
+    # Battery low-state-of-charge alerts. The HEALTH sidebar row is
+    # always rendered when a battery is present; these knobs gate
+    # the captain's-log alert + (future) manager-note nudge.
+    "battery_alert_enabled":          "true",   # master switch.
+    "battery_alert_threshold_pct":    "20",     # warn when SoC dips below this
+                                                  # (and the host is unplugged).
+    "battery_alert_critical_pct":     "10",     # critical band — louder alert
+                                                  # message, future manager nudge.
     "proxy_orchestration_mode":      "recipe",  # off | recipe.
                                               # `recipe` = pattern-match the
                                               # user message and inject a

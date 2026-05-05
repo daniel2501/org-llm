@@ -15786,7 +15786,36 @@ def _opencode_sidebar_status(session, *, ctx: dict, workspace: str,
     vitals: list[dict] = []
     try:
         from .life_support import (probe_cpu, probe_memory,
-                                     probe_disk, probe_thermal)
+                                     probe_disk, probe_thermal,
+                                     battery_sidebar_label,
+                                     check_battery_alert)
+        # Battery first — most user-visible "life support" sensor; the
+        # row is hidden entirely on desktop / VM (no battery present)
+        # rather than rendered as 0%.
+        try:
+            bat = battery_sidebar_label()
+            if bat is not None:
+                label, status, _bd = bat
+                _pct = _bd.get("percent") if isinstance(_bd, dict) else None
+                _norm = round((_pct or 0) / 100.0, 3) if _pct is not None else 1.0
+                # On AC the host is fine even at low SoC — bias the
+                # numeric score so the panel doesn't paint a healthy
+                # plugged-in laptop as "alert".
+                if isinstance(_bd, dict) and _bd.get("plugged"):
+                    _norm = max(_norm, 0.95)
+                vitals.append({
+                    "name":   "battery",
+                    "label":  label,
+                    "status": status,
+                    "norm":   _norm,
+                })
+        except Exception:
+            pass
+        # Threshold-cross alert — best-effort; never blocks the launch.
+        try:
+            check_battery_alert()
+        except Exception:
+            pass
         for probe_fn in (probe_cpu, probe_memory, probe_disk, probe_thermal):
             try:
                 r = probe_fn()

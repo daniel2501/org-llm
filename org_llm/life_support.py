@@ -292,6 +292,202 @@ def _battery_message(pct: int, plugged: bool) -> str:
     return "Auxiliary power nominal."
 
 
+def _format_minutes(mins: int | None) -> str:
+    """Render minutes as `1h32m` / `28m` / empty string when unknown."""
+    if not mins or mins <= 0:
+        return ""
+    if mins < 60:
+        return f"{mins}m"
+    return f"{mins // 60}h{mins % 60:02d}m"
+
+
+def battery_sidebar_label() -> tuple[str, str, dict] | None:
+    """Render the dev-tracker battery row for the sidebar HEALTH section.
+
+    Returns (label, status, details) where:
+      • label   — e.g. `⚡ battery 47% / 1h32m / on AC`
+                       `▼ battery 12% / 28m / unplugged`
+      • status  — "nominal" | "watch" | "alert" | "critical"
+      • details — the underlying battery_details() dict for callers
+                   that want richer fields.
+
+    Returns None when no battery is present (desktop / VM) so the
+    caller can hide the row entirely instead of showing 0%.
+    """
+    bd = battery_details()
+    if not bd.get("present"):
+        return None
+    pct = bd.get("percent")
+    if pct is None:
+        return None
+    plugged = bool(bd.get("plugged"))
+    if plugged:
+        glyph     = "⚡"
+        time_str  = _format_minutes(bd.get("time_to_full_min"))
+        ac_str    = "on AC"
+    else:
+        time_str  = _format_minutes(bd.get("time_to_empty_min"))
+        ac_str    = "unplugged"
+        # Threshold-driven glyph for the unplugged path so the user
+        # eyes-on the row and registers low-SoC state at a glance.
+        try:
+            warn_pct = _battery_thresholds()[0]
+        except Exception:
+            warn_pct = 20
+        glyph = "▼" if pct <= warn_pct else "🔋"
+    parts = [f"battery {pct}%"]
+    if time_str:
+        parts.append(time_str)
+    parts.append(ac_str)
+    label = f"{glyph} " + " / ".join(parts)
+    # Map (pct, plugged) → status enum independent of probe_battery's
+    # generic norm bucketing — captain's-log alerts read this status.
+    if plugged:
+        status = "nominal"
+    else:
+        warn_pct, crit_pct = _battery_thresholds()
+        if pct <= crit_pct:
+            status = "critical"
+        elif pct <= warn_pct:
+            status = "alert"
+        else:
+            status = "nominal"
+    return (label, status, bd)
+
+
+def _battery_thresholds() -> tuple[int, int]:
+    """Read the warn + critical thresholds from Config (with defaults).
+
+    Defaults match MODEL_DEFAULTS in db.py — kept in sync there so the
+    knob surface tells the same story.
+    """
+    warn, crit = 20, 10
+    try:
+        from .db import Config, make_engine
+        from sqlalchemy.orm import Session
+        with Session(make_engine()) as s:
+            w = s.get(Config, "battery_alert_threshold_pct")
+            c = s.get(Config, "battery_alert_critical_pct")
+            if w and w.value:
+                warn = int(w.value)
+            if c and c.value:
+                crit = int(c.value)
+    except Exception:
+        pass
+    # Sanity: critical must sit at-or-below warn so the band logic
+    # produces a coherent ordering.
+    if crit > warn:
+        crit = warn
+    return warn, crit
+
+
+def _battery_alert_state_path() -> Path:
+    """JSON state file used by `check_battery_alert` to remember the
+    last-emitted alert level so we only log on threshold CROSSINGS,
+    not every poll. ENV override mirrors the auto-embedder pattern.
+    """
+    return Path(os.environ.get("ORG_LLM_BATTERY_ALERT_STATE", "")
+                 or os.path.expanduser(
+                     "~/.local/share/org-llm/battery-alert.state.json"))
+
+
+def check_battery_alert() -> str | None:
+    """Detect a threshold crossing and write a kind=alert captain's-log
+    row when one is found. Idempotent — repeated calls at a steady
+    state return None and don't spam the log.
+
+    Levels: "ok" → "warn" → "critical". Only transitions UP into a
+    worse band emit a log. Plugging back in / recovery resets state
+    silently. Returns the new level when a transition was emitted,
+    None otherwise.
+
+    Honours the `battery_alert_enabled` knob — when false, the function
+    is a no-op (state file is left untouched).
+    """
+    # Honour the master switch.
+    try:
+        from .db import Config, make_engine
+        from sqlalchemy.orm import Session
+        with Session(make_engine()) as s:
+            row = s.get(Config, "battery_alert_enabled")
+            if row and row.value and row.value.strip().lower() in (
+                    "0", "false", "no", "off"):
+                return None
+    except Exception:
+        pass
+
+    bd = battery_details()
+    if not bd.get("present"):
+        return None
+    pct = bd.get("percent")
+    if pct is None:
+        return None
+    plugged = bool(bd.get("plugged"))
+    warn_pct, crit_pct = _battery_thresholds()
+
+    # Compute current band.
+    if plugged:
+        level = "ok"
+    elif pct <= crit_pct:
+        level = "critical"
+    elif pct <= warn_pct:
+        level = "warn"
+    else:
+        level = "ok"
+
+    # Read previous band.
+    state_path = _battery_alert_state_path()
+    prev = "ok"
+    try:
+        if state_path.exists():
+            import json as _json
+            prev = (_json.loads(state_path.read_text()).get("level")
+                    or "ok")
+    except Exception:
+        prev = "ok"
+
+    # Persist the latest band regardless of whether we emit, so a
+    # transient critical → warn (after plug-in pulse) doesn't re-fire.
+    try:
+        import json as _json
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(_json.dumps({
+            "level":   level,
+            "pct":     pct,
+            "plugged": plugged,
+            "ts":      int(time.time()),
+        }))
+    except Exception:
+        pass
+
+    rank = {"ok": 0, "warn": 1, "critical": 2}
+    if rank[level] <= rank.get(prev, 0):
+        return None   # not a worsening transition — stay silent.
+
+    # Emit a captain's-log row.
+    try:
+        from .logbook import write_event
+        ttle = bd.get("time_to_empty_min")
+        time_str = _format_minutes(ttle)
+        remaining = f", est. {time_str} remaining" if time_str else ""
+        if level == "critical":
+            msg = (f"⚠ battery {pct}%, unplugged{remaining}; "
+                   f"save state + plug in NOW.")
+        else:
+            msg = (f"battery {pct}%, unplugged{remaining}. "
+                   f"Recommend connecting to mains.")
+        write_event(
+            "alert",
+            "battery",
+            args=f"pct={pct} plugged={plugged} level={level}",
+            response=msg,
+            outcome=level,
+        )
+    except Exception:
+        pass
+    return level
+
+
 # ── CPU + memory ─────────────────────────────────────────────────────────────
 
 def probe_cpu() -> Reading:

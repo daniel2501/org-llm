@@ -125,7 +125,7 @@ def _config_snapshot() -> dict:
     """
     out = {
         "log_level": "normal",
-        "log_kinds": "cli,llm,mcp,config,doctor,dbt",
+        "log_kinds": "cli,llm,mcp,config,doctor,dbt,alert",
         "log_max_rows_per_kind": str(_DEFAULT_MAX_ROWS_PER_KIND),
     }
     try:
@@ -155,8 +155,8 @@ def _enabled(kind: str) -> tuple[bool, str]:
     kinds = {k.strip() for k in cfg.get("log_kinds", "").split(",") if k.strip()}
     if kinds and kind not in kinds:
         return (False, level)
-    # minimal level only allows cli + doctor; normal allows everything
-    if level == "minimal" and kind not in ("cli", "doctor"):
+    # minimal level only allows cli + doctor + alert; normal allows everything
+    if level == "minimal" and kind not in ("cli", "doctor", "alert"):
         return (False, level)
     return (True, level)
 
