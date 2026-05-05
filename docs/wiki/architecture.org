@@ -1247,6 +1247,92 @@ be a deterministic resolver.
 The full pattern, the namespace roster, the manifest format,
 risks, and implementation order live in [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]].
 
+* Design rule — Org is Code (literal, not metaphor)
+
+*Summary.* Org-mode files are not "documents" or "notes" —
+they are *code*: plain text, structured (headings + properties
++ tags + links + babel blocks), parseable, diff-able,
+version-controlled, refactorable. Every feature decision in
+org-llm passes through one test: */would we do this for
+code?/* If yes, do it. If no, rethink. The pun ("Org is Code")
+is not branding; it's the architectural principle that makes
+the rest of the project tractable.
+
+*Expanded.*
+
+The principle has four direct consequences for how we build:
+
+1. *Same toolchain applies.* Git, diff, code review, CI,
+   lint, refactor, blame, bisect — all work on org files
+   because org files are text with structure. We don't need
+   bespoke tooling to version, branch, merge, or audit a
+   vault. We use what already works for code.
+
+2. *Same dev practices apply.* Schemas (typed properties),
+   tests (=org-lint=, custom validators, drift checks),
+   refactors (rename a tag → mass operation; rename a roam
+   ID → cross-file fixup), code review (a daily file is
+   reviewable; a project plan is reviewable), changelogs
+   (commit history IS the change record). None of these are
+   metaphors — they're literal applications of code-tool
+   primitives to org files.
+
+3. *Same agent affordances apply.* The agent capabilities
+   that make Claude Code valuable for code (search, patch,
+   review, refactor, narrate) transfer to org because org has
+   the same structural properties as code. This is why
+   "Claude Code for Org Mode" is positioning, not metaphor —
+   it's a literal observation about transferable affordances.
+
+4. *Same ergonomic expectations.* Editing in Emacs should
+   feel like editing in Emacs (the user owns the buffer).
+   Mass operations should be cheap (you can run a script
+   over a vault the way you run one over a codebase).
+   Quality bars (lint clean, tests green, citations cited)
+   should be enforceable. /If a code-shaped expectation
+   wouldn't survive being applied to org, that's a smell — fix
+   the gap, don't excuse it./
+
+*Tension with database-maximalism.* /This is the real tension
+this rule has to coexist with./ The Phase 25 inversion makes
+SQLite the runtime source of truth (DB-authoritative); files
+become rendered UI. *That does not contradict "Org is Code".*
+The two pillars are layered, not opposed:
+
+- Org-as-Code applies to the *durable artifact* — the file
+  on disk that the human edits, version-controls, and
+  reasons about as code.
+- DB-maximalism applies to the *runtime engine* — the
+  state the system queries, mutates atomically, and uses
+  for cross-file operations.
+
+Files remain code (= satisfy this rule's four consequences)
+even when the DB is the engine's read/write surface. The
+round-trip (file ⇄ DB) is bidirectional and frictionless;
+neither side gets to "win" against the other. See
+[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] § Phase 25 for the
+inversion details and
+[[id:67ab8c13-8f29-4c5b-9d62-7e1f3a4b8c52][memory-alpha.org]]
+for the Trek-framing of the layered model.
+
+What this rule rules /out/: treating org as a markup format
+that the engine "happens to read." Building features that
+require the engine to be running for the file to be readable.
+Storing data in shapes that can't round-trip to plain text.
+Anything that would make a future contributor say "this
+isn't really portable text any more — it depends on the
+runtime."
+
+Adjacent decisions:
+- *DEC-002 (org-native first; .md only for cross-tool surfaces)*
+  is the file-format ramification of this rule.
+- *Phase 24 supervision trinity* applies code-style
+  pre-flight + recovery + observability to agent dispatch —
+  that's "would we do this for code?" answered yes.
+- *Phase 26 cull-and-extract* treats core/addable the way a
+  monorepo treats workspace/package — code-shaped reasoning
+  about modularity.
+
 * Source-of-truth conventions
 
 | concern                     | authoritative location                                  |

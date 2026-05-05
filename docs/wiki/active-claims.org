@@ -47,6 +47,14 @@ chronological ordering — append to the bottom; the next
 
 * Recently closed                                              :@closed:
 
+** DONE Claude/opus-C — DEC-010 + Org-is-Code + Phase 24 v1.0 gating
+   :PROPERTIES:
+   :CLAIM:    docs/wiki/decisions.org docs/wiki/architecture.org docs/wiki/roadmap.org docs/wiki/active-claims.org
+   :BRANCH:   trunk
+   :STARTED:  [2026-05-04 Mon 23:00]
+   :CLOSED:   [2026-05-04 Mon 23:12]
+   :END:
+
 ** DONE Claude/opus-C — capture tonight's planning convo
    :PROPERTIES:
    :CLAIM:    docs/wiki/decisions.org docs/wiki/dev-tracker.org docs/wiki/active-claims.org

@@ -2313,11 +2313,21 @@ call.
 Design rule canonized in =docs/wiki/architecture.org= §
 /Design rule — supervision is deterministic by default/
 [2026-05-04]. Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 24 when
-work starts. 24.1 is sprint-eligible (~1 day for framework +
-three resolvers); 24.2 follows naturally (~1 day for decorator
-+ four hooks); 24.3 needs more design on the signal-tripping
+work starts. 24.1 *shipped 2026-05-04* (commits =9c75bb5= +
+=f417132=); 24.2 follows naturally (~1 day for decorator +
+four hooks); 24.3 needs more design on the signal-tripping
 threshold (likely ~1.5 days). 24.4 stays gated until 24.1–24.3
 prove their keep.
+
+*v1.0 gating (per 2026-05-04 mission walk):* Phase 24.2 + 24.3
+are *gating for "first usable" v1.0*, not gravy. The lead
+value (β: dream-state vault via agents) lives or dies on
+whether agents make wrong moves silently. Without recovery
+hooks (24.2) and confusion detection (24.3), every silent
+failure erodes user trust in the agent layer; with them,
+mistakes become recoverable + visible. Phase 30.5
+self-validation is the same family of gates — agents check
+each other's output before user-review time.
 
 * TODO [#A] Planned — Phase 29: Self-coded tools             :planned:
 SCHEDULED: post-Phase 25.4
