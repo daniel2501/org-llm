@@ -1924,14 +1924,41 @@ they catch (and what they don't). 24.5 sprint-eligible after
 24.1 lands (shares the registry pattern; ~1.5d total across
 24.5a/b/c).
 
-** TODO Phase 25 — invert authority: DB is truth, files are UI    :plan:db:foundation:load-bearing:
+** TODO Phase 25 — DB-as-cache + git-canonical pipeline    :plan:db:foundation:load-bearing:
 :PROPERTIES:
 :PRIORITY:        A
 :GATE:            1,3
-:EFFORT:          multi-day (5-phase arc, weeks not days)
+:EFFORT:          multi-day (revised arc per DEC-011, 25.1-25.7)
 :PHASE_CANDIDATE: yes
-:SOURCE:          2026-05-03 directional decision
+:SOURCE:          2026-05-03 directional decision; SCOPE REVISED
+                  2026-05-05 per DEC-011
 :END:
+
+#+begin_quote
+*Scope revised 2026-05-05 per DEC-011* — files are canonical
+(committed to git), DB is the universal SQL interface
+(regenerable local cache). The original "DB-authoritative
+inversion" framing was both narrower than reality required and
+broader than the lead value needed. Primary canonical entry is
+now =roadmap.org= § Phase 25 (rewritten); the body of this
+dev-tracker entry below is preserved as historical context for
+the original framing's gate-1 reasoning.
+
+Companion canonical pages:
+- [[file:sync-architecture.org][sync-architecture.org]] — git-canonical multi-device sync
+- [[file:dbt-pipeline.org][dbt-pipeline.org]] — dbt as the data pipeline
+- [[file:data-integrity-laws.org][data-integrity-laws.org]] — agent-vs-human edit policy
+- [[file:decisions.org][decisions.org]] § DEC-011, DEC-012
+#+end_quote
+
+The remainder of this entry is the *original 2026-05-03
+directional reasoning* that motivated Phase 25. Most of it
+still applies to the revised scope (mass ops, cross-file
+queries, atomic transactions, history queryability) — only
+the "files become rendered UI" target changed. The revised
+sub-phase plan is in =roadmap.org= § Phase 25.
+
+────────────────────────────────────────────────────────
 
 Today: vault on disk = source of truth; SQLite = derived cache.
 Stated in architecture.org five places ("vault authoritative;

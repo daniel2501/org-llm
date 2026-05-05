@@ -2029,56 +2029,87 @@ Three downstream features can't ship cleanly without it:
 - *Multi-vault federation* (wishlist) is unbuildable without
   a working single-vault sync first.
 
-* TODO [#A] Planned — Phase 25: DB-authoritative inversion   :planned:
+* TODO [#A] Planned — Phase 25: DB-as-cache + git-canonical pipeline :planned:
 SCHEDULED: <2026-05-17 Sun>
 
-Foundation shift: invert the vault-authoritative principle. DB
-becomes source of truth; =~/org/*.org= becomes rendered UI
-surface. One DB file = the entire org-llm state.
+*Scope revised 2026-05-05 per [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]].* The original framing
+("DB becomes source of truth; vault becomes rendered UI") was
+*narrower than reality required and broader than the lead value
+needed*. The 2026-05-05 mission walk locked in the simpler shape:
+*files are canonical (committed in git); DB is the universal
+SQL interface (regenerable local cache).* Phase 25 implements
+that pipeline.
 
-** Why
+** Why (revised)
 
-- Mass operations via SQL (rename tag, bulk content edit)
-  instead of disk walks
-- Cross-file queries become one-liners
-- Single backup target — DB dump = full state (today =self
-  snapshot= bundles package + DB but *not* the vault)
-- Atomic transactions across content + tags + embeddings
-- Vault history queryable via git ingestion (Phase 25.4)
-- Multi-device sync via DB replication
-- dbt + Phase 27 Superset analytics over vault content directly
+- *SQL power without the inversion.* Mass operations via SQL,
+  cross-file queries as one-liners, atomic transactions on
+  the runtime cache — all the DB-max wins, none of the
+  "files become rendered UI" sync risk.
+- *Multi-device sync via git, not DB replication.* git already
+  solves multi-writer distributed sync; using it dissolves a
+  custom-engineering problem we'd otherwise have to build.
+  See [[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]].
+- *dbt + Phase 27 Superset analytics* over the dbt-managed
+  cache, not against a "DB-as-truth" surface that fights with
+  Emacs editing. See [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]].
+- *Catastrophic recovery for free.* Lose any device's DB →
+  re-derive from canonical files. Property cloud SaaS charges
+  for; we get from layering.
 
-** Sub-phases (6 + optional)
+** Sub-phases (revised)
 
-- *25.1 — DB as full mirror.* Add =File.raw_content=; round-
-  trip validated byte-equal disk → DB → disk. Foundation.
-- *25.2 — backup + restore tooling.* =org-llm backup= /
-  =restore= using SQLite's Online Backup API.
+- *25.1 — dbt pipeline scaffolding.* Wire the existing
+  =dbt_templates/= into a working dbt project at
+  =~/.local/share/org-llm/dbt/= + user-extension layer at
+  =~/org/dbt/=. Sources point at the vault repo; baseline
+  models produce =parsed_nodes=, =parsed_links=,
+  =parsed_properties=, =parsed_tags=. Incremental builds.
+  Foundation.
+- *25.2 — DB regenerate verb.* =org-llm db rebuild= drops
+  local DB + re-derives from files via dbt run. Backup-via-
+  rebuild replaces "Online Backup API" — the canonical state
+  is the repo, not the DB blob.
 - *25.3 — WAL + concurrency hardening.* =PRAGMA journal_mode
-  = WAL=; busy_timeout; document the new concurrency model.
-- *25.4 — git ingestion as audit/history layer.* Snowflake-
-  style "git repo as DB" pattern, FOSS-implemented via
-  =pygit2= (libgit2). Tables =git_commits= + =file_versions=;
-  branches/tags as queryable state; engine writes stay
-  gitignored.
-- *25.5 — DB-authoritative engine ops.* Mass ops read/write
-  DB and re-render to disk; conflict resolution uses git
-  merge primitives from 25.4.
-- *25.6 — full inversion.* Architecture.org's "vault
-  authoritative" principle becomes "DB authoritative; vault
-  is rendered UI."
-- *(Phase 26 optional) — beyond SQLite.* DuckDB hybrid
-  (analytics overlay) or Postgres+pgvector (full migration)
-  if perf demands.
+  = WAL=; busy_timeout; document the runtime concurrency
+  model now that DB is read by agents + dashboards + auto-
+  embedder concurrently.
+- *25.4 — git ingestion as queryable history layer.* Snowflake-
+  style "git repo as DB" pattern via =pygit2= (libgit2).
+  Tables =git_commits= + =file_versions= over the vault repo;
+  agents query "what did this node look like in March" via
+  SQL window query.
+- *25.5 — agent-write surface (file rendering).* Agents write
+  via DB or directly to files; engine emits files
+  deterministically when agents wrote via DB. Whole-file
+  rewrite (per the mission walk decision; surgical update is
+  a future enhancement). Three Laws of Data Integrity govern
+  user-vs-agent edit policy ([[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][data-integrity-laws.org]]).
+- *25.6 — DEC-012 schema migration.* =Config(key, value)= →
+  =Config(key, device, value)=; literate config supports
+  =:DEVICE:= property + per-device override files. Same
+  pattern extends to other tables as needed.
+- *25.7 (optional) — beyond SQLite.* DuckDB analytics overlay
+  or Postgres+pgvector full migration if perf demands.
+  Deferred until a real bottleneck surfaces.
 
-Round-trip fidelity is the canary: if 25.1 can't achieve byte-
-equal on the dev's vault within ~5 days, reconsider.
+** What dropped from the original scope
+
+- *25.6 "full inversion"* — removed. Files are canonical, not
+  rendered. The inversion isn't happening.
+- *"DB dump = full state" backup story* — removed. Backup is
+  the vault repo (already version-controlled remotely);
+  re-derive the DB on restore.
+- *"Multi-device sync via DB replication"* — removed. git is
+  the sync layer.
 
 ** Status
 
 Active state, sub-phase plans, decision points, and pass
-criteria live in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 25. This roadmap
-entry is the narrative; the tracker is the work surface.
+criteria live in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 25 (entry to be
+revised in same migration). Companion concept pages:
+[[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]], [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]],
+[[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][data-integrity-laws.org]].
 
 * TODO [#A] Planned — Phase 27: Apache Superset dashboards   :planned:
 SCHEDULED: post-1.0
