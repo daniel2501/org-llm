@@ -3242,34 +3242,69 @@ deferred until DEC-015 lands.
 :PROPERTIES:
 :PRIORITY: A
 :GATE:     1,3
-:SOURCE:   2026-05-05 user dump
+:SOURCE:   2026-05-05 user dump; revised same-day per
+           project_mobile_is_full_graphical_emacs memory
 :END:
 
-DEC-011 says "every device interchangeable" and
-sync-architecture.org Scenario 1-10 walks the laptop ↔ phone
-flow — but the mobile target *isn't actually built yet*.
-Target: Termux + Emacs + org-llm CLI + bundled scribe agent
-running on Android.
+DEC-011 — DB as universal interface says "every device
+interchangeable"; sync-architecture.org § Scenarios 1-10 walks
+the laptop ↔ phone flow. The user's actual mobile setup is
+*Doom Emacs running on Android via termux-x11 + sway* (or xfce)
+— full graphical desktop, any Linux GUI app runs, xwidget-webkit
+works, full org-llm + Magnificent Seven agents + Superset
+embedded dashboards all work. Mobile is a *peer device*, not a
+text-mode reduced sibling.
+
+The "build" is not "make a stripped-down phone version" — it's
+"verify the full distro runs cleanly under Termux + termux-x11
++ sway, with battery/thermal-aware tuning."
 
 What needs to happen:
-1. Termux install of org-llm (uv pip install or distro
-   package); validate on real Android.
-2. Decide which agents run mobile (probably read-only by
-   default per DEC-012 =agent.write_active=false=).
-3. Mobile capture flow — entry point that doesn't require
-   the LCARS sidebar (CLI capture verb, opencode/Claude Code
-   variant, or Pi-style status line).
-4. dbt-core mobile compatibility — does it run cleanly under
-   Termux's Python? Test.
-5. Embedding strategy on phone: cloud-only (cheaper local
-   battery cost), or smaller local model variant.
-6. git push/pull cadence on mobile — battery + network
-   pragmatics (Scenario 2 offline edits + Scenario 7 capture
-   while offline).
+1. *Document the install path.* Termux + termux-x11 + sway
+   already work for the user; the org-llm side is
+   =uv tool install --editable= against a clone in
+   =~/storage/repos/org-llm= (or wherever the user prefers).
+   Capture as a wiki page + smoke-test on a fresh Android
+   device.
+2. *Per-device tuning knobs* (per DEC-012 — per-device Config
+   keying):
+   - =dbt_materialization_profile=mobile= (lighter cache
+     strategy)
+   - =battery_alert_threshold_pct= lower (e.g. 30) since
+     mobile UX cares about battery more
+   - =embed_model= — smaller variant (=nomic-embed-text-v1.5=
+     still the default, but consider quantized variant for
+     thermal headroom)
+   - =sync_pull_interval_minutes= — battery-aware default
+     (pull on app foreground vs every-5min)
+   - =cloud_first= — likely true on mobile by default to
+     spare phone CPU/battery; user override always available
+3. *dbt-core under Termux Python* — verify build runs cleanly;
+   any C extensions that need =pkg-add= of build-deps captured
+   in the install doc.
+4. *Battery + thermal smoke test.* Run a typical session
+   (capture, ask, dispatch) for ~1h; measure battery drain;
+   tune knobs to target.
+5. *Sync verification.* sync-architecture.org § Scenario 7
+   (offline capture) + Scenario 2 (offline edits, reconnect)
+   actually run on phone; round-trip tested with laptop.
+6. *Visual / UX checks* — LCARS sidebar renders on phone screen
+   real estate; xwidget-webkit Superset embed works (per
+   embedded-dashboards.org § Layer 1); fonts + colors readable.
 
-Phase fit: 25.x (alongside the DB-as-cache + git-canonical
-pipeline). Until this ships, the multi-device thesis is
-theoretical.
+What's *NOT* a constraint:
+- Text-mode-only — wrong; full graphical Emacs runs.
+- Cloud-only LLM — wrong as a hard rule; local small models
+  plausible, just thermally costly.
+- Stripped-down agent set — wrong; full Magnificent Seven
+  applies.
+- "Read-only mobile" default — wrong; user's choice via
+  =agent_write_active= per-device knob, not architectural ceiling.
+
+Phase fit: Phase 25.x — DB-as-cache + git-canonical pipeline
+(alongside the rest of the sync work). Until this is verified,
+the multi-device thesis is theoretical; once verified, mobile
+is a real first-class device.
 
 ** TODO Scout pattern — send agents ahead to prep user review     :plan:agents:meta:pattern:
 :PROPERTIES:
