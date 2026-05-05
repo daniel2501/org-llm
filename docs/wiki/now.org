@@ -119,6 +119,15 @@ deferred — user runs =org-llm tracker init= interactively post-nap.
   arch + opencode main-face take focus; don't let it rot. Circle-back
   CLI-love opportunities flagged: OpenTofu integration, =pass=
   integration, "tofu-y" CLI verbs in general. Saved as feedback memory.
+- *Remote control framing* (third-nap pre-sleep, follow-up):
+  conversational UI = the *remote control* for org-llm. From anywhere
+  (phone SMS, voice, tap, watch, email-in) → command lands on home
+  Emacs → result delivered back via same channel. Ties together:
+  life-as-code (text-me-that-info), mobile-as-full-graphical-Emacs,
+  DEC-015 (chat surface), conversational-discoverability (the remote
+  has no buttons, so it must teach itself). User read pending tomorrow
+  — alternate interp could be literal push-trigger (=RemoteTrigger=)
+  or controlling another agent's session.
 - *Conversational-discoverability question* (third-nap pre-sleep):
   classical UI teaches via tooltips / placeholder / pre-filled prompts.
   Conversation is now our primary UI — how do we deliver those teach-
