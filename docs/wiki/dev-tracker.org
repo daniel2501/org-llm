@@ -3117,6 +3117,153 @@ template + tone guide are written. *Don't auto-dispatch — too
 much risk of clobbering canonical wiki state without review.*
 Review tomorrow per user's plan.
 
+** TODO Babel + tangle as core concept — code-IDE-inside-emacs    :plan:meta:literate:babel:dbt:
+:PROPERTIES:
+:PRIORITY: A
+:SOURCE:   2026-05-05 user dump
+:END:
+
+User-named architectural insight: org-mode babel + tangle is a
+*core concept* of org-llm, not just a feature. The org file
+becomes both *narrative AND code*: SQL blocks tangle to dbt
+models; literate config tangles to DB rows; future self-coded
+tools land as tangled code. *Org-as-Code* (architecture.org §
+design rule) is operationalized via babel.
+
+Pattern shape:
+- Org files contain =#+begin_src sql ... #+end_src= blocks
+- =org-babel-tangle= extracts blocks → dbt =models/*.sql=
+- dbt build → DB tables / views
+- Agent reads narrative + queries DB; both share one source
+
+Existing instances (already proving the pattern):
+- =~/org/org-llm-config.org= → Config table (literate config)
+- =~/org/org-llm-agents.org= → AgentRow table
+- =~/org/org-llm-baselines.org= → AgentBaseline table
+- =~/org/org-llm-tools.org= (Phase 23.6, planned)
+
+Extension to dbt:
+- =~/org/dbt/= contains org files with SQL src blocks
+- Per-model file is org-shape: docstring + tests + SQL + tags
+- Tangle target: =~/.local/share/org-llm/dbt/models/*.sql=
+- "Code IDE inside Emacs" — agent writes/reads narrative, dbt
+  consumes the tangled SQL.
+
+Likely worth a small DEC + wiki concept page once design firms.
+
+** TODO Hosting matrix — where can org-llm run?                   :plan:research:hosting:partner-apps:
+:PROPERTIES:
+:PRIORITY: B
+:SOURCE:   2026-05-05 user dump
+:END:
+
+Enumerate where org-llm can run + which partner apps support
+each environment. Candidates to map:
+- Laptop (macOS / Linux / Windows-via-WSL) — primary
+- Mobile (Termux + Emacs + org-llm CLI) — Phase ~25.x
+- Self-hosted VPS / homelab (FOSS-aligned: Hetzner, OVH,
+  Proxmox)
+- Containerized (per Phase 28 asymmetric strategy — most
+  composable: Superset + dbt + auto-embedder daemon)
+- Pi-class hardware (Pi 5 / NAS-style boxes)
+- Cloud GPU (only for embedding warmup; ephemeral)
+
+Per partner app (Doom, opencode, ollama, dbt-core, Superset,
+Forgejo, Tailscale): which environments work, which need
+fallback. Per DEC-010 anti-cap: prefer Codeberg / Forgejo
+self-hosted over GitHub for vault remote.
+
+Scout-pattern candidate: spawn agent to build the matrix as
+a tight wiki page + flag environment-specific design gaps
+(e.g. mobile + dbt-core compatibility?).
+
+** TODO Org-mode-aware chat surface — chat IS an editable org buffer :plan:emacs:phase16-3:load-bearing:dec-15-candidate:
+:PROPERTIES:
+:PRIORITY: A
+:GATE:     1,3
+:SOURCE:   2026-05-05 user dump — "in org-llm everything is in
+           org format except when it's not"
+:END:
+
+User-named architectural principle: *the canonical interaction
+surface is an org-mode buffer.* Both the prompt input AND the
+chat history window are *editable org-mode buffers* — full org
+keybinds, indentation, todo states, priorities, headings,
+refile, agenda all work natively in the conversation. User
+can edit the LLM's output in place: mark a TODO as DONE, change
+a priority, refile a heading, fix a typo, all with normal
+Emacs muscle memory.
+
+Why load-bearing:
+- *Daily-driver dogfood loop closes* — today's chat surface
+  is the one place that ISN'T Emacs. Closing that gap closes
+  the entire dogfood thesis.
+- *Org-is-Code extends down* — chat output is org code; editing
+  it is editing code; same git/diff/refactor primitives apply
+  to LLM output.
+- *Phase 16.3 (Emacs companion)* was always the destination;
+  this names what it actually delivers.
+- *Plugin-framework angle* — could ship as a meta-extension
+  surface (fish-fisher / oh-my-zsh shape), letting community
+  add their own org-mode chat extensions.
+
+Implications if accepted as CORE:
+- opencode / Claude Code TUI become *secondary* surfaces (not
+  where the user lives daily).
+- Mobile target uses an org-mode-aware editor (Termux-Emacs,
+  Beorg-on-iOS-style, future).
+- Phase 16.3 becomes load-bearing for v1.0 (criterion 1 +
+  criterion 3 of the user's "first usable" definitions).
+- DEC-015 candidate: "Canonical interaction surface is an
+  org-mode buffer." Files post-design.
+
+Implementation candidates:
+- Native Emacs companion package (=org-llm.el= already exists
+  in =doom/= — extend it to be a chat-buffer surface).
+- =vterm= + opencode wrapper that re-renders in org-mode (less
+  native but cheaper).
+- Pure Emacs UI talking directly to =org-llm= via MCP / HTTP
+  (skip opencode/Claude Code entirely for the primary surface).
+
+Likely option (3) — a native Emacs surface — for the principled
+fit. Options (1)/(2) ship sooner but are halfway-houses.
+
+Phase fit: Phase 16.3+ becomes load-bearing. Sub-phase plan
+deferred until DEC-015 lands.
+
+** TODO Mobile / Termux build — ship the second device           :plan:mobile:phase25:load-bearing:
+:PROPERTIES:
+:PRIORITY: A
+:GATE:     1,3
+:SOURCE:   2026-05-05 user dump
+:END:
+
+DEC-011 says "every device interchangeable" and
+sync-architecture.org Scenario 1-10 walks the laptop ↔ phone
+flow — but the mobile target *isn't actually built yet*.
+Target: Termux + Emacs + org-llm CLI + bundled scribe agent
+running on Android.
+
+What needs to happen:
+1. Termux install of org-llm (uv pip install or distro
+   package); validate on real Android.
+2. Decide which agents run mobile (probably read-only by
+   default per DEC-012 =agent.write_active=false=).
+3. Mobile capture flow — entry point that doesn't require
+   the LCARS sidebar (CLI capture verb, opencode/Claude Code
+   variant, or Pi-style status line).
+4. dbt-core mobile compatibility — does it run cleanly under
+   Termux's Python? Test.
+5. Embedding strategy on phone: cloud-only (cheaper local
+   battery cost), or smaller local model variant.
+6. git push/pull cadence on mobile — battery + network
+   pragmatics (Scenario 2 offline edits + Scenario 7 capture
+   while offline).
+
+Phase fit: 25.x (alongside the DB-as-cache + git-canonical
+pipeline). Until this ships, the multi-device thesis is
+theoretical.
+
 ** TODO Scout pattern — send agents ahead to prep user review     :plan:agents:meta:pattern:
 :PROPERTIES:
 :PRIORITY: A
