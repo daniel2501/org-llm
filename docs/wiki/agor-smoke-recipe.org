@@ -88,14 +88,21 @@ bear =mcp_token= against =POST /mcp=.
 * Run
 
 #+begin_src sh
-# full pipeline incl. claude -p
+# v0 — full pipeline incl. claude -p (LLM spend ≈ $0.07)
 bash scripts/agor-smoke.sh
 
-# REST primitives only — no LLM spend (good for CI)
+# v0 — REST primitives only — no LLM spend (good for CI)
 SKIP_CLAUDE=1 bash scripts/agor-smoke.sh
 
-# pin a specific repo + leave artifacts for inspection
+# v0 — pin a specific repo + leave artifacts for inspection
 AGOR_REPO_PATH=/home/daniel/repos/org-llm KEEP_DIRTY=1 bash scripts/agor-smoke.sh
+
+# v0.1 — extended primitives (btw / subsession / fork / artifacts /
+# captain's-log; cron is RECORDED-GAP) — zero LLM spend by design
+bash scripts/agor-smoke-v01.sh
+
+# v0.1 — keep state for forensic inspection (sessions + artifact NOT archived)
+KEEP_DIRTY=1 bash scripts/agor-smoke-v01.sh
 #+end_src
 
 Live PASS report from 2026-05-06:
@@ -120,23 +127,146 @@ genealogy_ok      : 1   elapsed_seconds : 12   cost_usd : 0.0704
 
 * What this validates / leaves open
 
-Exercised: daemon REST · worktree filesystem (executor) · session
-=mcp_token= issuance · MCP HTTP transport · progressive-disclosure
-tool surface (=search_tools= → =execute_tool=) ·
-=agor_sessions_spawn= · parent-child genealogy in DB.
+** Exercised in v0
 
-Not yet (v0.1+): =mode:"btw"= callbacks · =subsession= resume ·
-cron-scheduled children · =agor_artifacts_create= +
-=agor_sessions_fork= · Captain's-log bridge · Slack/GitHub gateway.
+Daemon REST · worktree filesystem (executor) · session =mcp_token=
+issuance · MCP HTTP transport · progressive-disclosure tool surface
+(=search_tools= → =execute_tool=) · =agor_sessions_spawn= ·
+parent-child genealogy in DB.
+
+** Exercised in v0.1
+
+=mode:"btw"= async peer query (ephemeral fork w/ inline-callback
+receipt) · =mode:"subsession"= resumable child (archive→unarchive
+persistence cycle) · =agor_artifacts_publish= source path on disk ·
+=mode:"fork"= sibling-from on shared worktree (diverged context) ·
+Captain's-log bridge (=kind=team-session=) reconciling sessionId +
+boardId + parent + children + artifacts. /Recorded-gap:/ no MCP/REST
+surface in v0.17.3 to *create* a cron-scheduled session — the
+=sessions.scheduled_from_worktree= column and =bulk_archive
+sessionType:"scheduled"= filter exist, but spawning is daemon-internal.
+
+** Not yet (v0.2+)
+
+Slack / GitHub message-gateway round-trip · =sessions_create
+callback_config= ack-on-completion semantics with a real LLM body ·
+cross-tool spawn (Claude → Codex / Gemini / OpenCode child) ·
+multiplayer canvas presence (facepile + cursor stream) · cron
+heartbeat once upstream exposes the scheduler API.
 
 Open questions: =mcp_token= refresh loop for >24 h runs;
 progressive-disclosure round-trip latency cost; rotate the
 default-admin creds during =agor-pilot-install=.
+
+* v0.1 — extended primitives
+
+*Summary.* =scripts/agor-smoke-v01.sh= adds five new primitive checks
+on top of v0 (btw / subsession-resumable / fork / artifacts /
+captain's-log) and *records a sixth as an upstream gap* (cron). All
+five pass deterministically via direct MCP calls — *zero LLM spend*
+on the primitive layer per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-006 — deterministic supervision]]. Live
+PASS on agor-live v0.17.3 + claude code 2.1.x: 5 s, $0.00.
+
+*Expanded.* The v0 harness paid for one =claude -p= turn to prove
+the round-trip. v0.1's primitives don't need an LLM in the loop —
+they're each a single MCP tool call whose response shape carries the
+proof (genealogy fields, callback-config presence, build_status,
+captain's-log file growth). Forks the harness rather than extending
+v0 because the path is materially different (no =--mcp-config=
+plumbing, no transient =/tmp/agor-mcp-$$.json=, no =stream-json=
+parsing, no =--max-budget-usd=). v0 stays the LLM-end-to-end smoke;
+v0.1 is the primitive-shape smoke.
+
+*Coverage map.*
+
+| Primitive                  | Tool                                    | Pass criterion                                                                                  |
+|----------------------------+-----------------------------------------+-------------------------------------------------------------------------------------------------|
+| =mode:"btw"=               | =agor_sessions_prompt mode:"btw"=       | Response has =fork_origin:"btw"=, =callback_config.enabled=true=, =callback_session_id=parent= |
+| =mode:"subsession"=        | =agor_sessions_prompt mode:"subsession"= | Response has =genealogy.parent_session_id=parent=; archive→unarchive round-trip preserves it   |
+| Cron / scheduled child     | (none — gap)                            | =agor_search_tools query:"schedule cron heartbeat"= returns 0 matches; REST routes 404         |
+| =agor_artifacts_publish=   | =agor_artifacts_publish=                | Response has =artifact_id=, =build_status:"success"=, on-disk source folder reachable          |
+| =mode:"fork"=              | =agor_sessions_prompt mode:"fork"=      | Same =worktree_id= as parent; =genealogy.forked_from_session_id=parent=; new =session_id=      |
+| Captain's-log bridge       | =org_llm.logbook.write_event=           | =~/org/captains-log.org= grows; =kind=team-session= entry present with sessionId+boardId+parent |
+
+*Tool-name reality vs. v0 prediction.*
+
+| v0 doc said                 | Actually in v0.17.3                                                              |
+|-----------------------------+----------------------------------------------------------------------------------|
+| =agor_artifacts_create=     | =agor_artifacts_publish= — folder→DB serialization                              |
+| =agor_sessions_fork= (tool) | =agor_sessions_prompt mode:"fork"= — no separate fork tool                      |
+| =mode:"btw"= "callback inline" | New session w/ =fork_origin:"btw"= + =callback_config.callback_mode:"once"= — caller polls genealogy / receives callback when peer finishes |
+
+*Captain's-log bridge config.* The =team-session= kind is added to
+=Config.log_kinds= idempotently on first run (default allowlist is
+=cli,llm,mcp,config,doctor,dbt,alert= — =team-session= isn't yet in
+the canon set). The harness owns this config edit because the bridge
+is unusable without it; subsequent runs skip the write.
+
+* New bugs found in v0.1
+
+(Numbering continues from the v0 list above — items 1-3 there.)
+
+| #  | Symptom                                                            | Reproducer                                                                 | Workaround                                                                  |
+|----+--------------------------------------------------------------------+----------------------------------------------------------------------------+-----------------------------------------------------------------------------|
+| 4  | No MCP/REST surface to *create* cron-scheduled sessions           | =agor_search_tools query:"schedule cron heartbeat"= → 0 matches; =GET /schedules /scheduled /cron /scheduler /scheduled-sessions= → 404 | Insert directly into =agor.db sessions= with =scheduled_from_worktree=true=, or wait for upstream scheduler API |
+| 5  | SSE response from =POST /mcp= ends with a trailing blank line; naive =\| tail -1= picks up the empty line, not the data | =curl … \| sed 's/^data: //' \| tail -1= returns "" instead of the JSON | Use =\| grep '^data: ' \| sed 's/^data: //'= (v0.1 harness uses this; v0 happened to skip it because the parser was =stream-json=, not raw SSE) |
+| 6  | =multi-agent-org-llm.org § "Async peer query"= predicts =mode:"btw"= "answer returns inline via callback"; actually returns a *new session* w/ =fork_origin:"btw"= + =callback_config.callback_mode:"once"=. Caller must check session genealogy or wait for the daemon to invoke the callback. | Compare wiki text to v0.1 run-log primitive 1 | Update wiki copy to "ephemeral fork that auto-archives + auto-callbacks the parent on completion" |
+| 7  | =org_llm.logbook= default =log_kinds= allowlist excludes =team-session=, so the canonical kind from =multi-agent-org-llm.org § Captain's-log + session-genealogy reconciliation= silently drops on write | Call =logbook.write_event(kind="team-session", …)= on a fresh DB | v0.1 harness adds =team-session= to =Config.log_kinds= idempotently on first run; lift to default before promoting Agor team-session writes app-wide |
 
 * Cross-refs
 
 - [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] · [[id:9dc47d5a-5efe-4a04-8a3a-45b69643e982][agor-pilot-install.org]]
 - [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-006 (deterministic supervision); DEC-017 — stack composition vs. integration
 - [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] — current sprint side-quest
-- =/tmp/agor-test-log-2026-05-06.org= — live test session log (this run)
+- =/tmp/agor-test-log-2026-05-06.org= — v0 live test session log
+- =/tmp/agor-smoke-v01-run-2026-05-06.org= — v0.1 live run log (5 s, $0.00, 5/6 PASS + 1/6 RECORDED-GAP)
 - Upstream: =https://agor.live/guide/internal-mcp= · =https://agor.live/guide/architecture=
+
+* Long-lived sessions — token refresh
+
+*Summary.* =scripts/agor-mcp-refresh.sh= rotates the bearer in a
+=/tmp/agor-mcp-<sid>.json= before its JWT =exp= lapses, so a
+heartbeat-driven team session can outlive the default ~24 h
+=mcp_token= TTL without manual intervention. Companion to
+=agor-smoke.sh=; same admin-JWT + REST conventions; pytest harness at
+=tests/test_agor_mcp_refresh.py= (8/8 PASS, 2026-05-06 EDT).
+
+*Expanded.* The smoke harness writes its mcp-config once at session
+boot. For one-shot runs that's fine. Long-lived teams (per
+[[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org § Coordination patterns]]) need rotation:
+the script base64url-decodes the bearer's JWT payload, compares =.exp=
+against =now + ttl-buffer= (default 600 s), and on staleness
+=GET /sessions/:id= for a fresh =mcp_token=, then atomically rewrites
+the config (=jq= → =<path>.tmp.<pid>= → =mv=) preserving every
+sibling field. Re-login to admin only happens when
+=~/.agor/cli-token.expiresAt= is in the past (uses =pass
+org-llm/agor/admin-password= under the hood — same creds path as
+=agor-smoke.sh=). The =GET /sessions/:id= path is preferred over
+re-login because the per-session token is regenerated by the daemon's
+after-create hook for any ≥member caller.
+
+*Cron / supervisor recipe.*
+
+#+begin_src sh
+# Every 5 min while a long-lived team session is active. Refreshes
+# only when the bearer has < 600s left; exits 0 quickly otherwise.
+*/5 * * * * /home/daniel/repos/org-llm/scripts/agor-mcp-refresh.sh \
+    --config /tmp/agor-mcp-<sid>.json \
+    --session-id <sid> \
+    --ttl-buffer 600 >>/tmp/agor-refresh.log 2>&1
+
+# Probe-only: print "EXPIRES_IN <sec>" without touching the file.
+scripts/agor-mcp-refresh.sh --config /tmp/agor-mcp-<sid>.json \
+    --session-id <sid> --check-only
+#+end_src
+
+*Exit codes.* =0= refreshed (or skipped fresh); =10= PREREQ; =11=
+AUTH (admin JWT bad); =12= SESSION_GONE (404 / archived); =13=
+CONFIG_BAD (malformed JSON / non-JWT bearer); =14= WRITE_FAIL.
+
+*v0.2 gap.* =claude -p= reads =--mcp-config= at startup, so flipping
+the file is necessary but not sufficient — the supervisor still must
+restart the agent (or upstream Claude Code must learn
+MCP =notifications/tools/list_changed=). =--pid= triggers a
+best-effort =SIGHUP=, which most clients ignore today; documented as
+a hook for when they don't.

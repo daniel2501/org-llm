@@ -74,8 +74,18 @@ def clean_registry():
 
 
 def _run(coro):
-    """Run an awaitable from a sync test."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Run an awaitable from a sync test.
+
+    Builds a fresh event loop each call. `asyncio.get_event_loop()`
+    is unreliable across pytest sessions on Python 3.11+ (it raises
+    when no loop is current and another test in the run has
+    already disposed of one), so we own the loop's lifetime here.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 # ── decorator behaviour ─────────────────────────────────────────
