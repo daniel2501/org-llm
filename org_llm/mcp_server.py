@@ -2,6 +2,7 @@
 from __future__ import annotations
 from pathlib import Path
 import asyncio
+import functools
 import inspect
 import json
 import os
@@ -12,6 +13,20 @@ import subprocess
 # imports inside create_mcp_server() leave the symbol unresolvable from the
 # tool's __globals__.
 from mcp.server.fastmcp import Context
+
+# Phase 24.2 — recovery hooks. The middle layer of the supervision
+# trinity (DEC-006 — deterministic supervision). Imported here so
+# the @recover_on_failure decorator below can dispatch through the
+# registered hook chain (timeout → connection_error →
+# missing_argument) on any tool exception. Hooks are deterministic
+# and cannot tax the user's turn — backward-compatible default is
+# RAISE (re-raise unchanged), so undecorated tools keep their
+# existing behaviour.
+from .recovery import (
+    RecoveryAction   as _RecoveryAction,
+    RecoveryContext  as _RecoveryContext,
+    recover_from     as _recover_from,
+)
 
 
 def _format_mcp_error(tool_name: str, exc: Exception,
@@ -32,6 +47,133 @@ def _format_mcp_error(tool_name: str, exc: Exception,
             f"WHY: {hint.why}\n"
             f"FIX: {hint.fix}\n"
             f"(structured-rescue confidence: {hint.confidence})")
+
+
+def _format_skip_message(tool_name: str, exc: BaseException) -> str:
+    """Structured 'skipped' string for `RecoveryAction.SKIP`.
+
+    The recovery hook decided this exception is non-load-bearing
+    (e.g. a transient telemetry failure). We surface a short note
+    so the LLM sees that the tool ran but produced no result
+    rather than a silent empty string.
+    """
+    return (f"SKIPPED in {tool_name}: {type(exc).__name__}: "
+             f"{str(exc)[:200]} — supervision deemed this "
+             f"non-fatal; proceed with what you have.")
+
+
+def _format_escalate_message(tool_name: str, exc: BaseException,
+                                hint: str) -> str:
+    """Structured hint string for `RecoveryAction.ESCALATE`.
+
+    Surfaces the deterministic hint built by the matched hook
+    (e.g. missing_argument's 'expected X, got Y' shape) so the LLM
+    can self-correct on its next turn. Mirrors the resolver
+    pattern: deterministic code prepares the LLM with the right
+    next move, no observer agent required.
+    """
+    head = (f"ERROR in {tool_name}: {type(exc).__name__}: "
+              f"{str(exc)[:200]}")
+    if not hint:
+        return head
+    return f"{head}\n\nRECOVERY HINT: {hint}"
+
+
+def recover_on_failure(fn):
+    """Phase 24.2 — recovery hooks: per-tool exception router.
+
+    Wraps a tool function so any exception is dispatched through
+    the recovery registry (`recover_from(exc, ctx)`). The four
+    possible outcomes:
+
+      - `RETRY`    → call the tool one more time (single retry for
+                     v0.1; the hook may have mutated `ctx` to
+                     extend a deadline / sleep for backoff /
+                     etc., and returns `RAISE` itself once its
+                     attempt budget is exhausted).
+      - `SKIP`     → return a structured 'skipped' string; the
+                     LLM proceeds without the tool's result.
+      - `ESCALATE` → return a structured hint string built by the
+                     matched hook so the LLM can self-correct on
+                     its next turn (e.g. missing-argument fixes).
+      - `RAISE`    → re-raise the original exception unchanged
+                     (the default for unknown exceptions). The
+                     existing `_wrap_tool_decorator` rescue path
+                     catches it and runs `match_structured`, so
+                     undecorated behaviour is preserved.
+
+    Single retry by design: hooks themselves enforce per-class
+    attempt budgets via `ctx.attempts` (timeout: 2 attempts;
+    connection: 3 attempts; missing-argument: ESCALATE-only).
+    The decorator only re-invokes once because the framework
+    rule is 'a single retry is enough for v0.1' — repeated
+    re-invocation would let a misbehaving hook spin the tool
+    indefinitely. Tools requiring multi-attempt loops belong in
+    a dedicated worker (e.g. dbt_run) not the supervision layer.
+
+    Works on both sync and async tool functions. The wrapper
+    preserves `__annotations__` + `__wrapped__` so FastMCP's
+    pydantic schema introspection still sees the original
+    signature.
+    """
+    if asyncio.iscoroutinefunction(fn):
+        @functools.wraps(fn)
+        async def _async_recovered(*a, **kw):
+            ctx = _RecoveryContext(
+                tool=fn.__name__,
+                args=dict(kw),
+                attempts=1,
+                timeout_s=float(kw.get("timeout_s")
+                                 or kw.get("timeout") or 0.0),
+            )
+            try:
+                return await fn(*a, **kw)
+            except Exception as exc:
+                action = _recover_from(exc, ctx)
+                if action == _RecoveryAction.RETRY:
+                    ctx.attempts += 1
+                    # Hooks that extended ctx.timeout_s could
+                    # update kw here on a future iteration; for
+                    # v0.1 we only carry the timeout hint via
+                    # ctx.meta, which the hook already used.
+                    return await fn(*a, **kw)
+                if action == _RecoveryAction.SKIP:
+                    return _format_skip_message(fn.__name__, exc)
+                if action == _RecoveryAction.ESCALATE:
+                    return _format_escalate_message(
+                        fn.__name__, exc, ctx.hint)
+                # RAISE — fall through to existing rescue path.
+                raise
+        # Preserve annotations explicitly: functools.wraps copies
+        # __wrapped__ + __annotations__, which is what FastMCP
+        # introspects via inspect.get_annotations(eval_str=True).
+        return _async_recovered
+
+    @functools.wraps(fn)
+    def _sync_recovered(*a, **kw):
+        ctx = _RecoveryContext(
+            tool=fn.__name__,
+            args=dict(kw),
+            attempts=1,
+            timeout_s=float(kw.get("timeout_s")
+                             or kw.get("timeout") or 0.0),
+        )
+        try:
+            return fn(*a, **kw)
+        except Exception as exc:
+            action = _recover_from(exc, ctx)
+            if action == _RecoveryAction.RETRY:
+                ctx.attempts += 1
+                return fn(*a, **kw)
+            if action == _RecoveryAction.SKIP:
+                return _format_skip_message(fn.__name__, exc)
+            if action == _RecoveryAction.ESCALATE:
+                return _format_escalate_message(
+                    fn.__name__, exc, ctx.hint)
+            # RAISE — fall through to existing rescue path.
+            raise
+
+    return _sync_recovered
 
 
 def _make_engine():
@@ -642,7 +784,13 @@ def create_mcp_server():
             return f"Skill '{name}' failed: {e}"
 
     # ── tangle_file ───────────────────────────────────────────────────────────
+    # Phase 24.2 — recovery hook site: tangle_file shells out to
+    # `emacsclient`, which can `TimeoutExpired` (slow tangle of a
+    # huge org file) or hit `ConnectionError`-style failures when
+    # the daemon is mid-restart. Both are transient and benefit
+    # from the timeout / connection_error hooks' retry budgets.
     @server.tool()
+    @recover_on_failure
     def tangle_file(file_path: str) -> str:
         """Run org-babel-tangle on an org file via emacsclient.
 
@@ -688,7 +836,13 @@ def create_mcp_server():
 
     # ── get_config ────────────────────────────────────────────────────────────
     # ── access: read_file, list_directory, open_url, qute_command ───────────
+    # Phase 24.2 — recovery hook site: read_file is the canonical
+    # filesystem op the LLM reaches for. A wrong-shape call
+    # (`read_file()` with no `path` arg, or a typo of the kwarg)
+    # is the most likely failure mode — perfect ESCALATE territory
+    # for the missing_argument hook so the LLM self-corrects.
     @server.tool()
+    @recover_on_failure
     def read_file(path: str) -> str:
         """Read a file from anywhere on the user's filesystem.
 
@@ -702,7 +856,11 @@ def create_mcp_server():
             return result.error
         return result.content
 
+    # Phase 24.2 — recovery hook site: parallel to read_file,
+    # the same missing-argument and transient-IO failure modes
+    # apply.
     @server.tool()
+    @recover_on_failure
     def list_directory(path: str) -> str:
         """List entries in a directory. Same allow-list gating as read_file."""
         from .access import list_directory as _list
@@ -756,7 +914,12 @@ def create_mcp_server():
         result = request_self_grant(path, reason)
         return result.message
 
+    # Phase 24.2 — recovery hook site: open_url shells out to a
+    # browser process; transient ConnectionError / TimeoutError
+    # from the IPC handshake are exactly what the connection +
+    # timeout hooks were built for.
     @server.tool()
+    @recover_on_failure
     def open_url(url: str) -> str:
         """Open a URL in qutebrowser (or the user's default browser).
 
@@ -918,7 +1081,17 @@ def create_mcp_server():
         return _themed("list_agents",
                         f"{len(rows)} agent(s)", "\n".join(rows))
 
+    # Phase 24.2 — recovery hook site: delegate is the single
+    # highest-leverage MCP tool (every cloud sub-LLM call funnels
+    # through here). Connection drops to the cloud + cloud-side
+    # timeouts are the most common transient failure modes, and
+    # the in-body try/except already returns themed strings rather
+    # than re-raising — so this decorator is a *safety net* for
+    # exceptions that escape that try/except (e.g. config-loader
+    # crashes, agent-resolver bugs, missing-argument shape errors
+    # the LLM emitted).
     @server.tool()
+    @recover_on_failure
     def delegate(agent: str, prompt: str, context: str = "",
                   model_override: str = "", timeout_s: int = 120) -> str:
         """Consult a specialist agent and return its response.
@@ -1391,7 +1564,12 @@ def create_mcp_server():
                         + (f" matching {buffer_pattern!r}"
                             if buffer_pattern else ""))
 
+    # Phase 24.2 — recovery hook site: same shell-IPC failure
+    # surface as open_url. Decorated so a flaky qutebrowser RPC
+    # gets a single retry instead of bubbling to the LLM as a
+    # bare ConnectionError.
     @server.tool()
+    @recover_on_failure
     def browser_command(command: str) -> str:
         """Send a colon-command (e.g. ':open URL', ':tab-next') to qutebrowser.
 
@@ -1455,7 +1633,14 @@ def create_mcp_server():
             lines.append(f"  - [{kw}] {n.title or '(untitled)'}  (id={n.node_id})")
         return "\n".join(lines)
 
+    # Phase 24.2 — recovery hook site: org_llm_run shells out to
+    # the CLI itself with a configurable timeout. Subprocess
+    # `TimeoutExpired` translates to TimeoutError-like failures
+    # the timeout hook can absorb with a single 2× retry; cloud
+    # subcommand backends can also throw transient
+    # ConnectionError shapes.
     @server.tool()
+    @recover_on_failure
     async def org_llm_run(command_string: str, timeout: int = 60,
                             ctx: Context | None = None) -> str:
         """Run an arbitrary `org-llm` subcommand from natural-language intent.
@@ -2003,7 +2188,13 @@ def create_mcp_server():
         """List all dbt models with materialization (table / view / etc.)."""
         return _shell_org_llm_dbt("models", timeout=30)
 
+    # Phase 24.2 — recovery hook site: dbt_run shells out for
+    # what can be a multi-minute build. Transient subprocess
+    # failures (FileNotFoundError on the org-llm binary, sudden
+    # PATH change, OSError from a contended SQLite write) are
+    # exactly the v0.1 retry cohort.
     @server.tool()
+    @recover_on_failure
     async def dbt_run(select: str = "",
                        full_refresh: bool = False,
                        ctx: Context | None = None) -> str:
@@ -2045,7 +2236,11 @@ def create_mcp_server():
         if select: args += ["-s", select]
         return _shell_org_llm_dbt(*args, timeout=300)
 
+    # Phase 24.2 — recovery hook site: dbt_build is dbt_run +
+    # dbt_test compounded; same subprocess-shell failure surface,
+    # same v0.1 retry cohort.
     @server.tool()
+    @recover_on_failure
     async def dbt_build(select: str = "",
                          ctx: Context | None = None) -> str:
         """dbt run + dbt test in dependency order — the canonical "do it all".
