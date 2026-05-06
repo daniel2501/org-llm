@@ -426,7 +426,47 @@ complete (38 components, 14 commits day-over-day).
   =http://127.0.0.1:&lt;port&gt;/v1/chat/completions=. Unlocks real
   =@&lt;agent&gt;= persona swap via proxy =intercept_agent_prefix=
   (DEC-008 — proxy-seam @-prefix swap) AND opens door to SSE
-  streaming in v0.2.
+  streaming in v0.2. *(Shipped 2026-05-06 in commit =16c3924=.)*
+
+** Agor-shaped follow-ups (filed 2026-05-06 → 2026-05-07 from idea menu)
+
+- *Inbox-zero team — design page* — @data triages + @riker queues +
+  @atoz files long-term. Ties =remote-control.org= +
+  =life-as-code.org=. New SMS/email/voice memo triggers vault-
+  shaped capture from outbound channel. *Highest-leverage life-as-
+  code surface; should ship as the next concrete domain after
+  =budget-org-schema.org=.*
+- *Daily-journal team — design page* — @data captures + @atoz
+  cross-refs + @geordi drift-spots. Per-capture trigger; produces
+  auto-linked entries + "today's themes" digest. Most-used cadence
+  (every capture).
+- *Personal-CI team — design page* — @boothby verifies + @atoz
+  updates concept-graph + @data writes daily digest. Vault-changed
+  trigger. Excellent dogfood loop; surfaces drift before it bites.
+- *Travel-prep team — design page* — @riker schedules + @data
+  drafts itinerary + @geordi pulls weather/flight data. Concrete
+  feels-like-a-real-feature surface for life-as-code.
+- *Annual-review team — design page* — @atoz pulls year-arc +
+  @geordi computes drift metrics + @data drafts narrative. Cron
+  every January. "Anti-mediocre-year" primitive.
+- *Real spike-team flow test — Phase 26.2 — physical extraction
+  end-to-end via Agor* — extractor + test-runner + doc-updater +
+  reviewer as 4 sibling sessions on one boardId; verifies dissolve
+  trigger + parallel-PR coordination. Highest-leverage *practical*
+  Agor use case for our v1.0 work.
+- *Long-running 24h heartbeat test* — vault-hygiene team running
+  for 24h via scheduler + =scripts/agor-mcp-refresh.sh= for
+  =mcp_token= refresh. First overnight Agor test; validates the
+  =long-lived team= lifetime end-to-end.
+- *Cross-tool override test* — Claude parent spawns Codex child;
+  validates the spawn tool-override primitive. Needs Codex
+  installed (sprint pre-req).
+- *Btw peer-query test* — parent asks two peers via =mode:"btw"=;
+  responses inject into parent transcript. Claude-only path;
+  validates async peer-coordination primitive.
+- *Real Bridge Crew team test* — materialize 7 personas + spawn
+  one of each + observe behavior matches each persona's
+  =SOUL.md= (just-shipped =bridge-crew-agor-assistants.org=).
 #+end_quote
 
 * Ahead                                                            :@queued:
