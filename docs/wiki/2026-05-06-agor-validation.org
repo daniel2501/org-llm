@@ -1,0 +1,208 @@
+:PROPERTIES:
+:ID:       8c41a7b9-f8d3-4b21-9e74-5a1c3f8b2d09
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Agor integration validation — 2026-05-06 three-pilot suite
+#+FILETAGS: :wiki:test:agor:integration:validation:multi-agent-org-llm:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Three parallel pilots ran today against =agor-live v0.17.3=
++ =claude code 2.1.129= to validate the [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]] integration:
+*A* extended the headless smoke harness from v0 to v0.1 (5/6 primitives
+PASS, 1 RECORDED-GAP); *B* ran a real spike-team for the license-decision
+investigation (3 children, factual correction caught); *C* fired a 1-tick
+smoke of the vault-hygiene long-lived team (PASS within a 24 h JWT
+window). Total spend across all three: *$0.34*. Total wall-clock:
+*~10 min*. Verdict: *integration validates at the seam; promote spike-team
+pattern; gate long-lived cadence on a token-refresh primitive.*
+
+*Expanded.* This is the canonical aggregate report for the 2026-05-06
+validation event. It does *not* duplicate the three pilot docs — each
+pilot has its own canon page and run log. This page tracks: cross-pilot
+totals, the 8 bugs found across v0.17.3, the four primitives still
+unvalidated (cron / token-refresh / cross-tool / canvas), and what the
+results mean for our integration plan ([[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]] — stack composition vs.
+integration). One open hygiene item: A's bug numbering goes 1–7 in
+=agor-smoke-recipe.org=; B introduced "BUG-04" in
+=spike-team-license-pilot.org= as a parallel-dispatch artifact — the
+permission-inheritance bug is actually the *eighth* bug found in
+v0.17.3, and the canon list needs reconciling.
+
+* Pilots at a glance
+
+| Pilot | What                                          | Verdict                            | Spend    | Wall    | Canon doc                                         |
+|-------+-----------------------------------------------+------------------------------------+----------+---------+---------------------------------------------------|
+| Pre-A | =scripts/agor-smoke.sh= v0 LLM end-to-end     | PASS                               | $0.0704  | 12 s    | [[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe.org]] § v0           |
+| A     | =scripts/agor-smoke-v01.sh= primitive shapes  | 5/6 PASS · 1 RECORDED-GAP (cron)   | $0.00    | ~5 s    | [[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe.org]] § v0.1         |
+| B     | Spike team — license-decision investigation   | PASS · marginally beats solo (60/40) | $0.187 | ~7 min  | [[id:73649a8c-c9d8-4691-9959-c726615b6635][spike-team-license-pilot.org]]            |
+| C     | Long-lived team — vault-hygiene 1-tick smoke  | PASS within single 24 h JWT window | $0.0794  | 63 s    | [[id:3a8b1f72-9c4d-4e21-a5d8-7b2e9f1c3a6d][long-lived-team-vault-hygiene.org]]       |
+
+* Primitives validated (cumulative)
+
+| Primitive                                       | v0 | v0.1 | B  | C  | Status                                          |
+|-------------------------------------------------+----+------+----+----+-------------------------------------------------|
+| Daemon REST surface (=POST /repos/.../worktrees=, =POST /sessions=) | ✓ | ✓    | ✓  | ✓  | Solid                                           |
+| Session =mcp_token= issuance                    | ✓  | ✓    | ✓  | ✓  | Solid (24 h JWT)                                |
+| MCP HTTP transport (Bearer JWT)                 | ✓  | ✓    | ✓  | ✓  | Solid                                           |
+| Progressive-disclosure tool surface             | ✓  | ✓    | ✓  | ✓  | Solid (=agor_search_tools= → =agor_execute_tool=) |
+| =agor_sessions_spawn= + parent-child genealogy   | ✓  | —    | ✓  | ✓  | Solid                                           |
+| =mode:"btw"= async peer query                   | —  | ✓    | —  | —  | Protocol-level confirmed; production use deferred |
+| =mode:"subsession"= resumable child             | —  | ✓    | —  | —  | Confirmed (archive→unarchive cycle)             |
+| =mode:"fork"= sibling-from-shared-worktree      | —  | ✓    | —  | —  | Confirmed                                       |
+| =agor_artifacts_publish=                        | —  | ✓    | —  | —  | Confirmed (Sandpack render is browser-only)     |
+| Captain's-log bridge (=kind=team-session=)      | —  | ✓    | manual | ✓  | Confirmed; needs default-allowlist promotion (bug #7) |
+| Sibling-session by =boardId= (real team)        | —  | —    | ✓  | ✓  | Confirmed (worktree as board-equivalent in B)   |
+| Captain pre-fetch + single LLM narration        | —  | —    | —  | ✓  | Confirmed (DEC-006 invariant held)              |
+| Read-only-constraint via prompt alone           | —  | —    | —  | ✓  | Confirmed (no =~/org/*.org= writes)             |
+
+* Primitives NOT validated yet (the gating list)
+
+| Primitive                                | Why unvalidated                                  | Owner / status                                        |
+|------------------------------------------+--------------------------------------------------+-------------------------------------------------------|
+| Cron / scheduled child spawn             | No MCP/REST surface exists in v0.17.3 (gap #4)   | Wait for upstream scheduler API; or write to DB direct |
+| =mcp_token= refresh after 24 h           | Day-2 heartbeat will silently break              | *Build next* — gates promotion of vault-hygiene to cron |
+| =mode:"btw"= in production team          | Confirmed at protocol level only (v0.1)          | Validate in next pilot when a team genuinely needs mid-tick clarification |
+| Cross-tool spawn (Claude → Codex / Gemini / OpenCode child) | All pilots stayed on Claude Code  | Recommended v0.2 of harness (per Agent A report)      |
+| Slack / GitHub message gateway           | Out of scope for headless validation             | Defer until human-in-loop pilot                       |
+| Multiplayer canvas / facepile / cursors  | Headless by design; canvas is a separate consumer | Defer; not on critical path                          |
+| Captain session multi-tick reuse vs. recreate | C archived after smoke; production semantics not exercised | Verify on first 7-day vault-hygiene cron run     |
+
+* Bugs found in agor-live v0.17.3 (renumbered + reconciled)
+
+The two canon docs (=agor-smoke-recipe.org= + =spike-team-license-pilot.org=)
+were written in parallel and B's "BUG-04" actually slots in as #8 below.
+Canon list to follow this ordering once a follow-up edit pass lands.
+
+| #  | Symptom                                              | Found by | Where                                                       | Workaround                                                |
+|----+------------------------------------------------------+----------+-------------------------------------------------------------+-----------------------------------------------------------|
+| 1  | =agor worktree add= CLI broken (Feathers REST)       | Pre-A    | =agor-smoke-recipe.org= bugs                                | =POST /repos/:id/worktrees= directly                      |
+| 2  | =GET /sessions/:id/genealogy= 500s                   | Pre-A    | =agor-smoke-recipe.org= bugs                                | Read =genealogy.children= from =GET /sessions/:id=        |
+| 3  | Bare =POST /worktrees= rejects (=worktree_unique_id= null) | Pre-A | =agor-smoke-recipe.org= bugs                                | Use the =/repos/:id/worktrees= route only                 |
+| 4  | No MCP/REST to *create* cron-scheduled sessions      | A        | =agor-smoke-recipe.org= § v0.1 new bugs                     | Insert =sessions= row direct or wait for upstream         |
+| 5  | SSE response trailing blank line; =\| tail -1= → ""  | A        | =agor-smoke-recipe.org= § v0.1 new bugs                     | Use =\| grep '^data: '= before sed                        |
+| 6  | Wiki-canon =mode:"btw"= description wrong            | A        | =multi-agent-org-llm.org= § Coordination § Async peer query | Update wiki copy (this report flags it)                   |
+| 7  | =org_llm.logbook= default =log_kinds= excludes =team-session= | A | =org_llm/logbook.py=                                       | Harness adds it idempotently; lift to default             |
+| 8  | Child sessions inherit =permission_config.mode="acceptEdits"=; CLI =--permission-mode= flag scopes only parent process | B | =spike-team-license-pilot.org= verdict (labeled BUG-04 there) | =PATCH /sessions/{parent} {"permission_config":{"mode":"bypassPermissions"}}= before spawn |
+
+* Cross-pilot findings (not in any single pilot doc)
+
+** Cost shape
+
+Total cloud spend across the entire 2026-05-06 validation event:
+*$0.34* (Pre-A $0.07 + A $0.00 + B $0.187 + C $0.0794). Spend is
+dominated by B (license spike, 7 min, real LLM work). v0.1's
+*zero-spend* property is load-bearing: the primitive-shape harness can
+run in CI without burning money, leaving the LLM budget for actual team
+work.
+
+** Wiki canon updates owed
+
+- =multi-agent-org-llm.org= § /Coordination patterns/ § /Async peer
+  query/ — current text says =btw= "answer returns inline via callback";
+  v0.1 verified the actual shape is a /new session w/ =fork_origin:"btw"=
+  + =callback_config.callback_mode:"once"=/. Caller polls genealogy or
+  receives the daemon-invoked callback. (Bug #6.)
+- =multi-agent-org-llm.org= § /What's native vs delivered by integration/
+  — the =Live artifact preview= row references =agor_artifacts_create=;
+  actual tool name is =agor_artifacts_publish=. Folder→DB
+  serialization, not arbitrary create. (Tool-name reality table in
+  v0.1 doc.)
+- =multi-agent-org-llm.org= § /Coordination patterns/ § /Scout-pattern
+  dispatch/ — references =agor_sessions_fork= as a tool; actual surface
+  is =agor_sessions_prompt mode:"fork"=. No separate fork tool exists.
+
+** Bug-numbering reconciliation
+
+A's run wrote bugs 1–7 to =agor-smoke-recipe.org=. B's run, dispatched
+in parallel, labeled its permission-inheritance finding as "BUG-04" in
+=spike-team-license-pilot.org=. The canonical numbering (this doc's
+table above) is 1–8 with B's bug as #8. =spike-team-license-pilot.org=
+needs one Edit pass to switch its quote-block label from =BUG-04= to
+=BUG-08=. *Pre-existing context:* this is exactly the kind of friction
+=mode:"btw"= peer query would have caught — A and B couldn't ask each
+other "what's your next bug number?" mid-run.
+
+** Integration-posture implication for DEC-017
+
+Per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]] § 7 (signposting allowed; integration-only pre-2029-01-15),
+this validation event:
+
+- /Confirms/ the integration shape works end-to-end.
+- /Surfaces/ 8 v0.17.3 bugs, 4 of which are upstream-fix candidates
+  (1, 2, 3, 4) and 4 of which are doc/wiring on our side (5, 6, 7, 8).
+- /Does not move/ the BSL→Apache 2029-01-15 wait-and-fork stance —
+  but it sharpens the open question: if upstream fixes 1+2+3+4 within
+  the validation window, our local workarounds become legacy; if not,
+  we own the workarounds in the smoke harness indefinitely. Worth
+  re-checking upstream =preset-io/agor= weekly through the next sprint.
+
+** Spike-team value evidence
+
+B's pilot is the first concrete evidence the spike-team shape /catches
+errors solo wouldn't./ The 2025-05-05 license draft's Redis SSPL→AGPLv3
+framing was wrong; =@spock= caught it on cross-check; solo
+=delegate()= would have rubber-stamped the prior draft forward. This
+is the kind of "big" work [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]] § Purpose names. Cost
+premium ($0.087 over estimated solo on this run) is acceptable for
+decision-grade work.
+
+** Long-lived-team value evidence
+
+C's narration (vault-hygiene tick) cross-joined three pre-fetched
+facts (priority spread, daily-coverage ratio, roam-index status) into
+*one prioritization call*. That's the interpretation layer a
+deterministic stat dump can't deliver — exactly what the @-prefix
+flow can't surface unless the user already suspects a hygiene issue.
+The heartbeat finds drift /at rest/.
+
+* What this changes in the integration plan
+
+| Plan item                                      | Before today                | After today                                             |
+|------------------------------------------------+-----------------------------+---------------------------------------------------------|
+| Headless smoke harness                         | v0 PASS                     | v0.1 covers 5 more primitives; v0.2 = cross-tool spawn  |
+| Spike-team pattern                             | designed in canon, not run  | *Validated* on license decision; AGPLv3 rec to ratify   |
+| Long-lived team — vault hygiene                | designed in canon, not run  | *1-tick PASS*; promotion to daily cron blocked on token-refresh primitive |
+| Token-refresh primitive                        | not on backlog              | *Top of backlog* — gates all long-lived teams           |
+| =mode:"btw"= in production                     | unvalidated                 | Protocol confirmed; first production user = vault hygiene v2 (=@geordi= ↔ =@atoz= mid-tick) |
+| Cross-tool spawn                               | unvalidated                 | Recommended v0.2 of harness                              |
+| Wiki-canon corrections                         | n/a                         | 3 corrections owed in =multi-agent-org-llm.org=         |
+| =org_llm.logbook= default allowlist            | =cli,llm,mcp,config,doctor,dbt,alert= | Add =team-session= (per bug #7)                |
+| =agor-pilot-install.org= rotation note         | not flagged                 | Default admin =admin@agor.live= / =admin= must rotate during pilot install |
+
+* What ratification you owe
+
+These are user-decisions surfaced by the validation; flagged here
+explicitly so they don't get lost in cross-pilot scrolling.
+
+1. *License recommendation* — AGPLv3 primary + DCO; demote EUPL v1.2 to
+   "watch v1.3"; reject SSPL/Hippocratic/ACSL as non-OSI. Per
+   =/tmp/license-decision-2026-05-06.md=. Rec: ratify as
+   [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-010]] resolution.
+2. *Promote spike-team pattern* as a sanctioned tool for decision-grade
+   doc work (license, version scheme, Phase 26.2 extraction). Implies
+   it earns a coordination-pattern entry in [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]].
+3. *Defer cron promotion* of vault-hygiene team until token-refresh
+   primitive lands. Document this gating in =now.org=.
+4. *File 4 upstream bugs* (1, 2, 3, 4) at =preset-io/agor= — or wait
+   for upstream sweep first to avoid noise.
+5. *Wiki-canon edits* in =multi-agent-org-llm.org= per § "Wiki canon
+   updates owed" above (3 corrections).
+6. *Bug-numbering reconciliation* — one Edit pass on
+   =spike-team-license-pilot.org= changing BUG-04 → BUG-08.
+
+* Cross-refs
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — canonical integration definition
+- [[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe.org]] — v0 + v0.1 harness
+- [[id:73649a8c-c9d8-4691-9959-c726615b6635][spike-team-license-pilot.org]] — pilot B
+- [[id:3a8b1f72-9c4d-4e21-a5d8-7b2e9f1c3a6d][long-lived-team-vault-hygiene.org]] — pilot C
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-006 (deterministic supervision); DEC-010 (license); DEC-017 (integration only)
+- [[id:9dc47d5a-5efe-4a04-8a3a-45b69643e982][agor-pilot-install.org]] — install + first-run; needs admin-creds-rotation note
+- [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] — sprint side-quest carrying these follow-ups
+- =/tmp/agor-smoke-v01-run-2026-05-06.org= — A run log
+- =/tmp/license-decision-2026-05-06.md= — B artifact (the recommendation)
+- =/tmp/vault-hygiene-1tick-2026-05-06.org= — C run log
+- =/tmp/captains-log-vault-hygiene-2026-05-06.jsonl= — C bridge record

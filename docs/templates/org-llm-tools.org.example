@@ -1,0 +1,55 @@
+#+TITLE: org-llm — user-defined MCP tools (Phase 23.6 — literate MCP tools)
+#+AUTHOR: you
+#+OPTIONS: toc:nil num:nil
+#+FILETAGS: :org-llm:tools:literate-config:
+
+# Copy this file to ~/org/org-llm-tools.org to enable. Override the
+# location via the ORG_LLM_LITERATE_TOOLS_PATH env var. See
+# docs/wiki/literate-tools.org for the full spec.
+#
+# Each top-level heading is ONE tool. The heading title becomes the
+# Python function name; properties drawer carries metadata; the
+# `#+begin_src python :tangle no` block is the function body. The
+# org_llm.literate_mcp package compiles each into a sandboxed
+# callable that the MCP server registers at startup.
+#
+# Required properties: :DESCRIPTION:, :PARAMS:.
+# Optional:           :RETURNS:, :TIMEOUT:, :IMPORTS:, :DANGEROUS:.
+#
+# IMPORTS gates against a stdlib allowlist (json, re, math, datetime,
+# collections, …). Modules outside the allowlist require BOTH
+# :DANGEROUS: yes on the tool AND `dangerous_enabled=True` at the
+# host's load-time. Two-key rule by design.
+
+* word_count
+:PROPERTIES:
+:DESCRIPTION: Count whitespace-separated words in a string.
+:PARAMS:      {"text": {"type": "string"}}
+:RETURNS:     {"type": "integer"}
+:END:
+
+#+begin_src python :tangle no
+return len(text.split())
+#+end_src
+
+* extract_urls
+:PROPERTIES:
+:DESCRIPTION: Pull every http(s) URL out of a blob of text.
+:PARAMS:      {"text": {"type": "string"}}
+:IMPORTS:     re
+:END:
+
+#+begin_src python :tangle no
+return re.findall(r"https?://\S+", text)
+#+end_src
+
+* utc_now_iso
+:PROPERTIES:
+:DESCRIPTION: Return the current UTC time as an ISO-8601 string.
+:PARAMS:      {}
+:IMPORTS:     datetime
+:END:
+
+#+begin_src python :tangle no
+return datetime.datetime.utcnow().isoformat() + "Z"
+#+end_src

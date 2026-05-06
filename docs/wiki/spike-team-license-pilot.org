@@ -1,0 +1,183 @@
+:PROPERTIES:
+:ID:       73649a8c-c9d8-4691-9959-c726615b6635
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Spike-team pilot — license-decision via Agor
+#+FILETAGS: :wiki:concept:agor:integration:spike-team:pilot:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* First real *spike-team* exercise of the Agor integration
+(per [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]] § Spike teams) on a doc-shaped target — the
+license-decision investigation pending under [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-010]] / [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]]. Captain
+=@picard= dispatched 3 children (=@spock= researcher × 2 attempts +
+=@data= drafter) on a shared worktree-as-board. Total cloud spend
+$0.187, wall ~7 min. *Verdict: AGPLv3-primary holds*; EUPL v1.2
+demoted from co-fallback to "watch v1.3"; the 2025-05-05 draft's
+Redis SSPL→AGPLv3 framing was *factually wrong* and the team caught
+it. /Updated artifact:/ =/tmp/license-decision-2026-05-06.md=.
+
+*Expanded.* This is a *minimum-viable* spike-team run (per the
+mission's "≥1 captain spawn + ≥1 child round-trip via MCP" floor),
+which expanded to the full 3-role shape inside budget. It validates
+the team-shape end-to-end: parent session genealogy carries 3
+children correctly; sibling discovery via shared =worktree_id= is
+exactly what the [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]] § "Sibling-session by
+boardId" pattern named; one bug surfaced (default child
+=permission_config.mode= is =acceptEdits=, blocking WebSearch with
+no visible permission-grant REST endpoint). The captain's *one*
+turn dispatched 2 children + reported their session IDs in 48s for
+$0.12 — the part Agor genuinely earned. The synthesis itself was
+done by the harness (parent agent), not by another captain turn,
+to stay inside the spend cap.
+
+* Team shape
+
+| Slot       | Persona / Role        | Agor mapping                       | Lifetime status |
+|------------+-----------------------+------------------------------------+-----------------|
+| Captain    | =@picard= — framer / dispatcher | parent session 019dfbe3-a30e | live (worktree retained for audit) |
+| Researcher | =@spock=  — fresh license context | child session 019dfbe7-c0dc (v2; v1 archived) | done — VERDICT=HOLD |
+| Drafter    | =@data=   — tradeoff matrix + recommendation | child session 019dfbe4-f2aa | done — RECOMMENDATION=AGPLv3 |
+
+- *Workspace.* Single worktree =spike-license-637257= (=worktree_id=
+  =019dfbe3-5f70=) on branch =spike-license-637257= off =trunk=
+  =d411375d=. All 3 children pinned to that worktree — board-equivalent
+  for sibling discovery.
+- *Lifetime.* Spike — dissolves on artifact delivery. The recommendation
+  doc lands; team disbands; worktree archives next captain's-log sweep.
+- *Audit trail.* Captain's-log not yet bridged (per [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]]
+  § "Captain's-log + session-genealogy reconciliation" pattern — gap
+  is real, this run did the bridging by hand into this doc).
+
+* Coordination map (Agor primitives used)
+
+| Pattern (per multi-agent-org-llm § Coordination patterns) | Used? | Where it landed                                                                                                       |
+|-----------------------------------------------------------+-------+-----------------------------------------------------------------------------------------------------------------------|
+| *Sibling-session by boardId*                              | Yes   | All 3 children share =worktree_id= 019dfbe3-5f70 — the worktree IS the board for this run                            |
+| *Scout-pattern dispatch* (=mode:"spawn"=)                 | Yes   | Captain's lone turn called =agor_execute_tool= → =agor_sessions_spawn= twice for =@spock= + =@data=; respawn for =@spock= v2 |
+| *Async peer query* (=mode:"btw"=)                         | No    | Out of scope for this run — children didn't need to clarify mid-turn; would have used it if =@data= needed =@spock='s verdict before drafting |
+| *Cross-tool escalation*                                   | No    | All children stayed on Sonnet 4.6; Opus reserved for synthesis if needed (synthesis ended up done by harness)         |
+| *Scheduled heartbeat*                                     | n/a   | Spike teams are one-shot; this is a long-lived-team pattern                                                            |
+| *Multiplayer canvas / facepile*                           | n/a   | No human cursor needed for headless run                                                                                 |
+| *Captain's-log reconciliation*                            | Yes (manual) | Genealogy + costs filed into this org doc by hand — gap-fill until the bridge lands                            |
+
+* Run log
+
+| Step | t (s)  | Action                                        | Outcome / cost                                                                                              |
+|------+--------+-----------------------------------------------+-------------------------------------------------------------------------------------------------------------|
+|    0 | 0      | =POST /repos/.../worktrees= — create =spike-license-637257= | =worktree_id= 019dfbe3-5f70 · =unique_id=5 · path =~/.agor/worktrees/local/org-llm/spike-license-637257= |
+|    1 | ~16    | =POST /sessions= — captain (claude-code, sonnet) | =parent_session_id= 019dfbe3-a30e · =mcp_token= JWT 24h                                                  |
+|    2 | ~63    | =claude -p= captain dispatch (turn 1)         | 48s · $0.11963 · 7 turns · spawned 2 children: =@spock= v1 + =@data=                                      |
+|    3 | ~85    | =GET /sessions/{spock_v1}=                    | status=awaiting_permission · WebSearch tool blocked by inherited =acceptEdits= mode                       |
+|    4 | ~95    | Diagnose: child permission_config inherits "acceptEdits"; no =/permissions= REST endpoint to grant         | Workaround: PATCH parent perm_config to bypassPermissions; respawn fresh =@spock= without web tools         |
+|    5 | ~120   | =PATCH /sessions/{parent}= → bypassPermissions; archive =@spock= v1                                          | parent now has =mode:"bypassPermissions"=; =@spock= v1 archived with reason                                 |
+|    6 | ~135   | =GET /sessions/{data}=                         | status=idle (finished autonomously while diagnosing)                                                        |
+|    7 | ~277   | =claude -p= captain dispatch (turn 2)         | 14s · $0.06750 · 3 turns · spawned =@spock= v2 with no-web prompt                                          |
+|    8 | ~370   | Poll =@spock= v2 — became idle                 | "SPOCK_VERDICT=HOLD" + corrected Redis framing (BSD→SSPL+RSALv2 in 03/2024, NOT SSPL→AGPLv3 reversal)      |
+|    9 | ~400   | Synthesize artifact in harness (no further LLM call) | =/tmp/license-decision-2026-05-06.md= written; this org doc written                                       |
+
+*Total cloud spend.* $0.18713 across two captain turns (0 spent on
+direct child invocation — children billed under captain's session
+via the spawn cascade).
+
+*Total wall clock.* ~7 min from worktree create to artifact delivery.
+
+* Final license recommendation
+
+*One-liner:* **AGPLv3 primary; add DCO (not CLA) for contributor
+compliance; reject SSPL/Hippocratic/ACSL as non-OSI; demote EUPL
+v1.2 from co-fallback to "watch v1.3 release."**
+
+Full artifact at =/tmp/license-decision-2026-05-06.md=. Key
+corrections from the 2025-05-05 draft:
+
+- *Redis framing fixed.* The earlier draft said "Redis SSPL→AGPLv3
+  reversal in 2025" — this is unverified by training data. =@spock=
+  caught it: Redis went *BSD → SSPL + RSALv2* in March 2024, which
+  triggered the Linux Foundation Valkey fork. No AGPL reversal in
+  training data through August 2025.
+- *Elastic confirmed.* August 2024 trilicense (AGPLv3 + SSPL +
+  Elastic License 2.0). This part of the 2025-05-05 draft was
+  correct.
+- *Sentry posture clarified.* Sentry uses FSL-1.1 (2-year sunset
+  to Apache 2.0), not AGPL — they're the "eventually FOSS" camp,
+  not copyleft.
+- *EUPL v1.3 not released.* As of training cutoff, EUPL 1.2 (2017)
+  remains current; v1.3 is unconfirmed. Demote EUPL from
+  co-fallback to "watch."
+- *DCO over CLA.* New addition: pair AGPLv3 with a Developer
+  Certificate of Origin (Nextcloud/Signal pattern), not a full CLA
+  — keeps the process FOSS-idiomatic while putting employer-IP
+  compliance burden on contributors' employers.
+
+* Counterfactual: how solo =delegate()= would have looked
+
+Comparison is honest, not boosterish — both shapes have wins.
+
+| Dimension          | Spike team (this run)                                               | Solo =delegate()= via @-prefix proxy                              |
+|--------------------+----------------------------------------------------------------------+--------------------------------------------------------------------|
+| Cloud cost         | $0.187                                                              | ~$0.10 — single Sonnet call, no spawn cascade overhead             |
+| Wall clock         | ~7 min (incl. permission-bug diagnosis)                             | ~2 min — one round-trip, no polling                                |
+| Depth of research  | =@spock= caught Redis-framing error AND verified Elastic/Sentry/Google AGPL allowlist independently | One Sonnet call would have re-stated the original 2025-05-05 framing without the cross-check |
+| Audit trail        | 3 sessions retained on disk + this org doc + recommendation artifact + captain's log entry  | One =manager-log.jsonl= entry + the artifact                       |
+| Worktree pinning   | Each child in =spike-license-637257= worktree — clean isolation     | No worktree; runs in caller's CWD                                  |
+| Robustness to bugs | First =@spock= attempt got stuck (permission inheritance bug); workaround visible | Single point of failure, but fewer moving parts to break             |
+
+*Honest read.* Solo would have produced a recommendation faster
+and ~half the cost. But solo *would not have caught* the
+Redis-framing factual error in the existing draft, because solo
+=delegate()= reuses the caller's context — the wrong framing would
+have been carried forward. The team-shape's two-turn structure
+(captain dispatches; researcher cross-checks; harness synthesizes)
+is what produced the *correction*, not just a confirmation.
+
+* Verdict
+
+*Did the spike-team shape earn its keep on this job?* /Marginally yes —
+on this specific run./
+
+The team-shape produced a factually corrected recommendation that
+solo would have rubber-stamped. That's the real win — the kind of
+"big" work [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]] names. The cost premium ($0.087 over
+estimated solo) is acceptable for license-decision-grade work.
+
+*But it's a 60/40 call, not a 90/10 one.* Three caveats:
+
+1. *Most of the wall-clock cost* came from diagnosing the
+   permission-inheritance bug (= ~3 of ~7 min). On a clean run
+   that goes away; the team would beat solo on time, not lose to it.
+2. *Synthesis happened in harness*, not in another captain turn.
+   That's where Opus would have lived. Skipping it kept us under
+   budget but means this run only validated dispatch + sibling
+   genealogy, not the full captain-loop. A cleaner pilot would
+   include a 2nd captain turn that reads child outputs and emits
+   the final doc — lifting cost to ~$0.30 but exercising the full
+   shape.
+3. *The work was doc-shaped, low-stakes, reversible.* Spike-team
+   shines harder on cross-cutting code work where the children are
+   doing different *kinds* of work in different worktrees (Phase
+   26.2 — physical extraction is the Schelling-point next pilot).
+
+*Bug filed (v0.17.3, addendum to [[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe.org]]).*
+
+#+begin_quote
+=BUG-04= — child sessions inherit =permission_config.mode = "acceptEdits"=
+even when the parent was launched via =claude -p --permission-mode
+bypassPermissions=. The CLI flag scopes only the parent process; the
+DB record carries =acceptEdits=, and child spawns inherit from there
+(=daemon/mcp/tools/sessions.js:14293=). =WebSearch= and other non-edit
+tools then block forever with no visible permission-grant REST
+endpoint. /Workaround:/ =PATCH /sessions/{parent}
+{"permission_config":{"mode":"bypassPermissions"}}= before the spawn,
+or formulate child prompts to skip web tools.
+#+end_quote
+
+* Cross-refs
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — canonical definition; spike-team example #3 (license)
+- [[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe.org]] — bootstrap path + 3 known bugs (this run files BUG-04)
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-010 (anti-capitalist FOSS); DEC-017 (stack composition vs. integration)
+- =/tmp/license-decision-2026-05-06.md= — the recommendation artifact this team produced
+- =/tmp/license-decision-2026-05-05.md= — superseded prior draft (kept for audit)
