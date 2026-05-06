@@ -1,0 +1,119 @@
+:PROPERTIES:
+:ID:       d186646c-83f4-4192-9b68-5cd3147eae95
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Conversational discoverability — teaching through chat
+#+FILETAGS: :wiki:concept:ux:discoverability:chat:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* When chat is the primary UI, the affordances
+classical UI uses to teach — tooltips, placeholders, pre-filled
+prompts, menus — disappear. Conversational discoverability puts
+those teach-features back as conversation: first-touch persona
+self-intros, trailing teach, suggested-follow-up chips, and
+"what can you do here?" as a first-class context-aware verb.
+
+*Expanded.* Articulated 2026-05-05 (third-nap pre-sleep capture
+in [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]]); downstream of [[id:6b8e2d3a-9c47-4f1e-8a52-7d3b6c4e9f81][org-mode-chat-surface.org]] (DEC-015
+candidate). The chat buffer is where these affordances land;
+this is the "what to put there" companion to that page's
+"what shape the buffer is."
+
+* The problem
+
+Classical UI teaches incidentally. Tooltips fire on hover,
+placeholders show what to type, pre-filled prompts model good
+queries, menus enumerate verbs, right-click reveals actions in
+scope. Discovery is *ambient* — the surface reads as instruction.
+
+Conversation has none of that. A blank prompt teaches nothing;
+a response answers what was asked but doesn't hint at what
+*could have been* asked. If chat is the primary UI (per
+DEC-015 — org-mode chat surface), the system must teach itself
+*through the conversation itself*, not via a separate help layer.
+
+* Four conversational analogues to classical teach affordances
+
+** First-touch persona self-introduction
+*Summary.* Analogue to placeholder text. On first invocation
+in a session, the persona opens with a one-line "what I'm good
+for" + "try X" before answering.
+*Expanded.* =@geordi= on first touch: /"I'm your engineer —
+data, drift, pipelines. Try `@geordi what's drifting this
+week?`"/ then answers. Subsequent invocations skip the intro;
+state per-session, resets on new buffer.
+
+** Trailing teach
+*Summary.* Analogue to "did you know?" tooltips, contextualized
+to what the user just did. Fires when the agent detects the
+user took the long way.
+*Expanded.* If the user pasted three commits and asked
+"summarize these", the agent appends /"*next time you can just
+`tracker pace`*"/. Detector is agent-side heuristic ("user did
+X verbosely; we have a verb for X"); suppressed once
+acknowledged.
+
+** Suggested-follow-up chips
+*Summary.* Analogue to menu items / button rows. Two-to-three
+contextual next-asks after each response — ChatGPT/Claude.ai
+pattern.
+*Expanded.* Chips render as a small =** Try next= subtree under
+the response with clickable =[[chat-llm:...]]= links (or
+=@<agent>= text the user =RET=s on). Derived from recent
+message + state, not a static list.
+
+** "What can you do here?" as a first-class verb
+*Summary.* Analogue to a help menu, but context-aware. Returns
+capabilities tied to current buffer / agent / state.
+*Expanded.* =@<agent> what can you do here?= (or a bare form
+routed to =@picard=) inventories verbs in scope: pinned agents,
+in-flight TODOs the chat could pick up, recent MCP tools, and
+2-3 "things you haven't tried." Distinct from =help= — answers
+"in this context" not "in general."
+
+* Connections to other framings
+
+- *DEC-015 — org-mode-aware chat surface.* These affordances
+  are *where* DEC-015's buffer earns its ergonomic keep. Org-
+  shape means chips become real subtrees, intros become real
+  text, "what-can-you-do-here?" returns a real table. DEC-015
+  should pick up these hooks as MVP-or-just-after-MVP scope.
+- *Remote-control framing.* When chat doubles as a remote
+  control from SMS / voice / watch / email-in (per the
+  2026-05-05 capture in [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]]), the discoverability burden
+  grows — no menus on a watch face. Trailing teach +
+  first-touch intros become *more* important; the chip layer
+  adapts ("reply 1 / 2 / 3" for SMS, voice-readable for audio).
+
+* Implementation hooks
+
+| Analogue            | Owner               | Where it lands                                     | Phase                            |
+|---------------------+---------------------+----------------------------------------------------+----------------------------------|
+| First-touch intro   | per-persona         | prompt prefix; first-turn detector in session state | DEC-015 — chat surface MVP+1     |
+| Trailing teach      | the answering agent | post-response hook; "long-way" heuristic           | DEC-015 — chat surface MVP+2     |
+| Suggested-follow-up | sidebar widget      | deterministic; recent-message + state → 2-3 chips  | Phase 29 — self-coded tools loop |
+| "What can you do here?" | =@picard=       | context-aware capability inventory verb            | Phase 23.6 — literate MCP tools  |
+
+* Open questions
+
+1. Inside DEC-015 — org-mode chat surface as MVP+ scope, or
+   own DEC?
+2. Sequencing: chips are highest-bang/lowest-cost
+   (deterministic, no LLM call); first-touch intro is the
+   cheapest prompt-level change. Which first?
+3. Suppression: after the user sees "try X" three times,
+   stop globally or per-verb?
+4. Cross-surface parity: SMS/voice remote gets the same chip
+   layer or a degraded variant?
+
+* Cross-refs
+
+- [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] — origin (third-nap pre-sleep capture, 2026-05-05).
+- [[id:6b8e2d3a-9c47-4f1e-8a52-7d3b6c4e9f81][org-mode-chat-surface.org]] — DEC-015 candidate (the buffer).
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — Bridge Crew agents that teach.
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]] + [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]] — persona detail (intros).
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-015 candidate registration.
+- [[id:20d84cf7-2506-47c5-90ff-d666f4fbc66d][whole-picture.org]] — Org is Code; chat is the terminus.

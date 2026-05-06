@@ -16,7 +16,7 @@ headings, links, TODO items, properties); editing the chat IS
 editing org. =C-c C-c= runs blocks; =org-babel-tangle= lands code
 in real files; =[[id:UUID]]= links resolve; refile to vault works;
 agenda sees the TODOs. Phase 16.3 — Emacs companion is the home;
-opencode and Claude Code TUI become *secondary* surfaces.
+opencode (and other MCP clients like Claude Code) become *secondary* surfaces.
 
 *Expanded.* This is a *design-detail* page, written to be
 reviewable BEFORE the implementation commits. Three implementation
@@ -35,7 +35,7 @@ A faux session — what an actual chat buffer looks like at rest:
 ,** Me
 Can you find recent activity tagged :resolve-2025: and summarise?
 
-,** @analyst
+,** @geordi
 Pulled the recent activity:
 
 ,#+begin_src sql :results table
@@ -58,7 +58,7 @@ these up as a weekly summary at [[file:summaries.org]]?
 ,** Me [Y]
 Yes please, also tangle that SQL into snap_resolve.sql.
 
-,** @analyst
+,** @geordi
 ,#+begin_src sql :tangle ~/org/dbt/models/marts/snap_resolve.sql
 -- snap_resolve: resolve-2025 tagged activity
 SELECT * FROM recent_activity WHERE tags LIKE '%resolve-2025%';
@@ -69,7 +69,7 @@ Tangled. Built model passes 4 tests; latest row 2026-05-04.
 ,*** TODO follow-up — schedule the weekly rollup
 SCHEDULED: <2026-05-12 Tue>
 :PROPERTIES:
-:OWNER: @analyst
+:OWNER: @geordi
 :END:
 #+end_example
 
@@ -163,9 +163,25 @@ Concrete pieces, in dependency order:
    real babel blocks).
 7. =[[id:UUID]]= resolution via existing =org-roam= machinery
    (free — it's a real link in a real org file).
-8. The Magnificent Seven all dispatchable via =@<name>= prefix
-   in the prompt body. =@picard= / =@analyst= / =@curator= / etc.
+8. The Bridge Crew all dispatchable via =@<name>= prefix
+   in the prompt body. =@picard= / =@geordi= / =@atoz= / etc.
    route to the corresponding agent handler.
+9. *Easy export of any part of the chat surface.* Subtree
+   (turn, follow-up, code block, table, =[[id:...]]= link) can
+   be exported via:
+   - *Refile to vault* — =M-x org-llm-chat-refile= picks an
+     org-roam node by completion and refiles the subtree there
+     (subtree retains its =[[id:...]]= so back-refs still work).
+   - *Export-as-file* — =M-x org-llm-chat-export-subtree=
+     prompts for a destination path; subtree written as a
+     standalone =.org= file.
+   - *Copy / kill* — standard org keys (=C-c C-x C-w=,
+     =C-c M-w=) already work since the buffer is real org-mode.
+   - *Tangle* — code blocks with =:tangle <path>= header
+     work via =org-babel-tangle= (free — real babel block).
+   - *Pin* — =M-x org-llm-chat-pin= flips a turn into an
+     append-only reference card under =~/org/chat-pins.org=.
+   The chat is org content; export uses org primitives.
 
 Out of MVP (explicitly):
 - Inline image rendering, voice input, side-window status panel,
@@ -184,7 +200,7 @@ Out of MVP (explicitly):
 * Implications
 
 - Phase 16.3 — Emacs companion becomes load-bearing for v1.0.
-- opencode + Claude Code TUI become *secondary* surfaces — still
+- opencode (and other MCP-client TUIs like Claude Code) become *secondary* surfaces — still
   shipped, still useful for "no Emacs available" / "developer
   preferring TUI" cases, but not the canonical mental model.
 - The LCARS sidebar relocates from inside the TUI to a side
@@ -228,7 +244,7 @@ design fails the "really good at the job" gate.
 - DEC-015 candidate (the principle this implements) — see
   [[file:dev-tracker.org][dev-tracker.org]].
 - Phase 16.3 — Emacs companion (the home) — see [[file:roadmap.org][roadmap.org]].
-- DEC-014 — cull rubric (the Magnificent Seven roster the chat
+- DEC-014 — cull rubric (the Bridge Crew roster the chat
   dispatches to).
 - DEC-011 — DB as universal interface (chat persists as org files
   in the vault, indexed like any other node).

@@ -1,0 +1,92 @@
+:PROPERTIES:
+:ID:       b537c80a-4451-4d5e-a191-6769e86a93f9
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Life-as-code — org-llm's twin framing
+#+FILETAGS: :wiki:concept:framing:purpose:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* org-llm is /Claude Code for Org Mode/ *and also*
+Claude-Code/opencode-shaped for /life-as-code/. The Claude-Code
+analogy is doubled: like Claude Code is for software-as-code, org-llm
+is for life-as-code. Personal finance, GPS streams, "text me that
+info" outbound flows, phone-as-Emacs workflows — anything you'd
+version-control in code, you can org-mode-ify with agents on top.
+
+*Expanded.* The user articulated this twin framing 2026-05-05 (third
+pre-sleep capture). The first lens — "Claude Code for Org Mode" — is
+about the agent-system shape. The second lens — "Claude-Code-shaped
+for life-as-code" — is about what the agents act on. Both lenses are
+load-bearing; collapsing one into the other loses scope. This page
+canonizes the framing so feature decisions can reference it directly
+instead of re-deriving it each time.
+
+* The twin framing
+
+| Lens                                    | What it asserts                                              |
+|-----------------------------------------+--------------------------------------------------------------|
+| /Claude Code for Org Mode/              | Agent-driven life management; a Claude-Code-shaped agent system whose substrate happens to be org-mode |
+| /Claude-Code/opencode-shaped for life-as-code/ | A life-management app whose code-shaped affordances happen to fit Claude-Code patterns |
+
+Both inform feature decisions. The first asks "is this how a
+Claude-Code agent system would work?" The second asks "is this a
+life domain that wants code-shaped treatment?" Don't collapse one
+into the other.
+
+* What "life-as-code" means concretely
+
+Life domains become first-class when they get the same treatment
+software gets in Claude Code: structured files, agents reasoning over
+them, deterministic tooling, version control, cross-channel handoff.
+
+| Domain            | Org file pattern                          | Agent role                         | Coordination shape                |
+|-------------------+-------------------------------------------+------------------------------------+-----------------------------------|
+| Personal finance  | =personal-live-budget-with-all-trx.org=   | Reconcile / categorise / flag      | Live agent over an org transaction log |
+| Location / GPS    | GPS streams as org-clock-equivalents      | Where-was-I queries; place tagging | Continuous capture from phone     |
+| Outbound flows    | "text me that info" → SMS / push          | Pull from vault, format, deliver   | Org-mode capture roundtrip        |
+| Phone workflow    | Termux-x11 + sway + Doom on Android       | Same agents as desktop             | Mobile = peer device, not reduced |
+| Agenda / clocking | =~/org/*.org= scheduled / clocked entries | Plan, refile, summarise across life domains | Cross-file org-agenda           |
+| Capture           | Inbox + roam-capture templates            | Triage, route, enrich              | Voice / SMS / watch → home Emacs  |
+
+The list is open-ended. New life domains arrive as new org files
+plus agents; the framework is the same.
+
+* Vs. dev-as-code
+
+/Dev-as-code/ — Claude Code building software — is a *special case*
+of life-as-code; software-development is one life domain among many.
+The dev-tracker self-hosting (Phase 29.0 — self-coded tools, =tracker
+init / review / pace=) is one instance of the broader pattern: every
+dev-process artefact is a candidate user-facing feature for an
+analogous life domain (per =feedback_dev_artifacts_are_app_candidates=).
+
+Don't treat dev tooling as architecturally distinct from life
+tooling — the same dbt models, same agent registry, same supervision
+trinity apply.
+
+* Implications for org-llm
+
+| Implication                                  | What changes                                                  |
+|----------------------------------------------+---------------------------------------------------------------|
+| Life domains are *in scope*                  | Finance, GPS, messaging, mobile workflow are not "out of scope" |
+| Dev-process tooling is a candidate feature   | Tracker schema, EFFORT tracking, agenda views, validation framework can be lifted into user-facing surfaces |
+| Mobile is *core*, not peripheral             | Mobile = where life happens; phone-as-full-graphical-Emacs is the substrate per =project_mobile_is_full_graphical_emacs= |
+| Outbound flows are first-class               | "Text me that info" / SMS roundtrip / push notifications belong in the agent surface, not as bolt-ons |
+| Capture latency is a quality dimension       | Local-disk speed mobile capture (per [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] § sync) gates the framing |
+| Cross-channel handoff is a design concern    | Voice / SMS / watch / email-in / Emacs all need to feed the same vault |
+
+The "remote control" framing (also captured 2026-05-05) sits inside
+this: the conversational UI is the remote control for org-llm, and
+the remote operates on life-as-code surfaces from anywhere.
+
+* Cross-refs
+
+- [[id:20d84cf7-2506-47c5-90ff-d666f4fbc66d][whole-picture.org]] — mission statement + dream-state vault + lead value (β)
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-009 (curated core agent team), DEC-010 (anti-capitalist FOSS — life-as-code's license posture)
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — agent coordination over life domains
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]] — Bridge Crew roster; each agent's life-domain coverage
+- [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] § Pre-sleep capture (2026-05-05) — original twin-framing seed
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] — design rule /Org is Code/ (the substrate-side claim)

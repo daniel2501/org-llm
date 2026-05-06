@@ -1,0 +1,443 @@
+:PROPERTIES:
+:ID:       1e75cdba-f743-456d-9d0f-07b9e0da33ac
+:CREATED:  [2026-05-05]
+:END:
+#+TITLE: multi-agent-org-llm — agent teams build big things for you
+#+FILETAGS: :wiki:concept:multi-agent:teams:integration:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* =multi-agent-org-llm= is the named feature of org-llm
+where /agent teams build big things for you/. The unit is a *team*
+(a structured grouping of multiple agents, often heterogeneous), not
+a lone agent. Teams have two lifetimes: *spike* (one-off, time-boxed,
+dissolves on completion) and *long-lived* (perma-roles, persist
+across sessions, evolve toolsets + roster). Implementation is
+delivered via the *Agor integration* (per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]] —
+integration-only pre-2029-01-15); we do *not* build a parallel
+multi-agent runtime.
+
+*Expanded.* This page is the canonical definition of
+=multi-agent-org-llm= — what it is, what shapes it takes, where it
+lives in the stack, and what's native vs. integrated. Until
+2026-05-05 the feature was named (per memory
+=project_agor_is_multi_agent_integration=) but not canonized in
+the wiki; this page closes that gap. The /scope/ is Agor as a
+companion tool for org-llm's @-agents to coordinate at runtime
+(plus assists to org-llm's runtime functioning) — Agor as a
+dev-workflow tool for the maintainer is out of scope here.
+
+* Purpose
+
+/Agent teams build big things for you./
+
+"Big" = work that one agent or one human can't do alone. Three
+concrete shapes framed as team-coordination work:
+
+- *Multi-agent vault sweep* — =@boothby= captains a heartbeat-fired
+  team where =@geordi= drift-checks, =@atoz= link-fixes,
+  =@spock= cross-references. Each runs in its own worktree session
+  against a shared boardId; results converge to one canvas card
+  before any vault writes land.
+- *Coordinated phase extraction* — Phase 26.2 — physical extraction
+  dispatches extractor + test-runner + doc-updater + reviewer as
+  four sibling sessions on one boardId; they query each other via
+  =mode:"btw"= without blocking the captain.
+- *Cadenced cross-cutting analysis* — daily-review long-lived team
+  fires from Agor's scheduler (=Scheduled: daily-review=), pulls
+  vault facts deterministically, then narrates via the @-prefix
+  proxy seam in one cloud call per agent.
+
+Solo opencode can do many things; =multi-agent-org-llm= is for
+the things that need a *team*.
+
+* The unit is a team
+
+A *team* is a structured grouping of multiple agents (Bridge
+Crew members + extension-path personas), assembled for a job.
+Teams are the next concept layer above the @-agents (per
+[[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-009 — curated core agent team + extension path]] /
+[[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014 — Bridge Crew]] roster) — composing them, not
+replacing them.
+
+/Team is a new concept in org-llm./ Until this page (2026-05-05),
+the wiki canonized agents (per [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]]) and the manager
+pattern (=@picard= → =delegate()=), but never the team layer
+above them. =multi-agent-org-llm= is where the team concept
+enters the wiki. The Bridge Crew roster is the population;
+teams are how that population organises around work.
+
+A team has: a *roster* (which agents); a *captain* (usually
+=@picard=, sometimes a domain specialty captain); a *purpose*; a
+*lifetime* (spike or long-lived); a *toolset* (evolves); a
+*workspace* (worktree(s) + canvas board(s) when integrated via
+Agor); and an *audit trail* (captain's log + per-member journal +
+Agor session genealogy).
+
+* Two team lifetimes
+
+| Lifetime         | Shape                                                   | Dissolve trigger                                |
+|------------------+---------------------------------------------------------+-------------------------------------------------|
+| *Spike team*     | Rises up for one-off / time-boxed work                  | Job ships (PR merged, report delivered, etc.)   |
+| *Long-lived team* | Perma-roles; persists across sessions; evolves over time | Goal sunset (rare); roster reshape (more common) |
+
+*Transitions between lifetimes.* A spike team can graduate to
+long-lived when its job recurs (one vault-cull spike that proves
+useful weekly becomes the vault-hygiene long-lived team). A
+long-lived team can disband when its goal sunsets (drift-detection
+team dissolves once auto-classifier reaches steady-state). The
+substrate is the same — assistants + boardId — only the schedule
+attachment and =memory/{date}.md= retention shift.
+
+** Spike-team examples (current org-llm work shaped like spike teams)
+
+| Team                                     | Roles                                                      | Dissolve on                                  |
+|------------------------------------------+------------------------------------------------------------+----------------------------------------------|
+| Phase 26.2 — physical extraction         | extractor + test-runner + doc-updater + reviewer           | PR merged, =:test:agent-runnable:= green     |
+| Phase 24.2 — recovery hooks (v1.0-gating) | hook-author + spec-tester + doc-curator                    | Recovery hooks ship + DEC closes             |
+| License decision investigation           | researcher + drafter + briefly-=@picard= captain           | =/tmp/license-decision-*.org= delivered      |
+| One-off vault cull walk                  | walker + classifier + retire-actor                         | Cull report committed                        |
+| Phase 25 — DB-as-cache spike             | inverter + render-side + migration-tester                  | Sub-phase complete, files re-render clean    |
+
+** Long-lived team examples (perma-roles, evolving)
+
+| Team                | Roles                                                          | Cadence                  | What evolves                                |
+|---------------------+----------------------------------------------------------------+--------------------------+---------------------------------------------|
+| Vault hygiene       | =@boothby= captain + =@geordi= drift + =@atoz= link-fixes      | Continuous + heartbeat   | Toolset (new sweepers); roster as drift surfaces |
+| Daily-review        | =@picard= + =@riker= + =@data=                                 | Daily heartbeat          | Review template; pace metrics; new probes   |
+| Drift-detection     | =@geordi= + standing-orders watcher + =@atoz=                  | Hourly / on-commit       | Detector rules; classifier thresholds       |
+| Dogfood-watch       | =@riker= + ergonomics agent + =@atoz=                          | Per-session debrief      | Friction taxonomy; auto-file rules          |
+| Mobile-stack-watch  | mobile-shape agent + =@geordi= + =@atoz=                       | Weekly                   | Mobile knob inventory; xwidget regression set |
+| FOSS-license watcher | license-sniffer + =@atoz= + =@picard= as escalator            | On-dependency-change     | Vendor-sniff rubric; allowlist per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-010]]    |
+
+* Teams evolve
+
+A team is not a fixed roster — it's an evolving unit:
+
+- *Toolsets adapt* as the team's work surfaces new needs. Agents ask
+  before installing tools (per memory =feedback_agent_tool_install_rule.md=) and install in venvs.
+  Self-coded tools per Phase 29 retire LLM-driven steps when the
+  pattern is stable. /Concrete example./ The vault-hygiene team
+  begins with =@boothby= calling =delegate('geordi', …)= for
+  drift heuristics; once a heuristic stabilises (e.g. "tag
+  taxonomy duplicate detection"), Phase 29 promotes it to a dbt
+  model + first-class data tool, and the team's per-cycle LLM
+  cost drops while throughput climbs. The agent roster doesn't
+  change; the toolset under it does.
+- *New agent types emerge* to fill specialty roles within teams.
+  Phase 23.5 — user-supplied agents library (literate config in
+  =~/org/org-llm-agents.org=) is the mechanism; community-shareable
+  per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014 — Bridge Crew]].
+- *Role composition drifts* — what each member does within a team
+  shifts as the team learns its shape; not pinned at team-formation.
+
+* Role of the Agor integration
+
+Per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]] (stack composition vs. integration), Agor is
+*integration-only* until 2029-01-15 (BSL 1.1 → Apache 2.0 auto-convert
+date), and the integration is *what we call =multi-agent-org-llm=*.
+
+The integration's role is to provide:
+
+- The *team substrate* — boards (canvas containers) + assistants
+  (perma-role members with =SOUL.md= / =IDENTITY.md= / =USER.md= /
+  =memory/{date}.md= identity files) + sessions (ephemeral worker spawns)
+- The *async-peer-query primitive* — =agor_sessions_prompt(mode:"btw")= /
+  =subsession= for inter-agent communication mid-turn
+- The *worktree-per-session* anchor — sessions pinned to isolated git worktrees
+- The *scheduler* for long-lived team heartbeats (cron-style, Handlebars-templated)
+- The *cross-tool delegation* primitive (Claude/Codex/Gemini/OpenCode override per spawn)
+- The *team-observability surface* — multiplayer canvas, facepile, shared terminal
+
+What the integration does *not* replace:
+
+- The *@-prefix proxy seam* per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-008 — Phase 24.1 wires at the @-prefix seam]]
+  (per-message persona swap) — stays at the proxy
+- The *Phase 24 supervision trinity* (pre-flight resolvers + recovery hooks + confusion detector) — stays native
+- The *vault as canonical truth* per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011 — DB is universal interface; files canonical]] — stays native
+- The *captain's log* (=org_llm/logbook.py= rotated event records) — stays native
+
+Agor sits *above* org-llm's engine layer, not at the proxy seam.
+
+*What changes if the integration is adopted.* The team primitives
+build on Agor's substrate (assistants + boards + sessions +
+scheduler) instead of on a parallel org-llm runtime; we *don't*
+build a multi-agent runtime, a custom scheduler, or a per-assistant
+memory store. The dependency means a daemon (=agor daemon=) needs
+to be running locally for team sessions to spawn — but the @-prefix
+single-agent path keeps working untouched if Agor is down. The
+whole arrangement re-evaluates at the BSL → Apache 2.0 change date
+(2029-01-15) per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017 — stack composition vs. integration]].
+
+* What's native vs. delivered by integration
+
+The split is load-bearing: where org-llm already owns a capability,
+the integration layers *on top*; where org-llm has a gap, the
+integration *fills* it. Each row names the responsible side; no
+overlap is left ambiguous.
+
+| Capability                              | Native to org-llm                                                                  | Delivered via Agor integration                                                          |
+|-----------------------------------------+------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------|
+| Per-message persona swap (@-prefix)     | =intercept_agent_prefix= (=org_llm/llm_proxy.py:1125=); sticky chains :1031        | (untouched — Agor sessions sit above this seam)                                         |
+| Pre-flight resolvers (Phase 24.1)       | =org_llm/resolvers/= (path/repo/agent), 80ms budget; eager-imported                | (untouched — fires same way for any session)                                            |
+| Manager-mediated delegation             | =delegate()= (=org_llm/mcp_server.py:922=); =list_agents()= :886                   | Cross-tool override (spawn Codex / Gemini / OpenCode child) when the model role suits   |
+| Recipe pre-fetch                        | =DEFAULT_INTERCEPTORS= chain (=llm_proxy.py:3564=); recipe match before LLM        | (untouched)                                                                             |
+| Captain's log (event record)            | =org_llm/logbook.py= — JSONL + rotated org file (5MB), =write_event= / =track_event= | Session genealogy + facepile reconcile against captain's log =kind=team-session=      |
+| Vault as canonical truth                | =~/org/*.org= committed; per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011 — DB is universal interface]] files canonical    | (Agor's LibSQL is its own truth, not vault truth)                                       |
+| Claim board (=active-claims.org=)       | Strict claim-before-touch per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-005 — claim + commit hygiene + worktree]]      | Sibling-session discovery by =boardId= cross-references claim file                      |
+| Worktree escape hatch                   | =git worktree add= per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-005]] when scope overlaps a hot file              | *Worktree-per-session as default* — every session is pinned to a worktree              |
+| Async peer query (mid-turn, non-block)  | (gap — no in-process primitive)                                                    | =agor_sessions_prompt(mode:"btw")= — ephemeral fork, auto-archives, callback inline    |
+| Scout-pattern dispatch                  | =delegate()= manager-mediated (synchronous, returns string)                        | =mode:"spawn"= — child session with chosen context, returns via session genealogy      |
+| Scheduled heartbeats                    | (gap per [[id:c4e2d3a1-7f9b-4c5e-8d6a-2b3f4e9c1d57][agent-time-awareness.org]] § Layer 3 — cross-cutting orchestration) | Cron-style scheduler; spawns =Scheduled: <worktree>= sessions; Handlebars-templated     |
+| Persistent agent memory                 | =AgentBaseline= table (=org_llm/db.py=); standing-orders Layer 2b filed-not-built  | =SOUL.md= / =IDENTITY.md= / =USER.md= / =memory/{date}.md= per assistant — file-based   |
+| Per-agent journal (Layer 2a)            | (filed-not-built per [[id:739868a9-f62c-43de-ac1d-1671d483a2c1][standing-orders.org]] § memory model)                  | =memory/{YYYY-MM-DD}.md= per assistant fills the slot                                   |
+| Cross-tool delegation                   | =model_override=  on =delegate()= (model-level override only)                      | Per-spawn assistant override (Claude / Codex / Gemini / OpenCode); sibling-session-level |
+| Tool registration                       | =@server.tool()= (=mcp_server.py:128= =create_mcp_server=) — single MCP per process  | Per-channel / per-assistant MCP attachment via =.agor.yml=; one MCP per session token  |
+| Multiplayer review surface              | (gap — sidebar is single-user; chat is single-thread)                              | =canvas= + =facepile= + live cursors + zone-templated prompts on shared boardId         |
+| Live artifact preview                   | (gap — opencode TUI renders text only)                                             | =agor_artifacts_create= + Sandpack — React/JSX/TS rendered live in browser              |
+| Message gateway (external surfaces)     | (gap — no Slack / GitHub bot surface)                                              | Slack DM + GitHub PR/issue =@agor= mention → thread-bound session, bidirectional       |
+| Per-assistant env / secrets             | =Config(key, device, env, value)= per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-016 — three-tier SDLC]]               | =.agor.yml= per worktree/assistant; encrypted secrets in daemon DB                      |
+| Cards (non-code workflow)               | (out of scope today — vault entries are the workflow primitive)                    | =cards= primitive (beta) — generic entities placed in zones                             |
+| Audit + provenance reconciliation       | =manager-log.jsonl= + captain's log + git history                                  | Session genealogy tree + per-session prompts retained on disk; reconciled to captain's log |
+
+* Coordination patterns
+
+How *teams* of agents use Agor to coordinate. Each pattern names
+the Agor primitive, the org-llm need it serves, and the seam where
+the two compose.
+
+** Sibling-session by boardId
+
+*Summary.* All members of a team open sessions on the *same*
+=boardId=; sibling-discovery is "list sessions on my board." The
+board IS the registry — the captain doesn't need a separate one.
+
+*Expanded.* Each role spawns a session pinned to a worktree on
+the team's shared board; members see each other in the facepile.
+Maps cleanly to Bridge Crew roles, each as one assistant
+with its own =model_role=. Replaces in-process =delegate()=
+when peers must remain alive across multiple captain turns.
+
+** Async peer query (=mode:"btw"=)
+
+*Summary.* Agent A asks agent B a focused question mid-turn
+without blocking; B's answer returns inline via callback when A
+next checks. Fills a real gap in org-llm.
+
+*Expanded.* =agor_sessions_prompt(mode:"btw", target:<peer>,
+prompt:…)= forks an ephemeral child, auto-archives on completion,
+surfaces the answer as a callback message. Today's =delegate()=
+is synchronous-string-return; it can't ask =@geordi= a clarifier
+mid-turn without forcing the caller to wait. Use case: =@atoz=
+mid-wiki-sweep asks =@spock= "is this the canonical link?"
+without halting the sweep.
+
+** Scheduled heartbeat
+
+*Summary.* Long-lived teams attach cron-style schedules to their
+boardId; each tick spawns a =Scheduled: <worktree>= session that
+reads =HEARTBEAT.md= and executes the team's recurring work.
+
+*Expanded.* Fills the [[id:c4e2d3a1-7f9b-4c5e-8d6a-2b3f4e9c1d57][agent-time-awareness.org]] § Layer 3
+(cross-cutting orchestration) gap. Daily-review team: cron
+=0 8 * * *= → Handlebars prompt with =board.custom_context= →
+captain narrates over deterministic vault-fact reads. Honors
+[[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-006 — supervision is deterministic by default]]: heartbeat
+fires data tools first; LLM narrates pre-fetched data.
+
+** Scout-pattern dispatch
+
+*Summary.* Captain spawns a specialist child session with a
+focused context window; specialist returns via the session
+genealogy callback. Generalises today's =delegate()=.
+
+*Expanded.* =mode:"spawn"= creates a child with a curated context
+slice (not the parent's full history). =@picard= dispatches
+=@spock=; =@spock= runs in its own worktree, emits artifacts +
+summary; the result is reachable from =@picard='s session tree
+even after =@picard='s turn ends. "Delegate the call, *keep* the
+thread."
+
+** Cross-tool escalation
+
+*Summary.* When an agent's work needs a different *tool* (not
+just a different model), the spawn carries a per-call assistant
+override (Claude vs. Codex vs. Gemini vs. OpenCode).
+
+*Expanded.* Today =delegate(model_override=…)= overrides only
+the model. Agor's spawn-override goes higher: the child runs
+under a *different cloud-coding tool* with that tool's full
+toolbelt. Must respect [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017 § 6 — Defaults rule]] —
+proprietary backends are user-selectable, never default.
+
+** Shared multiplayer terminal
+
+*Summary.* Spike teams working on overlapping scope get a
+real-time canvas with live cursors + facepile, layered above the
+worktree escape hatch.
+
+*Expanded.* DEC-005's worktree escape hatch separates working
+trees. Agor's multiplayer canvas adds a *visible* coordination
+surface above that: agents see each other's cursors, zone-
+templated prompts fire when artifacts move into review zones,
+humans can drop in to spot-check. Worktree isolation stays;
+canvas adds situational awareness.
+
+** Captain's-log + session-genealogy reconciliation
+
+*Summary.* Agor's session genealogy tree is reconciled into
+org-llm's captain's log so provenance is unified.
+
+*Expanded.* Each Agor session retains prompts/responses on disk
+as a tree (parent → spawn / btw / fork edges). On session end, a
+bridge writes a =kind=team-session= entry to captain's log with
+=boardId=, =sessionId=, =parent=, =assistant=, =model=,
+=duration=. Vault stays canonical (per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011]]); Agor's DB stays
+its own truth for session bodies; captain's log is the join key.
+
+* "Anything else" — non-coordination assists
+
+Uses of Agor that aren't strictly team-coordination but help
+org-llm's runtime functioning.
+
+** Live artifact preview
+
+*Summary.* Agents emit React/JSX/TS into a worktree and call
+=agor_artifacts_create=; Sandpack renders it live in-browser.
+
+*Expanded.* Use cases: =@geordi= drafts a chart before
+committing to a Superset card; =@atoz= previews a wiki
+layout; an agent emits an interactive form to capture a
+multi-option decision. Artifact source lives at
+=.agor/artifacts/<id>/= — file-based per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011]]; render is
+ephemeral.
+
+** Message Gateway (Slack / GitHub)
+
+*Summary.* =@agor= mention on Slack DM, GitHub PR, or issue
+spawns a thread-bound session; follow-ups continue the same
+session; agent replies post back as bot comments.
+
+*Expanded.* Lets the user trigger a team from outside Emacs.
+Use case: open a PR, tag =@agor= asking =@atoz= to verify
+cross-refs; gateway spawns the session, =@atoz= sweeps, posts
+findings as a PR comment. Outbound-only transport (Slack Socket
+Mode / GitHub polling) keeps webhooks off the user's network.
+
+** Persistent agent memory substrate
+
+*Summary.* Per-assistant =SOUL.md= / =IDENTITY.md= / =USER.md= /
+=memory/{date}.md= fills the filed-not-built Layer 2a per-agent
+journal slot in [[id:739868a9-f62c-43de-ac1d-1671d483a2c1][standing-orders.org]].
+
+*Expanded.* The standing-orders memory model names three layers;
+Layer 2a (per-agent observations) is partially served today by
+=crew_log= + captain's log but lacks a clean per-agent journal.
+Agor's =memory/{YYYY-MM-DD}.md= is exactly that shape. Layer 2b
+(cross-agent standing orders) stays in =AgentBaseline= because
+the broadcast semantics need DB indexing the files don't.
+
+** Worktree-per-session as hygiene
+
+*Summary.* Every Agor session is pinned to its own git worktree;
+no two sessions touch the same working directory.
+
+*Expanded.* Generalises [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-005]]'s worktree escape hatch from
+"reach for it when scopes overlap" to "always-on by default."
+Long-running risky work (Phase 26.2 extraction, mass-cull walks)
+runs with zero contention against the maintainer's primary
+stream. Cleanup: =git worktree remove= + session archive.
+
+** Per-assistant =.agor.yml= env templating
+
+*Summary.* Each assistant carries its own =.agor.yml=; honors
+per-device + per-env config keying per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-012]] / [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-016]].
+
+*Expanded.* =@boothby= on laptop runs nightly hygiene with full
+write access; same agent on phone is read-only. =Config(key,
+device, env, value)= already encodes that policy in DB;
+=.agor.yml= is where it lands at runtime. Encrypted secrets stay
+in the daemon DB, not the worktree.
+
+** Canvas + facepile + cards as review surface
+
+*Summary.* Batched agent output gets a user-facing review
+surface — canvas zones for staging, facepile for "who worked on
+this," cards for non-code workflow items.
+
+*Expanded.* Today the user reviews agent output in the opencode
+TUI (linear chat) or via a sidebar widget (single-pane). For
+larger jobs (a multi-agent vault sweep, a Phase extraction
+review), spatial review beats linear scrolling. Cards (beta)
+extend the surface to non-code items — review queue for a
+research roundup, capture-promote staging, etc. *This does not
+replace the org-buffer for editing* per the DEC-015 candidate
+chat-surface decision; canvas is review, not authoring.
+
+* Per-agent coordination map
+
+For each Bridge Crew member, the 1-2 coordination patterns
+they'd most plausibly reach for. Tight by design — the page is
+canon, not a recipe book.
+
+| Agent       | Patterns                                                                                       |
+|-------------+------------------------------------------------------------------------------------------------|
+| =@picard=   | *Sibling-session by boardId* (captains spike teams) + *scout-pattern dispatch* (spawn specialists) |
+| =@spock=    | *Async peer query* (=btw= when a research thread needs a clarifier from =@atoz= or =@geordi=) |
+| =@data=     | *Scout-pattern dispatch* (long-form drafts spawn off the captain's main turn)                  |
+| =@boothby=  | *Scheduled heartbeat* (nightly vault hygiene) + *cross-tool escalation* (heavy-context sweeps run a stronger model than the default) |
+| =@geordi=   | *Live artifact preview* (chart drafts in Sandpack before Superset card commit) + *async peer query* |
+| =@atoz=     | *Sibling-session by boardId* (multi-agent wiki sweep) + *captain's-log reconciliation* (link-fix provenance) |
+| =@riker=    | *Scheduled heartbeat* (daily what's-on-deck) + *message gateway* (=@agor= on PR fires phase-landing checks) |
+
+* Constraints
+
+| Source     | Rule that constrains =multi-agent-org-llm=                                                                  |
+|------------+-------------------------------------------------------------------------------------------------------------|
+| [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-005]]   | Strict claim-before-touch holds inside Agor sessions too; sessions write claims before edits              |
+| [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-006]]   | Supervision is deterministic by default — heartbeat-fired LLM calls for fixed work violate this           |
+| [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-008]]   | =@-prefix= seam stays at proxy; Agor assistants are session-level peers above                              |
+| [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-009]] / DEC-014 | Curated core ≤ 7; teams compose Bridge Crew + extension agents                                    |
+| [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-010]]   | Anti-capitalist FOSS — defaults must be FOSS (per DEC-017 § 6 — Defaults rule); no Claude as default      |
+| [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011]]   | Files are canonical; Agor's DB is its truth, not vault truth                                              |
+| [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-013]]   | Two-tier tools (data / effect) survive the team layer — team work routes through the same dbt + MCP split |
+| [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-015]] candidate | Org-mode-aware chat surface — canvas does NOT replace org-buffer for editing                       |
+| [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-016]]   | Three-tier SDLC — team sessions honor =ORG_LLM_ENV= per worktree; dev-tier teams don't touch prod         |
+| [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]]   | Integration-only pre-2029; no FOSS-distribution shipping Agor as dependency until BSL→Apache              |
+
+* Open questions
+
+Grouped thematically. Research can't answer these — the user
+decides.
+
+| Theme            | Question                                                                                                       |
+|------------------+----------------------------------------------------------------------------------------------------------------|
+| License & posture | Pre-2029 *recommending* Agor in user-facing docs — is that FOSS-distribution shipping or integration signposting? *(Resolved 2026-05-06: signposting — allowed; canonized in DEC-017 § 7)* |
+| License & posture | At 2029-01-15 BSL→Apache: fork+vendor (stack), keep integrating, or re-evaluate if Agor outgrew our shape?     |
+| Topology         | One board per team or one board per project (vault as board, teams as zones)?                                   |
+| Topology         | Does =@picard= captain every team, or do domains get specialty captains (=@boothby= for hygiene, etc.)?        |
+| Persistence      | Layer 2a fill — use Agor's =memory/{date}.md= directly, or mirror to a DB-indexed =AgentJournal= table?         |
+| Persistence      | Captain's-log + session-genealogy join — bridge on session-end, every prompt, or user-pull?                    |
+| Coordination     | Claim-board ↔ session-spawn ordering — claim first then spawn, or spawn first then claim?                      |
+| Coordination     | =btw= scope — all Bridge Crew pairs, or only within a team's roster?                                          |
+| Mobile           | Does Agor's daemon run on Android+termux (Node.js ≥22.12)? *(Verifier landed 2026-05-06: works-with-caveats — Node 22 LTS in Termux; =@libsql/client= needs glibc-spoof workaround. User's experienced termux take 2026-05-06: "promising"; default lean = native daemon as primary path with canvas-only as fallback. On-device verification filed as side-quest sprint.)* |
+| Phase sequencing | When does =multi-agent-org-llm= enter the roadmap — post-Phase 26 (cull)? Does Phase 25 (DB-as-cache) gate it? |
+| Runtime registration | Bridge Crew → Agor assistants: auto-create at =org-llm init= or lazily on first team-spawn?              |
+| Runtime registration | =.agor.yml= per assistant — render from literate =org-llm-agents.org= at tangle, or hand-author?         |
+| Vendor sniff     | Preset (Maxime Beauchemin's company) is commercial; per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-010 — anti-capitalist FOSS]] integration sniff — explicit acceptance call wanted |
+| Vendor sniff     | Discord-only community — interaction with anti-capitalist-FOSS posture beyond integration mode?                 |
+
+* See also
+
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-009 / DEC-014 (Bridge Crew), DEC-010 (anti-capitalist FOSS), DEC-017 (stack composition vs. integration)
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] — design rules; @-prefix seam; tool tier model
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]] + [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]] — Bridge Crew roster; persona detail
+- [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][agent-framework.org]] — agent dataclass + DELEGATES_TO; runtime detail
+- [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] — DEC-005 protocol live-form; claim board, worktree escape hatch
+- [[id:739868a9-f62c-43de-ac1d-1671d483a2c1][standing-orders.org]] — Layer 2a/2b memory model; per-agent journal slot
+- [[id:c4e2d3a1-7f9b-4c5e-8d6a-2b3f4e9c1d57][agent-time-awareness.org]] — Layer 3 heartbeat / scheduling gap Agor fills
+- [[id:7e39a4b1-5c82-4d6f-9b3a-8c1d72e5f8a4][sidecar-agent-design.org]] — async capture handoff pattern (extension persona)
+- [[id:7dcbce8b-0941-48ec-a17d-c623ba00883a][side-quests.org]] §Agor as conceptual prior art
+- [[id:20d84cf7-2506-47c5-90ff-d666f4fbc66d][whole-picture.org]] — end-to-end navigation

@@ -55,7 +55,7 @@ snapshot= verb could regenerate this page from
 | 05-04 | ✓      | Park SQLite-successor research at C with trigger conditions     | 2ffa4d2 |
 | 05-04 | ✓      | Queue SQLite-successor research before Phase 25.1               | 6f92205 |
 | 05-04 | ✓      | Queue route-preview entry in dev-tracker (design doc)           | af705c0 |
-| 05-04 | ✓      | Ship =@curator= + =@tracker= + wiki concept-graph sweep         | 3369a8a |
+| 05-04 | ✓      | Ship =@atoz= + =@riker= + wiki concept-graph sweep              | 3369a8a |
 | 05-04 | ✓      | Add =now.org= — single-view dashboard ('YOU ARE HERE')          | 9f25ecb |
 | 05-04 | ✓      | Close @doom legacy-pack + boundary validation                   | 786b907 |
 | 05-04 | ✓      | =fix(@doom)= promote to starfleet-core + tool-unreachable case  | b70dd00 |
@@ -74,9 +74,11 @@ snapshot= verb could regenerate this page from
 
 ** What landed this arc
 
-- *Two new meta-agents* — =@curator= (atoz, wiki concept-graph
-  specialist) + =@tracker= (boothby, dev-process steward).
-  Birth-name aliases registered; routes via =_AGENT_TRIGGERS=.
+- *Two new meta-agents* — =@atoz= (wiki concept-graph
+  specialist; alias =@curator=) + =@riker= (dev-process steward;
+  alias =@tracker=). Trek-canonical handles per 2026-05-06
+  Bridge Crew rename; legacy aliases registered; routes via
+  =_AGENT_TRIGGERS=.
 - *Wiki concept-graph sweep* — 14-page cross-link audit, 4 new
   concept pages registered (=vault-facts.org=,
   =memory-alpha.org=, =architecture.org=, =interceptors.org=).
@@ -97,10 +99,93 @@ snapshot= verb could regenerate this page from
 - *@doom* promoted to starfleet-core; tool-unreachable case
   handled.
 
-* ▶ THIS AFTERNOON — 2026-05-05 Tue, EDT (set 11:18 EDT pre-nap)   :@here:
+* ▶ TONIGHT — 2026-05-06 Wed, EDT (handoff snapshot)               :@here:
 
 #+begin_quote
-*Committed deadline:* @tracker migration build —
+*State for a new Claude Code session resuming this work.*
+Read this section first, then =multi-agent-org-llm.org= and
+=decisions.org= DEC-014 + DEC-015 + DEC-017.
+
+** In flight (background agents, won't transfer cross-session)
+
+| Agent ID            | Job                                          | Started      | ETA   |
+|---------------------+----------------------------------------------+--------------+-------|
+| =a0f7b318057e94c64= | Bridge Crew rename sweep (≥30 files)         | ~mid-evening | ~done |
+| =a691011a6e0112790= | Phase 24.2 — recovery hooks build (new pkg)  | ~mid-evening | running |
+| =ad467067829858795= | Headless Agor+Claude-Code feasibility        | late evening | running |
+
+Don't re-dispatch. Their artifacts will land regardless of session.
+
+** Today's landed work (2026-05-06)
+
+| Item                                              | State      |
+|---------------------------------------------------+------------|
+| =DEC-017 § 6 Defaults rule= (FOSS-only baked-in)  | ratified   |
+| =DEC-017 § 7 Doc-recommendation rule= (signposting allowed) | ratified |
+| Code-purge agent: =validation.py= judge → =qwen2.5-72b= (Apache); =recipes.py= inheritance fix; 3 regression tests added; 808→811 pass | landed, uncommitted |
+| Doc-prose Claude-demotion sweep (25+ files)       | landed, uncommitted |
+| =multi-agent-org-llm.org= canonical definition (443 lines, expanded clean-slate by agent) | landed, uncommitted |
+| Bridge Crew rename: Magnificent Seven → Bridge Crew; =@gardener= → =@boothby=; =@analyst= → =@geordi=; =@curator= → =@atoz=; =@tracker= → =@riker=; (=@picard= / =@spock= / =@data= unchanged) | sweeping, ~done |
+| DEC-015 v0 build (Path 1): =doom/org-llm-chat.el= (490 lines); =tests/test_org_llm_chat.el= (149 lines, 12 ert); =doom/org-llm.el= +13 | landed, NOT YET VERIFIED — sandbox blocked emacs invocation; user must run manually |
+| Mobile termux verifier (verdict: works-with-caveats; user lean = promising) | landed |
+| Wiki seeds (4 new pages, all ratify-ready): =life-as-code.org= (92), =conversational-discoverability.org= (119), =remote-control.org= (128), =agor-pilot-install.org= (119) | landed, uncommitted |
+| Matchmaking pair (org-llm + Agor expert): scrapped to =/tmp/agor-scrapped-2026-05-05/= after wrong-baseline detection + replaced by clean-slate canon doc | scrapped |
+
+** Open follow-ups filed today
+
+- *DEC-015 v0.1 — proxy-port discovery + url-retrieve switch.* Have
+  =start_proxy= write its bound port to
+  =~/.local/share/org-llm/proxy-port= on launch; switch
+  =org-llm-chat--call-backend= to =url-retrieve= against that port.
+  Unlocks real =@<agent>= persona swap via DEC-008 — proxy-seam
+  @-prefix swap; opens door to SSE streaming v0.2.
+- *On-device Agor-on-Termux daemon test* — verify =@libsql/client= +
+  Drizzle work on Android via documented glibc-spoof; user's
+  experienced lean = promising; native daemon = primary path,
+  canvas-only = fallback.
+- *Personal-live-budget-with-all-trx.org schema sketch* (deepens
+  =life-as-code.org= § what it means concretely)
+- *=:PRIVATE:= redaction pass for SMS outbound* (architecture-level
+  requirement surfaced by =remote-control.org= — needs to land
+  before any SMS-channel adapter ships)
+
+** DEC-015 verification (manual — agent sandbox blocked emacs)
+
+#+begin_src bash
+emacs -batch -L /home/daniel/repos/org-llm/doom/ -l org-llm-chat -f kill-emacs
+emacs -batch -L /home/daniel/repos/org-llm/doom/ -l ert \
+      -l /home/daniel/repos/org-llm/tests/test_org_llm_chat.el \
+      -f ert-run-tests-batch-and-exit
+emacsclient -e '(org-llm-chat)'
+#+end_src
+
+** Where to resume the doc-review walk
+
+Bite 3/~9 of the matchmaking-pair walk was paused when:
+
+1. The matchmaking pair got scrapped (clean slate)
+2. =multi-agent-org-llm.org= was scaffolded + agent-expanded as the *new* destination
+
+Resume options:
+- *Walk =multi-agent-org-llm.org= section by section* (it's ~443 lines now — the canonical definition)
+- *Drill into one of today's wiki seeds* (life-as-code, conversational-discoverability, remote-control, agor-pilot-install)
+- *Pivot to Bridge Crew sweep verification* (read swept files, ratify rename)
+- *Run DEC-015 v0 verification* (commands above)
+- *Commit the bundle* (everything's uncommitted; one big commit pass would land ~30+ file changes)
+
+** Pending decisions (your call when you're ready)
+
+- License ratification (rec: AGPLv3 — see =/tmp/license-decision-2026-05-05.md=)
+- Versioning scheme ratification (rec: Hybrid SemVer + acpt suffix)
+- HashiCorp OpenBao adoption (rec from research)
+- Heartbeat scheduler — Layer 3 build vs. defer to Airflow (per =agent-time-awareness.org=)
+- DEC-015 candidate → ratify as full DEC?
+#+end_quote
+
+* ▶ THIS AFTERNOON — 2026-05-05 Tue, EDT (set 11:18 EDT pre-nap)
+
+#+begin_quote
+*Committed deadline:* @riker migration build —
 *LANDED 11:28 EDT* (3.5h ahead of 15:00 EDT deadline). Commit
 =8ec72d0=. 29 tracker tests + 130 cli tests pass. Vault cut-over
 deferred — user runs =org-llm tracker init= interactively post-nap.
@@ -146,7 +231,7 @@ deferred — user runs =org-llm tracker init= interactively post-nap.
 | post-wake  | Coffee + read =/tmp/= drops (license, versioning, Agor)    | reviewable artifacts ready  |
 |     ~13:30 | Review the four landed artifacts (≤30 min)                 | ratify + ask drill-downs    |
 |     ~14:00 | Agor walk (use =/tmp/agor-walkthrough-2026-05-05.md=)      | 5 bites pre-prepped         |
-|      15:00 | =@tracker= migration build deadline — review agent output  | committed; verify + cut-over|
+|      15:00 | =@riker= migration build deadline — review agent output    | committed; verify + cut-over|
 |     ~15:30 | Pick one: ratify license + tag, OR start DEC-015 v0 build  | sprint-shape decision       |
 |     ~17:00 | Phase 24.2 — recovery hooks build kickoff (v1.0 gate)      | only if energy permits      |
 |     ~18:00 | Wrap, commit, dogfood note in captain's log                | acpt-promotion check        |
@@ -168,7 +253,7 @@ deferred — user runs =org-llm tracker init= interactively post-nap.
 acpt branch + v0.1.0-acpt0 tag + Config env-dim) · battery alert build
 (life_support + sidebar HEALTH row + 3 knobs) · Phase 26.1 cull
 walkthrough complete · DEC-014 — cull rubric framework · DEC-015
-candidate filed (org-mode-chat-surface) · Magnificent Seven canon
+candidate filed (org-mode-chat-surface) · Bridge Crew canon
 refresh · Wiki Rule 2b sweep wave 1 (12 pages) · whole-picture.org
 synthesis (332 lines) · codebase-map-post-cull (49 modules) ·
 embedded-dashboards.org (3-layer chart embedding) · 4 morning-dump
@@ -176,7 +261,7 @@ TODOs · acpt branch + v0.1.0-acpt0 baseline tag.
 
 *Open right now (background agents finishing while user naps):*
 
-- =@tracker= migration build (finish 15:00 EDT)
+- =@riker= migration build (finish 15:00 EDT)
 - =agent-time-awareness.org= → just landed
 - =org-mode-chat-surface.org= (DEC-015 design) → landed
 - =/tmp/license-decision-2026-05-05.md= → landed
@@ -201,7 +286,7 @@ complete (38 components, 14 commits day-over-day).
   sync-architecture (multi-device git-canonical), dbt-pipeline
   (data layer), tools-as-dbt-models (synthesis), plus cull.org
   + doc-rewrite-plan + sidecar-agent-design from parallel scouts.
-- Phase 24.1 shipped + verified live (motivating @curator/
+- Phase 24.1 shipped + verified live (motivating @atoz/
   superset.org bug closed end-to-end via proxy-side resolver
   enrichment).
 - Phase 25 scope rewritten (DB-as-cache + git-canonical pipeline,
@@ -210,8 +295,10 @@ complete (38 components, 14 commits day-over-day).
   LoC retirement candidates identified (=org_tools.py= 1174,
   =vault_facts.py= 951, =insights.py= 826, =walk.py= 140, 5
   loser recipe runners 350).
-- Magnificent Seven agent roster locked: =@picard, @spock, @data,
-  @gardener, @analyst, @curator, @tracker= (DEC-014).
+- Bridge Crew agent roster locked: =@picard, @spock, @data,
+  @boothby, @geordi, @atoz, @riker= (DEC-014; renamed
+  2026-05-06 from "Magnificent Seven" + handles
+  @gardener/@analyst/@curator/@tracker).
 - Scout pattern named + canonized (this morning's working mode is
   the worked example).
 
@@ -224,7 +311,7 @@ complete (38 components, 14 commits day-over-day).
 | 3 | Agor walk                           | hours  | user has a list; multi-agent leveling          |
 | 4 | Doc rewrite dispatch                | days   | doc-rewrite-plan.org ready; pool of agents     |
 | 5 | =@sidecar= design review            | hours  | 469-line design ready; ratify or revise        |
-| 6 | DEC-009 + agents.org refresh        | small  | propagate Magnificent Seven + tracker scope    |
+| 6 | DEC-009 + agents.org refresh        | small  | propagate Bridge Crew + tracker scope          |
 | 7 | End-to-end comprehension walk       | hours  | spawn synthesis scout → tight tiny-bite walk   |
 | 8 | Phase 24.2 + 24.3                   | days   | recovery hooks + confusion detector (v1.0 gate)|
 | 9 | License decision (DEC-010 deferred) | small  | AGPLv3 vs others                               |
@@ -235,6 +322,27 @@ complete (38 components, 14 commits day-over-day).
 - Captain's-log sync per DEC-011
 - Live verify Phase 24.1 still works post-relaunch
 - AGENTS.md tone audit per DEC-010 anti-cap
+- *On-device Agor-on-Termux daemon test* (sprint item, filed
+  2026-05-06) — verify Node ≥22.12 daemon + =@libsql/client= w/
+  =npm_config_platform=linux npm_config_libc=glibc= workaround
+  actually starts on aarch64 Android. Strategy lean per user
+  termux experience: native daemon as primary path; canvas-only
+  as fallback. Verifier artifact:
+  =/tmp/agor-mobile-termux-verify-2026-05-06.org=. Target:
+  before mobile holy-grail sprint cuts.
+- *DEC-015 v0.1 — proxy-port discovery + url-retrieve backend
+  switch* (sprint item, filed 2026-05-06) — Path-1 v0 currently
+  shells to =org-llm ask= because =mcp_server.py= is FastMCP-
+  stdio-only and the LLM proxy's HTTP port is OS-assigned and
+  ephemeral (=llm_proxy.py:5028 start_proxy=, port=0, not
+  persisted). Fix: have =start_proxy= write its bound port to
+  =~/.local/share/org-llm/proxy-port= on launch (one-line
+  write); switch =org-llm-chat--call-backend= in
+  =doom/org-llm-chat.el= to =url-retrieve= against
+  =http://127.0.0.1:&lt;port&gt;/v1/chat/completions=. Unlocks real
+  =@&lt;agent&gt;= persona swap via proxy =intercept_agent_prefix=
+  (DEC-008 — proxy-seam @-prefix swap) AND opens door to SSE
+  streaming in v0.2.
 #+end_quote
 
 * Ahead                                                            :@queued:
@@ -244,19 +352,19 @@ complete (38 components, 14 commits day-over-day).
 | When     | Pri | Item                                                                              | Source                |
 |----------+-----+-----------------------------------------------------------------------------------+-----------------------|
 | Imminent | A   | Visual-verify route-preview Stage 1 in real opencode (15-30 min)                  | route-preview         |
-| Sat 5-09 | A   | Validate =@gardener= (routine re-test)                                            | agent test            |
+| Sat 5-09 | A   | Validate =@boothby= (routine re-test)                                             | agent test            |
 | Sun 5-10 | —   | Routine re-test sweep — @journalist boundary, agentsmith multi-domain refusal     | scheduled             |
 | Mon 5-11 | B   | Lift =weather_aware_agenda= 40% → ≥55% (top-5→10 + location hint)               | weather re-A/B        |
 | Mon 5-11 | B   | Fix =recipe_ab_harness.py= shebang (silent sqlalchemy failure)                    | weather re-A/B        |
 | Mon 5-11 | B   | Fix =recipe_ab_judge.py --results= flag wiring                                    | weather re-A/B        |
 | Tue 5-12 | B   | =delegate()= chat-completions doesn't carry MCP tools                             | agent test            |
 | Sun 5-17 | A   | Routine re-test sweep — agentsmith multi-domain refusal                           | scheduled             |
-| Sun 5-31 | B   | Routine re-test sweep — =@gardener=                                               | scheduled             |
+| Sun 5-31 | B   | Routine re-test sweep — =@boothby=                                                | scheduled             |
 | Tue 6-02 | B   | Routine re-test sweep — =classify_items= MCP tool                                 | scheduled             |
 | Pending  | B   | Route-preview Stage 2 — upstream opencode PR (=onInput= + Tab hooks)              | route-preview Stage 1 |
 | Pending  | B   | Memory Alpha framing — verb-namespace + README copy decisions                     | Phase 25 mid-arc      |
-| Pending  | B   | @curator MCP tools — =wiki_link_audit= / =wiki_drift_check= / =wiki_orphan_terms= | Stage 2 of @curator   |
-| Pending  | B   | @tracker =tracker review= verb (self-hosting goal)                                | Stage 2 of @tracker   |
+| Pending  | B   | @atoz MCP tools — =wiki_link_audit= / =wiki_drift_check= / =wiki_orphan_terms=    | Stage 2 of @atoz      |
+| Pending  | B   | @riker =tracker review= verb (self-hosting goal)                                  | Stage 2 of @riker     |
 
 * Beyond — open from earlier dev-tracker entries (samples)         :@beyond:
 

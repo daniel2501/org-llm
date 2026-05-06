@@ -1,0 +1,173 @@
+:PROPERTIES:
+:ID:       4e05d9b8-9399-4e88-9409-11dfe9cf390a
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Agor headless smoke recipe — Bridge Crew first contact
+#+FILETAGS: :wiki:concept:agor:integration:smoke:
+#+OPTIONS: toc:nil num:nil
+
+* Summary
+
+*Summary.* =scripts/agor-smoke.sh= is the first-contact harness for the
+[[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]] integration: bash, ~200 lines, stands up the
+Agor daemon, mints an MCP bearer token via the *anonymous-localhost*
+path (default auth on a fresh =agor init=), hands it to =claude -p=
+over a transient =mcp-config=, and asserts a child session can be
+spawned and observed end-to-end.
+
+*Expanded.* The harness deliberately stays a bare bash script for
+the spike (per *Keep CLI pristine* memory — circle back as a Typer
+verb =tracker agor-smoke= once the recipe stabilizes). Bootstrap-token
+investigation (below) found Agor has *no* dedicated tokens-on-disk
+file and *no* admin token; the working bootstrap path is anonymous
+=POST /api/sessions= against localhost, with the JSON response
+carrying both =sessionId= and =mcpToken=. The script tries that path
+third, after env-var override and a speculative =agor token= verb,
+and falls back to a SQLite read of =sessions.data.mcp_token= on the
+already-confirmed schema. The whole flow is *untested live* — Agor
+isn't installed on this machine yet (per [[id:9dc47d5a-5efe-4a04-8a3a-45b69643e982][agor-pilot-install]]).
+
+* What the script does
+
+1. *Banner + prereq check* — =agor=, =claude=, =curl=, =jq= must be on
+   PATH; =sqlite3= optional (db-fallback path disabled if absent).
+2. *Daemon health* — pings =/api/health=; if down, runs
+   =agor daemon start= and waits up to 20s. Remembers if WE started
+   it so the EXIT trap stops it cleanly.
+3. *Bootstrap token discovery* (in order):
+   a. =$AGOR_BOOTSTRAP_TOKEN= env var (user-supplied)
+   b. =agor token= CLI verb if it exists (probed via =--help=)
+   c. anon-localhost =POST /api/sessions= → response =mcpToken=
+   d. =sqlite3 ~/.agor/agor.db= → =json_extract(data, '$.mcp_token')=
+   e. Hard-fail with file-an-issue pointer
+4. *Mint parent session* (skipped if step 3c already did it) and
+   write =/tmp/agor-mcp-$$.json= with =Authorization: Bearer <tok>=
+   pointing at =${AGOR_BASE_URL}/mcp=.
+5. *Run =claude -p=* — =--mcp-config=, =--strict-mcp-config=,
+   =--permission-mode bypassPermissions=, =--max-turns 6=,
+   =timeout 300s=. Prompt asks the parent to spawn a child via
+   =mcp__agor__agor_sessions_spawn= that prints =HELLO_FROM_CHILD=
+   as its final message, then poll until terminal.
+6. *Assertions + report* — parses =CHILD_SESSION_ID=, =CHILD_STATUS=,
+   counts =HELLO_FROM_CHILD= hits in the stream, prints elapsed
+   seconds + token counts (in/out via =jq= over =stream-json=).
+7. *EXIT trap* — deletes the mcp-config; stops daemon iff WE started it.
+
+* Bootstrap token investigation
+
+What the public docs *and* the source-of-truth schema confirm:
+
+- [[https://agor.live/guide/architecture][agor.live/guide/architecture]] enumerates four auth strategies
+  (=anonymous=, =local=, =jwt=, =session-token=) and names
+  *anonymous as the default* for "local development".
+- =packages/core/src/db/schema.sqlite.ts= shows the =sessions= table
+  has a JSON =data= column whose schema includes =mcp_token=
+  ("MCP authentication token for Agor self-access"). *No* dedicated
+  =tokens= or =auth_tokens= table exists.
+- =POST /api/sessions= responds with both =sessionId= and =mcpToken=
+  (per the upstream feasibility doc and =agor.live/guide/internal-mcp=).
+
+What the docs *do not* confirm and the script will surface live:
+
+- Whether the default =agor daemon start= still ships =anonymous=
+  in the latest =agor-live= release, or whether =local= is now
+  default-on (would break path 3c).
+- Whether =agor token= exists as a CLI verb. =agor.live/guide= lists
+  =init=, =daemon=, =open=, =session=, =worktree= — no =token=.
+- Whether =better-auth= cookies are required *in addition to* the
+  Bearer header on =/api/sessions= (the docs are quiet here).
+
+Best-guess token source (confidence *medium-high*): the anon-POST
+path (3c) works on a fresh =agor init= without further config.
+Fallback (3d) works as long as a session has ever been created
+through any path, since the token is co-located in the JSON =data=
+blob and =json_extract= is a stable SQLite builtin.
+
+* Prerequisites
+
+- Per [[id:9dc47d5a-5efe-4a04-8a3a-45b69643e982][agor-pilot-install]]: Node ≥ 22.12, =npm i -g agor-live=,
+  =agor init=.
+- =claude= CLI on =PATH= (Claude Code; =-p= and =--mcp-config= flags
+  per code.claude.com/docs/en/cli-reference).
+- =jq=, =curl= (ubiquitous); =sqlite3= optional but recommended.
+- Optional env: =AGOR_BASE_URL= (default =http://localhost:3030=),
+  =AGOR_DATA_DIR= (=~/.agor=), =MODEL= (=claude-3-5-sonnet-latest=),
+  =MAX_TURNS= (=6=), =TIMEOUT= (=300=), =AGOR_BOOTSTRAP_TOKEN=,
+  =AGOR_BOARD_ID= (=smoke=), =AGOR_WORKTREE= (=smoke-wt=).
+
+* Run
+
+#+begin_src sh
+# default — auto-discover token via anon-POST
+bash scripts/agor-smoke.sh
+
+# user-supplied token
+AGOR_BOOTSTRAP_TOKEN=ey... bash scripts/agor-smoke.sh
+
+# Opus child + tighter loop
+MODEL=claude-3-opus-latest MAX_TURNS=4 bash scripts/agor-smoke.sh
+#+end_src
+
+Expected report block on success:
+
+#+begin_example
+parent_session_id : sess_abc123
+child_session_id  : sess_def456
+child_status      : completed
+hello_from_child  : 1 occurrence(s) in stream
+elapsed_seconds   : 47
+tokens_in/out     : 28412/904
+#+end_example
+
+* Failure modes & exit codes
+
+| Code | Name        | Trigger                                                  | User action                                                |
+|------+-------------+----------------------------------------------------------+------------------------------------------------------------|
+|   10 | PREREQ      | =agor=, =claude=, =curl=, or =jq= missing; daemon won't start | Install per [[id:9dc47d5a-5efe-4a04-8a3a-45b69643e982][agor-pilot-install]]; check =$PATH=        |
+|   20 | BOOTSTRAP   | All four token paths exhausted                           | Open canvas once + retry, or pass =$AGOR_BOOTSTRAP_TOKEN=  |
+|   30 | SPAWN_FAIL  | =claude -p= rc≠0 *or* no =CHILD_SESSION_ID= in stream    | Inspect =/tmp/agor-smoke-parent-$$.jsonl=                  |
+|   40 | CHILD_FAIL  | Child spawned but never echoed =HELLO_FROM_CHILD=         | Re-run with =MAX_TURNS=10=; check child via =agor session list= |
+|   50 | TIMEOUT     | =claude -p= exceeded =$TIMEOUT= seconds                   | Bump =TIMEOUT=; or model is overloaded — try Sonnet         |
+
+* What this validates
+
+Exercised by this v0 harness:
+- Daemon REST surface (=POST /api/sessions=) under default auth.
+- MCP HTTP transport (=Bearer= header on =/mcp=).
+- =mcp__agor__agor_sessions_spawn= round-trip from =claude -p=.
+- Child terminal-status observability via tool-call polling.
+
+*Not* exercised yet (left for v0.1):
+- =mode:"btw"= async peer query + inline callback.
+- =mode:"subsession"= resumable child.
+- Cron heartbeat / scheduled child.
+- =agor_artifacts_create= + =agor_sessions_fork=.
+- Captain's-log bridge (=kind=team-session=) audit trail.
+- Slack / GitHub message-gateway round-trip.
+
+* Open questions
+
+- Default-auth drift: does the latest =agor-live= still ship
+  =anonymous= for fresh installs, or has it moved to =local=?
+- Is =agor session create --json= a viable canonical bootstrap
+  (CLI-mediated mint) instead of raw HTTP? Worth a probe on first run.
+- =better-auth= cookie requirement on =/api/sessions= — confirm
+  Bearer-only suffices or whether a CSRF/session-cookie is also needed.
+- =mcp_token_expires_at= field exists in =sessions.data=; what is the
+  default expiry on the anon-POST path, and does the harness need
+  to refresh mid-run for =$TIMEOUT > 24h=?
+- Param schema for =agor_sessions_spawn= (still undocumented per
+  feasibility); the harness leans on =tools/list= introspection
+  implicitly via =claude='s MCP plumbing — confirm the canonical
+  param names (=prompt=? =task=? =initialMessage=?) on first run.
+
+* Cross-refs
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — canonical integration definition
+- [[id:9dc47d5a-5efe-4a04-8a3a-45b69643e982][agor-pilot-install.org]] — install + first-spawn smoke checklist
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-006 (deterministic supervision); DEC-017 (integration vs. fork)
+- [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] — current sprint side-quest entry
+- =/tmp/agor-claude-code-headless-2026-05-06.org= — feasibility verdict + minimal recipe
+- Upstream: =https://agor.live/guide/internal-mcp= (MCP endpoint shape)
+- Upstream: =https://agor.live/guide/architecture= (auth strategies)
+- Upstream: =https://github.com/preset-io/agor/blob/main/packages/core/src/db/schema.sqlite.ts= (sessions schema)

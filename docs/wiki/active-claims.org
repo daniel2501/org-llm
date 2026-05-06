@@ -28,7 +28,7 @@ before your first =Edit=/=Write= call. Update or move it to
 
 This file is meant to churn. Don't worry about pretty diffs or
 chronological ordering — append to the bottom; the next
-=@tracker= sweep will compact.
+=@riker= sweep will compact.
 
 * Active claims                                                 :@active:
 

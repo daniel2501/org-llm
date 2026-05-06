@@ -1,0 +1,119 @@
+:PROPERTIES:
+:ID:       9dc47d5a-5efe-4a04-8a3a-45b69643e982
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Agor pilot install — Linux + Guix desktop checklist
+#+FILETAGS: :wiki:concept:agor:integration:install:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Pilot-install checklist for [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]]'s
+=Agor= integration on the user's Linux + Guix desktop. Per
+agent-tool-install rule, this page is a *checklist the user
+runs themselves* — not an automated install. FOSS-first,
+user-scope (no =sudo=), Node ≥ 22.12 prerequisite. Mobile /
+termux is *out of scope* — see the verifier artifact at
+=/tmp/agor-mobile-termux-verify-2026-05-06.org= for the
+separate sprint side-quest.
+
+*Expanded.* Agor ships as npm package =agor-live=. Upstream
+install is =npm install -g agor-live=; on Guix this lands in
+=~/.guix-profile= (user-scope, no =sudo=). First-run is
+=agor init= → =agor daemon start= → =agor open=. The
+=@libsql/client= glibc-spoof workaround flagged in the termux
+verifier is *Bionic-only* and should not bite glibc Guix; the
+Guix Node TLS cert-bundle gotcha (per =project_guix_ssl_certs.md=)
+is the more likely first-foot stumble.
+
+* Prerequisites checklist
+
+| Requirement       | Check command                  | Current state on this machine    | Action if missing                                         |
+|-------------------+--------------------------------+----------------------------------+-----------------------------------------------------------|
+| Node.js ≥ 22.12   | =node --version=               | unverified (bash blocked in agent) | =guix install node-lts= (user profile, ~/.guix-profile/bin) |
+| npm available     | =npm --version=                | unverified                       | comes with =node-lts=; verify after node install          |
+| Guix profile live | =which guix=                   | unverified (assumed per env)     | n/a — Guix is the package manager of record               |
+| SSL_CERT_FILE set | =echo $SSL_CERT_FILE=          | configured in =~/.config/fish/conf.d/ssl-cert.fish= | already handled per =project_guix_ssl_certs.md=         |
+| Git ≥ 2.45 (worktrees) | =git --version=          | already used by org-llm daily    | =guix install git= if missing                             |
+| Browser for canvas | n/a (Firefox / Chromium)       | already running (mobile + desktop) | n/a                                                       |
+
+* Install steps (user-scope)
+
+Run each block at a fish/bash shell. Per agent-tool-install rule,
+*do not run as root*; everything stays in =~/.guix-profile= or
+=~/.npm-global=.
+
+1. *Verify or install Node ≥ 22.12 via Guix (user-scope).*
+
+   # USER ACTION REQUIRED
+   #+begin_src sh
+   node --version
+   # if absent or < 22.12:
+   guix install node-lts
+   hash -r   # refresh shell PATH cache (fish: rehash)
+   node --version
+   #+end_src
+
+2. *(Optional but recommended) Configure npm to install user-scope
+   without =-g= polluting Guix's node prefix.* This isolates Agor's
+   global bins under =~/.npm-global/bin/= so =guix gc= /
+   profile-rotation can't sweep them.
+
+   # USER ACTION REQUIRED
+   #+begin_src sh
+   mkdir -p ~/.npm-global
+   npm config set prefix ~/.npm-global
+   # ensure on PATH (fish: add to ~/.config/fish/conf.d/path.fish):
+   set -gx PATH $HOME/.npm-global/bin $PATH
+   #+end_src
+
+3. *Install Agor.* Upstream-supported command is the global
+   install; with step 2's prefix it remains user-scope.
+
+   # USER ACTION REQUIRED
+   #+begin_src sh
+   npm install -g agor-live
+   #+end_src
+
+   /If step 2 was skipped/ and =npm install -g= refuses on Guix's
+   read-only node prefix, fall back to a per-tool prefix:
+   =npm install --prefix ~/.local/share/agor agor-live= and put
+   =~/.local/share/agor/bin= on =PATH=.
+
+4. *Initialize Agor.* Creates =~/.agor/= and the local DB.
+
+   # USER ACTION REQUIRED
+   #+begin_src sh
+   agor init
+   #+end_src
+
+* First-spawn smoke test
+
+# USER ACTION REQUIRED
+#+begin_src sh
+agor --version          # 1. binary on PATH, prints version
+agor daemon start       # 2. background daemon comes up
+agor daemon status      # 3. reports running + port
+agor open               # 4. opens canvas in default browser
+#+end_src
+
+If all four succeed, Agor is alive. Stop the daemon with
+=agor daemon stop= when done piloting.
+
+* Known gotchas
+
+| Gotcha                                  | Trigger                                                | Fix                                                                                          |
+|-----------------------------------------+--------------------------------------------------------+----------------------------------------------------------------------------------------------|
+| Node TLS cert errors during =npm install= | Guix-shipped Node doesn't see system CA bundle by default | Already mitigated — =SSL_CERT_FILE= / =NODE_EXTRA_CA_CERTS= set in =~/.config/fish/conf.d/ssl-cert.fish= per =project_guix_ssl_certs.md=; verify env vars are exported in the install shell |
+| =npm install -g= EACCES on Guix node prefix | Guix's =~/.guix-profile/lib/node_modules= can be read-only | Use step 2's =npm config set prefix ~/.npm-global=, or =npm install --prefix ~/.local/share/agor= |
+| =@libsql/client= glibc-prebuilt mismatch | Bionic libc (termux) only — *N/A on Guix glibc desktop*  | Skip — termux-specific per =/tmp/agor-mobile-termux-verify-2026-05-06.org=                  |
+| Daemon can't bind / port already in use | Another Agor or dev server on default port             | =agor daemon stop= then restart; or set =AGOR_PORT= per Agor docs                            |
+| =agor= command not found after install  | =~/.npm-global/bin= or =~/.local/share/agor/bin= not on PATH | Add the prefix's =bin/= to =PATH= in =~/.config/fish/conf.d/=, then =exec fish=             |
+| =better-sqlite3= source build attempt   | If Agor pulls it transitively and prebuilt is missing  | =guix install gcc-toolchain python-3 make=; rerun =npm install=. Unlikely on glibc but possible |
+
+* Cross-refs
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — canonical definition; integration's role
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-017 (stack composition vs. integration); DEC-010 (anti-capitalist FOSS)
+- =/tmp/agor-mobile-termux-verify-2026-05-06.org= — termux/mobile verifier (separate sprint side-quest)

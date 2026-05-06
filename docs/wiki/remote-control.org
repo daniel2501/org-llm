@@ -1,0 +1,128 @@
+:PROPERTIES:
+:ID:       10b267cb-79a6-41af-bef1-5577e23e7559
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Remote control — chat as universal-access command surface
+#+FILETAGS: :wiki:concept:ux:remote:mobile:chat:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* The conversational chat surface IS the *remote control*
+for org-llm. Same interaction model as the canonical Emacs chat;
+different reach. From anywhere — phone SMS, voice, tap, watch,
+email-in — a command lands on home Emacs, runs through the agent
+dispatcher, and the result returns via the same channel.
+
+*Expanded.* Canonizes a framing from 2026-05-05 (third-nap pre-sleep;
+see [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] § Pre-sleep capture). Unifies life-as-code, mobile-as-
+full-graphical-Emacs, [[id:6b8e2d3a-9c47-4f1e-8a52-7d3b6c4e9f81][org-mode-chat-surface.org]] / DEC-015 (the
+substrate), and [[file:conversational-discoverability.org][conversational-discoverability.org]] (button-less
+→ must teach itself). Not a new product; the chat surface through a
+/reach/ lens.
+
+* The framing
+
+A TV remote does not contain the TV — it /reaches/ it. Home Emacs
+holds vault, agents, org-roam graph, dbt models, captain's log; the
+remote (phone, watch, SMS, voice, email) carries no state, only
+ships commands and renders replies. Contract: /the same conversation/
+— =@<persona>= dispatch, org-shaped replies, downgraded for channel
+bandwidth. "Remote control" beats "mobile app" — no parallel app to
+maintain; one surface, many transports.
+
+* Reachable channels
+
+| Channel              | Inbound shape           | Outbound shape          | Latency    | Status      |
+|----------------------+-------------------------+-------------------------+------------+-------------|
+| Native Emacs         | org buffer keystrokes   | live org buffer         | <100ms     | canonical   |
+| opencode TUI         | TUI prompt input        | TUI render              | <500ms     | shipped     |
+| Mobile Emacs (sway)  | termux-x11 keystrokes   | live org buffer         | <100ms     | shipped     |
+| SMS                  | text body               | plaintext digest        | seconds    | not yet     |
+| Voice (in/out)       | Whisper transcription   | TTS-friendly summary    | 1-3s       | not yet     |
+| Tap / shortcut       | HTTP POST (Termux/iOS)  | push notif + org link   | sub-second | not yet     |
+| Watch (Apple/Wear)   | voice + glance          | one-line glance         | 1-3s       | not yet     |
+| Email-in             | mailbox poll            | full org reply          | minutes    | not yet     |
+| Slack / GitHub PR    | Agor Message Gateway    | thread reply / comment  | seconds    | partial     |
+
+(Native + mobile Emacs /are/ the TV; listed to anchor the gradient.)
+
+* Connection points
+
+** Life-as-code
+*Summary.* Remote control IS what makes life-as-code reachable. You
+do not carry a laptop everywhere; you do carry your phone.
+
+*Expanded.* [[file:life-as-code.org][life-as-code.org]] treats personal domain (budget, GPS,
+agenda, contacts, plans) as queryable code; that value only lands if
+the field-side human can ask /from the field/. "Text me that info"
+is canonical: SMS-in, vault query, SMS-out. Without the remote,
+life-as-code is desk-only.
+
+** Mobile-as-full-graphical-Emacs
+*Summary.* Termux+sway covers /when you are at your phone/. Remote
+control covers /when you are not/. Complementary, not redundant.
+
+*Expanded.* Per =project_mobile_is_full_graphical_emacs=, the phone
+runs real Doom Emacs — but opening Termux + sway + a buffer isn't
+always feasible. SMS / watch / voice are the low-friction reach.
+Compose: voice-dictate from the treadmill; follow up in full Emacs.
+
+** DEC-015 — org-mode-aware chat surface
+*Summary.* Same chat buffer; different transport.
+
+*Expanded.* No new dispatcher. Every channel adapter lands prompts
+on the =@<agent>= seam (DEC-008 — proxy-seam @-prefix swap) the chat
+buffer already uses. [[id:6b8e2d3a-9c47-4f1e-8a52-7d3b6c4e9f81][org-mode-chat-surface.org]] is the substrate;
+remote control is its reach.
+
+** Conversational discoverability
+*Summary.* The remote has no buttons → teaching burden grows.
+
+*Expanded.* Classical UI teaches via tooltips + visible affordances;
+SMS has none, voice has fewer. The remote /must/ carry first-touch
+self-intros, trailing teach lines ("next time you can…"), and a
+first-class "what can you do here?" verb per channel.
+
+* Implementation seams
+
+- *Inbound.* Small adapter per channel (Twilio / Whisper / Tasker /
+  iOS Shortcuts / mailbox poll); each normalizes to one HTTP POST to
+  the proxy. =@<persona>= routing inside =intercept_agent_prefix=
+  (=org_llm/llm_proxy.py=, DEC-008 — proxy-seam @-prefix swap)
+  handles dispatch unchanged.
+- *Outbound.* Agent emits org-formatted reply; channel renderer
+  downgrades — SMS = plaintext digest + vault link; email = full org;
+  voice = TTS summary; watch = one-line glance.
+- *Audit.* Every remote command lands in the captain's log
+  (=org_llm/logbook.py=) tagged =:CHANNEL:=.
+
+* Failure modes
+
+- *Daemon offline.* Channel surfaces graceful fallback, not silent
+  loss; SMS needs a retry-or-bounce contract.
+- *Channel auth lapse.* Twilio token / Apple Push cert rotation →
+  silent muting; health probes belong in =@geordi='s daily-review.
+- *PII leakage.* SMS crosses carrier infra; renderer must redact
+  =:PRIVATE:=-tagged vault content before downgrade.
+- *Latency cliffs.* Voice on bad cellular hits 5-10s; ack inside 1s.
+- *Cross-channel drift.* SMS → watch needs a shared session token.
+
+* Open questions
+
+- *Auth boundary.* Phone-number allowlist works n=1 but not FOSS-
+  later; email signing or shared-secret HMAC on tap?
+- *Session continuity.* SMS → watch → desk thread lives where —
+  vault-side =sessions/<id>.org=, ephemeral Redis key, or session DB?
+- *Cost ceilings.* Whisper-on-cloud cheap per minute, unbounded per
+  day; per-channel daily budgets?
+
+* Cross-refs
+
+- [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] § Pre-sleep capture — the seed
+- [[id:6b8e2d3a-9c47-4f1e-8a52-7d3b6c4e9f81][org-mode-chat-surface.org]] / DEC-015 — the substrate
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — Slack / PR gateway lives here
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] / DEC-008 — proxy-seam @-prefix swap entry point
+- [[id:20d84cf7-2506-47c5-90ff-d666f4fbc66d][whole-picture.org]] — where reach fits in the shape
+- [[file:life-as-code.org][life-as-code.org]] · [[file:conversational-discoverability.org][conversational-discoverability.org]]
