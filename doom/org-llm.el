@@ -15,6 +15,14 @@
 (defvar org-llm-claude-buffer   "*org-llm: claude*")
 
 
+;;; ── browser ─────────────────────────────────────────────────────────────────
+;; qutebrowser is org-llm's default browser (keyboard-driven, FOSS, Python).
+;; Set globally so every browse-url call from the org-llm session — agent
+;; output, org-mode links, help buffers — opens there.
+(setq browse-url-browser-function 'browse-url-generic
+      browse-url-generic-program  "qutebrowser")
+
+
 ;;; ── internal helpers ─────────────────────────────────────────────────────────
 
 (defun org-llm--env ()
@@ -1296,6 +1304,18 @@ current selection."
         :desc "Power-boost"              "p" #'org-llm-doctor-power-boost
         :desc "Cloud status"             "c" #'org-llm-cloud)
 
+       ;; ─── Chat surface (DEC-015 — Phase 16.3) ────────────────────────
+       ;; Native Emacs UI talking to org-llm's MCP/proxy. Each turn is
+       ;; a level-2 heading (`** Me` / `** @<agent>`); `C-c C-c` on
+       ;; `** Me` submits and appends the response. Real org file →
+       ;; refile / tangle / agenda all free.
+       (:prefix ("Q" . "chat")
+        :desc "Open chat buffer"         "Q" #'org-llm-chat
+        :desc "Submit current ** Me"     "s" #'org-llm-chat-submit
+        :desc "Refile subtree → roam"    "r" #'org-llm-chat-refile
+        :desc "Export subtree → file"    "e" #'org-llm-chat-export-subtree
+        :desc "Pin subtree → chat-pins"  "p" #'org-llm-chat-pin)
+
        ;; ─── Tutor + source + advanced ──────────────────────────────────
        (:prefix ("H" . "help/tutor")
         :desc "Tutor step"               "H" #'org-llm-tutor
@@ -1307,6 +1327,10 @@ current selection."
         :desc "Code-index repos"         "c" #'org-llm-code-index
         :desc "Init DB"                  "i" #'org-llm-init
         :desc "List grants"              "g" #'org-llm-grants)))
+
+;; Load the chat surface (DEC-015 — org-mode-aware chat). Optional —
+;; old setups without org-llm-chat.el on the load-path still work.
+(condition-case _err (require 'org-llm-chat nil t) (error nil))
 
 (provide 'org-llm)
 ;;; org-llm.el ends here

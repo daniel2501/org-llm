@@ -758,7 +758,9 @@ MODEL_DEFAULTS = {
                                             # (classifier, tag, summarize).
                                             # Empty → falls back to cloud_model.
                                             # Suggested: qwen/qwen-2.5-7b-instruct
-                                            # or anthropic/claude-haiku-4.5.
+                                            # (Apache 2.0). Closed-API fast
+                                            # models are available via opt-in
+                                            # (see proprietary_models_enabled).
     "embed_model":    "nomic-embed-text",   # 137 MB — semantic search
     "chat_model":     "llama3.2",           # 2.0 GB — ask / Q&A (first-flight friendly)
     "code_model":     "qwen2.5-coder",      # 4.7 GB — code generation
