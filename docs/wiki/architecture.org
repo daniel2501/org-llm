@@ -78,7 +78,7 @@ store for the underlying policy.
    │   ├── setup.state.json             first-run setup progress            │ │
    │   ├── snapshots/                   `self snapshot` rollback bundles    │ │
    │   ├── askbook/                     askbook tangle artifacts            │ │
-   │   ├── dbt/                         dbt analytics (Phase 12.7)          │ │
+   │   ├── dbt/                         dbt analytics (Phase 2026-07.06 — dbt analytics)          │ │
    │   └── apply-jobs/                  long-running --apply job state      │ │
    │                                                                        │ │
    │  ~/.password-store/org-llm/        cloud + provider creds (via `pass`) │ │
@@ -107,7 +107,7 @@ store for the underlying policy.
    │                                                                         │
    │  CACHE  (deterministic; auto-refilled on miss / TTL expiry)             │
    │   ┌────────────┐   value JSON · computed_at · inputs_mtime · ttl_secs   │
-   │   │ vault_fact │   inferrers in vault_facts.py (Phase 21.1)             │
+   │   │ vault_fact │   inferrers in vault_facts.py (Phase 2026-05.13.01 — DB-backed vault fact store)             │
    │   └────────────┘                                                        │
    │                                                                         │
    │  EVENT LOGS  (append-only; mirrored to vault files)                     │
@@ -122,7 +122,7 @@ store for the underlying policy.
    │   ┌────────────┐  →  sidebar-status.json (recent slice)                 │
    │   │ sensor_log │  probe ∈ battery|cpu|mem|disk|thermal|net|ollama|…     │
    │   └────────────┘     ts · value · normalized · status · context         │
-   │   ┌─────────────────────┐  →  dbt views (Phase 12.7, planned)           │
+   │   ┌─────────────────────┐  →  dbt views (Phase 2026-07.06 — dbt analytics, planned)           │
    │   │ insight_engagement  │  reaction ∈ good|bad|clicked|dismissed        │
    │   └─────────────────────┘                                               │
    └──────────────────────────────┬──────────────────────────────────────────┘
@@ -159,7 +159,7 @@ store for the underlying policy.
    │   knowledge      │ indexer · search · walk · insights · code_index       │
    │                  │ context (llm-context.org overlay) · askbook           │
    │   orchestration  │ orchestration (recipe registry) · recipe_runner       │
-   │                  │ vault_facts (Phase 21.1 deterministic cache)          │
+   │                  │ vault_facts (Phase 2026-05.13.01 — DB-backed vault fact store deterministic cache)          │
    │   tools          │ org_tools (pure-python; called by mcp + recipes)      │
    │                  │ weather · doom_introspect                             │
    │   self-care      │ rescue · life_support · perf · performance            │
@@ -327,7 +327,7 @@ surfaces — it shapes which features each one gets.
             (via bundled TS adapter)    ║                              ║
               ╳ proxy bypassed → Pi's own model selection              ║
                                         ║                              ║
-   Emacs    ───── direct (planned) ────▶║  llm.py          (Phase 16.3) ║
+   Emacs    ───── direct (planned) ────▶║  llm.py          (Phase 2026-05.03 — Emacs companion) ║
    companion                            ║                               ║
                                         ║  ─────────────────────────────║
                                         ║  ONLY opencode sees the proxy ║
@@ -383,7 +383,7 @@ point it at =http://127.0.0.1:<proxy-port>= and run our 23
 interceptors before traffic hits Ollama. Other MCP clients
 (Claude Code, Cursor, …) talk to their own backends with no
 equivalent override; Pi manages its own provider plumbing.
-Phase 22's design bet was *"orchestration without round-trips"*
+Phase 2026-05.12 — orchestration v2's design bet was *"orchestration without round-trips"*
 — recipes only work when we control the request seam. That's
 why opencode is the primary host and why we don't try to
 retrofit the proxy onto the other surfaces (per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]],
@@ -431,9 +431,9 @@ from the literate org file and is descriptive, not authoritative.
 | =history=            | Unified event log — CLI invocations, MCP calls, crew actions.         |
 | =config=             | Single source of truth for runtime knobs (key/value).                 |
 | =crew_log=           | Manager-log entries: recipes matched, narrations, delegates, repairs. |
-| =vault_fact=         | DB-backed deterministic inferrer cache (Phase 21.1) — see [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]].   |
+| =vault_fact=         | DB-backed deterministic inferrer cache (Phase 2026-05.13.01 — DB-backed vault fact store) — see [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]].   |
 | =sensor_log=         | Life-support telemetry (battery, CPU, thermal, …).                    |
-| =insight_engagement= | Whether the user opened/dismissed each insight card (Phase 12.5).     |
+| =insight_engagement= | Whether the user opened/dismissed each insight card (Phase 2026-04.07.05 — engagement table).     |
 | =agent_baseline=     | Central registry of agent persona fragments.                          |
 
 Two on-disk supplements to the DB:
@@ -961,7 +961,7 @@ shows the full self-care trail.
    │  │   org-llm doctor --power-boost RAM-fit probe → may auto-set         │ │
    │  │                                proxy_cloud_first when local can't   │ │
    │  │                                fit the chosen model                 │ │
-   │  │   org-llm doctor --diagnose-cards   Phase 12.5 insight diagnosis    │ │
+   │  │   org-llm doctor --diagnose-cards   Phase 2026-04.07.05 — engagement table insight diagnosis    │ │
    │  │                                                                     │ │
    │  │   rescue.py: match_structured(exc, traceback_tail) → known-failure  │ │
    │  │              dispatch (regex + type matchers)                       │ │
@@ -1024,7 +1024,7 @@ shows the full self-care trail.
    │  │   (find_stale_notes MCP tool wraps the same logic for agent use)    │ │
    │  │                                                                     │ │
    │  │   Dry-run by default (no edits unless --apply)                      │ │
-   │  │   Stale candidates  →  surfaced as Phase 12 insight cards           │ │
+   │  │   Stale candidates  →  surfaced as Phase 2026-04.07 — insight cards insight cards           │ │
    │  │   User reaction     →  insight_engagement table                     │ │
    │  │   --diagnose-cards  →  doctor reads insight_engagement to surface   │ │
    │  │                        per-generator quality patterns               │ │
@@ -1143,10 +1143,10 @@ repeated failure, hedging — the answer must be code.
 Alignment with adjacent arcs:
 - The existing /Recipe pre-fetch (zero round-trip)/ row in the
   [[*Capability matrix][capability matrix]] is one instance of pattern (1).
-- Phase 25's DB-authoritative inversion turns the DB into the
+- Phase 2026-05.17 — DB-as-cache + git-canonical pipeline's DB-authoritative inversion turns the DB into the
   resolvers' reference desk (repo registry, person/agent index,
   org-node lookup all hit the DB).
-- Phase 29's self-coded tools provide the auto-promotion path:
+- Phase 2026-05.20 — sync verb POC's self-coded tools provide the auto-promotion path:
   when the audit log shows the LLM repeatedly disambiguating
   the same kind of thing, the proposed tool is a new resolver
   registry entry.
@@ -1229,14 +1229,14 @@ Composition with the rest of the orchestration layer:
   *project* grain — host launch, regenerated, single file. The
   orientation primer operates at *domain* grain — fetched per
   task, per namespace. They stack; nothing duplicates.
-- *Recipes* (Phase 22 v2) operate at *intent* grain — manager
+- *Recipes* (Phase 2026-05.07 — manager pre-fetch + agent narrates) operate at *intent* grain — manager
   detects intent class match, pre-fetches deterministically.
   Same lazy-loading discipline, different trigger.
-- *Resolver registry* (Phase 24.1) operates at *prompt*
+- *Resolver registry* (Phase 2026-05.02.01 — pre-flight resolvers) operates at *prompt*
   grain — facts (path, repo, agent, time) injected per call.
   Orientation operates at *domain* grain — conventions
   injected per task class.
-- *Self-coded tools* (Phase 29) is the auto-promotion path:
+- *Self-coded tools* (Phase 2026-05.20 — sync verb POC) is the auto-promotion path:
   when the audit log shows a primer fetch consistently
   precedes a specific intent class, the primer fetch
   becomes part of a recipe — collapsing today's per-spawn
@@ -1300,7 +1300,7 @@ The principle has four direct consequences for how we build:
    the gap, don't excuse it./
 
 *Tension with database-maximalism.* /This is the real tension
-this rule has to coexist with./ The Phase 25 inversion makes
+this rule has to coexist with./ The Phase 2026-05.17 — DB-as-cache + git-canonical pipeline inversion makes
 SQLite the runtime source of truth (DB-authoritative); files
 become rendered UI. *That does not contradict "Org is Code".*
 The two pillars are layered, not opposed:
@@ -1316,7 +1316,7 @@ Files remain code (= satisfy this rule's four consequences)
 even when the DB is the engine's read/write surface. The
 round-trip (file ⇄ DB) is bidirectional and frictionless;
 neither side gets to "win" against the other. See
-[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] § Phase 25 for the
+[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] § Phase 2026-05.17 — DB-as-cache + git-canonical pipeline for the
 inversion details and
 [[id:67ab8c13-8f29-4c5b-9d62-7e1f3a4b8c52][memory-alpha.org]]
 for the Trek-framing of the layered model.
@@ -1332,10 +1332,10 @@ runtime."
 Adjacent decisions:
 - *DEC-002 (org-native first; .md only for cross-tool surfaces)*
   is the file-format ramification of this rule.
-- *Phase 24 supervision trinity* applies code-style
+- *Phase 2026-05.02 — supervision trinity supervision trinity* applies code-style
   pre-flight + recovery + observability to agent dispatch —
   that's "would we do this for code?" answered yes.
-- *Phase 26 cull-and-extract* treats core/addable the way a
+- *Phase 2026-05.04 — cull walk cull-and-extract* treats core/addable the way a
   monorepo treats workspace/package — code-shaped reasoning
   about modularity.
 
@@ -1372,7 +1372,7 @@ Two rules from [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki conventions]] app
 - *Not the phase log.* The roadmap holds shipped/planned phases
   with commit anchors; this page only mentions phase numbers
   when they explain a structural choice (e.g. "the LLM proxy is
-  the seam — Phase 17.1 + Phase 22").
+  the seam — Phase 2026-05.05 — LCARS panel + LLM proxy + Phase 2026-05.12 — orchestration v2").
 - *Not the tool catalogue.* MCP holds the tool list; recipes
   holds the recipe registry; this page points at both.
 
@@ -1383,7 +1383,7 @@ Two rules from [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki conventions]] app
 - [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] — the orchestration seam
 - [[id:daaf30cd-4316-4f20-befa-5831328708c6][Interceptors]] — the concept the proxy chain runs
 - [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][Recipes]] — proxy-time orchestration
-- [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]] — Phase 21 deterministic-fact cache (=vault_fact= table)
+- [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]] — Phase 2026-05.13 — deterministic vault inferrers deterministic-fact cache (=vault_fact= table)
 - [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][Agents]] — the persona surface that runs on the proxy
 - [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][Agent framework]] — Agent dataclass, capabilities, hygiene scans
 - [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — the tool surface

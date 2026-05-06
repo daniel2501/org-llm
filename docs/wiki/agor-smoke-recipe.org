@@ -146,7 +146,15 @@ surface in v0.17.3 to *create* a cron-scheduled session — the
 =sessions.scheduled_from_worktree= column and =bulk_archive
 sessionType:"scheduled"= filter exist, but spawning is daemon-internal.
 
-** Not yet (v0.2+)
+** Exercised in v0.2 (2026-05-06)
+
+=scripts/agor-token-refresh.sh= — sourceable + standalone primitive.
+=GET /sessions/:id= after-get hook /does/ regenerate =mcp_token= with
+a fresh =exp= claim — verified live (delta=2s after 2s sleep). Closes
+the long-lived-team gating gap surfaced in
+[[id:3a8b1f72-9c4d-4e21-a5d8-7b2e9f1c3a6d][long-lived-team-vault-hygiene.org]] § Gating follow-ups.
+
+** Not yet (v0.3+)
 
 Slack / GitHub message-gateway round-trip · =sessions_create
 callback_config= ack-on-completion semantics with a real LLM body ·
@@ -154,7 +162,7 @@ cross-tool spawn (Claude → Codex / Gemini / OpenCode child) ·
 multiplayer canvas presence (facepile + cursor stream) · cron
 heartbeat once upstream exposes the scheduler API.
 
-Open questions: =mcp_token= refresh loop for >24 h runs;
+Open questions: progressive-disclosure round-trip latency cost;
 progressive-disclosure round-trip latency cost; rotate the
 default-admin creds during =agor-pilot-install=.
 
@@ -213,13 +221,76 @@ is unusable without it; subsequent runs skip the write.
 | 6  | =multi-agent-org-llm.org § "Async peer query"= predicts =mode:"btw"= "answer returns inline via callback"; actually returns a *new session* w/ =fork_origin:"btw"= + =callback_config.callback_mode:"once"=. Caller must check session genealogy or wait for the daemon to invoke the callback. | Compare wiki text to v0.1 run-log primitive 1 | Update wiki copy to "ephemeral fork that auto-archives + auto-callbacks the parent on completion" |
 | 7  | =org_llm.logbook= default =log_kinds= allowlist excludes =team-session=, so the canonical kind from =multi-agent-org-llm.org § Captain's-log + session-genealogy reconciliation= silently drops on write | Call =logbook.write_event(kind="team-session", …)= on a fresh DB | v0.1 harness adds =team-session= to =Config.log_kinds= idempotently on first run; lift to default before promoting Agor team-session writes app-wide |
 
+* v0.2 — token refresh primitive
+
+*Summary.* =scripts/agor-token-refresh.sh= refreshes a session's
+=mcp_token= via the documented =GET /sessions/:id= after-get hook.
+Sourceable (5 functions: =agor_decode_jwt_exp=,
+=agor_token_seconds_until_expiry=, =agor_token_near_expiry=,
+=agor_refresh_session_token=, =agor_refresh_if_near_expiry=) +
+standalone CLI (=decode= / =seconds-left= / =check= / =refresh= /
+=refresh-if-needed=). 9/9 live tests PASS on agor-live v0.17.3.
+Verdict: long-lived-team cron promotion *unblocked*.
+
+*Expanded.* Verified contract: calling =GET /sessions/:id= as the
+admin who created the session returns a freshly-minted =mcp_token=
+with =exp= advanced to "now + execution.mcp_token_expiration_ms"
+(default 24 h). Re-mint differs from the prior token (verified — first
+two test runs returned tokens with =exp= delta = wallclock delta).
+The primitive exposes both a "refresh always" entry point
+(=refresh_session_token=) and a "refresh if within threshold" path
+(=refresh_if_near_expiry=, default 300 s) so heartbeat callers can
+amortise the round-trip.
+
+*Coverage map.*
+
+| Function / verb              | Pass criterion                                                              | Live result      |
+|------------------------------+-----------------------------------------------------------------------------+------------------|
+| =decode <jwt>=               | Prints exp epoch (positive integer)                                         | PASS             |
+| =seconds-left <jwt>=         | Returns ~86400 for a freshly-minted 24 h JWT                                | PASS (=86400)    |
+| =check <jwt>= (default 300s) | Fresh token rc=1 + prints =OK=                                              | PASS             |
+| =check <jwt> 90000=          | Fresh token rc=0 + prints =NEAR_EXPIRY= (threshold > 24 h)                  | PASS             |
+| =refresh <sid>=              | Returns new JWT; =exp_new > exp_old=; new prefix differs                    | PASS (delta=2s)  |
+| =refresh-if-needed= (300s)   | Fresh token returns unchanged                                               | PASS             |
+| =refresh-if-needed= (90000s) | Forces refresh; new exp ≥ prior                                             | PASS             |
+| Bogus session id             | Exit 30 NOTFOUND (with v0.17.3 500-quirk handling — see bug #9)             | PASS             |
+| Missing =cli-token= file     | Exit 20 AUTH                                                                | PASS             |
+
+*Run.*
+
+#+begin_src sh
+# Decode an arbitrary mcp_token's exp claim
+scripts/agor-token-refresh.sh decode "$JWT"
+
+# How long until this token expires?
+scripts/agor-token-refresh.sh seconds-left "$JWT"
+
+# Refresh always — sized for "every heartbeat"
+NEW=$(scripts/agor-token-refresh.sh refresh "$SESSION_ID")
+
+# Refresh only if within 5 min of expiry — sized for "every long tick"
+NEW=$(scripts/agor-token-refresh.sh refresh-if-needed "$SESSION_ID" "$CURRENT_JWT" 300)
+
+# Sourceable — for in-script use
+. scripts/agor-token-refresh.sh
+fresh=$(agor_refresh_if_near_expiry "$SID" "$current" 300)
+#+end_src
+
+* New bugs found in v0.2
+
+| #  | Symptom                                                            | Reproducer                                                                 | Workaround                                                                  |
+|----+--------------------------------------------------------------------+----------------------------------------------------------------------------+-----------------------------------------------------------------------------|
+| 9  | =GET /sessions/<bogus_id>= returns HTTP 500 with =GeneralError= "Session not found: …", *not* a proper 404 | =curl -H bearer http://…/sessions/00000000-0000-0000-0000-000000000000= | Pattern-match =message =~ /[Ss]ession not found/= on 500 response and treat as 404 (v0.2 primitive does this) |
+
 * Cross-refs
 
 - [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] · [[id:9dc47d5a-5efe-4a04-8a3a-45b69643e982][agor-pilot-install.org]]
 - [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-006 (deterministic supervision); DEC-017 — stack composition vs. integration
 - [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] — current sprint side-quest
+- [[id:3a8b1f72-9c4d-4e21-a5d8-7b2e9f1c3a6d][long-lived-team-vault-hygiene.org]] — gating gap closed by v0.2
 - =/tmp/agor-test-log-2026-05-06.org= — v0 live test session log
 - =/tmp/agor-smoke-v01-run-2026-05-06.org= — v0.1 live run log (5 s, $0.00, 5/6 PASS + 1/6 RECORDED-GAP)
+- =/tmp/agor-token-refresh-test-2026-05-06.org= — v0.2 live test report
 - Upstream: =https://agor.live/guide/internal-mcp= · =https://agor.live/guide/architecture=
 
 * Long-lived sessions — token refresh

@@ -46,8 +46,8 @@ one shared =boardId=, one worktree per role.
 | Cadence           | Daily heartbeat — proposed cron =0 8 * * *= EST; 1 tick fired now for smoke       |
 | Captain pre-fetch | =vault_profile_digest()= (deterministic; 576 chars; 0 LLM tokens) before narration |
 | LLM call shape    | *One* cloud call per tick (captain narrates; children narrate one line each)       |
-| Dissolve trigger  | Goal sunset (roster reshape on Phase 29 promotion of drift heuristic to dbt model) |
-| Evolution rules   | Toolset adapts (Phase 29 promotes recurring heuristics); roster pinned this phase  |
+| Dissolve trigger  | Goal sunset (roster reshape on Phase 2026-05.20 — sync verb POC promotion of drift heuristic to dbt model) |
+| Evolution rules   | Toolset adapts (Phase 2026-05.20 — sync verb POC promotes recurring heuristics); roster pinned this phase  |
 
 * Workspace topology
 
@@ -148,16 +148,17 @@ stream: =/tmp/vault-hygiene-captain-out-643903.jsonl=. Bridge record:
 cron, and a third smaller item surfaced in the smoke. Listed
 captured-not-built; Agent A in this dispatch owns the harness work.
 
-** Token refresh (BLOCKING for long-lived cadence)
+** Token refresh — *CLOSED 2026-05-06*
 
 The captain's =mcp_token= is a 24 h JWT (per [[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe]]
-step 6). A daily cron at =0 8= will hit expiry on day 2 unless either
-(a) every tick re-issues a captain session, or (b) Agor's
-after-=GET /sessions/:id= hook re-mints =mcp_token= when called by an
-authorised member. Recommendation: route (b), so the long-lived
-captain *session* is durable — only the *token* is refreshed. Filed
-as Agent A territory; today's smoke worked precisely because the run
-finished inside a single 24 h window.
+step 6). Originally filed as a blocker because a daily cron at =0 8=
+would hit expiry on day 2. /Now resolved./ =scripts/agor-token-refresh.sh=
+(see [[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe]] § v0.2) implements route (b) — Agor's
+after-=GET /sessions/:id= hook re-mints =mcp_token= with a fresh =exp=
+claim, verified live (9/9 tests PASS). Heartbeat callers should call
+=agor_refresh_if_near_expiry "$SID" "$current_jwt" 300= each tick to
+amortise the round-trip; long-lived captain *sessions* now persist
+across 24 h boundaries with token rotation handled inline.
 
 ** =mode:"btw"= async peer query (BLOCKING for richer coordination)
 

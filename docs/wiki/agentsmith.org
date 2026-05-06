@@ -27,7 +27,7 @@ The result is a working @-tag in one conversation.
 | You want to clone a built-in with a different model_role      | yes              |
 | You want to tweak ONE field on an existing agent (triggers)  | edit ~/org/org-llm-agents.org directly |
 | You want to design an MCP tool, not an agent                 | no — it's the wrong abstraction |
-| You're adding capabilities the host doesn't ship yet         | discuss with @ops or open a Phase 23.x ticket |
+| You're adding capabilities the host doesn't ship yet         | discuss with @ops or open a Phase 2026-05.14 — agent-framework refinements (legacy 23.x family) ticket |
 
 The cost of building an agent that turns out unused is small (a
 heading in your literate file you can delete), so err toward

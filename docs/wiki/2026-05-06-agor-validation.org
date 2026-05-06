@@ -63,7 +63,7 @@ v0.17.3, and the canon list needs reconciling.
 | Primitive                                | Why unvalidated                                  | Owner / status                                        |
 |------------------------------------------+--------------------------------------------------+-------------------------------------------------------|
 | Cron / scheduled child spawn             | No MCP/REST surface exists in v0.17.3 (gap #4)   | Wait for upstream scheduler API; or write to DB direct |
-| =mcp_token= refresh after 24 h           | Day-2 heartbeat will silently break              | *Build next* — gates promotion of vault-hygiene to cron |
+| =mcp_token= refresh after 24 h           | (was: day-2 heartbeat will silently break)       | *CLOSED 2026-05-06* — =scripts/agor-token-refresh.sh= primitive landed; 9/9 live PASS; see [[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe.org]] § v0.2 |
 | =mode:"btw"= in production team          | Confirmed at protocol level only (v0.1)          | Validate in next pilot when a team genuinely needs mid-tick clarification |
 | Cross-tool spawn (Claude → Codex / Gemini / OpenCode child) | All pilots stayed on Claude Code  | Recommended v0.2 of harness (per Agent A report)      |
 | Slack / GitHub message gateway           | Out of scope for headless validation             | Defer until human-in-loop pilot                       |
@@ -162,10 +162,10 @@ The heartbeat finds drift /at rest/.
 
 | Plan item                                      | Before today                | After today                                             |
 |------------------------------------------------+-----------------------------+---------------------------------------------------------|
-| Headless smoke harness                         | v0 PASS                     | v0.1 covers 5 more primitives; v0.2 = cross-tool spawn  |
+| Headless smoke harness                         | v0 PASS                     | v0.1 covers 5 more primitives; v0.2 lands token-refresh; v0.3 = cross-tool spawn |
 | Spike-team pattern                             | designed in canon, not run  | *Validated* on license decision; AGPLv3 rec to ratify   |
-| Long-lived team — vault hygiene                | designed in canon, not run  | *1-tick PASS*; promotion to daily cron blocked on token-refresh primitive |
-| Token-refresh primitive                        | not on backlog              | *Top of backlog* — gates all long-lived teams           |
+| Long-lived team — vault hygiene                | designed in canon, not run  | *1-tick PASS*; daily cron promotion *unblocked* by v0.2 token-refresh primitive |
+| Token-refresh primitive                        | not on backlog              | *LANDED 2026-05-06* — =scripts/agor-token-refresh.sh=, 9/9 live PASS |
 | =mode:"btw"= in production                     | unvalidated                 | Protocol confirmed; first production user = vault hygiene v2 (=@geordi= ↔ =@atoz= mid-tick) |
 | Cross-tool spawn                               | unvalidated                 | Recommended v0.2 of harness                              |
 | Wiki-canon corrections                         | n/a                         | 3 corrections owed in =multi-agent-org-llm.org=         |
@@ -182,7 +182,7 @@ explicitly so they don't get lost in cross-pilot scrolling.
    =/tmp/license-decision-2026-05-06.md=. Rec: ratify as
    [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-010]] resolution.
 2. *Promote spike-team pattern* as a sanctioned tool for decision-grade
-   doc work (license, version scheme, Phase 26.2 extraction). Implies
+   doc work (license, version scheme, Phase 2026-05.01 — physical extraction extraction). Implies
    it earns a coordination-pattern entry in [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]].
 3. *Defer cron promotion* of vault-hygiene team until token-refresh
    primitive lands. Document this gating in =now.org=.
@@ -206,3 +206,96 @@ explicitly so they don't get lost in cross-pilot scrolling.
 - =/tmp/license-decision-2026-05-06.md= — B artifact (the recommendation)
 - =/tmp/vault-hygiene-1tick-2026-05-06.org= — C run log
 - =/tmp/captains-log-vault-hygiene-2026-05-06.jsonl= — C bridge record
+
+* Test 6 — Bridge Crew materialize + persona-driven spawn
+
+*Summary.* End-to-end test of =org-llm bridge-crew materialize= verb
+(commit =645f921=) + probe of whether Agor v0.17.3 auto-loads the
+resulting on-disk SOUL/IDENTITY/USER files. *Verdict: PARTIAL.* Phase
+A PASS (21/21 byte-identical to canon). Phase B answered via REST+MCP
+inspection (=claude -p= blocked by harness sandbox): Agor does *not*
+auto-load =.agor-assistants/<handle>/=. Wall ~6 min, LLM $0.00.
+
+*Expanded.* Worktree: =019dfc19-719e-7421-bac0-08f8694bb5d1= at
+=/home/daniel/.agor/worktrees/local/org-llm/bridge-crew-validate-2026-05-06=
+(created via REST per bug #1). Materializer wrote 21 files, 8 dirs;
+=org_llm.bridge_crew.BRIDGE_CREW= equality check across all 7 personas
+× SOUL/IDENTITY/USER → all True. Phase B blocked from running a live
+session, but the structural question is resolvable at the API layer:
+
+| Check                                        | Expected if wired | Actual         |
+|----------------------------------------------+-------------------+----------------|
+| =GET /worktrees/<id>.custom_context=         | populated         | field absent   |
+| =agor_assistants_list= MCP                   | 1+ entries        | =total=0=      |
+| =agor_assistants_{create,update}= MCP tool   | exists            | does not exist |
+
+*The gap.* On-disk =.agor-assistants/<handle>/= is /our convention/,
+not Agor's. v0.17.3 stores assistants in =worktree.custom_context.assistant=
+(per =AssistantConfig= in bundled =repo-*.d.ts=); the only registration
+path today is the in-app UI — there's a read-side MCP tool
+(=agor_assistants_list=) but no write-side.
+
+*v0.1 follow-up shape:* extend =bridge_crew.materialize()= to also
+=PATCH /worktrees/<id>= with =custom_context.assistant={soul,
+identity, user, name, description}= per persona; petition upstream
+for =agor_assistants_create= MCP tool. With that, the read tool
+populates and zone-triggered sessions inherit the persona role.
+
+*Surprise.* The =bridge_crew.py= docstring is accurate verbatim — and
+=agor_assistants_list= already exists, so only the write-side is
+missing. The v0.1 ask is a single upstream patch, not a re-architecture.
+
+*Cross-refs (Test 6):* [[file:bridge-crew-agor-assistants.org][bridge-crew-agor-assistants.org]] · =org_llm/bridge_crew.py=
+· =org_llm/cli.py= ~L21039 · parent session
+=019dfc1a-52e0-7238-934f-c7f45b88fcb6= (archived); worktree left dirty.
+
+* Test 7 — Scheduler heartbeat (3 fires + dedupe)
+
+*Summary.* PASS. =* * * * *= cron fired *3 cron-driven session spawns*
+at min 06/07/08 UTC (+ 4th at 09 post-disable race). Internal dedupe
+held: 7 "Schedule is due" tick-lines → 4 spawns (=scheduled_run_at=
+rounded-to-minute key, =services/scheduler.js:314=). Wall *211 s*. LLM
+~*$0.075* (Haiku, ~$0.025/fire). Cleanup idempotent. *Closes gap #4
+— cron is real, doc-gapped not API-gapped.*
+
+*Schedule API.* No dedicated route. =PATCH /worktrees/:id= w/
+=schedule_enabled:true=, =schedule_cron=, and =schedule= JSON object
+(=prompt_template= Handlebars, =agentic_tool=, =permission_mode=,
+=model_config{mode:"custom",model}=, =timezone=, =retention=,
+=allow_concurrent_runs=). =register-services.js= rejects =enabled:true=
+if =schedule= absent; =POST /worktrees/:id/execute-schedule-now= for
+manual fire (untested).
+
+| # | scheduled_run_at (UTC) | session_id suffix | tick lag |
+|---+------------------------+-------------------+----------|
+| 1 | 07:06:00.000Z          | =019dfc1b-e466=   | +19.6 s  |
+| 2 | 07:07:00.000Z          | =019dfc1c-cebb=   | +19.6 s  |
+| 3 | 07:08:00.000Z          | =019dfc1d-b923=   | +19.6 s  |
+| 4 | 07:09:00.000Z (race)   | =019dfc1e-a38e=   | +19.6 s  |
+
+Tick = 30 s misses top-of-minute; lands on next tick. Deterministic.
+
+*HEARTBEAT_FIRE.* Indirect-confirmed: rendered prompt verbatim in
+=daemon.log= per executor; all 3 hit =Execution completed (assistant=2
+msgs)=. Post-mortem GET impossible — DELETE cascade-removed sessions;
+v0.2 should =KEEP_DIRTY=1=. Cosmetic sub-bug: =worktree.unique_id=
+rendered empty (Handlebars key is =worktree_unique_id=; caller error).
+
+*Dedupe.* PATCH idempotent =200= (config update). Real dedupe is
+spawn-side: 30 s tick fires twice/min, only first spawns; second hits
+=existingSession= and silent-skips. *7 ticks → 4 spawns = 3 skips.*
+
+*Surprise / bug #9.* =POST /repos/:id/worktrees= w/ =new_branch:true= +
+=ref:<same as name>= silently *fell back* to creating empty,
+non-=.git= dir after =git.worktree.add= rejected the ref. Cron then
+ran in 0-files cwd. Fine for print prompt; silently broken for a
+repo-aware cron job.
+
+*v0.2 follow-ups.* (a) =SCHEDULER_TEST=1= primitive in
+=scripts/agor-smoke.sh= w/ =KEEP_DIRTY=1=. (b) Document =schedule=
+shape in =multi-agent-org-llm.org=. (c) Fix bug #9. (d) Promote cron
+"unvalidated" → "Solid" in primitives table; no longer gates
+long-lived-team daily cadence.
+
+*Cross-refs:* =/tmp/agor-test5-runner.py= · =/tmp/agor-test5-run.log=
+· =/tmp/agor-test5-summary.json= · worktree archived.

@@ -66,7 +66,7 @@ file. Today's mechanisms are ad-hoc.
 |-------------------------------+--------------------------+-------------------------------|
 | @boothby nightly hygiene      | nightly                  | (planned) cron / scheduled remote |
 | dbt build on save             | event-driven             | save-hook                     |
-| dbt build incremental         | every save               | (in-flight per Phase 25.x DB-authoritative) |
+| dbt build incremental         | every save               | (in-flight per Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) DB-authoritative) |
 | Snapshot table refresh        | per snapshot strategy    | dbt-managed                   |
 | Captain's-log rotation        | size threshold (5MB)     | =org_llm/logbook.py= internal |
 | Recipe A/B re-test            | weekly/monthly           | scheduled remote agent (=trig_019...=) |
@@ -84,12 +84,24 @@ per-machine cron-shape work where =systemd= timers or cron suffice.
 
 ** Real candidates (Airflow earns its keep)
 
-| Candidate                                    | Why Airflow                                |
-|----------------------------------------------+--------------------------------------------|
-| Cross-vault federation (post-1.0)            | Joins household / work / personal vaults — DAG of joins, sensors per vault |
-| Heavy daily snapshot rolls (=snap_*=)        | When computed across multiple data sources, retries + observability matter |
-| Cross-app pipelines (org → dbt → Superset → email) | Multi-step with dependencies            |
-| Multi-device coordination                    | Laptop nightly with phone-aware fallback   |
+Eleven candidates, ranked by current-phase fit.  Each has a
+matching headless test in =tests/test_airflow_candidates.py= (see
+§ Headless validation harness below) and a verdict row in the
+2026-05-06 report ([[file:2026-05-06-airflow-candidates-report.org][airflow-candidates-report.org]]).
+
+| #  | Candidate                                                                        | DAG / Sensors / Retries / Backfill            | Phase fit            |
+|----+----------------------------------------------------------------------------------+-----------------------------------------------+----------------------|
+|  1 | Cross-vault federation (household / work / personal joins)                       | sensors + DAG                                 | 30+ — federation     |
+|  2 | DB ↔ vault re-render under Phase 2026-05.17 — DB-as-cache + git-canonical pipeline — DB-authoritative inversion                | DAG + retries on conflict                     | 25.x                 |
+|  3 | External-data ingest fan-in (calendar / email / RSS / finance / health / weather) | per-source sensors + retries                  | sprint+1             |
+|  4 | Cross-app egress (org → dbt → Superset → digest email/push)                      | DAG                                           | already named        |
+|  5 | Heavy daily snapshot rolls (=snap_*=) over multi-source                          | retries + observability                       | already named        |
+|  6 | Agor multi-day campaign orchestration (research → spec → impl → test → review)   | DAG + SLA + retries on flaky model calls      | DEC-017 — Agor       |
+|  7 | Phase 2026-05.20 — sync verb POC — self-coded tools runtime (mass scheduling of promoted tools)          | mass cron-of-many + observability             | 29.x                 |
+|  8 | Embedding refresh + vault re-index after large rewrites                          | backfill is the killer feature                | 25.x                 |
+|  9 | Multi-device fleet coordination (laptop / phone / homelab)                       | per-device sensors                            | 30+                  |
+| 10 | Provenance / vault-history backfills (rerun a pipeline against historical org)   | backfill                                      | 25.x cleanup         |
+| 11 | A/B / multivariate harness fan-out at scale (agent-team variants, not recipes)   | DAG of judge calls                            | post-DEC-017         |
 
 ** Anti-candidates (don't reach for Airflow)
 
@@ -99,13 +111,51 @@ per-machine cron-shape work where =systemd= timers or cron suffice.
 | Save-hook dbt build           | file-watch / babel                         |
 | Recipe A/B harness            | scheduled remote agent / cron              |
 | Captain's-log rotation        | in-process size check                      |
+| Chat-surface latency path     | direct RPC                                 |
+| One-off "remind me at 3pm"    | =schedule= skill / scheduled remote agent  |
+| In-frame agent calls          | live cloud call                            |
+| NATS-shape event fan-out (notify-on-write) | NATS event fabric (per containerization-strategy memo) |
+
+** Decision lens — when Airflow vs. alternatives
+
+| Alternative                              | Wins when                                                |
+|------------------------------------------+----------------------------------------------------------|
+| =systemd= / cron                         | Single host, single vault, no dependencies               |
+| NATS                                     | Event-shape (something happened → fan out), not time-shape |
+| Phase 2026-05.20 — sync verb POC — promoted-tool runtime         | Recurring deterministic call, n=1 today                  |
+| Airflow                                  | DAG-shape + sensors + retries + backfill + observability across hosts/vaults/apps |
+| Prefect / Dagster                        | Same shape as Airflow, lighter footprint — side-look once "yes orchestrator" lands |
 
 ** Recommendation
 
 Airflow becomes plausible at /n=many users/ or /cross-vault
 federation/. For n=1 today, simpler primitives win. *Defer Airflow
-integration; revisit once cross-vault federation lights up* (Phase 30+
+integration; revisit once cross-vault federation lights up* (Phase 2026-06.04 — FOSS agent value-adds+
 — federation). Filed in [[file:dev-tracker.org][dev-tracker.org]] § Hosting matrix as a TODO.
+
+Caveat to the deferral: candidates *#2 (DB ↔ vault re-render)*,
+*#7 (Phase 2026-05.20 — sync verb POC — self-coded tools runtime)*, *#8 (embedding refresh)*,
+and *#10 (provenance backfills)* are /internal/ DAG-shape needs that
+arrive *before* federation.  They are the earlier trigger and may
+collapse the deferral window.
+
+** Headless validation harness
+
+Per =feedback_validate_orchestration_with_ab=, the eleven candidates
+above are each exercised by an /agent-managed headless test/ in
+=tests/test_airflow_candidates.py=.  The harness lives in
+=tests/airflow_candidate_harness.py= and provides minimal
+in-process simulators for the four Airflow primitives we'd lean
+on: =DAG= (topological execution), =Sensor= (poll-with-timeout),
+=Retry= (backoff with cap), =Backfill= (replay-over-window).
+
+Each test asserts whether the candidate /actually/ exercises the
+primitives that justify Airflow over =systemd= timers.  Verdicts
+are emitted as a structured row the harness collects so an agent
+(today: =@geordi= per [[file:agents.org][agents.org]] roster) can run
+=pytest tests/test_airflow_candidates.py -q= and narrate the
+result table.  This is the empirical prior the recommendation
+above rests on.
 
 * Two-tier tools and scheduling (DEC-013)
 
@@ -132,7 +182,7 @@ its own schedule/. Examples:
   09:00 EST?"
 - @riker proposes "sprint review every other Friday 16:00 EST."
 
-Phase 29 — self-coded tools is the natural home: LLM observes a
+Phase 2026-05.20 — sync verb POC — self-coded tools is the natural home: LLM observes a
 recurring need, proposes a deterministic tool (here: a schedule
 entry), validates it, registers it; runtime calls skip LLM.
 

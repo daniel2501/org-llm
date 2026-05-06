@@ -1,7 +1,7 @@
 :PROPERTIES:
 :ID:       a5dedfd4-591d-431a-9190-6392de12140b
 :END:
-#+title: Codebase map — post-cull (Phase 26.1)
+#+title: Codebase map — post-cull (Phase 2026-05.04 — cull walk)
 #+filetags: :phase26:cull:codebase:map:
 
 * Summary
@@ -11,7 +11,7 @@ Tells a contributor (human or agent) at a glance: which modules survive as CORE,
 ship CORE_DISABLED, which retire (SUBSUMED), which move to community extension path,
 and which weren't in the cull and need future review.
 
-*Expanded.* Single-table map. Phase 26.2 (physical extraction) reads from this map.
+*Expanded.* Single-table map. Phase 2026-05.01 — physical extraction (physical extraction) reads from this map.
 After 26.2 completes, this page becomes the "what's in the install" reference for
 new contributors.
 
@@ -58,7 +58,7 @@ new contributors.
 | report.py             |   335 | NOT IN CULL    | -                                          | report rendering; review    |
 | rescue.py             |   347 | CORE           | Doctor + self-heal                         | distro deliverability       |
 | search.py             |   573 | CORE+SUBSUMED  | Embeddings + search                        | vector stays; ~150 LoC cut  |
-| self_mod.py           |   456 | CORE           | Self-coded tools (Phase 29)                | auto-promotion pipeline     |
+| self_mod.py           |   456 | CORE           | Self-coded tools (Phase 2026-05.20 — sync verb POC)                | auto-promotion pipeline     |
 | skills.py             |   138 | CORE_DISABLED  | Skills (org-babel slash commands)          | off-default                 |
 | style_infer.py        |   267 | COMMUNITY      | Style-infer / personalize                  | polish layer                |
 | theme_studio.py       |   771 | CORE_DISABLED  | LCARS theming + theme studio               | off-default                 |
@@ -73,7 +73,7 @@ new contributors.
 20 CORE (incl. 4 with SUBSUMED-partial overlap), 7 CORE_DISABLED, 4 SUBSUMED (incl.
 2 SPLIT), 5 COMMUNITY, 13 NOT IN CULL.
 
-* Phase 26.2 work surface
+* Phase 2026-05.01 — physical extraction work surface
 
 - =org_tools.py= (1174 LoC) — SUBSUMED; delete after dbt =parsed_*= + =agenda_view= + =link_graph= + =tag_taxonomy= ship.
 - =vault_facts.py= (951 LoC) — SUBSUMED; migrate 9 inferrers to 9 dbt models, then delete (~600 LoC cut).
@@ -85,4 +85,4 @@ new contributors.
 
 - [[file:cull.org][cull.org]] — verdict source (38 components)
 - [[file:dbt-pipeline.org][dbt-pipeline.org]] — what subsumes most of the SUBSUMED set
-- [[file:dev-tracker.org][dev-tracker.org]] § Phase 26 — extraction work
+- [[file:dev-tracker.org][dev-tracker.org]] § Phase 2026-05.04 — cull walk — extraction work

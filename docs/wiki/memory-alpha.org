@@ -8,8 +8,8 @@
 
 * What this is
 
-A naming + conceptual frame for the Phase 25 inversion. Instead
-of describing Phase 25 in dry shop-talk ("DB-authoritative
+A naming + conceptual frame for the Phase 2026-05.17 — DB-as-cache + git-canonical pipeline inversion. Instead
+of describing Phase 2026-05.17 — DB-as-cache + git-canonical pipeline in dry shop-talk ("DB-authoritative
 inversion"), describe it via the Trek concept of *Memory
 Alpha* — the Federation's central library, a planetoid that
 houses all cultural and scientific knowledge, accessible to any
@@ -27,20 +27,20 @@ its own state.
 * The mapping (Trek → org-llm)
 
 Three of four mappings are already in the codebase. The fourth
-(the DB inversion itself) is Phase 25.
+(the DB inversion itself) is Phase 2026-05.17 — DB-as-cache + git-canonical pipeline.
 
 | Trek concept                      | org-llm equivalent                          | status                  |
 |-----------------------------------+---------------------------------------------+-------------------------|
-| *Memory Alpha* (central library)  | the SQLite DB ([[file:../../org_llm/db.py][=db.py=]]) — canonical store    | Phase 25 inversion lands this |
-| Planetary archives (local mirrors) | =~/org/*.org= files — renders of DB state   | Phase 25.6 inversion    |
-| *Memory Prime* (specialised archive) | [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]] — deterministic regex-derived subsets | Phase 21 — *shipped*    |
+| *Memory Alpha* (central library)  | the SQLite DB ([[file:../../org_llm/db.py][=db.py=]]) — canonical store    | Phase 2026-05.17 — DB-as-cache + git-canonical pipeline inversion lands this |
+| Planetary archives (local mirrors) | =~/org/*.org= files — renders of DB state   | Phase 2026-05.17.06 — DB-as-cache step 6 inversion    |
+| *Memory Prime* (specialised archive) | [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]] — deterministic regex-derived subsets | Phase 2026-05.13 — deterministic vault inferrers — *shipped*    |
 | Captain's Log (event stream)      | [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's Log]] (=History= table)             | already named — *shipped* |
 | Memory Alpha librarians           | [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][@atoz]] (Mr. Atoz, TOS S3E23; alias =@curator= legacy) | shipped 2026-05-04      |
-| Federation-wide access protocol   | [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — opencode / Pi / Emacs (+ MCP clients) | Phase 16 — *shipped*    |
+| Federation-wide access protocol   | [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — opencode / Pi / Emacs (+ MCP clients) | Phase 2026-04.10 — extensions — *shipped*    |
 
 The core re-frame: org-llm's DB is your *personal Memory
 Alpha*. Your =~/org/*.org= files are the printed extracts you
-carry between starships. The Phase 25 work is teaching the
+carry between starships. The Phase 2026-05.17 — DB-as-cache + git-canonical pipeline work is teaching the
 system that the library is canonical, not the printed extracts.
 
 * Why this naming
@@ -69,9 +69,9 @@ system that the library is canonical, not the printed extracts.
    developer-facing docs. The metaphor lives in user-facing
    surfaces (verbs, persona language, README).
 
-* The Phase 25 arc as Memory Alpha construction
+* The Phase 2026-05.17 — DB-as-cache + git-canonical pipeline arc as Memory Alpha construction
 
-Mapping the six sub-phases (per [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 25) onto
+Mapping the six sub-phases (per [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 2026-05.17 — DB-as-cache + git-canonical pipeline) onto
 the metaphor:
 
 | sub-phase | technical name              | Memory Alpha framing                                                         |
@@ -82,7 +82,7 @@ the metaphor:
 | 25.4      | git ingestion as audit/history | Every edit is preserved as a versioned record — Memory Alpha gains *time*.   |
 | 25.5      | DB-authoritative engine ops | Mass operations happen in the library; printed extracts re-render from it.   |
 | 25.6      | full inversion              | The library is canonical. Printed extracts become a UI surface. Phase done.  |
-| (Phase 26)| beyond SQLite (DuckDB / Postgres) | Memory Alpha gets a new substrate when the planetoid runs out of room.  |
+| (Phase 2026-05.04 — cull walk)| beyond SQLite (DuckDB / Postgres) | Memory Alpha gets a new substrate when the planetoid runs out of room.  |
 
 Round-trip fidelity is the survival check. Per the roadmap:
 "if 25.1 can't achieve byte-equal on the dev's vault within ~5
@@ -101,7 +101,7 @@ nothing in the current verb space fills cleanly:
 | =org-llm memory-alpha verify= | Walk every file ↔ DB row and report disagreements. The audit verb.          |
 | =org-llm memory-alpha snapshot= | DB Online-Backup-API dump before destructive ops; pairs with restore.     |
 
-These compose with Phase 25.2's =backup= / =restore= verbs
+These compose with Phase 2026-05.17.02 — DB-as-cache step 2's =backup= / =restore= verbs
 rather than replacing them: =memory-alpha snapshot= is the
 *pre-mutation* gesture (snapshot before a risky verb runs);
 =backup= is the *scheduled* / cron-flavour version.
@@ -135,9 +135,9 @@ ships with this naming pass.
 
 * Related
 
-- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 25 —
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 2026-05.17 — DB-as-cache + git-canonical pipeline —
   the six-sub-phase arc this naming wraps
-- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] § Phase 25 —
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] § Phase 2026-05.17 — DB-as-cache + git-canonical pipeline —
   active work surface for the inversion
 - [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] §
   Source-of-truth conventions — what flips during 25.6

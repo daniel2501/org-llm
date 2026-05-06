@@ -45,7 +45,7 @@ Python, hand the agent a structured pre-fetch, narrate in one
 cloud call. Vault facts are the *cached* form — once computed,
 every subsequent call inside the TTL is free.
 
-* The shipped inferrers (Phase 21)
+* The shipped inferrers (Phase 2026-05.13 — deterministic vault inferrers)
 
 Order matches registration in [[file:../../org_llm/vault_facts.py][=org_llm/vault_facts.py=]]:
 
@@ -122,13 +122,13 @@ is per-turn deterministic computation; vault facts are
 *amortised* deterministic computation cached across turns. A
 single agent turn can use both.
 
-* How agents own facts (Phase 23.4)
+* How agents own facts (Phase 2026-05.14 — agent-framework refinements (legacy 23.4 — recipes/inferrers as agent properties))
 
 The [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][agent framework]] gives each =Agent= an optional list of
 inferrers it owns. =mood_signal= belongs to =@journalist=;
 =routine_chores= belongs to the dailies-flavour scribe. Today
 ownership is documentation-only: the global =_INFERRERS= dict in
-=vault_facts.py= remains the active source of truth. Phase 23.4
+=vault_facts.py= remains the active source of truth. Phase 2026-05.14 — agent-framework refinements (legacy 23.4 — recipes/inferrers as agent properties)
 plans to move inferrer registration into the agent definition so
 adding an agent ships its facts with it; the dict stays as the
 runtime registry.
@@ -162,7 +162,7 @@ because:
 
 - [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][Recipes]] — recipe pre-fetch is the per-turn analog; facts
   are the cached, amortised analog
-- [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][Agent framework]] — Phase 23.4 plans to move inferrer
+- [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][Agent framework]] — Phase 2026-05.14 — agent-framework refinements (legacy 23.4 — recipes/inferrers as agent properties) plans to move inferrer
   ownership onto the =Agent= dataclass
 - [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][Agents]] — every agent is told "facts are authoritative; do
   not re-derive"
@@ -170,4 +170,4 @@ because:
   tool surface
 - [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] § Data plane — where =VaultFact= sits in the
   SQLite schema
-- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 21 — the shipping chronology
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 2026-05.13 — deterministic vault inferrers — the shipping chronology

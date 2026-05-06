@@ -24,7 +24,7 @@ surfaces, one source of truth.
 
 - The SQLite row is for *analytics*: dbt models read it,
   =/doctor --reflect= clusters patterns, the AGENTS.md primer
-  audit (Phase 16.2) mines it for tool-call frequency.
+  audit (Phase 2026-04.10.03 — launch wires plugin) mines it for tool-call frequency.
 - The org file is for *human review*: =org-mode= folds the
   headings, supports =M-x grep= and =org-ql=, surfaces in the
   user's daily journal review flow.
@@ -77,20 +77,20 @@ self-documents.
 
 * Integration with insight cards
 
-The =insight_engagement= table (Phase 12.5) is a *separate* table,
+The =insight_engagement= table (Phase 2026-04.07.05 — engagement table) is a *separate* table,
 not part of =History= — engagement events have a different shape
 (card_kind, reaction, narration_model). But =reflect= and
 =--diagnose-cards= both feed into the same "what does the user
 do, and is it working?" picture.
 
-The Phase 12.7 dbt layer (planned) will join the two for
+The Phase 2026-07.06 — dbt analytics dbt layer (planned) will join the two for
 cross-cutting analytics like "card kinds the user clicked AND
 the resulting tool calls succeeded."
 
 * Sparse =kind='mcp'= logging
 
 Today only one MCP tool explicitly logs to =History= with
-=kind=mcp=. The Phase 16.4+ wishlist item "MCP-kind tool-call
+=kind=mcp=. The Phase 2026-05.19 — extension polish+ wishlist item "MCP-kind tool-call
 logging" is a small decorator on every =@server.tool()= in
 =mcp_server.py= that fixes this gap. The AGENTS.md primer audit
 script flags this as a best-effort secondary signal because of
@@ -147,7 +147,7 @@ org-llm log --tangle                     # rewrite ~/org/captains-log.org from D
   the =--reflect= flow's auto-doctor entries write back here
 - [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] § Data
   plane — where Captain's Log fits in the SQLite picture
-- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 16.4 —
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 2026-05.19 — extension polish —
   MCP-kind logging is a planned foundation upgrade
 - [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — the future
   decorator wraps =@server.tool()= to write Captain's Log entries

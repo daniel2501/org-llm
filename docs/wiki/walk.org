@@ -3,7 +3,7 @@
 :CREATED:  [2026-04-30]
 :UPDATED:  [2026-04-30]
 :END:
-#+TITLE: Walk — LLM-driven knowledge capture (Phase 13)
+#+TITLE: Walk — LLM-driven knowledge capture (Phase 2026-04.08 — walk + opencode surfacing)
 #+FILETAGS: :wiki:concept:walk:capture:phase-13:
 #+OPTIONS: toc:nil num:nil
 
@@ -57,16 +57,16 @@ The first positional argument picks a *track*:
 
 | Track       | Status                                                    |
 |-------------+-----------------------------------------------------------|
-| =notes=     | shipped (Phase 13.1) — the default                        |
-| =dailies=   | planned (Phase 13.2) — walk a day's nodes; no explicit ID |
-| =projects=  | planned (Phase 13.3) — walk by project tag                |
+| =notes=     | shipped (Phase 2026-04.08 — walk + opencode surfacing) — the default                        |
+| =dailies=   | planned (Phase 2026-07.07 — dailies as walk targets) — walk a day's nodes; no explicit ID |
+| =projects=  | planned (Phase 2026-04.08 — walk + opencode surfacing (legacy 13.3 — by-project walk)) — walk by project tag                |
 
 Other tracks raise =not yet wired= until the relevant
 sub-phase ships.
 
 * Atomic facts + disambiguation
 
-Phase 13.1 introduced two related concepts:
+Phase 2026-04.08 — walk + opencode surfacing introduced two related concepts:
 
 - *Atomic facts* — single-claim statements extracted from your
   explanation. =walk_remove_fact= MCP tool can target one by
@@ -167,5 +167,5 @@ The walk_* MCP tool family (in [[file:../../org_llm/mcp_server.py][=org_llm/mcp_
   =walk_save_facts=, …) are MCP tools, addressable from any host
 - [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] §
   Knowledge plane — where walk fits beside indexer + search
-- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 13
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 2026-04.08 — walk + opencode surfacing
   for the chronology + planned 13.2-13.5 work

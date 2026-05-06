@@ -58,7 +58,7 @@ plus agents; the framework is the same.
 
 /Dev-as-code/ — Claude Code building software — is a *special case*
 of life-as-code; software-development is one life domain among many.
-The dev-tracker self-hosting (Phase 29.0 — self-coded tools, =tracker
+The dev-tracker self-hosting (Phase 2026-05.20 — sync verb POC — self-coded tools, =tracker
 init / review / pace=) is one instance of the broader pattern: every
 dev-process artefact is a candidate user-facing feature for an
 analogous life domain (per =feedback_dev_artifacts_are_app_candidates=).

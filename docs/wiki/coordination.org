@@ -328,7 +328,7 @@ These =kind= values may not be wired in
 [[file:../../org_llm/logbook.py][=org_llm/logbook.py=]] yet.
 Until they are, write to =kind=cli= with =command=coordination=
 or =command=decision-log= and a structured =args= payload. The
-Phase 16.4 MCP-kind logging upgrade will widen the kind
+Phase 2026-05.19 — extension polish MCP-kind logging upgrade will widen the kind
 taxonomy.
 
 * What this is NOT

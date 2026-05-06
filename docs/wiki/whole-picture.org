@@ -55,7 +55,7 @@ the page it's canonized in.
 | Principle                                          | Where canonized |
 |----------------------------------------------------+-----------------|
 | /Org is Code/ — files literally are code, not "documents" | [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] § Design rule — Org is Code |
-| /Supervision is deterministic by default/          | [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-006 + Phase 24                  |
+| /Supervision is deterministic by default/          | [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-006 + Phase 2026-05.02 — supervision trinity                  |
 | /Anti-capitalist FOSS/ — copyleft, no enclosure    | [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-010                             |
 
 *Operational paradoxes* (held in tension, both true):
@@ -99,7 +99,7 @@ interface splits cleanly into two tiers (next section).
 Catastrophic loss is a re-clone event, not a data-loss event.
 Mobile capture latency stays at local-disk speed.
 
-** Supervision — deterministic trinity (Phase 24)
+** Supervision — deterministic trinity (Phase 2026-05.02 — supervision trinity)
 
 | Registry              | Status            | Wiring                  |
 |-----------------------+-------------------+-------------------------|
@@ -144,8 +144,8 @@ Two patterns to know:
   personas with registry entries.
   They compose; they're not subsets.
 
-*Extension path is first-class* (not afterthought) — Phase 23.5
-user-supplied agents + Phase 23.6 literate MCP tools (*shipped
+*Extension path is first-class* (not afterthought) — Phase 2026-05.14.02 — DB-backed registry
+user-supplied agents + Phase 2026-05.16 — literate MCP tools literate MCP tools (*shipped
 2026-05-06*; wiring v0.1 in progress). Anything beyond the Bridge
 Crew is community-developable per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-009]]/[[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014 — Bridge Crew]].
 
@@ -190,14 +190,14 @@ Examples: =search_notes=, =ask_notes=, =count_across_vault=,
 | granted-fs  | =read_file=, =list_directory= (allowlist)   |
 | network     | http fetches, webhooks                      |
 
-** Self-coded tools (Phase 29)
+** Self-coded tools (Phase 2026-05.20 — sync verb POC)
 
 LLM observes pattern → proposes dbt model → tests pass → register.
 Future invocations skip the LLM. =org-llm tracker sync= (29.0) is
 the seed.
 
 Cross-refs: [[id:3a986238-898c-4298-a3e3-47157f502c48][tools-as-dbt-models.org]], [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-013,
-[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 29.
+[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 2026-05.20 — sync verb POC.
 
 * The quality story (Three Laws + trinity + tests)
 
@@ -208,7 +208,7 @@ build-time, and meta-time.
 
 | Law | Plain version |
 |-----+---------------|
-| 0th | An agent may not propagate vault state inconsistent with user intent — Phase 24 trinity enforces |
+| 0th | An agent may not propagate vault state inconsistent with user intent — Phase 2026-05.02 — supervision trinity trinity enforces |
 | 1st | Agent defers to user (open dirty buffer = queue the change)   |
 | 2nd | Agent must propagate to canonical files unless 1st blocks      |
 | 3rd | Agent preserves its own past via git audit; retry on regression |
@@ -216,7 +216,7 @@ build-time, and meta-time.
 Default mode is =auto-revert-mode= for clean buffers; user always
 wins on collision; git remembers; engine retries.
 
-** Supervision trinity (Phase 24)
+** Supervision trinity (Phase 2026-05.02 — supervision trinity)
 
 Three registries — pre-flight resolvers, tool-failure recovery hooks,
 confusion detector. Each accepts new entries the way the recipe
@@ -230,13 +230,13 @@ Declarative tests in =schema.yml= run on every build. Agents trust
 =SELECT * FROM recent_activity= because tests pass. =@boothby='s job
 sharpens from "vague hygiene" to "read failing tests, propose fixes."
 
-** Phase 30.4 multi-judge (the meta-quality gate)
+** Phase 2026-05.21 — multi-judge validation multi-judge (the meta-quality gate)
 
 Validation framework's =judge_models= becomes a list; FOSS judges
 (Llama 3.3, Qwen 2.5, DeepSeek R1) vote; reduces single-judge bias.
 Sprint-eligible (~1d).
 
-Cross-refs: [[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][data-integrity-laws.org]], [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 24 + § Phase 30.4.
+Cross-refs: [[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][data-integrity-laws.org]], [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 2026-05.02 — supervision trinity + § Phase 2026-05.21 — multi-judge validation.
 
 * The versioning shape
 
@@ -255,11 +255,11 @@ checkpoints.
 
 *v1.0 gates (remaining):*
 
-- Phase 26.2 — physical extraction (~3000 LoC retire / move)
+- Phase 2026-05.01 — physical extraction — physical extraction (~3000 LoC retire / move)
 - Retrieval-bug sweep
 - Cross-platform install validation (macOS + Ubuntu)
 
-(Phase 24.2 — recovery hooks + Phase 24.3 — confusion detector
+(Phase 2026-05.02.02 — recovery hooks — recovery hooks + Phase 2026-05.02.03 — confusion detector — confusion detector
 shipped 2026-05-06; both off the gate list.)
 
 *Version-number scheme* locked 2026-05-06 per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-019 — Hybrid
@@ -312,29 +312,29 @@ distro" means picking partners and shipping a cohesive experience.
 | Cloud LLM        | Anthropic / others    | effect-tier MCP                     |
 | /Excluded/       | Groq                  | banned per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-010]] anti-cap        |
 | Data pipeline    | dbt-core (local; no dbt-cloud) | CORE                       |
-| Dashboards       | Apache Superset       | CORE_DISABLED (Phase 27)            |
+| Dashboards       | Apache Superset       | CORE_DISABLED (Phase 2026-07.01 — Apache Superset dashboards)            |
 | Infra            | OpenTofu              | planned (anti-cap aligned)          |
 | Vault transport  | git                   | CORE; substrate-agnostic per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011]] |
 | Vault host       | Forgejo / Codeberg / GitHub / USB | any (substrate-agnostic) |
 | Multi-agent      | Agor                  | integration; smoke validated 2026-05-06 (per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]]) — see [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] |
 
-Cross-refs: [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § OpenTofu + § Phase 28,
-[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 27 / 28, [[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]].
+Cross-refs: [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § OpenTofu + § Phase 2026-07.02 — containerization strategy,
+[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 2026-07.01 — Apache Superset dashboards / 28, [[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]].
 
 * What's next (live state)
 
 *Summary.* As of 2026-05-06 EDT: Bridge Crew roster locked (Trek
 handles canonized); supervision trinity feature-complete (24.1 +
-24.2 + 24.3 all shipped); Phase 23.6 — literate MCP tools shipped;
+24.2 + 24.3 all shipped); Phase 2026-05.16 — literate MCP tools — literate MCP tools shipped;
 =multi-agent-org-llm= named + smoke-validated against Agor;
 DEC-018 (license: AGPL v3.0+) + DEC-019 (versioning) locked.
-Remaining v1.0 gates: Phase 26.2 — physical extraction, retrieval
+Remaining v1.0 gates: Phase 2026-05.01 — physical extraction — physical extraction, retrieval
 bug sweep, cross-platform install validation.
 
 Recent shipped (2026-05-06 EDT):
-- Phase 24.2 — recovery hooks (=@recover= decorator wired at MCP sites)
-- Phase 24.3 — confusion detector (signal registry over =crew_log=)
-- Phase 23.6 — literate MCP tools
+- Phase 2026-05.02.02 — recovery hooks — recovery hooks (=@recover= decorator wired at MCP sites)
+- Phase 2026-05.02.03 — confusion detector — confusion detector (signal registry over =crew_log=)
+- Phase 2026-05.16 — literate MCP tools — literate MCP tools
 - Bridge Crew rename sweep (=@picard / @spock / @data / @boothby /
   @geordi / @atoz / @riker=) + prose demotion
 - DEC-015 — org-mode-aware chat surface (v0.1 — proxy-port discovery
@@ -348,9 +348,9 @@ Earlier shipped (2026-05-04 → 2026-05-05):
 - 4 new wiki concept pages: data-integrity-laws, sync-architecture,
   dbt-pipeline, tools-as-dbt-models
 - DEC-006 through DEC-017 (architectural decisions backbone)
-- Phase 24.1 — pre-flight resolver registry verified live
-- Phase 25 scope rewrite (DB-as-cache, not DB-authoritative inversion)
-- Phase 26.1 — cull verdicts complete (38/38)
+- Phase 2026-05.02.01 — pre-flight resolvers — pre-flight resolver registry verified live
+- Phase 2026-05.17 — DB-as-cache + git-canonical pipeline scope rewrite (DB-as-cache, not DB-authoritative inversion)
+- Phase 2026-05.04 — cull walk — cull verdicts complete (38/38)
 
 Cross-refs: [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] § YOU ARE HERE, [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]],
 [[id:65c67408-a0de-4f93-9ffa-6800ea0f436f][cull.org]] § Subsumed / dead code, [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]].
@@ -364,5 +364,5 @@ Cross-refs: [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] § YOU ARE HERE
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] — narrative phase catalog
 - [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] — structured actionable state
 - [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] — single-view dashboard ("YOU ARE HERE")
-- [[id:65c67408-a0de-4f93-9ffa-6800ea0f436f][cull.org]] — Phase 26.1 walkthrough; Bridge Crew boundary
+- [[id:65c67408-a0de-4f93-9ffa-6800ea0f436f][cull.org]] — Phase 2026-05.04 — cull walk walkthrough; Bridge Crew boundary
 - [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki-conventions.org]] — Rule 2b summary+expanded format applies here

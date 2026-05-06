@@ -58,7 +58,7 @@ Why nomic-embed-text:
 
 Trade-off: the model REQUIRES task-instruction prefixes
 (=search_query:= for queries, =search_document:= for documents)
-to perform correctly. We discovered this the hard way in Phase 11
+to perform correctly. We discovered this the hard way in Phase 2026-04.06 — embed migration + tag --apply
 of testing — see the dedicated entry on [[id:wiki-task-prefix-stub][task-instruction
 prefixes]] (planned) for the saga.
 
@@ -86,7 +86,7 @@ No vectors yet. Just text in a SQLite database.
 #+begin_src python
 text = f"{node.title}\n{node.body}".strip()[:2048]
 vec  = embed(text, model=embed_model, base_url=ollama_url,
-              task="document")          # ← Phase 11 fix
+              task="document")          # ← Phase 2026-04.06 — embed migration + tag --apply fix
 node.embedding = to_blob(vec)            # 3072 bytes (768 × float32)
 #+end_src
 
@@ -170,7 +170,7 @@ minute or two of being written.
 ** Embeddings are model-specific
 Switching =embed_model= invalidates every existing vector. You
 have to =org-llm embed --force= to re-embed. Same goes for ANY
-preprocessing change — Phase 11's task-prefix migration was a
+preprocessing change — Phase 2026-04.06 — embed migration + tag --apply's task-prefix migration was a
 mini version of this: same model, different input convention,
 full re-embed required. See [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][the wiki index]]'s "Common gotchas"
 for the migration command.
@@ -178,7 +178,7 @@ for the migration command.
 ** Embeddings drift with model upgrades
 nomic-embed-text v1 → v1.5 is mostly compatible but not
 exactly. A future major version will require re-embedding. dbt
-analytics layer (eventually, Phase 14+) will track per-model
+analytics layer (eventually, Phase 2026-05.13 — deterministic vault inferrers (legacy 14+ — analytics layer)) will track per-model
 retrieval quality so we can compare and decide when to migrate.
 
 ** Local vs cloud trade-off
@@ -198,7 +198,7 @@ Read these in this order if you want to trace the pipeline:
 3. [[file:../../org_llm/search.py][org_llm/search.py:vector_search]] — query-time embed +
    cosine ranking + rerank
 4. [[file:../../org_llm/db.py][org_llm/db.py]] — the =Node.embedding= column (BLOB)
-5. [[file:../../org_llm/insights.py][org_llm/insights.py]] (Phase 12) — uses embeddings
+5. [[file:../../org_llm/insights.py][org_llm/insights.py]] (Phase 2026-04.07 — insight cards) — uses embeddings
    indirectly via the topic-cluster generator
 
 * How to configure

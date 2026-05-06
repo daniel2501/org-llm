@@ -152,7 +152,7 @@ because:
    genuinely-orthogonal text is rare
 
 This is why our score-display format went from =:.3f= to =:.4f=
-during Phase 11 — three decimals were collapsing distinct
+during Phase 2026-04.06 — embed migration + tag --apply — three decimals were collapsing distinct
 distances into ties at 0.000. The actual gradient is in the
 fourth decimal.
 
@@ -174,10 +174,10 @@ really means "distance."
 If the embedding model produces a degenerate vector for some
 input (very short input, all-whitespace, etc.), cosine distance
 becomes ill-defined (=0/0=). sqlite-vec returns 0 in that case,
-which means "perfect match to anything." Phase 11 saw this:
+which means "perfect match to anything." Phase 2026-04.06 — embed migration + tag --apply saw this:
 single-word capitalized inputs (=Kafka=, =Marx=) all hit a
 sentinel zero-ish vector, so they all "matched" each other at
-distance 0. The fix was task-instruction prefixes (Phase 11
+distance 0. The fix was task-instruction prefixes (Phase 2026-04.06 — embed migration + tag --apply
 commit =b604257=).
 
 ** Vectors from different sub-spaces
@@ -190,7 +190,7 @@ consistently or quality drops.
 
 ** Tied scores
 When many short title-only nodes share similar embeddings, they
-all land at roughly the same distance from any query. Phase 11
+all land at roughly the same distance from any query. Phase 2026-04.06 — embed migration + tag --apply
 fix added =_apply_signal_boosts= to break ties via
 title-substring / tag / path hints — see [[id:e1111111-2222-3333-4444-aaaaaaaaaaaa][embeddings]]'s pipeline
 section.

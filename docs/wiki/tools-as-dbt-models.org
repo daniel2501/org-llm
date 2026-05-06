@@ -185,7 +185,7 @@ are bridge.
 =dbt docs serve= auto-generates a navigable schema reference from
 column descriptions, lineage edges, test invariants, and sample
 data. This is the *data-layer orientation primer* —
-complementary to Phase 24.5b's agent-orientation pattern.
+complementary to Phase 2026-05.02 — supervision trinity (legacy 24.5b — agent-report orientation primer)'s agent-orientation pattern.
 
 Concrete agent flow with lineage:
 
@@ -214,7 +214,7 @@ Three loops this closes:
    descriptions for drift, missing tests, undocumented columns.
 2. *Users become legible to themselves at the schema level* —
    open dbt-docs, see the vault's queryable shape.
-3. *Phase 26 cull gets a lineage map* — "if I extract this model
+3. *Phase 2026-05.04 — cull walk cull gets a lineage map* — "if I extract this model
    to addable, what core breaks?" answered by =dbt list= queries.
 
 * Snapshots make agent retrospection cheap
@@ -244,7 +244,7 @@ WHERE valid_from >= date('now', '-7 days');
 -- @riker
 SELECT valid_from, status, valid_to
 FROM snap_project_status
-WHERE phase_id = 'Phase 24'
+WHERE phase_id = 'Phase 2026-05.02 — supervision trinity'
 ORDER BY valid_from;
 #+end_src
 
@@ -256,9 +256,9 @@ Mission connections:
 - *α (coherence over time)* finally has structured backing.
 - *β (dream-state vault)* gains a retrospection surface.
 - */@journalist/* becomes a real specialist.
-- *Phase 30 FOSS agent value-adds* gains a flagship — the agent
-  that lives in the vault's history (Phase 30.3 background
-  continuous, Phase 30.1 local-only — snapshots don't need cloud).
+- *Phase 2026-06.04 — FOSS agent value-adds FOSS agent value-adds* gains a flagship — the agent
+  that lives in the vault's history (Phase 2026-06.06 — background continuous work background
+  continuous, Phase 2026-06.04 — local-only flows local-only — snapshots don't need cloud).
 
 * Materialization decisions unify human + agent perf
 
@@ -279,7 +279,7 @@ The agent did what a senior data engineer would have done.
 *Same primitive a human uses; the agent didn't need a special
 tool.*
 
-Phase 29 × materialization is a particularly tight self-coded
+Phase 2026-05.20 — sync verb POC × materialization is a particularly tight self-coded
 loop: detect repeated slow queries → propose materialization
 upgrade → validate via timing harness → apply.
 
@@ -293,7 +293,7 @@ The shared dialect IS the shared knowledge.
 
 * Federation extends the love
 
-When cross-vault federation lights up (post-1.0, Phase 26+), the
+When cross-vault federation lights up (post-1.0, Phase 2026-05.04 — cull walk+), the
 *same SQL vocabulary* extends across vaults:
 
 #+begin_src sql
@@ -332,20 +332,20 @@ across the FOSS commons.
 
 * Agent-generated artifacts inherit "Org is Code" (recursive)
 
-When an agent proposes a dbt model (Phase 29 self-coded loop), the
+When an agent proposes a dbt model (Phase 2026-05.20 — sync verb POC self-coded loop), the
 artifact lives in git. The /same toolchain/ used for human-written
 tools applies — there is no second-class agent-generated tier.
 
 Lifecycle of an agent-generated dbt model:
 
 #+begin_example
-1. Agent detects pattern    (Phase 29 audit log)
+1. Agent detects pattern    (Phase 2026-05.20 — sync verb POC audit log)
         ↓
 2. Agent generates files    (models/foo.sql + schema.yml + tests)
         ↓
 3. PR-shaped commit         (git log: 🤖 @boothby proposed foo)
         ↓
-4. Multi-judge review       (Phase 30.4: blinded judges score)
+4. Multi-judge review       (Phase 2026-05.21 — multi-judge validation: blinded judges score)
         ↓                  OR CODEOWNERS routing (DEC-004 future)
         ↓
 5. Test suite runs          (dbt build --select +foo+)
@@ -398,5 +398,5 @@ protects from agent-special-case sprawl.
 - [[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]] — git-canonical multi-device sync
 - [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]] — dbt as the data pipeline layer
 - [[file:architecture.org][architecture.org]] § Org is Code design rule
-- [[file:roadmap.org][roadmap.org]] § Phase 29 (self-coded tools), § Phase 30 (FOSS
-  agent value-adds), § Phase 26 (cull and extract)
+- [[file:roadmap.org][roadmap.org]] § Phase 2026-05.20 — sync verb POC (self-coded tools), § Phase 2026-06.04 — FOSS agent value-adds (FOSS
+  agent value-adds), § Phase 2026-05.04 — cull walk (cull and extract)

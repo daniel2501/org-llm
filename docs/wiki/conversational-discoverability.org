@@ -94,8 +94,8 @@ in-flight TODOs the chat could pick up, recent MCP tools, and
 |---------------------+---------------------+----------------------------------------------------+----------------------------------|
 | First-touch intro   | per-persona         | prompt prefix; first-turn detector in session state | DEC-015 — chat surface MVP+1     |
 | Trailing teach      | the answering agent | post-response hook; "long-way" heuristic           | DEC-015 — chat surface MVP+2     |
-| Suggested-follow-up | sidebar widget      | deterministic; recent-message + state → 2-3 chips  | Phase 29 — self-coded tools loop |
-| "What can you do here?" | =@picard=       | context-aware capability inventory verb            | Phase 23.6 — literate MCP tools  |
+| Suggested-follow-up | sidebar widget      | deterministic; recent-message + state → 2-3 chips  | Phase 2026-05.20 — sync verb POC — self-coded tools loop |
+| "What can you do here?" | =@picard=       | context-aware capability inventory verb            | Phase 2026-05.16 — literate MCP tools — literate MCP tools  |
 
 * Open questions
 

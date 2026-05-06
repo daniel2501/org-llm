@@ -6,7 +6,7 @@ Python config writer.
 
 ## Why a plugin instead of more JSON config?
 
-The 2026-04-29 audit (Phase 15) showed opencode's JSON config has real
+The 2026-04-29 audit (Phase 2026-04.09 — provider config audit) showed opencode's JSON config has real
 limits:
 
 - **Provider config silently dropped** when fields are missing or schema
@@ -21,13 +21,13 @@ Plugins give us hooks into opencode's event stream, can render TUI
 widgets, and can intercept model selection. That's the right surface
 for the behavior we want.
 
-## Phase 16.1 scope (first real plugin)
+## Phase 2026-04.10.02 — opencode TUI plugin scope (first real plugin)
 
 | Hook                      | What it does                                                       |
 |---------------------------+--------------------------------------------------------------------|
-| `session-start`           | Render the Phase 12 insight cards as a TUI widget instead of injecting via system prompt. Cleaner UX, doesn't bloat the prompt across turns. |
+| `session-start`           | Render the Phase 2026-04.07 — insight cards insight cards as a TUI widget instead of injecting via system prompt. Cleaner UX, doesn't bloat the prompt across turns. |
 | `tool-call`               | Surface life-support vitals if any probe trips during a long-running operation. |
-| `model-selection`         | Refuse opencode's bundled fallback (`big-pickle`) when an Ollama provider is configured. Fixes the Phase 15 audit bug structurally. |
+| `model-selection`         | Refuse opencode's bundled fallback (`big-pickle`) when an Ollama provider is configured. Fixes the Phase 2026-04.09 — provider config audit audit bug structurally. |
 | `theme-change`            | Re-skin our LCARS palette in response to knob changes without requiring a relaunch. |
 
 ## Layout
@@ -58,10 +58,10 @@ The output gets registered with opencode via:
 "plugin": ["./dist/index.js"]
 ```
 
-…in the workspace's `.opencode/opencode.json` (Phase 16.2 wires this into
+…in the workspace's `.opencode/opencode.json` (Phase 2026-04.10.03 — launch wires plugin wires this into
 `org-llm launch`'s config writer).
 
 ## Status
 
-**Phase 16.0** (this commit): scaffolding only — build pipeline lands a
-working no-op plugin. Real hooks land in Phase 16.1+.
+**Phase 2026-04.10.01 — extensions scaffolding** (this commit): scaffolding only — build pipeline lands a
+working no-op plugin. Real hooks land in Phase 2026-04.10.02 — opencode TUI plugin+.

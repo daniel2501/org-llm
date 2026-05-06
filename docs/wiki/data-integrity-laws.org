@@ -45,7 +45,7 @@ notices the regression on next sync and re-attempts.)
 *Zeroth Law* (with apologies to Asimov). An agent may not,
 through any combination of edits, propagate a state
 inconsistent with the user's intent across the vault as a
-whole. The Phase 24 supervision trinity is the enforcement
+whole. The Phase 2026-05.02 — supervision trinity supervision trinity is the enforcement
 mechanism: pre-flight resolvers + tool-failure recovery hooks
 + confusion detector.
 #+end_quote
@@ -94,7 +94,7 @@ concurrent flows. (c) is the always-on safety net underneath.
 
 * Connections
 
-- *[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 24 supervision trinity* — the
+- *[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 2026-05.02 — supervision trinity supervision trinity* — the
   enforcement mechanism for the Zeroth Law.
 - *DEC-011 (DB as universal interface)* — every agent write
   goes through SQL on the way in or out, regardless of

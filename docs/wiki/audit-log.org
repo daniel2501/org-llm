@@ -101,7 +101,7 @@ context overlay.
 | Output is "narrative through context graph" | Output is "lessons extracted to =llm-context.org=" |
 | MCP tool: =walk_node=                  | Doesn't exist                                          |
 | MCP tool: =add_disambig=               | Doesn't exist; =walk_save_disambiguation= is the real one |
-| Tracks: notes (only one wired)         | =notes= wired; =dailies= + =projects= are Phase 13.2-3 stubs |
+| Tracks: notes (only one wired)         | =notes= wired; =dailies= + =projects= are Phase 2026-07.07 — dailies as walk targets-3 stubs |
 
 The walk page's CONCEPTUAL framing was fundamentally wrong — it
 treated walk as a retrieval mode (alongside ask), but walk is a
@@ -225,16 +225,16 @@ The granted-filesystem-access wiki page now mentions
 =open_url= and =browser_command= under the =execute= scope.
 Originally missed.
 
-*** Phase 17+ planning markers
+*** Phase 2026-04.11 — live sidebar status panel+ planning markers
 :PROPERTIES:
 :STATUS: deferred
 :END:
 
-The roadmap page enumerates Phase 1–16. No code references
-exist for Phase 17+ yet, but the roadmap should track open
+The roadmap page enumerates Phase 2026-04.01 through 2026-04.10 — pre-beta foundations (legacy 1–16). No code references
+exist for Phase 2026-04.11 — live sidebar status panel+ yet, but the roadmap should track open
 "next-phase" candidates explicitly: live status panel
 (considered in this session), MCP-kind logging, sidebar
-expansion. Add a "Phase 17 — candidates" placeholder section.
+expansion. Add a "Phase 2026-04.11 — live sidebar status panel — candidates" placeholder section.
 
 ** Numerical / commit-anchor fixes
 
@@ -244,7 +244,7 @@ expansion. Add a "Phase 17 — candidates" placeholder section.
 :END:
 Wiki said 23 steps; reality is 45.
 
-*** Phase 16.2 commit roster
+*** Phase 2026-04.10.03 — launch wires plugin commit roster
 :PROPERTIES:
 :STATUS: fix-applied
 :END:
@@ -252,14 +252,14 @@ Roadmap listed =a1f0ff9, 55cb260, 7ba5486, d82b698, 6db6a88,
 db6bbd1, cd4d61a=. Adding =3b9cb0c= (regen_screenshots) and
 =91eeef8= (this docs landing) for completeness.
 
-* 2026-04-30 — Phase 17 landed
+* 2026-04-30 — Phase 2026-04.11 — live sidebar status panel landed
 
 Implementation followed the audit; updates to the wiki +
 README:
 
-- Roadmap §Phase 17 flipped from =planned= to =shipped= with
+- Roadmap §Phase 2026-04.11 — live sidebar status panel flipped from =planned= to =shipped= with
   the v1 launch-time scope.
-- README "Where we are" updated: latest shipped is Phase 17.
+- README "Where we are" updated: latest shipped is Phase 2026-04.11 — live sidebar status panel.
 - New launch artefact: =.opencode/sidebar-status.json= written
   alongside =insight-cards.json=. Schema: =vault / active /
   mcp / hardware / sensors / links= top-level blocks.
@@ -312,4 +312,4 @@ reminder.
 - [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][Wiki index]] — list of
   pages this audit covered
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — where a
-  "Phase 17 — candidates" section should land
+  "Phase 2026-04.11 — live sidebar status panel — candidates" section should land

@@ -25,14 +25,14 @@ If any interceptor returns a =ProxyResponse=, the proxy short-circuits
 ollama doesn't even wake up. If every interceptor returns =None=, the
 request forwards transparently and the response streams back.
 
-Phase 17 shipped 12 interceptors. Phase 18 has added 13 more
+Phase 2026-04.11 — live sidebar status panel shipped 12 interceptors. Phase 2026-05.06 — proxy expansion has added 13 more
 (=sysexport=, =sysscreenshot=, =shell=, =agent_sticky=,
 =agent_prefix=, =synth_tool_call=, =tool_dialect_translate=,
 =force_tool_call=, =explain_prose_only=, =cite=,
 =replay_history=, =raw_passthrough=, =prompt_cache=).
 =DEFAULT_INTERCEPTORS= currently has *25 entries*;
 =intercept_local_only= is appended conditionally when
-=proxy_local_only=true=. Phase 18 is still landing one per
+=proxy_local_only=true=. Phase 2026-05.06 — proxy expansion is still landing one per
 single-file commit; cloud failover was the first.
 
 * Why it exists
@@ -156,7 +156,7 @@ its position in the chain:
   =intercept_model_routing=, =intercept_prompt_slim=.
 - *Typed prefixes:* see the dedicated table below.
 
-** Cloud failover (Phase 18, first interceptor)
+** Cloud failover (Phase 2026-05.06 — proxy expansion, first interceptor)
 
 The forward path now wraps the local =urlopen= with a tight time-to-
 first-byte timeout (=proxy_first_byte_timeout_ms=, default 30000). When
@@ -173,7 +173,7 @@ gets an answer without a relaunch round-trip. Knobs:
 
 - =proxy_cloud_failover_enabled= (default true)
 - =proxy_first_byte_timeout_ms= (default 30000; bumped from 8000 in
-  Phase 18.6 — cold-start prefill on thermally-throttled CPUs with
+  Phase 2026-05.06.02 — cloud-first + synth tools — cold-start prefill on thermally-throttled CPUs with
   heavy MCP tool inventories needed real headroom; 0 disables)
 - =proxy_cloud_first= (default false) — when true, chat completions
   skip local entirely and route directly through =_failover_to_cloud=,
@@ -202,7 +202,7 @@ from regular forwards in [[file:../../scripts/audit_phase17.py][=scripts/audit_p
   default chain. No threading conditionals through opencode's request
   path.
 
-** Prefix interceptor family (Phase 18.7)
+** Prefix interceptor family (Phase 2026-05.06 — proxy expansion (legacy 18.7 — prefix interceptor family))
 
 A small set of typed prefixes lets the user shape a chat request
 without going through the LLM's negotiation step. Each prefix is
@@ -240,7 +240,7 @@ one is a single function plus an entry in =DEFAULT_INTERCEPTORS=.
 The cloud-failover, cloud-first, and compressed-tools-retry paths
 inherit the prefix-mutated request for free.
 
-** Synthetic tool calls for tool-incapable models (Phase 18.6)
+** Synthetic tool calls for tool-incapable models (Phase 2026-05.06.02 — cloud-first + synth tools)
 
 Some local models — gemma, gemma2, gemma3, phi3, phi3.5, llava,
 deepseek-coder — don't natively support OpenAI-style tool calling.
@@ -300,7 +300,7 @@ groups by =intercepted_by= for deeper slicing. See also
 * Roadmap
 
 The next-up interceptor list lives in
-[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 18; tracked here as TODOs so the proxy
+[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 2026-05.06 — proxy expansion; tracked here as TODOs so the proxy
 page is self-contained.
 
 ** TODO [#A] Skill→slash auto-bridge
@@ -335,7 +335,7 @@ CLOSED: [2026-05-02]
   cloud-failover path; the proxy is what makes the failover instant
   (no need to reload opencode for it to take effect).
 - [[id:001a2e03-30e8-49c5-a813-e774f58b6a0e][Skills]] — =intercept_md_skills= runs =.md= slashes as
-  subprocesses; Phase 18's skill→slash auto-bridge would generate
+  subprocesses; Phase 2026-05.06 — proxy expansion's skill→slash auto-bridge would generate
   one =.md= per =:skill:= block.
 - [[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][Doctor & self-heal]] — the slow-LLM watcher in
   [[file:../../extensions/opencode/src/slow-llm-watch.tsx][=slow-llm-watch.tsx=]] runs =doctor --power-boost= when the

@@ -26,7 +26,7 @@ Activated by =proxy_orchestration_mode = "recipe"= (the default).
 
 * Why two recipes, not six
 
-Phase 22 v2 shipped six recipes. The 2026-05-03 A/B run (90
+Phase 2026-05.07 — manager pre-fetch + agent narrates shipped six recipes. The 2026-05-03 A/B run (90
 judged pairs over qwen-2.5-72b cloud, blinded Claude Opus 4.7
 judge, see [[file:../../scripts/recipe_ab_harness.py][=scripts/recipe_ab_harness.py=]] + the [[file:2026-05-03-recipe-ab-ground-truth.org][ground-truth doc]])
 found that *only* =count_across_vault= consistently beat the

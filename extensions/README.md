@@ -23,7 +23,7 @@ extensions/
                                 produce TS types from the Python schema
 ```
 
-## Phase 16 spec
+## Phase 2026-04.10 — extensions spec
 
 See `~/org/org-llm-test-session/phase-16-extensions-codebase-expansion.org`
 for the implementation plan. This directory's scaffolding lands ahead of the

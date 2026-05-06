@@ -68,13 +68,13 @@ templated wrapper*, not a sub-LLM call. This means:
 - Predictable cost (file I/O, no token economics).
 - Unit-testable.
 - No risk of the primer hallucinating a rule.
-- Composable with [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Phase 29 self-coded tools]] — a deterministic
-  resolver IS the artifact Phase 29 promotes recurring patterns
+- Composable with [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Phase 2026-05.20 — sync verb POC self-coded tools]] — a deterministic
+  resolver IS the artifact Phase 2026-05.20 — sync verb POC promotes recurring patterns
   into.
 
 If a fetch *would* benefit from reasoning, the resolver is the
 wrong shape; the right shape is to encode the reasoning as a
-rule and emit it deterministically. (Same logic as the [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Phase 24
+rule and emit it deterministically. (Same logic as the [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Phase 2026-05.02 — supervision trinity
 supervision rule]] — supervision and orientation share the
 deterministic-default discipline.)
 
@@ -111,7 +111,7 @@ future features inherit it instead of re-discovering it.
 | [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]]                      | =routine_chores=, =mood_signal=…  | agent calls =get_vault_fact(name)=     |
 | [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] =/sys*= short-circuits | full system-prompt body          | =/sysstatus=, =/syswiki= etc. invoked  |
 | [[id:32fe7314-0a69-4945-aef3-7105d507b201][Agent orientation primer]]         | wiki / dev-tracker / report rules | specialist calls =primer(namespace)=    |
-| Phase 24.1 [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][resolver registry]]            | path / repo / agent / time facts | every =delegate()= (parallel fetch)    |
+| Phase 2026-05.02.01 — pre-flight resolvers [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][resolver registry]]            | path / repo / agent / time facts | every =delegate()= (parallel fetch)    |
 
 The /eager/ counterpart in each row would be: a recipe whose
 context is pre-built into the agent's persona, vault facts
@@ -140,14 +140,14 @@ decision.
   primer namespace fetched on >70% of specialist spawns of a
   given type, that's evidence it should be in the manifest —
   *or* that the specialist type's spawn-prompt should embed
-  the full primer (Phase 29 self-coded-tools territory: the
+  the full primer (Phase 2026-05.20 — sync verb POC self-coded-tools territory: the
   pattern-detection loop catches this). Eager-becomes-lazy is
   reversible.
 - *Adversarial relevance.* If a security primer needs to fire
   on EVERY tool call regardless of what the agent thinks is
   relevant, lazy-fetch by the specialist is the wrong shape —
   the resolver should be triggered by the host (interceptor
-  on the proxy) instead of the agent. Phase 24.1's resolver
+  on the proxy) instead of the agent. Phase 2026-05.02.01 — pre-flight resolvers's resolver
   registry is the closer match for that case.
 
 * The cache-window argument (LLM-host specific)
@@ -194,7 +194,7 @@ justification in the dev-tracker entry that proposes the
 feature.
 
 *Expanded.* This page is referenced by [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]]
-and the upcoming Phase 24.5 dev-tracker entry. Any new feature
+and the upcoming Phase 2026-05.02 — supervision trinity (legacy 24.5 — orientation primer registry) dev-tracker entry. Any new feature
 that introduces context-injection — a new primer, a new
 resolver, a new system-prompt addition, a new pre-fetch — must
 either inherit the lazy default or document why eager is right
@@ -214,8 +214,8 @@ free to ship; eager carries a justification burden.
   fact cache fetched on agent demand, not embedded.
 - [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] —
   =/sys*= short-circuits as lazy system-prompt fetches.
-- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] § Phase 24.5 —
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] § Phase 2026-05.02 — supervision trinity (legacy 24.5 — orientation primer registry) —
   the orientation-primer registry.
-- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 29 —
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 2026-05.20 — sync verb POC —
   self-coded tools; lazy fetches that prove their keep can be
   promoted to deterministic recipes.

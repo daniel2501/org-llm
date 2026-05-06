@@ -2,7 +2,7 @@
 :ID:       902bea52-585b-4a1a-9fe0-1b8c43edcf12
 :CREATED:  [2026-04-30]
 :END:
-#+TITLE: Insight cards (Phase 12)
+#+TITLE: Insight cards (Phase 2026-04.07 — insight cards)
 #+FILETAGS: :wiki:concept:insights:phase-12:
 #+OPTIONS: toc:nil num:nil
 
@@ -27,7 +27,7 @@ class InsightCard:
     suggested_question: str = "" # natural-language question to feed the LLM
 #+end_src
 
-A "card kind" is its source generator (see Phase 12.1+12.3 below).
+A "card kind" is its source generator (see Phase 2026-04.07.01 — pre-mount skeleton+12.3 below).
 
 * The deterministic-vs-narrated split
 
@@ -38,7 +38,7 @@ Cards have two costs:
 | Deterministic gather | sub-second | Always — pattern-matches the vault             |
 | LLM narration        | 1-30s     | Only when a scorer says it'd improve the card |
 
-The scorer (Phase 12.2) looks at the card's body and decides if
+The scorer (Phase 2026-04.07.02 — LLM narration) looks at the card's body and decides if
 LLM rewriting would meaningfully improve readability. If the
 deterministic body is already clean, narration skips.
 
@@ -64,7 +64,7 @@ path; not the plugin path).
 
 * Two surfacing channels
 
-** System-prompt injection (Phase 12.4)
+** System-prompt injection (Phase 2026-04.07.04 — inject cards)
 
 The launch flow appends rendered cards to the LLM's system prompt:
 
@@ -82,14 +82,14 @@ The model opens the conversation by referencing them: "I noticed
 3 stale candidates since your last session…"
 
 This is the legacy path, gated on =ORG_LLM_INSIGHT_PREMOUNT=
-(opt-in because the prompt-bloat penalty is real). Phase 16.1
+(opt-in because the prompt-bloat penalty is real). Phase 2026-04.10.02 — opencode TUI plugin
 supersedes it for plugin-using clients.
 
-** TUI plugin =/insights= dialog (Phase 16.1+)
+** TUI plugin =/insights= dialog (Phase 2026-04.10.02 — opencode TUI plugin+)
 
-The Phase 16.1 TUI plugin reads =.opencode/insight-cards.json=
+The Phase 2026-04.10.02 — opencode TUI plugin TUI plugin reads =.opencode/insight-cards.json=
 on every plugin mount, registers a =/insights= command (alias
-=/i=), pops a load toast, and (Phase 16.2) auto-opens the
+=/i=), pops a load toast, and (Phase 2026-04.10.03 — launch wires plugin) auto-opens the
 =DialogSelect= so cards APPEAR ON OPEN — no need to type
 =/insights=. Selecting a card prefills the prompt with its
 =suggested_question=.
@@ -98,7 +98,7 @@ This is the *canonical* surfacing channel going forward; the
 prompt-injection path is kept as a fallback for clients without
 TUI plugin support (Pi, claude.ai/code).
 
-* The engagement loop (Phase 12.5)
+* The engagement loop (Phase 2026-04.07.05 — engagement table)
 
 When the user reacts to a card (good / bad / clicked / dismissed),
 =insight_card_feedback= MCP tool writes a row to the
@@ -127,7 +127,7 @@ narration_model)= and surfaces patterns:
 - "Cloud-narrated cards have 80% bad-rate vs local at 20% → cloud
   prompt may have drifted"
 
-The Phase 12.7 dbt layer will turn this into a per-generator
+The Phase 2026-07.06 — dbt analytics dbt layer will turn this into a per-generator
 quality view.
 
 * How to configure
@@ -151,13 +151,13 @@ launch=. Cards refresh when the user relaunches; long-running
 sessions see the snapshot from launch time.
 
 ** Conversational
-- =/insights= or =/i= — open the dialog mid-session (Phase 16.1
+- =/insights= or =/i= — open the dialog mid-session (Phase 2026-04.10.02 — opencode TUI plugin
   TUI plugin command)
 - =insight_card_feedback= MCP tool — model writes engagement
   rows when the user says "that one was useful" / "skip that"
 - *(no =gather_insights= MCP tool today)* — gather is launch-time
   only; relaunch to refresh. A mid-session refresh tool is a
-  Phase 12.6 candidate.
+  Phase 2026-07.05 — cached-gather persistence candidate.
 
 * Source files
 
@@ -174,14 +174,14 @@ sessions see the snapshot from launch time.
 
 * Related
 
-- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — § Phase 12 chronology
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — § Phase 2026-04.07 — insight cards chronology
 - [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] —
   =insight_card_feedback= is the MCP tool that writes engagement rows
 - [[id:e3333333-4444-5555-6666-cccccccccccc][Staleness]] —
   =stale_candidates= is one of the highest-engagement card kinds
 - [[id:53c6089c-f9cf-41ad-ad8c-ad07a220ffb6][Doctor & self-heal]] —
   =doctor diagnose-cards= is the doctor surface for engagement
-  analytics (Phase 12.5)
+  analytics (Phase 2026-04.07.05 — engagement table)
 - [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's Log]] —
   the =insight_engagement= table sits alongside =History= as a
   separate but adjacent event log

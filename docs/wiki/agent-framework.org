@@ -14,20 +14,20 @@ inferrers, registration, the four invocation paths, migration
 plan.
 
 Status (2026-05-04):
-- Phase 23.1 *shipped* — Agent dataclass lives at
+- Phase 2026-05.14.01 — dataclass *shipped* — Agent dataclass lives at
   [[file:../../org_llm/agents/_types.py][=org_llm/agents/_types.py=]]; metadata + builtin registry at
   [[file:../../org_llm/agents/_builtins.py][=org_llm/agents/_builtins.py=]]; alias-aware resolution wired
   through proxy + MCP layer; OOB cut to 12 starfleet-core agents
   with Trek birth-names + functional aliases.
-- Phase 23.2 (capability enforcement) — *declarative shipped*,
+- Phase 2026-05.14 — agent-framework refinements (legacy 23.2 — capability enforcement) (capability enforcement) — *declarative shipped*,
   enforcement still pending. Each Agent declares its
   =capabilities=; the MCP layer doesn't gate yet.
-- Phase 23.3 (hygiene scans) — slot exists on the Agent
+- Phase 2026-05.14 — agent-framework refinements (legacy 23.3 — hygiene scans) (hygiene scans) — slot exists on the Agent
   dataclass; concrete scans not yet implemented.
-- Phase 23.4 (per-agent recipes/inferrers) — slot exists; the
+- Phase 2026-05.14 — agent-framework refinements (legacy 23.4 — recipes/inferrers as agent properties) (per-agent recipes/inferrers) — slot exists; the
   global =orchestration._RECIPES= registry remains the active
   source of truth for now.
-- Phase 23.5 (user-supplied agents from a library) — verb
+- Phase 2026-05.14.02 — DB-backed registry (user-supplied agents from a library) — verb
   surface =org-llm agents install= still to be designed.
 
 Companion docs (different audience, different scope):
@@ -89,9 +89,9 @@ class Agent:
     model_role:   str            = "chat_model"
     aliases:      tuple[str, ...] = ()         # extra @<name>s; theme-aware aliases live here
     triggers:     tuple[str, ...] = ()         # keyword auto-route
-    capabilities: tuple[str, ...] = ()         # declared; enforcement = Phase 23.2
-    recipes:      tuple[str, ...] = ()         # recipe NAMES owned by agent (Phase 23.4)
-    hygiene_scan: Callable | None = None       # domain-specific scanner (Phase 23.3)
+    capabilities: tuple[str, ...] = ()         # declared; enforcement = Phase 2026-05.14 — agent-framework refinements (legacy 23.2 — capability enforcement)
+    recipes:      tuple[str, ...] = ()         # recipe NAMES owned by agent (Phase 2026-05.14 — agent-framework refinements (legacy 23.4 — recipes/inferrers as agent properties))
+    hygiene_scan: Callable | None = None       # domain-specific scanner (Phase 2026-05.14 — agent-framework refinements (legacy 23.3 — hygiene scans))
     origin:       Origin          = "builtin"  # builtin | library | user
     pack:         str             = "starfleet-core"   # pack filter at launch
     addressable:  bool            = True       # False = internal subroutine, hidden from picker
@@ -108,7 +108,7 @@ joins them with the structural metadata to produce =Agent=
 instances. A future PR can lift the literals into the agents
 package; the dataclass shape is stable across that move.
 
-** Birth-names + aliases (Phase 23.1)
+** Birth-names + aliases (Phase 2026-05.14.01 — dataclass)
 
 Each agent has a stable *birth_name* — what =crew_log= records,
 what code references, what the user types =@<name>= against.
@@ -223,7 +223,7 @@ rows). Same pattern as =org-llm-config.org= for knobs and
 ** Built-in defaults
 
 Today the registry lives at =org_llm/cli.py::_PRECONFIGURED_AGENT_PROMPTS=
-(the dataclass refactor in Phase 23.1 will move this to
+(the dataclass refactor in Phase 2026-05.14.01 — dataclass will move this to
 [[file:../../org_llm/agents/_builtins.py][=org_llm/agents/_builtins.py=]]). Current built-ins (17, after the
 2026-05-03 rationalization — see [[file:agents.org][agents.org]]):
 
@@ -366,7 +366,7 @@ improvement.
 
 * Migration plan
 
-** Phase 23.1 — Agent dataclass + registry refactor *[shipped 2026-05-03]*
+** Phase 2026-05.14.01 — dataclass — Agent dataclass + registry refactor *[shipped 2026-05-03]*
 - =Agent= dataclass shipped at [[file:../../org_llm/agents/_types.py][=org_llm/agents/_types.py=]]
   (frozen, with =birth_name=, =aliases=, =pack=, =origin=,
   =addressable=).
@@ -385,7 +385,7 @@ improvement.
   shape; user file accepts =:ALIASES:= and =:MODEL_ROLE:=
   properties.
 
-** Phase 23.2 — Capability enforcement *[declarative shipped, gating pending]*
+** Phase 2026-05.14 — agent-framework refinements (legacy 23.2 — capability enforcement) — Capability enforcement *[declarative shipped, gating pending]*
 - =Agent.capabilities= populated for the core 9 (read.vault for
   Spock, write.vault for Data, shell for Scotty + Geordi, etc).
 - Enforcement at the MCP-tool dispatch layer not yet wired —
@@ -394,13 +394,13 @@ improvement.
   that signal end-to-end is the load-bearing part of this
   phase.
 
-** Phase 23.3 — Hygiene scans *[slot exists, scans pending]*
+** Phase 2026-05.14 — agent-framework refinements (legacy 23.3 — hygiene scans) — Hygiene scans *[slot exists, scans pending]*
 - =Agent.hygiene_scan: Callable | None= field exists.
 - Concrete scans (gardener vault hygiene, scribe untagged
   headings, agenda outdoor-flag suggestions) not yet
   implemented. =org-llm hygiene= verb still TODO.
 
-** Phase 23.4 — Recipes + inferrers as agent properties *[slot exists, migration pending]*
+** Phase 2026-05.14 — agent-framework refinements (legacy 23.4 — recipes/inferrers as agent properties) — Recipes + inferrers as agent properties *[slot exists, migration pending]*
 - =Agent.recipes: tuple[str, ...]= field exists; the two
   current recipes (=count_across_vault= owned by Spock,
   =weather_aware_agenda= owned by Janeway) are tagged on the
@@ -411,7 +411,7 @@ improvement.
   =get_builtins()=.
 - =vault_facts._INFERRERS= migration unchanged from this plan.
 
-** Phase 23.5 — User-supplied agents (library) *[design pending]*
+** Phase 2026-05.14.02 — DB-backed registry — User-supplied agents (library) *[design pending]*
 - =~/.config/org-llm/agents/<pack>/<name>.org= sourced as
   additional overrides. Same shape as =org-llm-agents.org=.
 - =org-llm agents install <git-url-or-pack>= clones into the
@@ -421,13 +421,13 @@ improvement.
 - Open: signing / verification / audit-on-update story. Until
   then the verb is documented but not implemented — users who
   want a custom agent today edit =~/org/org-llm-agents.org=
-  directly (Phase 23.1's existing path).
+  directly (Phase 2026-05.14.01 — dataclass's existing path).
 
 * What this means for tonight's weather + battery work
 
 We landed weather as a recipe + agent (=agenda=) + MCP tools and
 battery as a richer probe + power_profile + MCP tool. None of
-that needs to move now. Phase 23.1 absorbs them when the Agent
+that needs to move now. Phase 2026-05.14.01 — dataclass absorbs them when the Agent
 dataclass lands; nothing about the user-facing surface changes.
 
 Bookkeeping in the roadmap: weather is the @agenda agent's
@@ -448,7 +448,7 @@ MCP tool can sit in =life_support.py= until then; no rush.
    explicit allowlist; safer.
 3. *Hot-reloading agents.* Should =org-llm agents --apply=
    live-reload the running session, or require a relaunch?
-   Lean: relaunch initially; live-reload is a Phase 24
+   Lean: relaunch initially; live-reload is a Phase 2026-05.02 — supervision trinity
    improvement.
 
 * See also

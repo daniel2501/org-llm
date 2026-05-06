@@ -53,7 +53,7 @@ integrated diagnosis. The 2026-04-29 stall fix:
 
 ** =doctor diagnose-cards= subcommand
 
-Phase 12.5 add. Clusters recent =insight_engagement= rows by
+Phase 2026-04.07.05 — engagement table add. Clusters recent =insight_engagement= rows by
 =(card_kind, narration_model)= and surfaces patterns for the
 insight-card pipeline. Note: this is a SUBCOMMAND
 (=org-llm doctor diagnose-cards=), not a flag on the
@@ -145,12 +145,12 @@ explicit complaint.
 
 ** Auto-doctor behaviour: suggest, don't interrupt
 
-The plugin-side slow-LLM watcher (Phase 17.1j, see
+The plugin-side slow-LLM watcher (Phase 2026-05.05 — LCARS panel + LLM proxyj, see
 [[file:../../extensions/opencode/src/slow-llm-watch.tsx][=slow-llm-watch.tsx=]]) used to call =session.abort= when the
 threshold tripped — that meant a cold-start prefill on
 thermally-throttled hardware could be killed mid-flight before
 producing its first byte, and the user never saw the response
-they were waiting for. Phase 18.6 reversed this: auto-doctor
+they were waiting for. Phase 2026-05.06.02 — cloud-first + synth tools reversed this: auto-doctor
 now SUGGESTS proposals (numbered list, =/sysapply <n>= to
 apply) without interrupting the in-flight LLM call. The user's
 turn finishes whenever it lands; the doctor's diagnostic +
@@ -200,7 +200,7 @@ org-llm doctor walkthrough
 org-llm doctor fix
 org-llm doctor power-boost
 org-llm doctor install <toolname>
-org-llm doctor diagnose-cards             # Phase 12.5 — cluster insight engagement
+org-llm doctor diagnose-cards             # Phase 2026-04.07.05 — engagement table — cluster insight engagement
 #+end_src
 
 ** Conversational
@@ -231,7 +231,7 @@ org-llm doctor diagnose-cards             # Phase 12.5 — cluster insight engag
 - [[id:510a135d-2a0c-4b0c-ac3a-2fd2ab80bf08][Cloud-or-local routing]] —
   power-boost decisions consume routing config
 - [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][Insight cards]] —
-  =--diagnose-cards= is the doctor surface for Phase 12.5
+  =--diagnose-cards= is the doctor surface for Phase 2026-04.07.05 — engagement table
   engagement analytics
 - [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's Log]] —
   doctor verdicts log themselves so =--reflect= can spot

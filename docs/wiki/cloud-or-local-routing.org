@@ -74,7 +74,7 @@ prompts for the API key, encrypts it via [[https://www.passwordstore.org][pass]]
 [[https://groq.com][Groq]] is deliberately excluded from the
 catalog and providers list. Don't add it.
 
-** FOSS-first gate (Phase 18)
+** FOSS-first gate (Phase 2026-05.06 — proxy expansion)
 
 Every catalog row carries a =license_tier= field — one of:
 
@@ -217,5 +217,5 @@ org-llm launch -n                        # dry-run; key is REDACTED in output
 - [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] §
   Cloud-or-local routing — where this fits in the bigger map
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — the
-  cloud catalog has been a moving target since Phase 5;
-  Phase 15 added schema-compliant provider blocks for opencode
+  cloud catalog has been a moving target since Phase 2026-04.02 — opencode workspace;
+  Phase 2026-04.09 — provider config audit added schema-compliant provider blocks for opencode

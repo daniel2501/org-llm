@@ -15,7 +15,7 @@ responses are org-shape (=#+begin_src= blocks tangleable, tables,
 headings, links, TODO items, properties); editing the chat IS
 editing org. =C-c C-c= runs blocks; =org-babel-tangle= lands code
 in real files; =[[id:UUID]]= links resolve; refile to vault works;
-agenda sees the TODOs. Phase 16.3 — Emacs companion is the home;
+agenda sees the TODOs. Phase 2026-05.03 — Emacs companion — Emacs companion is the home;
 opencode (and other MCP clients like Claude Code) become *secondary* surfaces.
 
 *Expanded.* This is a *design-detail* page, written to be
@@ -199,7 +199,7 @@ Out of MVP (explicitly):
 
 * Implications
 
-- Phase 16.3 — Emacs companion becomes load-bearing for v1.0.
+- Phase 2026-05.03 — Emacs companion — Emacs companion becomes load-bearing for v1.0.
 - opencode (and other MCP-client TUIs like Claude Code) become *secondary* surfaces — still
   shipped, still useful for "no Emacs available" / "developer
   preferring TUI" cases, but not the canonical mental model.
@@ -243,7 +243,7 @@ design fails the "really good at the job" gate.
 
 - DEC-015 candidate (the principle this implements) — see
   [[file:dev-tracker.org][dev-tracker.org]].
-- Phase 16.3 — Emacs companion (the home) — see [[file:roadmap.org][roadmap.org]].
+- Phase 2026-05.03 — Emacs companion — Emacs companion (the home) — see [[file:roadmap.org][roadmap.org]].
 - DEC-014 — cull rubric (the Bridge Crew roster the chat
   dispatches to).
 - DEC-011 — DB as universal interface (chat persists as org files

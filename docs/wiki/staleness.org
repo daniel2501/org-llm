@@ -40,7 +40,7 @@ If left in place:
 - The vault-stats counts overstate reality
 
 ** How =org-llm= heals it
-*Phase 11 fix*: =org-llm index= now self-prunes stale file rows on
+*Phase 2026-04.06 — embed migration + tag --apply fix*: =org-llm index= now self-prunes stale file rows on
 every run. Pre-pass:
 
 #+begin_src python
@@ -193,7 +193,7 @@ contradictions are the perfect insight card material:
    → /stale promote
 #+end_example
 
-That's [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][Phase 12]]'s =stale_candidates= generator.
+That's [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][Phase 2026-04.07 — insight cards]]'s =stale_candidates= generator.
 
 * How to configure
 

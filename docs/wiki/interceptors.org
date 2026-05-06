@@ -112,7 +112,7 @@ Every request emits one JSONL line to
 
 =/sysrecent= surfaces the tail in chat;
 [[file:../../scripts/audit_phase17.py][=scripts/audit_phase17.py=]] groups by =intercepted_by= for the
-periodic Phase 17 audit.
+periodic Phase 2026-04.11 — live sidebar status panel audit.
 
 * When to add one (and when not to)
 
@@ -203,7 +203,7 @@ across the three.
 /config=) and =intercept_md_skills= (=.md= slash with =exec:= →
 subprocess) are both "handwritten slash → response". A unified
 registry where each entry is /either/ a markdown body /or/ an exec
-spec lines up with the Phase 18 "skill→slash auto-bridge" TODO
+spec lines up with the Phase 2026-05.06 — proxy expansion "skill→slash auto-bridge" TODO
 already on the proxy roadmap.
 
 ** Cache trio — share a key helper, don't merge
@@ -252,6 +252,6 @@ behaviour, one obvious seam per family for the next addition.
   HTTP boundary); the two are complementary
 - [[id:9b012557-f592-4d1e-8dd1-464c2a4250c3][Audit log]] —
   the JSONL stream every interceptor writes to via =AuditLogger=
-- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 18 —
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 2026-05.06 — proxy expansion —
   the next-up interceptor list (skill→slash bridge, citation
   post-processor, tool-result memoisation, per-turn routing)

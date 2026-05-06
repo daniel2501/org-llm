@@ -215,4 +215,4 @@ Python persona class (or just an entry in
 - [[file:tonight-rave-list.org][tonight-rave-list.org]] — the
   active build queue.
 - =org_llm/cli.py::_PRECONFIGURED_AGENT_PROMPTS= — the current
-  built-in registry (resolution source-of-truth until Phase 23.1).
+  built-in registry (resolution source-of-truth until Phase 2026-05.14.01 — dataclass).

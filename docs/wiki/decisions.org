@@ -37,7 +37,7 @@ Triggers (write an entry):
 - Closing off an alternative we evaluated and rejected
   ("we considered libSQL; staying on SQLite because …")
 - A trade-off where the loser is non-obvious
-  ("vault-authoritative now → DB-authoritative in Phase 25;
+  ("vault-authoritative now → DB-authoritative in Phase 2026-05.17 — DB-as-cache + git-canonical pipeline;
   the inversion has costs and we accept them because …")
 - A deferral with a trigger condition
   ("CODEOWNERS deferred until N agent reviewers …")
@@ -182,7 +182,7 @@ surface before we know what's load-bearing.
 2. Use existing agents (=@atoz=, =@riker=) for
    PM-shaped work; promote new agents (=@scrummaster=,
    =@projectmanager=, etc.) only when patterns are
-   undeniable, per agent-idea-interaction-lens and Phase 29
+   undeniable, per agent-idea-interaction-lens and Phase 2026-05.20 — sync verb POC
    self-coded-tools.
 3. Treat ceremony as opt-in, never as default.
 4. Differentiator must be agent-native + vault-grounded +
@@ -372,7 +372,7 @@ turn and the orchestration top priority (smoother + faster +
 higher-quality than solo) fails the moment supervision taxes
 latency. Sharply: /if a confusion can be detected by code, it
 must be; LLM-based supervision is reserved for confusions that
-genuinely need reasoning./ Implemented as the Phase 24
+genuinely need reasoning./ Implemented as the Phase 2026-05.02 — supervision trinity
 [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][supervision trinity]] —
 three registries (pre-flight resolvers, tool-failure recovery
 hooks, confusion detector) that each accept new entries the
@@ -404,7 +404,7 @@ confusion is pattern-matchable.
    reviewing the audit log retrospectively) over inline
    round-trips.
 
-3. *The trinity is the implementation surface.* Phase 24
+3. *The trinity is the implementation surface.* Phase 2026-05.02 — supervision trinity
    ships three registries: 24.1 pre-flight resolvers, 24.2
    tool-failure recovery hooks, 24.3 confusion detector
    (24.4 manager quorum is the open-question slot for the
@@ -416,7 +416,7 @@ confusion is pattern-matchable.
 - Architecture rule canonized in
   =docs/wiki/architecture.org= § /Design rule —
   supervision is deterministic by default/.
-- Phase 24 trinity is the load-bearing surface;
+- Phase 2026-05.02 — supervision trinity trinity is the load-bearing surface;
   later phases (29 self-coded tools, 30 FOSS agent value-adds)
   treat the registries as the auto-promotion targets.
 - Forecloses LLM-observer-per-turn shapes — those
@@ -467,7 +467,7 @@ fixes, link repairs, passing edits.
   under ~150 words. Today's call: keep the rule strict
   to build the habit.
 
-** DEC-008 — Phase 24.1 wires at the @-prefix seam, not delegate-only
+** DEC-008 — Phase 2026-05.02.01 — pre-flight resolvers wires at the @-prefix seam, not delegate-only
 :PROPERTIES:
 :ID:       8aa9e7d2-9f63-4ef3-9b25-3b1c7d2e8f5a
 :STATUS:   accepted
@@ -486,7 +486,7 @@ through it. Eager-imports =org_llm.resolvers= at proxy
 module-load time so the prewarm thread is finished before
 the first user prompt and the cold-start budget never bites.
 
-*Context.* The first cut of Phase 24.1 wired the resolver
+*Context.* The first cut of Phase 2026-05.02.01 — pre-flight resolvers wired the resolver
 into =delegate()= only. Live verify against the motivating
 =@curator/superset.org= bug failed to fire enrichment because
 curator (running on cloud =qwen-2.5-72b= via the @-prefix
@@ -496,7 +496,7 @@ never ran. Reading
 [[id:47ba2143-c53a-409a-8286-2b3759794608][llm-proxy.org]]
 made the seam location obvious: =intercept_agent_prefix= (#6
 in =DEFAULT_INTERCEPTORS=) is where every @-prefix turn gets
-its persona swap, and the recipe pre-fetch (Phase 22 v2)
+its persona swap, and the recipe pre-fetch (Phase 2026-05.07 — manager pre-fetch + agent narrates)
 already mutates =agent_prompt= here. Resolver enrichment
 slots in cleanly using the same pattern.
 
@@ -517,7 +517,7 @@ problem is "every agent dispatch deserves enrichment." The
    in =llm_proxy.py= so =_prewarm_caches()= fires at proxy
    startup. First user prompt sees warm caches; the 80ms
    wall-clock budget stays comfortable.
-4. The same wiring lesson applies forward: future Phase 24
+4. The same wiring lesson applies forward: future Phase 2026-05.02 — supervision trinity
    sub-phases (recovery hooks, confusion detector) wire at
    the *broadest dispatch seam available*, not the narrowest
    convenient call site. The trinity's value compounds when
@@ -525,7 +525,7 @@ problem is "every agent dispatch deserves enrichment." The
    ones.
 
 *Consequences.*
-- Phase 24.1 closes the motivating bug end-to-end via the
+- Phase 2026-05.02.01 — pre-flight resolvers closes the motivating bug end-to-end via the
   @-prefix path; verified live (third turn of 2026-05-04
   session: agent's first tool call hit the absolute path).
 - Resolver enrichment is now a shared seam with recipe
@@ -563,8 +563,8 @@ of agents (manager + a small set of specialists — initial
 likely =@picard= manager, =@spock= researcher, =@data= scribe,
 =@boothby= hygiene) capped at ≤7 (per DEC-014; originally ≤6)
 and provides an *extension path* for any agent the user (or
-community) writes via Phase 23.5 user-supplied agents and
-Phase 23.6 literate-tools. Two-tier population by design
+community) writes via Phase 2026-05.14.02 — DB-backed registry user-supplied agents and
+Phase 2026-05.16 — literate MCP tools literate-tools. Two-tier population by design
 (extended to ternary by DEC-014): out-of-the-box clarity from
 the opinionated team; long-tail value from the extension
 surface.
@@ -577,7 +577,7 @@ that makes /first usable/ achievable) AND must remain
 extensible (so any agent anyone could write becomes a
 first-class citizen). Today's roster of 19 agents is too many
 for "core" — most are specialists or experiments and don't
-gate the dream-state-vault thesis (β). The cull (Phase 26 —
+gate the dream-state-vault thesis (β). The cull (Phase 2026-05.04 — cull walk —
 core/addable extract) decides which stay core; this decision
 captures the principle that drives the cull.
 
@@ -591,7 +591,7 @@ captures the principle that drives the cull.
    against the lead thesis or it goes to the extension path.
 
 2. *Extension path is first-class, not afterthought.*
-   Phase 23.5 (user-supplied agents) and Phase 23.6 (literate
+   Phase 2026-05.14.02 — DB-backed registry (user-supplied agents) and Phase 2026-05.16 — literate MCP tools (literate
    MCP tools) are not "advanced" features — they are the
    mechanism by which the long tail of agent value lands.
    They get the same surface polish as the core team.
@@ -603,13 +603,13 @@ captures the principle that drives the cull.
    external (or external-shaped) agent landing successfully.
 
 *Consequences.*
-- Phase 26 (cull) becomes load-bearing for v1.0 — without it,
+- Phase 2026-05.04 — cull walk (cull) becomes load-bearing for v1.0 — without it,
   the curated core team is undefined.
-- The Phase 23.5 user-supplied-agents work moves from
+- The Phase 2026-05.14.02 — DB-backed registry user-supplied-agents work moves from
   "design pending / nice-to-have" toward gating, since the
   extension path is half of this decision.
 - Most of today's 19-agent roster moves to the extension
-  path. Specific calls happen during Phase 26.
+  path. Specific calls happen during Phase 2026-05.04 — cull walk.
 - Mirrors the substrate paradox (opinionated experience +
   agnostic substrate) — same shape applied to agents:
   opinionated core team + extensible roster.
@@ -724,7 +724,7 @@ that latency is explicit, not a leak. This collapses the
 two-pillar tension between "Org is Code" and "DB-maximalism":
 they're layered, not opposed.
 
-*Context.* The original Phase 25 framing said "DB becomes
+*Context.* The original Phase 2026-05.17 — DB-as-cache + git-canonical pipeline framing said "DB becomes
 truth, files become rendered UI" — pure DB-authoritative
 inversion. The 2026-05-05 mission walk surfaced two related
 clarifications: (1) at the bytes level, *everything is files*
@@ -776,7 +776,7 @@ introspectability — all the DB-max wins).
    [[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][data-integrity-laws.org]] for agent-vs-human edit policies.
 
 *Consequences.*
-- *Phase 25 scope rewrites.* Was "DB becomes truth, files
+- *Phase 2026-05.17 — DB-as-cache + git-canonical pipeline scope rewrites.* Was "DB becomes truth, files
   become rendered UI"; now "files canonical, DB-as-cache, dbt
   pipeline." Narrower, safer, ships sooner. Captures most of
   the original DB-max wins without the bidirectional-sync
@@ -961,14 +961,14 @@ policy."
    #+end_example
 
 *Consequences.*
-- *Phase 26 cull becomes operationally clearer.* Every "tool"
+- *Phase 2026-05.04 — cull walk cull becomes operationally clearer.* Every "tool"
   candidate gets categorized: data → dbt, effect → MCP, then
   either core (gates lead value) or addable (per DEC-009).
-- *Phase 29 self-coded tools target dbt by default.* The
+- *Phase 2026-05.20 — sync verb POC self-coded tools target dbt by default.* The
   promotion path (audit-log → propose model → tests pass →
   register) is dbt's natural shape. Effect-tool synthesis is
   rarer + harder; dbt majority makes the loop tractable.
-- *Phase 30.4 multi-judge applies cleanly to data tools* —
+- *Phase 2026-05.21 — multi-judge validation multi-judge applies cleanly to data tools* —
   comparing model output against past LLM-produced answers is
   the dbt-natural validation. Effect-tool validation is
   per-tool bespoke.
@@ -1010,7 +1010,7 @@ policy."
            retained on the agents for back-compat.
 :END:
 
-*Summary.* The Phase 26.1 cull walkthrough produced four
+*Summary.* The Phase 2026-05.04 — cull walk cull walkthrough produced four
 load-bearing framework decisions that extend [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009]] (curated
 core + extension path) and need explicit canon: (1) cull
 verdicts are *ternary* — CORE / CORE_DISABLED_BY_DEFAULT /
@@ -1089,7 +1089,7 @@ vocabulary.
    the capability natively in SQL — are tracked in a separate
    "Subsumed / dead code (out of cull scope)" section in
    =cull.org=. Subsumption is *delete-as-you-go* (lands when
-   the subsumer ships, not as a Phase 26 cut). The cull rubric
+   the subsumer ships, not as a Phase 2026-05.04 — cull walk cut). The cull rubric
    answers "what shape does this ship in?"; subsumption answers
    "is this a thing anymore?" — different question types, kept
    separate to keep the rubric honest. Recommendation (c) per
@@ -1097,8 +1097,8 @@ vocabulary.
 
 *Consequences.*
 
-- Phase 26.1 cull walk now has its persistent record in
-  =cull.org= with all 38 components verdicted; Phase 26.2
+- Phase 2026-05.04 — cull walk cull walk now has its persistent record in
+  =cull.org= with all 38 components verdicted; Phase 2026-05.01 — physical extraction
   (physical extraction) inherits the verdicts as its work
   surface. The Subsumed section enumerates the ~3000 LoC of
   delete candidates (=org_tools.py= 1174, =vault_facts.py=
@@ -1139,7 +1139,7 @@ vocabulary.
 work), =acpt= (staged for stability test), =prod= (tagged releases).
 Two axes — *code branches* (trunk → acpt → main) AND *install slots*
 (editable / acpt-pinned / tag-pinned). Daily-driver runs prod; risky
-work (Phase 26.2 LoC delete, Phase 24.2/24.3, etc.) runs in dev.
+work (Phase 2026-05.01 — physical extraction LoC delete, Phase 2026-05.02.02 — recovery hooks/24.3, etc.) runs in dev.
 Promotion gates: =trunk → acpt= on smoke + author-ready; =acpt → prod=
 on ≥24h dogfood-without-surprise + tag bump. Agent-vs-human dogfood
 marking (per user, 2026-05-05): test items carry =:test:agent-runnable:=
@@ -1149,8 +1149,8 @@ possible. Promotion provenance recorded in captain's log
 (=Config(key, device, env, value)= per [[id:b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1][DEC-012]]+this).
 
 *Context.* The 2026-05-05 cull walk surfaced a parallelism need:
-Phase 26.2 (~3000 LoC delete) is high-risk for daily-driver
-stability; other dev work (Phase 24.2/24.3, mobile build, DEC-015
+Phase 2026-05.01 — physical extraction (~3000 LoC delete) is high-risk for daily-driver
+stability; other dev work (Phase 2026-05.02.02 — recovery hooks/24.3, mobile build, DEC-015
 chat surface) shouldn't block on it. DEC-001 (trunk + PR-to-main)
 covers code-branch isolation but not *runtime* isolation — the user
 daily-drives the same install they develop on, which means risky
@@ -1158,7 +1158,7 @@ dev work and stable use share runtime state. The user named the
 gap explicitly: "want to develop the LoC delete while allowing
 other work in parallel… also a concept of dev/acpt/prod."
 
-The Phase 26.2 use case is the trigger; the framework generalises
+The Phase 2026-05.01 — physical extraction use case is the trigger; the framework generalises
 to all future risky work and to org-llm's use *as a dev tool* for
 the user's own projects (per [[id:8e0c3b71-1f75-4a0f-9d3e-9b85f29c4ed1][DEC-003]] agents-as-SDLC).
 
@@ -1199,7 +1199,7 @@ the user's own projects (per [[id:8e0c3b71-1f75-4a0f-9d3e-9b85f29c4ed1][DEC-003]
 
 *Consequences.*
 
-- *Phase 26.2 unblocks.* Extraction work runs on =dev/26-2-extraction=
+- *Phase 2026-05.01 — physical extraction unblocks.* Extraction work runs on =dev/26-2-extraction=
   branch off main; promotes to trunk → acpt → prod through the gates.
   Other dev work continues on trunk in parallel; conflicts resolved at
   promotion time, not edit time.
@@ -1313,7 +1313,7 @@ to be re-litigated from first principles.
         foundation for any FOSS-distribution roll-out.
      3. *Never while BSL active:* stack membership is off the
         table.
-   - *Superset (Apache 2.0)* — currently integrate (Phase 27
+   - *Superset (Apache 2.0)* — currently integrate (Phase 2026-07.01 — Apache Superset dashboards
      dashboards talk to a Superset instance). FOSS-licensed,
      so fork-and-stack is *available* if warranted; not
      currently chosen, but the option is live under the stack
@@ -1511,8 +1511,8 @@ from git). Promotion gate strips the suffix: =v0.2.0-acpt3=
 that survives the [[id:e2c47df1-3a86-4f9e-9d13-7c4b8e2f5a91][DEC-016]] 24h dogfood window becomes
 =v0.2.0=. v1.0 cuts only when the gate items in
 [[id:81d0f3bc-4b91-4cb3-8d22-5a83c3f6f7e2][whole-picture.org § The versioning shape]] all land — Phase
-24.2 (recovery hooks) ✓ today, Phase 24.3 (confusion detector)
-pending, Phase 26.2 (physical extraction) pending, retrieval-
+24.2 (recovery hooks) ✓ today, Phase 2026-05.02.03 — confusion detector (confusion detector)
+pending, Phase 2026-05.01 — physical extraction (physical extraction) pending, retrieval-
 bug sweep, cross-platform install validation (macOS + Ubuntu).
 
 *Expanded.* This formalises the path already started: =v0.1.0=
@@ -1594,8 +1594,8 @@ config.
 
 6. *v1.0 cut criteria.* v1.0 ships when *all five* gate
    items in whole-picture.org § The versioning shape are
-   green: Phase 24.2 (recovery hooks), Phase 24.3 (confusion
-   detector), Phase 26.2 (physical extraction), retrieval-bug
+   green: Phase 2026-05.02.02 — recovery hooks (recovery hooks), Phase 2026-05.02.03 — confusion detector (confusion
+   detector), Phase 2026-05.01 — physical extraction (physical extraction), retrieval-bug
    sweep, cross-platform install validation (macOS + Ubuntu).
    Snapshot 2026-05-06 EST: 24.2 shipped today; 24.3 + 26.2
    pending; retrieval + cross-platform pending.

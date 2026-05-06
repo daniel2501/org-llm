@@ -117,7 +117,7 @@ the MCP tool inline and moves on.
 The captain's heuristic is testable: any side-quest spawn
 where the resulting agent-report has empty *Decisions* and
 empty *What landed* should not have been a spawn. Audit-log
-review (Phase 24.2 family) catches these and tunes the
+review (Phase 2026-05.02.02 — recovery hooks family) catches these and tunes the
 disposition.
 
 * Who gets spawned
@@ -202,7 +202,7 @@ primers, recipes, or =crew_log= — it composes them.
 
 What's *new* here is only the *naming + heuristic + receipt
 convention*. Every implementation primitive already exists or
-is queued in Phase 24.5.
+is queued in Phase 2026-05.02 — supervision trinity (legacy 24.5 — orientation primer registry).
 
 * Risks and boundaries
 
@@ -224,7 +224,7 @@ in the existing audit + capability + roster machinery.
 - *Report-skipping.* The specialist may finish the work
   without writing the report. Mitigation A: the manifest
   injects =primer("agent-report")= as a *prerequisite*. Mitigation
-  B: a tool-failure recovery hook (Phase 24.2) on the
+  B: a tool-failure recovery hook (Phase 2026-05.02.02 — recovery hooks) on the
   =delegate=-return path that detects a missing report and
   returns a recovery suggestion.
 - *Target drift.* Captain spawns =@boothby= for what should
@@ -247,7 +247,7 @@ in the existing audit + capability + roster machinery.
 
 *Summary.* Pattern named 2026-05-04. Mechanism is fully
 present today (=delegate()= ships, manifest queued for Phase
-24.5a, =primer("agent-report")= queued for Phase 24.5b,
+24.5a, =primer("agent-report")= queued for Phase 2026-05.02 — supervision trinity (legacy 24.5b — agent-report orientation primer),
 template canonized). What's left is the captain's *disposition
 tuning* — adding the spawn-vs-inline heuristic to =@picard='s
 persona and validating it against audit-log review.
@@ -335,7 +335,7 @@ agor.live/guide/architecture, 2026-05-04):
 One material constraint Agor's architecture surfaces that
 matters for org-llm: MCP servers attach at session creation
 with a 64-char hex token; *no runtime registration mechanism
-is documented*. If Phase 29's self-coded-tools loop wants
+is documented*. If Phase 2026-05.20 — sync verb POC's self-coded-tools loop wants
 agents to register newly-synthesized tools mid-conversation,
 that's a known unconfirmed in the dev-tracker spike protocol.
 

@@ -24,7 +24,7 @@ The dbt project itself is a hybrid of app-bundled defaults
 plus user extensions in the vault repo, merged at runtime in
 the same pattern as agent personas, recipes, and config. dbt's
 incremental builds, declarative tests, and lineage graph are
-what make Phase 29 self-coded tools realistic — when an LLM
+what make Phase 2026-05.20 — sync verb POC self-coded tools realistic — when an LLM
 proposes a new derived model, dbt is the substrate that
 validates it, ships it, and serves it deterministically from
 then on.
@@ -85,7 +85,7 @@ cross-cutting queries. Each is roughly 30 lines of SQL.
 
 The point: agents stop re-implementing the same join logic in
 every recipe — they =SELECT * FROM recent_activity= and trust
-the model. The Phase 21 vault-fact inferrers map naturally to
+the model. The Phase 2026-05.13 — deterministic vault inferrers vault-fact inferrers map naturally to
 dbt models. Cross-cutting queries collapse to one-line agent
 prompts.
 
@@ -216,10 +216,10 @@ Specific to org-llm:
 Cost: roughly free. dbt-docs ships with dbt. Adding column
 descriptions is a few hundred lines of YAML, written once.
 
-* Phase 29 self-coded tools land here
+* Phase 2026-05.20 — sync verb POC self-coded tools land here
 
 When an agent runs the same complex query repeatedly, the
-audit log notices, and the Phase 29 detector flags it as a
+audit log notices, and the Phase 2026-05.20 — sync verb POC detector flags it as a
 candidate. The LLM is asked: "express this as a dbt model" —
 producing =models/some_model.sql= plus =schema.yml= plus
 tests. dbt validates the proposal: builds the model, runs the
@@ -239,12 +239,12 @@ Why dbt makes this realistic:
 The shift this enables: the app gets *faster and more
 deterministic over time for your specific workflows*. That's
 the differentiator γ promised. dbt is the substrate that
-makes Phase 29 not just feasible but easy.
+makes Phase 2026-05.20 — sync verb POC not just feasible but easy.
 
-* Dashboards — Phase 27 Superset connection
+* Dashboards — Phase 2026-07.01 — Apache Superset dashboards Superset connection
 
 With dbt models as the schema, Superset gets a clean
-dashboarding target. Phase 27 — Apache Superset dashboards
+dashboarding target. Phase 2026-07.01 — Apache Superset dashboards — Apache Superset dashboards
 stops being optional and starts being load-bearing for the
 third quality criterion (substantial user value).
 
@@ -273,7 +273,7 @@ in narratives — "Your mood arc this month tracks closely with
 Project X's delivery cycle."
 
 Cost: Superset has a setup learning curve, but minimal once
-running. Phase 29 means an LLM can propose dashboards the same
+running. Phase 2026-05.20 — sync verb POC means an LLM can propose dashboards the same
 way it proposes models.
 
 * Cross-vault federation — the n=many future
@@ -339,4 +339,4 @@ references. Same shape as agent personas, config, and recipes
 - [[id:b6c4f8a7-1e23-4d96-9f8b-7c1d52a4b3f1][DEC-012 — Per-device configuration]]
 - [[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]] — git-canonical multi-device sync
 - [[file:architecture.org][architecture.org]] § Org is Code design rule
-- [[file:roadmap.org][roadmap.org]] § Phase 25 (DB-authoritative — scope revised by DEC-011), § Phase 27 (Superset), § Phase 29 (self-coded tools)
+- [[file:roadmap.org][roadmap.org]] § Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (DB-authoritative — scope revised by DEC-011), § Phase 2026-07.01 — Apache Superset dashboards (Superset), § Phase 2026-05.20 — sync verb POC (self-coded tools)

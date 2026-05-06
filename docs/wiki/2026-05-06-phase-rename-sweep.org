@@ -1,0 +1,477 @@
+:PROPERTIES:
+:ID:       2026-05-06-phase-rename-sweep
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Phase rename sweep — 2026-05-06
+#+FILETAGS: :wiki:meta:rename:log:
+#+OPTIONS: toc:2 num:nil
+#+STARTUP: overview content
+
+* Summary
+
+Retroactive rename of all =Phase 1–31= numerical entries to the
+new chronological scheme =Phase YYYY-MM.PP[.PP[.PP]] — slug=
+ratified 2026-05-06. This page is the *work log* for the sweep:
+canonical mapping table, wave-by-wave progress, residual finds,
+and decisions made during execution.
+
+The scheme itself is documented in memory as
+=project_roadmap_phase_naming.md=.
+
+* Scheme rules (recap)
+
+- *Granularity:* month. =YYYY-MM= base unit.
+- *Date:* target month — renamed if it slips. Already-shipped
+  phases use their ship month.
+- *Sub-numbering:* zero-padded priority within the month. =.01= is
+  highest priority. Recursive: =.01.01= is top sub-priority of
+  =.01=.
+- *Deferral:* slipped phase gets a NEW entry under the new target
+  month; the old entry is retired (kept for history). No
+  carry-forward.
+- *No grandfather:* all pre-existing phases renamed; no
+  half-state.
+
+* Decisions made during the sweep
+
+These were interpretive calls; logged here so the rationale
+survives.
+
+1. *2026-06 vs 2026-07 split for post-1.0 work.* Agent ecosystem
+   (Phase 29.x, 30.x, co-edit, agenda-agent) → 2026-06. Superset
+   + avatars → 2026-07/08. Reasoning: agent ecosystem is the
+   lowest-friction next layer after v1.0; Superset is heavier;
+   avatars are explicitly post-1.0 in the original scope.
+2. *Phase 16.4+ / 16.5 (extension polish + Doom intro).*
+   Currently =TODO [#A] Planned= with no SCHEDULED tag. Placed in
+   2026-05 sprint slots because both are tagged sprint-eligible
+   in the original entries.
+3. *Phase 20 (full agent crew, parked).* Given =2026-05.99= to
+   keep it in the chronological index for history, marked
+   =PARKED=. Not retired — the lessons stay accessible.
+4. *Deferred TODOs of shipped 2026-04 parents* (12.6, 12.7, 13.2,
+   13.4, 13.5, Phase 18 follow-ups) → re-targeted to 2026-07
+   (later). Rule says deferral renames; these slipped past their
+   parent's 2026-04 ship.
+5. *Commit-message quotations in body text* — leave alone (commit
+   messages are immutable history). Active prose referencing
+   phases gets rewritten.
+6. *Code (=org_llm/*.py= comments, test names, file names like
+   =scripts/audit_phase17.py=)* — out of scope for the wiki
+   sweep; check in with user before touching.
+
+* Canonical rename map
+
+** 2026-04 — foundational shipped
+
+| Old                                    | New                                                                  |
+|----------------------------------------+----------------------------------------------------------------------|
+| Phase 1–3 — initial implementation     | Phase 2026-04.01 — initial implementation                            |
+| Phase 5 — opencode workspace           | Phase 2026-04.02 — opencode workspace                                |
+| Phase 7 — opencode wiring audit        | Phase 2026-04.03 — opencode wiring audit                             |
+| Phase 9.7 — =.opencode/= dotfile       | Phase 2026-04.04 — =.opencode/= dotfile                              |
+| Phase 10 — surface polish + tutor      | Phase 2026-04.05 — surface polish + tutor + gallery                  |
+| Phase 11 — embed migration + tag       | Phase 2026-04.06 — embed migration + tag --apply                     |
+| Phase 12 — insight cards (parent)      | Phase 2026-04.07 — insight cards                                     |
+| Phase 12.1 — pre-mount skeleton        | Phase 2026-04.07.01 — pre-mount skeleton + first generator           |
+| Phase 12.2 — LLM narration             | Phase 2026-04.07.02 — LLM narration + scorer                         |
+| Phase 12.3 — more generators           | Phase 2026-04.07.03 — more generators + concept wiki                 |
+| Phase 12.4 — inject cards              | Phase 2026-04.07.04 — inject cards into opencode                     |
+| Phase 12.5 — engagement table          | Phase 2026-04.07.05 — engagement table + diagnose-cards              |
+| Phase 13.1 — walk + opencode           | Phase 2026-04.08 — walk + opencode surfacing                         |
+| Phase 15 — provider config audit       | Phase 2026-04.09 — provider config audit                             |
+| Phase 16.0 — scaffolding               | Phase 2026-04.10.01 — extensions scaffolding                         |
+| Phase 16.1 — opencode TUI plugin       | Phase 2026-04.10.02 — opencode TUI plugin                            |
+| Phase 16.2 — launch wires plugin       | Phase 2026-04.10.03 — launch wires the plugin                        |
+| Phase 17 — live sidebar status panel   | Phase 2026-04.11 — live sidebar status panel                         |
+
+** 2026-05 — current arc
+
+Priority order: v1.0 gates → NEXT/active → planned-this-month →
+parked-but-history.
+
+| Old                                       | New                                                                  |
+|-------------------------------------------+----------------------------------------------------------------------|
+| Phase 26.2 — physical extraction          | Phase 2026-05.01 — physical extraction                               |
+| Phase 24 — Supervision trinity (parent)   | Phase 2026-05.02 — supervision trinity                               |
+| Phase 24.1 — pre-flight resolvers         | Phase 2026-05.02.01 — pre-flight resolvers                           |
+| Phase 24.2 — recovery hooks               | Phase 2026-05.02.02 — recovery hooks                                 |
+| Phase 24.3 — confusion detector           | Phase 2026-05.02.03 — confusion detector                             |
+| Phase 24.4 — manager quorum               | Phase 2026-05.02.04 — manager quorum                                 |
+| Phase 16.3 — Emacs companion              | Phase 2026-05.03 — Emacs companion                                   |
+| Phase 26.1 — cull walk                    | Phase 2026-05.04 — cull walk                                         |
+| Phase 17.1 — LCARS panel + LLM proxy      | Phase 2026-05.05 — LCARS panel + LLM proxy + auto-doctor             |
+| Phase 18 — proxy expansion (parent)       | Phase 2026-05.06 — proxy expansion                                   |
+| Phase 18 — Action bridge                  | Phase 2026-05.06.01 — action bridge                                  |
+| Phase 18.6 — cloud-first + synth tools    | Phase 2026-05.06.02 — cloud-first + synth tools + ctx-overflow       |
+| Phase 18 — system-prompt prefix cache     | Phase 2026-05.06.03 — system-prompt prefix cache                     |
+| Phase 18 — FOSS-first segmentation        | Phase 2026-05.06.04 — FOSS-first segmentation                        |
+| Phase 18 — cloud failover (first-byte)    | Phase 2026-05.06.05 — cloud failover on first-byte timeout           |
+| Phase 22 v2 — manager pre-fetch           | Phase 2026-05.07 — manager pre-fetch + agent narrates                |
+| Phase 22.6 — markdown-JSON repair         | Phase 2026-05.08 — markdown-JSON repair                              |
+| Phase 22.6 — agent tools v2 (parent)      | Phase 2026-05.09 — agent tools v2                                    |
+| Phase 22.6.1 — pure-python tools          | Phase 2026-05.09.01 — six pure-python org tools                      |
+| Phase 22.6.2 — CLOCK + drill + attach     | Phase 2026-05.09.02 — CLOCK + drill + attach                         |
+| Phase 22.6.3 — templating + Doom config   | Phase 2026-05.09.03 — templating + Doom config                       |
+| Phase 22.6.4 — wire into agent prompts    | Phase 2026-05.09.04 — wire into agent prompts                        |
+| sidebar plugin disk-read squash           | Phase 2026-05.10 — sidebar plugin disk-read squash                   |
+| Phase 22.5 — thought-process capture      | Phase 2026-05.11 — thought-process capture                           |
+| Phase 22.5a — token-stream excerpt        | Phase 2026-05.11.01 — token-stream excerpt                           |
+| Phase 22.5b — explicit reasoning          | Phase 2026-05.11.02 — explicit reasoning capture                     |
+| Phase 22.5c — chain visualisation         | Phase 2026-05.11.03 — chain visualisation                            |
+| Phase 22 — orchestration v2               | Phase 2026-05.12 — orchestration v2 (recipe expansion)               |
+| Phase 21 — deterministic vault inferrers  | Phase 2026-05.13 — deterministic vault inferrers                     |
+| Phase 21.1 — DB-backed fact store         | Phase 2026-05.13.01 — DB-backed vault fact store                     |
+| Phase 21.2 — five-inferrer first cut      | Phase 2026-05.13.02 — five-inferrer first cut                        |
+| Phase 21.3 — vault_profile aggregate      | Phase 2026-05.13.03 — vault_profile aggregate                        |
+| Phase 23 — agent-framework refinements    | Phase 2026-05.14 — agent-framework refinements                       |
+| Phase 23.1 — dataclass                    | Phase 2026-05.14.01 — dataclass                                      |
+| Phase 23.5 — DB-backed registry           | Phase 2026-05.14.02 — DB-backed registry                             |
+| Phase 19 — built-in vault git-sync        | Phase 2026-05.15 — built-in vault git-sync                           |
+| Phase 23.6 — literate MCP tools (parent)  | Phase 2026-05.16 — literate MCP tools                                |
+| Phase 23.6.1 — customize tier             | Phase 2026-05.16.01 — customize tier                                 |
+| Phase 23.6.2 — manage tier                | Phase 2026-05.16.02 — manage tier                                    |
+| Phase 23.6.3 — shell-wrapped user tools   | Phase 2026-05.16.03 — shell-wrapped user tools                       |
+| Phase 23.6.4 — HTTP-wrapped user tools    | Phase 2026-05.16.04 — HTTP-wrapped user tools                        |
+| Phase 25 — DB-as-cache + git-canonical    | Phase 2026-05.17 — DB-as-cache + git-canonical pipeline              |
+| Phase 25.1..25.7                          | Phase 2026-05.17.01..07 (parallel sub-numbers)                       |
+| Phase 16.5 — Doom config introspection    | Phase 2026-05.18 — Doom config introspection                         |
+| Phase 16.4+ — extension polish            | Phase 2026-05.19 — extension polish                                  |
+| Phase 29.0 — sync verb POC                | Phase 2026-05.20 — sync verb POC                                     |
+| Phase 30.4 — multi-judge validation       | Phase 2026-05.21 — multi-judge validation                            |
+| Punch list (beta → 1.0)                   | Phase 2026-05.22 — punch list (beta → 1.0)                           |
+| Phase 20 — full agent crew (parked)       | Phase 2026-05.99 — full agent crew (PARKED)                          |
+
+** 2026-06 — post-1.0, agent ecosystem
+
+| Old                                       | New                                                                  |
+|-------------------------------------------+----------------------------------------------------------------------|
+| Phase 29.1 — pattern detection            | Phase 2026-06.01 — pattern detection                                 |
+| Phase 29.2 — tool synthesis + validation  | Phase 2026-06.02 — tool synthesis with validation                    |
+| Phase 29.3 — registration + replacement   | Phase 2026-06.03 — registration + replacement                        |
+| Phase 30.1 — local-only flows             | Phase 2026-06.04 — local-only flows                                  |
+| Phase 30.2 — specialized small models     | Phase 2026-06.05 — specialized small models per domain               |
+| Phase 30.3 — background continuous work   | Phase 2026-06.06 — background continuous work                        |
+| Phase 30.5 — self-validation              | Phase 2026-06.07 — self-validation                                   |
+| Co-edit org files (B)                     | Phase 2026-06.08 — co-edit org files                                 |
+| org-agenda-agent (B)                      | Phase 2026-06.09 — org-agenda-agent                                  |
+
+** 2026-07+ — Superset, avatars, deferred
+
+| Old                                       | New                                                                  |
+|-------------------------------------------+----------------------------------------------------------------------|
+| Phase 27 — Apache Superset dashboards     | Phase 2026-07.01 — Apache Superset dashboards                        |
+| Phase 28 — containerization strategy      | Phase 2026-07.02 — containerization strategy                         |
+| Phase 31.1 — agent visual metadata        | Phase 2026-07.03 — agent visual metadata                             |
+| Phase 31.2 — themes as literate config    | Phase 2026-07.04 — themes as literate config                         |
+| Phase 12.6 — cached gather persistence    | Phase 2026-07.05 — cached-gather persistence                         |
+| Phase 12.7 — dbt analytics                | Phase 2026-07.06 — dbt analytics over engagement                     |
+| Phase 13.2 — dailies as walk targets      | Phase 2026-07.07 — dailies as walk targets                           |
+| Phase 13.4 — per-slug routing             | Phase 2026-07.08 — per-slug routing in walk                          |
+| Phase 13.5 — follow-up questions in walk  | Phase 2026-07.09 — follow-up questions in walk                       |
+| Phase 18 — citation post-processor        | Phase 2026-07.10 — citation post-processor                           |
+| Phase 18 — tool-result memoisation        | Phase 2026-07.11 — tool-result memoisation                           |
+| Phase 18 — skill-matching free-form       | Phase 2026-07.12 — skill-matching on free-form text                  |
+| Phase 18 — per-turn model routing         | Phase 2026-07.13 — per-turn model routing                            |
+| Phase 18 — auto-summarisation             | Phase 2026-07.14 — auto-summarisation of long context                |
+| Phase 18 — stream-time tool-call repair   | Phase 2026-07.15 — stream-time tool-call repair                      |
+| Phase 18 — provider-failure fallback      | Phase 2026-07.16 — provider-failure fallback                         |
+| Phase 31.3 — image-gen backend            | Phase 2026-08.01 — image-gen backend abstraction                     |
+| Phase 31.4 — Emacs display path           | Phase 2026-08.02 — Emacs display path                                |
+| Phase 31.5 — terminal protocol path       | Phase 2026-08.03 — terminal protocol path                            |
+| Phase 31.6 — conversational tuning        | Phase 2026-08.04 — conversational tuning via @avatarsmith            |
+
+** Wishlist (kept undated, no commitment)
+
+Voice / TTS bridge · Multi-vault federation · Browser extension ·
+Inline embeddings refresh — stay under a =* Wishlist — no
+commitment :wishlist:= section. No phase number assigned.
+
+* Wave plan + execution log
+
+** Wave 1 — roadmap.org headings (DONE 2026-05-06)
+
+Targets: rename every =* Phase X= heading to the new form. Flip
+Phase 24 status TODO → DONE. Add new headings for 2026-05.01
+(physical extraction) + 2026-05.04 (cull walk).
+
+Files touched: =docs/wiki/roadmap.org=.
+
+Result: 95 new-style =Phase 2026-MM.PP= headings. Phase 24 flipped
+DONE. Phase 26.1 + 26.2 added as =Phase 2026-05.04= and
+=Phase 2026-05.01= with =:LEGACY_NUMBER:= property + body
+description. Sub-phases of Phase 24 / 25 / 29 / 30 / 31 stayed as
+bullet items in body (not headings) — Wave 4 cross-ref sweep
+will rewrite those bullet labels.
+
+** Wave 2 — Phase index table (DONE 2026-05-06)
+
+Inserted =* Phase index :index:= section at top of roadmap.org
+(replacing the stale =Phases planned= bullet list). Three
+sub-tables: 2026-04 (foundational), 2026-05 (current arc, 21
+rows), 2026-06+ (post-1.0). Org-links resolve to the new
+headings. Wishlist stays separate.
+
+** Wave 3 — now.org (DONE 2026-05-06)
+
+Inserted =* Phase board :phaseboard:= section (7 rows: 2026-05.01
+in flight, 2026-05.02 shipped, 2026-05.03 in flight, 2026-05.04
+shipped, 2026-05.16 planned, 2026-05.22 planned, 2026-05.99
+parked) with =[[file:roadmap.org::*…][…]]= links to roadmap.org
+catalog headings.
+
+Body rewrites: Recently-done table row 56 (Phase 25.1 →
+2026-05.17.01); What-landed-this-arc bullet (Phase 25 →
+2026-05.17); OVERNIGHT block (Phase 24 → 2026-05.02; Phase 26.2 →
+2026-05.01; Phase 29.x → 2026-06.01–.03; supervision-gate
+trinity 24.1/24.2/24.3 → 2026-05.02.01/.02/.03; v1.0 still
+gating Phase 26.2 → 2026-05.01; open follow-ups Phase 23.6/26.2/
+30.4 → 2026-05.16/.01/.21); TONIGHT block (Phase 24.2 →
+2026-05.02.02); afternoon table (~17:00 Phase 24.2 →
+2026-05.02.02; Today's-commits Phase 26.1 → 2026-05.04); pre-nap
+snapshot (Phase 24.1 → 2026-05.02.01; Phase 25 → 2026-05.17;
+Phase 26.1 → 2026-05.04; starter options Phase 26.2 →
+2026-05.01; option 8 Phase 24.2+24.3 → 2026-05.02.02+.03; Live
+verify Phase 24.1 → 2026-05.02.01); Agor follow-ups (Phase 26.2
+→ 2026-05.01); Ahead table (Phase 25 mid-arc → 2026-05.17 mid-arc);
+Beyond table (Phase 25 → 2026-05.17).
+
+Skipped: 2 commit-message quotation rows in Tonight's-commits
+table (=feat:= + =feat(agor):= patterns inside ===) per Decision
+5.
+
+Diff: ~21 reference replacements + new 11-line phase-board
+section.
+
+** Wave 4 — wiki cross-refs (DONE 2026-05-06)
+
+~70 wiki pages renamed via =scripts/_phase_rename_sweep.py= (a
+temporary helper that codifies the canonical mapping, the
+=Phase X.Y= → =Phase 2026-MM.PP= regex replace with
+sentence-period boundary, and the skip rules for commit-message
+quotations + git-log blocks + =:LEGACY_NUMBER:= property lines +
+=legacy: Phase NN= table-cell preservation markers).
+
+Per-file totals (top 15 by count, full list in script output):
+
+| File                                          | Subs |
+|-----------------------------------------------+------|
+| =dev-tracker.org=                             | 197+ |
+| =roadmap.org=                                 |  98+ |
+| =decisions.org=                               |  39  |
+| =whole-picture.org=                           |  26  |
+| =cull.org=                                    |  25  |
+| =architecture.org=                            |  22  |
+| =doc-rewrite-plan.org=                        |  20  |
+| =2026-05-06-airflow-candidates-report.org=    |  20  |
+| =agent-framework.org=                         |  18  |
+| =00-index.org=                                |  16  |
+| =memory-alpha.org=                            |  14  |
+| =insight-cards.org=                           |  14  |
+| =literate-tools.org=                          |  14  |
+| =multi-agent-org-llm.org=                     |  13  |
+| =tools-as-dbt-models.org=                     |  13  |
+| =2026-05-03-test-session.org=                 |  16  |
+| =2026-05-06-airflow-candidates-report.org=    |  12  |
+| =now.org= (Wave 3 — manual edits)             |  ~21 |
+| (~50 other files)                             | 1–11 |
+
+Total Wave-4 substitutions across ~70 files: *~520* (sum of all
+script runs; including manual edits in =now.org=).
+
+Intentional residuals after sweep (NOT bugs — kept on purpose):
+
+- =roadmap.org:37= — meta-reference to legacy gaps in =Phase 1–31=
+- =roadmap.org:278= — =Renames replace old =Phase 1–31= numbering=
+  (header comment of the index)
+- =roadmap.org:2746–2747= — meta-discussion of =legacy Phase 4= /
+  =legacy Phase 14= absorption history (rewritten with explicit
+  "legacy" prefix)
+- =dev-tracker.org:4676= — =legacy Phase 6 finding (retired)=
+  (legacy phase reference, no current mapping)
+- =architecture.org:534/536/631= — =Phase 1 / Phase 2= are
+  pipeline stages (interceptor chain), NOT roadmap phases
+- =now.org:152, 160= — commit-message quotations in
+  Tonight's-commits table
+
+** Wave 5 — README + extension READMEs (DONE 2026-05-06)
+
+| File                                       | Subs |
+|--------------------------------------------+------|
+| =README.md=                                |  10  |
+| =extensions/README.md=                     |   1  |
+| =extensions/emacs/README.md=               |   3  |
+| =extensions/opencode/README.md=            |   7  |
+
+Total Wave-5: *21* substitutions across 4 README files.
+
+** Wave 6 — code + tests (DECISION POINT)
+
+Agent stopped here. Per-file residuals captured by
+=scripts/_phase_rename_sweep.py --count=:
+
+*** =org_llm/= — 238 refs across 44 files
+
+| File                                          | Refs |
+|-----------------------------------------------+------|
+| =cli.py=                                      |   70 |
+| =db.py=                                       |   28 |
+| =mcp_server.py=                               |   25 |
+| =llm_proxy.py=                                |   24 |
+| =insights.py=                                 |   15 |
+| =walk.py=                                     |    8 |
+| =literate_config.py=                          |    5 |
+| =org_tools.py=                                |    4 |
+| =recovery/__init__.py=                        |    3 |
+| =literate_mcp/parser.py=                      |    3 |
+| =context.py=                                  |    3 |
+| =confusion/__init__.py=                       |    3 |
+| =agents/_builtins.py=                         |    3 |
+| 23 files × 2 refs                             |   46 |
+| 8 files × 1 ref                               |    8 |
+
+Categories (qualitative spot-check):
+- *Inline comments* explaining which phase introduced a feature
+  (e.g. =# Phase 22 v2: manager-driven recipe execution.=,
+  =# Phase 24.1 — eager import of resolver registry=).
+  Highest volume; most informational, no behavioural impact.
+- *Sub-section heading comments* (e.g. =# ── Tool-call dialect
+  translation (Phase 18.7) ────= in =llm_proxy.py=).
+- *Docstring references* in =db.py= column comments.
+- *No log strings or runtime user-facing copy* found in spot
+  check.
+
+*** =tests/= — 33 refs across 15 files
+
+| File                              | Refs |
+|-----------------------------------+------|
+| =test_workspace_mcp.py=           |   11 |
+| =test_airflow_candidates.py=      |    4 |
+| =test_confusion_wiring.py=        |    3 |
+| =test_agents.py=                  |    3 |
+| =test_literate_mcp.py=            |    2 |
+| 10 files × 1 ref                  |   10 |
+
+Categories: test-class docstrings, test-function names tagging
+the phase under test, fixture comments. Some tests literally
+NAMED after the phase (e.g. =test_phase_24_2_recovery=).
+
+*** =scripts/= — 15 refs across 3 files
+
+| File                          | Refs |
+|-------------------------------+------|
+| =audit_phase17.py= (filename) |   12 |
+| =regen_screenshots.py=        |    2 |
+| =sync_sidebar_defaults.py=    |    1 |
+
+NOTE: =audit_phase17.py= has *Phase 17.1* in the *filename* +
+docstring + 11 inline references. The new equivalent name would
+be =audit_phase_2026-05-05.py= or similar. *Filename rename is
+out-of-tree work* — needs CI / git-log search-and-replace if
+done.
+
+*** =extensions/opencode/src/= — 41 refs across 7 files
+
+| File                  | Refs |
+|-----------------------+------|
+| =panel.tsx=           |   14 |
+| =index.ts=            |    8 |
+| =slow-llm-watch.tsx=  |    5 |
+| =sys-commands.tsx=    |    4 |
+| =sidebar.tsx=         |    4 |
+| =auto-session.tsx=    |    4 |
+| =slots.tsx=           |    2 |
+
+Categories: TSX comments (= * (Phase 17.1).=, =// Auto-session
+(Phase 17.1e)= sub-feature tags). Same pattern as Python — phase
+attribution, not behaviour.
+
+*** Out-of-stop-list code surfaces (smaller; flagged for awareness)
+
+| File                          | Refs |
+|-------------------------------+------|
+| =extensions/emacs/org-llm.el= |    2 |
+| =doom/org-llm.el=             |    4 |
+
+These elisp files weren't in the Wave-6 explicit stop list. Same
+phase-attribution-comment pattern. Group with Wave-6 if user
+runs the sweep across all code surfaces.
+
+*** Total residual hits in Wave-6 space
+
+| Surface                          | Refs |
+|----------------------------------+------|
+| =org_llm/=                       |  238 |
+| =tests/=                         |   33 |
+| =scripts/=                       |   15 |
+| =extensions/opencode/src/=       |   41 |
+| (extensions/emacs/ + doom/)      |    6 |
+| *Total*                          | *333* |
+
+*** Ambiguous / skipped during Wave 4/5 (recap)
+
+- =now.org:152, 160= — Tonight's-commits table commit-message
+  quotations (=feat: Phase 24.3...= after =hash= cell)
+- =decisions.org:299= — body code-fence quoting a commit subject
+  (=feat(primers): Phase 24.5b — …=)
+
+Both intentionally preserved per Decision 5 (commit messages are
+immutable history).
+
+Sub-phases not in canonical mapping that needed
+case-by-case treatment in Wave 4 (added to script with
+=(legacy NN.M)= preservation slug):
+
+- =Phase 13.3=, =Phase 16.x=, =Phase 18.7=, =Phase 19.1/.2/.3=,
+  =Phase 23.0/.2/.3/.4=, =Phase 24.5/.5a/.5b=, =Phase 25.x=,
+  =Phase 14+=, =Phase 32=, =Phase 23.x=, =Phase 1–16=,
+  =Phase 26.3=, =Phase 26.4=
+
+*** Estimated effort + risk for Wave 6 (if user approves)
+
+Effort:
+- *org_llm/=* — 238 refs, ~30-60 min via the rename script
+  (already proven idempotent on wiki). Bulk is comments + 2
+  docstrings + 1 sub-section heading. No behaviour change.
+- *tests/=* — 33 refs, ~10 min. Some test function names
+  (=test_phase_24_2_recovery=) might be worth keeping with a
+  legacy-tag but the user should decide.
+- *scripts/=* — 15 refs, ~5 min for content. =audit_phase17.py=
+  filename rename is a separate decision (filename-only =git mv=
+  is trivial; ripple is any external doc / commit referencing
+  the path).
+- *extensions/opencode/src/=* — 41 refs, ~10 min via script.
+- *(elisp surfaces)* — 6 refs, ~5 min.
+
+*Total: ~60-90 min.*
+
+Risk:
+- *Low for runtime correctness* — all refs are comments /
+  docstrings / sub-headings; no runtime string matching against
+  =Phase NN= patterns observed in spot check.
+- *Some risk for grep-based tooling* — if any external tool /
+  doc / agent prompt greps =Phase 17.1= verbatim, it will miss
+  after the rename. Mitigation: the script preserves =legacy
+  17.1= tag in the replacement so grep =legacy 17= still hits.
+- *audit_phase17.py= filename* — if any CI / shell history /
+  README links to the path, those break. Recommend: keep filename
+  as-is + just rename body refs, OR =git mv= + add a
+  redirect-shim Python file that imports from the new module.
+
+** Final — verification grep (pending — after Wave 6 decision)
+
+* Reference counts (baseline 2026-05-06)
+
+#+begin_src text
+docs/        ~70 files,    most refs concentrated
+org_llm/     ~30 files,    code TODO comments + log strings
+extensions/  ~10 files,    sidebar/plugin Phase tags
+tests/       ~20 files,    test descriptions
+scripts/     audit_phase17.py (filename)
+README.md    overview Phase mentions
+
+Total grep hits: 1218
+#+end_src
+
+Final tally + per-file diff stats land at the bottom of this
+page once Wave-Final closes.

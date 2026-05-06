@@ -145,4 +145,4 @@ flag; remove the bridge file from =~/.pi/extensions/= manually
   Pi handles its own model routing; org-llm only owns Pi's tool
   surface
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — Pi support
-  landed pre-Phase 12; ongoing maintenance only
+  landed pre-Phase 2026-04.07 — insight cards; ongoing maintenance only

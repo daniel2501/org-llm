@@ -109,7 +109,7 @@ raise =Unknown step=.
 * Related
 
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] §
-  Phase 10 — tutor first landed there alongside the README
+  Phase 2026-04.05 — surface polish + tutor — tutor first landed there alongside the README
   rewrite + gallery
 - [[id:c88b2ddc-33bc-4b58-bd16-993c48b91209][Theme studio]] — tutor
   step bodies route through =get_themed= so they match the

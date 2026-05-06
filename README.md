@@ -30,6 +30,25 @@ shortcuts; first-run users see a setup nudge instead.
 
 </div>
 
+## Multi-agent org-llm — the Bridge Crew
+
+org-llm is built as a roster of named agent personas, not a single
+monolithic assistant. The **Bridge Crew** is seven Trek-canonical
+handles: `@picard` (manager — decompose / delegate / synthesise),
+`@spock` (researcher — workhorse over the vault), `@data` (scribe
+— capture-flow + drafting), `@boothby` (hygiene — orphans, drift,
+broken links), `@geordi` (analytics — dashboards + Superset surface),
+`@atoz` (wiki concept-graph specialist), and `@riker` (general-purpose
+project tracker). Each owns a domain, a system prompt, and a tool
+slice. You summon them with `@<name>` in any opencode / Pi / Claude
+Code session; the proxy resolves the persona, binds the right
+enrichments at the @-prefix seam (per DEC-008 — proxy-seam @-prefix
+swap), and routes the turn. See
+**[docs/wiki/multi-agent-org-llm.org](docs/wiki/multi-agent-org-llm.org)**
+for the full crew roster, composition rules, team-shape coordination
+patterns, and how to add your own via the extension path
+(Phase 2026-05.14.02 — DB-backed registry — user-supplied agents library).
+
 ## opencode workspace — your second brain in chat
 
 `org-llm launch` opens [opencode](https://opencode.ai) on your vault
@@ -44,7 +63,7 @@ when something needs tuning.
 > which Rich's exporter can't see — so opencode imagery has to come
 > from your terminal screenshot tool.
 
-**Recent ships visible in the workspace** (Phase 18.6, 2026-05):
+**Recent ships visible in the workspace** (Phase 2026-05.06.02 — cloud-first + synth tools, 2026-05):
 
 - **Cloud-first proxy** (`proxy_cloud_first=true`) — chat completions
   skip the local upstream when hardware can't deliver; routes directly
@@ -94,6 +113,7 @@ when something needs tuning.
 | 🌎 **Env-var override visibility** — every config key has an `ORG_LLM_<KEY>` env tap; `org-llm config` shows the source ([env|config|default]) + env name for every row | 🤖 **LLM copywriting throughout** — Try-it lines, models nudge, doctor closing, tutor recommendation all generated from real state |
 | ⚡ **Cloud-first proxy** — `proxy_cloud_first=true` skips the local upstream when hardware can't deliver, routing chat completions through cloud directly. Onboarding step 6c auto-offers it when free RAM < 1.2× the chat-model footprint. Pairs with a context-overflow retry chain (compressed-tools → no-tools) so cloud's 32k cap doesn't block 64-tool MCP requests | 🔧 **Synthetic tool calls for tool-incapable models** — gemma, gemma2, gemma3, phi3, phi3.5, llava all get full MCP/RAG via proxy-side prompt-engineered tool calling (`<tool_call>{...}</tool_call>` contract) — no capability loss when picking a non-tool-native model |
 | 🩺 **`config --check`** — one-shot sanity check: ollama reachability, role-model pull status, cloud creds, .opencode/ structure, doom keybinds vs plugin slash registry, ORG_LLM_* env-var validity. Exit 1 on errors, 0 on warnings/clean | 🚀 **Auto-pull on launch + chat-model warmup** — `org-llm launch` fetches any missing role models from ollama AND fires a background warmup ping so your first prompt isn't a cold-load. Preflight context cached 5min so repeat-launches drop to ~2s |
+| 📐 **[Semantic-layer registry](docs/wiki/superset.org)** — `org-llm metrics ls/describe/query/emit` exposes named metrics (`metric:llm_avg_ms group_by:[model]`) instead of raw SQL; same registry emits a Superset v1 import bundle so dashboards and the `metrics_query` MCP tool answer with identical numbers | 🍱 **[Phase 2026-07.01 — Apache Superset dashboards — Superset](docs/wiki/superset.org) integration ladder** — 7 tiers from read-only point-and-click → Org-as-source-format importer; emitter + round-trip + Tier 1 dogfood probe shipped; native `uv venv` install path documented (Docker optional) |
 
 ---
 
@@ -484,7 +504,7 @@ What gets written into your vault under `.opencode/`:
 - `tui.json` — LCARS theme reference + TUI plugin path (a `file://`
   URI of the `extensions/opencode/` package directory; opencode
   resolves the entrypoint via `package.json#exports["./tui"]`).
-- `insight-cards.json` — Phase 12 insight cards the TUI plugin renders
+- `insight-cards.json` — Phase 2026-04.07 — insight cards insight cards the TUI plugin renders
   in the `/insights` dialog. Re-gathered on every launch.
 - `AGENTS.md` — opencode's standard project-context file. ~80-line
   primer: "this workspace has org-llm; here's the search-first rule
@@ -1860,11 +1880,20 @@ parent theme.
 
 ### Where we are
 
-- **Latest shipped:** Phase 17.1 — LCARS sidebar + LLM proxy +
+- **Latest shipped:** Phase 2026-05.02 — supervision trinity trinity — multi-agent infrastructure
+  fully wired. **Phase 2026-05.02.01 — pre-flight resolvers — @-prefix enrichment seam** routes
+  persona summons through the proxy with per-agent context binding;
+  **Phase 2026-05.02.02 — recovery hooks — Bridge Crew handoff protocol** lets agents delegate
+  turns to one another (e.g. `@atoz` → `@boothby` for a refile);
+  **Phase 2026-05.02.03 — confusion detector — agent roster + composition** ships the crew as a
+  registry, with user-defined personas added via the same surface.
+  See [docs/wiki/multi-agent-org-llm.org](docs/wiki/multi-agent-org-llm.org)
+  + [docs/wiki/agent-roster.org](docs/wiki/agent-roster.org).
+- **Earlier shipped:** Phase 2026-05.05 — LCARS panel + LLM proxy — LCARS sidebar + LLM proxy +
   auto-doctor. Full TNG-styled status panel (5 cards) on both
   welcome + session views; `/sys*` slash family that bypasses
-  ollama via the new `org_llm/llm_proxy.py` HTTP shim
-  (23 interceptors today — see [docs/wiki/architecture.org](docs/wiki/architecture.org)
+  ollama via `org_llm/llm_proxy.py` (now 23+ interceptors — see
+  [docs/wiki/architecture.org](docs/wiki/architecture.org)
   for the full chain: `/sys*` short-circuit, `@<agent>` persona swap
   + recipe match, response/probe/prompt cache, static slash handwrites,
   time-grounding, PII redact, tool-call repair, synth-tool for
@@ -1873,17 +1902,9 @@ parent theme.
   auto-runs `doctor --power-boost` and offers a one-keystroke
   `/syscloud` failover (with auto-relaunch); auto-session opener
   so the sidebar appears on launch without typing.
-- **Previous:** Phase 17 — live sidebar status panel scaffolding
-  (vault counts, palette, MCP, hardware probe, sensorlog tail).
-- **Active focus:** Phase 16.3 — Emacs companion (`extensions/emacs/`).
-- **In flight planned:** Phase 18 (proxy expansion — skill→slash
-  auto-bridge, system-prompt prefix cache, cloud failover on first-
-  byte timeout, citation post-processor, tool-result memoisation,
-  per-turn model routing); auto-embedder re-writes
-  `sidebar-status.json` per cycle (live refresh w/o relaunch);
-  Phase 12.6 (insight-card cache persistence); Phase 12.7 (dbt
-  analytics over engagement); Phase 13.4–13.5 (walk per-slug
-  routing + clarifying questions).
+- **In flight planned:** validation framework hardening,
+  captain's-log bridge module, `@sidecar` v0, and Phase 2026-05.17 — DB-as-cache + git-canonical pipeline —
+  DB-authoritative inversion (vault ↔ SQLite role flip).
 
 ### Beta → 1.0 punch list
 

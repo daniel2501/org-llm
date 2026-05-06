@@ -77,27 +77,27 @@ for the full convention.
   consolidation opportunities
 - [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][Recipes]] —
   proxy-time orchestration; manager pre-fetches deterministically,
-  agent narrates in ONE cloud call (Phase 22 v2)
+  agent narrates in ONE cloud call (Phase 2026-05.07 — manager pre-fetch + agent narrates)
 - [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]] —
   deterministic regex-derived knowledge (=routine_chores=,
   =mood_signal=, =tag_taxonomy=, …) cached in SQLite; agents
-  treat as authoritative (Phase 21)
+  treat as authoritative (Phase 2026-05.13 — deterministic vault inferrers)
 - [[id:a2af071e-8244-444d-8954-61317cc1ec4d][Superset]] —
   integration ladder + the semantic-layer registry (one
   source of truth for "what does =metric:X= mean") that ships
-  ahead of Phase 27
+  ahead of Phase 2026-07.01 — Apache Superset dashboards
 - [[id:6aa21db3-1bae-4c6c-ae11-fb02a64e0a56][Promotions & SSSS]] —
   manager promotes recurring LLM intent into deterministic
   artifacts (top-down); specialists report typed notices into
-  a manager inbox (bottom-up); both feed Phase 29's dispatch loop
+  a manager inbox (bottom-up); both feed Phase 2026-05.20 — sync verb POC's dispatch loop
 - [[id:b91f980e-5699-4994-843a-00532f1770b3][Memory Alpha]] —
-  Trek framing for Phase 25's DB-authoritative inversion: the
+  Trek framing for Phase 2026-05.17 — DB-as-cache + git-canonical pipeline's DB-authoritative inversion: the
   DB becomes the central library, files are renders, vault facts
   are Memory Prime
 - [[id:ddfb74ae-3c16-45e3-b1be-df3c2b03966b][Pi bridge]] —
   third conversational interface; per-turn dynamic system prompts
 - [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][Insight cards]] —
-  the "I noticed N things" headline experience (Phase 12)
+  the "I noticed N things" headline experience (Phase 2026-04.07 — insight cards)
 - [[id:001a2e03-30e8-49c5-a813-e774f58b6a0e][Skills]] —
   org-babel-driven LLM workflows you define yourself
 - [[id:ff70047c-6611-4391-857e-f94c14fc1914][Code corpus]] —
@@ -201,10 +201,10 @@ the link to the source:
 - [[file:../../org_llm/llm.py][org_llm/llm.py]] — the embed() and chat() boundary against Ollama
 - [[file:../../org_llm/indexer.py][org_llm/indexer.py]] — index_directory() and embed_nodes()
 - [[file:../../org_llm/search.py][org_llm/search.py]] — vector_search() and the rerank stack
-- [[file:../../org_llm/insights.py][org_llm/insights.py]] — Phase 12 insight pre-mount
-- [[file:../../org_llm/walk.py][org_llm/walk.py]] — Phase 13 graph walk
+- [[file:../../org_llm/insights.py][org_llm/insights.py]] — Phase 2026-04.07 — insight cards insight pre-mount
+- [[file:../../org_llm/walk.py][org_llm/walk.py]] — Phase 2026-04.08 — walk + opencode surfacing graph walk
 - [[file:../../org_llm/mcp_server.py][org_llm/mcp_server.py]] — MCP server + 71 tools
-- [[file:../../org_llm/llm_proxy.py][org_llm/llm_proxy.py]] — HTTP proxy + 23 interceptors (Phase 17.1 + 18)
+- [[file:../../org_llm/llm_proxy.py][org_llm/llm_proxy.py]] — HTTP proxy + 23 interceptors (Phase 2026-05.05 — LCARS panel + LLM proxy + Phase 2026-05.06 — proxy expansion)
 - [[file:../../org_llm/auto_embedder.py][org_llm/auto_embedder.py]] — background freshness daemon
 - [[file:../../org_llm/theme_studio.py][org_llm/theme_studio.py]] — themed-phrasing cache
 - [[file:../../org_llm/db.py][org_llm/db.py]] — the SQLAlchemy schema
@@ -234,14 +234,14 @@ the link to the source:
 | Staleness                 | [[id:e3333333-4444-5555-6666-cccccccccccc][staleness.org]] | full       |
 | RAG                       | [[id:e4444444-5555-6666-7777-dddddddddddd][retrieval-augmented-generation.org]] | full       |
 | MCP                       | [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][mcp.org]] | full       |
-| LLM proxy (Phase 17.1)    | [[id:47ba2143-c53a-409a-8286-2b3759794608][llm-proxy.org]] | full       |
+| LLM proxy (Phase 2026-05.05 — LCARS panel + LLM proxy)    | [[id:47ba2143-c53a-409a-8286-2b3759794608][llm-proxy.org]] | full       |
 | Interceptors (concept)    | [[id:daaf30cd-4316-4f20-befa-5831328708c6][interceptors.org]] | full       |
-| Recipes (Phase 22 v2)     | [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes.org]] | full       |
-| Vault facts (Phase 21)    | [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][vault-facts.org]] | full       |
-| Memory Alpha (Phase 25 framing) | [[id:b91f980e-5699-4994-843a-00532f1770b3][memory-alpha.org]] | full       |
+| Recipes (Phase 2026-05.07 — manager pre-fetch + agent narrates)     | [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes.org]] | full       |
+| Vault facts (Phase 2026-05.13 — deterministic vault inferrers)    | [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][vault-facts.org]] | full       |
+| Memory Alpha (Phase 2026-05.17 — DB-as-cache + git-canonical pipeline framing) | [[id:b91f980e-5699-4994-843a-00532f1770b3][memory-alpha.org]] | full       |
 | Now (single-view dashboard) | [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]]                | full       |
-| Insight cards (Phase 12)  | [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][insight-cards.org]] | full       |
-| Walk (Phase 13)           | [[id:47c84cd6-1cba-457d-a947-9c482d392991][walk.org]] | full       |
+| Insight cards (Phase 2026-04.07 — insight cards)  | [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][insight-cards.org]] | full       |
+| Walk (Phase 2026-04.08 — walk + opencode surfacing)           | [[id:47c84cd6-1cba-457d-a947-9c482d392991][walk.org]] | full       |
 | Skills (org-babel)        | [[id:001a2e03-30e8-49c5-a813-e774f58b6a0e][skills.org]] | full       |
 | Auto-embedder             | [[id:4df57d95-0e31-41cb-b973-5f41706901c0][auto-embedder.org]] | full       |
 | LCARS theming             | [[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][lcars-theming.org]] | full       |
@@ -262,12 +262,12 @@ the link to the source:
 | Code corpus               | [[id:ff70047c-6611-4391-857e-f94c14fc1914][code-corpus.org]] | full       |
 | Granted filesystem access | [[id:11029de4-2780-4169-9f3b-2fd1a3a73e6a][granted-filesystem-access.org]] | full       |
 | Task-instruction prefixes | [[id:338485eb-1669-4966-82fb-03607f5f0c64][task-instruction-prefixes.org]] | full       |
-| AGENTS.md primer          | (covered in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] § Phase 16.2) | partial |
+| AGENTS.md primer          | (covered in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] § Phase 2026-04.10.03 — launch wires plugin) | partial |
 | Agents (roster + invocation) | [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]]              | full       |
 | Agent framework            | [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][agent-framework.org]]    | full       |
 | Agent roster               | [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]]       | full       |
 | @agentsmith                | [[id:b9e5d3c2-4a7f-48a6-9c1d-e2f3a4b5c6d7][agentsmith.org]]         | full       |
-| Agent orientation (manifest + primer) | [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]] | full (Phase 24.5 candidate) |
+| Agent orientation (manifest + primer) | [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]] | full (Phase 2026-05.02.05 — agent orientation candidate) |
 | Lazy-loading policy        | [[id:cf466e65-0fa1-4f23-8103-8205f67a6ca3][lazy-loading.org]]        | full       |
 | Coordination (parallel instances) | [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]]   | full       |
 | Active claims (live board) | [[id:281ddc58-169b-4f35-bab6-03f59c1df359][active-claims.org]]       | full       |

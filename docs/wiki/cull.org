@@ -1,12 +1,12 @@
 :PROPERTIES:
 :ID:       65c67408-a0de-4f93-9ffa-6800ea0f436f
 :END:
-#+title: Cull — Phase 26.1 per-component decisions
+#+title: Cull — Phase 2026-05.04 — cull walk per-component decisions
 #+filetags: :phase26:cull:core:addable:walkthrough:
 
 * Summary
 
-*Summary.* This page is the live walkthrough surface for Phase 26.1 — per-component
+*Summary.* This page is the live walkthrough surface for Phase 2026-05.04 — cull walk — per-component
 core-vs-addable decisions. Each component is a heading with the cut criterion applied;
 the user walks through one at a time, lands a decision (CORE / ADDABLE / EDGE), and
 commits this page as the persistent record of the cut.
@@ -19,7 +19,7 @@ produced an initial split of ~30 components: ~15 pre-classified CORE, ~16 pre-cl
 ADDABLE, and 7 EDGE components that need argument. Protocol is one component per turn —
 decide together, fill the Decision + Walkthrough notes fields, repeat. This page is the
 persistent record of the cut; once complete, follow-up extraction TODOs land in
-dev-tracker.org under Phase 26.
+dev-tracker.org under Phase 2026-05.04 — cull walk.
 
 * The cut criterion
 
@@ -102,7 +102,7 @@ ownership is the routing layer below.
   - Brief rationale (1–2 sentences)
   - Follow-up if any (extract path, refactor needed, plugin loader entry)
 - When all components decided, file follow-up TODOs for the actual extractions in
-  dev-tracker.org § Phase 26.
+  dev-tracker.org § Phase 2026-05.04 — cull walk.
 - Don't re-categorize during walkthrough — EDGE stays EDGE until argued.
 
 * Components
@@ -158,7 +158,7 @@ ownership is the routing layer below.
 - *Where it lives:* =org_llm/logbook.py= (writes =~/org/captains-log-*.org=)
 - *What it does:* Rotated event log capturing every agent turn, tool call, decision,
   and recipe run; the substrate for retro/reflect verbs and dbt analytics later.
-- *What depends on it:* dbt analytics (Phase 27), retro recipes, doctor, audit trail.
+- *What depends on it:* dbt analytics (Phase 2026-07.01 — Apache Superset dashboards), retro recipes, doctor, audit trail.
 - *Cut-criterion test:* Without it, agents act in amnesia and nothing analytic can be
   layered on top. β ships but the dbt-distro thesis loses its data spine.
 - *Decision:* CORE, NO agent (DB object / substrate, 2026-05-05) — captain's log is
@@ -170,14 +170,14 @@ ownership is the routing layer below.
   "no agent" / "DB object" / similar.
 
 *** Vault-facts inferrers — pre-classified CORE
-- *Decision:* SUBSUMED (re-walk 2026-05-05 per subsumption-scan) — Phase 21
+- *Decision:* SUBSUMED (re-walk 2026-05-05 per subsumption-scan) — Phase 2026-05.13 — deterministic vault inferrers
   inferrer engine (=vault_facts.py=, 951 LoC of register/cache/TTL machinery)
   was "dbt without dbt"; it retires. The /capability/ (per-vault facts)
-  survives as dbt models with =materialized: table=, landing in Phase 25.x.
+  survives as dbt models with =materialized: table=, landing in Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family).
   Earlier "CORE + agent-ify (agent-as-manager pattern)" verdict still holds
   in spirit — the agent now manages dbt models, not a custom inferrer
   registry.
-- *Where it lives:* =org_llm/vault_facts.py= (Phase 21)
+- *Where it lives:* =org_llm/vault_facts.py= (Phase 2026-05.13 — deterministic vault inferrers)
 - *What it does:* Derives per-vault facts (active projects, recurring tags, agenda
   shape, capture habits) used as deterministic context for agents.
 - *What depends on it:* Manager pre-fetch, resolver registry, recipes, capture flow.
@@ -192,7 +192,7 @@ ownership is the routing layer below.
   manages the resolver registry (proposes new resolvers from captain's-log
   patterns, scores effectiveness, deregisters stale ones, audits 80ms budget),
   doesn't BECOME a resolver (resolvers stay pure deterministic code).
-- *Where it lives:* Phase 24.1 — resolver seam at @-prefix expansion.
+- *Where it lives:* Phase 2026-05.02.01 — pre-flight resolvers — resolver seam at @-prefix expansion.
 - *What it does:* Resolves @-prefixed references (agents, nodes, facts) deterministically
   before they hit the LLM; enriches prompts at the seam.
 - *What depends on it:* Manager pre-fetch pattern, every recipe, capture flow.
@@ -247,9 +247,9 @@ ownership is the routing layer below.
   code + dbt models, not a runtime registry an agent curates). Per DEC-011,
   files are canonical and DB is universal SQL interface; the *contents* are
   managed by upstream component-agents (vault facts, captain's log, etc).
-- *Where it lives:* =org_llm/db.py= (current SQLite) + Phase 25 inversion target.
+- *Where it lives:* =org_llm/db.py= (current SQLite) + Phase 2026-05.17 — DB-as-cache + git-canonical pipeline inversion target.
 - *What it does:* Persistent state for agents, runs, captures, derived facts; under
-  Phase 25 it becomes the truth and the vault becomes rendered UI.
+  Phase 2026-05.17 — DB-as-cache + git-canonical pipeline it becomes the truth and the vault becomes rendered UI.
 - *What depends on it:* Logbook, vault_facts, search, recipes, dbt analytics.
 - *Cut-criterion test:* Without it, no durable state across runs. β does not ship in
   any meaningful sense.
@@ -269,7 +269,7 @@ ownership is the routing layer below.
 - *What depends on it:* Researcher agent, ask_notes tool, recipes that walk the graph.
 - *Cut-criterion test:* Without it, agents fall back to grep — usable but β quality
   drops. Probably load-bearing for "vault thinks with you".
-- *Walkthrough notes:* Ranking helpers retire to dbt at Phase 25.x; vector +
+- *Walkthrough notes:* Ranking helpers retire to dbt at Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family); vector +
   ann-index remain. See § Subsumed § Modules subsumed for specific candidates.
 
 *** Cloud-or-local routing — pre-classified CORE
@@ -302,13 +302,13 @@ ownership is the routing layer below.
   Subsumed § CLI verbs / Modules. =count_across_vault= + =weather_aware_agenda=
   remain in core.
 
-*** Self-coded tools (Phase 29) — pre-classified CORE
+*** Self-coded tools (Phase 2026-05.20 — sync verb POC) — pre-classified CORE
 - *Decision:* CORE + agent-ify (agent-as-manager pattern, 2026-05-05) — agent
   manages the auto-promotion pipeline (pattern detection → proposed tool →
   validation → registration). The pipeline IS the agent's job description;
   this is the most native fit for the agent-as-manager pattern in the entire
   cull.
-- *Where it lives:* Phase 29 target — meta-feature on top of tool registry.
+- *Where it lives:* Phase 2026-05.20 — sync verb POC target — meta-feature on top of tool registry.
 - *What it does:* When the LLM does X repeatedly, the app detects, proposes a
   deterministic tool, validates it, and registers it; runtime calls then skip the LLM.
 - *What depends on it:* The dbt-distro thesis; long-term cost + speed + quality.
@@ -367,7 +367,7 @@ ownership is the routing layer below.
   dbt analytics *layer* = Apache Superset dashboards (CORE_DISABLED_BY_DEFAULT,
   see entry). @geordi agent (alias =@analyst=) owns this surface (Bridge Crew, locked).
   No standalone "dbt analytics" component remains.
-- *Where it lives:* Phase 27 target.
+- *Where it lives:* Phase 2026-07.01 — Apache Superset dashboards target.
 - *What it does:* dbt models over captain's log + DB for analytic queries.
 - *What depends on it:* Superset dashboards; @geordi (analyst) agent.
 - *Cut-criterion test:* β ships without; analytics is a downstream lens, not lead value.
@@ -396,7 +396,7 @@ ownership is the routing layer below.
 *** Avatars — pre-classified ADDABLE
 - *Decision:* COMMUNITY IDEA (2026-05-05) — pure aesthetic; community / user
   develops if they want (image-gen pipeline + theme metadata is well-trodden).
-- *Where it lives:* =org_llm/avatars.py= + =org_llm/avatar_render.py= (Phase 31).
+- *Where it lives:* =org_llm/avatars.py= + =org_llm/avatar_render.py= (Phase 2026-07.03 — theme-driven agent avatars).
 - *What it does:* Theme × metadata → image-gen pipeline for agent avatars.
 - *What depends on it:* TUI rendering; conversational tuning loop.
 - *Cut-criterion test:* β ships without; avatars are personality polish.
@@ -444,7 +444,7 @@ ownership is the routing layer below.
 - *Decision:* CORE_DISABLED_BY_DEFAULT (2026-05-05 per user direction) —
   ship the launcher (=org-llm superset --start=); off-default; user enables;
   @geordi (alias =@analyst=) owns the surface.
-- *Where it lives:* Phase 27 target.
+- *Where it lives:* Phase 2026-07.01 — Apache Superset dashboards target.
 - *What it does:* Web dashboards over dbt analytics tables.
 - *What depends on it:* dbt analytics; analyst workflows.
 - *Cut-criterion test:* β ships without; dashboards are downstream of analytics.
@@ -454,7 +454,7 @@ ownership is the routing layer below.
 *** Containerization — pre-classified ADDABLE
 - *Decision:* COMMUNITY IDEA (2026-05-05) — native primary per memory;
   containers are deployment optionality; community / user develops.
-- *Where it lives:* Phase 28 target.
+- *Where it lives:* Phase 2026-07.02 — containerization strategy target.
 - *What it does:* Optional container packaging for asymmetric deployment.
 - *What depends on it:* Specific deployment scenarios; native is primary.
 - *Cut-criterion test:* β ships native; containers are deployment optionality.
@@ -464,7 +464,7 @@ ownership is the routing layer below.
 - *Decision:* COMMUNITY IDEA (2026-05-05) — speculative; defer; community /
   user can develop a multi-judge orchestration on top of the existing manager
   surface if a use case proves out.
-- *Where it lives:* Phase 24.4 target.
+- *Where it lives:* Phase 2026-05.02.04 — manager quorum target.
 - *What it does:* Multi-agent quorum step in manager orchestration for high-stakes calls.
 - *What depends on it:* Specific high-stakes recipes.
 - *Cut-criterion test:* β ships with single-manager; quorum is a quality lever for edge
@@ -522,7 +522,7 @@ ownership is the routing layer below.
 - *Decision:* CORE + agent-ify (2026-05-05) — partial subsumption: schema-shape
   YAML checks (no orphans, no broken file: links, TODO has priority) migrate
   to dbt tests per dbt-pipeline.org § Tests. Runtime agent-output validation
-  (semantic gates, A/B harness, multi-judge per Phase 30.4) stays.
+  (semantic gates, A/B harness, multi-judge per Phase 2026-05.21 — multi-judge validation) stays.
 - *Where it lives:* =org_llm/validation.py= + =org_llm/validation_configs/=
 - *What it does:* Pre/post-check framework for agent outputs and vault writes.
 - *What depends on it:* Capture flow; agent quality bar.
@@ -624,7 +624,7 @@ architecture moving past a wrapper; the cull rubric answers
 2026-05-05 verdict-vocabulary refinement (recommendation (c)).
 
 Items here are scheduled for *delete-as-you-go* — the deletion
-lands when the subsumer ships, not as a Phase 26 cut decision.
+lands when the subsumer ships, not as a Phase 2026-05.04 — cull walk cut decision.
 A captain's-log entry captures each pruning event for audit.
 
 ** Recipes subsumed by dbt-pipeline (CORE)
@@ -643,7 +643,7 @@ to a dbt-pipeline derived model:
 
 Both reasons (paid-for-and-lost vs agent-tool-use baseline +
 subsumed by dbt-pipeline) make these dead code. Delete when
-the corresponding dbt models ship in Phase 25.1.
+the corresponding dbt models ship in Phase 2026-05.17.01 — DB-as-cache foundations.
 
 ** Other subsumed items (2026-05-05 scan)
 
@@ -750,14 +750,14 @@ To be filled with concrete TODOs once the walkthrough completes. Format:
 
 #+begin_example
 TODO Move <component> from org_llm/<path> to plugins/<path>; update imports;
-     ship plugin loader entry. (Phase 26.2)
+     ship plugin loader entry. (Phase 2026-05.01 — physical extraction)
 #+end_example
 
 * Connections
 
 - [[id:DEC-009][DEC-009]] — curated core agents + extension path (the source rule)
 - [[id:DEC-013][DEC-013]] — two-tier tools (core / addable tier model)
-- [[file:dev-tracker.org][dev-tracker.org]] § Phase 26 (Core/addable cull and extract)
+- [[file:dev-tracker.org][dev-tracker.org]] § Phase 2026-05.04 — cull walk (Core/addable cull and extract)
 - [[file:tools-as-dbt-models.org][tools-as-dbt-models.org]] (the dbt-distro thesis)
 - [[file:agents.org][agents.org]] (curated core roster)
-- [[file:roadmap.org][roadmap.org]] (Phase 26 placement)
+- [[file:roadmap.org][roadmap.org]] (Phase 2026-05.04 — cull walk placement)

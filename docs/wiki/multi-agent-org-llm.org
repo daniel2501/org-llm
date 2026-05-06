@@ -41,7 +41,7 @@ concrete shapes framed as team-coordination work:
   =@spock= cross-references. Each runs in its own worktree session
   against a shared boardId; results converge to one canvas card
   before any vault writes land.
-- *Coordinated phase extraction* — Phase 26.2 — physical extraction
+- *Coordinated phase extraction* — Phase 2026-05.01 — physical extraction — physical extraction
   dispatches extractor + test-runner + doc-updater + reviewer as
   four sibling sessions on one boardId; they query each other via
   =mode:"btw"= without blocking the captain.
@@ -83,6 +83,18 @@ Agor session genealogy).
 | *Spike team*     | Rises up for one-off / time-boxed work                  | Job ships (PR merged, report delivered, etc.)   |
 | *Long-lived team* | Perma-roles; persists across sessions; evolves over time | Goal sunset (rare); roster reshape (more common) |
 
+*Both shapes validated 2026-05-06.* The /spike-team/ pattern ran
+end-to-end against the license-decision investigation (3 children,
+factual SSPL→AGPLv3 correction caught by =@spock= on cross-check —
+solo =delegate()= would have rubber-stamped the prior wrong draft);
+canon prior to 2026-05-07 listed both shapes as designed-not-run.
+The /long-lived team/ pattern validated as a 1-tick smoke of the
+vault-hygiene team (=@boothby= captain + =@geordi= drift +
+=@atoz= link-fixes) — PASS within a single 24 h JWT window, daily-
+cron promotion gated on the token-refresh primitive (now landed —
+see § /Role of the Agor integration/ /What changes/ below).
+*(verified 2026-05-07 EDT)*
+
 *Transitions between lifetimes.* A spike team can graduate to
 long-lived when its job recurs (one vault-cull spike that proves
 useful weekly becomes the vault-hygiene long-lived team). A
@@ -95,11 +107,11 @@ attachment and =memory/{date}.md= retention shift.
 
 | Team                                     | Roles                                                      | Dissolve on                                  |
 |------------------------------------------+------------------------------------------------------------+----------------------------------------------|
-| Phase 26.2 — physical extraction         | extractor + test-runner + doc-updater + reviewer           | PR merged, =:test:agent-runnable:= green     |
-| Phase 24.2 — recovery hooks (v1.0-gating) | hook-author + spec-tester + doc-curator                    | Recovery hooks ship + DEC closes             |
+| Phase 2026-05.01 — physical extraction — physical extraction         | extractor + test-runner + doc-updater + reviewer           | PR merged, =:test:agent-runnable:= green     |
+| Phase 2026-05.02.02 — recovery hooks — recovery hooks (v1.0-gating) | hook-author + spec-tester + doc-curator                    | Recovery hooks ship + DEC closes             |
 | License decision investigation           | researcher + drafter + briefly-=@picard= captain           | =/tmp/license-decision-*.org= delivered      |
 | One-off vault cull walk                  | walker + classifier + retire-actor                         | Cull report committed                        |
-| Phase 25 — DB-as-cache spike             | inverter + render-side + migration-tester                  | Sub-phase complete, files re-render clean    |
+| Phase 2026-05.17 — DB-as-cache + git-canonical pipeline — DB-as-cache spike             | inverter + render-side + migration-tester                  | Sub-phase complete, files re-render clean    |
 
 ** Long-lived team examples (perma-roles, evolving)
 
@@ -118,16 +130,16 @@ A team is not a fixed roster — it's an evolving unit:
 
 - *Toolsets adapt* as the team's work surfaces new needs. Agents ask
   before installing tools (per memory =feedback_agent_tool_install_rule.md=) and install in venvs.
-  Self-coded tools per Phase 29 retire LLM-driven steps when the
+  Self-coded tools per Phase 2026-05.20 — sync verb POC retire LLM-driven steps when the
   pattern is stable. /Concrete example./ The vault-hygiene team
   begins with =@boothby= calling =delegate('geordi', …)= for
   drift heuristics; once a heuristic stabilises (e.g. "tag
-  taxonomy duplicate detection"), Phase 29 promotes it to a dbt
+  taxonomy duplicate detection"), Phase 2026-05.20 — sync verb POC promotes it to a dbt
   model + first-class data tool, and the team's per-cycle LLM
   cost drops while throughput climbs. The agent roster doesn't
   change; the toolset under it does.
 - *New agent types emerge* to fill specialty roles within teams.
-  Phase 23.5 — user-supplied agents library (literate config in
+  Phase 2026-05.14.02 — DB-backed registry — user-supplied agents library (literate config in
   =~/org/org-llm-agents.org=) is the mechanism; community-shareable
   per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014 — Bridge Crew]].
 - *Role composition drifts* — what each member does within a team
@@ -151,11 +163,22 @@ The integration's role is to provide:
 - The *cross-tool delegation* primitive (Claude/Codex/Gemini/OpenCode override per spawn)
 - The *team-observability surface* — multiplayer canvas, facepile, shared terminal
 
+*MCP surface shape — progressive disclosure (not flat).* =tools/list=
+on the Agor MCP server exposes only two tools: =agor_search_tools=
+and =agor_execute_tool=. All other capabilities (=agor_sessions_spawn=,
+=agor_sessions_prompt=, =agor_artifacts_publish=, =agor_assistants_list=,
+…) are *discovered* at runtime via =agor_search_tools= and *invoked*
+indirectly via =agor_execute_tool({toolName, arguments})=. Prompts
+that say "use =mcp__agor__agor_sessions_spawn=" no-op against
+v0.17.3; the working shape is to nudge the agent through the
+discovery indirection. *(verified 2026-05-07 EDT — was assumed flat
+in canon prior to the 2026-05-06 smoke run)*
+
 What the integration does *not* replace:
 
-- The *@-prefix proxy seam* per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-008 — Phase 24.1 wires at the @-prefix seam]]
+- The *@-prefix proxy seam* per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-008 — Phase 2026-05.02.01 — pre-flight resolvers wires at the @-prefix seam]]
   (per-message persona swap) — stays at the proxy
-- The *Phase 24 supervision trinity* (pre-flight resolvers + recovery hooks + confusion detector) — stays native
+- The *Phase 2026-05.02 — supervision trinity supervision trinity* (pre-flight resolvers + recovery hooks + confusion detector) — stays native
 - The *vault as canonical truth* per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011 — DB is universal interface; files canonical]] — stays native
 - The *captain's log* (=org_llm/logbook.py= rotated event records) — stays native
 
@@ -171,6 +194,39 @@ single-agent path keeps working untouched if Agor is down. The
 whole arrangement re-evaluates at the BSL → Apache 2.0 change date
 (2029-01-15) per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017 — stack composition vs. integration]].
 
+*Validated primitives + known v0.17.3 bugs (state as of 2026-05-07
+EDT).* Token-refresh, Bridge Crew materializer, and the seven-
+primitive smoke harness have all landed as of 2026-05-06; six
+upstream bugs are documented with workarounds:
+
+- *Token-refresh primitive* — =scripts/agor-token-refresh.sh=, 9/9
+  live PASS. Prior canon stated this was filed-not-built and gated
+  the long-lived-team daily cron; that gating is now lifted.
+  *(verified 2026-05-07 EDT)*
+- *Bridge Crew materializer* — =org-llm bridge-crew materialize=
+  (CLI verb, commit =645f921=) writes 21 byte-identical SOUL /
+  IDENTITY / USER files for all 7 personas. *Caveat:* on-disk
+  =.agor-assistants/<handle>/= is /our convention/, not Agor's;
+  v0.17.3 stores assistants in =worktree.custom_context.assistant=
+  and the only registration path is the in-app UI (read-side
+  =agor_assistants_list= MCP exists; no write-side). v0.1
+  follow-up: =bridge_crew.materialize()= should also =PATCH
+  /worktrees/<id>= with =custom_context.assistant=.
+  *(verified 2026-05-07 EDT — was canonized as filed only)*
+- *Six known upstream bugs* — BUG-1 (=agor worktree add= CLI
+  broken — workaround =POST /repos/:id/worktrees=); BUG-2 (=GET
+  /sessions/:id/genealogy= 500s — read =genealogy.children= from
+  =GET /sessions/:id=); BUG-3 (bare =POST /worktrees= NOT-NULL on
+  =worktree_unique_id= — use =/repos/:id/worktrees=); BUG-4 (default
+  creds =admin@agor.live=/=admin= seeded silently — rotate at
+  install); BUG-5 (=users= service has no =requireAuth= hook — REST
+  user-management surface unreachable, workaround = direct sqlite
+  UPDATE for password rotation); BUG-6 (CLI =cli-token=
+  =expiresAt= mismatched against embedded JWT TTL of 15 min —
+  decode JWT =exp= or force =/authentication/refresh= each run).
+  Drafts in =/tmp/agor-bug-drafts-2026-05-07/= for upstream
+  filing. *(verified 2026-05-07 EDT)*
+
 * What's native vs. delivered by integration
 
 The split is load-bearing: where org-llm already owns a capability,
@@ -181,7 +237,7 @@ overlap is left ambiguous.
 | Capability                              | Native to org-llm                                                                  | Delivered via Agor integration                                                          |
 |-----------------------------------------+------------------------------------------------------------------------------------+-----------------------------------------------------------------------------------------|
 | Per-message persona swap (@-prefix)     | =intercept_agent_prefix= (=org_llm/llm_proxy.py:1125=); sticky chains :1031        | (untouched — Agor sessions sit above this seam)                                         |
-| Pre-flight resolvers (Phase 24.1)       | =org_llm/resolvers/= (path/repo/agent), 80ms budget; eager-imported                | (untouched — fires same way for any session)                                            |
+| Pre-flight resolvers (Phase 2026-05.02.01 — pre-flight resolvers)       | =org_llm/resolvers/= (path/repo/agent), 80ms budget; eager-imported                | (untouched — fires same way for any session)                                            |
 | Manager-mediated delegation             | =delegate()= (=org_llm/mcp_server.py:922=); =list_agents()= :886                   | Cross-tool override (spawn Codex / Gemini / OpenCode child) when the model role suits   |
 | Recipe pre-fetch                        | =DEFAULT_INTERCEPTORS= chain (=llm_proxy.py:3564=); recipe match before LLM        | (untouched)                                                                             |
 | Captain's log (event record)            | =org_llm/logbook.py= — JSONL + rotated org file (5MB), =write_event= / =track_event= | Session genealogy + facepile reconcile against captain's log =kind=team-session=      |
@@ -196,7 +252,7 @@ overlap is left ambiguous.
 | Cross-tool delegation                   | =model_override=  on =delegate()= (model-level override only)                      | Per-spawn assistant override (Claude / Codex / Gemini / OpenCode); sibling-session-level |
 | Tool registration                       | =@server.tool()= (=mcp_server.py:128= =create_mcp_server=) — single MCP per process  | Per-channel / per-assistant MCP attachment via =.agor.yml=; one MCP per session token  |
 | Multiplayer review surface              | (gap — sidebar is single-user; chat is single-thread)                              | =canvas= + =facepile= + live cursors + zone-templated prompts on shared boardId         |
-| Live artifact preview                   | (gap — opencode TUI renders text only)                                             | =agor_artifacts_create= + Sandpack — React/JSX/TS rendered live in browser              |
+| Live artifact preview                   | (gap — opencode TUI renders text only)                                             | =agor_artifacts_publish= + Sandpack — folder→DB serialization, React/JSX/TS rendered live in browser /(verified 2026-05-07 EDT — was =agor_artifacts_create=)/ |
 | Message gateway (external surfaces)     | (gap — no Slack / GitHub bot surface)                                              | Slack DM + GitHub PR/issue =@agor= mention → thread-bound session, bidirectional       |
 | Per-assistant env / secrets             | =Config(key, device, env, value)= per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-016 — three-tier SDLC]]               | =.agor.yml= per worktree/assistant; encrypted secrets in daemon DB                      |
 | Cards (non-code workflow)               | (out of scope today — vault entries are the workflow primitive)                    | =cards= primitive (beta) — generic entities placed in zones                             |
@@ -223,13 +279,21 @@ when peers must remain alive across multiple captain turns.
 ** Async peer query (=mode:"btw"=)
 
 *Summary.* Agent A asks agent B a focused question mid-turn
-without blocking; B's answer returns inline via callback when A
-next checks. Fills a real gap in org-llm.
+without blocking; B's answer arrives as a /new session/ with
+=fork_origin:"btw"= + =callback_config.callback_mode:"once"=,
+which the caller polls (or the daemon invokes via callback).
+Fills a real gap in org-llm. *(verified 2026-05-07 EDT)*
 
 *Expanded.* =agor_sessions_prompt(mode:"btw", target:<peer>,
-prompt:…)= forks an ephemeral child, auto-archives on completion,
-surfaces the answer as a callback message. Today's =delegate()=
-is synchronous-string-return; it can't ask =@geordi= a clarifier
+prompt:…)= spawns an ephemeral child session tagged with
+=fork_origin:"btw"=; its =callback_config.callback_mode= is
+=once=, so the answer materialises exactly once — either by the
+caller polling genealogy for the new child or by the daemon
+firing the callback. The child auto-archives on completion. (The
+v0.1 smoke harness confirmed the actual shape; canon prior to
+2026-05-07 incorrectly described it as "answer returns inline via
+callback when A next checks.") Today's =delegate()= is
+synchronous-string-return; it can't ask =@geordi= a clarifier
 mid-turn without forcing the caller to wait. Use case: =@atoz=
 mid-wiki-sweep asks =@spock= "is this the canonical link?"
 without halting the sweep.
@@ -251,14 +315,22 @@ fires data tools first; LLM narrates pre-fetched data.
 
 *Summary.* Captain spawns a specialist child session with a
 focused context window; specialist returns via the session
-genealogy callback. Generalises today's =delegate()=.
+genealogy callback. Generalises today's =delegate()=. The
+mechanism — =agor_sessions_prompt(mode:"fork", …)= — is also the
+spike-team primitive validated 2026-05-06 (license-decision
+pilot, factual correction caught by =@spock=). *(verified
+2026-05-07 EDT — no separate =agor_sessions_fork= tool exists)*
 
-*Expanded.* =mode:"spawn"= creates a child with a curated context
-slice (not the parent's full history). =@picard= dispatches
-=@spock=; =@spock= runs in its own worktree, emits artifacts +
-summary; the result is reachable from =@picard='s session tree
-even after =@picard='s turn ends. "Delegate the call, *keep* the
-thread."
+*Expanded.* =agor_sessions_prompt(mode:"fork", …)= creates a
+sibling-from-shared-worktree child with a curated context slice
+(not the parent's full history). =@picard= dispatches =@spock=;
+=@spock= runs in its own session under the shared worktree,
+emits artifacts + summary; the result is reachable from
+=@picard='s session tree even after =@picard='s turn ends.
+"Delegate the call, *keep* the thread." Canon prior to
+2026-05-07 referenced =agor_sessions_fork= as a tool name —
+there is no such tool in v0.17.3; the dispatch surface is
+=agor_sessions_prompt= with the =mode= argument.
 
 ** Cross-tool escalation
 
@@ -346,7 +418,7 @@ no two sessions touch the same working directory.
 
 *Expanded.* Generalises [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-005]]'s worktree escape hatch from
 "reach for it when scopes overlap" to "always-on by default."
-Long-running risky work (Phase 26.2 extraction, mass-cull walks)
+Long-running risky work (Phase 2026-05.01 — physical extraction extraction, mass-cull walks)
 runs with zero contention against the maintainer's primary
 stream. Cleanup: =git worktree remove= + session archive.
 
@@ -423,7 +495,7 @@ decides.
 | Coordination     | Claim-board ↔ session-spawn ordering — claim first then spawn, or spawn first then claim?                      |
 | Coordination     | =btw= scope — all Bridge Crew pairs, or only within a team's roster?                                          |
 | Mobile           | Does Agor's daemon run on Android+termux (Node.js ≥22.12)? *(Verifier landed 2026-05-06: works-with-caveats — Node 22 LTS in Termux; =@libsql/client= needs glibc-spoof workaround. User's experienced termux take 2026-05-06: "promising"; default lean = native daemon as primary path with canvas-only as fallback. On-device verification filed as side-quest sprint.)* |
-| Phase sequencing | When does =multi-agent-org-llm= enter the roadmap — post-Phase 26 (cull)? Does Phase 25 (DB-as-cache) gate it? |
+| Phase sequencing | When does =multi-agent-org-llm= enter the roadmap — post-Phase 2026-05.04 — cull walk (cull)? Does Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (DB-as-cache) gate it? |
 | Runtime registration | Bridge Crew → Agor assistants: auto-create at =org-llm init= or lazily on first team-spawn?              |
 | Runtime registration | =.agor.yml= per assistant — render from literate =org-llm-agents.org= at tangle, or hand-author?         |
 | Vendor sniff     | Preset (Maxime Beauchemin's company) is commercial; per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-010 — anti-capitalist FOSS]] integration sniff — explicit acceptance call wanted |

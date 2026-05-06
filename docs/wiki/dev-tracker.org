@@ -17,7 +17,7 @@
 *Summary.* The dev tracker's canonical location is now
 =~/org/org-llm-dev-tracker.org= (vault-resident, syncs via git per
 DEC-011 in [[file:decisions.org][decisions.org]]).
-Phase 29.0 — self-hosted via @riker (Bridge Crew dev-process
+Phase 2026-05.20 — sync verb POC — self-hosted via @riker (Bridge Crew dev-process
 steward; alias =@tracker=). Verb name `tracker` stays — verbs are
 functional, agent handles are persona.
 
@@ -51,7 +51,7 @@ The =org-llm tracker= verbs are the deterministic skeleton; the
 
 - =~/org/org-llm-dev-tracker.org= — the canonical live tracker
 - [[file:agents.org][agents.org]] — @riker persona (TNG first officer / XO; alias =@tracker=)
-- [[file:roadmap.org][roadmap.org]] § Phase 29.0 — self-coded tools (this is the seed)
+- [[file:roadmap.org][roadmap.org]] § Phase 2026-05.20 — sync verb POC — self-coded tools (this is the seed)
 - [[file:decisions.org][decisions.org]] DEC-011 — vault-and-DB symmetry; files canonical
 - [[file:active-claims.org][active-claims.org]] — live coordination half (sibling of this)
 
@@ -246,7 +246,7 @@ counting drift, not state mismatch.
 | items STARTED with significant work | 5                                         |
 | items NEXT awaiting pickup          | 4                                         |
 | items TODO                          | ~28                                       |
-| items CANCELLED                     | 1 (Phase 22.5b merged into show-your-work)|
+| items CANCELLED                     | 1 (Phase 2026-05.11.02 — explicit reasoning merged into show-your-work)|
 | items HOLD/WAITING                  | 0                                         |
 | open :EFFORT: estimated             | ~30h sized + show-your-work (1d–5d slices)|
 | :ACTUAL: spent this session         | ~7h15m                                    |
@@ -495,7 +495,7 @@ SCHEDULED: <2026-05-03 Sun>
 :VALIDATED:  -
 :END:
 
-Run =@keiko what needs cleanup= as-is. Phase 23.3 (concrete
+Run =@keiko what needs cleanup= as-is. Phase 2026-05.14 — agent-framework refinements (legacy 23.3 — hygiene scans) (concrete
 hygiene scans) is pending — @keiko has the persona but no
 backing scan results yet. The friction *is* the signal —
 walking the workflow surfaces what scan(s) need to land first.
@@ -505,7 +505,7 @@ Walk-through observations:
   text, generic suggestions)? Does it feel actionable, or
   vague?
 - *Success:* either gardener proposes the top 3 issues I'd
-  agree with, OR the gap forces a clean Phase 23.3 scope.
+  agree with, OR the gap forces a clean Phase 2026-05.14 — agent-framework refinements (legacy 23.3 — hygiene scans) scope.
 - *Failure modes:* @keiko hallucinates "scan results,"
   proposes too much, scope is wrong (suggests cleanup of
   files I'm actively working on), needs the daemon running
@@ -795,7 +795,7 @@ session it landed.
   user's session is configured local — by design.
 
 
-** DONE Phase 23.1 + 23.5 — Agent dataclass + DB-backed registry  :plan:agents:db:cli:load-bearing:
+** DONE Phase 2026-05.14.01 — dataclass + 23.5 — Agent dataclass + DB-backed registry  :plan:agents:db:cli:load-bearing:
 CLOSED: [2026-05-03]
 :PROPERTIES:
 :VALIDATED:  2026-05-03
@@ -807,7 +807,7 @@ Restructured the agent registry from two parallel Python
 literals into a real Agent dataclass with a DB layer behind it.
 The org-file (=~/org/org-llm-agents.org=) is now a tangled
 mirror of the DB rather than a parallel runtime layer.
-"Shape A" pattern — same shape Phase 25 will eventually apply
+"Shape A" pattern — same shape Phase 2026-05.17 — DB-as-cache + git-canonical pipeline will eventually apply
 to the entire vault.
 
 *** What landed
@@ -835,16 +835,16 @@ to the entire vault.
 - 22 tests in [[file:../../tests/test_agents.py][=tests/test_agents.py=]], all passing. Cross-check
   100/100 on agents + mcp + db + knobs.
 
-*** Why this composes with Phase 25
+*** Why this composes with Phase 2026-05.17 — DB-as-cache + git-canonical pipeline
 
-This IS Phase 25's pattern, applied to one table (agents). The
+This IS Phase 2026-05.17 — DB-as-cache + git-canonical pipeline's pattern, applied to one table (agents). The
 "DB authoritative; file is tangled mirror; auto-apply when file
-is newer" model proven here is what Phase 25.1-25.6 does for
+is newer" model proven here is what Phase 2026-05.17.01 — DB-as-cache foundations-25.6 does for
 =File.raw_content=. If round-trip fidelity holds for agents
-across a sprint, that's a credible signal Phase 25 can clear
+across a sprint, that's a credible signal Phase 2026-05.17 — DB-as-cache + git-canonical pipeline can clear
 the same bar for vault content. Bug found during this work —
 =datetime.utcnow()= vs =mtime= timezone mismatch — is exactly
-the kind of subtle round-trip footgun Phase 25's "round-trip
+the kind of subtle round-trip footgun Phase 2026-05.17 — DB-as-cache + git-canonical pipeline's "round-trip
 canary" risk is about.
 
 *** Deferred (slots exist, functional pending)
@@ -859,9 +859,9 @@ canary" risk is about.
 - *Per-agent recipe matcher rewire* — recipe ownership declared
   on Agent (spock owns =count_across_vault=, janeway owns
   =weather_aware_agenda=) but =orchestration._RECIPES= is still
-  the active matcher. Phase 23.4 rewires.
+  the active matcher. Phase 2026-05.14 — agent-framework refinements (legacy 23.4 — recipes/inferrers as agent properties) rewires.
 - *Library install verb* — =org-llm agents install <pack>=
-  documented as Phase 23.5 design pending; needs sandboxing +
+  documented as Phase 2026-05.14.02 — DB-backed registry design pending; needs sandboxing +
   signing story.
 - *Persona text rewrites* — agents still self-identify with
   functional names (=you are crew=, =you are scribe=) rather
@@ -875,7 +875,7 @@ canary" risk is about.
 - =org_llm/cli.py::_resolve_active_agents= — runtime resolver
 - =org_llm/cli.py::_maybe_auto_apply_org_file= — Shape-A bridge
 - =docs/wiki/agent-framework.org= — architecture spec (updated)
-- [[*Phase 25 — invert authority: DB is truth, files are UI][Phase 25]] — vault-level version of this pattern
+- [[*Phase 2026-05.17 — DB-as-cache + git-canonical pipeline — invert authority: DB is truth, files are UI][Phase 2026-05.17 — DB-as-cache + git-canonical pipeline]] — vault-level version of this pattern
 
 * Next  :@next:
 
@@ -1190,7 +1190,7 @@ ground-truth checks — listed as follow-up work below.
 - =[ ]= Wire =org-llm validate inferrers= to a scheduled remote
   routine for nightly regression CI.
 
-Three inferrers shipped Phase 21.1: =vault_stats=, =tag_taxonomy=,
+Three inferrers shipped Phase 2026-05.13.01 — DB-backed vault fact store: =vault_stats=, =tag_taxonomy=,
 =routine_chores=. They feed recipe pre-fetch (=count_across_vault=
 adds a =user_context:= line when count target overlaps a known
 chore).
@@ -1201,7 +1201,7 @@ chore).
   2026-05-03).
 - =tag_taxonomy= top-30 matches a hand-grep ranking.
 - =routine_chores= correctly REJECTS routines marked
-  cancelled/skipped (the Phase 18.4-style routine drift fix).
+  cancelled/skipped (the Phase 2026-05.06 — proxy expansion-style routine drift fix).
 - TTL invalidation actually re-runs after =ttl_secs= expires.
 
 *** NEXT Validate auto-embedder + staleness sweep cooperation     :validation:auto-embedder:cli:load-bearing:
@@ -1252,7 +1252,7 @@ one macOS, hits =org-llm ask= successfully.
 :SOURCE: gap-analysis-alpha-to-beta.org P1.2
 :END:
 
-Phase 9.7 validated 4 of 71 MCP tools live in opencode. The
+Phase 2026-04.04 — =.opencode/= dotfile validated 4 of 71 MCP tools live in opencode. The
 other 67 are tested via =test_workspace_mcp.py= structural
 assertions but no end-to-end exercise inside an actual
 opencode session (or another MCP client like Claude Code).
@@ -1612,7 +1612,7 @@ options).
 :SOURCE: backlog.org [later]
 :END:
 
-Surfaced during Phase 12.1 smoke test. Opencode config writer
+Surfaced during Phase 2026-04.07.01 — pre-mount skeleton smoke test. Opencode config writer
 hard-codes the env from when the org-llm process started, not
 the walk-wrapper override. Annoying not breaking — opencode
 starts; the MCP server it spawns just talks to the real DB
@@ -1627,7 +1627,7 @@ env-var override at write time.
 :SOURCE: backlog.org [later]
 :END:
 
-Search works well enough post-Phase 11; revisit if real users
+Search works well enough post-Phase 2026-04.06 — embed migration + tag --apply; revisit if real users
 complain. Low priority — gate 1 (be good at the job) is met for
 typical retrieval; this would only help edge cases.
 
@@ -1800,7 +1800,7 @@ anyway.
 # Migrated 2026-05-03 from ~/org/org-llm-test-session/backlog.org
 # + gap-analysis P2/P3 + recipes.org roadmap section.
 
-** TODO Phase 24 — Supervision trinity (resolvers + recovery + detector) :plan:agents:proxy:meta:load-bearing:
+** TODO Phase 2026-05.02 — supervision trinity — Supervision trinity (resolvers + recovery + detector) :plan:agents:proxy:meta:load-bearing:
 :PROPERTIES:
 :PRIORITY:        A
 :GATE:            1,2,3
@@ -1809,7 +1809,7 @@ anyway.
 :SOURCE:          2026-05-04 — design rule canonized in
                   architecture.org § /Design rule —
                   supervision is deterministic by default/;
-                  full plan in roadmap.org § Phase 24
+                  full plan in roadmap.org § Phase 2026-05.02 — supervision trinity
 :END:
 
 *Generative principle:* when the agent layer needs supervision
@@ -1819,7 +1819,7 @@ unless the confusion genuinely needs reasoning. An LLM-based
 observer is an extra round-trip per turn and the orchestration
 top priority (smoother + faster + higher-quality than solo)
 fails the moment supervision taxes latency. Generalizes the
-already-shipped Phase 22 v2 pattern (manager pre-fetch + agent
+already-shipped Phase 2026-05.07 — manager pre-fetch + agent narrates pattern (manager pre-fetch + agent
 narrates) from a single recipe-bound instance into a uniform
 three-layer framework.
 
@@ -1841,11 +1841,11 @@ layers each fix this bug at a different point in the call.
   without touching the orchestration core.
 - *Gate 3:* audit log + manager-pre-fetch wiring already
   exist; this consolidates them into a uniform protocol that
-  Phase 29 (self-coded tools) can write into automatically.
+  Phase 2026-05.20 — sync verb POC (self-coded tools) can write into automatically.
 
 *** Recommended ship order (3 sub-phases + 1 open)
 
-1. *Phase 24.1 — Pre-flight resolver registry.* *Shipped
+1. *Phase 2026-05.02.01 — pre-flight resolvers — Pre-flight resolver registry.* *Shipped
    2026-05-04* (commit =9c75bb5= framework + =delegate()=
    wiring + tests; proxy-side wiring + eager-import follow-up
    commit). New package =org_llm/resolvers/= with one file
@@ -1874,7 +1874,7 @@ layers each fix this bug at a different point in the call.
    tool call hit =/home/daniel/repos/org-llm/docs/wiki/superset.org=
    with no guessing.
 
-2. *Phase 24.2 — Tool-failure recovery hooks.* =@recover=
+2. *Phase 2026-05.02.02 — recovery hooks — Tool-failure recovery hooks.* =@recover=
    decorator at each MCP tool's registration site. On tool
    failure, hook gets =(args, error)= and returns
    =list[Suggestion]=; framework appends them to the error
@@ -1885,7 +1885,7 @@ layers each fix this bug at a different point in the call.
    (parent-directory suggestion). Suggestions, not auto-
    substitutions — agent decides on next call. ~1d.
 
-3. *Phase 24.3 — Confusion detector.* Signal registry over
+3. *Phase 2026-05.02.03 — confusion detector — Confusion detector.* Signal registry over
    =crew_log=, layered on top of 24.2's wiring (when a
    recovery hook fires, the detector also runs). Initial
    signals: failure-loop (N consecutive failures of same
@@ -1896,7 +1896,7 @@ layers each fix this bug at a different point in the call.
    round-trip. ~1.5d (signal-tripping thresholds need
    calibration against real audit traces).
 
-4. *Phase 24.4 — Manager quorum (open question, async-only).*
+4. *Phase 2026-05.02.04 — manager quorum — Manager quorum (open question, async-only).*
    For reasoning-required supervision (the rule's exception),
    N managers vote on whether a delegate's output addressed
    the user's actual intent. Runs *async on the audit log* —
@@ -1907,7 +1907,7 @@ layers each fix this bug at a different point in the call.
    "ineffective delegation retrospective" is a recurring
    need or stays as on-demand validation tooling.
 
-5. *Phase 24.5 — Orientation primer registry.* Sibling
+5. *Phase 2026-05.02 — supervision trinity (legacy 24.5 — orientation primer registry) — Orientation primer registry.* Sibling
    discipline to 24.1: instead of injecting *facts* per
    prompt, inject *conventions* per domain. Manifest at
    spawn names core agents and their primer namespaces
@@ -1943,14 +1943,14 @@ proceeds.
 
 *** Connections
 
-- *Phase 22 v2 (shipped)* is the prototype that 24 generalizes;
+- *Phase 2026-05.07 — manager pre-fetch + agent narrates (shipped)* is the prototype that 24 generalizes;
   =format_prefetch_block= in [[file:../../org_llm/recipe_runner.py][=recipe_runner.py=]] is the shape
   reference for resolver output formatting.
-- *Phase 25 (DB-authoritative inversion)* turns the DB into
+- *Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (DB-authoritative inversion)* turns the DB into
   resolvers' reference desk — repo registry, person/agent
-  index, org-node lookups all hit the DB once Phase 25.x
+  index, org-node lookups all hit the DB once Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family)
   lands. Pre-25 resolvers fall back to disk walks.
-- *Phase 29 (self-coded tools)* provides the auto-promotion
+- *Phase 2026-05.20 — sync verb POC (self-coded tools)* provides the auto-promotion
   path: when audit log shows a recurring confusion not caught
   by any current resolver/hook/signal, the system proposes a
   new registry entry and validates it the same way 29.2
@@ -1962,7 +1962,7 @@ proceeds.
 - *Sibling architecture rule* canonized in
   =docs/wiki/architecture.org= § /Design rule — agent
   orientation: manifest at spawn, primer on demand/.
-  Phase 24.5 IS that rule's implementation; same
+  Phase 2026-05.02 — supervision trinity (legacy 24.5 — orientation primer registry) IS that rule's implementation; same
   deterministic-by-default discipline applied to context
   injection rather than supervision.
 - *Wiki Rule 2b* (Summary + Expanded) shipped alongside the
@@ -1982,7 +1982,7 @@ they catch (and what they don't). 24.5 sprint-eligible after
 24.1 lands (shares the registry pattern; ~1.5d total across
 24.5a/b/c).
 
-** TODO Phase 25 — DB-as-cache + git-canonical pipeline    :plan:db:foundation:load-bearing:
+** TODO Phase 2026-05.17 — DB-as-cache + git-canonical pipeline — DB-as-cache + git-canonical pipeline    :plan:db:foundation:load-bearing:
 :PROPERTIES:
 :PRIORITY:        A
 :GATE:            1,3
@@ -1998,7 +1998,7 @@ they catch (and what they don't). 24.5 sprint-eligible after
 (regenerable local cache). The original "DB-authoritative
 inversion" framing was both narrower than reality required and
 broader than the lead value needed. Primary canonical entry is
-now =roadmap.org= § Phase 25 (rewritten); the body of this
+now =roadmap.org= § Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (rewritten); the body of this
 dev-tracker entry below is preserved as historical context for
 the original framing's gate-1 reasoning.
 
@@ -2010,11 +2010,11 @@ Companion canonical pages:
 #+end_quote
 
 The remainder of this entry is the *original 2026-05-03
-directional reasoning* that motivated Phase 25. Most of it
+directional reasoning* that motivated Phase 2026-05.17 — DB-as-cache + git-canonical pipeline. Most of it
 still applies to the revised scope (mass ops, cross-file
 queries, atomic transactions, history queryability) — only
 the "files become rendered UI" target changed. The revised
-sub-phase plan is in =roadmap.org= § Phase 25.
+sub-phase plan is in =roadmap.org= § Phase 2026-05.17 — DB-as-cache + git-canonical pipeline.
 
 ────────────────────────────────────────────────────────
 
@@ -2051,7 +2051,7 @@ replicated DB) IS the entire org-llm state.
 - *Sync / multi-device* — SQLite over Litestream (or successor
   on Postgres) = trivial replication. Today the vault is
   pinned to one box.
-- *dbt over EVERYTHING* — Phase 12.7's dbt scope is currently
+- *dbt over EVERYTHING* — Phase 2026-07.06 — dbt analytics's dbt scope is currently
   the engagement table. With everything in DB, dbt models the
   *vault content directly* — analytics over notes is a
   one-liner.
@@ -2091,7 +2091,7 @@ enough.
   = different concurrency model).
 - *No-WAL concurrency latent risk* (already noted in
   architecture.org § Concurrency) becomes a *blocker*. If DB
-  is authoritative, write contention matters. Phase 25 must
+  is authoritative, write contention matters. Phase 2026-05.17 — DB-as-cache + git-canonical pipeline must
   ship WAL.
 
 *** Recommended ship order (6 sub-phases)
@@ -2103,25 +2103,25 @@ git merge). With git semantics in the DB by 25.4, conflict
 resolution becomes a known-solved problem instead of one we
 invent.
 
-1. *Phase 25.1 — DB as full mirror (vault still authoritative).*
+1. *Phase 2026-05.17.01 — DB-as-cache foundations — DB as full mirror (vault still authoritative).*
    Add =File.raw_content= column. Indexer writes raw bytes
    alongside parsed structure. Validate round-trip: dump from
    DB → rendered file == original disk file (byte-equal or
    diff'd through a tolerant comparator). Iterate on the dev's
    vault until 100%. ~3-5 days.
 
-2. *Phase 25.2 — backup + restore tooling.* Once round-trip
+2. *Phase 2026-05.17.02 — DB-as-cache step 2 — backup + restore tooling.* Once round-trip
    verified: =org-llm backup [path]= produces a single archive
    (SQLite dump + creds digest manifest + version stamp).
    =org-llm restore <archive>= unpacks with confirmation +
    integrity check. Reuses =self snapshot= substrate. ~1d.
 
-3. *Phase 25.3 — WAL + concurrency hardening.* =PRAGMA
+3. *Phase 2026-05.17.03 — DB-as-cache step 3 — WAL + concurrency hardening.* =PRAGMA
    journal_mode = WAL=. Test multi-process write contention
    (proxy + auto-embedder + CLI). Document the new concurrency
    model. ~half-day.
 
-4. *Phase 25.4 — git ingestion as audit/history layer (NEW).*
+4. *Phase 2026-05.17.04 — DB-as-cache step 4 — git ingestion as audit/history layer (NEW).*
    Snowflake-style "git repo as DB" pattern, FOSS-implemented.
    Add tables =git_commits= (sha, ts, author, msg) +
    =file_versions= (file_id, commit_sha → raw_content_blob,
@@ -2141,7 +2141,7 @@ invent.
 
    ~3-5 days. Composes with 25.5's conflict resolution.
 
-5. *Phase 25.5 — DB-authoritative for engine ops.* Mass
+5. *Phase 2026-05.17.05 — DB-as-cache step 5 — DB-authoritative for engine ops.* Mass
    operations (=org-llm tag --rename foo bar=, content edits
    triggered by agents) read/write DB and trigger re-render of
    affected files. Disk watcher (auto-embedder evolution)
@@ -2149,15 +2149,15 @@ invent.
    primitives from 25.4* — conflict resolution becomes a
    known-solved problem. ~1-2 weeks of careful work.
 
-6. *Phase 25.6 — full inversion.* Architecture.org's "vault
+6. *Phase 2026-05.17.06 — DB-as-cache step 6 — full inversion.* Architecture.org's "vault
    authoritative" principle becomes "DB authoritative; vault
    is rendered UI." All engine reads go to DB; disk is touched
    only for user-facing render. Multi-device sync becomes a
    feature. ~1 week.
 
-7. *(Optional) Phase 26 — beyond SQLite.* If perf or analytics
+7. *(Optional) Phase 2026-05.04 — cull walk — beyond SQLite.* If perf or analytics
    demand, evaluate DuckDB / Postgres+pgvector. Schema lift
-   shouldn't be hard if Phase 25.x is well-designed. Decision
+   shouldn't be hard if Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) is well-designed. Decision
    gate: are we hitting actual SQLite limits, or is it
    premature?
 
@@ -2171,18 +2171,18 @@ invent.
 
 *** Connections to existing work
 
-- =self snapshot= verb is the seed for Phase 25.2 backup
+- =self snapshot= verb is the seed for Phase 2026-05.17.02 — DB-as-cache step 2 backup
   tooling. Currently bundles package source + DB; just needs
   raw vault content (which 25.1 puts in DB).
 - *auto-embedder* is the seed for the disk-watcher in 25.4 —
   it already watches mtime + re-ingests. Just needs to learn
   conflict resolution.
-- *dbt (Phase 12.7)* dramatically expands in usefulness once
+- *dbt (Phase 2026-07.06 — dbt analytics)* dramatically expands in usefulness once
   vault content lives in DB.
 - =vault_facts= inferrers currently read disk; with 25.1 they
   could read DB (faster, more consistent, keeps disk-read
   fallback). See the inferrer-vs-DB discussion in
-  [[*Validate =vault_facts= inferrer accuracy][validate vault_facts]] DONE entry — Phase 25.1 lets us
+  [[*Validate =vault_facts= inferrer accuracy][validate vault_facts]] DONE entry — Phase 2026-05.17.01 — DB-as-cache foundations lets us
   reverse that decision cleanly.
 - Show-your-work mode + this: cross-file analytics views
   become much richer when the underlying data is queryable.
@@ -2203,7 +2203,7 @@ invent.
 - *Personal-now-FOSS-later cost.* At n=1, round-trip mistakes
   are recoverable (the dev's git has the vault). At n=many, a
   round-trip bug silently corrupts users' notes — gate-1
-  catastrophic. Phase 25.1 needs aggressive validation
+  catastrophic. Phase 2026-05.17.01 — DB-as-cache foundations needs aggressive validation
   (multi-vault test corpus including the user's, sparse
   vaults, weird-formatting vaults) before 25.2 ships
   user-facing.
@@ -2215,17 +2215,17 @@ invent.
 *** Effort + scheduling
 
 Per-phase estimates above. Total arc: 4-6 weeks of focused
-work, not counting Phase 26. Way beyond the current sprint —
+work, not counting Phase 2026-05.04 — cull walk. Way beyond the current sprint —
 this is foundation work for the next quarter.
 
 *Recommendation:* don't start during this rationalization
 sprint. Land show-your-work first (immediate user-visible win,
-doesn't touch the foundation). Schedule Phase 25.1 for the
+doesn't touch the foundation). Schedule Phase 2026-05.17.01 — DB-as-cache foundations for the
 sprint *after* this one closes (~2026-05-17 onward). The first
 concrete deliverable should be: round-trip fidelity proof on
 the dev's vault.
 
-*** Phase 25.4 design notes (expanded 2026-05-04)
+*** Phase 2026-05.17.04 — DB-as-cache step 4 design notes (expanded 2026-05-04)
 
 Expands the 25.4 bullet in "Recommended ship order" above
 into concrete design decisions, MCP tool surface, and a
@@ -2301,7 +2301,7 @@ cutoff.
 - Submodules (vault has none).
 - Git LFS pointers (no large binaries in vault).
 - Org-mode-aware semantic diffs ("what changed in =:tags:= of
-  this heading") — separate Phase 25.x layer over parsed
+  this heading") — separate Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) layer over parsed
   structure, NOT 25.4 scope.
 - Blob GC for orphaned (no =commit_files= row) blobs —
   =org-llm git-sync --vacuum= verb later.
@@ -2333,7 +2333,7 @@ def vault_velocity(
     window_days: int = 30,
 ) -> VelocityStats:
     """Commits, insertions, deletions, files-changed over a
-    rolling window. For @tracker sprint metrics + Phase 27
+    rolling window. For @tracker sprint metrics + Phase 2026-07.01 — Apache Superset dashboards
     Superset rollups."""
 
 def file_at_revision(
@@ -2456,7 +2456,7 @@ code.
   helpers so recipe pre-fetch can call them in-process (the
   org-tools seam pattern from architecture.org).
 - *dbt source declarations.* =git_commits=, =git_commit_diffs=,
-  =git_commit_files= become dbt sources for Phase 12.7
+  =git_commit_files= become dbt sources for Phase 2026-07.06 — dbt analytics
   models. Trivial — one block in =sources.yml=.
 
 **** Implementation checklist (when 25.4 starts)
@@ -2488,7 +2488,7 @@ above (~3-5d). Design work above takes that estimate from
 :PROPERTIES:
 :PRIORITY: C
 :GATE:     3
-:SOURCE:   2026-05-04 — Phase 25 says "SQLite (or successor)"; parked at C until a trigger fires
+:SOURCE:   2026-05-04 — Phase 2026-05.17 — DB-as-cache + git-canonical pipeline says "SQLite (or successor)"; parked at C until a trigger fires
 :END:
 
 *Status: parked.* Default position is "stay on SQLite + extensions"
@@ -2502,13 +2502,13 @@ research format is pre-committed when a trigger fires.
 - *Captain's log or embeddings table crosses ~1M rows* and WAL-mode
   SQLite shows write-stall or query latency on the dev's actual vault
   (not synthetic).
-- *A Phase 25 sub-phase hits a real SQLite limitation* — e.g. 25.4
+- *A Phase 2026-05.17 — DB-as-cache + git-canonical pipeline sub-phase hits a real SQLite limitation* — e.g. 25.4
   git_sync needs row-level concurrent writes from multiple processes,
   or 25.x needs streaming replication that Litestream can't provide.
 - *Multi-device sync becomes a 1.0 requirement* (laptop ↔ desktop ↔
   phone) and the user-experience cost of "ship the .db file" is
   judged unacceptable.
-- *dbt/Superset (Phase 12.7/27) demonstrably underperforms* against
+- *dbt/Superset (Phase 2026-07.06 — dbt analytics/27) demonstrably underperforms* against
   SQLite as the read-side and a columnar engine would clearly help.
   Most likely outcome here is "attach DuckDB as a read-only sibling,"
   not "replace SQLite."
@@ -2520,7 +2520,7 @@ Until a trigger fires, the answer is: **SQLite + WAL +
 =sqlite-vec= + FTS5 + Litestream**, with DuckDB as a possible
 read-only attached sibling for analytics. No swap.
 
-Phase 25 inverts vault/DB authority and explicitly leaves the
+Phase 2026-05.17 — DB-as-cache + git-canonical pipeline inverts vault/DB authority and explicitly leaves the
 engine open ("SQLite or successor"). Once the DB carries raw
 bytes + parsed structure + embeddings + history + config +
 crew log + sensors + engagement + creds digest, the engine
@@ -2540,11 +2540,11 @@ Candidates worth a serious look (FOSS-first per
   *Public production reference (2026-05):* [[https://github.com/preset-io/agor][preset-io/agor]] — a
   multi-agent-over-shared-DB workspace (same author as Apache
   Superset/Airflow) chose libSQL for exactly the
-  many-agents-writing-to-one-store use case Phase 25 is
+  many-agents-writing-to-one-store use case Phase 2026-05.17 — DB-as-cache + git-canonical pipeline is
   heading into. Strongest non-speculative prior on the libSQL
   trigger.
 - *DuckDB* — columnar, OLAP-shaped; fits the dbt/Superset arc
-  in Phase 12.7/27. Worse for OLTP write churn (every
+  in Phase 2026-07.06 — dbt analytics/27. Worse for OLTP write churn (every
   =log.kind=llm= row); could be a *sibling* analytical engine
   rather than a replacement.
 - *PostgreSQL* (embedded via =pg_embed= / =postgres-wasm=, or
@@ -2552,7 +2552,7 @@ Candidates worth a serious look (FOSS-first per
   rich JSON. Cost: laptop-path ergonomics, ops surface,
   conflicts with native-install primary.
 - *LMDB / RocksDB* — KV with great write throughput; wrong
-  abstraction layer for cross-file SQL queries Phase 25
+  abstraction layer for cross-file SQL queries Phase 2026-05.17 — DB-as-cache + git-canonical pipeline
   promises. Probably out.
 - *Datalog/EDB engines* (Datomic-style, XTDB, =cozodb=) —
   appealing for =:VALIDATED:= /tag rename mass-ops, but
@@ -2567,7 +2567,7 @@ Candidates worth a serious look (FOSS-first per
 2. A small benchmark on a realistic vault (~1k notes, captain's
    log churn, embedding writes) — same A/B-harness discipline
    as recipe validation.
-3. A go/no-go before Phase 25.1 ships, so we don't bake
+3. A go/no-go before Phase 2026-05.17.01 — DB-as-cache foundations ships, so we don't bake
    SQLite-specific assumptions into the inversion if the
    successor is libSQL/DuckDB.
 
@@ -2622,7 +2622,7 @@ Inverted framing: *Agor is the workspace; org-llm runs inside
 it.* Agor is the meta-surface above our stack — "which
 sessions in which worktrees doing which work" — not a
 substrate. Doom stays primary on the host. Vault stays
-authoritative (or becomes so per Phase 25). Recipes,
+authoritative (or becomes so per Phase 2026-05.17 — DB-as-cache + git-canonical pipeline). Recipes,
 captain's log, opencode plugin all stay. Agor only adds the
 *air-traffic-control* layer above them.
 
@@ -2655,7 +2655,7 @@ work" in one line. Wrong; they fit problems we have *today*:
   mechanically prevents collision instead of relying on
   memory-assisted vigilance.
 - *Vault experiments without polluting =~/org/=.* Tag-rename
-  rehearsal, Phase 25 round-trip-fidelity proof, aggressive
+  rehearsal, Phase 2026-05.17 — DB-as-cache + git-canonical pipeline round-trip-fidelity proof, aggressive
   =@curator= sweep with diff-then-decide — all today's
   =git stash= + branch ceremony. Worktrees collapse to "open
   experimental worktree, do experiment, close, live vault
@@ -2709,7 +2709,7 @@ non-blocking peer calls, per-session attached MCP servers.
 
 *Unconfirmed (1-day spike to verify):*
 - Can agents *programmatically register* external MCP servers
-  (vs user-only via settings panel)? Matters for Phase 29
+  (vs user-only via settings panel)? Matters for Phase 2026-05.20 — sync verb POC
   self-coded-tools loop where the app synthesizes new tools
   with no human in the loop.
 - Can assistants directly call each other, or only via
@@ -2720,13 +2720,13 @@ non-blocking peer calls, per-session attached MCP servers.
 *Honest caveat:* each assistant lives in a worktree. A 5-agent
 fleet = 5+ on-disk worktrees. Real footprint, not hypothetical.
 
-*Why this matters more than worktrees alone:* Phase 30's
+*Why this matters more than worktrees alone:* Phase 2026-06.04 — FOSS agent value-adds's
 "FOSS agent value-adds (always-on / multi-model / multi-judge)"
 is a build-it-ourselves plan that overlaps heavily with what
 Agor already ships. If the spike confirms agent-side MCP
-registration, Agor potentially absorbs ~30-50% of Phase 30's
+registration, Agor potentially absorbs ~30-50% of Phase 2026-06.04 — FOSS agent value-adds's
 infrastructure work (always-on heartbeats, multi-model
-delegation, peer-call patterns) and we focus Phase 30 on the
+delegation, peer-call patterns) and we focus Phase 2026-06.04 — FOSS agent value-adds on the
 FOSS-agent-specific value (multi-judge consensus, local-model
 patterns cloud-can't-afford). That's a meaningful sequencing
 question.
@@ -2809,11 +2809,11 @@ the integration framing. Five concrete opportunities surfaced:
    created via =agor_artifacts_create= MCP tool. Concrete
    high-value uses (artifact-charter applies — render-only,
    never edit-surface):
-   - Theme-studio knob-preview (Phase 31 avatars)
-   - Recipe A/B comparison viewer (Phase 27 validation)
+   - Theme-studio knob-preview (Phase 2026-07.03 — theme-driven agent avatars avatars)
+   - Recipe A/B comparison viewer (Phase 2026-07.01 — Apache Superset dashboards validation)
    - Captain's-log filterable timeline
    - Validation-framework dashboard (pre-Superset)
-   - Phase 29 self-coded-tools candidate explorer
+   - Phase 2026-05.20 — sync verb POC self-coded-tools candidate explorer
      w/ accept-reject UI
    - Tutor renderer w/ live-fillable forms
 4. *Cards — generic non-code workflow entities.* "Dumb by
@@ -2868,14 +2868,14 @@ Eight ways this matters:
    asks @curator "is [[id:abc]] valid?" non-blocking, gets
    answer, continues. Today =delegate()= synchronous.
 7. *Agent provenance.* Every session pins =(worktree,
-   commit, agent, prompt)=. Phase 30 always-on needs this
+   commit, agent, prompt)=. Phase 2026-06.04 — FOSS agent value-adds always-on needs this
    for trust.
 8. *Sprawl problem solved.* User-added-agent fleet
    management is what Agor's assistant model was built for.
 
 *Deepest insight:* Agor turns "agent" from
 =(persona-file, recipe, ad-hoc-cron)= tuple into a
-*first-class entity*. Phase 30 + Phase 31 are already
+*first-class entity*. Phase 2026-06.04 — FOSS agent value-adds + Phase 2026-07.03 — theme-driven agent avatars are already
 drifting toward this; Agor is farther down the path.
 
 *** Risks + mitigations (across all arguments)
@@ -2941,11 +2941,11 @@ Any one is sufficient:
    cross-contamination incident wastes >2h, OR =git stash=
    used >3 times in a single day. Worktree spike's gate-1
    question becomes urgent.
-2. *Phase 30 is about to start* — Agor's heartbeat-scheduled
+2. *Phase 2026-06.04 — FOSS agent value-adds is about to start* — Agor's heartbeat-scheduled
    assistants potentially absorb 30-50% of the
    "always-on / multi-model / multi-judge" infrastructure.
-   Spike before writing Phase 30 scaffolding from scratch.
-3. *Phase 31 needs live preview surface* — knob-tweaking via
+   Spike before writing Phase 2026-06.04 — FOSS agent value-adds scaffolding from scratch.
+3. *Phase 2026-07.03 — theme-driven agent avatars needs live preview surface* — knob-tweaking via
    CLI + Emacs reload becomes the slowest part of theme
    iteration. Artifacts as preview goes from "interesting"
    to "obvious win."
@@ -3048,13 +3048,13 @@ Forcing the migration is the stress test.
 
 *Sub-items (now that the architecture is clearer):*
 
-*** TODO New Phase 27 Superset applications                     :phase27:dashboards:
+*** TODO New Phase 2026-07.01 — Apache Superset dashboards Superset applications                     :phase27:dashboards:
 "Vault life signs" pulse, project arcs, mood arc, activity
 heatmap, drift watch (failing dbt tests). Specific dashboards
 sketched in [[file:dbt-pipeline.org][dbt-pipeline.org]] § Dashboards. Each is a TODO
-once Phase 27 lights up.
+once Phase 2026-07.01 — Apache Superset dashboards lights up.
 
-*** TODO New Phase 26+ Agor partner-app applications            :agor:phase26:
+*** TODO New Phase 2026-05.04 — cull walk+ Agor partner-app applications            :agor:phase26:
 With DEC-009 (curated core + extension) and tonight's
 parallel-agent experience: Agor as orchestration substrate
 under the extension path. Specific apps to investigate: Agor
@@ -3063,14 +3063,58 @@ distribution, Agor × tofu-stack management. See entry below.
 
 *** TODO Apache Airflow integration?                            :airflow:research:
 Question whether dbt-on-cron + dbt-cloud-shape needs
-escalation to Airflow for: scheduled cross-vault federation
-(post-1.0), heavy daily snapshot rolls, cross-app pipelines
-(org → dbt → Superset → email summary). Needs scope evaluation
-against DEC-010 anti-capitalist alignment (Airflow itself is
-ASF/FOSS — fine; managed Airflow is the question).
+escalation to Airflow.  Eleven candidate use cases identified
+(2026-05-06) and walked through agent-managed headless tests
+in =tests/test_airflow_candidates.py=:
+
+1. Cross-vault federation (household / work / personal) — sensors + DAG, Phase 2026-06.04 — FOSS agent value-adds+.
+2. DB ↔ vault re-render under Phase 2026-05.17 — DB-as-cache + git-canonical pipeline — DAG + retries on conflict.
+3. External-data ingest fan-in (calendar / email / RSS / finance / health / weather).
+4. Cross-app egress (org → dbt → Superset → digest email / push).
+5. Heavy daily snapshot rolls (=snap_*=) over multi-source.
+6. Agor multi-day campaign orchestration (research → spec → impl → test → review).
+7. Phase 2026-05.20 — sync verb POC — self-coded tools runtime (mass scheduling of promoted tools).
+   *NOTE 2026-05-06:* harness verdict came back =Retry= only (mass-cron-of-many,
+   not DAG-shape).  Strikes from the Airflow candidate list; rerouted as
+   a Phase 2026-06.01–.03 — self-coded tools agent ecosystem internal-scheduling sub-item below.
+8. Embedding refresh + vault re-index after large rewrites.
+9. Multi-device fleet coordination (laptop / phone / homelab).
+10. Provenance / vault-history backfills (replay pipeline against historical org).
+11. A/B / multivariate harness fan-out at scale (agent-team variants).
+
+Walk + verdicts: see [[file:agent-time-awareness.org][agent-time-awareness.org]] § Real candidates
+and the report at [[file:2026-05-06-airflow-candidates-report.org][2026-05-06-airflow-candidates-report.org]].
+
+Earlier-trigger sub-set (internal, arrive before federation):
+*#2, #7, #8, #10*.  These four collapse the deferral window
+if Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) or Phase 2026-06.01–.03 — self-coded tools agent ecosystem ship before cross-vault federation
+work.
+
+Needs scope evaluation against DEC-010 anti-capitalist
+alignment (Airflow itself is ASF/FOSS — fine; managed Airflow
+is the question; Prefect / Dagster are lighter alternatives
+worth a side-look once "yes orchestrator" is the answer).
+
+*** TODO Phase 2026-05.20 — sync verb POC — promoted-tool scheduling runtime           :phase29:scheduling:
+Rerouted from Airflow candidate #7 (2026-05-06).  Once Phase
+29.0 (=tracker sync= verb) lands, the runtime needs a mass
+scheduler for promoted deterministic tools — mass-cron-of-many
+shape, not DAG-shape, so Airflow is overkill.  Right tool:
+=systemd= timers per registered tool, with =@geordi= owning
+observability (success/fail counts, drift).  Scope: small
+(~half-day once Phase 2026-05.20 — sync verb POC ships).
+
+*** TODO @geordi — recurring Airflow-candidate harness run    :geordi:harness:airflow:
+Wire =pytest tests/test_airflow_candidates.py= as a recurring
+=@geordi= duty so verdicts stay fresh as candidates evolve.
+Mechanism (low-cost): scheduled remote agent firing weekly,
+artifact = =tests/_artifacts/airflow_verdicts.json= diff
+against last-known-good.  See [[file:agent-time-awareness.org][agent-time-awareness.org]] §
+Headless validation harness and the 2026-05-06 report's open
+question (now resolved: yes, =@geordi= owns it).
 
 *Scheduling:* the migration itself is sprint-eligible (~1d) once
-Phase 29.0 (=tracker sync= verb) lands. Sub-items are research
+Phase 2026-05.20 — sync verb POC (=tracker sync= verb) lands. Sub-items are research
 queue entries.
 
 ** TODO Agor — multi-agent orchestration substrate (tonight's framing) :research:agor:multi-agent:
@@ -3107,7 +3151,7 @@ Specific questions to investigate:
 2. How does Agor's worktree isolation interact with org-llm's
    git-as-sync model (per [[file:sync-architecture.org][sync-architecture.org]])? The two
    may be redundant or complementary.
-3. Per Phase 26 cull: does Agor become a CORE component or
+3. Per Phase 2026-05.04 — cull walk cull: does Agor become a CORE component or
    extension-path-only?
 4. DEC-009 fit: is Agor the substrate that PROVES the extension
    path is real (per criterion-2 of "first usable")?
@@ -3120,7 +3164,7 @@ Cross-references:
 - DEC-005 (strict claim-before-touch + worktree escape hatch —
   Agor's exact territory)
 
-** TODO Cull walkthrough — actually do Phase 26.1                :plan:meta:cull:
+** TODO Cull walkthrough — actually do Phase 2026-05.04 — cull walk                :plan:meta:cull:
 :PROPERTIES:
 :PRIORITY: A
 :SOURCE:   2026-05-05 user reminder ("Weren't we going to do a
@@ -3129,7 +3173,7 @@ Cross-references:
            to "after the mission walk"
 :END:
 
-Phase 26.1 (finalize the cut list) was scheduled to be walked
+Phase 2026-05.04 — cull walk (finalize the cut list) was scheduled to be walked
 component-by-component, one at a time, but deferred during the
 2026-05-05 mission walk to keep momentum. Schedule the actual
 walk: per the cut criterion (DEC-009: would the lead value still
@@ -3171,7 +3215,7 @@ Compare outputs:
   Summary blocks)
 - Cost (cloud spend per page)
 
-This is also a Phase 30.4 (multi-judge validation) candidate —
+This is also a Phase 2026-05.21 — multi-judge validation (multi-judge validation) candidate —
 each output is judged by Opus blinded. Outcome is a real signal
 on which agent surface to invest in for high-stakes content
 work.
@@ -3209,7 +3253,7 @@ Existing instances (already proving the pattern):
 - =~/org/org-llm-config.org= → Config table (literate config)
 - =~/org/org-llm-agents.org= → AgentRow table
 - =~/org/org-llm-baselines.org= → AgentBaseline table
-- =~/org/org-llm-tools.org= (Phase 23.6, planned)
+- =~/org/org-llm-tools.org= (Phase 2026-05.16 — literate MCP tools, planned)
 
 Extension to dbt:
 - =~/org/dbt/= contains org files with SQL src blocks
@@ -3257,7 +3301,7 @@ Use-case candidates per tool (org-llm fit):
   ephemeral coordination.
 - *Vagrant* — reproducible test env builder for =org-llm doctor=
   smoke tests + acpt-tier dogfood VMs.
-- *Packer fork* — building org-llm distro images (Phase 28 —
+- *Packer fork* — building org-llm distro images (Phase 2026-07.02 — containerization strategy —
   containerization strategy + future bare-metal installer).
 
 Spawn a research agent post-nap (if user wants depth);
@@ -3277,7 +3321,7 @@ each environment. Candidates to map:
 - Mobile (Termux + Emacs + org-llm CLI) — Phase ~25.x
 - Self-hosted VPS / homelab (FOSS-aligned: Hetzner, OVH,
   Proxmox)
-- Containerized (per Phase 28 asymmetric strategy — most
+- Containerized (per Phase 2026-07.02 — containerization strategy asymmetric strategy — most
   composable: Superset + dbt + auto-embedder daemon)
 - Pi-class hardware (Pi 5 / NAS-style boxes)
 - Cloud GPU (only for embedding warmup; ephemeral)
@@ -3312,7 +3356,7 @@ resolve; tables sort; refile from chat to vault works; agenda
 sees the TODOs.
 
 Implementation paths (sub-phases):
-1. *Native Emacs UI to MCP/proxy* (Phase 16.3 — Emacs companion
+1. *Native Emacs UI to MCP/proxy* (Phase 2026-05.03 — Emacs companion — Emacs companion
    delivered). Cleanest fit. Biggest scope.
 2. *Emacs wrapper around opencode subprocess* — pipes prompts;
    reformats output as org. Ships sooner; inherits recipes +
@@ -3342,7 +3386,7 @@ Implications if accepted as CORE:
   *secondary* surfaces (not where the user lives daily).
 - Mobile target uses an org-mode-aware editor (composes with
   the holy-grail mobile sprint item below).
-- Phase 16.3 — Emacs companion becomes load-bearing for v1.0.
+- Phase 2026-05.03 — Emacs companion — Emacs companion becomes load-bearing for v1.0.
 - DEC-015 candidate locks the principle once design lands.
 
 ** TODO Mobile / Termux build — ship the holy-grail org-mode-on-mobile :plan:mobile:phase25:holy-grail:load-bearing:sprint:
@@ -3422,7 +3466,7 @@ What's *NOT* a constraint:
 - "Read-only mobile" default — wrong; user's choice via
   =agent_write_active= per-device knob, not architectural ceiling.
 
-Phase fit: Phase 25.x — DB-as-cache + git-canonical pipeline
+Phase fit: Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) — DB-as-cache + git-canonical pipeline
 (alongside the rest of the sync work). Until this is verified,
 the multi-device thesis is theoretical; once verified, mobile
 is a real first-class device.
@@ -3434,8 +3478,8 @@ is a real first-class device.
            "spawn agents to research while we talk" working mode
 :END:
 
-Meta-pattern complementing manager-pre-fetch (Phase 22 v2) and
-the supervision trinity (Phase 24): when the user is about to
+Meta-pattern complementing manager-pre-fetch (Phase 2026-05.07 — manager pre-fetch + agent narrates) and
+the supervision trinity (Phase 2026-05.02 — supervision trinity): when the user is about to
 review / decide / walk a substantial surface, *send a scout
 agent ahead* to (a) summarize the surface, (b) suggest paths,
 (c) gather needed info, (d) flag blockers / deps / contradictions
@@ -3454,7 +3498,7 @@ Tight table-shaped scout output is the load-bearing constraint
 produce 400-line prose-walls defeat the pattern.
 
 Sprint-eligible: ~1d to formalize as verb + registerable recipe.
-Connections: Phase 22 v2, Phase 24, Phase 30.3, condense-outputs
+Connections: Phase 2026-05.07 — manager pre-fetch + agent narrates, Phase 2026-05.02 — supervision trinity, Phase 2026-06.06 — background continuous work, condense-outputs
 memory.
 
 ** TODO Clarify @-agents vs spawned subagents in agent-framework.org :doc:agent-framework:
@@ -3481,7 +3525,7 @@ persona) demonstrated the pure ephemeral-writer pattern.
 
 Quick wiki edit (~30 lines). Sprint-eligible (~30 min).
 
-** TODO Phase 26 — Core/addable cull and extract                 :plan:meta:agents:tooling:load-bearing:
+** TODO Phase 2026-05.04 — cull walk — Core/addable cull and extract                 :plan:meta:agents:tooling:load-bearing:
 :PROPERTIES:
 :PRIORITY:        A
 :GATE:            2
@@ -3519,7 +3563,7 @@ complexity) compound positively; gate 2 is the immediate win.
 
 *** Sub-phases
 
-1. *Phase 26.1 — Finalize the cut list.* Walk every
+1. *Phase 2026-05.04 — cull walk — Finalize the cut list.* Walk every
    component in the mission-walk draft (the ~30 items split
    core / addable / edge); decide each through DEC-009
    criterion. Edge cases (gardener, validation framework,
@@ -3527,16 +3571,16 @@ complexity) compound positively; gate 2 is the immediate win.
    under existing ones. Ship: =docs/wiki/cull.org= with
    per-component decisions + rationale. ~1 day.
 
-2. *Phase 26.2 — Physical extraction.* Move addables out of
+2. *Phase 2026-05.01 — physical extraction — Physical extraction.* Move addables out of
    =org_llm/= core into a sibling namespace (=plugins/= or
    =extras/= TBD). Update imports, ship a plugin loader,
    make sure =org-llm doctor= still passes for a
    minimum-install (core only) and a full-install (core +
    all extras). ~3-5 days; the bulk of the work.
 
-3. *Phase 26.3 — Stabilize the extension boundary.* The
-   extension path becomes first-class — Phase 23.5
-   user-supplied agents + Phase 23.6 literate-tools land
+3. *Phase 2026-05.04 — cull walk (legacy 26.3 — stabilize extension boundary).* The
+   extension path becomes first-class — Phase 2026-05.14.02 — DB-backed registry
+   user-supplied agents + Phase 2026-05.16 — literate MCP tools literate-tools land
    under this surface. Documented in
    =docs/wiki/extensions.org=. Ship: at least one external
    (or external-shaped) agent demonstrably loaded via the
@@ -3549,16 +3593,16 @@ complexity) compound positively; gate 2 is the immediate win.
 - *DEC-006 (supervision is deterministic by default)* applies:
   the cut criterion is itself a deterministic rule, not a
   judgment call.
-- *Phase 23.5 (user-supplied agents)* gets pulled forward
+- *Phase 2026-05.14.02 — DB-backed registry (user-supplied agents)* gets pulled forward
   alongside 26.3 — they're the same surface.
-- *Phase 23.6 (literate MCP tools)* same — extension path for
+- *Phase 2026-05.16 — literate MCP tools (literate MCP tools)* same — extension path for
   user tools is the same shape.
 - *Versioning:* "first usable" v1.0 plausibly requires
-  Phase 26 done. Without the cull, core is too noisy to
+  Phase 2026-05.04 — cull walk done. Without the cull, core is too noisy to
   describe to a stranger.
 
 *Scheduling:* 26.1 sprint-eligible (~1d). 26.2/26.3 follow
-sequentially. Likely runs in parallel with Phase 24
+sequentially. Likely runs in parallel with Phase 2026-05.02 — supervision trinity
 (supervision trinity) since they're independent surfaces.
 
 *** OpenTofu use cases (filed 2026-05-05 from research)
@@ -3608,7 +3652,7 @@ Cross-references:
 - [[file:dbt-pipeline.org][dbt-pipeline.org]] (parsing pipeline; =tofu show -json= or =hcl2json= as upstream source)
 - [[file:sync-architecture.org][sync-architecture.org]] (write-active device discipline)
 
-*Scheduling:* gated on Phase 25.x device-config plumbing
+*Scheduling:* gated on Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) device-config plumbing
 landing; sprint-eligible after that (~2-3d).
 
 ** TODO Vault repo bootstrap from bare OS via OpenTofu        :plan:infra:tofu:onboarding:phase26:
@@ -3632,7 +3676,7 @@ wired org-llm."
 
 - *Lead-value fit (β):* this is the v0 install experience for
   n=many — without it, FOSS distribution is "git clone +
-  follow 14 README steps." Phase 26 onboarding gate-1 is
+  follow 14 README steps." Phase 2026-05.04 — cull walk onboarding gate-1 is
   "stranger can install in <30min"; this is the path.
 - *dbt fit:* =tofu_resources= is the schema of "what exists in
   your homelab" — agents answer /"what would I lose if my
@@ -3645,12 +3689,12 @@ wired org-llm."
 Cross-references:
 - [[file:decisions.org][decisions.org]] § [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]] (re-clone event thesis)
 - [[file:decisions.org][decisions.org]] § [[id:2c8f6b1d-4e9a-4c3f-86b7-9d5e1f2a8c47][DEC-010]] (anti-capitalist FOSS provider tiering)
-- [[*Phase 26 — Core/addable cull and extract][Phase 26]] (this is the install-experience companion to the cull)
+- [[*Phase 2026-05.04 — cull walk — Core/addable cull and extract][Phase 2026-05.04 — cull walk]] (this is the install-experience companion to the cull)
 - [[file:sync-architecture.org][sync-architecture.org]] (multi-device fabric this bootstraps into)
 
-*Scheduling:* depends on Phase 26 cull landing (so we know
+*Scheduling:* depends on Phase 2026-05.04 — cull walk cull landing (so we know
 which components to bootstrap) + a self-hosted vault stack
-existing somewhere to point at. Earliest: Phase 26.4 or post-26.
+existing somewhere to point at. Earliest: Phase 2026-05.04 — cull walk (legacy 26.4) or post-cull.
 
 ** TODO LLM cost guardrails as infrastructure (HCL-declared budgets) :plan:infra:tofu:llm:anticap:
 :PROPERTIES:
@@ -3689,12 +3733,12 @@ Cross-references:
 - [[file:dbt-pipeline.org][dbt-pipeline.org]] (audit + budget models)
 - =feedback_no_groq.md= (Groq exclusion is enforced at the HCL provider list, not just at runtime)
 
-*Scheduling:* Phase 26+ once cloud-routing maturity stabilizes
+*Scheduling:* Phase 2026-05.04 — cull walk+ once cloud-routing maturity stabilizes
 and the provider catalog has tier metadata. Sprint-eligible
 (~2d) once the underlying =tofu_resources= dbt source exists
 (shared dependency with the per-device knob entry above).
 
-** TODO Phase 27 — Apache Superset dashboards (optional)          :plan:db:dashboards:dbt:
+** TODO Phase 2026-07.01 — Apache Superset dashboards — Apache Superset dashboards (optional)          :plan:db:dashboards:dbt:
 :PROPERTIES:
 :PRIORITY:        B
 :GATE:            1
@@ -3711,20 +3755,20 @@ and the provider catalog has tier metadata. Sprint-eligible
 - Speaks SQLAlchemy natively — we already use SQLAlchemy →
   zero glue code; one connection-string config to point at
   =~/.local/share/org-llm/org-llm.db=
-- Pairs naturally with dbt (Phase 12.7) — Superset commonly
+- Pairs naturally with dbt (Phase 2026-07.06 — dbt analytics) — Superset commonly
   fronts dbt models; we already have dbt scaffolding
-- Composes with Phase 25.4 (git history) for time-travel
+- Composes with Phase 2026-05.17.04 — DB-as-cache step 4 (git history) for time-travel
   analytics — "which notes were most active this quarter,
   faceted by tag, week-over-week" is one query
 
 *Where it slots:*
-- =insight_engagement= dashboards (Phase 12.5) — which card
+- =insight_engagement= dashboards (Phase 2026-04.07.05 — engagement table) — which card
   generators land
 - =sensor_log= timeseries — system health under various
   workloads
 - =crew_log= — orchestration patterns; recipe match rates
 - =history= — usage analytics
-- Post-Phase 25: vault content directly — note creation
+- Post-Phase 2026-05.17 — DB-as-cache + git-canonical pipeline: vault content directly — note creation
   patterns, tag distribution, writing time-of-day, daily
   heatmaps
 
@@ -3753,18 +3797,89 @@ and the provider catalog has tier metadata. Sprint-eligible
 Superset still works perfectly. Adding it is a one-liner for
 users who want it. That's the right complexity ratio.
 
-*Scheduling:* post-1.0. Definitely post Phase 25 (the data
+*Scheduling:* post-1.0. Definitely post Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (the data
 model needs to settle first). Earliest: 2026-Q3.
 
 *Connections:*
-- Phase 12.7 (dbt analytics) — Superset is the natural BI
+- Phase 2026-07.06 — dbt analytics (dbt analytics) — Superset is the natural BI
   layer above dbt models
-- Phase 25.4 (git ingestion) — dashboards over vault history
+- Phase 2026-05.17.04 — DB-as-cache step 4 (git ingestion) — dashboards over vault history
   become possible
-- Phase 25.6 (full inversion) — when DB is truth, dashboards
+- Phase 2026-05.17.06 — DB-as-cache step 6 (full inversion) — when DB is truth, dashboards
   reflect ground truth, not stale projections
 
-** TODO Phase 28 — Containerization strategy (asymmetric)         :plan:infra:deployment:
+*** DONE Phase 2026-07.01 — Apache Superset dashboards — overnight leg [2026-05-06]                  :leg:overnight:
+:PROPERTIES:
+:CLOSED:   [2026-05-06]
+:EFFORT:   ~6h overnight
+:WAVES:    1+2 (3 wiki, 6 follow-ups)
+:END:
+
+Three-wave autonomous leg run while user slept. Goal: prove
+the Superset integration ladder ([[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]]) end-to-end
+and devise follow-ups based on what surfaced.
+
+**** Wave 1 — original three subagent dispatches
+
+- =A= Tier 1 dogfood probe → blocked on subagent Bash, retried
+  in main session: [[id:5f59c6a3-db42-4410-81e4-5ea9daa33d9b][2026-05-06-superset-tier1-probe.org]]
+- =B= YAML emitter → blocked on subagent Edit, retried in main
+  session: =Registry.emit_superset()= shipped, round-trip
+  validated via =uv venv= apache-superset 4.1.1 +
+  =superset import-directory=
+- =C= Fork-spike survey → blocked on subagent Write but
+  delivered the draft, written by main: [[id:93b87da8-bca5-409a-8fdf-8ed20ca739ef][2026-05-06-superset-fork-survey.org]]
+
+Subagent permission wall (Bash/Edit/Write all denied) is
+documented for the morning conversation; an allowlist in
+=.claude/settings.local.json= would unblock subagent runs.
+
+**** Wave 2 — six follow-ups
+
+- =W2.4= =org-llm metrics ls / describe / query / emit= CLI
+  subcommand group ([[file:../../org_llm/cli.py][=cli.py=]] near =metrics_app=)
+- =W2.5= 4 new metrics + 2 dimensions: =agent_fan_out=,
+  =hist_kind_count=, =hist_command_count=, =probe_alert_rate=
+  (also =hist_day=, =sensor_day= dimensions)
+- =W2.6= [[file:../../tests/test_metrics_registry.py][=tests/test_metrics_registry.py=]]: 21 cases all
+  green; covers load/compile/query/emit; pytest -k metrics
+  now collects (used to collect 0)
+- =W2.7= =metrics_describe= + =metrics_query= MCP tools
+  registered ([[file:../../org_llm/mcp_server.py][=mcp_server.py=]]); =@recover_on_failure= on
+  the query tool
+- =W2.8= [[file:roadmap.org][=roadmap.org=]] §Phase 2026-07.01 — Apache Superset dashboards status updated; [[file:superset.org][=superset.org=]]
+  tier-7 reframing landed; =README.md= grew a feature row for
+  the semantic-layer registry
+- =W2.10= Agor use cases informed by tonight's findings →
+  [[file:./2026-05-06-agor-superset-use-cases.org][2026-05-06-agor-superset-use-cases.org]]
+
+**** Wave 3 — full org-doc report
+
+- [[file:./2026-05-06-superset-leg-overnight.org][2026-05-06-superset-leg-overnight.org]] — synthesis;
+  setup, wave-1 results, anomalies, wave-2 results, fork
+  recommendation, open questions, sprint candidates
+
+**** Notable findings
+
+- *=llm_calls.timestamp= drift bug.* Same 1000 events show up
+  on 2026-04-28 in =llm_calls= and on 2026-05-04 → 2026-05-06
+  in =history= (kind='llm'). Memory Alpha (Phase 2026-05.17 — DB-as-cache + git-canonical pipeline) is meant
+  to surface exactly this kind of drift.
+- *Tier 7 reframing.* Auth swap is /not/ a fork (upstream
+  =CUSTOM_SECURITY_MANAGER= already exists). Headless render
+  is structurally infeasible (renderer = React frontend).
+  Org-as-source importer is the only true tier-7 candidate
+  and may be a zero-fork pre-processor.
+- *=phi3.5= 23-ok / 23-error split.* Suspiciously exact;
+  registry's =llm_error_rate= shows 50% but doesn't expose
+  the *shape* (sequential vs paired vs random).
+- *Proxy dominance over manager.* =proxy → scribe= (28
+  recipes) and =proxy → researcher= (25) outweigh any
+  =manager → *= delegation count. Mental model of
+  manager-as-orchestrator is wrong.
+
+
+** TODO Phase 2026-07.02 — containerization strategy — Containerization strategy (asymmetric)         :plan:infra:deployment:
 :PROPERTIES:
 :PRIORITY:        B
 :GATE:            2,3
@@ -3810,11 +3925,11 @@ isolation fights the design:
 | component / use case        | container? | ships when?     | notes |
 |-----------------------------+------------+-----------------+-------|
 | Primary install (laptop)    | NO         | n/a             | native install via uv |
-| Apache Superset (Phase 27)  | yes        | with Phase 27   | standard Superset deploy; docker-compose |
+| Apache Superset (Phase 2026-07.01 — Apache Superset dashboards)  | yes        | with Phase 2026-07.01 — Apache Superset dashboards   | standard Superset deploy; docker-compose |
 | Cloud GPU side              | yes        | already         | RunPod/Lambda/etc templates — provider-managed |
 | Headless / Pi / NAS / cloud | yes (opt)  | post-1.0        | =org-llm/server= image; vault bind-mounted, MCP socket exposed; ships ALONGSIDE native |
 | CI / test infra             | yes        | when CI lands   | reproducible test env; not user-facing |
-| A/B harness reproducibility | maybe      | Phase 28+       | containerize validation runs for cloud-judge consistency |
+| A/B harness reproducibility | maybe      | Phase 2026-07.02 — containerization strategy+       | containerize validation runs for cloud-judge consistency |
 | Multi-user / SaaS server    | yes        | if-ever         | different product; not optimizing for now |
 
 *** What we are NOT adding
@@ -3829,7 +3944,7 @@ isolation fights the design:
 
 *** Implementation when each container lands
 
-- =org-llm superset --start= / =--stop= — Phase 27 covers
+- =org-llm superset --start= / =--stop= — Phase 2026-07.01 — Apache Superset dashboards covers
 - =org-llm server --image=...= — post-1.0; one-line spinup for
   headless deployments
 - =scripts/ci/= containerized test images — when CI work begins
@@ -3839,8 +3954,8 @@ isolation fights the design:
 
 *** Connections
 
-- Phase 27 (Superset) — already containerizes its component
-- Phase 25.6 (full inversion) — multi-device sync via DB
+- Phase 2026-07.01 — Apache Superset dashboards (Superset) — already containerizes its component
+- Phase 2026-05.17.06 — DB-as-cache step 6 (full inversion) — multi-device sync via DB
   replication is more naturally containerized but the *user
   side* still runs native
 - Cross-platform install validation (gap-analysis P0.1) — the
@@ -3848,11 +3963,11 @@ isolation fights the design:
   alternative deployment, not a substitute
 
 *Scheduling:* decision is documented above. Specific container
-shipments happen alongside the components they serve (Phase 27
-Superset, post-1.0 headless variant). No standalone "Phase 28"
+shipments happen alongside the components they serve (Phase 2026-07.01 — Apache Superset dashboards
+Superset, post-1.0 headless variant). No standalone "Phase 2026-07.02 — containerization strategy"
 sprint.
 
-** TODO Phase 29 — Self-coded tools (LLM patterns → deterministic) :plan:meta:db:mcp:test:load-bearing:
+** TODO Phase 2026-05.20 — sync verb POC — Self-coded tools (LLM patterns → deterministic) :plan:meta:db:mcp:test:load-bearing:
 :PROPERTIES:
 :PRIORITY:        A
 :GATE:            1,2,3
@@ -3880,14 +3995,14 @@ code, not runtime decisions.
 
 *** Recommended ship order (3 sub-phases)
 
-1. *Phase 29.1 — pattern detection.* Build =org-llm tools
+1. *Phase 2026-06.01 — pattern detection — pattern detection.* Build =org-llm tools
    auto-discover= verb. Walks recent =llm-audit.jsonl=,
    identifies repeated query shapes (same prompt-hash class,
    same tool sequence, deterministic-shaped output). Outputs
    ranked list of "tool candidates" with hit count + estimated
    savings. Pure analysis — no synthesis yet. ~2d.
 
-2. *Phase 29.2 — tool synthesis with validation.* For each
+2. *Phase 2026-06.02 — tool synthesis with validation — tool synthesis with validation.* For each
    candidate: =org-llm tools propose <name>= → LLM generates
    a Python implementation. The proposed tool gets a
    =ValidationConfig= (deterministic kind) sampling N past
@@ -3896,7 +4011,7 @@ code, not runtime decisions.
    register; FAIL → reject + save proposal for human review.
    ~5d.
 
-3. *Phase 29.3 — registration + replacement.* Validated tools
+3. *Phase 2026-06.03 — registration + replacement — registration + replacement.* Validated tools
    register in =mcp_server.py= via an =@auto_generated=
    decorator (signals provenance + makes them reviewable).
    Future LLM calls matching the original pattern hit the
@@ -3908,7 +4023,7 @@ code, not runtime decisions.
 
 The user's specific question — "good mechanism for the app to
 keep roadmap + dev-tracker in sync" — is the *seed example*
-for Phase 29.
+for Phase 2026-05.20 — sync verb POC.
 
 The sync is rules-based (deterministic), not LLM-needed:
 - For each =:PHASE_CANDIDATE: yes= tracker entry, ensure
@@ -3922,11 +4037,11 @@ The sync is rules-based (deterministic), not LLM-needed:
   =:STARTED-AT:= / =:COMPLETED-AT:= properties
 
 This is exactly the kind of thing that today is done by the
-LLM in conversation. Phase 29.0 makes it a deterministic
+LLM in conversation. Phase 2026-05.20 — sync verb POC makes it a deterministic
 verb: =org-llm tracker sync= or =org-llm tools sync-roadmap=.
 Run as cron OR =git pre-commit= hook. ~half-day to write.
 
-*Phase 29.0 ships standalone* as a proof-of-concept of the
+*Phase 2026-05.20 — sync verb POC ships standalone* as a proof-of-concept of the
 self-coded-tools principle BEFORE the full discover/synthesise
 loop. It's the smallest possible demonstration; success here
 informs the design of 29.1+. Could land within this sprint
@@ -3935,25 +4050,25 @@ or shortly after.
 *** Connections
 
 - *Audit log* (=llm-audit.jsonl=) is the input
-- *Validation framework* (Phase 27) is how proposed tools get
+- *Validation framework* (Phase 2026-07.01 — Apache Superset dashboards) is how proposed tools get
   validated before registration
 - *MCP server* is where validated tools register
 - *Show-your-work mode* — auto-generated tools support
   citations natively (they read the DB; citations are field
   mappings)
-- *DB-authoritative (Phase 25)* — tools operate on DB, not
+- *DB-authoritative (Phase 2026-05.17 — DB-as-cache + git-canonical pipeline)* — tools operate on DB, not
   files; this is the unifier
 - *Tracker self-hosting goal* (=project_tracker_self_hosting_goal.md=)
-  — Phase 29 is the engine; tracker.org is one user-facing
+  — Phase 2026-05.20 — sync verb POC is the engine; tracker.org is one user-facing
   feature it powers
 - *dbt-LLM intersection* — proposed dbt models are a special
   case of proposed tools; same validation flow applies
 
 *Scheduling:* 29.0 (sync verb) — sprint-eligible; ~half-day.
-29.1+ (full discover/synth/replace loop) — post-Phase 25.4
+29.1+ (full discover/synth/replace loop) — post-Phase 2026-05.17.04 — DB-as-cache step 4
 when DB has enough for tools to operate against.
 
-** TODO Phase 30 — FOSS agent value-adds (always-on / multi-model / multi-judge) :plan:agents:proxy:research:
+** TODO Phase 2026-06.04 — FOSS agent value-adds — FOSS agent value-adds (always-on / multi-model / multi-judge) :plan:agents:proxy:research:
 :PROPERTIES:
 :PRIORITY:        A
 :GATE:            1,3
@@ -3962,7 +4077,7 @@ when DB has enough for tools to operate against.
 :SOURCE:          2026-05-03 — directional decision
 :END:
 
-The Phase 20 lesson: orchestration that adds latency without
+The Phase 2026-05.99 — full agent crew (PARKED) lesson: orchestration that adds latency without
 quality wins is a loss. So FOSS-agent value-add must be wins
 the user can't get from a single solo agent. The unifying
 thread: *FOSS agents add value when they're cheap enough to
@@ -3998,7 +4113,7 @@ Cloud is per-call expensive; local agents run free 24/7.
 
 Concrete agents:
 - *@gardener nightly* — vault hygiene scan, drafts cleanups
-  onto =org-llm/gardener= branch (uses Phase 25.4), user
+  onto =org-llm/gardener= branch (uses Phase 2026-05.17.04 — DB-as-cache step 4), user
   reviews in morning
 - *@journalist weekly* — drafts weekly digest from dailies
   (mood + activity + carry-overs)
@@ -4037,9 +4152,9 @@ validation trivially mechanical). ~2d.
 
 *** Connections
 
-- *Phase 25.4 (git ingestion)* — branch-based output (30.3)
+- *Phase 2026-05.17.04 — DB-as-cache step 4 (git ingestion)* — branch-based output (30.3)
   needs the git layer
-- *Phase 25.5 (DB-authoritative)* — agents-write-to-DB-then-
+- *Phase 2026-05.17.05 — DB-as-cache step 5 (DB-authoritative)* — agents-write-to-DB-then-
   render unlocks 30.5 self-validation
 - *Show-your-work mode* — citations are the validator's
   ground truth
@@ -4052,9 +4167,9 @@ validation trivially mechanical). ~2d.
 *Scheduling:* parallel-shippable. 30.4 (multi-judge) is the
 quickest + most independent — could ship within this sprint
 as an A/B framework upgrade (~1d). 30.1 (local-only flag)
-also small + sprint-eligible. Others depend on Phase 25.x.
+also small + sprint-eligible. Others depend on Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family).
 
-** TODO Phase 31 — Theme-driven agent avatars (PNG generation)    :plan:agents:theme:images:research:
+** TODO Phase 2026-07.03 — theme-driven agent avatars — Theme-driven agent avatars (PNG generation)    :plan:agents:theme:images:research:
 :PROPERTIES:
 :PRIORITY:        B
 :GATE:            1,2
@@ -4180,7 +4295,7 @@ Cloud proprietary gated behind the existing
 
 *** Connections
 
-- *Phase 30.x agent metadata extensions* — 31.1's =visual=
+- *Phase 2026-06.04 — FOSS agent value-adds.x agent metadata extensions* — 31.1's =visual=
   field extends the same persona-metadata work
 - *Show-your-work mode* — prompt diffs + theme citations
   surfaced when avatars regenerate
@@ -4190,20 +4305,20 @@ Cloud proprietary gated behind the existing
 - *FOSS-first rule* — local SD primary path on capable
   hardware; Together/Replicate (open-weight, hosted compute) as
   cloud default; DALL-E gated
-- *Containerization (Phase 28)* — local SD server is
-  heavyweight; aligns with Phase 28's "containerize Superset"
+- *Containerization (Phase 2026-07.02 — containerization strategy)* — local SD server is
+  heavyweight; aligns with Phase 2026-07.02 — containerization strategy's "containerize Superset"
   pattern (containerize SD server, keep CLI/agents native)
-- *Phase 25 DB-authoritative* — visual metadata + theme defs +
+- *Phase 2026-05.17 — DB-as-cache + git-canonical pipeline DB-authoritative* — visual metadata + theme defs +
   prompt history all live in DB
 - *Existing [[file:../../org_llm/avatars.py][=org_llm/avatars.py=]]* — demoted to ASCII fallback;
   the 23 hand-pixel avatars stay as the low-bandwidth render
 
-*Scheduling:* full feature is post-1.0 (Phase 31, after 25 +
+*Scheduling:* full feature is post-1.0 (Phase 2026-07.03 — theme-driven agent avatars, after 25 +
 27 + 30). 31.1 + 31.2 (metadata + themes literate config) are
 sprint-eligible (~2d combined) and could ship without the
 full pipeline as schema groundwork.
 
-** TODO Expand Phase 12.7 — dbt as universal analytics layer      :plan:db:dbt:research:
+** TODO Expand Phase 2026-07.06 — dbt analytics — dbt as universal analytics layer      :plan:db:dbt:research:
 :PROPERTIES:
 :PRIORITY:        A
 :GATE:            3
@@ -4212,7 +4327,7 @@ full pipeline as schema groundwork.
 :SOURCE:          2026-05-03 — directional decision (dbt usage)
 :END:
 
-*Current scope:* Phase 12.7 in roadmap.org is "dbt analytics
+*Current scope:* Phase 2026-07.06 — dbt analytics in roadmap.org is "dbt analytics
 over engagement" — narrow.
 
 *Expanded role:* dbt becomes the *abstraction layer between
@@ -4228,7 +4343,7 @@ user via SQL). Three concrete roles:
    =accepted_values= tests catch schema regressions
    automatically. Ship as =org-llm doctor --dbt-tests=.
 
-3. *LLM-generated dbt models.* Per Phase 29: agents propose
+3. *LLM-generated dbt models.* Per Phase 2026-05.20 — sync verb POC: agents propose
    dbt models from natural language. dbt's own test framework
    auto-validates the model.
 
@@ -4236,16 +4351,16 @@ user via SQL). Three concrete roles:
 
 #+begin_example
 ~/org/ (vault, git-tracked)
-  ↓ ingest (Phase 25.4 git_sync)
+  ↓ ingest (Phase 2026-05.17.04 — DB-as-cache step 4 git_sync)
 SQLite raw tables
   ↓ dbt models (this expansion)
 dbt views — domain abstractions
   ↓ consumed by:
-  • Superset (Phase 27 dashboards)
+  • Superset (Phase 2026-07.01 — Apache Superset dashboards dashboards)
   • Agents (via MCP tool: dbt query results)
   • doctor --dbt-tests (data quality)
   • org-llm tracker pace (sprint metrics)
-  • Phase 29 self-coded tools (deterministic ops over views)
+  • Phase 2026-05.20 — sync verb POC self-coded tools (deterministic ops over views)
 #+end_example
 
 *** Concrete first models to ship
@@ -4258,7 +4373,7 @@ dbt views — domain abstractions
   dbt-from-org adapter or scripted ingest)
 - =models/git_activity_weekly.sql= (post-25.4)
 
-*Scheduling:* sequence with Phase 25 (raw tables stable
+*Scheduling:* sequence with Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (raw tables stable
 first). 12.7 v1 (engagement-only) could ship pre-25.x; full
 expansion lands alongside 25.4.
 
@@ -4311,11 +4426,11 @@ Where it lives:
 *** Why this is a unification, not a new layer
 
 This feature ties together infrastructure we've already built:
-- *Phase 22.5a* (manager log) — narration capture wired but
+- *Phase 2026-05.11.01 — token-stream excerpt* (manager log) — narration capture wired but
   audit-only. Show-your-work makes it user-visible.
-- *Phase 22.5b* (reasoning capture probe — in plan queue) — same
+- *Phase 2026-05.11.02 — explicit reasoning* (reasoning capture probe — in plan queue) — same
   idea, different framing. *Should merge into this item.*
-- *Insight cards (Phase 12)* — already cite evidence in their
+- *Insight cards (Phase 2026-04.07 — insight cards)* — already cite evidence in their
   bodies. Show-your-work generalises the pattern to ALL LLM
   output.
 - *=llm-audit.jsonl=* — already records every call. Levels 3+
@@ -4360,7 +4475,7 @@ Mitigation:
 
 *** Merges with
 
-- =Phase 22.5b — explicit reasoning capture= (in plan queue):
+- =Phase 2026-05.11.02 — explicit reasoning — explicit reasoning capture= (in plan queue):
   same problem space; merge into this entry's slice 3 (the
   reasoning probe IS show-your-work level 3+ for thinking).
 - *Recipe pre-fetch template iteration* (in validation
@@ -4398,7 +4513,7 @@ life-support / =ask --emh= for sensor_log.
 to =playful_level=0= — keeps the app focused on the job for new
 users.
 
-** CANCELLED Phase 22.5b — explicit reasoning capture            :plan:proxy:agents:
+** CANCELLED Phase 2026-05.11.02 — explicit reasoning — explicit reasoning capture            :plan:proxy:agents:
 :PROPERTIES:
 :PRIORITY: B
 :SOURCE: recipes.org § Roadmap
@@ -4419,7 +4534,7 @@ Promote the probe into the proxy's persona-injection layer;
 pair with the existing native-=<think>=-tag extractor for
 models that do.)
 
-** TODO Phase 22.6 expansion — promote two recipes to deterministic :plan:recipes:
+** TODO Phase 2026-05.08 — markdown-JSON repair expansion — promote two recipes to deterministic :plan:recipes:
 :PROPERTIES:
 :PRIORITY: B
 :SOURCE: recipes.org § Roadmap
@@ -4454,7 +4569,7 @@ searchable from inside org-llm.
 - opencode / MCP-client hook that periodically writes deltas as
   they happen.
 
-Phase 13.2-5 timeframe. Per the dog-food meta in this tracker —
+Phase 2026-07.07 — dailies as walk targets-5 timeframe. Per the dog-food meta in this tracker —
 a related app-level feature.
 
 ** TODO =org-llm mcp call <tool>= for scripted MCP testing        :plan:mcp:test:
@@ -4504,7 +4619,7 @@ What's missing:
 4. *Optional agent nudge.* Below =battery_alert_critical_pct=,
    inject a one-line MANAGER NOTE-shaped warning into the next
    delegate / @-prefix turn ("⚠ battery 8%, ~12m remaining;
-   save state + plug in"). Same wiring as the Phase 24.3
+   save state + plug in"). Same wiring as the Phase 2026-05.02.03 — confusion detector
    confusion-detector signals — uses the same registry shape.
 5. *Cross-platform corners.* Probe already handles macOS via
    psutil; sidecar test on a real macOS host before claiming
@@ -4518,7 +4633,7 @@ single most user-visible "life support" sensor and not having
 it is a credibility hole.
 
 *Scheduling:* sprint-eligible (~half-day for HEALTH row +
-knobs + threshold alert; agent nudge can defer until Phase 24.3
+knobs + threshold alert; agent nudge can defer until Phase 2026-05.02.03 — confusion detector
 ships its signal registry as the natural home).
 
 ** TODO CLI =capture --link-to= picker (org-roam-node-insert eq.) :plan:cli:capture:
@@ -4537,8 +4652,8 @@ workspace LLM. Defer until users complain.
 :END:
 
 Small models produce mediocre reflections; cloud would help but
-adds cost. Phase 12's deterministic-stats pre-pass may obviate
-the need. Revisit after Phase 12.6 lands.
+adds cost. Phase 2026-04.07 — insight cards's deterministic-stats pre-pass may obviate
+the need. Revisit after Phase 2026-07.05 — cached-gather persistence lands.
 
 ** TODO Knob ↔ palette decoupling                                 :plan:theme:
 :PROPERTIES:
@@ -4558,7 +4673,7 @@ swaps =lcars_palette= when level>0.
 ** TODO Theme-studio cache auto-regen on knob change              :plan:theme:ux:
 :PROPERTIES:
 :PRIORITY: C
-:SOURCE: gap-analysis-alpha-to-beta.org P2 + Phase 6 finding
+:SOURCE: gap-analysis-alpha-to-beta.org P2 + legacy Phase 6 finding (retired phase, no current equivalent)
 :END:
 
 User adds a knob → cached variants stale. Currently they need to
@@ -4762,7 +4877,7 @@ features — most of org-llm.
 include a validate config. Same pattern as test files for
 deterministic features.
 
-*Phase 23.x or 24 candidate.* Pairs with the dev-tracker
+*Phase 2026-05.14 — agent-framework refinements (legacy 23.x family) or 24 candidate.* Pairs with the dev-tracker
 self-hosting goal — both are about org-llm becoming great at
 the meta-work of running an org-mode project responsibly.
 
@@ -4810,7 +4925,7 @@ configurable per user / per agent without code changes.
 *Gate-2 check:* shape mirrors existing literate-config and
 agent-roster patterns; not new architecture.
 
-** TODO MCP tool *creation* tier 3 (Phase 23.6.3+ candidate)      :plan:mcp:research:
+** TODO MCP tool *creation* tier 3 (Phase 2026-05.16.03 — shell-wrapped user tools+ candidate)      :plan:mcp:research:
 :PROPERTIES:
 :PRIORITY: C
 :SOURCE: ~/org/20260503155918-claude_scratchpad.org Tier 3
@@ -4833,8 +4948,8 @@ c) *Python-via-org-babel* (~1-2 weeks if responsible) —
 
 *Gate-2/3 check:* this expands scope significantly — only
 proceed when tiers 1+2 prove insufficient AND a real user need
-surfaces. Tracked under Phase 23.6.3 / 23.6.4 / 23.6.5 in
-roadmap.org now that Phase 24 is allocated to the supervision
+surfaces. Tracked under Phase 2026-05.16.03 — shell-wrapped user tools / 23.6.4 / 23.6.5 in
+roadmap.org now that Phase 2026-05.02 — supervision trinity is allocated to the supervision
 trinity.
 
 ** TODO Get Claude set up with GitHub for daniel2501/org-llm     :plan:meta:infra:
@@ -4884,14 +4999,14 @@ selectively when a real user need surfaces.
 # Forward-looking work that isn't a phase yet. Things to design,
 # decide, prototype.
 
-** TODO Memory Alpha framing for Phase 25                  :phase25:naming:
+** TODO Memory Alpha framing for Phase 2026-05.17 — DB-as-cache + git-canonical pipeline                  :phase25:naming:
 :PROPERTIES:
 :CAPTURED:  [2026-05-04]
 :DOC:       [[id:b91f980e-5699-4994-843a-00532f1770b3][memory-alpha.org]]
 :END:
 
 Naming + UX layer over the DB-authoritative inversion. Per the
-new wiki page: rename Phase 25's user-facing surface to "Memory
+new wiki page: rename Phase 2026-05.17 — DB-as-cache + git-canonical pipeline's user-facing surface to "Memory
 Alpha mode"; pair with =memory-alpha sync= / =verify= /
 =snapshot= verbs; keep technical phrase "DB-authoritative
 inversion" valid in code comments + commit messages but lead
@@ -4899,18 +5014,18 @@ with the metaphor in user-facing copy.
 
 Three of four mappings already shipped (=Captain's Log= /
 =@curator= / =vault_facts= as Memory Prime / MCP as the access
-protocol). Phase 25 is the fourth — making the DB canonical.
+protocol). Phase 2026-05.17 — DB-as-cache + git-canonical pipeline is the fourth — making the DB canonical.
 
 Decisions to make before 25.1 lands:
 - Do we add the =memory-alpha= verb namespace, or fold the
   three verbs (=sync= / =verify= / =snapshot=) into existing
   groups (=context= / =doctor= / =backup=)?
 - Does the README's "What you get" panel mention "Memory Alpha
-  mode" or just "DB inversion (Phase 25)"?
+  mode" or just "DB inversion (Phase 2026-05.17 — DB-as-cache + git-canonical pipeline)"?
 - Does the agent-roster icon palette get a Memory Alpha glyph
   for the persona surface?
 
-Pending — not a Phase 25 blocker; can land mid-arc as the
+Pending — not a Phase 2026-05.17 — DB-as-cache + git-canonical pipeline blocker; can land mid-arc as the
 inversion progresses.
 
 ** TODO Route preview — ghost text in opencode prompt        :ui:opencode:plugin:
@@ -5041,7 +5156,7 @@ variants for one agent + blinded Opus judge. Run when persona
 drifts (curator's situation 2026-05-04).
 
 ** TODO Self-coded-tools detector applied to dev sessions
-Phase 29's idea pointed inward: when the LLM does the same wiki
+Phase 2026-05.20 — sync verb POC's idea pointed inward: when the LLM does the same wiki
 sweep / drift check / roster lookup repeatedly, surface as a
 candidate tool. Curator's =wiki_link_audit= was discovered this
 exact way (manual sweep × N times this session).
@@ -5180,7 +5295,7 @@ preserved as historical audits — do not edit.
   P0/P1/P2/P3 punch list → [[*Validation backlog][Validation backlog]] (load-bearing P0-1
   install, P1.2 MCP fleet) + [[*Bugs / findings][Bugs]] (P0.2 SSL, P1.1 tests, P1.3
   Pi-Node, P1.5 perf footer) + [[*Plan queue][Plan queue]] (P2 polish, P3 long-tail)
-- =~/org/20260502010556-phase18_test_plan.org= — Phase 18
+- =~/org/20260502010556-phase18_test_plan.org= — Phase 2026-05.06 — proxy expansion
   hands-on; merged into the validation framework
 - =~/org/org-llm-test-report-2026-04-26.org= — multi-agent test
   report; historical, no live items

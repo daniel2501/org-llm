@@ -4,7 +4,7 @@
 :ARCHIVED: [2026-05-03]
 :END:
 # ── ARCHIVED [2026-05-03] ────────────────────────────────────────────
-# Test session findings 1-9 + opt-1..5 + Phase 21.1 ship notes.
+# Test session findings 1-9 + opt-1..5 + Phase 2026-05.13.01 — DB-backed vault fact store ship notes.
 # Live items extracted into docs/wiki/dev-tracker.org:
 # - GitHub setup TODO → Plan queue (PRIORITY A)
 # - Findings 6, 7, 8 → Bugs (already in tracker via recipes.org refs)
@@ -23,11 +23,11 @@
 * Scope
 
 Tire-kick of features that landed today (2026-05-03):
-- Phase 22 v2 — manager pre-fetch + agent narrates
-- Phase 22.5a — narration capture in manager-log
-- Phase 22.6.1 — six pure-python org tools (link graph, backlinks,
+- Phase 2026-05.07 — manager pre-fetch + agent narrates — manager pre-fetch + agent narrates
+- Phase 2026-05.11.01 — token-stream excerpt — narration capture in manager-log
+- Phase 2026-05.09.01 — pure-python tools — six pure-python org tools (link graph, backlinks,
   orphans, property search, id_find, refile_candidates)
-- Phase 22.6.2 + 22.6.3 — six more tools (clock, drill, attach,
+- Phase 2026-05.09.02 — CLOCK + drill + attach + 22.6.3 — six more tools (clock, drill, attach,
   template, doom_packages, doom_keybinds)
 - Markdown-JSON repair path with renderer coverage
 - =recent_activity_summary= recipe runner (second deterministic
@@ -97,7 +97,7 @@ narration → researcher  (qwen 2.5-72b)   ~10s   "you have made your bed 10 tim
 #+end_example
 
 Single cloud call. Cited 3 specific files (2025-11-09, 2026-03-07,
-2026-03-14). Phase 22 v2 + 22.5a confirmed working end-to-end.
+2026-03-14). Phase 2026-05.07 — manager pre-fetch + agent narrates + 22.5a confirmed working end-to-end.
 
 ** [2026-05-03T05:44Z] #4 — recent activity narrative         ✓⚠
 
@@ -174,7 +174,7 @@ Severity of both: medium. Workaround: avoid the word
 tags?" instead, which doesn't match the recipe and routes
 through =org_tag_index= cleanly.
 
-* Thought-tracking analysis (Phase 22.5a)
+* Thought-tracking analysis (Phase 2026-05.11.01 — token-stream excerpt)
 
 The user's standing ask: *manager watches agents at zero
 performance cost*. Today's implementation captures the agent's
@@ -201,7 +201,7 @@ capped at e.g. 8KB and only extract the head.
 Recommendation: add a =proxy_capture_all_narrations= knob
 (default false). When true, every cloud / local turn captures a
 =narration= entry, not just orchestrated ones. Pairs naturally
-with Phase 22.5b (explicit =<thinking>= tag extraction).
+with Phase 2026-05.11.02 — explicit reasoning (explicit =<thinking>= tag extraction).
 
 * Optimization opportunities
 
@@ -344,11 +344,11 @@ same regex; second-and-later calls hit the cache. Verified:
 - Plugin typecheck (=tsc --noEmit=) clean.
 - Python ast.parse clean for proxy / runner / orchestration.
 
-* Same-night follow-up: Phase 21.1 shipped               :inline-fixes:
+* Same-night follow-up: Phase 2026-05.13.01 — DB-backed vault fact store shipped               :inline-fixes:
 
 User: "we must improve accuracy in part, by maintaining facts and
 context about the vault contents in the db" → shipped a first
-cut of Phase 21 with a DB-backed fact store.
+cut of Phase 2026-05.13 — deterministic vault inferrers with a DB-backed fact store.
 
 ** =VaultFact= table
 [[file:../../org_llm/db.py][=org_llm/db.py=]] — new table =vault_fact= keyed by inferrer
@@ -409,7 +409,7 @@ question.
 * Forward-direction note: walks enrich the fact store
 
 User: "walk activities will also enrich context data and
-directives and knowledge". Phase 13's =org-llm walk= is an
+directives and knowledge". Phase 2026-04.08 — walk + opencode surfacing's =org-llm walk= is an
 LLM-driven dialog over the vault. Today walks produce one-off
 output (the walk's response) but nothing persisted. The
 direction:
@@ -583,11 +583,11 @@ MCP shim.
 
 ** Confirmed working
 
-- *Phase 21.1 routine_chores* (#14) — REJECT-first filter held;
+- *Phase 2026-05.13.01 — DB-backed vault fact store routine_chores* (#14) — REJECT-first filter held;
   top 5 = make bed (8×), clean bathroom (4×), exercise (3×),
   trash (3×), juice (3×). Multi-model agreement = 3/3 listed
   same chores in same order.
-- *Phase 21.1 mood_signal + weekly_mood_review* (#18) —
+- *Phase 2026-05.13.01 — DB-backed vault fact store mood_signal + weekly_mood_review* (#18) —
   recipe matched, runner produced 6 weekly windows, narrations
   all hedged + observational ("relatively stable", "no significant
   fluctuations") matching @journalist's persona spec.
@@ -616,7 +616,7 @@ Recommendation: drop gemma3 from the local rotation, keep
 llama3.2 + phi4-mini as the two local fallbacks; reserve
 qwen2.5-coder for code-shaped prompts only.
 
-** Reasoning capture (Phase 22.5b probe)
+** Reasoning capture (Phase 2026-05.11.02 — explicit reasoning probe)
 
 Every prompt was instructed to emit a leading =Reasoning: …= line
 before its answer. Capture rate was 100% — every model+prompt
@@ -627,11 +627,11 @@ showed actual decision-tree reasoning ("=search_notes= instead of
 a direct tool call due to type error" — llama3.2 on #8 noticing
 the harness error and re-routing).
 
-Implication for Phase 22.5b: a system-prompt =Reasoning:= probe
+Implication for Phase 2026-05.11.02 — explicit reasoning: a system-prompt =Reasoning:= probe
 is portable, cheap, and yields useful signal across models that
 DON'T natively emit =<thinking>= tags. Pair this with the
 existing native-=<think>=-tag extractor for models that do.
-Promotes Phase 22.5b from "explicit reasoning capture" (model-
+Promotes Phase 2026-05.11.02 — explicit reasoning from "explicit reasoning capture" (model-
 dependent) to "universal reasoning capture" (works on any
 instruction-following model).
 

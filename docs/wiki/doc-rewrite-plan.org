@@ -15,7 +15,7 @@ highest-leverage rewrite candidates, and proposes a rewrite style
 template + dispatch protocol. User reviews this page, picks a subset,
 then a pool of agents executes the rewrite against it.
 
-*Expanded.* The rewrite is a Phase 30.4-flavored stress test
+*Expanded.* The rewrite is a Phase 2026-05.21 — multi-judge validation-flavored stress test
 (multi-agent A/B) on a real doc-quality task — not a synthetic eval.
 Three surfaces compared head-to-head: Claude Code subagent pool,
 =org-llm= CLI agents, opencode session. Each surface gets the same
@@ -26,7 +26,7 @@ outputs are kept as review notes. This page is the *dispatchable
 artifact* — once the user picks a subset and weights the rubric, an
 agent pool can execute against it without further scoping.
 
-The dev-tracker TODO under "Doc rewrite stress test" (Phase 30.4
+The dev-tracker TODO under "Doc rewrite stress test" (Phase 2026-05.21 — multi-judge validation
 candidate) is the parent ticket; this page scopes its inputs.
 
 * The dispatch protocol
@@ -44,7 +44,7 @@ For each page in the chosen subset:
 Each surface produces *one rewritten file per page*. Three outputs per
 page total. None overwrites the original until judging.
 
-** Phase 30.4 multi-judge scores each output
+** Phase 2026-05.21 — multi-judge validation multi-judge scores each output
 
 The judge is one Opus-class call per page-output triple, blinded to
 which surface produced which file. The judge returns a structured
@@ -147,35 +147,35 @@ Sorted within bucket by REWRITE PRIORITY (high → low). PRIORITY signal:
 | mcp.org                           | Model Context Protocol (MCP)                            |   205 | Apr 30      | no          | MCP roles, why org-llm uses it, server/host/client                                       | high     | foundational; widely linked; no Summary block                      |
 | auto-embedder.org                 | Auto-embedder — background freshness daemon            |   111 | Apr 30      | no          | opt-in daemon thread for index/embed freshness                                           | high     | small; tight rewrite candidate; verify status vs current code      |
 | captains-log.org                  | Captain's Log — vault-wide event log                    |   153 | May 3       | no          | History table + ~/org/captains-log.org dual surface                                      | high     | high cross-ref load (architecture, memory-alpha); needs 2b         |
-| insight-cards.org                 | Insight cards (Phase 12)                                |   190 | May 3       | no          | "I noticed N things" cards; uniform shape; phase-12                                      | high     | Phase 12 — likely shipped; status section needs cull               |
+| insight-cards.org                 | Insight cards (Phase 2026-04.07 — insight cards)                                |   190 | May 3       | no          | "I noticed N things" cards; uniform shape; phase-12                                      | high     | Phase 2026-04.07 — insight cards — likely shipped; status section needs cull               |
 | skills.org                        | Skills — org-babel-driven LLM workflows                 |   189 | May 3       | no          | org-babel :skill: blocks → MCP tool registry                                             | high     | needs 2b + status check vs current skill loader                    |
 | code-corpus.org                   | Code corpus — cross-repo semantic search                |   153 | May 3       | no          | second corpus alongside notes; code+notes one DB                                         | high     | small; 2b conversion + verify against current verbs                |
 | cloud-or-local-routing.org        | Cloud-or-local routing                                  |   221 | May 3       | no          | decision tree for cloud vs Ollama; provider catalog                                      | high     | DEC-Groq applies — verify Groq isn't mentioned anywhere            |
 | doctor-self-heal.org              | Doctor & self-heal                                      |   240 | May 3       | no          | three doctor layers: doctor, proactive_doctor, LLM-rescue                                | high     | needs 2b; verify all three layers actually shipped                 |
 | pi-bridge.org                     | Pi bridge — second conversational interface             |   139 | Apr 30      | no          | Pi.dev TS extension; second surface alongside opencode (Claude Code is integration option per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]]) | high     | small; clear 2b candidate; check pi_extension/ status              |
-| walk.org                          | Walk — LLM-driven knowledge capture (Phase 13)          |   171 | Apr 30      | no          | walk vs ask; LLM-driven note review + atomic claim extraction                             | high     | Phase 13 status check; needs 2b                                    |
+| walk.org                          | Walk — LLM-driven knowledge capture (Phase 2026-04.08 — walk + opencode surfacing)          |   171 | Apr 30      | no          | walk vs ask; LLM-driven note review + atomic claim extraction                             | high     | Phase 2026-04.08 — walk + opencode surfacing status check; needs 2b                                    |
 | audit-log.org                     | Wiki ↔ reality audit log                                |   315 | May 2       | no          | bidirectional audit log between wiki claims + code reality                                | high     | meta; deferred-list curation needed; long but structured          |
 | theme-studio.org                  | Theme studio + knobs — voice personalization            |   147 | May 2       | no          | knob model 0–3 levels; theme_studio.get_themed                                            | medium   | small; check for SaaS-tone bleed in copy                           |
 | lcars-theming.org                 | LCARS theming + palette system                          |   141 | May 2       | no          | three role colors; "honest LCARS" not just orange-on-black                                | medium   | small visual-language doc; 2b-able                                 |
 | granted-filesystem-access.org     | Granted filesystem access                               |   133 | May 2       | no          | path allowlist; user-controlled grants; request_access tool                                | medium   | small permissions doc; 2b-able                                     |
-| task-instruction-prefixes.org     | Task-instruction prefixes (the nomic-embed gotcha)      |   152 | May 2       | no (TL;DR)  | search_document: / search_query: prefixes; Phase 11 audit story                            | medium   | gotcha doc; small; 2b-able                                         |
+| task-instruction-prefixes.org     | Task-instruction prefixes (the nomic-embed gotcha)      |   152 | May 2       | no (TL;DR)  | search_document: / search_query: prefixes; Phase 2026-04.06 — embed migration + tag --apply audit story                            | medium   | gotcha doc; small; 2b-able                                         |
 | recipes.org                       | Recipes — proxy-time pre-fetch (curated set)            |   270 | May 4       | no          | recipe = manager's "I've already done it" pattern; phase-22                                | medium   | recently edited; check 2b conversion                               |
 | interceptors.org                  | Interceptors                                            |   257 | May 3       | no          | proxy interceptor shape; short-circuit vs mutation                                       | medium   | structural; cross-refs llm-proxy heavily                           |
 | llm-proxy.org                     | LLM proxy                                               |   343 | May 4       | no          | the proxy server; phase-17 + 18 interceptor catalog                                      | medium   | recently edited; large; 2b conversion + section ordering           |
 | now.org                           | Now — single-view dashboard                             |   177 | May 4       | no          | flat in-flight + recently-shipped dashboard                                              | medium   | recently edited; meta page; 2b-able                                |
 | test-prompts.org                  | End-to-end test prompts                                 |   354 | May 4       | no          | natural-language regression suite; recipe + MCP coverage                                  | medium   | testing reference; 2b + recipe-name freshness check                |
-| vault-facts.org                   | Vault facts — deterministic inferrers + DB cache        |   173 | May 4       | no          | Phase 21; routine_chores, tag_taxonomy, mood_signal facts                                 | medium   | small; 2b-able                                                     |
+| vault-facts.org                   | Vault facts — deterministic inferrers + DB cache        |   173 | May 4       | no          | Phase 2026-05.13 — deterministic vault inferrers; routine_chores, tag_taxonomy, mood_signal facts                                 | medium   | small; 2b-able                                                     |
 | tonight-rave-list.org             | Tonight's rave-coding list                              |   451 | May 4       | no          | queue of late-night-knockable items; effort estimates                                    | medium   | living planning doc; possible auto-prune of DONEs                  |
 | literate-tools.org                | Literate MCP tools — customize, manage, create          |   324 | May 4       | no          | proposal for ~/org/org-llm-tools.org as fourth literate file                              | medium   | proposal-stage; 2b + check what's shipped since                    |
 | 00-index.org                      | org-llm wiki — concepts index                           |   288 | May 4       | no          | wiki entry point; concept map; how to symlink to your vault                              | medium   | INDEX — see "index/meta" handling below                            |
 | agent-roster.org                  | Agent roster — classification & rave-coding stack       |   204 | May 4       | no          | classified inventory of every domain in org-llm                                          | medium   | data-heavy; 2b-able; cross-ref dense                               |
 | agentsmith.org                    | @agentsmith — design and ship new agents                |   310 | May 4       | no          | meta-agent for designing new specialists; one-conversation onboarding                       | medium   | 2b-able; verify against current builtin agent shape                |
 | agents.org                        | Agents — what they are and how they work                |   279 | May 4       | no          | agent = persona + tool roster + model choice; via @-tag                                  | medium   | foundational; 2b-able                                              |
-| superset.org                      | Apache Superset in org-llm — integration ladder         |   273 | May 4       | no          | 7-tier integration ladder; semantic layer first piece                                    | medium   | Phase 27 longer-form; 2b-able                                      |
+| superset.org                      | Apache Superset in org-llm — integration ladder         |   273 | May 4       | no          | 7-tier integration ladder; semantic layer first piece                                    | medium   | Phase 2026-07.01 — Apache Superset dashboards longer-form; 2b-able                                      |
 | coordination.org                  | Coordination — parallel-instance protocol               |   371 | May 4       | YES         | the contract between humans + agents working in parallel                                  | low      | already 2b-compliant + recently edited; light polish only          |
 | active-claims.org                 | Active claims — parallel-instance live board            |   161 | May 5       | YES         | the live state half of coordination.org                                                  | low      | live-board; 2b-compliant; meant to churn                           |
-| memory-alpha.org                  | Memory Alpha — Trek framing for DB-authoritative inversion |   150 | May 4    | no          | naming + conceptual frame for Phase 25                                                   | medium   | 2b-able; Phase 25 framing                                          |
-| promotions.org                    | Promotions & See-something-say-something                |   254 | May 4       | YES         | Phase 29 top-down + bottom-up signal-to-artifact                                          | low      | already 2b-compliant; mature                                       |
+| memory-alpha.org                  | Memory Alpha — Trek framing for DB-authoritative inversion |   150 | May 4    | no          | naming + conceptual frame for Phase 2026-05.17 — DB-as-cache + git-canonical pipeline                                                   | medium   | 2b-able; Phase 2026-05.17 — DB-as-cache + git-canonical pipeline framing                                          |
+| promotions.org                    | Promotions & See-something-say-something                |   254 | May 4       | YES         | Phase 2026-05.20 — sync verb POC top-down + bottom-up signal-to-artifact                                          | low      | already 2b-compliant; mature                                       |
 | side-quests.org                   | Side-quests — spawning specialists for off-thread work  |   373 | May 4       | YES         | captain spawns specialist via delegate(); agent-report                                    | low      | already 2b-compliant                                               |
 | standing-orders.org               | Standing orders — shared memories agents check          |   354 | May 4       | YES         | user-authoritative decisions in versioned DB table                                       | low      | already 2b-compliant                                               |
 | agent-orientation.org             | Agent orientation — manifest at spawn, primer on demand |   316 | May 4       | YES         | manifest + on-demand primers pattern for specialists                                     | low      | already 2b-compliant                                               |
@@ -261,8 +261,8 @@ RAG / MCP) plus small surface-area pages.
 ** Wave 2 — concept pages with status drift
 
 Pages where the rewrite must verify shipped-status against current
-code (Phase 12 insight cards, Phase 13 walk, Phase 21 vault-facts,
-Phase 22 recipes, Phase 23 agent-framework). These pages are higher
+code (Phase 2026-04.07 — insight cards insight cards, Phase 2026-04.08 — walk + opencode surfacing walk, Phase 2026-05.13 — deterministic vault inferrers vault-facts,
+Phase 2026-05.12 — orchestration v2 recipes, Phase 2026-05.14 — agent-framework refinements agent-framework). These pages are higher
 risk because the rewrite must cull stale phase notes and replace with
 status + commit ref.
 
@@ -339,13 +339,13 @@ in parens; user picks or overrides.
 6. *Branch strategy?* One branch per surface, or one branch per page?
    (Default: one branch per surface for the wave, merge per-page after
    judging.)
-7. *Judge model?* Opus 4.7 is the default Claude judge in Phase 30.4
+7. *Judge model?* Opus 4.7 is the default Claude judge in Phase 2026-05.21 — multi-judge validation
    eval. Confirm or override.
 
 * Connections
 
 - [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § "Doc rewrite stress test" — parent TODO
-- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 30.4 — multi-judge validation
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 2026-05.21 — multi-judge validation — multi-judge validation
 - [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki-conventions.org]] — Rule 2b is the binding contract
 - [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-010 — anti-capitalist FOSS framing
 - [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] — claim discipline for the rewriting agents

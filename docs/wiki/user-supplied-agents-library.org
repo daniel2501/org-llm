@@ -2,16 +2,16 @@
 :ID:       db57b919-9a7b-44f7-a4df-a206ecd79431
 :CREATED:  [2026-05-07]
 :END:
-#+TITLE: User-supplied agents library — Phase 23.5 design + extension path leg 1
+#+TITLE: User-supplied agents library — Phase 2026-05.14.02 — DB-backed registry design + extension path leg 1
 #+FILETAGS: :wiki:agents:literate-config:phase-23-5:extension-path:
 #+OPTIONS: toc:2 num:nil
 
 * Summary
 
-*Summary.* Phase 23.5 ships =org_llm/user_agents/= — a literate
+*Summary.* Phase 2026-05.14.02 — DB-backed registry ships =org_llm/user_agents/= — a literate
 extension-path package that reads =~/org/org-llm-agents.org= and
 yields validated user-defined =@<handle>= personas the registry
-can register at startup. Sister surface to [[file:literate-tools.org][Phase 23.6 — literate
+can register at startup. Sister surface to [[file:literate-tools.org][Phase 2026-05.16 — literate MCP tools — literate
 MCP tools]]: same parser/validator/sandbox shape applied to agents
 instead of tools. This is the *first leg* of the extension path
 locked by [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009 — curated core agent team + extension path]].
@@ -75,7 +75,7 @@ v0.1).
 
 Override: =ORG_LLM_USER_AGENTS_PATH=/some/other/path.org= for tests
 + alternate vault layouts. Pure env-var, mirrors the
-=ORG_LLM_LITERATE_TOOLS_PATH= knob from Phase 23.6.
+=ORG_LLM_LITERATE_TOOLS_PATH= knob from Phase 2026-05.16 — literate MCP tools.
 
 Missing file → empty list (soft failure; never crashes startup).
 
@@ -84,7 +84,7 @@ Missing file → empty list (soft failure; never crashes startup).
 | heading      | =* @<handle>= or =* <handle>= (leading ``@`` optional). Tag =:agent:= required.        |
 | =:DESCRIPTION:= | one-liner; surfaced to launcher / =list_agents= / opencode autocomplete                  |
 | =:SKILLS:=      | csv; informational, mirrors the documentation surface in [[file:agents.org][=agents.org=]]                  |
-| =:TOOL_ALLOWLIST:= | csv of MCP tool names this persona is allowed to call (Phase 23.6 — literate-MCP-tools Tier 2 groups also accepted) |
+| =:TOOL_ALLOWLIST:= | csv of MCP tool names this persona is allowed to call (Phase 2026-05.16 — literate MCP tools — literate-MCP-tools Tier 2 groups also accepted) |
 | =:MODEL:=       | optional default model role (=chat_model= / =reason_model= / etc.). Falls back to host default. |
 | =:ALIASES:=     | csv; additional =@<name>=s that route to the same persona                                |
 | =:TRIGGERS:=    | csv; keywords for the lightning-fast keyword router ([[file:../../org_llm/cli.py][=cli.py=]] § =_AGENT_TRIGGERS=)   |
@@ -133,5 +133,5 @@ the rejection list.
 - [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009 — curated core agent team + extension path]] (decision)
 - [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014 — Bridge Crew]] (the seven reserved handles)
 - [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]], [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]] — agent canon + long-tail roster
-- [[id:c3e7a2f1-8b4d-4e9c-a1f2-d3e4b5a6c7d8][literate-tools.org]] — parallel extension-path leg (Phase 23.6)
+- [[id:c3e7a2f1-8b4d-4e9c-a1f2-d3e4b5a6c7d8][literate-tools.org]] — parallel extension-path leg (Phase 2026-05.16 — literate MCP tools)
 - [[file:../../org_llm/user_agents/__init__.py][=org_llm/user_agents/=]] · [[file:../../tests/test_user_agents.py][=tests/test_user_agents.py=]] · =~/org/org-llm-agents.org=

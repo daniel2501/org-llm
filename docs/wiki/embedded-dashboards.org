@@ -192,7 +192,7 @@ supports it.
 - [[id:e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63][DEC-013 — Two-tier tool architecture]]
 - [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014 — Cull rubric]] (positions @geordi as the agent that
   proposes SQL blocks)
-- =roadmap.org= § /Phase 27 — Apache Superset dashboards/
+- =roadmap.org= § /Phase 2026-07.01 — Apache Superset dashboards — Apache Superset dashboards/
   (CORE_DISABLED per cull)
 - =dev-tracker.org= § /Babel + tangle as core concept/ — this
   page is one of the worked examples

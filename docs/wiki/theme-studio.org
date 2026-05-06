@@ -150,5 +150,5 @@ saves prompt budget.
 
 - [[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][LCARS theming]] — visual
   layer that pairs with theme studio's voice layer
-- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — Phase 1–3
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — Phase 2026-04.01 — initial implementation
   foundation; refinements continue but the substrate is stable

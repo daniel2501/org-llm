@@ -116,7 +116,7 @@ versioned, and benchmarked, and primer drift is detectable by
 diffing the resolver output against the source-file truth.
 
 This is the same family as [[*Composition with existing primers][the resolver registry coming in
-Phase 24.1]] — orientation primers and pre-flight resolvers
+Phase 2026-05.02.01 — pre-flight resolvers]] — orientation primers and pre-flight resolvers
 both inject deterministic context into the spawn prompt; they
 differ only in *what they resolve* (resolvers: per-prompt
 facts like path/agent/time; primers: per-domain conventions
@@ -136,7 +136,7 @@ candidate future namespaces.
 | core agent     | primer namespace        | what it teaches                                                                              |
 |----------------+-------------------------+----------------------------------------------------------------------------------------------|
 | =@atoz=        | =wiki-authorship=       | Rule 2b, link forms, fresh UUID, 00-index.org integration, =link_wiki_files.py= verifier      |
-| =@atoz=        | =agent-report=          | the uniform =docs/notes/= report structure (see [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] § Phase 24.5)                          |
+| =@atoz=        | =agent-report=          | the uniform =docs/notes/= report structure (see [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] § Phase 2026-05.02 — supervision trinity (legacy 24.5 — orientation primer registry))                          |
 | =@riker=       | =dev-tracker-entry=     | property block, Recommended ship order, Connections, Risks pinning                            |
 | =@agentsmith=  | =new-agent=             | persona shape, triggers, =model_role=, capability declaration, registration site               |
 
@@ -162,7 +162,7 @@ roster row, = earns its keep at gates 1/2/3).
 replace — three existing context-injection mechanisms:
 [[file:../../.opencode/AGENTS.md][AGENTS.md]] (project-level primer regenerated on launch),
 [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes]] (proxy-time pre-fetch for known intent classes), and
-the upcoming [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Phase 24.1]] resolver registry (per-prompt
+the upcoming [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Phase 2026-05.02.01 — pre-flight resolvers]] resolver registry (per-prompt
 deterministic facts). Each operates at a different level: project,
 intent, prompt, domain. They stack; nothing in the orientation
 pattern duplicates them.
@@ -172,8 +172,8 @@ pattern duplicates them.
 | mechanism                 | grain               | when it fires                       | shape                            |
 |---------------------------+---------------------+-------------------------------------+----------------------------------|
 | =AGENTS.md=               | project             | host launch (regenerated)            | static doc, manually authored    |
-| Recipes (Phase 22 v2)     | intent class        | prompt matches recipe trigger        | manager pre-fetch + agent narrate |
-| Resolvers (Phase 24.1)    | per prompt           | every =delegate()= call              | parallel pure functions, ~80ms   |
+| Recipes (Phase 2026-05.07 — manager pre-fetch + agent narrates)     | intent class        | prompt matches recipe trigger        | manager pre-fetch + agent narrate |
+| Resolvers (Phase 2026-05.02.01 — pre-flight resolvers)    | per prompt           | every =delegate()= call              | parallel pure functions, ~80ms   |
 | *Orientation primer*      | per domain           | specialist explicitly requests        | deterministic resolver, on demand |
 | Manifest (this page)      | per spawn            | every specialist spawn               | one short paragraph              |
 
@@ -183,7 +183,7 @@ Concretely, a specialist spawned to "draft a wiki page about
 1. Read the project-wide =AGENTS.md= primer at host launch
    (already loaded into the host's context).
 2. Receive its task prompt with the manifest pre-pended.
-3. The Phase 24.1 resolvers fire: =RepoResolver= establishes
+3. The Phase 2026-05.02.01 — pre-flight resolvers resolvers fire: =RepoResolver= establishes
    the repo root, =PathResolver= confirms =docs/wiki/= exists,
    =AgentResolver= notes =@atoz= as the relevant steward.
 4. The specialist, prompted by the manifest, calls
@@ -191,7 +191,7 @@ Concretely, a specialist spawned to "draft a wiki page about
 5. The primer returns Rule 2b, link forms, the UUID command,
    and the verifier step. Specialist drafts conformant.
 6. (Future, not in scope of this page.) The
-   [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Phase 29 self-coded tools]] loop watches the audit log; if
+   [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Phase 2026-05.20 — sync verb POC self-coded tools]] loop watches the audit log; if
    primer fetches consistently precede successful artifact
    writes, the primer fetch becomes a deterministic step in
    the recipe for that intent class — collapsing what's a
@@ -242,7 +242,7 @@ deterministic-resolver shape.
   without calling =primer()=. Mitigation A: the manifest
   includes the call as a *prerequisite* phrasing ("call
   primer(…) *before* writing"). Mitigation B: a tool-failure
-  recovery hook (Phase 24.2 family) on the wiki-write path
+  recovery hook (Phase 2026-05.02.02 — recovery hooks family) on the wiki-write path
   that detects a missing fetch and returns a recovery
   suggestion rather than letting a non-conformant draft land.
 
@@ -256,7 +256,7 @@ deterministic-resolver shape.
 
 - *Primer-as-LLM-call.* The pattern explicitly forbids primers
   from being LLM calls — that would put orientation in the
-  same anti-pattern Phase 24's design rule rules out. Primers
+  same anti-pattern Phase 2026-05.02 — supervision trinity's design rule rules out. Primers
   are deterministic resolvers. If a primer would benefit from
   reasoning, the resolver is the wrong shape; the right shape
   is to encode the reasoning as a rule and emit it
@@ -266,7 +266,7 @@ deterministic-resolver shape.
 
 *Summary.* Pattern canonized 2026-05-04. Manifest format and
 namespace list above are the load-bearing claims. Implementation
-queued as *Phase 24.5 — Orientation primer registry* alongside
+queued as *Phase 2026-05.02 — supervision trinity (legacy 24.5 — orientation primer registry) — Orientation primer registry* alongside
 the rest of the supervision trinity in =dev-tracker.org=.
 =docs/templates/agent-report.org= is the first artifact the
 =agent-report= primer namespace points at; the slice/wiki
@@ -312,5 +312,5 @@ short-circuits).
   framing of this pattern.
 - [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][Wiki conventions]] —
   the source the =wiki-authorship= primer reads.
-- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] § Phase 24.5 —
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] § Phase 2026-05.02 — supervision trinity (legacy 24.5 — orientation primer registry) —
   implementation tracking.

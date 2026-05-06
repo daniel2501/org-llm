@@ -12,7 +12,7 @@
 the default embedding model, REQUIRES task-instruction prefixes
 (=search_document:= for stored content, =search_query:= for queries).
 Without them, the model returns plausible-looking vectors that don't
-actually retrieve well — a silent failure mode the Phase 11 audit
+actually retrieve well — a silent failure mode the Phase 2026-04.06 — embed migration + tag --apply audit
 caught when single capitalized words (=Kafka=, =Marx=, =Subjects=)
 were all collapsing to the same near-garbage vector.
 
@@ -26,7 +26,7 @@ degrade against the new query-space.
 
 * The bug
 
-Before Phase 11:
+Before Phase 2026-04.06 — embed migration + tag --apply:
 
 #+begin_src python
 # org_llm/llm.py — wrong (this used to be the implementation)
@@ -47,7 +47,7 @@ obvious cause.
 
 * The fix
 
-After Phase 11:
+After Phase 2026-04.06 — embed migration + tag --apply:
 
 #+begin_src python
 def embed(text: str, *, task: str = "document") -> list[float]:
@@ -64,7 +64,7 @@ Every embed site (indexer, search, code-index) was audited for
 correct =task= argument. The migration:
 
 #+begin_src sh
-# Phase 11 migration: re-embed everything with prefixes
+# Phase 2026-04.06 — embed migration + tag --apply migration: re-embed everything with prefixes
 org-llm embed --force
 #+end_src
 
@@ -148,7 +148,7 @@ org-llm doctor                             # surfaces "embed prefix mismatch"
   general theory; this page is the "watch out" sibling
 - [[id:e2222222-3333-4444-5555-bbbbbbbbbbbb][Vector similarity]] —
   why bad prefixes silently degrade rather than fail loudly
-- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 11 —
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 2026-04.06 — embed migration + tag --apply —
   the migration's chronology
 - [[https://huggingface.co/nomic-ai/nomic-embed-text-v1.5#usage][nomic-embed-text-v1.5 model card]] — upstream documentation
   of the prefix requirement

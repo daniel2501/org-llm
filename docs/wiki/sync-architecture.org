@@ -17,7 +17,7 @@ multi-writer distributed sync. Each device has its own DB
 derived from the synced files; loss of any device's DB is a
 re-derive event, not a data-loss event.
 
-*Expanded.* This collapses Phase 25's original "DB-authoritative
+*Expanded.* This collapses Phase 2026-05.17 — DB-as-cache + git-canonical pipeline's original "DB-authoritative
 inversion" framing into the simpler, narrower "DB-as-cache +
 git-canonical" shape per [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]]. The vault stays canonical;
 the DB becomes a universal query interface re-derived on demand.
@@ -187,8 +187,8 @@ The driver:
 
 Implementation cost: ~200–500 lines of Python wrapping
 =orgparse= for parse, a deterministic renderer for round-trip,
-and a thin git driver shim. Phase 25.x sub-phase or sibling
-Phase 32 candidate; the cost is manageable because the parser
+and a thin git driver shim. Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) sub-phase or sibling
+Phase 2026-08+ — out-month placeholder (legacy 32) candidate; the cost is manageable because the parser
 already exists in =org_llm/= and the renderer is an
 inverse-function unit-test target.
 
@@ -370,7 +370,7 @@ A summary of the conflict-resolution stack in priority order:
    Removes the dumbest sources of spurious diff.
 4. *Org-aware merge driver* (target) — heading-aware,
    slot-by-slot three-way merge. Handles the same-heading
-   different-aspect case cleanly. Phase 25.x or Phase 32.
+   different-aspect case cleanly. Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) or Phase 32.
 5. *Standard git conflict markers* — always-on fallback. User
    resolves in Emacs =smerge-mode=. Degraded but correct.
 
@@ -396,8 +396,8 @@ committed*. If you can, it should not be.
   but the laptop runs Emacs continuously — does it need a
   periodic pull, an =auto-revert-mode=-style file-watch over
   =.git/refs=, or something else? Test under daily-driver use.
-- *Org-aware merge driver — implementation timing.* Phase 25.x
-  sub-phase, sibling Phase 32, or post-1.0? Depends on how
+- *Org-aware merge driver — implementation timing.* Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family)
+  sub-phase, sibling Phase 2026-08+ — out-month placeholder (legacy 32), or post-1.0? Depends on how
   often scenario 4 actually fires under real two-device use.
 - *Per-device captain's log entry IDs.* Today the log is
   per-device-rotated; if both devices commit log entries the
@@ -416,4 +416,4 @@ committed*. If you can, it should not be.
 - [[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][Three Laws of org-llm Data Integrity]]
 - [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]] — the forward-direction implementation
 - [[file:architecture.org][architecture.org]] § Org is Code design rule
-- [[file:roadmap.org][roadmap.org]] § Phase 25 (DB-authoritative inversion — scope revised by DEC-011)
+- [[file:roadmap.org][roadmap.org]] § Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (DB-authoritative inversion — scope revised by DEC-011)

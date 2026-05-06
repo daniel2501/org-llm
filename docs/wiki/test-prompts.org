@@ -146,7 +146,7 @@ Prompt:
 Should call =org_grep= or =search_notes=. Expected output: a
 short list of =path:line: text= excerpts (or "no matches"). A
 proper-noun query like "Postgres" tests that the agent doesn't
-filter the matches into routine-shape (Phase 18.4 regression
+filter the matches into routine-shape (Phase 2026-05.06 — proxy expansion regression
 where proper nouns got rejected from results).
 
 ** [#7] Link graph — N-hop walk                             :graph:
@@ -202,11 +202,11 @@ Tests =org_agenda(window_days=7)=. Expected output: sectioned
 
 Prompt:
 #+begin_example
-@researcher how many headings are in my Phase 22 roadmap entry?
+@researcher how many headings are in my Phase 2026-05.12 — orchestration v2 roadmap entry?
 And give me a high-level outline.
 #+end_example
 
-Two-shot test: =org_id_find=("Phase 22") → =org_file_meta= for
+Two-shot test: =org_id_find=("Phase 2026-05.12 — orchestration v2") → =org_file_meta= for
 the heading counts → =org_outline= for the structure. Agent
 should chain these tools (or do them in parallel via a single
 =tool_calls= array) and present a 2-3 sentence summary.

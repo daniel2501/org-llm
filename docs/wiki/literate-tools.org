@@ -44,7 +44,7 @@ A literate file gives:
 - *Diff-friendly* — `git log ~/org/org-llm-tools.org` is the
   audit trail of who-changed-which-tool-when.
 
-* Tier 1 — Customize (Phase 23.6.1)
+* Tier 1 — Customize (Phase 2026-05.16.01 — customize tier)
 
 Per-tool defaults, descriptions, and enable flags. No new tools,
 no user code. Lets the user shape the existing surface.
@@ -108,7 +108,7 @@ Same verb shape as =org-llm config= and =org-llm agents=.
 Implementation reuses =literate_config.py='s parsing
 infrastructure with a tool-shaped =_ConfigEntry= variant.
 
-* Tier 2 — Manage (Phase 23.6.2)
+* Tier 2 — Manage (Phase 2026-05.16.02 — manage tier)
 
 Tool groups + per-agent allow/deny lists. Lets the user shape the
 *surface each agent sees* without editing tool implementations.
@@ -165,7 +165,7 @@ Resolution order at launch:
    members).
 2. Subtract anything in =:DENY_TOOLS:=.
 3. Filter by the agent's declared =:CAPABILITIES:= against each
-   tool's =:CAPABILITY_REQ:= (Phase 23.2 will enforce; today it's
+   tool's =:CAPABILITY_REQ:= (Phase 2026-05.14 — agent-framework refinements (legacy 23.2 — capability enforcement) will enforce; today it's
    advisory).
 
 Result: each agent has a tightly scoped tool surface visible to
@@ -180,12 +180,12 @@ Groups let the host author tag tools by purpose; agents
 reference purposes; new tools join the right group and
 automatically reach the right agents.
 
-* Tier 3 — Create (deferred to Phase 23.6.3+)
+* Tier 3 — Create (deferred to Phase 2026-05.16.03 — shell-wrapped user tools+)
 
 User-defined MCP tools. Three execution backends with different
 risk profiles:
 
-** Tier 3a — Shell-wrapped (Phase 23.6.3, the MVP)
+** Tier 3a — Shell-wrapped (Phase 2026-05.16.03 — shell-wrapped user tools, the MVP)
 
 Cheapest, safest. User declares a shell command + arg schema; the
 host wraps it in an MCP function.
@@ -208,7 +208,7 @@ invocation. =CMD= templates use =Jinja-lite=
 interpolation. Host runs the resolved command in a subprocess
 with =timeout=30s=, captures stdout/stderr, returns as JSON.
 
-** Tier 3b — HTTP-wrapped (Phase 23.6.4)
+** Tier 3b — HTTP-wrapped (Phase 2026-05.16.04 — HTTP-wrapped user tools)
 
 User declares an HTTP endpoint + auth + arg schema. Host issues
 the request, returns the JSON body.
@@ -249,7 +249,7 @@ restart-resilient.
 Tier 3 user tools register at startup by reading the literate
 file and dynamically wrapping each declaration as an MCP function.
 Hot-reload (=org-llm tools --apply= in a running session)
-deferred to Phase 24 — initial cut requires relaunch.
+deferred to Phase 2026-05.02 — supervision trinity — initial cut requires relaunch.
 
 * Security boundaries
 
@@ -277,14 +277,14 @@ Two principles this honours:
 - *Customizability via opt-in, simplicity by default.* Default
   tool surface ships in code; users add overrides only when
   they have a real reason. Same posture as the agent
-  rationalization (Phase 23.0): umbrella defaults in the
+  rationalization (Phase 2026-05.14 — agent-framework refinements (legacy 23.0 — rationalization)): umbrella defaults in the
   built-in registry, specialists via the literate file.
 
-This is also a natural prerequisite for [[*TODO [#A] Planned — Phase 29: Self-coded tools][Phase 29 — self-coded
+This is also a natural prerequisite for [[*TODO [#A] Planned — Phase 2026-05.20 — sync verb POC: Self-coded tools][Phase 2026-05.20 — sync verb POC — self-coded
 tools]]: the LLM-generated-tool synthesis pipeline writes its
 output to =~/org/org-llm-tools.org= (Tier 3a) where the user
-reviews, optionally edits, and applies. Phase 29's auto-discovery
-needs Phase 23.6.3's shell-wrapped tool format to land tools
+reviews, optionally edits, and applies. Phase 2026-05.20 — sync verb POC's auto-discovery
+needs Phase 2026-05.16.03 — shell-wrapped user tools's shell-wrapped tool format to land tools
 without code edits.
 
 * Sub-phase shipping order
@@ -298,7 +298,7 @@ without code edits.
 | 23.6.5    | Tier 3c — Python-via-babel (or skip) | 23.6.3 + sandbox design | ~1-2 weeks |
 
 23.6.1 + 23.6.2 are sprint-eligible immediately. 23.6.3+ blocks
-on Phase 23.2 (capability enforcement) — declarative capabilities
+on Phase 2026-05.14 — agent-framework refinements (legacy 23.2 — capability enforcement) (capability enforcement) — declarative capabilities
 exist today but the MCP layer doesn't gate yet, and shipping
 user-defined tools without enforcement is reckless.
 
@@ -320,5 +320,5 @@ user-defined tools without enforcement is reckless.
 - =~/org/org-llm-config.org= — knobs file (model: this is one)
 - =~/org/org-llm-agents.org= — agents file (model: this is one)
 - =~/org/org-llm-baselines.org= — baselines file (model: this is one)
-- *Phase 29* (self-coded tools, see roadmap) — depends on
+- *Phase 2026-05.20 — sync verb POC* (self-coded tools, see roadmap) — depends on
   23.6.3's shell-wrapped tool format

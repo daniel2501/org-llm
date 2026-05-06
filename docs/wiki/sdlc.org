@@ -42,7 +42,7 @@ Diagram (ASCII):
 - acpt → =uv tool install --from git@…@acpt= (separate slot)
 - prod → =uv tool install --from git@…@v0.X.Y= (tag-pinned)
 
-Daily-driver runs prod. Risky work (e.g. Phase 26.2 LoC delete) runs
+Daily-driver runs prod. Risky work (e.g. Phase 2026-05.01 — physical extraction LoC delete) runs
 in dev. Acpt is the gate.
 
 Per-slot identification: ENV variable =ORG_LLM_ENV=dev|acpt|prod=,
@@ -104,7 +104,7 @@ Examples:
 - agent_write_active = false in prod (read-only daily-driver
   default)
 
-* The Phase 26.2 use case (worked example)
+* The Phase 2026-05.01 — physical extraction use case (worked example)
 - Extraction work happens on a =dev/26-2-extraction= branch off
   main
 - Author tests + CIs on that branch; merges to trunk when functional
@@ -146,5 +146,5 @@ DEC-003 agents-as-SDLC), the same three-tier model applies:
   directional
 
 * See also
-- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 26.2 (the first big SDLC use case)
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 2026-05.01 — physical extraction (the first big SDLC use case)
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]]

@@ -140,5 +140,5 @@ ls .opencode/themes/                     # opencode theme JSON
 
 - [[id:c88b2ddc-33bc-4b58-bd16-993c48b91209][Theme studio + knobs]] —
   the voice layer that pairs with LCARS visuals
-- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 16.2 —
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 2026-04.10.03 — launch wires plugin —
   TUI plugin slot overrides that ported LCARS into opencode

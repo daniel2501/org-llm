@@ -187,7 +187,7 @@ them. This narrowness is what keeps the table from sprawling.
    reactivated. This is the safety valve against accidental
    permanence.
 
-The promotion ladder is a special case of [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Phase 29]]'s
+The promotion ladder is a special case of [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Phase 2026-05.20 — sync verb POC]]'s
 self-coded-tools loop: a recurring pattern (LLM keeps
 re-deriving the same rule) gets detected and promoted to a
 deterministic artifact (the wiki page becomes the
@@ -241,7 +241,7 @@ machinery.
 - *Write-authority leak.* If specialists could author orders,
   the table becomes a chat log. Mitigation: =write.standing_orders=
   capability is captain + curator + tracker only; enforced at
-  MCP dispatch (Phase 23.2 capability enforcement).
+  MCP dispatch (Phase 2026-05.14 — agent-framework refinements (legacy 23.2 — capability enforcement) capability enforcement).
 - *Silent drift.* In-flight specialist proceeds with
   pre-change orientation. Mitigation A: the "changed since
   spawn — refresh?" hint above. Mitigation B: @atoz catches
@@ -282,12 +282,12 @@ land in source files primers read). Nothing they touch is new.
 | =AgentBaseline=                                    | the table standing orders extend; existing rows become "system" authored |
 | [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]]                                          | parallel mechanism for vault-derived facts; standing orders are user-derived decisions |
 | [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's log]]                                        | every =standing_orders_set= call logs an event for replay          |
-| [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Phase 29 self-coded tools]]                            | the promotion ladder is one branch of Phase 29's promotion-detection |
+| [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Phase 2026-05.20 — sync verb POC self-coded tools]]                            | the promotion ladder is one branch of Phase 2026-05.20 — sync verb POC's promotion-detection |
 
 * Status
 
 *Summary.* Pattern named 2026-05-04. Full implementation is
-Phase 25-or-later territory (it intersects DB-authoritative
+Phase 2026-05.17 — DB-as-cache + git-canonical pipeline-or-later territory (it intersects DB-authoritative
 inversion). Today: the wiki page itself is the only artifact;
 a placeholder vault file at =~/org/standing-orders.org= holds
 hand-written entries until the AgentBaseline schema-extension

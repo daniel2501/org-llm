@@ -27,18 +27,21 @@ The split:
 Phases are organic milestones, not a calendar cadence. A phase
 advances when a chunk of work feels done and the next chunk has
 shape. =Phase X.Y= sub-phases let one parent theme (e.g. "insight
-cards" = Phase 12) ship in slices without renumbering the world.
+cards" = Phase 2026-04.07 — insight cards) ship in slices without renumbering the world.
 
 ** How to read this page
 
 - *Status* on each phase: =shipped=, =in progress=, =planned=,
   =wishlist=. Shipped phases have a commit hash anchor; planned
   ones reference the code TODO that names them.
-- *Phase numbers can have gaps* (no Phase 4, no Phase 14). When a
-  chunk got absorbed into the previous or next milestone, the
-  number was retired rather than reassigned.
-- *Sub-phases stay open* until the parent retires; a Phase 12.6
-  that's still =planned= doesn't block a Phase 13 that already
+- *Legacy phase numbers had gaps* (no Phase 4, no Phase 14 in the
+  pre-2026-05-06 numerical scheme). When a chunk got absorbed
+  into the previous or next milestone, the number was retired
+  rather than reassigned. The new chronological scheme
+  (=YYYY-MM.PP=) has no gaps because sub-priorities are assigned
+  per-month at sort time.
+- *Sub-phases stay open* until the parent retires; a Phase 2026-07.05 — cached-gather persistence
+  that's still =planned= doesn't block a Phase 2026-04.08 — walk + opencode surfacing that already
   shipped.
 
 ** What goes here vs in the dev-tracker
@@ -65,15 +68,15 @@ Cross-reference convention:
 - *Standing top priority:* orchestration that is *smooth*,
   *beneficial*, *faster than solo*, and *higher quality than
   solo* — all four, simultaneously. No architecture is worth
-  shipping if it trades any one of those. Phase 20.x
+  shipping if it trades any one of those. Phase 2026-05.99 — full agent crew (PARKED)
   (full-crew LLM manager) was reverted in this session because
-  it traded speed AND quality; Phase 22 (recipe injection at
+  it traded speed AND quality; Phase 2026-05.12 — orchestration v2 (recipe injection at
   proxy time, zero extra round-trips) was accepted because it
   cleared all four bars.
 - *Currently:* late beta. Core flows (index → embed → ask →
   capture → launch) are stable. Most active recent surface is
-  Phase 22 v2 (manager pre-fetch + agent narrates) plus the
-  Phase 23.x agent-framework refinements + a wiki concept-graph
+  Phase 2026-05.07 — manager pre-fetch + agent narrates (manager pre-fetch + agent narrates) plus the
+  Phase 2026-05.14 — agent-framework refinements (legacy 23.x family) agent-framework refinements + a wiki concept-graph
   pass.
 - *Latest shipped (2026-05-04):*
   - *Two new meta-agents in starfleet-core* — =@atoz= (Trek:
@@ -90,9 +93,9 @@ Cross-reference convention:
     personas (artefact of adjacent-string-literal concatenation).
     Discovered + fixed during the @atoz dogfood.
   - *Wiki concept-graph sweep* — 14-page cross-link audit;
-    4 new concept pages registered: [[file:vault-facts.org][vault-facts.org]] (Phase 21
+    4 new concept pages registered: [[file:vault-facts.org][vault-facts.org]] (Phase 2026-05.13 — deterministic vault inferrers
     deterministic inferrers + DB cache), [[file:memory-alpha.org][memory-alpha.org]] (Trek
-    framing for the Phase 25 inversion: Memory Alpha = DB,
+    framing for the Phase 2026-05.17 — DB-as-cache + git-canonical pipeline inversion: Memory Alpha = DB,
     Memory Prime = =vault_facts=, Captain's Log + Mr. Atoz
     already in place), [[file:architecture.org][architecture.org]] (single-source-of-truth
     shape doc), [[file:interceptors.org][interceptors.org]] (concept page for the proxy
@@ -113,14 +116,14 @@ Cross-reference convention:
     renders; [[file:../../extensions/opencode/src/slots.tsx][=slots.tsx=]] wires it into both =home_prompt= +
     =session_prompt=. Visual verification (a real opencode
     session) still owed — gates Stage 2.
-  - *Supervision design rule canonized + Phase 24 planned.*
+  - *Supervision design rule canonized + Phase 2026-05.02 — supervision trinity planned.*
     [[file:architecture.org][architecture.org]] gains a top-level /Design rule —
     supervision is deterministic by default/ section: when the
     agent layer needs supervision, it runs as deterministic
     code unless the confusion genuinely needs reasoning.
     Implementation is three registries (pre-flight resolvers,
     tool-failure recovery hooks, confusion detector); spelled
-    out in [[*Phase 24: Supervision trinity][Phase 24]] with sub-phases 24.1–24.3 and an
+    out in [[*Phase 2026-05.02 — supervision trinity: Supervision trinity][Phase 2026-05.02 — supervision trinity]] with sub-phases 24.1–24.3 and an
     open-question 24.4 (manager quorum, async-only). Motivating
     bug: =@atoz= delegated for =wiki/superset.org=, agent
     looked in two wrong places (cwd + =~/org/=), gave up;
@@ -150,14 +153,14 @@ Cross-reference convention:
     =proxy_repair_markdown_tools=, =location_lat=,
     =location_lon=, =weather_enabled=,
     =weather_cache_ttl_secs=, =power_profile=.
-  - *Phase 21.1 — DB-backed vault fact store (first cut).*
+  - *Phase 2026-05.13.01 — DB-backed vault fact store — DB-backed vault fact store (first cut).*
     New =vault_fact= table + [[file:../../org_llm/vault_facts.py][=org_llm/vault_facts.py=]] with
     =register_inferrer= / =get_fact= / =get_all_facts= and
     mtime / ttl-aware invalidation. Three inferrers:
     =vault_stats= (572 files, 138 dailies, 182k nodes for this
     user), =tag_taxonomy= (top 30 tags), =routine_chores=
     (recurring chores from last 30 dailies; REJECT-first
-    filtering — fixes Phase 18.4-style routine drift at the
+    filtering — fixes Phase 2026-05.06 — proxy expansion-style routine drift at the
     data layer). Pre-fetch integration: =count_across_vault=
     runs append a =user_context:= line when the count target
     overlaps a known chore, so the agent gets accurate routine
@@ -165,7 +168,7 @@ Cross-reference convention:
     MCP tool. Bug-hunt finding: time-modifier phrases
     ("this year") still tokenise as content — see finding-5 in
     =docs/wiki/2026-05-03-test-session.org=.
-  - *Phase 22.5a — manager watches agents at zero perf cost.*
+  - *Phase 2026-05.11.01 — token-stream excerpt — manager watches agents at zero perf cost.*
     Cloud response stream is buffered (was already done for the
     repair path — bytes are free) and the agent's textual
     narration is appended to manager-log.jsonl as a =narration=
@@ -173,11 +176,11 @@ Cross-reference convention:
     one extra =log_crew_action= call (~5ms). Visible in the
     MANAGER buffer (=<leader> y Y=) and the sidebar's MANAGER
     card. Knob: =proxy_capture_narration= (default true).
-  - *Phase 22.6.2 + 22.6.3 — six more org/doom tools.*
+  - *Phase 2026-05.09.02 — CLOCK + drill + attach + 22.6.3 — six more org/doom tools.*
     =org_clock_summary=, =org_drill_review_due=,
     =org_attach_list=, =org_template_apply=, =doom_packages=,
     =doom_keybinds=. With these the toolbelt is *13 / 12*
-    (one more than the original Phase 22.6 plan because
+    (one more than the original Phase 2026-05.08 — markdown-JSON repair plan because
     =org_template_apply= came in alongside the others). MCP
     wrappers shipped.
   - *Repair-path renderer coverage.* The markdown-JSON
@@ -204,7 +207,7 @@ Cross-reference convention:
     tags, search, link graph, properties, orphans, agenda,
     metadata. Each prompt names the expected recipe + describes
     a passing answer + lists regression flags.
-  - *Phase 22 v2 — manager pre-fetch + agent narrates.* When a
+  - *Phase 2026-05.07 — manager pre-fetch + agent narrates — manager pre-fetch + agent narrates.* When a
     recipe matches, the proxy executes the underlying tool
     itself (zero LLM cost), injects the result into the agent
     prompt as a compact =MANAGER PRE-FETCH= block, then lets the
@@ -215,13 +218,13 @@ Cross-reference convention:
     end-to-end: "in dailies, how many times have I made my bed?"
     → 17ms manager pre-fetch + ~6s qwen3:4b narration → "Based on
     the dailies, you've made your bed 10 times..."
-  - *Phase 22.6 manager-side markdown-JSON tool-call repair.*
+  - *Phase 2026-05.08 — markdown-JSON repair manager-side markdown-JSON tool-call repair.*
     When a model emits a fenced ```json {tool_calls:…} ``` block
-    instead of a real tool call (the Phase 20 regression shape),
+    instead of a real tool call (the Phase 2026-05.99 — full agent crew (PARKED) regression shape),
     the proxy extracts it, executes locally for known org tools,
     and returns a final assistant message — no second cloud call.
     Knob: =proxy_repair_markdown_tools= (default true).
-  - *Phase 22.6.1 — six new pure-python org tools.* =org_link_graph=,
+  - *Phase 2026-05.09.01 — pure-python tools — six new pure-python org tools.* =org_link_graph=,
     =org_backlinks=, =org_orphans=, =org_property_search=,
     =org_id_find=, =org_refile_candidates=. MCP wrappers in
     =mcp_server.py=. Six of twelve tools queued in 22.6 done.
@@ -241,7 +244,7 @@ Cross-reference convention:
   STARTED items, validation backlog, and pace. Roadmap status
   reflects narrative-level milestones; the tracker is the
   source for actionable state.
-- *Phase 22 recipe-expansion: REVERSED 2026-05-03.* The
+- *Phase 2026-05.12 — orchestration v2 recipe-expansion: REVERSED 2026-05-03.* The
   90-judged-pair A/B ([[file:../../scripts/recipe_ab_harness.py][=scripts/recipe_ab_harness.py=]] +
   [[file:../../scripts/recipe_ab_judge.py][=scripts/recipe_ab_judge.py=]], blinded Claude Opus judge) found
   that 5 of 6 shipped recipes (=recent_activity_summary=,
@@ -265,6 +268,75 @@ Cross-reference convention:
   (macOS / Ubuntu), Termux/Android port, smoke coverage on
   less-walked verbs, MCP-kind tool-call logging.
 
+* Phase index                                                   :index:
+
+# As of: 2026-05-06. Single-row-per-phase view, sorted
+# chronologically by target month. Detail lives in the catalog
+# below. Update the State column when a phase ships, advances,
+# or pivots. Naming scheme: =Phase YYYY-MM.PP[.PP] — slug=,
+# sub-numbers are zero-padded priority within the month
+# (=.01= highest). Renames replace old =Phase 1–31= numbering;
+# legacy numbers preserved in =:LEGACY_NUMBER:= property + body
+# headers where useful.
+
+** 2026-04 — pre-beta foundations
+
+| Phase            | Name                                              | State    | Notes                                  |
+|------------------+---------------------------------------------------+----------+----------------------------------------|
+| [[*DONE Phase 2026-04.01 — initial implementation][2026-04.01]]       | initial implementation                            | shipped  | legacy: Phase 1–3                      |
+| [[*DONE Phase 2026-04.02 — opencode workspace][2026-04.02]]       | opencode workspace                                | shipped  | legacy: Phase 5                        |
+| [[*DONE Phase 2026-04.03 — opencode wiring audit][2026-04.03]]       | opencode wiring audit                             | shipped  | legacy: Phase 7                        |
+| [[*DONE Phase 2026-04.04 — =.opencode/= directory vs =.opencode.json= dotfile][2026-04.04]]       | =.opencode/= directory vs =.opencode.json= dotfile | shipped  | legacy: Phase 9.7                      |
+| [[*DONE Phase 2026-04.05 — surface polish + tutor + gallery][2026-04.05]]       | surface polish + tutor + gallery                  | shipped  | legacy: Phase 10                       |
+| [[*DONE Phase 2026-04.06 — embed migration + tag --apply][2026-04.06]]       | embed migration + tag --apply                     | shipped  | legacy: Phase 11                       |
+| [[*Phase 2026-04.07 — insight cards][2026-04.07]]       | insight cards (5 sub shipped, 2 deferred → 07.05/.06) | shipped | legacy: Phase 12                       |
+| [[*Phase 2026-04.08 — walk + opencode surfacing][2026-04.08]]       | walk + opencode surfacing (1 shipped, 3 deferred → 07.07/.08/.09) | shipped | legacy: Phase 13       |
+| [[*Phase 2026-04.09 — provider config audit][2026-04.09]]       | provider config audit                             | shipped  | legacy: Phase 15                       |
+| [[*Phase 2026-04.10 — extensions (scaffolding + plugin + launch wiring)][2026-04.10]]       | extensions (scaffolding + plugin + launch wiring) | shipped  | legacy: Phase 16.0–16.2                |
+| [[*DONE Phase 2026-04.11 — live sidebar status panel][2026-04.11]]       | live sidebar status panel                         | shipped  | legacy: Phase 17                       |
+
+** 2026-05 — current arc (priority order)
+
+| Phase            | Name                                              | State        | Notes                                  |
+|------------------+---------------------------------------------------+--------------+----------------------------------------|
+| [[*NEXT [#A] Phase 2026-05.01 — physical extraction][2026-05.01]]       | physical extraction                               | in flight    | v1.0 gate; legacy: Phase 26.2; in-flight overnight |
+| [[*DONE Phase 2026-05.02 — supervision trinity][2026-05.02]]       | supervision trinity                               | shipped      | 24.1+24.2+24.3 wired 2026-05-06; 24.4 open question |
+| [[*NEXT [#A] Phase 2026-05.03 — Emacs companion][2026-05.03]]       | Emacs companion                                   | in flight    | NEXT priority; legacy: Phase 16.3      |
+| [[*DONE Phase 2026-05.04 — cull walk][2026-05.04]]       | cull walk                                         | shipped      | 38 components verdicted; legacy: 26.1   |
+| [[*DONE Phase 2026-05.05 — LCARS panel + LLM proxy + auto-doctor][2026-05.05]]       | LCARS panel + LLM proxy + auto-doctor             | shipped      | 4 sub-phases shipped; legacy: 17.1     |
+| [[*Phase 2026-05.06 — proxy expansion + follow-ups][2026-05.06]]       | proxy expansion + follow-ups                      | partial      | 5 sub shipped; 7 follow-ups → 2026-07.10–.16; legacy: Phase 18 |
+| [[*DONE Phase 2026-05.07 — manager pre-fetch + agent narrates][2026-05.07]]       | manager pre-fetch + agent narrates                | shipped      | legacy: Phase 22 v2                    |
+| [[*DONE Phase 2026-05.08 — markdown-JSON repair (manager-side)][2026-05.08]]       | markdown-JSON repair                              | shipped      | legacy: Phase 22.6                     |
+| [[*TODO [#A] Phase 2026-05.09 — agent tools v2 (org/doom toolbelt expansion)][2026-05.09]]       | agent tools v2 (org/doom toolbelt)                | partial      | 3 sub shipped, .04 TODO; legacy: 22.6.x |
+| [[*DONE Phase 2026-05.10 — sidebar plugin disk-read squash][2026-05.10]]       | sidebar plugin disk-read squash                   | shipped      |                                        |
+| [[*NEXT [#A] Phase 2026-05.11 — thought-process capture in MANAGER log][2026-05.11]]       | thought-process capture                           | partial      | .01 shipped; .02/.03 TODO; legacy: 22.5 |
+| [[*TODO [#A] Phase 2026-05.12 — orchestration v2 (recipe expansion)][2026-05.12]]       | orchestration v2 (recipe expansion)               | in flight    | legacy: Phase 22                       |
+| [[*TODO [#A] Phase 2026-05.13 — deterministic vault inferrers][2026-05.13]]       | deterministic vault inferrers                     | partial      | .01 shipped (=vault_facts=); legacy: 21 |
+| [[*TODO [#A] Phase 2026-05.15 — built-in vault git-sync][2026-05.15]]       | built-in vault git-sync                           | planned      | gates org-agenda-agent; legacy: Phase 19 |
+| [[*TODO [#A] Phase 2026-05.16 — literate MCP tools (customize / manage / create)][2026-05.16]]       | literate MCP tools                                | planned      | sprint-eligible; legacy: Phase 23.6    |
+| [[*TODO [#A] Phase 2026-05.17 — DB-as-cache + git-canonical pipeline][2026-05.17]]       | DB-as-cache + git-canonical pipeline              | planned      | "Memory Alpha"; legacy: Phase 25       |
+| [[*TODO [#A] Phase 2026-05.18 — Doom config introspection][2026-05.18]]       | Doom config introspection                         | planned      | legacy: Phase 16.5                     |
+| [[*TODO [#A] Phase 2026-05.19 — extension polish][2026-05.19]]       | extension polish                                  | planned      | legacy: Phase 16.4+                    |
+| [[*TODO [#A] Phase 2026-05.20 — self-coded tools (sync verb POC + later sub-phases)][2026-05.20]]       | self-coded tools                                  | planned      | sync-verb POC sprint-eligible; legacy: Phase 29 |
+| [[*TODO [#A] Phase 2026-05.22 — punch list (beta → 1.0)][2026-05.22]]       | punch list (beta → 1.0)                           | planned      | cross-platform install + smoke + perf  |
+| [[*TODO [#B] Phase 2026-05.99 — full agent crew (manager + specialists, PARKED)][2026-05.99]]       | full agent crew                                   | parked       | reverted; legacy: Phase 20             |
+
+** 2026-06+ — post-1.0
+
+| Phase            | Name                                              | State        | Notes                                  |
+|------------------+---------------------------------------------------+--------------+----------------------------------------|
+| [[*TODO [#A] Phase 2026-06.04 — FOSS agent value-adds (multi-judge + later sub-phases)][2026-06.04]]       | FOSS agent value-adds                             | planned      | multi-judge .04 sprint-eligible; legacy: Phase 30 |
+| [[*TODO [#A] Phase 2026-07.01 — Apache Superset dashboards][2026-07.01]]       | Apache Superset dashboards                        | planned      | post-1.0; legacy: Phase 27             |
+| [[*TODO [#B] Phase 2026-07.02 — containerization strategy][2026-07.02]]       | containerization strategy                         | planned      | decision-already-made; legacy: Phase 28 |
+| [[*TODO [#B] Phase 2026-07.03 — theme-driven agent avatars][2026-07.03]]       | theme-driven agent avatars                        | planned      | post-1.0; legacy: Phase 31             |
+| 2026-07.05–.16   | deferred sub-phases of Phase 2026-04.07 — insight cards / 13 / 18         | planned      | low priority; bodies live in their parents |
+
+** Wishlist (no commitment)
+
+Voice / TTS · Multi-vault federation · Browser extension ·
+Inline embeddings refresh · Co-edit org files · org-agenda-agent.
+See =* TODO [#C] Wishlist — no commitment= section below.
+
 ** Phases planned (forward-looking, narrative)
 
 Standing direction: orchestration items pinned ahead of
@@ -278,27 +350,9 @@ sub-headings in the catalog — each carries scope and
 rationale. For sprint-level priority and active work state,
 see [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]].
 
-Currently planned phases (links into catalog below):
-
-- [[*TODO [#A] Active — Phase 16.3: Emacs companion][Phase 16.3 — Emacs companion]] (NEXT, in progress)
-- [[*TODO [#A] Planned — Phase 16.4+: extension polish][Phase 16.4+ — extension polish]]
-- [[*TODO [#A] Planned — Phase 16.5: Doom config introspection][Phase 16.5 — Doom config introspection]]
-- [[*TODO [#A] Planned — Phase 18: proxy expansion (follow-ups)][Phase 18 — proxy expansion follow-ups]]
-- [[*TODO [#A] Planned — Phase 19: built-in vault git-sync][Phase 19 — built-in vault git-sync]] (gates org-agenda-agent)
-- *Phase 21 deterministic inferrers* — Phase 21.1 shipped (=vault_facts=); further inferrers added as need surfaces (validated 2026-05-03 via =org-llm validate inferrers=)
-- *Phase 22.6 agent tools v2* — 13/12 shipped; remaining tool work tracked in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker]]
-- [[*TODO [#A] Planned — Phase 23.6: literate MCP tools (customize / manage / create)][Phase 23.6 — literate MCP tools]] (extends literate-config to the MCP surface)
-- [[*TODO [#B] Parked — Phase 20: full agent crew (manager + specialists)][Phase 20 — full agent crew]] (parked)
-
-Leftover sub-phases from earlier parents (B-priority unless
-otherwise noted): 12.6 (cached gather persistence), 12.7 (dbt
-analytics), 13.2 (dailies as walk targets), 13.4 (per-slug
-routing), 13.5 (follow-up questions in walk), Co-edit org
-files, org-agenda-agent.
-
 * Shipped — pre-beta foundations                             :shipped:
 
-** DONE Phase 1–3: initial implementation
+** DONE Phase 2026-04.01 — initial implementation
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -310,7 +364,7 @@ SQLite schema (Files, Nodes, History, Config), ollama integration,
 the first =doctor= verb, the source-of-truth =org-roam.db=, the
 themed splash + LCARS palette plumbing.
 
-** DONE Phase 5: opencode workspace
+** DONE Phase 2026-04.02 — opencode workspace
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -321,7 +375,7 @@ First working =org-llm launch=. Wrote =.opencode.json= with model +
 MCP server entries, registered the org-llm MCP tools so the
 in-opencode model could call =search_notes= et al.
 
-** DONE Phase 7: opencode wiring audit
+** DONE Phase 2026-04.03 — opencode wiring audit
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -333,7 +387,7 @@ spawned it. Model would silently fall back to grep. Fixed +
 pinned with the first [[file:../../tests/test_workspace_mcp.py][=tests/test_workspace_mcp.py=]] integration
 suite.
 
-** DONE Phase 9.7: =.opencode/= directory vs =.opencode.json= dotfile
+** DONE Phase 2026-04.04 — =.opencode/= directory vs =.opencode.json= dotfile
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -344,7 +398,7 @@ Walkthrough discovered opencode searches =<cwd>/.opencode/opencode.json=
 writing the latter — opencode silently ignored it. Switched the
 writer.
 
-** DONE Phase 10: surface polish + tutor + gallery
+** DONE Phase 2026-04.05 — surface polish + tutor + gallery
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -354,7 +408,7 @@ CLOSED: [2026-05-02]
 Tutor system, palette gallery, README rewrite. The "first 5 minutes"
 narrative that lands new users.
 
-** DONE Phase 11: embed migration + tag --apply
+** DONE Phase 2026-04.06 — embed migration + tag --apply
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -364,14 +418,14 @@ CLOSED: [2026-05-02]
 Embedding model migration path, =tag --apply= shipped (was a no-op
 stub before).
 
-* Shipped — Phase 12: insight cards                          :shipped:
+* Phase 2026-04.07 — insight cards                            :shipped:
 
 The headline "Claude Code for org-roam" experience: workspaces open
 with "I noticed N things since you were last active" instead of a
 blank prompt. Cards are deterministic generators (fast) optionally
 narrated by an LLM (slow); a scorer picks which to narrate.
 
-** DONE 12.1: pre-mount skeleton + first generator
+** DONE Phase 2026-04.07.01 — pre-mount skeleton + first generator
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -380,7 +434,7 @@ CLOSED: [2026-05-02]
 
 Card data model + first deterministic generator (stale candidates).
 
-** DONE 12.2: LLM narration + deterministic-vs-narrated scorer
+** DONE Phase 2026-04.07.02 — LLM narration + deterministic-vs-narrated scorer
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -390,7 +444,7 @@ CLOSED: [2026-05-02]
 Cards can be rewritten in the user's voice. A scorer picks which
 ones benefit from narration vs which read fine deterministic.
 
-** DONE 12.3: more generators + concept wiki
+** DONE Phase 2026-04.07.03 — more generators + concept wiki
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -400,7 +454,7 @@ CLOSED: [2026-05-02]
 Additional card kinds (drift, dangling links, etc.) + the wiki
 substrate this page lives in.
 
-** DONE 12.4: inject cards into opencode's first message
+** DONE Phase 2026-04.07.04 — inject cards into opencode's first message
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -408,11 +462,11 @@ CLOSED: [2026-05-02]
 :END:
 
 Cards appended to the system prompt so the model opens with
-"I noticed…" framing. Phase 16.1 supersedes this for the TUI plugin
+"I noticed…" framing. Phase 2026-04.10.02 — opencode TUI plugin supersedes this for the TUI plugin
 (cards now visible in a dialog instead of via prompt injection),
 but the prompt-injection path is still live as a fallback.
 
-** DONE 12.5: engagement table + =doctor --diagnose-cards=
+** DONE Phase 2026-04.07.05 — engagement table + =doctor --diagnose-cards=
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -423,7 +477,7 @@ Every card the user marks bad / clicks / dismisses writes a row to
 =insight_engagement=. =doctor --diagnose-cards= clusters by
 =(card_kind, narration_model)= and surfaces patterns.
 
-** TODO [#B] 12.6: real persistence for cached gather
+** TODO [#B] Phase 2026-07.05 — real persistence for cached gather
 SCHEDULED: <2026-06-15 Mon>
 :PROPERTIES:
 :STATUS: planned
@@ -433,7 +487,7 @@ SCHEDULED: <2026-06-15 Mon>
 The current cache is in-memory; cold every process. Persist to
 SQLite so launch-after-launch hits the cache.
 
-** TODO [#B] 12.7: dbt analytics over engagement
+** TODO [#B] Phase 2026-07.06 — dbt analytics over engagement
 SCHEDULED: <2026-06-22 Mon>
 :PROPERTIES:
 :STATUS: planned
@@ -442,16 +496,16 @@ SCHEDULED: <2026-06-22 Mon>
 
 Per-generator quality view + per-narration-model accept rate via
 =org-llm dbt run= models. Foundation for the AGENTS.md tuning
-loop (see Phase 16.2 audit + remote routine).
+loop (see Phase 2026-04.10.03 — launch wires plugin audit + remote routine).
 
-* Shipped — Phase 13: walk + opencode surfacing             :shipped:
+* Phase 2026-04.08 — walk + opencode surfacing               :shipped:
 
 Walking the context graph: the user can ask "what was I doing
 around X" and =walk= traces from a starting node through
 related-by-id, related-by-tag, related-by-time, and surfaces a
 narrative.
 
-** DONE 13.1: =org-llm walk= + opencode surfacing
+** DONE Phase 2026-04.08.01 — =org-llm walk= + opencode surfacing
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -461,7 +515,7 @@ CLOSED: [2026-05-02]
 The =walk= verb, =/walk= slash command, walk MCP tool. Atomic-fact
 validator + disambiguation tool + permissive UX.
 
-** TODO [#B] 13.2: dailies as walk targets
+** TODO [#B] Phase 2026-07.07 — dailies as walk targets
 SCHEDULED: <2026-06-08 Mon>
 :PROPERTIES:
 :STATUS: planned
@@ -471,7 +525,7 @@ SCHEDULED: <2026-06-08 Mon>
 Walk a day's nodes (today, yesterday, last weekday) without needing
 an explicit start ID.
 
-** TODO [#B] 13.4: per-slug routing + real fact replacement
+** TODO [#B] Phase 2026-07.08 — per-slug routing + real fact replacement
 SCHEDULED: <2026-06-29 Mon>
 :PROPERTIES:
 :STATUS: planned
@@ -481,7 +535,7 @@ SCHEDULED: <2026-06-29 Mon>
 Replace "fact removal" with real edit-in-place via slug routing,
 not the current append-with-disambiguation-marker scheme.
 
-** TODO [#B] 13.5: follow-up questions in walk
+** TODO [#B] Phase 2026-07.09 — follow-up questions in walk
 SCHEDULED: <2026-07-06 Mon>
 :PROPERTIES:
 :STATUS: planned
@@ -492,7 +546,7 @@ Walk currently is one-shot — answer or no-answer. 13.5 lets walk
 ask the user a clarifying question when the start node is
 ambiguous.
 
-* Shipped — Phase 15: provider config audit                  :shipped:
+* Phase 2026-04.09 — provider config audit                    :shipped:
 
 Cloud-or-local routing default-to-auto. Both providers (Ollama +
 cloud) written into the launch config so the in-opencode model
@@ -502,13 +556,13 @@ dropping our config.
 
 Key commits: =d84b28a=, =ef7e61a= (num_ctx 32k per-model), =16d2e33=.
 
-* Shipped — Phase 16.0–16.2: extensions                      :shipped:
+* Phase 2026-04.10 — extensions (scaffolding + plugin + launch wiring) :shipped:
 
 The TypeScript-and-Emacs era: behavior code that runs *inside*
 opencode's plugin loader instead of trying to express everything
 through JSON config.
 
-** DONE 16.0: scaffolding
+** DONE Phase 2026-04.10.01 — extensions scaffolding
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -518,7 +572,7 @@ CLOSED: [2026-05-02]
 =extensions/opencode/= bun project, =extensions/emacs/= elisp scaffold,
 no-op plugin that compiles + tests cleanly.
 
-** DONE 16.1: opencode TUI plugin (insight cards)
+** DONE Phase 2026-04.10.02 — opencode TUI plugin (insight cards)
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -528,7 +582,7 @@ CLOSED: [2026-05-02]
 First real plugin: reads =.opencode/insight-cards.json=, registers
 =/insights= command, pops a toast on load.
 
-** DONE 16.2: launch wires the plugin + AGENTS.md primer + slot overrides
+** DONE Phase 2026-04.10.03 — launch wires the plugin + AGENTS.md primer + slot overrides
 CLOSED: [2026-04-30]
 :PROPERTIES:
 :STATUS: shipped
@@ -560,7 +614,7 @@ The big push that landed today (2026-04-30). What was added:
   routine firing 2026-05-13 to evaluate primer effectiveness and
   optionally open a tuning PR (hybrid: local audit, remote PR).
 
-* NEXT [#A] Active — Phase 16.3: Emacs companion        :in_progress:
+* NEXT [#A] Phase 2026-05.03 — Emacs companion                :in_progress:
 
 Emacs integration that lives next to opencode rather than as an
 alternative to it. Per [[file:../../extensions/emacs/README.md][=extensions/emacs/README.md:40=]].
@@ -574,16 +628,16 @@ alternative to it. Per [[file:../../extensions/emacs/README.md][=extensions/emac
 
 ** Status
 
-Scaffolded in [[file:../../extensions/emacs/org-llm.el][=extensions/emacs/org-llm.el=]] (Phase 16.0). Real
+Scaffolded in [[file:../../extensions/emacs/org-llm.el][=extensions/emacs/org-llm.el=]] (Phase 2026-04.10.01 — extensions scaffolding). Real
 hooks land here.
 
-* DONE Shipped — Phase 17: live sidebar status panel         :shipped:
+* DONE Phase 2026-04.11 — live sidebar status panel           :shipped:
 CLOSED: [2026-04-30]
 
 The next big feature push. The opencode TUI sidebar currently
 shows opencode's defaults (mcp / lsp / files / todo widgets);
-the sidebar_title was branded "org-llm •" in Phase 16.2 but the
-content beneath is still default. Phase 17 replaces it with a
+the sidebar_title was branded "org-llm •" in Phase 2026-04.10.03 — launch wires plugin but the
+content beneath is still default. Phase 2026-04.11 — live sidebar status panel replaces it with a
 live, refreshing org-llm panel.
 
 ** Scope
@@ -606,7 +660,7 @@ live, refreshing org-llm panel.
 
 - =sidebar_content= slot override (TSX in
   [[file:../../extensions/opencode/src/slots.tsx][=extensions/opencode/src/slots.tsx=]]); same plumbing as the
-  Phase 16.2 =home_logo= override.
+  Phase 2026-04.10.03 — launch wires plugin =home_logo= override.
 - New launch-time JSON file =.opencode/sidebar-status.json=
   populated alongside =insight-cards.json=. Plugin reads this
   on mount and re-reads on a tick.
@@ -624,15 +678,15 @@ the JSON file, so an external writer (auto-embedder cycle, a
 =doctor= run, etc.) can update the panel without coupling to
 opencode's runtime.
 
-* DONE Shipped — Phase 17.1: LCARS panel + LLM proxy + auto-doctor :shipped:
+* DONE Phase 2026-05.05 — LCARS panel + LLM proxy + auto-doctor :shipped:
 CLOSED: [2026-05-02]
 
-What started as "polish on the Phase 17 sidebar" became a much
+What started as "polish on the Phase 2026-04.11 — live sidebar status panel sidebar" became a much
 larger refactor that took the launch surface from "opencode with
 some org-llm decoration" to "an opencode harness where org-llm
 owns the user's LLM-routing decisions." Three pillars:
 
-** 17.1a–m: LCARS panel reorganisation
+** Phase 2026-05.05.01 — LCARS panel reorganisation (17.1a–m)
 - New [[file:../../extensions/opencode/src/panel.tsx][=extensions/opencode/src/panel.tsx=]] shared module: status
   JSON cache + types + section renderers, used by BOTH the
   =sidebar_content= slot (in-session, see
@@ -647,7 +701,7 @@ owns the user's LLM-routing decisions." Three pillars:
 - =MAKE IT SO= footer flipped off by default to save vertical
   space; stardate header retained.
 
-** 17.1e: auto-session opener
+** Phase 2026-05.05.02 — auto-session opener (17.1e)
 - New [[file:../../extensions/opencode/src/auto-session.tsx][=extensions/opencode/src/auto-session.tsx=]] — at plugin
   mount, populate the prompt with a launch-rendered LCARS banner
   (live stardate + vault stats + a Trek-themed prompt) and call
@@ -665,7 +719,7 @@ owns the user's LLM-routing decisions." Three pillars:
   tools via prompt-engineered synthesis, but =llama3.2= remains
   the safer default for the auto-session opener.)
 
-** 17.1j–o: slow-LLM watcher + cloud relaunch
+** Phase 2026-05.05.03 — slow-LLM watcher + cloud relaunch (17.1j–o)
 - New [[file:../../extensions/opencode/src/slow-llm-watch.tsx][=extensions/opencode/src/slow-llm-watch.tsx=]] — watches
   =message.updated= events from outside the LLM loop. If the AI
   hasn't started responding within =sidebar_slow_llm_threshold_ms=
@@ -680,7 +734,7 @@ owns the user's LLM-routing decisions." Three pillars:
   opencode. The new launch reads the stashed pending prompt and
   auto-resubmits via cloud — no manual "Ctrl+C twice + rerun."
 
-** 17.1k–s: =/sys*= slash family + LLM proxy
+** Phase 2026-05.05.04 — =/sys*= slash family + LLM proxy (17.1k–s)
 - New [[file:../../extensions/opencode/src/sys-commands.tsx][=extensions/opencode/src/sys-commands.tsx=]] — implements
   =/sysdoctor=, =/sysstats=, =/sysmodels=, =/sysrecent=,
   =/sysreclaim=, =/syscloud=, =/sysmenu=, =/sysmodel <name>=,
@@ -733,12 +787,12 @@ owns the user's LLM-routing decisions." Three pillars:
 ** Status
 
 Shipped 2026-05-02. The proxy is the foundation for several
-Phase 18+ ideas: skill→slash auto-bridging, citation
+Phase 2026-05.06 — proxy expansion+ ideas: skill→slash auto-bridging, citation
 post-processing, prefix caching of system prompts, cloud-failover
 on first-byte timeout. Each is a single new interceptor module
 slotting into the existing chain.
 
-* TODO [#A] Planned — Phase 16.4+: extension polish          :planned:
+* TODO [#A] Phase 2026-05.19 — extension polish               :planned:
 SCHEDULED: <2026-05-22 Fri>
 
 ** Status panel slot
@@ -761,7 +815,7 @@ insight cards, and the routine on 2026-05-13 having real data.
 
 =sidebar_content= (MCP panel header), =home_footer=, =home_bottom=
 (tip strings) all still leak opencode-flavored chrome. Same TSX
-slot pattern as Phase 16.2's =home_logo= work.
+slot pattern as Phase 2026-04.10.03 — launch wires plugin's =home_logo= work.
 
 ** Tool-call reliability warning for under-spec'd local models
 
@@ -769,7 +823,7 @@ Discovered 2026-05-02: a user query as simple as "count of org
 files?" hung indefinitely on =phi4-mini= because the model spun
 reasoning chains without ever emitting an MCP tool call. The
 slow-LLM watcher caught the hang at 25s and ran
-=doctor --power-boost= (Phase 17.1j working as designed), but
+=doctor --power-boost= (Phase 2026-05.05 — LCARS panel + LLM proxyj working as designed), but
 the user's *first* impression was a hung TUI.
 
 Fix: at launch, check =chat_model= against a known-unreliable
@@ -787,13 +841,13 @@ The bundled =chat_model= default is already =llama3.2= so fresh
 installs are fine; this is for users who manually overrode it
 without realising the tool-calling implications.
 
-* TODO [#B] Parked — Phase 20: full agent crew (manager + specialists) :parked:
+* TODO [#B] Phase 2026-05.99 — full agent crew (manager + specialists, PARKED) :parked:
 SCHEDULED: <2026-07-15 Wed>
 
 *Status (2026-05-02):* Reverted at commit ~f50d10a after the
 multi-round-trip orchestration tripled latency and degraded
 output quality. The deterministic-recipe variant shipped as
-Phase 22 captures most of the practical wins (orchestrated tool
+Phase 2026-05.12 — orchestration v2 captures most of the practical wins (orchestrated tool
 order, inline filters, MANAGER visibility) without the cost.
 This entry stays on the roadmap as the longer-term home for the
 peer-review / coder-as-language-reviewer ideas — re-enable when
@@ -802,7 +856,7 @@ we have a single-shot orchestrator model.
 
 Today the 13 preconfigured agents are independent specialists —
 the user picks one via =@scribe= / =@engineer= / etc. and the
-chosen agent answers in isolation. Phase 20 turns the registry
+chosen agent answers in isolation. Phase 2026-05.99 — full agent crew (PARKED) turns the registry
 into a *crew* with a manager that orchestrates the others, plus
 peer-review hand-offs so a draft from one specialist passes
 through another's review before reaching the user.
@@ -840,7 +894,7 @@ through another's review before reaching the user.
   invokes each specialist instead of the full toolbox.
 - *Per-role model preferences* — already partially shipped as
   =model_role= slots (=summarize_model=, =review_model=, etc.).
-  Phase 20 finishes the wiring so each crew member's model is
+  Phase 2026-05.99 — full agent crew (PARKED) finishes the wiring so each crew member's model is
   independently configurable in =~/org/org-llm-agents.org=.
 
 ** The default crew
@@ -868,12 +922,12 @@ Working name → role → typical reviewers (suggested defaults):
 The user customises the table — adds their own specialists,
 removes ones they don't use, swaps reviewers — by editing
 =~/org/org-llm-agents.org=. The literate-config round-trip
-already exists; Phase 20 extends the schema to express the
+already exists; Phase 2026-05.99 — full agent crew (PARKED) extends the schema to express the
 =reviewed_by= column and =allowed_tools= per agent.
 
 ** Roll-out
 
-*** 20.1 — Manager agent (=@crew=) + tool-subset enforcement
+*** Phase 2026-05.99.01 — manager agent (=@crew=) + tool-subset enforcement
 - New preconfigured agent =crew= that defaults to =primary=
   mode in opencode and is the agent users hit when they don't
   type =@anything=.
@@ -883,7 +937,7 @@ already exists; Phase 20 extends the schema to express the
 - Existing solo invocation pattern (=@scribe ...=) keeps working
   — just bypasses the manager.
 
-*** 20.2 — Peer review pipeline
+*** Phase 2026-05.99.02 — peer review pipeline
 - =reviewed_by= column expressed as one or more reviewer names.
 - When the manager assembles a final answer, it runs each
   draft through its declared reviewer first. Reviewer either
@@ -899,7 +953,7 @@ already exists; Phase 20 extends the schema to express the
   reviewed, hardened version with both drafter and reviewer
   named in the response.
 
-*** 20.3 — Crew-level memory + composition
+*** Phase 2026-05.99.03 — crew-level memory + composition
 - Cross-agent memory: when the manager dispatches to multiple
   specialists in one turn, they share a per-turn scratchpad so
   the planner's output is visible to the engineer and the
@@ -920,7 +974,7 @@ already exists; Phase 20 extends the schema to express the
    specialists. Add a =manager_model= role slot? (Likely yes;
    defaults to =fast_model=.)
 
-* TODO [#A] Planned — Phase 16.5: Doom config introspection  :planned:
+* TODO [#A] Phase 2026-05.18 — Doom config introspection      :planned:
 SCHEDULED: <2026-05-20 Wed>
 
 org-llm currently asks the user to set =org_dir=, =daily_dir=,
@@ -929,7 +983,7 @@ this (=org-directory=, =org-roam-directory=,
 =org-roam-dailies-directory=, =org-agenda-files=,
 =org-default-notes-file=). Read it from Doom and stop asking.
 
-** 16.5a — =org-llm doom-sync= verb (MVP)
+** Phase 2026-05.18.01 — =org-llm doom-sync= verb (MVP)
 
 - Probe the running Emacs via =emacsclient --eval= for ~7
   well-known org-* variables (=org-directory=,
@@ -954,9 +1008,9 @@ this (=org-directory=, =org-roam-directory=,
   =_static_parse=, =gather_doom_config=) are reusable from the
   daemon, =config --check=, and the doom companion later.
 
-** 16.5b — Daemon recheck on config drift
+** Phase 2026-05.18.02 — daemon recheck on config drift
 
-- Auto-embedder daemon (Phase 19's planned single-flight host)
+- Auto-embedder daemon (Phase 2026-05.15 — built-in vault git-sync's planned single-flight host)
   watches mtime on =~/.config/doom/config.el= +
   =~/.config/doom/init.el= + the live Emacs's
   =emacs-init-time=.
@@ -968,7 +1022,7 @@ this (=org-directory=, =org-roam-directory=,
   =prompt= in 16.5b — never =auto-apply=, since path changes can
   invalidate the embedding corpus).
 
-** 16.5c — Prompt-on-change UX + extras
+** Phase 2026-05.18.03 — prompt-on-change UX + extras
 
 - Sidebar gets a =DOOM= row with last-sync time and drift count.
 - =config --check= grows a =doom= row that flags drift.
@@ -979,7 +1033,7 @@ this (=org-directory=, =org-roam-directory=,
   =doctor= output so "do you have =:lang org +roam2=?" / "is
   =:tools magit= loaded?" can be answered without asking.
 
-** 16.5d — Capture-template authoring (scribe writes to Doom)
+** Phase 2026-05.18.04 — capture-template authoring (scribe writes to Doom)
 
 When @scribe is asked to capture a recurring shape — weekend
 todo, meeting notes, daily reflection, side-project log — and no
@@ -1018,7 +1072,7 @@ Why this matters:
 - Once the template exists, =C-c c m= from anywhere in Emacs
   uses it too — scribe's contribution becomes part of the
   user's permanent toolkit rather than session-scoped behavior.
-- Pairs with the *coder reviewer* from Phase 20: any elisp
+- Pairs with the *coder reviewer* from Phase 2026-05.99 — full agent crew (PARKED): any elisp
   scribe drafts goes through coder for safety/idiomatic review
   before it's written to disk.
 
@@ -1031,7 +1085,7 @@ Implementation surface:
   key. Writes to =~/.config/doom/config.el= under a section
   marker (=;; --- org-llm: scribe-authored capture templates
   ---=) so future updates land in the same place.
-- Diff preview goes through the existing review flow (Phase 20
+- Diff preview goes through the existing review flow (Phase 2026-05.99 — full agent crew (PARKED)
   coder reviewer if available, raw text diff otherwise).
 - =doom-sync --reload-org= triggers the live reload.
 
@@ -1055,7 +1109,7 @@ Three downstream features depend on knowing the user's real Doom
 state:
 - *org-agenda-agent* — needs =org-agenda-files= or it's just a
   =find -name '*.org'= guess.
-- *Phase 19 vault git-sync* — =org_dir= drift between doom and
+- *Phase 2026-05.15 — built-in vault git-sync vault git-sync* — =org_dir= drift between doom and
   org-llm causes "wrong repo synced" footguns.
 - *Auto-tag quality* — =org-tag-alist= is the user's curated
   taxonomy; the auto-tagger should prefer it over LLM-invented
@@ -1069,10 +1123,10 @@ Open questions:
    remote)? =emacsclient -s <socket>= covers it but the path
    resolution gets messy. Out of scope for 16.5a.
 
-* TODO [#A] Planned — Phase 18: proxy expansion (follow-ups) :planned:
+* Phase 2026-05.06 — proxy expansion + follow-ups             :planned:
 SCHEDULED: <2026-05-18 Mon>
 
-Phase 17.1 landed [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] with a 13-interceptor
+Phase 2026-05.05 — LCARS panel + LLM proxy landed [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] with a 13-interceptor
 chain between opencode and ollama. Each interceptor is a standalone
 =req → ProxyResponse | None= function — composing new ones is the
 cheapest unit of work in the codebase. The list below is the
@@ -1087,7 +1141,7 @@ already runs these without ever calling the LLM. Closes the loop:
 writing a skill in org gives you a tab-completable opencode slash
 for free, with zero ollama wake-up.
 
-** DONE Action bridge (file-based external dispatch)         :shipped:
+** DONE Phase 2026-05.06.01 — action bridge (file-based external dispatch) :shipped:
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -1131,7 +1185,7 @@ Doom bindings under =SPC l y= track the action types:
 - =q= — quit opencode (still vterm-send-string, only path that
   must reach opencode AFTER the bridge can no longer dispatch)
 
-Future actions (additive; tracked in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 18 follow-ups):
+Future actions (additive; tracked in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 2026-05.06 — proxy expansion follow-ups):
 
 - =set-model= — hot model swap without relaunch
 - *cloud_model validator should consult cloud catalog* — surfaced
@@ -1165,7 +1219,7 @@ Future actions (additive; tracked in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][
 - =scheduled-result= — remote agent (e.g. the 5/16 audit
   routine) writes when its work lands
 
-** DONE 18.6: Cloud-first + synth tools + ctx-overflow retries :shipped:
+** DONE Phase 2026-05.06.02 — cloud-first + synth tools + ctx-overflow retries :shipped:
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -1209,7 +1263,7 @@ Net user-visible impact: a tools-using prompt on RAM-constrained
 hardware dropped from ~40s end-to-end (30s local stall + 10s
 cloud) to ~9.5s direct via cloud-first.
 
-** DONE System-prompt prefix cache                           :shipped:
+** DONE Phase 2026-05.06.03 — system-prompt prefix cache      :shipped:
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -1237,7 +1291,7 @@ the request always wins. Knobs:
 
 6 new tests in [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]] (56 total).
 
-** DONE FOSS-first segmentation                              :shipped:
+** DONE Phase 2026-05.06.04 — FOSS-first segmentation         :shipped:
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -1266,7 +1320,7 @@ Behavior break: existing users will see the cloud_model
 recommendation default to open-weight after upgrade. Opting back
 in is one config flip.
 
-** DONE Cloud failover on first-byte timeout                 :shipped:
+** DONE Phase 2026-05.06.05 — cloud failover on first-byte timeout :shipped:
 CLOSED: [2026-05-02]
 :PROPERTIES:
 :STATUS: shipped
@@ -1285,7 +1339,7 @@ the relaunch round-trip. Audit entries show
 =intercepted_by="cloud_failover"=. 9 new tests in
 [[file:../../scripts/test_llm_proxy.py][=scripts/test_llm_proxy.py=]] (47 total).
 
-** TODO [#B] Citation post-processor
+** TODO [#B] Phase 2026-07.10 — citation post-processor
 
 After a forwarded =ask_notes= reply streams back, append a
 deterministic source list (=[#node-id]= markers + a footer block)
@@ -1293,7 +1347,7 @@ keyed on the nodes the proxy saw the LLM retrieve. Removes the
 LLM-cooperation dependency for grounded answers — citations are
 guaranteed even when the model "forgets" to cite.
 
-** TODO [#B] Tool-result memoisation
+** TODO [#B] Phase 2026-07.11 — tool-result memoisation
 
 Same MCP tool call (same args) within a configurable window →
 return the cached result without round-tripping. Saves the local
@@ -1301,7 +1355,7 @@ model from regenerating the same =search_notes= → =get_node= →
 read response chain when the user asks variations of the same
 question.
 
-** TODO [#C] Skill-matching on free-form text
+** TODO [#C] Phase 2026-07.12 — skill-matching on free-form text
 
 Extend =intercept_md_skills='s fuzzy matcher beyond the current
 hardcoded patterns ("save this thought" → capture). Build an
@@ -1310,7 +1364,7 @@ route free-form messages to the closest skill instead of the LLM
 when similarity exceeds a threshold. Falls back to the LLM
 cleanly when nothing matches.
 
-** TODO [#B] Per-turn model routing
+** TODO [#B] Phase 2026-07.13 — per-turn model routing
 
 Today =intercept_model_routing= runs at launch and sticks. Move
 the decision per-turn: cheap qwen for "what's 2+2", smart cloud
@@ -1318,7 +1372,7 @@ for code generation, local-only for vault queries. The proxy
 already sees every request body; the router just needs to rewrite
 =model:= before forwarding.
 
-** TODO [#C] Auto-summarisation of long context
+** TODO [#C] Phase 2026-07.14 — auto-summarisation of long context
 
 When the conversation history exceeds N turns, replace the
 earliest turns with one-line LLM-generated summaries before
@@ -1326,7 +1380,7 @@ forwarding. Local models re-prefill the entire history every turn;
 this keeps local-only sessions usable past 50+ turns without
 falling off a cliff.
 
-** TODO [#B] Stream-time tool-call repair
+** TODO [#B] Phase 2026-07.15 — stream-time tool-call repair
 
 =intercept_tool_call_repair= currently fixes the request body
 (LLM-emitted bad calls in completions). The streaming-response
@@ -1334,27 +1388,27 @@ counterpart: many local models emit malformed JSON tool calls
 mid-stream. Repair them on the fly so opencode's tool-use loop
 doesn't error out.
 
-** TODO [#B] Provider-failure fallback
+** TODO [#B] Phase 2026-07.16 — provider-failure fallback
 
 If upstream returns 5xx, connection-reset, or stalls past a
 configurable threshold, transparently retry against the cloud
 provider (or a different local model). Today the user sees
 opencode's raw error UI; the proxy can recover before it bubbles.
 
-* DONE Shipped — Phase 22 v2: manager pre-fetch + agent narrates :shipped:
+* DONE Phase 2026-05.07 — manager pre-fetch + agent narrates  :shipped:
 CLOSED: [2026-05-03]
 :PROPERTIES:
 :STATUS: shipped
 :END:
 
-The 2026-05-02 advisory recipe pattern (Phase 22) injected a
+The 2026-05-02 advisory recipe pattern (Phase 2026-05.12 — orchestration v2) injected a
 RECIPE block into the agent prompt and trusted the LLM to follow
 it. Validation against qwen-2.5-72b proved that trust was
 misplaced: the model recognised the recipe but emitted a fenced
 =```json {"tool_calls":...}```= block instead of a real tool
 call. Result: zero hits, no count, robotic dump of fake JSON.
 
-Phase 22 v2 pulls the deterministic step UP into the manager.
+Phase 2026-05.07 — manager pre-fetch + agent narrates pulls the deterministic step UP into the manager.
 
 ** What changed
 - *New module* [[file:../../org_llm/recipe_runner.py][=org_llm/recipe_runner.py=]] with =execute_recipe()=
@@ -1410,13 +1464,13 @@ and 2026-03-14.
 Single =step=1 loop= in opencode's session log — the agent did
 not re-invoke the tool. Tool use enforced, narration intact.
 
-* DONE Shipped — Phase 22.6 (manager-side markdown-JSON repair) :shipped:
+* DONE Phase 2026-05.08 — markdown-JSON repair (manager-side) :shipped:
 CLOSED: [2026-05-03]
 :PROPERTIES:
 :STATUS: shipped
 :END:
 
-Defence in depth for the Phase 20 regression shape. When a model
+Defence in depth for the Phase 2026-05.99 — full agent crew (PARKED) regression shape. When a model
 emits a fenced =```json {tool_calls:[…]}```= block instead of a
 real tool call, the proxy now intercepts it, parses the
 (possibly Python-flavoured) JSON, and executes the named tool
@@ -1448,13 +1502,13 @@ round-trip to feed the tool result back to the LLM.
   agent_from=manager, agent_to=<tool>, model=
   =(markdown→local)= or =(markdown→structured)=.
 
-* DONE Shipped — Phase 22.6.1: six pure-python org tools     :shipped:
+* DONE Phase 2026-05.09.01 — six pure-python org tools        :shipped:
 CLOSED: [2026-05-03]
 :PROPERTIES:
 :STATUS: shipped
 :END:
 
-Round 1 of the Phase 22.6 toolbelt expansion. Six pure-python
+Round 1 of the Phase 2026-05.08 — markdown-JSON repair toolbelt expansion. Six pure-python
 helpers added to =org_tools.py=, each with an MCP wrapper in
 =mcp_server.py= mirroring the seven seed tools (=org_grep=,
 =org_count_matches=, =org_file_meta=, =org_outline=,
@@ -1473,15 +1527,15 @@ Built on a shared =_vault_id_index()= helper (~30-80ms scan that
 returns ={id: {file, title, kind}}=). All read-only. All refuse
 paths outside =org_dir=. Validated against the live vault: 523
 ids indexed, refile picks the right Phase-related files for
-=Phase 22 orchestration recipe= input, =org_orphans= surfaces 50
+=Phase 2026-05.12 — orchestration v2 orchestration recipe= input, =org_orphans= surfaces 50
 unlinked-untagged files for triage.
 
-Remaining sub-rollouts in Phase 22.6 still planned: 22.6.2
+Remaining sub-rollouts in Phase 2026-05.08 — markdown-JSON repair still planned: 22.6.2
 (CLOCK summary, drill review-due, attach list), 22.6.3
 (template apply, doom packages, doom keybinds), 22.6.4 (wire
 into agent prompts).
 
-* DONE Shipped — sidebar plugin disk-read squash             :shipped:
+* DONE Phase 2026-05.10 — sidebar plugin disk-read squash     :shipped:
 CLOSED: [2026-05-03]
 :PROPERTIES:
 :STATUS: shipped
@@ -1523,7 +1577,7 @@ Two compounding silent failures lived in
   component triggers re-renders without depending on opencode
   re-invoking the slot fn (which it doesn't, after initial
   mount — empirically verified).
-- *Choppy-border revert.* The Phase 22.5 nested =<scrollbox>=
+- *Choppy-border revert.* The Phase 2026-05.11 — thought-process capture nested =<scrollbox>=
   inside a rounded =<SectionCard>= corrupted the corner
   cells on each redraw. Replaced with a plain =<box>= +
   entry slicing (=manager_card_max_lines / 2=) for stable
@@ -1536,10 +1590,10 @@ plugin .tsx files; route all sidebar JSON through the canonical
 helpers; components that need to react to disk changes should
 own a =createSignal= + =setInterval=.
 
-* NEXT [#A] Active — Phase 22.5: thought-process capture in MANAGER log :in_progress:
+* NEXT [#A] Phase 2026-05.11 — thought-process capture in MANAGER log :in_progress:
 SCHEDULED: <2026-05-09 Sat>
 
-The MANAGER buffer (Phase 22, Doom keybind =<leader> y Y=)
+The MANAGER buffer (Phase 2026-05.12 — orchestration v2, Doom keybind =<leader> y Y=)
 currently logs the I/O envelope of each crew action — action,
 target agent, prompt excerpt, result excerpt, model, duration,
 outcome. What it doesn't capture is the LLM's *internal*
@@ -1559,7 +1613,7 @@ Three layers of visibility, increasing in cost:
 
 ** Roll-out
 
-*** DONE 22.5a — token-stream excerpt :shipped:
+*** DONE Phase 2026-05.11.01 — token-stream excerpt :shipped:
 CLOSED: [2026-05-03]
 Shipped slightly differently than originally specced — instead
 of attaching a =reasoning= field to the existing =delegate= entry,
@@ -1572,14 +1626,14 @@ without slowing the wfile.write loop; on the cloud-failover
 path the bytes were already buffered for the tool-call repair.
 Knob: =proxy_capture_narration= (default true).
 
-*** 22.5b — explicit reasoning capture
+*** Phase 2026-05.11.02 — explicit reasoning capture
 - For models that natively emit structured thinking
   (=<thinking>...</thinking>= tags, OpenAI o1-style reasoning
   tokens, etc.), extract those separately so the user sees the
   decision tree, not just the verbose narration.
 - Knob: =proxy_capture_reasoning= (off / brief / full).
 
-*** 22.5c — chain visualisation
+*** Phase 2026-05.11.03 — chain visualisation
 - For multi-delegate turns (crew → classifier → scribe),
   generate a small ASCII chain diagram in the MANAGER buffer
   showing the call graph: who called whom, what was passed,
@@ -1594,11 +1648,11 @@ Knob: =proxy_capture_narration= (default true).
 3. Performance: capture for ALL turns or only orchestrated?
    Lean orchestrated-only at first.
 
-* TODO [#A] Active — Phase 22: orchestration v2 (recipe expansion) :in_progress:
+* TODO [#A] Phase 2026-05.12 — orchestration v2 (recipe expansion) :in_progress:
 SCHEDULED: <2026-05-10 Sun>
 
-Phase 22 v1 (advisory recipe injection, shipped 2026-05-02) and
-Phase 22 v2 (manager pre-fetch + agent narrates, shipped
+Phase 2026-05.12 — orchestration v2 v1 (advisory recipe injection, shipped 2026-05-02) and
+Phase 2026-05.07 — manager pre-fetch + agent narrates (manager pre-fetch + agent narrates, shipped
 2026-05-03) cover the =count_across_vault= shape end-to-end.
 This sub-phase is about *expansion* — promoting more recipes
 to the deterministic pre-fetch shape and adding new recipes
@@ -1612,14 +1666,14 @@ data-gathering step) or whether they genuinely need
 LLM-multi-step. Outcome: a draft PR with the runners + tests,
 or a markdown note explaining why each stays advisory.
 
-The 2026-05-02 attempt at full crew orchestration (Phase 20.x)
+The 2026-05-02 attempt at full crew orchestration (Phase 2026-05.99 — full agent crew (PARKED))
 was reverted because it cost 3-5× cloud round-trips per turn
 (60-150s) AND degraded output quality (LLM emitted tool calls as
 markdown JSON, hallucinated items, ignored format guidance). The
 manager pattern is still desired — but only if it doesn't trade
 speed or quality for the architecture.
 
-Hard constraints for Phase 22:
+Hard constraints for Phase 2026-05.12 — orchestration v2:
 - *No more round-trips than the solo path.* If solo is 2 cloud
   calls (gather + draft), orchestrated must be ≤ 2 cloud calls.
 - *No quality degradation.* Same routine filter strictness, same
@@ -1667,7 +1721,7 @@ Hard constraints for Phase 22:
 
 ** Roll-out
 
-*** 22.0 — Pick a design via A/B
+*** Phase 2026-05.12.01 — pick a design via A/B
 - Build minimal versions of A, B, C behind a knob
   (=proxy_orchestration_mode= = =off= / =router= / =parallel=
   / =recipe=).
@@ -1679,7 +1733,7 @@ Hard constraints for Phase 22:
 - Pick the winner; the other two stay in code as fallback
   modes for future eval.
 
-*** 22.1 — Cleanup of Phase 20.x dead code
+*** Phase 2026-05.12.02 — cleanup of Phase 2026-05.99 (full-crew) dead code
 - Audit and remove (or formally archive) the orchestration
   branches that lost the bake-off:
   - =proxy_orchestrate_via_crew= knob (currently false; remove
@@ -1690,10 +1744,10 @@ Hard constraints for Phase 22:
   agents, =crew_log= table, MANAGER sidebar row. These are
   reusable regardless of which orchestration shape wins.
 
-*** 22.2 — Re-introduce manager-on-top supervision
+*** Phase 2026-05.12.03 — re-introduce manager-on-top supervision
 - Once the chosen v2 design is stable on the happy path, re-
   enable the *sanity-check before user-facing actions* loop —
-  the part of the original Phase 20 design that actually
+  the part of the original Phase 2026-05.99 — full agent crew (PARKED) design that actually
   caught quality issues (non-routines, time-inappropriate
   items, format mismatches).
 - Constraint: the sanity check is a SINGLE deterministic
@@ -1714,7 +1768,7 @@ Hard constraints for Phase 22:
    keyword router + the inline classifier rule (already in
    scribe's prompt).
 
-* TODO [#A] Active — Phase 22.6: agent tools v2 (org/doom toolbelt expansion) :in_progress:
+* TODO [#A] Phase 2026-05.09 — agent tools v2 (org/doom toolbelt expansion) :in_progress:
 SCHEDULED: <2026-05-13 Wed>
 
 The seed shipped 2026-05-02: [[file:../../org_llm/org_tools.py][=org_llm/org_tools.py=]] + seven MCP
@@ -1727,7 +1781,7 @@ milliseconds without an LLM round-trip.
 22.6.1 shipped 2026-05-03: six more pure-python tools
 (=org_link_graph=, =org_backlinks=, =org_orphans=,
 =org_property_search=, =org_id_find=, =org_refile_candidates=)
-+ MCP wrappers. See "Shipped — Phase 22.6.1" above.
++ MCP wrappers. See "Shipped — Phase 2026-05.09.01 — pure-python tools" above.
 
 This phase rounds the toolbelt out to twelve total beyond the
 seed so any agent (scribe, researcher, planner,
@@ -1779,7 +1833,7 @@ structurally instead of guessing from prose.
 
 ** Roll-out
 
-*** DONE 22.6.1 — Pure-python tools (1, 2, 3, 5, 8, 10) :shipped:
+*** DONE Phase 2026-05.09.01 — pure-python tools (1, 2, 3, 5, 8, 10) :shipped:
 CLOSED: [2026-05-03]
 Six functions added to [[file:../../org_llm/org_tools.py][=org_llm/org_tools.py=]] +
 =mcp_server.py= wrappers. Built on a shared
@@ -1787,9 +1841,9 @@ Six functions added to [[file:../../org_llm/org_tools.py][=org_llm/org_tools.py=
 ={id: {file, title, kind}}=). Validated against the live
 vault: 523 ids indexed; =org_orphans= surfaces 50 unlinked
 files; =org_refile_candidates= picks correct destinations
-for "Phase 22 orchestration recipe" input. Zero new deps.
+for "Phase 2026-05.12 — orchestration v2 orchestration recipe" input. Zero new deps.
 
-*** DONE 22.6.2 — CLOCK + drill + attach (4, 6, 9) :shipped:
+*** DONE Phase 2026-05.09.02 — CLOCK + drill + attach (4, 6, 9) :shipped:
 CLOSED: [2026-05-03]
 =org_clock_summary= parses =CLOCK: [start]--[end] => H:MM=
 lines, aggregates per-heading + per-tag (when
@@ -1800,7 +1854,7 @@ node's attach dir under the standard layout
 (=.attach/<id[:2]>/<id[2:]>/=) and listdirs it. MCP
 wrappers shipped.
 
-*** DONE 22.6.3 — Templating + Doom config (7, 11, 12) :shipped:
+*** DONE Phase 2026-05.09.03 — templating + Doom config (7, 11, 12) :shipped:
 CLOSED: [2026-05-03]
 =org_template_apply= reads from
 =db.Config('capture_templates')= JSON, substitutes
@@ -1811,11 +1865,11 @@ caller. =doom_packages= parses =~/.config/doom/packages.el=
 =bindings.el= for =(map! :leader …)= bindings — broad
 regex covers both the =(map! :leader "key" cmd)= and
 =(map! :leader :desc "..." "key" #'cmd)= shapes the
-user's actual config uses. Phase 16.5 will make the doom
+user's actual config uses. Phase 2026-05.18 — Doom config introspection will make the doom
 parsers live (file-watch + reparse on change); these are
 the static-now read-only cuts.
 
-*** 22.6.4 — Wire into agent prompts
+*** Phase 2026-05.09.04 — wire into agent prompts
 - Add a one-line tool-roster line per relevant agent
   prompt — e.g. researcher gets =org_link_graph=,
   =org_backlinks=, =org_clock_summary=; planner gets
@@ -1845,16 +1899,16 @@ the static-now read-only cuts.
    than try to be exact. The agent can cite "I think you
    bound X to Y, but please verify".
 
-* TODO [#A] Planned — Phase 21: deterministic vault inferrers :planned:
+* TODO [#A] Phase 2026-05.13 — deterministic vault inferrers  :planned:
 SCHEDULED: <2026-05-15 Fri>
 
-Phase 20.x landed a manager pattern that consults specialist LLM
+Phase 2026-05.99 — full agent crew (PARKED) landed a manager pattern that consults specialist LLM
 agents for things the primary doesn't know. But many of the
 "things the LLM doesn't know" about the user's vault are
 *deterministic* — a regex sweep + counts answers them in 10ms,
 not 5-30 seconds of cloud LLM time.
 
-The =infer_capture_style= tool (shipped with Phase 20.x) is the
+The =infer_capture_style= tool (shipped with Phase 2026-05.99 — full agent crew (PARKED)) is the
 first concrete instance. Generalise it: a small library of
 deterministic vault inferrers + an on-disk cache + an MCP-tool
 wrapper for each. Each inferrer answers ONE crisp question about
@@ -1898,7 +1952,7 @@ without needing to know the internals.
 
 ** Roll-out
 
-*** 21.1 — Inferrer infrastructure
+*** Phase 2026-05.13.01 — inferrer infrastructure (DB-backed vault fact store)
 - Common cache path =~/.cache/org-llm/inferrer-cache.json=
   keyed by =(inferrer_name, dir_path)= → result dict.
 - mtime-aware invalidation: cache entry includes the newest-
@@ -1908,14 +1962,14 @@ without needing to know the internals.
   a 5-line change.
 - =org-llm inferrer-cache= CLI verb to inspect / clear.
 
-*** 21.2 — Five-inferrer first cut
+*** Phase 2026-05.13.02 — five-inferrer first cut
 - =capture_style= (DONE)
 - =tag_taxonomy=, =priority_usage=, =date_format=,
   =scheduling_pattern=
 - Wire into existing agents: scribe (style + tags),
   triager (tags + priorities), planner (scheduling).
 
-*** 21.3 — Aggregate: =vault_profile()=
+*** Phase 2026-05.13.03 — aggregate: =vault_profile()=
 - One MCP call returns ALL the inferrer outputs as a dict.
 - Used by the org-llm primary agent's startup sequence so the
   whole crew has a shared profile of "this user's vault" by
@@ -1934,7 +1988,7 @@ without needing to know the internals.
    into the DB.
 3. How to test? Sample fixtures + golden-file inferrer outputs.
 
-* TODO [#A] Planned — Phase 19: built-in vault git-sync       :planned:
+* TODO [#A] Phase 2026-05.15 — built-in vault git-sync        :planned:
 SCHEDULED: <2026-05-12 Tue>
 
 Today users syncing =~/org/= across machines have to run their
@@ -1948,7 +2002,7 @@ agenda to reason against).
 
 ** Roll-out in three slices
 
-*** 19.1 — =org-llm sync= verb + launch/shutdown hooks (MVP)
+*** Phase 2026-05.15.01 — =org-llm sync= verb + launch/shutdown hooks (MVP)
 - New CLI: =org-llm sync= runs =git pull --rebase= then
   =git add -A && git commit -m "auto: <slug>" && git push=
   against the configured remote/branch. =--dry-run= prints the
@@ -1962,7 +2016,7 @@ agenda to reason against).
 - Auth: reuses whatever the existing =~/org= remote uses (SSH /
   HTTPS+token / GitHub CLI). No new credential surface.
 
-*** 19.2 — Auto-embedder daemon piggyback (steady state)
+*** Phase 2026-05.15.02 — auto-embedder daemon piggyback (steady state)
 - Daemon already inspects mtimes; add a =git_sync= cycle that
   fires after N seconds of quiescence (default 30s).
 - Single-flight lock: one sync at a time, no overlap with the
@@ -1974,7 +2028,7 @@ agenda to reason against).
 - Backoff: rebase failures bump the next attempt by 2× up to a
   ceiling, then surface to the sidebar.
 
-*** 19.3 — Conflict surfacing + recovery UX
+*** Phase 2026-05.15.03 — conflict surfacing + recovery UX
 - Sidebar gains a =SYNC= row: =✓ clean=, =⏳ pulling=,
   =⚠ N pending=, =✗ conflict in <path>=.
 - On =CONFLICT (content)= during rebase: abort the rebase, leave
@@ -2015,11 +2069,11 @@ agenda to reason against).
    create --private daniel-org= during =install-tools=, or wait
    for the user to ask?
 4. *opencode-write conflict* — when the LLM writes to a file
-   (Phase 16.x co-edit) and the daemon syncs mid-write. Lock the
+   (Phase 2026-04.10 — extensions (legacy 16.x family) co-edit) and the daemon syncs mid-write. Lock the
    file during LLM writes; the daemon already needs single-flight
    anyway.
 
-** Why this is Phase 19, not a wishlist item
+** Why this is Phase 2026-05.15 — built-in vault git-sync, not a wishlist item
 
 Three downstream features can't ship cleanly without it:
 - *org-agenda-agent* (above) needs a stable on-disk agenda;
@@ -2030,7 +2084,7 @@ Three downstream features can't ship cleanly without it:
 - *Multi-vault federation* (wishlist) is unbuildable without
   a working single-vault sync first.
 
-* TODO [#A] Planned — Phase 25: DB-as-cache + git-canonical pipeline :planned:
+* TODO [#A] Phase 2026-05.17 — DB-as-cache + git-canonical pipeline :planned:
 SCHEDULED: <2026-05-17 Sun>
 
 *Scope revised 2026-05-05 per [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011]].* The original framing
@@ -2038,7 +2092,7 @@ SCHEDULED: <2026-05-17 Sun>
 *narrower than reality required and broader than the lead value
 needed*. The 2026-05-05 mission walk locked in the simpler shape:
 *files are canonical (committed in git); DB is the universal
-SQL interface (regenerable local cache).* Phase 25 implements
+SQL interface (regenerable local cache).* Phase 2026-05.17 — DB-as-cache + git-canonical pipeline implements
 that pipeline.
 
 ** Why (revised)
@@ -2051,7 +2105,7 @@ that pipeline.
   solves multi-writer distributed sync; using it dissolves a
   custom-engineering problem we'd otherwise have to build.
   See [[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]].
-- *dbt + Phase 27 Superset analytics* over the dbt-managed
+- *dbt + Phase 2026-07.01 — Apache Superset dashboards Superset analytics* over the dbt-managed
   cache, not against a "DB-as-truth" surface that fights with
   Emacs editing. See [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]].
 - *Catastrophic recovery for free.* Lose any device's DB →
@@ -2107,12 +2161,12 @@ that pipeline.
 ** Status
 
 Active state, sub-phase plans, decision points, and pass
-criteria live in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 25 (entry to be
+criteria live in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (entry to be
 revised in same migration). Companion concept pages:
 [[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]], [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]],
 [[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][data-integrity-laws.org]].
 
-* TODO [#A] Planned — Phase 27: Apache Superset dashboards   :planned:
+* TODO [#A] Phase 2026-07.01 — Apache Superset dashboards     :planned:
 SCHEDULED: post-1.0
 
 Optional analytics surface on top of org-llm.db.
@@ -2122,9 +2176,9 @@ Optional analytics surface on top of org-llm.db.
 - Apache 2.0, self-hostable, FOSS-aligned
 - Speaks SQLAlchemy natively → connects to org-llm.db with
   zero glue code
-- Pairs with dbt (Phase 12.7 expanded) — Superset over dbt
+- Pairs with dbt (Phase 2026-07.06 — dbt analytics expanded) — Superset over dbt
   models is the standard "modern data stack"
-- Composes with Phase 25.4 (git history) for time-travel
+- Composes with Phase 2026-05.17.04 — DB-as-cache step 4 (git history) for time-travel
   analytics over vault content
 
 ** Scope
@@ -2138,11 +2192,23 @@ core install never requires it.
 
 ** Status
 
-Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 27. Ships post-1.0,
-post-Phase 25. Long-form companion: [[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]] (7-tier
+Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 2026-07.01 — Apache Superset dashboards. Ships post-1.0,
+post-Phase 2026-05.17 — DB-as-cache + git-canonical pipeline. Long-form companion: [[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]] (7-tier
 integration ladder; semantic-layer prototype already shipped).
 
-* TODO [#B] Planned — Phase 28: Containerization strategy    :planned:
+*Overnight leg [2026-05-06]:* shipped Superset YAML emitter
+(=Registry.emit_superset()=, [[id:5f59c6a3-db42-4410-81e4-5ea9daa33d9b][tier-1 probe]]
+round-tripped via =superset import-directory= into a uv-venv
+Superset), =org-llm metrics= CLI verb (ls/describe/query/emit),
+=metrics_query= + =metrics_describe= MCP tools, and 4 new
+metrics + 2 dimensions. Tier-7 reframing per
+[[id:93b87da8-bca5-409a-8fdf-8ed20ca739ef][fork survey]]: auth swap is /not/ a fork
+(upstream =CUSTOM_SECURITY_MANAGER= already exists), headless
+render is infeasible (the renderer /is/ the React frontend),
+Org-as-source importer is the only true tier-7 candidate and
+may be a zero-fork pre-processor.
+
+* TODO [#B] Phase 2026-07.02 — containerization strategy      :planned:
 
 Decision-mostly-already-made phase: native install stays the
 *primary* path for org-llm; containers ship for specific use
@@ -2170,20 +2236,20 @@ every file/editor workflow.
 
 ** Status
 
-Decision documented in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 28 with the
+Decision documented in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 2026-07.02 — containerization strategy with the
 full table of which components containerize and which don't.
 No standalone sprint — specific containers ship alongside
 the components they serve.
 
-* TODO [#A] Planned — Phase 23.6: literate MCP tools (customize / manage / create) :planned:
-SCHEDULED: post-Phase 23.2 for tier-3 sub-phases; tier-1+2 sprint-eligible now
+* TODO [#A] Phase 2026-05.16 — literate MCP tools (customize / manage / create) :planned:
+SCHEDULED: post-Phase 2026-05.14 — agent-framework refinements (legacy 23.2 — capability enforcement) for tier-3 sub-phases; tier-1+2 sprint-eligible now
 
 Extend the existing literate-config pattern to the MCP tool
 surface. Same shape as =org-llm-config.org= /
 =org-llm-agents.org= / =org-llm-baselines.org=, fourth file at
 =~/org/org-llm-tools.org=. Three escalating capabilities:
 
-** 23.6.1 — Tier 1: customize (sprint-eligible, ~1 day)
+** Phase 2026-05.16.01 — tier 1: customize (sprint-eligible, ~1 day)
 
 Per-tool defaults, descriptions the LLM sees, and enable flags.
 No new tools, no user code; just lets the user shape the existing
@@ -2191,7 +2257,7 @@ surface without editing source. =org-llm tools --tangle= /
 =--apply= / =--show= reusing =literate_config.py='s
 infrastructure.
 
-** 23.6.2 — Tier 2: manage (sprint-eligible after 23.6.1, ~1 day)
+** Phase 2026-05.16.02 — tier 2: manage (sprint-eligible after 2026-05.16.01, ~1 day)
 
 Tool groups + per-agent allow/deny. Agents declare =:TOOL_ROSTER:=
 referencing groups (e.g. =hygiene-tools, count-tools=) instead of
@@ -2199,20 +2265,20 @@ hand-curated tool lists. New tools join groups and automatically
 reach the right agents. Necessary as the MCP surface grows past
 ~50 tools and hand-rosters become brittle.
 
-** 23.6.3 — Tier 3a: shell-wrapped user tools (gates on Phase 23.2)
+** Phase 2026-05.16.03 — tier 3a: shell-wrapped user tools (gates on Phase 2026-05.14 — agent-framework refinements (legacy 23.2 — capability enforcement))
 
 User declares a shell command + arg schema in the literate file;
 host wraps it as an MCP function. Existing =shell= capability
 gates invocation. Arg shell-escaping, subprocess timeout. Most
 common "I wish I had a tool that…" requests fit this shape.
 
-** 23.6.4 — Tier 3b: HTTP-wrapped user tools
+** Phase 2026-05.16.04 — tier 3b: HTTP-wrapped user tools
 
 User declares an HTTP endpoint + arg schema + env-var auth (no
 raw secrets in the literate file). =external.network= capability
 gate.
 
-** 23.6.5 — Tier 3c: Python-via-babel (deferred indefinitely)
+** Phase 2026-05.16.05 — tier 3c: Python-via-babel (deferred indefinitely)
 
 Arbitrary Python from a =#+begin_src python= block. Powerful but
 the security work (sandbox, AST allowlist, capability-locked env)
@@ -2226,7 +2292,7 @@ prove insufficient. Open question whether to implement at all.
 - Future-proofs the MCP surface as it grows. Per-agent rosters
   become declarative (group references) instead of hand-edited
   lists.
-- Natural prerequisite for *Phase 29 (self-coded tools)*: the
+- Natural prerequisite for *Phase 2026-05.20 — sync verb POC (self-coded tools)*: the
   LLM-generated-tool synthesis pipeline writes its output to
   =~/org/org-llm-tools.org= (Tier 3a format) where the user
   reviews and applies. 23.6.3 lands the format; 29 lands the
@@ -2238,12 +2304,12 @@ Design page: [[file:literate-tools.org][literate-tools.org]] (full
 spec — file format, properties, security boundaries, sub-phase
 shipping order). Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] when work
 starts. 23.6.1 + 23.6.2 are sprint-eligible immediately; 23.6.3+
-blocks on Phase 23.2 (capability enforcement).
+blocks on Phase 2026-05.14 — agent-framework refinements (legacy 23.2 — capability enforcement) (capability enforcement).
 
-* TODO [#A] Planned — Phase 24: Supervision trinity          :planned:
+* DONE Phase 2026-05.02 — supervision trinity                 :shipped:
 SCHEDULED: 24.1 sprint-eligible; 24.2 follows; 24.3 after; 24.4 open question
 
-Generalize the already-shipped Phase 22 v2 pattern (manager
+Generalize the already-shipped Phase 2026-05.07 — manager pre-fetch + agent narrates pattern (manager
 pre-fetch + agent narrates) from a single recipe-bound instance
 into a three-layer supervision framework. Each layer is a
 *registry* — adding new entries is one file, one decorator, or
@@ -2272,7 +2338,7 @@ call.
   touching the orchestration core.
 - *Gate 3:* the audit log + manager-pre-fetch wiring already
   exist; this consolidates them into a uniform protocol that
-  Phase 29 (self-coded tools) can write into automatically.
+  Phase 2026-05.20 — sync verb POC (self-coded tools) can write into automatically.
 
 ** Sub-phases
 
@@ -2330,14 +2396,14 @@ call.
   pipeline, or does it stay as on-demand validation tooling?
 
 ** Cross-references
-- Generalizes [[*DONE Shipped — Phase 22 v2: manager pre-fetch + agent narrates][Phase 22 v2]] from a single recipe-bound
-  instance into a framework. Phase 22 v2's =format_prefetch_block=
+- Generalizes [[*DONE Shipped — Phase 2026-05.07 — manager pre-fetch + agent narrates: manager pre-fetch + agent narrates][Phase 2026-05.07 — manager pre-fetch + agent narrates]] from a single recipe-bound
+  instance into a framework. Phase 2026-05.07 — manager pre-fetch + agent narrates's =format_prefetch_block=
   is the prototype shape for resolver output formatting.
-- *Phase 25 (DB-authoritative inversion)* turns the DB into
+- *Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (DB-authoritative inversion)* turns the DB into
   the resolvers' reference desk — repo registry, person/agent
-  index, and org-node lookups all hit the DB once Phase 25.x
+  index, and org-node lookups all hit the DB once Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family)
   lands.
-- *Phase 29 (self-coded tools)* provides the auto-promotion
+- *Phase 2026-05.20 — sync verb POC (self-coded tools)* provides the auto-promotion
   path: when the audit log shows a recurring confusion not
   caught by any current resolver/hook/signal, the system
   proposes a new registry entry and validates it the same way
@@ -2347,25 +2413,68 @@ call.
 
 Design rule canonized in =docs/wiki/architecture.org= §
 /Design rule — supervision is deterministic by default/
-[2026-05-04]. Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 24 when
+[2026-05-04]. Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 2026-05.02 — supervision trinity when
 work starts. 24.1 *shipped 2026-05-04* (commits =9c75bb5= +
 =f417132=); 24.2 follows naturally (~1 day for decorator +
 four hooks); 24.3 needs more design on the signal-tripping
 threshold (likely ~1.5 days). 24.4 stays gated until 24.1–24.3
 prove their keep.
 
-*v1.0 gating (per 2026-05-04 mission walk):* Phase 24.2 + 24.3
+*v1.0 gating (per 2026-05-04 mission walk):* Phase 2026-05.02.02 — recovery hooks + 24.3
 are *gating for "first usable" v1.0*, not gravy. The lead
 value (β: dream-state vault via agents) lives or dies on
 whether agents make wrong moves silently. Without recovery
 hooks (24.2) and confusion detection (24.3), every silent
 failure erodes user trust in the agent layer; with them,
-mistakes become recoverable + visible. Phase 30.5
+mistakes become recoverable + visible. Phase 2026-06.07 —
 self-validation is the same family of gates — agents check
 each other's output before user-review time.
 
-* TODO [#A] Planned — Phase 29: Self-coded tools             :planned:
-SCHEDULED: post-Phase 25.4
+* DONE Phase 2026-05.04 — cull walk                            :shipped:
+CLOSED: [2026-05-04]
+:PROPERTIES:
+:STATUS: shipped
+:LEGACY_NUMBER: Phase 26.1
+:END:
+
+Walk through every component in the codebase and verdict it:
+=keep=, =retire=, =keep-if-cleanup=, or =needs-decision=. 38
+components verdicted; ~3000 LoC retirement candidates surfaced
+(=org_tools.py= 1174, =vault_facts.py= 951, =insights.py= 826,
+=walk.py= 140, plus 5 loser recipe runners 350).
+
+Output drives [[*NEXT [#A] Phase 2026-05.01 — physical extraction][Phase 2026-05.01 — physical extraction]].
+Companion docs: [[file:cull.org][cull.org]] (rubric framework +
+verdicts), [[file:codebase-map-post-cull.org][codebase-map-post-cull.org]]
+(49 modules post-cull).
+
+* NEXT [#A] Phase 2026-05.01 — physical extraction             :in_progress:
+SCHEDULED: <2026-05-07 Thu>
+:PROPERTIES:
+:STATUS: in_progress
+:LEGACY_NUMBER: Phase 26.2
+:V1_GATE: yes
+:END:
+
+v1.0 gating. Execute the cull verdicts from
+[[*DONE Phase 2026-05.04 — cull walk][Phase 2026-05.04 — cull walk]]:
+physically remove ~3000 LoC of retire-verdicted modules, migrate
+any consumers that still depend on them, restructure the post-cull
+tree to match
+[[file:codebase-map-post-cull.org][codebase-map-post-cull.org]].
+
+In flight 2026-05-06 → 2026-05-07 overnight via spike-team Agor
+session (agent ID =a3c46f7b72c8e420c=).
+
+** Why v1.0 gating
+
+The cull verdicts are decisions; the extraction is the act that
+realises them. Until the retired LoC actually leaves the tree,
+new contributors (human or agent) can't tell which paths are
+canonical vs deprecated. Ships before any post-1.0 work.
+
+* TODO [#A] Phase 2026-05.20 — self-coded tools (sync verb POC + later sub-phases) :planned:
+SCHEDULED: post-Phase 2026-05.17.04 — DB-as-cache step 4
 
 Generative meta-feature: when the LLM does a pattern of work
 repeatedly, the app detects it, proposes a deterministic
@@ -2401,10 +2510,10 @@ registers it so future invocations skip the LLM entirely.
 
 ** Status
 
-Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 29. 29.0 is sprint-
-eligible (~half-day); 29.1+ depends on Phase 25.4.
+Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 2026-05.20 — sync verb POC. 29.0 is sprint-
+eligible (~half-day); 29.1+ depends on Phase 2026-05.17.04 — DB-as-cache step 4.
 
-* TODO [#A] Planned — Phase 30: FOSS agent value-adds        :planned:
+* TODO [#A] Phase 2026-06.04 — FOSS agent value-adds (multi-judge + later sub-phases) :planned:
 SCHEDULED: parallel-shippable
 
 Five concrete value-adds that make FOSS-agent orchestration
@@ -2423,7 +2532,7 @@ they're cheap enough to run in patterns cloud can't afford.*
   tasks. =model_size_hint= field on personas.
 - *30.3 — Background continuous work.* Local agents run free
   24/7. =@boothby nightly= drafts hygiene cleanups onto a
-  =org-llm/boothby= branch (uses Phase 25.4) for morning
+  =org-llm/boothby= branch (uses Phase 2026-05.17.04 — DB-as-cache step 4) for morning
   review.
 - *30.4 — Multi-judge validation.* Validation framework's
   =judge_models= becomes a list; FOSS judges (Llama 3.3,
@@ -2435,11 +2544,11 @@ they're cheap enough to run in patterns cloud can't afford.*
 
 ** Status
 
-Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 30. 30.4 (multi-judge)
+Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 2026-06.04 — FOSS agent value-adds. 30.4 (multi-judge)
 is sprint-eligible (~1d, A/B framework upgrade); others
-depend on Phase 25.x foundations.
+depend on Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) foundations.
 
-* TODO [#B] Planned — Phase 31: Theme-driven agent avatars   :planned:
+* TODO [#B] Phase 2026-07.03 — theme-driven agent avatars     :planned:
 SCHEDULED: post-1.0
 
 Theme-driven generation pipeline that produces PNG avatars for
@@ -2476,11 +2585,11 @@ agents.
 
 ** Status
 
-Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 31. 31.1 + 31.2 are
+Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 2026-07.03 — theme-driven agent avatars. 31.1 + 31.2 are
 sprint-eligible schema groundwork (~2d combined); full pipeline
 is post-1.0.
 
-* TODO [#A] Punch list — beta → 1.0                          :planned:
+* TODO [#A] Phase 2026-05.22 — punch list (beta → 1.0)        :planned:
 SCHEDULED: <2026-05-30 Sat>
 
 Lifted from the original README roadmap stub:
@@ -2549,7 +2658,7 @@ project. Invoked locally (=org-llm agent org-agenda …= or
 =@org-agenda= / =/agenda= in opencode), with full read access to
 the user's =~/org/= files via the existing tools.
 
-*Depends on Phase 19 (vault git-sync)* — once sync ships, the
+*Depends on Phase 2026-05.15 — built-in vault git-sync (vault git-sync)* — once sync ships, the
 agent can also run as a remote weekly routine that commits its
 review back to =~/org/= via the same git-sync surface.
 
@@ -2574,7 +2683,7 @@ Capabilities (sketch):
 - *Deadline pressure model* — flags items where the gap between
   =DEADLINE= and =SCHEDULED= is incompatible with the user's
   recent throughput on similar tasks (uses the engagement /
-  activity tables under Phase 12).
+  activity tables under Phase 2026-04.07 — insight cards).
 
 Implementation notes:
 - Lives alongside the other preconfigured agents in
@@ -2633,10 +2742,13 @@ its baked context. Open questions:
 - *Phase X.Y* sub-phases are the slices. They land independently;
   the parent phase isn't "done" until the last slice ships AND no
   more =planned= slices are outstanding.
-- *Numbers can be skipped or retired* when a chunk gets absorbed
-  into a different theme. Phase 4 was absorbed into Phase 5; Phase
-  14 was absorbed into Phase 15. The retired number doesn't get
-  reassigned.
+- *Legacy numbers could be skipped or retired* when a chunk got
+  absorbed into a different theme. Legacy Phase 4 was absorbed
+  into Phase 2026-04.02 — opencode workspace; legacy Phase 14
+  was absorbed into Phase 2026-04.09 — provider config audit.
+  The retired legacy number didn't get reassigned. Under the new
+  chronological scheme this concern is moot — sub-priorities are
+  per-month assignments, not global identifiers.
 - *Commit messages* prefix the phase: =feat(insights): Phase 12.5 —
   engagement table=. Grep =git log --grep="Phase "= to find every
   phase landing.
@@ -2652,7 +2764,7 @@ its baked context. Open questions:
   rows are the rave-coding fuel.
 - [[file:agent-framework.org][agent-framework.org]] — how agents
   compose. Defines the Agent dataclass, capability scoping,
-  hygiene scans, the four invocation paths, and the Phase 23
+  hygiene scans, the four invocation paths, and the Phase 2026-05.14 — agent-framework refinements
   migration plan.
 - [[file:tonight-rave-list.org][tonight-rave-list.org]] — the
   active build queue with effort + dep + yield per item.
@@ -2673,5 +2785,5 @@ Trace markers for any phase referenced above:
   plugin.
 - Architecture deep dive: companion org-roam node
   =20260429200110-opencode_workspace_architecture.org= (in the
-  user's vault, not in this repo) for the Phase 16.x integration
+  user's vault, not in this repo) for the Phase 2026-04.10 — extensions (legacy 16.x family) integration
   details.

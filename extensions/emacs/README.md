@@ -37,7 +37,7 @@ this directory holds the real package that backs them.
   :after org)
 ```
 
-## Phase 16.3+ scope (the actual workflow)
+## Phase 2026-05.03 — Emacs companion+ scope (the actual workflow)
 
 | Command                  | Binding (Doom) | What it does                                          |
 |--------------------------+----------------+-------------------------------------------------------|
@@ -62,7 +62,7 @@ extensions/emacs/
 
 ## Status
 
-**Phase 16.0** (this commit): scaffolding only.  `org-llm.el` ships with
+**Phase 2026-04.10.01 — extensions scaffolding** (this commit): scaffolding only.  `org-llm.el` ships with
 `defcustom` for the binary path, ORG_LLM_ORG_DIR / ORG_LLM_DB overrides,
 and a `org-llm-version` smoke command.  The interactive verbs above
-land in Phase 16.3+.
+land in Phase 2026-05.03 — Emacs companion+.

@@ -155,7 +155,7 @@ among top level-1 headings — the user is already capturing
 weather context in dailies, which directly motivates the
 weather-aware-agenda phase below.
 
-Effort delivered: M. Deps satisfied: Phase 21.1 (shipped earlier
+Effort delivered: M. Deps satisfied: Phase 2026-05.13.01 — DB-backed vault fact store (shipped earlier
 tonight).
 
 ** TODO [#B] Beanhub + org-mode personal budget integration  :budget:
@@ -201,7 +201,7 @@ state (routines, agenda, dailies). Money is the missing axis.
 With the integration, the planner agent can answer "can I
 afford this" without leaving the org-llm loop.
 
-Effort: L (multi-night). Deps: Phase 19.1 (sync MVP) for the
+Effort: L (multi-night). Deps: Phase 2026-05.15 — built-in vault git-sync (legacy 19.1 — MVP) (sync MVP) for the
 auto-pull; standalone otherwise.
 
 ** DONE Weather-aware org-agenda                              :weather:
@@ -292,7 +292,7 @@ exist).
 User asked tonight. =/sys/class/power_supply/BAT*/= on Linux,
 =pmset -g batt= on macOS. Sidebar HEALTH section gets a row.
 Threshold: WARN < 20%, CRIT < 10% AND discharging. Reuses the
-Phase 17 sensor ladder; one new probe + one renderer.
+Phase 2026-04.11 — live sidebar status panel sensor ladder; one new probe + one renderer.
 
 Effort: S. Deps: none.
 
@@ -353,7 +353,7 @@ Plus 1-2 new recipes that fire on obvious patterns:
 "review my flashcards" → =org_drill_review_due=, "what's
 orphaned?" → =org_orphans=.
 
-Effort: M. Deps: Phase 22.6.1-3 (shipped).
+Effort: M. Deps: Phase 2026-05.09.01 — pure-python tools-3 (shipped).
 
 ** TODO [#A] 5 new orchestration recipes                       :recipes:
 
@@ -366,7 +366,7 @@ Most @-tagged questions become single-cloud-call:
 - "where should this go?" → =org_refile_candidates= pre-fetch.
 - "what tags fit this?" → =org_tag_suggest= pre-fetch.
 
-Effort: M. Deps: Phase 22 v2 runner registry (shipped).
+Effort: M. Deps: Phase 2026-05.07 — manager pre-fetch + agent narrates runner registry (shipped).
 
 ** TODO [#A] Smoke-test runner over the 17 prompts             :testing:
 
@@ -378,7 +378,7 @@ golden-output set. Wire to the launch path (=org-llm doctor
 
 Effort: M-L. Deps: action-bridge stability (shipped).
 
-** TODO [#A] Phase 19.1 — =org-llm sync= MVP                   :sync:
+** TODO [#A] Phase 2026-05.15 — built-in vault git-sync (legacy 19.1 — MVP) — =org-llm sync= MVP                   :sync:
 
 Pull on launch, commit + push on quiescence. Gates the weekly
 GTD remote routine. Surfaces conflicts in the sidebar.
@@ -416,11 +416,11 @@ Effort: M. Deps: existing repair path.
 =routine_chores= / =tag_taxonomy= / =vault_stats= semantics so
 refactors don't drift silently.
 
-Effort: M. Deps: Phase 21.1 (shipped).
+Effort: M. Deps: Phase 2026-05.13.01 — DB-backed vault fact store (shipped).
 
 * Wishlist (no commitment)                                :wishlist:
 
-** TODO [#C] Phase 19.2 / 19.3 — auto-embedder + conflict UX
+** TODO [#C] Phase 2026-05.15 — built-in vault git-sync (legacy 19.2 — auto-embedder) / 19.3 — auto-embedder + conflict UX
 ** TODO [#C] org-agenda-agent (depends on 19)
 ** TODO [#C] Co-edit org files
 ** TODO [#C] Multi-vault federation
@@ -440,7 +440,7 @@ A 9-night queue if you want pacing rather than picking:
 |     5 | Theme 5: 22.6.4 tool-roster + walks → facts  | M+L    | agents see the toolbelt; walks compound  |
 |     6 | Theme 3 part 2: 5 new recipes                 | M      | most @-tagged Qs become 1 cloud call     |
 |     7 | Theme 7: smoke-test runner                    | M-L    | regression detection wired to launch     |
-|     8 | Theme 4: Phase 19.1 sync MVP                  | M-L    | cross-machine first-class                |
+|     8 | Theme 4: Phase 2026-05.15 — built-in vault git-sync (legacy 19.1 — MVP) sync MVP                  | M-L    | cross-machine first-class                |
 |     9 | Theme 2 22.5c chain viz + Theme 4 19.2/19.3   | M+M    | multi-delegate visibility; conflict UX   |
 
 * See also

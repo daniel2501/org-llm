@@ -59,7 +59,7 @@ org-llm pi --install
 # → registers in ~/.pi/config.json
 #+end_src
 
-The server exposes 64 tools as of Phase 16.2 (count verified
+The server exposes 64 tools as of Phase 2026-04.10.03 — launch wires plugin (count verified
 via =grep -c "@server\.tool" org_llm/mcp_server.py=). Categories:
 
 - *Notes (RAG + capture)* — =search_notes=, =ask_notes=,
@@ -78,8 +78,8 @@ via =grep -c "@server\.tool" org_llm/mcp_server.py=). Categories:
 - *Life support / EMH* — =emh_consult=, =life_support_advice=,
   =life_support_history=, =life_support_status=,
   =recent_perf_alerts=
-- *Insights (Phase 12)* — =insight_card_feedback=
-- *Walk (Phase 13)* — =walk_pick_targets=,
+- *Insights (Phase 2026-04.07 — insight cards)* — =insight_card_feedback=
+- *Walk (Phase 2026-04.08 — walk + opencode surfacing)* — =walk_pick_targets=,
   =walk_extract_facts=, =walk_save_facts=,
   =walk_save_disambiguation=, =walk_remove_fact=,
   =walk_review_pending=, =walk_undo_last_save=
@@ -163,7 +163,7 @@ happen.
 - =org_llm_run("<verb>")= — universal escape hatch when no
   specific tool fits
 
-* The launch flow (Phase 16.x integration)
+* The launch flow (Phase 2026-04.10 — extensions (legacy 16.x family) integration)
 
 =org-llm launch= writes a full opencode config that wires:
 
@@ -175,7 +175,7 @@ happen.
 4. =.opencode/AGENTS.md= (so opencode auto-loads the org-llm
    tool primer on every session)
 
-See [[file:roadmap.org][roadmap.org]] § Phase 16.0–16.2 for the full
+See [[file:roadmap.org][roadmap.org]] § Phase 2026-04.10.01 — extensions scaffolding–16.2 for the full
 landing chronology.
 
 * Source files
@@ -205,5 +205,5 @@ landing chronology.
 - [[id:11029de4-2780-4169-9f3b-2fd1a3a73e6a][Granted filesystem access]] — gates the =read_file= /
   =list_directory= MCP tools.
 - [[id:001a2e03-30e8-49c5-a813-e774f58b6a0e][Skills]] — org-babel skills register as MCP tools at launch.
-- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — Phase 16.x is the current MCP + TUI plugin
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] — Phase 2026-04.10 — extensions (legacy 16.x family) is the current MCP + TUI plugin
   landing.
