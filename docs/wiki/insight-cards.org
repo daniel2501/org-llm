@@ -10,9 +10,9 @@
 
 Small, structured "I noticed something" cards generated from the
 vault's current state. Shown to the user when an =org-llm= chat
-surface (opencode, Claude Code, Pi) opens — the headline experience
-is *"workspaces open with 'I noticed N things since you were last
-active' instead of a blank prompt."*
+surface (opencode, Pi, or another MCP client like Claude Code) opens
+— the headline experience is *"workspaces open with 'I noticed N
+things since you were last active' instead of a blank prompt."*
 
 Cards have a uniform shape:
 

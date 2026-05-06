@@ -64,7 +64,7 @@ The claim heading uses the form:
 #+end_example
 
 - =<who>= is human name *or* instance handle
-  (=Claude/opus-A=, =opencode=, =@curator-spawned-by-X=). Make
+  (=Claude/opus-A=, =opencode=, =@atoz-spawned-by-X=). Make
   it identifiable, not anonymous.
 - =CLAIM= lists files/directories you intend to write. Be
   generous — claiming a few extra files is fine; failing to
@@ -299,8 +299,8 @@ Tie-breakers when neither has merged yet:
 | Role            | Who                          | Authority                            |
 |-----------------+------------------------------+--------------------------------------|
 | Maintainer      | Daniel                       | Final say on directional decisions   |
-| Curator         | =@curator= agent             | Wiki concept-graph integrity         |
-| Tracker         | =@tracker= agent             | Dev-tracker hygiene + claims sweeps  |
+| Curator         | =@atoz= agent (alias =@curator=) | Wiki concept-graph integrity     |
+| Tracker         | =@riker= agent (alias =@tracker=) | Dev-tracker hygiene + claims sweeps |
 | Contributor     | Any human or agent instance  | Make claims, write code, open PRs    |
 
 The agent roles are advisory, not gating — they don't block

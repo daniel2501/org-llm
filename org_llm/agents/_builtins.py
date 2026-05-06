@@ -12,9 +12,13 @@ A future PR can lift the persona literals into this package and
 make `cli.py` derive its dicts from here. The Agent shape stays
 stable across that migration.
 
-OOB cut decisions (locked 2026-05-03):
-  * 9 starfleet-core agents — manager + 8 specialists.
-  * Other 8 personas tagged `legacy-extras`. The launcher
+OOB cut decisions (locked 2026-05-03; Bridge Crew rename 2026-05-06):
+  * starfleet-core agents — manager + specialists. Bridge Crew
+    (curated 7 per DEC-014 — Bridge Crew): @picard, @spock, @data,
+    @boothby, @geordi, @atoz, @riker. Other starfleet-core agents
+    (engineer, planner, agenda, ops, agentsmith, doom) are core but
+    not part of the Bridge Crew cap.
+  * Other personas tagged `legacy-extras`. The launcher
     filters to core by default; `agents_include_legacy=true`
     re-enables them during the transition window.
   * Trek = canonical birth-name; functional name = alias.
@@ -71,7 +75,7 @@ _NET = "external.network"
 # documentation-only; orchestration._RECIPES is the active
 # matcher (Phase 23.4 rewires that).
 _AGENT_META: dict[str, _AgentMeta] = {
-    # ── starfleet-core (9 OOB) ───────────────────────────────
+    # ── starfleet-core ───────────────────────────────────────
     "researcher": _AgentMeta(
         birth_name="spock", aliases=("researcher",),
         capabilities=(_R,),
@@ -82,11 +86,17 @@ _AGENT_META: dict[str, _AgentMeta] = {
         capabilities=(_R, _W),
     ),
     "engineer":   _AgentMeta(
-        birth_name="geordi", aliases=("engineer",),
+        # Bridge Crew rename 2026-05-06: birth_name "geordi" reassigned to
+        # @geordi (analyst) per DEC-014 — Bridge Crew. @engineer keeps a
+        # functional birth_name; pack stays starfleet-core for routing.
+        birth_name="engineer", aliases=("engineer",),
         capabilities=(_R, _W, _SH),
     ),
     "planner":    _AgentMeta(
-        birth_name="riker", aliases=("planner",),
+        # Bridge Crew rename 2026-05-06: birth_name "riker" reassigned to
+        # @riker (tracker) per DEC-014 — Bridge Crew. @planner keeps a
+        # functional birth_name; pack stays starfleet-core for routing.
+        birth_name="planner", aliases=("planner",),
         capabilities=(_R,),
     ),
     "agenda":     _AgentMeta(
@@ -102,23 +112,39 @@ _AGENT_META: dict[str, _AgentMeta] = {
         birth_name="soong", aliases=("agentsmith",),
         capabilities=(_R, _W, _SH),
     ),
-    "curator":    _AgentMeta(
+    "geordi":     _AgentMeta(
+        # Lt. Cmdr. Geordi La Forge — TNG chief engineer; "sees across
+        # spectrum w/ VISOR"; runs diagnostics. Fits dashboards/analytics.
+        # Bridge Crew rename 2026-05-06: replaces @analyst (prior
+        # legacy-extras birth_name `analyst`). Legacy alias `analyst`
+        # retained for back-compat.
+        birth_name="geordi", aliases=("analyst", "geordi"),
+        capabilities=(_R,),
+    ),
+    "atoz":       _AgentMeta(
         # Mr. Atoz — librarian on Sarpeidon ("All Our Yesterdays",
         # TOS S3E23). The most-direct curator/archivist character
-        # in canon. Functional alias `curator` is what users type.
-        birth_name="atoz", aliases=("curator",),
+        # in canon. Bridge Crew rename 2026-05-06: birth-name promoted
+        # to canonical handle; legacy alias `curator` retained.
+        birth_name="atoz", aliases=("curator", "atoz"),
         capabilities=(_R, _W, _SH),
     ),
-    "tracker":    _AgentMeta(
+    "riker":      _AgentMeta(
+        # Cmdr. William T. Riker — TNG first officer / XO. Owns the
+        # duty-roster + ops; pairs with @picard the captain. Bridge
+        # Crew rename 2026-05-06: replaces @tracker (prior birth-name
+        # `boothby` reassigned to @boothby — Boothby is the gardener,
+        # not a tracker). Legacy alias `tracker` retained for back-compat.
+        birth_name="riker", aliases=("tracker", "riker"),
+        capabilities=(_R, _W, _SH),
+    ),
+    "boothby":    _AgentMeta(
         # Boothby — Starfleet Academy groundskeeper (TNG/VOY,
-        # recurring). Knew every cadet's progress; gave plain-
-        # spoken advice from quiet observation. The canonical
-        # "watches your progress, calls you on it" character.
-        birth_name="boothby", aliases=("tracker",),
-        capabilities=(_R, _W, _SH),
-    ),
-    "gardener":   _AgentMeta(
-        birth_name="keiko", aliases=("gardener",),
+        # recurring). Direct role-fit: Boothby IS the gardener in
+        # Trek canon. Bridge Crew rename 2026-05-06: replaces
+        # @gardener (prior birth-name `keiko` retired). Legacy alias
+        # `gardener` retained for back-compat.
+        birth_name="boothby", aliases=("gardener", "boothby"),
         capabilities=(_R, _SH),
     ),
     "crew":       _AgentMeta(
@@ -142,9 +168,6 @@ _AGENT_META: dict[str, _AgentMeta] = {
                                    capabilities=(_R,)),
     "translator":     _AgentMeta(birth_name="translator",
                                    pack="legacy-extras"),
-    "analyst":        _AgentMeta(birth_name="analyst",
-                                   pack="legacy-extras",
-                                   capabilities=(_R,)),
     "doom":           _AgentMeta(birth_name="doom",
                                    capabilities=(_R, _SH)),
     "almanac":        _AgentMeta(birth_name="almanac",

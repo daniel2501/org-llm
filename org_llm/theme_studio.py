@@ -325,7 +325,7 @@ SURFACES: list[Surface] = [
         key="pi_launch_greeting",
         description=("ONE line shown when `org-llm pi --launch` execs into "
                       "the Pi TUI. Frames Pi as a third org-llm conversational "
-                      "surface (alongside opencode and Claude). Active dials "
+                      "surface (alongside opencode — and any other MCP client). Active dials "
                       "should be unmistakable — trek = 'Engaging Pi shuttle, "
                       "bridge online', commie = 'Pi joins the collective', "
                       "queer = 'Pi at the door, come on in'."),

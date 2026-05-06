@@ -38,7 +38,7 @@ For each page in the chosen subset:
 | Surface           | Spawn shape                                       | Sandbox / branch                          |
 |-------------------+---------------------------------------------------+-------------------------------------------|
 | Claude Code pool  | =Task= subagent per page (one shot, then exit)    | Worktree per agent OR distinct branch     |
-| org-llm CLI       | =@curator= or =@docsmith= dispatch via MCP        | Distinct branch; coordination claim       |
+| org-llm CLI       | =@atoz= or =@docsmith= dispatch via MCP           | Distinct branch; coordination claim       |
 | opencode session  | Single user-driven session, page-by-page          | Distinct branch; coordination claim       |
 
 Each surface produces *one rewritten file per page*. Three outputs per
@@ -152,7 +152,7 @@ Sorted within bucket by REWRITE PRIORITY (high → low). PRIORITY signal:
 | code-corpus.org                   | Code corpus — cross-repo semantic search                |   153 | May 3       | no          | second corpus alongside notes; code+notes one DB                                         | high     | small; 2b conversion + verify against current verbs                |
 | cloud-or-local-routing.org        | Cloud-or-local routing                                  |   221 | May 3       | no          | decision tree for cloud vs Ollama; provider catalog                                      | high     | DEC-Groq applies — verify Groq isn't mentioned anywhere            |
 | doctor-self-heal.org              | Doctor & self-heal                                      |   240 | May 3       | no          | three doctor layers: doctor, proactive_doctor, LLM-rescue                                | high     | needs 2b; verify all three layers actually shipped                 |
-| pi-bridge.org                     | Pi bridge — third conversational interface              |   139 | Apr 30      | no          | Pi.dev TS extension; third surface alongside opencode + Claude                            | high     | small; clear 2b candidate; check pi_extension/ status              |
+| pi-bridge.org                     | Pi bridge — second conversational interface             |   139 | Apr 30      | no          | Pi.dev TS extension; second surface alongside opencode (Claude Code is integration option per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]]) | high     | small; clear 2b candidate; check pi_extension/ status              |
 | walk.org                          | Walk — LLM-driven knowledge capture (Phase 13)          |   171 | Apr 30      | no          | walk vs ask; LLM-driven note review + atomic claim extraction                             | high     | Phase 13 status check; needs 2b                                    |
 | audit-log.org                     | Wiki ↔ reality audit log                                |   315 | May 2       | no          | bidirectional audit log between wiki claims + code reality                                | high     | meta; deferred-list curation needed; long but structured          |
 | theme-studio.org                  | Theme studio + knobs — voice personalization            |   147 | May 2       | no          | knob model 0–3 levels; theme_studio.get_themed                                            | medium   | small; check for SaaS-tone bleed in copy                           |

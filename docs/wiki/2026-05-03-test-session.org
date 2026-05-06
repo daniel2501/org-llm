@@ -1,9 +1,23 @@
 :PROPERTIES:
 :ID:       4d9f6a2c-c1e7-4b18-9b6e-3a7c2d6f9e51
 :CREATED:  [2026-05-03]
+:ARCHIVED: [2026-05-03]
 :END:
-#+TITLE: 2026-05-03 — hands-on test session
-#+FILETAGS: :wiki:testing:session:
+# ── ARCHIVED [2026-05-03] ────────────────────────────────────────────
+# Test session findings 1-9 + opt-1..5 + Phase 21.1 ship notes.
+# Live items extracted into docs/wiki/dev-tracker.org:
+# - GitHub setup TODO → Plan queue (PRIORITY A)
+# - Findings 6, 7, 8 → Bugs (already in tracker via recipes.org refs)
+# - opts 2-5 already shipped same-night per this file
+# Findings 1-5 + opt-2..5 = same-night fixes (DONE).
+# Per-run detail data lives in 2026-05-03-test-campaign-detail.org
+# (kept as ground-truth reference, not archived).
+# Do not edit.
+# See: ~/repos/org-llm/docs/wiki/dev-tracker.org
+# ─────────────────────────────────────────────────────────────────────
+
+#+TITLE: 2026-05-03 — hands-on test session (ARCHIVED)
+#+FILETAGS: :wiki:testing:session:archived:
 #+OPTIONS: toc:1 num:nil
 
 * Scope
@@ -49,26 +63,14 @@ will fail the "open a draft PR" step. Visit
 [[https://claude.ai/code/onboarding?magic=github-app-setup]] or
 run =/web-setup= in Claude Code locally.
 
-** TODO Add battery health + charge to health monitors
+** DONE Add battery health + charge to health monitors  (shipped 2026-05-03)
 
-User asked 2026-05-03: alert when battery is low. Plumbing path:
-
-- New probe in =org_llm/life_support.py= (or sibling) that
-  reads =/sys/class/power_supply/BAT*/= on Linux:
-  - =capacity= (0–100, percent of full charge)
-  - =status= (Charging / Discharging / Full / Not charging)
-  - =cycle_count= (battery health proxy; high → ageing)
-  - =energy_full= / =energy_full_design= (health %)
-- Integrate into the sidebar HEALTH section
-  (=panel.tsx::SectionHealth=) alongside cpu / memory /
-  disk / thermal — same =sensor_*= ladder. Threshold:
-  WARN below 20%, CRIT below 10% AND discharging.
-- For non-Linux (macOS), shell out to =pmset -g batt= and
-  parse. Expose battery_health_pct as a synthetic probe.
-
-Phase number: TBD. Likely a sub-issue of Phase 17.x (sidebar /
-health probes). Worth ~1 hour of work; the file paths exist on
-every laptop, parsing is trivial.
+Shipped same-day in commits =80593d9= (=battery_details= +
+=power_profile= + agent-framework architecture) and =70ac239=
+(battery fix + agent-roster docs + framework links + nerd
+icons). The =battery_status= MCP tool, sidebar HEALTH section
+integration, and =@gardener='s =power_profile= awareness all
+landed.
 
 * Findings log
 
@@ -267,25 +269,14 @@ Fix shape: defer narration writes to a background thread (the
 write order already preserves causality if we keep recipe /
 tool_call / delegate synchronous and only narration deferred).
 
-* Outstanding test coverage (deferred to tomorrow)
+* Outstanding test coverage  (RAN HEADLESSLY, same session)
 
-Prompts not exercised in this session — picked up by the
-morning agent (see schedule below):
-
-- #2 (counting verb stem)
-- #3 (irregular verb)
-- #6 (org_grep proper noun)
-- #7 (link graph N-hop)
-- #8 (property drawer)
-- #9 (orphans)
-- #10 (agenda)
-- #11 (file meta + outline)
-- #12 (tag suggest)
-- #13 (refile candidates)
-- #14 (dailies routine filter)
-- #15 (CLOCK + agenda combo)
-- #16 (doom keybinds)
-- #17 (markdown-JSON repair)
+All 14 deferred prompts (#2 #3 #6-#17) plus 6 new agent-domain
+prompts (#18-#23) ran headlessly later in this same session
+because the morning agent's TUI dependency dropped (opencode
+suspended). See =Headless test-campaign= section below for the
+roll-up + new findings (=finding-6= through =finding-9=). The
+=trig_01BDFVAqLhrDkSDua3Y3CjSP= remote routine was disabled.
 
 * Same-night follow-up: fixes shipped              :inline-fixes:
 
@@ -296,14 +287,14 @@ brief is now narrowed to PART 3 (run the 14 remaining test
 prompts).
 
 ** finding-2 — drop "frequency" from count_across_vault     ✓
-=org_llm/orchestration.py= — removed =frequency= from the
+[[file:../../org_llm/orchestration.py][=org_llm/orchestration.py=]] — removed =frequency= from the
 trigger regex. Verified: =match_recipe("what are my top 10 tags
 by frequency?")= → =NO MATCH=. Baseline preserved:
 =match_recipe("how many times have I made my bed")= →
 =count_across_vault=.
 
 ** finding-3 — paren-form repair pattern                    ✓
-=org_llm/llm_proxy.py= — added =name(\{...\})= as the 5th entry
+[[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] — added =name(\{...\})= as the 5th entry
 in =_TOOL_CALL_PATTERNS=. Verified: a prose-embedded
 =org-llm_count_matches({"pattern":"foo"})= now extracts to
 ={'name': 'org-llm_count_matches', 'arguments': {'pattern': 'foo'}}=.
@@ -311,7 +302,7 @@ The previous bare =name\{...\}= pattern still fires on
 curly-brace shapes (no regression).
 
 ** finding-1 — title-gen detection skips recipe block       ✓
-=org_llm/llm_proxy.py= =intercept_agent_prefix= — before
+[[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] =intercept_agent_prefix= — before
 calling =match_recipe=, the proxy now checks the system message
 for "title" / "summarize the conversation" AND that
 =max_tokens ≤ 200=. When both hold, =recipe= is forced to
@@ -319,14 +310,14 @@ for "title" / "summarize the conversation" AND that
 flow straight to the cloud without redundant local work.
 
 ** finding-4 — proxy_capture_all_narrations knob            ✓
-=org_llm/llm_proxy.py= — extended the =orch_buf= guard to also
+[[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] — extended the =orch_buf= guard to also
 fire when =proxy_capture_all_narrations= is true (default
 false). Set the knob to true to surface every chat turn's
 narration in manager-log, not just orchestrated ones. Pairs
 with the existing =proxy_capture_narration= master switch.
 
 ** opt-2 — SQL filter for File captains-log                 ✓
-=org_llm/recipe_runner.py= — replaced the Python-side
+[[file:../../org_llm/recipe_runner.py][=org_llm/recipe_runner.py=]] — replaced the Python-side
 =base.startswith("captains-log")= filter with
 =File.path.notlike("%captains-log%")= at the SQL layer +
 dropped the limit from 200 to 60. Separate =.count()= preserves
@@ -334,13 +325,13 @@ the bucket-summary line. Net: ~140 fewer disk reads per
 =recent_activity_summary= fire on this user's vault.
 
 ** opt-3 — orch_buf cap at 16KB                              ✓
-=org_llm/llm_proxy.py= — the chunk-loop append now checks
+[[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] — the chunk-loop append now checks
 =sum(len(b) for b in orch_buf) < orch_cap= before appending.
 Prevents unbounded growth on very long agent responses; we only
 render the first ~600 chars of content text so 16KB is plenty.
 
 ** opt-4 — lru_cache(_phrase_to_regex)                       ✓
-=org_llm/recipe_runner.py= — wrapped =_phrase_to_regex= with
+[[file:../../org_llm/recipe_runner.py][=org_llm/recipe_runner.py=]] — wrapped =_phrase_to_regex= with
 =functools.lru_cache(maxsize=64)=. Same phrase always yields the
 same regex; second-and-later calls hit the cache. Verified:
 3 calls of "made my bed" → 1 miss + 2 hits.
@@ -360,7 +351,7 @@ context about the vault contents in the db" → shipped a first
 cut of Phase 21 with a DB-backed fact store.
 
 ** =VaultFact= table
-=org_llm/db.py= — new table =vault_fact= keyed by inferrer
+[[file:../../org_llm/db.py][=org_llm/db.py=]] — new table =vault_fact= keyed by inferrer
 name. Columns: =value= (JSON), =computed_at=, =inputs_mtime=,
 =inputs_count=, =ttl_secs=. Created on existing DBs via the
 existing =_migrate_in_place= path (=Base.metadata.create_all=
@@ -442,31 +433,229 @@ Phase number for the walk → fact-store wiring: probably 21.4
 (after the inferrer infrastructure stabilises in 21.1–21.3).
 Add to the roadmap when the inferrer set grows beyond 5.
 
-* Tomorrow's continuation
+* Tomorrow's continuation  (SUPERSEDED — ran tonight)
 :PROPERTIES:
 :CUSTOM_ID: tomorrows-continuation
 :END:
 
-A remote agent has been scheduled to resume the test campaign
-first thing 2026-05-04. See the routine ID at the top of the
-file. The agent's brief:
+The 2026-05-04 morning agent (=trig_01BDFVAqLhrDkSDua3Y3CjSP=)
+was *disabled* — the entire test campaign ran headlessly in this
+same evening session. See the =Headless test-campaign= section
+below for the roll-up + findings 6-9. All four overnight
+findings (1-4) had already been fixed earlier in the session
+(see =Same-night follow-up: fixes shipped=).
 
-1. Run prompts #2 / #3 / #6–#17 in sequence, capturing manager
-   trace + chat output for each.
-2. Append findings to this file under =* Findings log= using the
-   same format as #1 / #4 / #5.
-3. Triage the four findings logged tonight:
-   - finding-1 (title-gen redundant pre-fetch) — try the
-     =max_tokens= + system-prompt heuristic.
-   - finding-2 (over-eager recipe match on "frequency") —
-     remove =frequency= from the =count_across_vault= trigger
-     regex.
-   - finding-3 (paren-form repair miss) — add a
-     =name(\{...\})= pattern to =_TOOL_CALL_PATTERNS=, careful
-     to anchor (line-start or non-word character before the
-     name) so prose mentions don't false-positive.
-   - finding-4 (untracked turns) — add the
-     =proxy_capture_all_narrations= knob.
-4. If GitHub is connected by then (see TODO), open a draft PR
-   per finding. Otherwise post the findings as a markdown note
-   in this file.
+* Headless test-campaign — 2026-05-03 evening      :inline-fixes:
+
+After the morning agent (=trig_01BDFVAqLhrDkSDua3Y3CjSP=) was
+disabled, the campaign was driven HEADLESSLY in this same session
+to bypass a stuck/suspended opencode TUI. Every prompt routes
+through the same =match_recipe= / =execute_recipe= / pre-fetch
+code paths the proxy uses; only the cloud LLM was replaced with
+three local small-models (=phi4-mini:latest=, =llama3.2:latest=,
+=gemma3:latest=) so we could compare narration quality across
+models on identical pre-fetch input.
+
+20 prompts × 3 models = 60 narration runs. Full per-run output in
+[[file:2026-05-03-test-campaign-detail.org][test-campaign-detail.org]].
+
+Six prompts (#18-#23) exercise the agents shipped 2026-05-03
+(@journalist, @doom, @gardener, @agenda, @ops, @agentsmith) ahead
+of test-prompts.org being extended.
+
+** Roll-up
+
+Same shape as the morning-agent's planned table.
+
+| #   | agent        | recipe                    | tool                              | v | avg-narr | best model            |
+|-----+--------------+---------------------------+-----------------------------------+---+----------+-----------------------|
+| #2  | @researcher  | count_across_vault        | org_count_matches                 | ⚠ |   208c   | phi4-mini             |
+| #3  | @researcher  | count_across_vault        | org_count_matches                 | ⚠ |   180c   | phi4-mini             |
+| #6  | @researcher  | —                         | org_grep                          | ⚠ |    95c   | llama3.2 (harness sig)|
+| #7  | @researcher  | —                         | org_id_find → org_link_graph      | ⚠ |   186c   | phi4-mini (harness sig)|
+| #8  | @researcher  | —                         | org_property_search               | ⚠ |   222c   | phi4-mini (harness sig)|
+| #9  | @researcher  | —                         | org_orphans                       | ✓ |   221c   | llama3.2              |
+| #10 | @researcher  | —                         | org_agenda                        | ✓ |   107c   | llama3.2              |
+| #11 | @researcher  | —                         | org_id_find + org_outline         | ⚠ |   195c   | llama3.2 (harness sig)|
+| #12 | @scribe      | —                         | org_tag_suggest                   | ⚠ |   256c   | llama3.2 (harness sig)|
+| #13 | @scribe      | —                         | org_refile_candidates             | ⚠ |   447c   | phi4-mini (harness sig)|
+| #14 | @scribe      | dailies_routine_filter    | routine_chores                    | ✓ |   119c   | llama3.2              |
+| #15 | @researcher  | —                         | org_agenda + org_clock_summary    | ✓ |   335c   | llama3.2              |
+| #16 | @researcher  | —                         | doom_keybinds                     | ⚠ |   120c   | llama3.2 (harness sig)|
+| #17 | @researcher  | count_across_vault        | org_count_matches                 | ⚠ |   194c   | gemma3                |
+| #18 | @journalist  | weekly_mood_review        | mood_signal                       | ✓ |   248c   | llama3.2              |
+| #19 | @doom        | —                         | doom_packages                     | ✓ |   380c   | llama3.2              |
+| #20 | @gardener    | —                         | vault_profile + orphans + embeds  | ✗ |    41c   | (all timed out)       |
+| #21 | @agenda      | weather_aware_agenda      | org_agenda + weather              | ✗ |    41c   | (all timed out)       |
+| #22 | @ops         | —                         | doctor / sysstats / config        | ✓ |    75c   | llama3.2              |
+| #23 | @agentsmith  | dailies_general (WRONG!)  | list_dailies                      | ✗ |    41c   | (all timed out)       |
+
+Verdict tally: ✓ 8 / ⚠ 9 / ✗ 3.
+
+** New findings
+
+*** finding-6 — scope-modifier phrases break the count regex
+While testing #2 ("how often have I exercised across the vault?"),
+=count_across_vault='s phrase tokeniser folded "across the vault"
+into the regex as content tokens:
+
+#+begin_example
+(?i)(\[X\]|\bDONE\b).*?\b(?:exercis|exercised|exercising|exerciss)
+(?:.{0,12}\bacross\b.{0,12}\bvault\b)
+#+end_example
+
+→ 0 hits despite the user clearly having exercise entries.
+
+Sibling of finding-5 (time-modifier "this year" — same shape).
+Both surface the SAME root cause: the tokeniser strips =:agent:=
+prefixes + a small set of stop words, but doesn't strip
+*scope qualifiers* ("across the vault", "in my dailies",
+"in all my notes") or *time qualifiers* ("this year", "last week",
+"in the past month").
+
+Severity: medium. Workaround: drop the scope/time clause from the
+question. Real fix: extend
+=org_llm/recipe_runner.py::_phrase_to_regex='s strip pass to
+include both modifier classes before tokenisation.
+
+*** finding-7 — small-local pre-fetch budget exhausted on @gardener / @agenda / @agentsmith
+#20 (=vault_profile + org_orphans + embed status= → ~1.5KB JSON),
+#21 (=weather_aware_agenda= → overdue list of ~2KB), and #23
+(=dailies_general= → recent dailies content ~3KB+) all timed out at
+60s across all 3 small models. Each model returned just a
+TimeoutError envelope (=<<ollama error: TimeoutError: timed out>>=,
+41 chars).
+
+In production these prompts route to cloud (=qwen-2.5-72b-instruct=,
+128K context, ~10x throughput) which would handle them comfortably.
+The local-forward path with sub-4B parameter models is the
+constrained surface.
+
+Two complementary fixes:
+1. Add =proxy_prefetch_max_chars= knob (default 6000 for cloud,
+   1500 for local). When pre-fetch would exceed the budget,
+   the runner emits a TOP-N summary instead of the full table
+   (e.g. for vault_profile: stats line + top-5 tags + top-5 chores).
+2. Detect local-forward path in =format_prefetch_block= and route
+   through the budget. The cloud path keeps the full table.
+
+*** finding-8 — @agentsmith prompt mis-routes to dailies_general recipe
+Prompt #23: "help me scope a new @therapist agent that reasons over
+my dailies' emotional content, suggests gentle reframes, and routes
+to @journalist's mood data." Recipe matcher fired on the word
+"dailies" → =dailies_general= → =list_dailies= pre-fetch (3KB+ of
+recent daily content), agent timed out trying to digest it.
+
+The agent name is =@agentsmith= — a META-agent that reads
+=docs/wiki/agent-roster.org= + =docs/wiki/agent-framework.org= and
+walks the user through 7 design steps. NO recipe should fire for
+@agentsmith; its persona is the value, the data is in the wiki
+files, and it should ALWAYS route through the cloud path with
+its full prompt.
+
+Fix: in =org_llm/orchestration.py::match_recipe=, short-circuit to
+=None= when the leading agent token is in a configurable
+META_AGENTS set (=agentsmith= for now, future-proof for any
+meta/conversational agents). Alternative: add an
+=ALLOWLIST_AGENT= field to recipes — only fire if the
+detected leading-agent is in the allowlist (defaults to all
+agents except metas).
+
+*** finding-9 — harness-side direct-tool kwargs drift from real signatures
+The headless harness invoked direct =org_tools= functions with
+guessed kwargs that didn't match the actual signatures (e.g.
+=org_grep(limit=20)= but the real signature is =max_results=,
+=org_property_search(name=...)= but real is =prop=,
+=doom_keybinds(query=...)= but real takes NO args). All eight
+errors surfaced as =TypeError= in the harness's tool-result
+preview.
+
+Severity: cosmetic — these are HARNESS-side bugs (kwargs invented
+in =/tmp/headless_campaign.py='s =NON_RECIPE_TOOL= map), not
+system bugs. Agent-side calls flow through the MCP wrapper layer
+(=mcp_server.py=) which already maps friendly names → real
+signatures.
+
+The lesson worth keeping: when wiring future test harnesses /
+remote routines, derive direct-call signatures from
+=inspect.signature= rather than hard-coding. Or always go via the
+MCP shim.
+
+** Confirmed working
+
+- *Phase 21.1 routine_chores* (#14) — REJECT-first filter held;
+  top 5 = make bed (8×), clean bathroom (4×), exercise (3×),
+  trash (3×), juice (3×). Multi-model agreement = 3/3 listed
+  same chores in same order.
+- *Phase 21.1 mood_signal + weekly_mood_review* (#18) —
+  recipe matched, runner produced 6 weekly windows, narrations
+  all hedged + observational ("relatively stable", "no significant
+  fluctuations") matching @journalist's persona spec.
+- *@doom doom_packages* (#19) — llama3.2 narration cleanly
+  identified =csv-mode=, =doric-themes=, =modus-themes=,
+  =ef-themes=, =ibuffer-sidebar=, =org-ql=, =claude-code-ide=
+  as non-default. Persona fit ✓.
+- *@ops doctor / sysstats* (#22) — narration routed to the right
+  verb (=org-llm doctor=) without inventing flags.
+- *count_across_vault* baseline (#1, prior session) preserved —
+  this campaign did not regress it.
+
+** Multi-model observations
+
+- *llama3.2:latest* — fastest of the three (often 12-25s), most
+  consistent at digesting larger pre-fetch blocks within the 60s
+  timeout. Best small-local default.
+- *phi4-mini:latest* — slightly slower (28-50s typical), produces
+  more verbose narrations with extra "consider trying X" advisory
+  flair (sometimes useful, sometimes noisy).
+- *gemma3:latest* — slowest (often 30-60s, hits timeout on
+  ≥1.5KB pre-fetch), least reliable. Marginal value as a third
+  voice; not worth its latency for routine prompts.
+
+Recommendation: drop gemma3 from the local rotation, keep
+llama3.2 + phi4-mini as the two local fallbacks; reserve
+qwen2.5-coder for code-shaped prompts only.
+
+** Reasoning capture (Phase 22.5b probe)
+
+Every prompt was instructed to emit a leading =Reasoning: …= line
+before its answer. Capture rate was 100% — every model+prompt
+combination produced a reasoning line, ranging from 30-280
+characters. Most were terse and surface-level ("Use
+org-count-matches to count occurrences …"), but a handful
+showed actual decision-tree reasoning ("=search_notes= instead of
+a direct tool call due to type error" — llama3.2 on #8 noticing
+the harness error and re-routing).
+
+Implication for Phase 22.5b: a system-prompt =Reasoning:= probe
+is portable, cheap, and yields useful signal across models that
+DON'T natively emit =<thinking>= tags. Pair this with the
+existing native-=<think>=-tag extractor for models that do.
+Promotes Phase 22.5b from "explicit reasoning capture" (model-
+dependent) to "universal reasoning capture" (works on any
+instruction-following model).
+
+** Improvements queued by this campaign
+
+For each verdict-⚠/✗ prompt, the actionable improvements:
+
+| #                   | improvement                                                                       | size    |
+|---------------------+-----------------------------------------------------------------------------------+---------|
+| #2                  | Strip scope qualifiers ("across the vault", "in my notes") before tokenisation    | tiny    |
+| #3                  | Strip time qualifiers ("this year", "last week") before tokenisation (finding-5)  | tiny    |
+| #17                 | Same as #2/#3 — and add compound-grouping support (=DONE grouped by tag=)         | small   |
+| #20                 | Pre-fetch budget knob; truncate vault_profile to summary on local-forward path    | small   |
+| #21                 | Same budget logic — also probably wants weekly bucketing of overdue items         | small   |
+| #23                 | =META_AGENTS= short-circuit in =match_recipe= for agentsmith / future meta agents | tiny    |
+| #6-#8, #11-#13, #16 | Harness should read tool signatures with =inspect= (not a system bug)             | trivial |
+
+Total estimated work: ~3-4 hours for findings 6-8, plus the
+documented harness-side cleanup. None block 1.0.
+
+** Open user TODOs (carried forward)
+
+- *GitHub for daniel2501/org-llm* — still pending; needed for
+  any remote routine that opens a draft PR.
+- *Battery health + charge* — already shipped (commits =80593d9=
+  + =70ac239=). This TODO is now stale; updating below in the
+  outstanding-items section.

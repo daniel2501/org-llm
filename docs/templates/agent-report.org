@@ -4,7 +4,7 @@
 
 # Agent post-action report template.
 #
-# Canonized 2026-05-04. Owned by @curator under the agent-report
+# Canonized 2026-05-04. Owned by @atoz (alias =@curator=) under the agent-report
 # primer namespace (see docs/wiki/agent-orientation.org).
 #
 # How to use:

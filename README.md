@@ -8,9 +8,10 @@
 
 A self-hosted system that indexes your `~/org/` notes into SQLite + sqlite-vec,
 embeds them locally via [Ollama](https://ollama.com), then surfaces 50+ MCP
-tools to [opencode](https://opencode.ai), [Claude Code](https://claude.com/code),
-and [Pi](https://pi.dev/) (via a bundled bridge extension) so any of those
-agents can read, write, search, and reason over your second brain natively.
+tools to [opencode](https://opencode.ai) (the primary surface), [Pi](https://pi.dev/)
+(via a bundled bridge extension), and any other MCP client like
+[Claude Code](https://claude.com/code) so any of those agents can read,
+write, search, and reason over your second brain natively.
 When your laptop runs out of VRAM, route through 6+ cloud providers; when
 local Ollama gets stuck, the proactive doctor probes RAM fit and proposes a
 downsize/upsize/cloud switch with one-line acceptance. Captain's Log mirrors
@@ -82,7 +83,7 @@ when something needs tuning.
 | 🚀 **Splash menu** — `org-llm` (no args) opens a Doom-Emacs-style LCARS launcher with grouped shortcuts; first-run users see a setup nudge instead | 🔍 **Semantic search** over your full org-roam graph (`sqlite-vec`, no vector DB) — see [Embeddings](docs/wiki/embeddings.org) + [Vector similarity](docs/wiki/vector-similarity.org) for how it works |
 | 💬 **[RAG Q&A](docs/wiki/retrieval-augmented-generation.org)** grounded in your own notes (`org-llm ask "…"`) | 📔 **Askbook** — literate Q/A scratchpad: pose the same question to chat / reason / fast / code / text / cloud / claude / pi backends and see answers side-by-side in `~/org/llm-askbook.org` |
 | 🧠 **Hardware-aware FOSS model catalog** — `org-llm models` dashboard with auto-suggestions; `models --benchmark` real tok/s rankings; `models --upgrade` one-shot local + cloud picker | ☁️ **6+ cloud providers** when you outgrow local — RunPod, Vast, Lambda, TensorDock, Salad, Paperspace, CoreWeave, OpenRouter, HuggingFace; auto-refreshing pricing catalog (`cloud --refresh-catalog`) |
-| 🛡️ **Encrypted credentials** via the standard Unix `pass` manager — never in plaintext | 🤖 **MCP server** with 50+ tools — every capability exposed to opencode + Claude Code (and Pi via the bundled bridge), with themed LCARS-styled output |
+| 🛡️ **Encrypted credentials** via the standard Unix `pass` manager — never in plaintext | 🤖 **MCP server** with 50+ tools — every capability exposed to opencode (primary), Pi (via the bundled bridge), and any other MCP client (Claude Code, Cursor, …), with themed LCARS-styled output |
 | 🐝 **Pi extension bridge** — `org-llm pi --install` auto-installs Pi if missing, copies a TypeScript MCP-bridge extension to `~/.pi/extensions/`, and wires `~/.pi/config.json`; per-turn dynamic system prompts (something opencode can't do) | 📓 **Org-babel skills** — define LLM workflows as `:skill:`-tagged source blocks |
 | 🔬 **Proactive `doctor`** — power-boost probe at launch surfaces upgrades; LLM rescue on every uncaught exception with opt-in self-rewrite + auto-rollback | 🚀 **`launch` / `claude`** — themed workspaces with 51+ slash commands, persona-binding from active dials, stall watcher, optional auto-embedder |
 | 🎨 **FOSS tool installer** — `bat`, `eza`, `delta`, `zellij`, … with LCARS/Doom themes | 📊 **dbt analytics + LLM lessons** — `org-llm dbt build/status/doctor/design/walkthrough/lessons`, mart layer over both notes AND the Captain's Log |
@@ -133,8 +134,9 @@ Three things the above quietly does that matter:
   and analyse your own LLM usage from inside your vault.
 
 After step 3 you have a working second-brain CLI. Read on for the
-deeper surfaces (workspaces in opencode/Claude/Pi, dbt analytics,
-self-healing, theming).
+deeper surfaces (workspaces in opencode/Pi — and integration with
+other MCP clients like Claude Code — dbt analytics, self-healing,
+theming).
 
 ## Install
 
@@ -245,8 +247,8 @@ org-llm ask "what did I write about cooperative governance last month?"
         ▼                  ▼               ▼                ▼                  ▼
    ┌─────────┐       ┌──────────┐    ┌──────────┐     ┌──────────┐      ┌────────────┐
    │ Ollama  │       │ MCP      │    │ opencode │     │ Claude   │      │ Cloud GPU  │
-   │ (local) │       │ stdio    │ ─▶ │ workspace│     │ Code     │      │ (RunPod /  │
-   │ chat    │ ◀──── │ 50+ tools│    │          │     │ workspace│      │  Vast / …) │
+   │ (local) │       │ stdio    │ ─▶ │ workspace│     │ Code etc.│      │ (RunPod /  │
+   │ chat    │ ◀──── │ 50+ tools│    │          │     │(integration)│   │  Vast / …) │
    │ embed   │       └──────────┘    └──────────┘     └──────────┘      └────────────┘
    └─────────┘
 ```
@@ -600,8 +602,9 @@ org-llm pi --reinstall   # rebuild the bridge from bundled TypeScript
 Theme parity: the same `opencode_persona_intro` /
 `mcp_tool_success_suffix` / `mcp_tool_error_suffix` surfaces from
 `theme_studio` that decorate opencode also feed Pi, so the active
-LCARS palette + dial voices show up identically across all three
-conversational surfaces (opencode · Claude Code · Pi).
+LCARS palette + dial voices show up identically across the
+conversational surfaces (opencode · Pi · any other MCP client like
+Claude Code).
 
 ---
 
@@ -915,7 +918,7 @@ All three apply to every LLM-using path in this feature:
 
 ### MCP exposure
 
-Four MCP tools mirror these surfaces for opencode / Claude Code:
+Four MCP tools mirror these surfaces for opencode (and any other MCP client like Claude Code):
 
 | Tool | Purpose |
 |---|---|
@@ -933,8 +936,8 @@ the CPU?" and it pulls from `life_support_history` or `emh_consult`.
 ## MCP file + browser grants
 
 The MCP server exposes `read_file`, `list_directory`, `request_access`,
-`open_url`, and `browser_command` to opencode/Claude — but only with
-your explicit authorization. Three layers:
+`open_url`, and `browser_command` to MCP clients (opencode, Claude
+Code, …) — but only with your explicit authorization. Three layers:
 
 ```sh
 # Direct grants:
@@ -1896,6 +1899,30 @@ parent theme.
 For the full catalog with status anchors per sub-phase, what's
 shipped vs planned vs wishlist, and how phase numbering works, see
 [docs/wiki/roadmap.org](docs/wiki/roadmap.org).
+
+---
+
+## Contributing
+
+org-llm is developed concurrently by humans and agent runtimes
+(opencode, Claude Code, etc.). Read these before opening an
+edit:
+
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — entry point for
+  human contributors; routes into the org wiki for substance.
+- **[AGENTS.md](AGENTS.md)** — primer for agent runtimes
+  loading this repo as project context.
+- **[docs/wiki/coordination.org](docs/wiki/coordination.org)**
+  — the parallel-instance protocol (claim before touch, one
+  branch per arc, re-Read before Edit, no silent wiki edits).
+- **[docs/wiki/active-claims.org](docs/wiki/active-claims.org)**
+  — the live board: who's touching what, on which branch.
+- **[docs/wiki/decisions.org](docs/wiki/decisions.org)** — the
+  directional record (DEC-NNN entries with status, context,
+  consequences).
+
+PR template lives at
+[.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md).
 
 ---
 

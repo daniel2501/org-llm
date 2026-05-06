@@ -2,7 +2,7 @@
 absolute candidates.
 
 Closes the canonical motivating bug for Phase 24: user says
-"@curator in org-llm, wiki/superset.org, fix it up". The agent
+"@atoz in org-llm, wiki/superset.org, fix it up". The agent
 sees `wiki/superset.org` and resolves it against MCP's cwd
 (=~/=), failing. This resolver extracts the token, globs its
 basename across granted roots + the user's repo dirs, and

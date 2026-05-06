@@ -65,7 +65,7 @@ def test_manifest_is_short_and_names_each_steward():
     assert line_count <= 15, (
         f"manifest is {line_count} lines; contract caps it at 15"
     )
-    for steward in ("@curator", "@tracker", "@agentsmith"):
+    for steward in ("@atoz", "@riker", "@agentsmith"):
         assert steward in out, f"manifest must name {steward}"
     for namespace in list_namespaces():
         assert namespace in out, (

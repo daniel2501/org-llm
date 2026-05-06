@@ -134,7 +134,7 @@ org-llm walk --review                          # oldest first
 org-llm walk --no-save
 #+end_src
 
-** Conversational (opencode / claude / pi)
+** Conversational (opencode / pi / MCP clients)
 
 The walk_* MCP tool family (in [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]]):
 

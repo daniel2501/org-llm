@@ -220,14 +220,14 @@ policies:
 Default to (b); upgrade to (a) for files with active concurrent
 flows; (c) is structural.
 
-** Scenario 6 — phone edit + laptop's nightly @gardener
+** Scenario 6 — phone edit + laptop's nightly @boothby
 
 This composes scenarios 4 and 5. The phone makes a quick
-hand-edit at 10pm; the laptop's nightly =@gardener= run kicks
-off at 3am, pulls, edits, pushes. If phone-edit and gardener-edit
+hand-edit at 10pm; the laptop's nightly =@boothby= run kicks
+off at 3am, pulls, edits, pushes. If phone-edit and @boothby-edit
 land in the same heading → scenario 4. If different headings →
 scenario 3 / clean merge. If the phone is offline at 3am →
-scenario 2 (gardener's commits queue on the laptop's push, phone
+scenario 2 (@boothby's commits queue on the laptop's push, phone
 pulls them on next app open).
 
 The orthogonality is the design payoff: *phone-vs-laptop and

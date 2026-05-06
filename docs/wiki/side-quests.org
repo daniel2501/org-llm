@@ -55,8 +55,8 @@ receipt to the user.
    Reflex mode a recipe may pre-fire the spawn — see
    composition below.)
 2. *Pick a target.* The captain picks an agent from the
-   [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][existing roster]] — =@scribe= for captures, =@gardener= for
-   vault hygiene, =@curator= for wiki edits, =@engineer= for
+   [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][existing roster]] — =@scribe= for captures, =@boothby= for
+   vault hygiene, =@atoz= for wiki edits, =@engineer= for
    slice-shaped code work, etc. Side-quests do *not* introduce
    a new agent type; the registry is the source of truth.
 3. *Spawn.* The captain calls =org-llm_delegate(target,
@@ -134,9 +134,9 @@ spawns *itself* (=@picard=) — recursion-as-fallback is fine.
 | side-quest shape                              | target             |
 |-----------------------------------------------+--------------------|
 | capture this aside / draft this paragraph     | =@scribe=          |
-| fix a stray TODO / sweep an orphan            | =@gardener=        |
-| edit a wiki page / fix a broken link          | =@curator=         |
-| add/edit a dev-tracker phase entry            | =@tracker=         |
+| fix a stray TODO / sweep an orphan            | =@boothby=         |
+| edit a wiki page / fix a broken link          | =@atoz=            |
+| add/edit a dev-tracker phase entry            | =@riker=           |
 | design a new agent persona                    | =@agentsmith=      |
 | code slice — bounded module change            | =@engineer=        |
 | review a code slice                           | =@reviewer=        |
@@ -227,8 +227,8 @@ in the existing audit + capability + roster machinery.
   B: a tool-failure recovery hook (Phase 24.2) on the
   =delegate=-return path that detects a missing report and
   returns a recovery suggestion.
-- *Target drift.* Captain spawns =@gardener= for what should
-  have been =@curator= work. Mitigation: the [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent roster's]]
+- *Target drift.* Captain spawns =@boothby= for what should
+  have been =@atoz= work. Mitigation: the [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent roster's]]
   steward namespacing — each specialist has a clear domain;
   recurring mis-routes mean either a roster gap (new
   specialist needed) or a manifest gap (steward namespace

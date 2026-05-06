@@ -73,12 +73,12 @@ def manifest() -> str:
 _MANIFEST = """\
 ORG-LLM AGENT MANIFEST (lazy primers — fetch when relevant)
 
-- @curator owns wiki conventions. Call primer("wiki-authorship")
+- @atoz owns wiki conventions. Call primer("wiki-authorship")
   before writing any docs/wiki/*.org page; primer("agent-report")
   before writing a docs/notes/ post-action report.
   Always-on: Rule 2b — every wiki concept leads with *Summary.*
   + *Expanded.*
-- @tracker owns dev-tracker.org. Call primer("dev-tracker-entry")
+- @riker owns dev-tracker.org. Call primer("dev-tracker-entry")
   before adding/editing a phase entry.
 - @agentsmith owns new-agent shape. Call primer("new-agent")
   before drafting persona/triggers/capabilities.

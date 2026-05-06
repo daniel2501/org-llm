@@ -45,11 +45,11 @@ inherits these for free.
 
 | Primitive             | Shape                              | Who reads it today           |
 |-----------------------+------------------------------------+------------------------------|
-| =SCHEDULED:=          | When a task should start           | @tracker (Boothby), agenda   |
-| =DEADLINE:=           | Hard due-by                        | @tracker, @gardener (drift)  |
-| =TIMESTAMP=           | Point-in-time event                | @analyst, agenda             |
-| =CLOCK= blocks        | Time spent on a task               | @analyst (rolls)             |
-| =org-habit=           | Recurrence (=+1d=, =++1w=, =.+1d=) | @gardener, @tracker          |
+| =SCHEDULED:=          | When a task should start           | @riker (Trek: TNG XO), agenda |
+| =DEADLINE:=           | Hard due-by                        | @riker, @boothby (drift)     |
+| =TIMESTAMP=           | Point-in-time event                | @geordi, agenda              |
+| =CLOCK= blocks        | Time spent on a task               | @geordi (rolls)              |
+| =org-habit=           | Recurrence (=+1d=, =++1w=, =.+1d=) | @boothby, @riker             |
 | =org-agenda= dispatch | Query/view layer                   | All agents via babel/SQL     |
 
 Per [[file:dbt-pipeline.org][dbt-pipeline.org]] § derived models, these primitives get
@@ -64,7 +64,7 @@ file. Today's mechanisms are ad-hoc.
 
 | Work                          | Cadence                  | Today's mechanism             |
 |-------------------------------+--------------------------+-------------------------------|
-| @gardener nightly hygiene     | nightly                  | (planned) cron / scheduled remote |
+| @boothby nightly hygiene      | nightly                  | (planned) cron / scheduled remote |
 | dbt build on save             | event-driven             | save-hook                     |
 | dbt build incremental         | every save               | (in-flight per Phase 25.x DB-authoritative) |
 | Snapshot table refresh        | per snapshot strategy    | dbt-managed                   |
@@ -95,7 +95,7 @@ per-machine cron-shape work where =systemd= timers or cron suffice.
 
 | Anti-candidate                | Right tool                                 |
 |-------------------------------+--------------------------------------------|
-| Single-vault @gardener nightly | cron / =systemd= timer                    |
+| Single-vault @boothby nightly | cron / =systemd= timer                     |
 | Save-hook dbt build           | file-watch / babel                         |
 | Recipe A/B harness            | scheduled remote agent / cron              |
 | Captain's-log rotation        | in-process size check                      |
@@ -126,11 +126,11 @@ Layer 2 (org-mode primitives) is mostly /data/ — agents read
 An agent reading captain's-log + tracker.org + agenda could /propose
 its own schedule/. Examples:
 
-- @gardener observes hygiene runs land cleanest at 02:00 EST; proposes
+- @boothby observes hygiene runs land cleanest at 02:00 EST; proposes
   its own cron entry.
 - @journalist offers "want a weekly mood review every Sunday morning
   09:00 EST?"
-- @tracker proposes "sprint review every other Friday 16:00 EST."
+- @riker proposes "sprint review every other Friday 16:00 EST."
 
 Phase 29 — self-coded tools is the natural home: LLM observes a
 recurring need, proposes a deterministic tool (here: a schedule
@@ -146,7 +146,7 @@ Today: out of scope. Filed for the future.
 | [[file:dbt-pipeline.org][dbt-pipeline.org]] § Snapshots                               | Layer 2's relational view of scheduling       |
 | [[file:cull.org][cull.org]] § Subsumed                                        | Captain's-log =--reflect= weekly cron as subsumed example |
 | DEC-013 — two-tier tools                                   | Scheduling sits at the data/effect boundary   |
-| DEC-014 — cull rubric (Magnificent Seven)                  | Time-aware @tracker, @analyst, @gardener      |
+| DEC-014 — cull rubric (Bridge Crew)                        | Time-aware @riker, @geordi, @boothby          |
 | [[file:dev-tracker.org][dev-tracker.org]] § Hosting matrix                           | Airflow integration TODO                      |
 | [[file:sdlc.org][sdlc.org]] — DEC-016 promotion gates                         | "≥24h dogfood" is itself a scheduling primitive |
 | [[file:agents.org][agents.org]] — agent roster                                  | Which agents are time-shaped                  |
@@ -155,8 +155,8 @@ Today: out of scope. Filed for the future.
 
 | Question                                                                    | Status            |
 |-----------------------------------------------------------------------------+-------------------|
-| Should @tracker own a /schedule registry/ — meta-agent surface for cadence? | Open              |
-| Per DEC-012 (per-device Config keying), do schedules need device-aware semantics? (mobile defers nightly @gardener to laptop) | Open |
+| Should @riker own a /schedule registry/ — meta-agent surface for cadence?   | Open              |
+| Per DEC-012 (per-device Config keying), do schedules need device-aware semantics? (mobile defers nightly @boothby to laptop) | Open |
 | Where does cron / launchd / =systemd= timer config live? (vault-committed = synced; per-device = local) | Open |
 | When does dbt-cloud-shape scheduling earn its keep over Airflow?            | Open              |
 | Captain's-log rotation: Layer 2 (vault-shape) or Layer 3 (cross-cutting)?   | Open — leans Layer 3 |

@@ -365,11 +365,11 @@ ownership is the routing layer below.
 - *Decision:* RESOLVED (2026-05-05) — entry was conflated. Post-Phase-25-
   rewrite: dbt-pipeline (parsing, derived models, tests, snapshots) is CORE.
   dbt analytics *layer* = Apache Superset dashboards (CORE_DISABLED_BY_DEFAULT,
-  see entry). @analyst agent owns this surface (Magnificent Seven, locked).
+  see entry). @geordi agent (alias =@analyst=) owns this surface (Bridge Crew, locked).
   No standalone "dbt analytics" component remains.
 - *Where it lives:* Phase 27 target.
 - *What it does:* dbt models over captain's log + DB for analytic queries.
-- *What depends on it:* Superset dashboards; analyst agent.
+- *What depends on it:* Superset dashboards; @geordi (analyst) agent.
 - *Cut-criterion test:* β ships without; analytics is a downstream lens, not lead value.
 - *Walkthrough notes:* Disambiguated: dbt-pipeline = CORE; Superset = CORE_DISABLED.
 
@@ -385,7 +385,7 @@ ownership is the routing layer below.
 *** Doom config introspection — pre-classified ADDABLE
 - *Decision:* CORE_DISABLED_BY_DEFAULT (2026-05-05) — Doom is core experience
   per memory (daily-driver dogfood); ships for Doom users; off-default for
-  non-Doom users; @doom agent stays in extension path (Magnificent Seven
+  non-Doom users; @doom agent stays in extension path (Bridge Crew
   doesn't include @doom).
 - *Where it lives:* =org_llm/doom_introspect.py=
 - *What it does:* Reads Doom Emacs config so agents can reason about the user's setup.
@@ -413,18 +413,19 @@ ownership is the routing layer below.
 - *Walkthrough notes:*
 
 *** Non-core agents — pre-classified ADDABLE
-- *Decision:* SPLIT per Magnificent Seven (2026-05-05) — three agents promoted
-  to CORE roster: @analyst (analytics), @curator (wiki), @tracker (project
-  tracking). Remaining agents → COMMUNITY IDEA: @journalist, @doom, @ops,
-  @agentsmith, @drillmaster, plus future legacy-extras.
+- *Decision:* SPLIT per Bridge Crew (2026-05-05; renamed 2026-05-06 from
+  "Magnificent Seven") — three agents promoted to CORE roster: @geordi
+  (analytics; was @analyst), @atoz (wiki; was @curator), @riker (project
+  tracking; was @tracker). Remaining agents → COMMUNITY IDEA: @journalist,
+  @doom, @ops, @agentsmith, @drillmaster, plus future legacy-extras.
 - *Where it lives:* =org_llm/agents.py= (subset): @journalist, @doom, @ops,
-  @agentsmith, @tracker, @curator, @analyst, @drillmaster.
+  @agentsmith, @riker, @atoz, @geordi, @drillmaster.
 - *What it does:* Specialized agents beyond the curated core roster.
 - *What depends on it:* Specific recipes + user workflows.
-- *Cut-criterion test:* β ships with manager + researcher + scribe + gardener; these
-  are extension-path agents.
-- *Walkthrough notes:* DEC-009's ≤6 cap expanded to ≤7 mid-walk (Magnificent
-  Seven). Update DEC-009 candidate text post-cull.
+- *Cut-criterion test:* β ships with manager + researcher + scribe + @boothby
+  (was @gardener); these are extension-path agents.
+- *Walkthrough notes:* DEC-009's ≤6 cap expanded to ≤7 mid-walk (Bridge
+  Crew). Update DEC-009 candidate text post-cull.
 
 *** Specific recipes — pre-classified ADDABLE
 - *Decision:* SPLIT — see Subsumed / dead code section for the 6 losers
@@ -442,7 +443,7 @@ ownership is the routing layer below.
 *** Apache Superset dashboards — pre-classified ADDABLE
 - *Decision:* CORE_DISABLED_BY_DEFAULT (2026-05-05 per user direction) —
   ship the launcher (=org-llm superset --start=); off-default; user enables;
-  @analyst owns the surface.
+  @geordi (alias =@analyst=) owns the surface.
 - *Where it lives:* Phase 27 target.
 - *What it does:* Web dashboards over dbt analytics tables.
 - *What depends on it:* dbt analytics; analyst workflows.
@@ -504,10 +505,11 @@ ownership is the routing layer below.
 
 ** EDGE — needs argument
 
-*** @gardener — EDGE
-- *Decision:* CORE + agent-ify (2026-05-05) — confirmed core via Magnificent
-  Seven roster decision; hygiene is load-bearing for β.
-- *Where it lives:* =org_llm/agents.py= (gardener agent).
+*** @boothby — EDGE (was @gardener)
+- *Decision:* CORE + agent-ify (2026-05-05) — confirmed core via Bridge Crew
+  roster decision (renamed 2026-05-06 from "Magnificent Seven"; @gardener →
+  @boothby per Trek-canonical handle rename); hygiene is load-bearing for β.
+- *Where it lives:* =org_llm/agents.py= (@boothby agent; alias =@gardener=).
 - *What it does:* Hygiene agent — fixes broken links, normalizes tags, archives stale
   nodes, keeps the vault tidy.
 - *What depends on it:* Vault hygiene; long-term β quality.
@@ -558,7 +560,7 @@ ownership is the routing layer below.
 *** Auto-tagger — EDGE
 - *Decision:* CORE_DISABLED_BY_DEFAULT + agent-ify (2026-05-05) — ships with
   distro; off-default (privacy-respecting); user enables via knob. When on,
-  =@gardener= (steady-state) or =@scribe= (capture-time) manages.
+  =@boothby= (steady-state) or =@scribe= (capture-time) manages.
 - *Where it lives:* tagging pipeline (auto-tag on capture / on index).
 - *What it does:* Suggests or applies tags automatically based on content + vault facts.
 - *What depends on it:* Capture flow; search quality.
@@ -568,12 +570,14 @@ ownership is the routing layer below.
 - *Walkthrough notes:*
 
 *** Tracker self-hosting (=tracker init= / =tracker review=) — EDGE
-- *Decision:* CORE + agent-ify (2026-05-05) — =@tracker= confirmed core via
-  Magnificent Seven; verbs (=tracker init= / =tracker review= / =tracker pace=)
-  are how the agent operates; ships on. *Scope expanded 2026-05-05:* @tracker
-  is *general-purpose project tracker*, not dev-only. Home DIY, lab work,
-  book-writing, personal projects, sprints — anything sustained tracked in
-  org-mode. Emacs users put everything in Emacs; @tracker tracks all of it.
+- *Decision:* CORE + agent-ify (2026-05-05) — =@riker= (was =@tracker=)
+  confirmed core via Bridge Crew (renamed 2026-05-06); verbs (=tracker init=
+  / =tracker review= / =tracker pace=) are how the agent operates; ships on.
+  Verb name `tracker` stays — verbs are functional, agent handles are persona.
+  *Scope expanded 2026-05-05:* @riker is *general-purpose project tracker*,
+  not dev-only. Home DIY, lab work, book-writing, personal projects, sprints
+  — anything sustained tracked in org-mode. Emacs users put everything in
+  Emacs; @riker tracks all of it.
 - *Where it lives:* future tracker verbs (currently dev-tracker.org is the stepping
   stone; end goal is org-llm owning tracking).
 - *What it does:* Lets org-llm own its own tracking via verbs rather than an external
@@ -584,17 +588,18 @@ ownership is the routing layer below.
 - *Decision:*
 - *Walkthrough notes:*
 
-*** @tracker scope expansion — EDGE
-- *Decision:* DIRECTIONAL — @tracker is a *general-purpose project tracker*,
-  not dev-only. Tracks any sustained org-mode activity: home DIY, lab work,
-  book-writing, personal projects, sprints. Emacs users put everything in
-  Emacs; @tracker tracks all of it. Locked 2026-05-05 mid-cull. Implication:
-  agent persona, recipe set, and verb surface (=tracker init/review/pace=)
-  must be domain-agnostic from day one. Captured here to make the directional
-  call visible alongside the @tracker component verdict (EDGE 6).
-- *Where it lives:* @tracker persona + tracker verbs (=tracker init=, =tracker review=).
+*** @riker scope expansion — EDGE (was @tracker)
+- *Decision:* DIRECTIONAL — @riker (was @tracker; renamed 2026-05-06) is a
+  *general-purpose project tracker*, not dev-only. Tracks any sustained
+  org-mode activity: home DIY, lab work, book-writing, personal projects,
+  sprints. Emacs users put everything in Emacs; @riker tracks all of it.
+  Locked 2026-05-05 mid-cull. Implication: agent persona, recipe set, and
+  verb surface (=tracker init/review/pace=) must be domain-agnostic from day
+  one. Captured here to make the directional call visible alongside the
+  @riker component verdict (EDGE 6).
+- *Where it lives:* @riker persona + tracker verbs (=tracker init=, =tracker review=).
 - *What it does:* Generalized project tracking over org-mode artifacts.
-- *What depends on it:* User trust in @tracker for any sustained activity.
+- *What depends on it:* User trust in @riker for any sustained activity.
 - *Cut-criterion test:* β requires the tracker to be /general/ — narrowing to
   dev-only would lock the app to one user shape.
 - *Walkthrough notes:* File as a small DEC or wiki update post-cull.

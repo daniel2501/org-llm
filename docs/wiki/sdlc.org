@@ -113,10 +113,11 @@ Examples:
 - During the 24h: other dev work continues on trunk in parallel
 - Conflicts resolved at promotion time (rare), not edit time
 
-* The Claude / multi-agent angle
-This SDLC also applies to Claude / agent-driven development of
-org-llm itself:
-- When agents (Claude Code subagents, future Agor instances) run in
+* The agent / multi-agent angle
+This SDLC also applies to agent-driven development of org-llm
+itself (whether the developer is using Claude Code, Codex, or
+another agent harness):
+- When agents (host subagents, future Agor instances) run in
   parallel, they target trunk by default
 - Acpt branch is *the surface where agents test their changes
   against each other* before promoting to prod
@@ -128,7 +129,7 @@ When org-llm is used as a *dev tool for user's own projects* (per
 DEC-003 agents-as-SDLC), the same three-tier model applies:
 - User's project has trunk / acpt / main branches (or equivalents
   in their VCS)
-- org-llm's @tracker agent (per DEC-014 Magnificent Seven)
+- org-llm's @riker agent (per DEC-014 — Bridge Crew; alias =@tracker=)
   understands the model
 - The tracker can score "is this acpt-ready?" against the user's
   tests + dogfood signals

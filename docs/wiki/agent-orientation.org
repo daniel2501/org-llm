@@ -21,7 +21,7 @@ fresh, large, and load-bearing for correctness.
 
 *Expanded.* org-llm has a small set of core "steward" agents —
 [[id:b9e5d3c2-4a7f-48a6-9c1d-e2f3a4b5c6d7][@agentsmith]] (ships
-new agents), =@curator= (sweeps wiki conventions), =@tracker=
+new agents), =@atoz= (sweeps wiki conventions; alias =@curator=), =@riker= (alias =@tracker=)
 (owns =dev-tracker.org=) — each owning a knowledge domain that
 many specialists touch. Without orientation, every specialist
 either re-derives conventions from the source files (slow,
@@ -52,11 +52,11 @@ at delegate time, not by the specialist. Its current shape:
 #+begin_example
 ORG-LLM AGENT MANIFEST (lazy primers — fetch when relevant)
 
-- @curator owns wiki conventions. Call primer("wiki-authorship")
+- @atoz owns wiki conventions. Call primer("wiki-authorship")
   before writing any docs/wiki/*.org page or report.
   Always-on: Rule 2b — every wiki concept leads with *Summary.*
   + *Expanded.*
-- @tracker owns dev-tracker.org. Call primer("dev-tracker-entry")
+- @riker owns dev-tracker.org. Call primer("dev-tracker-entry")
   before adding/editing a phase entry; primer("agent-report")
   before writing a docs/notes/ post-action report.
 - @agentsmith owns new-agent shape. Call primer("new-agent")
@@ -124,8 +124,8 @@ like rules/templates/checklists).
 
 * Roles by core agent
 
-*Summary.* Today three core agents own primers: =@curator=
-(wiki conventions, including report authorship), =@tracker=
+*Summary.* Today three core agents own primers: =@atoz=
+(wiki conventions, including report authorship), =@riker=
 (dev-tracker entries), =@agentsmith= (new-agent shape). The
 roster grows when a new domain earns a steward — security
 review, vault hygiene, data-analyst chart authorship are all
@@ -135,25 +135,25 @@ candidate future namespaces.
 
 | core agent     | primer namespace        | what it teaches                                                                              |
 |----------------+-------------------------+----------------------------------------------------------------------------------------------|
-| =@curator=     | =wiki-authorship=       | Rule 2b, link forms, fresh UUID, 00-index.org integration, =link_wiki_files.py= verifier      |
-| =@curator=     | =agent-report=          | the uniform =docs/notes/= report structure (see [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] § Phase 24.5)                          |
-| =@tracker=     | =dev-tracker-entry=     | property block, Recommended ship order, Connections, Risks pinning                            |
+| =@atoz=        | =wiki-authorship=       | Rule 2b, link forms, fresh UUID, 00-index.org integration, =link_wiki_files.py= verifier      |
+| =@atoz=        | =agent-report=          | the uniform =docs/notes/= report structure (see [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] § Phase 24.5)                          |
+| =@riker=       | =dev-tracker-entry=     | property block, Recommended ship order, Connections, Risks pinning                            |
 | =@agentsmith=  | =new-agent=             | persona shape, triggers, =model_role=, capability declaration, registration site               |
 
 Future candidates (none shipped):
 
 | candidate steward      | primer namespace        | rationale                                                                                     |
 |------------------------+-------------------------+-----------------------------------------------------------------------------------------------|
-| =@gardener=            | =vault-hygiene=         | when a specialist edits =~/org/= it should know the orphan-link / staleness conventions       |
+| =@boothby=             | =vault-hygiene=         | when a specialist edits =~/org/= it should know the orphan-link / staleness conventions       |
 | =@librarian= (planned) | =metadata=              | task-instruction-prefix conventions, embedding hygiene, FILETAGS taxonomy                     |
 | =@data-analyst= (spec) | =chart-yaml=            | once the [[id:a2af071e-8244-444d-8954-61317cc1ec4d][Superset]] semantic-layer registry stabilizes — chart-YAML shape promotion target  |
 
 Adding a steward is *not* the same as adding a primer
 namespace. A namespace can be owned by an existing steward
-(=@curator= already owns two). Promoting a namespace to a new
+(=@atoz= already owns two). Promoting a namespace to a new
 steward is justified only when the volume / breadth of rules
-in that domain crosses the bar that put =@curator= /
-=@tracker= / =@agentsmith= on the meta roster (= triggers a
+in that domain crosses the bar that put =@atoz= /
+=@riker= / =@agentsmith= on the meta roster (= triggers a
 roster row, = earns its keep at gates 1/2/3).
 
 * Composition with existing primers
@@ -185,7 +185,7 @@ Concretely, a specialist spawned to "draft a wiki page about
 2. Receive its task prompt with the manifest pre-pended.
 3. The Phase 24.1 resolvers fire: =RepoResolver= establishes
    the repo root, =PathResolver= confirms =docs/wiki/= exists,
-   =AgentResolver= notes =@curator= as the relevant steward.
+   =AgentResolver= notes =@atoz= as the relevant steward.
 4. The specialist, prompted by the manifest, calls
    =primer("wiki-authorship")= before writing.
 5. The primer returns Rule 2b, link forms, the UUID command,
@@ -218,7 +218,7 @@ different write path (captain authors, primers don't). Where
 primers serve *conventions* (deterministic, source-file
 backed), standing orders serve *decisions* (user-authored,
 DB-backed, eligible for graduation to source files via
-@curator's promotion sweep).
+@atoz's promotion sweep).
 
 * Risks and boundaries
 

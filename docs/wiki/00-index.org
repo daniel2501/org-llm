@@ -67,7 +67,7 @@ for the full convention.
 
 ** Surfaces & integrations (how org-llm reaches outside)
 - [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP (Model Context Protocol)]] —
-  the bridge to opencode / Claude Code / Pi / Emacs
+  the bridge to opencode / Pi / Emacs (and any other MCP client like Claude Code)
 - [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] —
   HTTP shim between opencode and the LLM; the seam where =/sys*=
   short-circuits, prompts get slimmed, and bad tool calls get repaired
@@ -125,7 +125,7 @@ for the full convention.
 - [[id:32fe7314-0a69-4945-aef3-7105d507b201][Agent orientation]] —
   manifest at spawn, primer on demand: the pattern for handing
   specialists their domain conventions without bloating spawn
-  prompts. Names =@curator= / =@tracker= / =@agentsmith= as
+  prompts. Names =@atoz= / =@riker= / =@agentsmith= as
   the meta stewards each owning a primer namespace.
 - [[id:7dcbce8b-0941-48ec-a17d-c623ba00883a][Side-quests]] —
   the captain's disposition for off-thread work: spawn a
@@ -136,19 +136,19 @@ for the full convention.
 - [[id:739868a9-f62c-43de-ac1d-1671d483a2c1][Standing orders]] —
   cross-agent shared memory for user-authoritative decisions;
   every spawn's manifest carries a digest, specialists fetch
-  the body for namespaces their task touches, @curator's sweep
+  the body for namespaces their task touches, @atoz's sweep
   promotes long-lived orders to wiki pages. Extends
   =AgentBaseline=; vault placeholder at =~/org/standing-orders.org=
   until the schema-extension lands.
-- =@curator= — wiki concept-graph specialist (covered in agents
+- =@atoz= — wiki concept-graph specialist (covered in agents
   + agent-roster); sweeps =docs/wiki/= for missing cross-links,
   numeric drift between tables and code, new-page candidates.
   Owns the =wiki-authorship= and =agent-report= primer
-  namespaces.
-- =@tracker= — dev-process steward (covered in agents +
+  namespaces. (Alias =@curator=.)
+- =@riker= — dev-process steward (covered in agents +
   agent-roster); owns =dev-tracker.org=; daily what's-on-deck,
   end-of-session what-shipped/what's-blocked, EFFORT drift.
-  Owns the =dev-tracker-entry= primer namespace.
+  Owns the =dev-tracker-entry= primer namespace. (Alias =@tracker=.)
 
 ** Visual + voice personalization
 - [[id:872c5c33-c912-4605-9bf6-e58e972f4d8a][LCARS theming]] —

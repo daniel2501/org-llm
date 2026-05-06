@@ -111,10 +111,10 @@ the snapshot's =strategy= config (=check= per change vs daily
 
 ** Agent integration
 
-@analyst (Magnificent Seven per [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014]] — cull rubric) can
+@geordi (Bridge Crew per [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014]] — cull rubric; alias =@analyst=) can
 *propose* SQL blocks for a given query intent (=insert a chart of
 my last 30 days mood= → drops the babel-SQL block in place). The
-user evaluates; @analyst can also validate the block produces
+user evaluates; @geordi can also validate the block produces
 results before insertion.
 
 * Layer 1 — live in Emacs buffer (under research)
@@ -139,7 +139,7 @@ For now, the static-image fallback works:
 [[file:.attach/chart-mood-arc.png]]
 #+end_src
 
-Refreshed by =@analyst= via the Superset chart-export API; saved
+Refreshed by =@geordi= via the Superset chart-export API; saved
 under =~/org/.attach/<id>/= and committed as part of normal vault
 sync (per [[id:50f49d19-6f98-4d03-85d5-87dfa19951ff][data-integrity-laws.org]] Three Laws).
 
@@ -190,7 +190,7 @@ supports it.
   babel-SQL block)
 - [[id:9b73e26d-5c84-4f1a-bd35-2af18e4c7c93][DEC-011 — DB as universal interface]]
 - [[id:e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63][DEC-013 — Two-tier tool architecture]]
-- [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014 — Cull rubric]] (positions @analyst as the agent that
+- [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014 — Cull rubric]] (positions @geordi as the agent that
   proposes SQL blocks)
 - =roadmap.org= § /Phase 27 — Apache Superset dashboards/
   (CORE_DISABLED per cull)

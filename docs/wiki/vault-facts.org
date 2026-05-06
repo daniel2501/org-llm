@@ -156,7 +156,7 @@ because:
   =ttl_secs=)
 - [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] :: =vault_facts= / =vault_profile= —
   the two MCP tools agents call
-- =org_llm/cli.py= — =org-llm inferrer-cache= verb for diagnostics
+- [[file:../../org_llm/cli.py][=org_llm/cli.py=]] — =org-llm inferrer-cache= verb for diagnostics
 
 * Related
 

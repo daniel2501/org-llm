@@ -165,7 +165,7 @@ because they're validated on every build. Build runs on every
 save. Agents read from a *constantly validated data substrate.*
 
 Three downstream effects:
-1. */@gardener/'s job description sharpens dramatically.* From
+1. */@boothby/'s job description sharpens dramatically.* From
    "vague hygiene" to "read failing tests, propose fixes." Each
    failing test is a concrete actionable bug.
 2. *Drift visible at write time, not query time.* A bad commit
@@ -210,7 +210,7 @@ reason about. Same primitive Claude Code uses for code
 (=xref-find-references=); applied to data.
 
 Three loops this closes:
-1. */@curator/* gains a complete checkable target — sweep model
+1. */@atoz/* gains a complete checkable target — sweep model
    descriptions for drift, missing tests, undocumented columns.
 2. *Users become legible to themselves at the schema level* —
    open dbt-docs, see the vault's queryable shape.
@@ -231,17 +231,17 @@ SELECT day, score, note_count
 FROM snap_mood_arc
 WHERE day >= date('now', '-30 days');
 
--- @gardener
+-- @boothby
 SELECT tag, first_seen, total_uses
 FROM snap_tag_taxonomy
 WHERE first_seen >= date('now', '-90 days');
 
--- @curator
+-- @atoz
 SELECT path, fields_changed, valid_from
 FROM snap_wiki_metadata
 WHERE valid_from >= date('now', '-7 days');
 
--- @tracker
+-- @riker
 SELECT valid_from, status, valid_to
 FROM snap_project_status
 WHERE phase_id = 'Phase 24'
@@ -343,7 +343,7 @@ Lifecycle of an agent-generated dbt model:
         ↓
 2. Agent generates files    (models/foo.sql + schema.yml + tests)
         ↓
-3. PR-shaped commit         (git log: 🤖 @gardener proposed foo)
+3. PR-shaped commit         (git log: 🤖 @boothby proposed foo)
         ↓
 4. Multi-judge review       (Phase 30.4: blinded judges score)
         ↓                  OR CODEOWNERS routing (DEC-004 future)
@@ -379,7 +379,7 @@ Three downstream consequences:
    just git + dbt + CODEOWNERS + multi-judge. Already exists.
 2. *Agent provenance is auditable.* =git blame= on a model line
    tells you which agent (or human) wrote it; =git log
-   --author=@gardener= shows everything that agent has proposed.
+   --author=@boothby= shows everything that agent has proposed.
 3. *Agents review each other uniformly.* No "is this human or
    agent?" branching — same review primitives apply.
 

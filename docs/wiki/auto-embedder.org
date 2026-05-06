@@ -87,7 +87,7 @@ org-llm auto-embed --once               # one cycle, no daemon
 org-llm config auto_embed_interval 60   # seconds between polls
 #+end_src
 
-** Conversational (opencode / claude / pi)
+** Conversational (opencode / pi / MCP clients)
 - =/auto-embed= slash command in opencode (status / control)
 - "Is auto-embedder running?" — model can call =doctor_health=
   which surfaces the daemon state

@@ -1,15 +1,16 @@
-"""@tracker (Boothby) — self-hosted dev/project tracking.
+"""@riker (Bridge Crew dev-process steward) — self-hosted dev/project tracking.
 
 Phase 29.0 — self-coded tools seed. The verbs `tracker init`, `tracker
 review`, and `tracker pace` flip this very dev-tracker.org from a
 file-in-the-repo to a vault-resident, vault-synced surface that
-@tracker (the in-app agent persona modeled on TNG/VOY's Boothby) can
-own deterministically.
+@riker (Cmdr. Riker — TNG first officer / XO; owns duty-roster + ops)
+can own deterministically. Verb name `tracker` stays — verbs are
+functional, agent handles are persona.
 
 Per project_tracker_self_hosting_goal: the long-running goal is to
 have org-llm itself be the surface that opens, summarises, and paces
 the tracker — not a wiki page the user manually edits. These three
-verbs are the deterministic skeleton; the @tracker LLM persona will
+verbs are the deterministic skeleton; the @riker LLM persona will
 narrate on top of them.
 
 Per DEC-011 (vault-and-DB symmetry, with files canonical): the
@@ -57,7 +58,7 @@ class InitResult:
     bytes_written: int = 0
 
 
-_INIT_HEADER_TEMPLATE = """# Managed by @tracker (Boothby) — Phase 29.0 self-hosted tracker.
+_INIT_HEADER_TEMPLATE = """# Managed by @riker — Phase 29.0 self-hosted tracker.
 # Canonical location: this file (vault-resident, syncs via git per DEC-011).
 # Archived original: docs/wiki/dev-tracker.org in the org-llm repo.
 #

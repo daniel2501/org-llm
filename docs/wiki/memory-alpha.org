@@ -35,8 +35,8 @@ Three of four mappings are already in the codebase. The fourth
 | Planetary archives (local mirrors) | =~/org/*.org= files — renders of DB state   | Phase 25.6 inversion    |
 | *Memory Prime* (specialised archive) | [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]] — deterministic regex-derived subsets | Phase 21 — *shipped*    |
 | Captain's Log (event stream)      | [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's Log]] (=History= table)             | already named — *shipped* |
-| Memory Alpha librarians           | [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][@curator]] (birth_name =atoz= — Mr. Atoz, TOS S3E23) | shipped 2026-05-04      |
-| Federation-wide access protocol   | [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — opencode / Claude Code / Pi / Emacs  | Phase 16 — *shipped*    |
+| Memory Alpha librarians           | [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][@atoz]] (Mr. Atoz, TOS S3E23; alias =@curator= legacy) | shipped 2026-05-04      |
+| Federation-wide access protocol   | [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — opencode / Pi / Emacs (+ MCP clients) | Phase 16 — *shipped*    |
 
 The core re-frame: org-llm's DB is your *personal Memory
 Alpha*. Your =~/org/*.org= files are the printed extracts you
@@ -49,9 +49,10 @@ system that the library is canonical, not the printed extracts.
 "Memory Alpha mode" carries:
 
 1. *A coherent vocabulary* — pairs naturally with names already
-   in the codebase (=Captain's Log=, =@curator=/Mr. Atoz, the
+   in the codebase (=Captain's Log=, =@atoz=/Mr. Atoz, the
    starfleet-core agent pack with Trek birth-names like
-   =picard=, =spock=, =data=, =janeway=, =boothby=).
+   =picard=, =spock=, =data=, =janeway=, =boothby=, =riker=,
+   =geordi=).
 
 2. *An accessible mental model* — most users will grasp "central
    library + planetary mirrors" faster than "vault-authoritative
@@ -146,5 +147,5 @@ ships with this naming pass.
 - [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]] —
   Memory Prime: the specialised authoritative subset
 - [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][Agents]] § agent
-  framework — Mr. Atoz / =@curator= is the Memory Alpha
+  framework — Mr. Atoz / =@atoz= is the Memory Alpha
   librarian role

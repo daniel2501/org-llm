@@ -313,9 +313,9 @@ user-defined tools without enforcement is reckless.
   too via the same conversational flow)
 - [[file:recipes.org][recipes.org]] — the deterministic-pre-fetch
   layer; tools are the primitives recipes compose
-- =org_llm/literate_config.py= — the tangle/apply infrastructure
+- [[file:../../org_llm/literate_config.py][=org_llm/literate_config.py=]] — the tangle/apply infrastructure
   this design reuses
-- =org_llm/mcp_server.py= — the MCP server; new tools land here
+- [[file:../../org_llm/mcp_server.py][=org_llm/mcp_server.py=]] — the MCP server; new tools land here
   via @server.tool() registration
 - =~/org/org-llm-config.org= — knobs file (model: this is one)
 - =~/org/org-llm-agents.org= — agents file (model: this is one)

@@ -1,7 +1,7 @@
 # [[file:../../../org/20260425230731-org_llm.org::*access.py][access.py:1]]
 """Permission-gated file + browser access for the MCP server.
 
-The LLM running inside opencode/claude-code can request to read files or
+The LLM running inside an MCP client (opencode, Claude Code, …) can request to read files or
 drive a browser, but only paths the user has explicitly authorized via
 `org-llm grant <path>` are reachable. Without grants, every file-access
 tool returns a refusal that names the missing grant — so the LLM can

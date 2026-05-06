@@ -9,10 +9,10 @@
 * What this is
 
 Hand-computed factual ground truth for the prompt set in
-=scripts/recipe_ab_harness.py=, captured 2026-05-03 against this
+[[file:../../scripts/recipe_ab_harness.py][=scripts/recipe_ab_harness.py=]], captured 2026-05-03 against this
 user's vault (~572 files, 138 dailies, 182k nodes).
 
-The judge in =scripts/recipe_ab_judge.py= parses the =:GT:= block
+The judge in [[file:../../scripts/recipe_ab_judge.py][=scripts/recipe_ab_judge.py=]] parses the =:GT:= block
 under each prompt heading and feeds it to Claude Opus alongside
 the two narrations so factual accuracy can be graded without the
 judge having to re-derive the data.
@@ -341,8 +341,8 @@ If anchor clears 0-1 → dump.
 
 * See also
 
-- =scripts/recipe_ab_harness.py= — runs the A/B
-- =scripts/recipe_ab_judge.py= — judges with Claude Opus
+- [[file:../../scripts/recipe_ab_harness.py][=scripts/recipe_ab_harness.py=]] — runs the A/B
+- [[file:../../scripts/recipe_ab_judge.py][=scripts/recipe_ab_judge.py=]] — judges with Claude Opus
 - =docs/wiki/recipes.org= — what we're testing
 - =docs/wiki/2026-05-03-test-session.org= — prior validation pass
   that produced findings 5-8 (still relevant; A2/B4 ground truth

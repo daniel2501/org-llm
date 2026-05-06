@@ -76,18 +76,19 @@ Cross-reference convention:
   Phase 23.x agent-framework refinements + a wiki concept-graph
   pass.
 - *Latest shipped (2026-05-04):*
-  - *Two new meta-agents in starfleet-core* — =@curator=
-    (birth_name =atoz=, Mr. Atoz from TOS S3E23) + =@tracker=
-    (birth_name =boothby=, Starfleet Academy groundskeeper from
-    TNG/VOY). Curator is the wiki concept-graph specialist;
-    tracker is the dev-process steward. Both shipped + dogfooded
+  - *Two new meta-agents in starfleet-core* — =@atoz= (Trek:
+    Mr. Atoz from TOS S3E23; alias =@curator=) + =@riker= (Trek:
+    TNG first officer / XO; alias =@tracker=; renamed 2026-05-06
+    from prior birth-name =boothby= which moved to =@boothby=).
+    Atoz is the wiki concept-graph specialist; riker is the
+    dev-process steward. Both shipped + dogfooded
     + persona-refined in one session — caught their own
     behavioural misses on first run, fixed in place. Roster now
     19 agents (12 starfleet-core, 7 legacy-extras).
   - *Persona whitespace normalizer* — runtime block in =cli.py=
     that collapses mid-sentence space runs across all 19
     personas (artefact of adjacent-string-literal concatenation).
-    Discovered + fixed during the curator dogfood.
+    Discovered + fixed during the @atoz dogfood.
   - *Wiki concept-graph sweep* — 14-page cross-link audit;
     4 new concept pages registered: [[file:vault-facts.org][vault-facts.org]] (Phase 21
     deterministic inferrers + DB cache), [[file:memory-alpha.org][memory-alpha.org]] (Trek
@@ -121,7 +122,7 @@ Cross-reference convention:
     tool-failure recovery hooks, confusion detector); spelled
     out in [[*Phase 24: Supervision trinity][Phase 24]] with sub-phases 24.1–24.3 and an
     open-question 24.4 (manager quorum, async-only). Motivating
-    bug: =@curator= delegated for =wiki/superset.org=, agent
+    bug: =@atoz= delegated for =wiki/superset.org=, agent
     looked in two wrong places (cwd + =~/org/=), gave up;
     actual file is =docs/wiki/superset.org=. Pre-flight
     resolvers would have closed the bug before the first tool
@@ -135,7 +136,7 @@ Cross-reference convention:
     agents), =@journalist= (mood / sentiment over dailies via
     the new =mood_signal= inferrer + =weekly_mood_review=
     recipe), =@doom= (live Doom Emacs config + keybind expert),
-    =@gardener= (vault hygiene advisor; reads vault_profile +
+    =@boothby= (vault hygiene advisor; alias =@gardener=; reads vault_profile +
     org_orphans + embed status; honours =power_profile= so it
     defers heavy work in saver mode). Roster catalogued in
     [[file:agent-roster.org][agent-roster.org]] with nerd-font /
@@ -2251,7 +2252,9 @@ one function, not core surgery. Implements the
 deterministic by default/.
 
 Motivating bug (2026-05-04): user said "@curator in org-llm,
-=wiki/superset.org=, fix it up" — curator (qwen3:4b) called
+=wiki/superset.org=, fix it up" (handle was @curator at time-of-bug;
+renamed @curator → @atoz per 2026-05-06 Bridge Crew rename) — the agent
+(qwen3:4b) called
 =read_file("wiki/superset.org")= which got resolved against
 MCP's cwd (=~/=, not the repo), failed silently with no
 recovery hint, then guessed =~/org/wiki/superset.org=, failed
@@ -2290,7 +2293,8 @@ call.
   proxy module-load so the prewarm thread completes before the
   first user prompt and steady-state calls land in 1–2ms.
   18/18 unit tests in =tests/test_resolvers.py= + live verify
-  closed the motivating =@curator/superset.org= bug.
+  closed the motivating =@curator/superset.org= bug (handle was
+  =@curator= at time-of-bug; renamed → =@atoz= 2026-05-06).
 
 - *24.2 — Tool-failure recovery hooks.* =@recover= decorator at
   each MCP tool's registration site. On tool failure, hook gets
@@ -2418,8 +2422,8 @@ they're cheap enough to run in patterns cloud can't afford.*
   ≠ multi-call; multi-MODEL. 1B-class models for narrow
   tasks. =model_size_hint= field on personas.
 - *30.3 — Background continuous work.* Local agents run free
-  24/7. =@gardener nightly= drafts hygiene cleanups onto a
-  =org-llm/gardener= branch (uses Phase 25.4) for morning
+  24/7. =@boothby nightly= drafts hygiene cleanups onto a
+  =org-llm/boothby= branch (uses Phase 25.4) for morning
   review.
 - *30.4 — Multi-judge validation.* Validation framework's
   =judge_models= becomes a list; FOSS judges (Llama 3.3,

@@ -348,7 +348,7 @@ is for vault-content questions only.
 * See also
 
 - =docs/wiki/roadmap.org= — the phase index + status snapshot.
-- =org_llm/recipe_runner.py= — the deterministic recipe runners.
-- =org_llm/orchestration.py= — the recipe-match patterns.
-- =org_llm/org_tools.py= — read-only org helpers (the MCP tool
+- [[file:../../org_llm/recipe_runner.py][=org_llm/recipe_runner.py=]] — the deterministic recipe runners.
+- [[file:../../org_llm/orchestration.py][=org_llm/orchestration.py=]] — the recipe-match patterns.
+- [[file:../../org_llm/org_tools.py][=org_llm/org_tools.py=]] — read-only org helpers (the MCP tool
   bodies live in =mcp_server.py=).

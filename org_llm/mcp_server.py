@@ -133,7 +133,8 @@ def create_mcp_server():
 
     # ── structured-rescue wrapper for every MCP tool ──────────────────────────
     # When an exception escapes a tool body, FastMCP returns a generic
-    # JSON-RPC error and the LLM in opencode/claude/pi sees an opaque
+    # JSON-RPC error and the LLM in the MCP client (opencode, Claude
+    # Code, Pi, …) sees an opaque
     # traceback string. Wrap the `server.tool` decorator so every
     # subsequently-registered tool runs through the same rescue path
     # the CLI uses: structured registry first (Ollama 404 → "pull X",
@@ -2211,7 +2212,7 @@ def create_mcp_server():
         # Performance baseline — is the active chat_model running slower
         # than a known alternative? Cheap query against existing History.
         # Also pull any unread perf alerts written by the inline lag
-        # detector — opencode/claude don't see stderr, so the ring
+        # detector — MCP clients (opencode, Claude Code, …) don't see stderr, so the ring
         # buffer is how those events surface here.
         perf_lines: list[str] = []
         try:
@@ -2241,7 +2242,7 @@ def create_mcp_server():
             alerts = _perf.recent_perf_alerts(limit=5)
             if alerts:
                 perf_lines.append(
-                    f"LAG ALERTS ({len(alerts)} recent — opencode/claude "
+                    f"LAG ALERTS ({len(alerts)} recent — MCP clients "
                     f"don't render stderr, so these were silent until now):")
                 for a in alerts:
                     perf_lines.append(
@@ -2318,8 +2319,8 @@ def create_mcp_server():
 
         The inline lag detector in `llm.chat()` writes one event each
         time a chat call ran meaningfully slower than its rolling
-        baseline AND a faster pulled alternative exists. opencode /
-        claude don't render stderr, so these events are otherwise
+        baseline AND a faster pulled alternative exists. MCP clients
+        (opencode, Claude Code, …) don't render stderr, so these events are otherwise
         invisible inside the workspace harness.
 
         Cheap (one JSON read). With `clear=True`, drains the buffer

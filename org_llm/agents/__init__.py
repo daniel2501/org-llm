@@ -10,8 +10,8 @@ Three concepts:
 * **birth_name** — canonical identifier. What `crew_log` records,
   what code references, what the user types `@<name>` against.
   For starfleet-core agents it's a Trek crew name (Picard, Spock,
-  …); for legacy agents it stays functional (`gardener`,
-  `analyst`, …) until they migrate.
+  Boothby, Geordi, Atoz, Riker, …); for legacy agents it stays
+  functional (`librarian`, `journalist`, …) until they migrate.
 
 * **aliases** — additional `@<name>`s that route to the same
   agent. `@crew` and `@captain` both reach Picard. The launcher

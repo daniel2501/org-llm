@@ -11,27 +11,29 @@
 *Summary.* [[https://modelcontextprotocol.io][Model Context Protocol]]
 is an open JSON-RPC standard for exposing tools, resources, and
 prompts from a host process to an LLM-driven client. =org-llm mcp= is
-the server; opencode / Claude Code / Pi / Emacs are hosts that spawn
-it and wire its 64+ tools into the LLM's tool-call loop.
+the server; opencode + Pi + Emacs are the primary hosts org-llm
+targets, and any other MCP client (Claude Code, Cursor, …) can spawn
+it and wire its 64+ tools into the LLM's tool-call loop too.
 
 *Expanded.* It's the same idea as a function-calling API like
 OpenAI's "tools" parameter, but generalised to a protocol any LLM
 client can speak. The server says "here are the things you can do";
 the client wires them into its tool-call loop. The server doesn't
 talk to the LLM directly — the host is the mediator, which is why the
-same MCP server works unchanged across opencode, Claude Code, and Pi.
+same MCP server works unchanged across opencode, Pi, and any other
+MCP client.
 
 ** Three roles
 
 | Role     | Who plays it                              | What they do                              |
 |----------+-------------------------------------------+--------------------------------------------|
 | Server   | =org-llm mcp= (this codebase)             | Exposes tools, listens on stdio JSON-RPC   |
-| Host     | opencode / Claude Code / Pi / Emacs       | Spawns the server, wires tools into the model |
+| Host     | opencode / Pi / Emacs (+ MCP clients like Claude Code) | Spawns the server, wires tools into the model |
 | Client   | The LLM running inside the host            | Picks tools, calls them, reads responses   |
 
 The server doesn't talk to the LLM directly — the host is the
 mediator. That separation is why the same MCP server works
-unchanged across opencode, Claude Code, and Pi.
+unchanged across opencode, Pi, and any other MCP client.
 
 * How org-llm uses it
 

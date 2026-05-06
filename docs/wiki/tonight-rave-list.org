@@ -88,7 +88,7 @@ row from agent-roster):
 - *=@doom=*     — Doom Emacs config + keybind expert. Tool
                    roster: doom_packages, doom_keybinds,
                    read_file, shell (suggest-only).
-- *=@gardener=* — vault hygiene advisor. Reads vault_profile,
+- *=@boothby=* — vault hygiene advisor (alias =@gardener=). Reads vault_profile,
                    org_orphans, embed status; suggests but
                    never auto-runs writes; honours
                    power_profile (defers heavy work in saver
@@ -207,7 +207,7 @@ auto-pull; standalone otherwise.
 ** DONE Weather-aware org-agenda                              :weather:
 CLOSED: [2026-05-03]
 Shipped tonight as the @agenda agent + a weather subsystem
-(=org_llm/weather.py=). Open-meteo API, FOSS-clean. Explicit
+([[file:../../org_llm/weather.py][=org_llm/weather.py=]]). Open-meteo API, FOSS-clean. Explicit
 weather-constraint tag DSL (=:cant-rain:= / =:cant-snow:= /
 =:cant-wind:= / =:cant-hot:= / =:cant-cold:= / =:needs-sun:= /
 =:weather-sensitive:=). Reschedule suggestions ranked by a
@@ -282,7 +282,7 @@ Implementation sketch: add to the agent registry
 (=org-llm-agents.org=) with a =:agent:= tag heading. Tool
 roster: =shell=, =read_file=, =org-llm_*= MCP tools. Pull the
 verb list dynamically from =org-llm --help= (or maintain a
-manpage-style summary in =org_llm/manpage.py=).
+manpage-style summary in [[file:../../org_llm/manpage.py][=org_llm/manpage.py=]]).
 
 Effort: M. Deps: agent registry + tool roster shape (both
 exist).

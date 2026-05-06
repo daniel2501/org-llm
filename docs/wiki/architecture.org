@@ -136,8 +136,8 @@ store for the underlying policy.
    │   │ cli.py           │  │ mcp_server.py    │  │ llm_proxy.py         │   │
    │   │ ~70 verbs        │  │ stdio · 71 tools│  │ HTTP · 23 interceptors│  │
    │   │ user shell       │  │ subprocess of    │  │ subprocess of        │   │
-   │   │ entry            │  │ opencode/claude  │  │ `org-llm launch`     │   │
-   │   │                  │  │ /pi              │  │                      │   │
+   │   │ entry            │  │ MCP client       │  │ `org-llm launch`     │   │
+   │   │                  │  │ (opencode, etc.) │  │                      │   │
    │   └──────────────────┘  └──────────────────┘  └──────────────────────┘   │
    │   ┌──────────────────┐                                                   │
    │   │ auto_embedder.py │                                                   │
@@ -186,7 +186,8 @@ store for the underlying policy.
            │  tool calls          │  chat / stream
            ▼                      ▼
    ┌─────────────────────────────────────────────────────────────┐
-   │  Surfaces — opencode TUI · Claude Code · Pi bridge · Emacs  │
+   │  Surfaces — opencode TUI · Pi bridge · Emacs  (+ optional   │
+   │  MCP-client integrations: Claude Code, Cursor, …)           │
    └─────────────────────────────────────────────────────────────┘
                                   │
                                   ▼  cloud-or-local routing
@@ -379,13 +380,14 @@ fine for tool-driven Q&A but don't get recipes, =@<agent>= swap,
 
 opencode lets us write the baseURL into its config, so we can
 point it at =http://127.0.0.1:<proxy-port>= and run our 23
-interceptors before traffic hits Ollama. Claude Code talks to
-its own Anthropic backend with no equivalent override; Pi
-manages its own provider plumbing. Phase 22's design bet was
-*"orchestration without round-trips"* — recipes only work when
-we control the request seam. That's why opencode is the
-primary host and why we don't try to retrofit the proxy onto
-the other surfaces.
+interceptors before traffic hits Ollama. Other MCP clients
+(Claude Code, Cursor, …) talk to their own backends with no
+equivalent override; Pi manages its own provider plumbing.
+Phase 22's design bet was *"orchestration without round-trips"*
+— recipes only work when we control the request seam. That's
+why opencode is the primary host and why we don't try to
+retrofit the proxy onto the other surfaces (per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]],
+Claude Code etc. are integration options, not stack peers).
 
 *** Two TypeScript adapters
 
@@ -539,8 +541,9 @@ but the behavioural split matters: it's why the diagram
 distinguishes the two phases.
 
 Important scoping note: this chain runs against opencode's
-chat-completions traffic only. Claude Code and Pi bypass the
-proxy entirely (their LLM transport is outside our control — see
+chat-completions traffic only. Other MCP clients (Claude Code,
+Cursor, …) and Pi bypass the proxy entirely (their LLM transport
+is outside our control — see
 [[*3. Surfaces — how org-llm reaches the user][surfaces]]). The =/sys*= short-circuits, recipe pre-fetch,
 =@<agent>= persona swap, and tool-call repair all live inside
 this chain — meaning they only fire when the user is in
@@ -663,15 +666,16 @@ points); [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes.org]] (the three lay
 [[file:../../org_llm/mcp_server.py][=mcp_server.py=]] exposes 71 tools over JSON-RPC 2.0 / MCP
 2024-11-05 stdio. Each tool is one =@server.tool()= decorator with
 a typed signature; the MCP server is otherwise stateless — all
-implementation lives in other modules. opencode, Claude Code, and
-the Pi bridge each spawn =org-llm mcp= as a subprocess at session
-start.
+implementation lives in other modules. opencode and the Pi bridge
+each spawn =org-llm mcp= as a subprocess at session start; any
+other MCP client (Claude Code, Cursor, …) can do the same.
 
 #+begin_example
    ┌─────────────────────────────────────────────────────────────────────────┐
    │  MCP SERVER ── org_llm/mcp_server.py                                    │
    │   71 tools registered as @server.tool() decorators.                     │
-   │   Spawned as stdio subprocess by opencode / Claude Code / Pi.           │
+   │   Spawned as stdio subprocess by opencode / Pi (or any other MCP        │
+   │   client — Claude Code, Cursor, …).                                     │
    │   The MCP `instructions` field carries the search-first contract that   │
    │   the Pi bridge re-injects per turn (others snapshot at session start). │
    │                                                                         │
@@ -983,7 +987,7 @@ shows the full self-care trail.
    │  │                                                                     │ │
    │  │   record_readings() → sensor_log (one row per probe per cycle)      │ │
    │  │   power_profile()   → saver | balanced | performance                │ │
-   │  │     (cascades into agent decisions — e.g. @gardener defers heavy    │ │
+   │  │     (cascades into agent decisions — e.g. @boothby defers heavy     │ │
    │  │      vault scans when power_profile = saver)                        │ │
    │  │                                                                     │ │
    │  │   org-llm life-support            — one-shot probe set              │ │
@@ -1151,8 +1155,8 @@ Alignment with adjacent arcs:
 
 *Summary.* When a specialist is spawned, the orchestration layer
 hands it a thin *manifest* naming the core agents and their
-primer namespaces (=@curator= owns wiki conventions,
-=@tracker= owns dev-tracker entries, =@agentsmith= owns
+primer namespaces (=@atoz= owns wiki conventions,
+=@riker= owns dev-tracker entries, =@agentsmith= owns
 new-agent shape). The full conventions for any namespace are
 fetched *on demand* via a deterministic resolver — never
 LLM-mediated, always read fresh from the authoritative source

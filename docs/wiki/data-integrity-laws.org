@@ -102,7 +102,7 @@ concurrent flows. (c) is the always-on safety net underneath.
   interface, not just the file write.
 - *DEC-012 (per-device configuration)* — knobs that govern
   agent-write-active behavior per device (e.g. the laptop
-  runs =@gardener= nightly; the phone is read-only) live in
+  runs =@boothby= nightly; the phone is read-only) live in
   the device-keyed Config table.
 - *=Org is Code= design rule* (architecture.org) — the same
   way concurrent edits to a code repo are handled by git

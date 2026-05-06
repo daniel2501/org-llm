@@ -276,12 +276,12 @@ All four are implemented today.
 * Spawned subagents — a different concept layer
 
 A point of frequent confusion: *spawned subagents* (the kind
-Claude Code or opencode delegates to via their built-in
-sub-agent tool) are *not* the same as *@-agents* (the org-llm
-personas this page describes). Two different concept layers
-that happen to share the word "agent."
+opencode — or another MCP client like Claude Code — delegates
+to via their built-in sub-agent tool) are *not* the same as
+*@-agents* (the org-llm personas this page describes). Two
+different concept layers that happen to share the word "agent."
 
-| | =@<name>= agents (org-llm) | Spawned subagents (Claude Code / opencode) |
+| | =@<name>= agents (org-llm) | Spawned subagents (opencode / Claude Code / …) |
 |---+----------------------------+--------------------------------------------|
 | *Identity* | Persona with name, persona prompt, tool roster, recipes | None — generic ephemeral context |
 | *Lifecycle* | Long-lived definition; invoked many times | Ephemeral; one shot per spawn |
@@ -292,8 +292,9 @@ that happen to share the word "agent."
 | *Persistence* | Agent definitions persist; specific calls are just events | No persistence beyond their one task |
 
 *How they compose.* An =@<name>= agent's =delegate= MCP call
-*could* spawn a Claude Code subagent under the hood as a
-model-layer choice (instead of going direct-to-proxy). Today
+*could* spawn a host-side subagent (opencode's, or another MCP
+client's like Claude Code) under the hood as a model-layer
+choice (instead of going direct-to-proxy). Today
 the dispatch goes through the proxy; spawning a subagent for
 delegation is a future model-routing option.
 
@@ -309,8 +310,8 @@ canonical example of spawned subagents working *alongside*
 *Practical rule for which to reach for:*
 
 - *@-agent* — when the task is recurring and benefits from a
-  consistent persona (=@curator= sweeping wiki drift,
-  =@gardener= running nightly hygiene). Persona is the value.
+  consistent persona (=@atoz= sweeping wiki drift,
+  =@boothby= running nightly hygiene). Persona is the value.
 - *Spawned subagent* — when the task is one-off and
   self-contained, briefed per-call (research a library, write
   a single doc, run a parallelisable computation). Brief is

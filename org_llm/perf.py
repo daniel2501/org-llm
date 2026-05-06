@@ -279,7 +279,7 @@ def record_perf_alert(*, model: str, elapsed_s: float,
 
     The lag detector calls this whenever it would have printed a
     yellow warning. Storing each event lets the MCP `proactive_doctor`
-    tool surface them later — opencode / claude don't render stderr,
+    tool surface them later — MCP clients don't render stderr,
     so an inline-only warning was invisible.
 
     Best-effort: if the file is unwritable or malformed we skip

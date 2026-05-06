@@ -39,15 +39,16 @@ persona text.
 * The current roster (19 agents, 2026-05-04)
 
 #+begin_quote
-*Magnificent Seven — curated core (≤7).* Locked 2026-05-05 by
-[[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014]] (cap expanded ≤6 → ≤7; see [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009]]): =@picard=
-(manager) · =@spock= (researcher) · =@data= (scribe) ·
-=@gardener= (hygiene) · =@analyst= (analytics — dbt + Superset) ·
-=@curator= (wiki) · =@tracker= (general-purpose project
-tracking). =@analyst=, =@curator=, =@tracker= promoted from
-legacy-extras / non-core. Every other persona below
-(=@journalist=, =@doom=, =@ops=, =@agentsmith=, …) is
-extension-path / community.
+*Bridge Crew — curated core (≤7).* Locked 2026-05-05 by
+[[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014]] (cap expanded ≤6 → ≤7; see [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009]]; renamed from
+"Magnificent Seven" with Trek-canonical handles 2026-05-06):
+=@picard= (manager) · =@spock= (researcher) · =@data= (scribe) ·
+=@boothby= (hygiene; Trek: Starfleet Academy gardener) · =@geordi=
+(analytics — dbt + Superset; TNG chief engineer) · =@atoz= (wiki;
+TOS Mr. Atoz) · =@riker= (general-purpose project tracking; TNG
+first officer / XO). =@geordi=, =@atoz=, =@riker= promoted from
+legacy-extras / non-core. Every other persona below (=@journalist=,
+=@doom=, =@ops=, =@agentsmith=, …) is extension-path / community.
 #+end_quote
 
 ** Vault-content (read + reason)
@@ -55,7 +56,7 @@ extension-path / community.
 | agent           | what it does                                                           | model_role     |
 |-----------------+------------------------------------------------------------------------+----------------|
 | =@researcher=   | Find / summarise / compare info already in the vault. The workhorse.   | chat_model     |
-| =@analyst=      | Read text → derived text. Mode-switches: SUMMARIZE / EXTRACT / ANALYZE | text_model     |
+| =@geordi=       | Read text → derived text. Mode-switches: SUMMARIZE / EXTRACT / ANALYZE (alias =@analyst=) | text_model     |
 | =@librarian=    | Tag taxonomy curation: surface duplicates, suggest consolidations      | tag_model      |
 | =@vision-analyst= | OCR + image reasoning when the user attaches images                  | vision_model   |
 | =@translator=   | Translate user-supplied text between languages                         | translate_model |
@@ -65,7 +66,7 @@ extension-path / community.
 | agent          | what it does                                                                | model_role      |
 |----------------+-----------------------------------------------------------------------------+-----------------|
 | =@scribe=      | Capture-flow + DRAFTING mode. Two shapes: clean org notes; long-form drafts | instruct_model  |
-| =@gardener=    | Vault hygiene advisor: orphans, stale TODOs, embeddings, broken links       | chat_model      |
+| =@boothby=     | Vault hygiene advisor: orphans, stale TODOs, embeddings, broken links (alias =@gardener=) | chat_model      |
 
 ** Personal context (life-domain)
 
@@ -91,8 +92,8 @@ extension-path / community.
 |-----------------+---------------------------------------------------------------------------------------------+------------|
 | =@crew=         | The manager. Decompose → delegate → sanity-check → synthesise. Default when no agent tagged | chat_model |
 | =@agentsmith=   | Meta-agent: interviews you about a new agent and ships it (persona + tools + literate entry) | chat_model |
-| =@curator=      | Wiki concept-graph specialist: sweeps =docs/wiki/= for missing cross-links, broken =[[id:…]]= / file: links, and numeric drift between wiki tables and code. Owns the =wiki-authorship= and =agent-report= primer namespaces (see [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]]). | chat_model |
-| =@tracker=      | General-purpose project tracker (DIY, lab work, book, sprints — not dev-only). Owns =dev-tracker.org=; future projects get own files. Daily what's-on-deck, end-of-session what-shipped/blocked, EFFORT drift. Birth-name =boothby= | chat_model |
+| =@atoz=         | Wiki concept-graph specialist: sweeps =docs/wiki/= for missing cross-links, broken =[[id:…]]= / file: links, and numeric drift between wiki tables and code. Owns the =wiki-authorship= and =agent-report= primer namespaces (see [[id:32fe7314-0a69-4945-aef3-7105d507b201][agent-orientation.org]]). Alias =@curator=. | chat_model |
+| =@riker=        | General-purpose project tracker (DIY, lab work, book, sprints — not dev-only). Owns =dev-tracker.org=; future projects get own files. Daily what's-on-deck, end-of-session what-shipped/blocked, EFFORT drift. Alias =@tracker= (legacy). Trek: TNG first officer / XO; pairs with @picard. | chat_model |
 
 ** What used to be agents but isn't now
 
@@ -101,9 +102,9 @@ pass. The underlying capability still exists; the surface changed.
 
 | dropped agent  | replaced by                                                                                          |
 |----------------+------------------------------------------------------------------------------------------------------|
-| =@triager=     | =@gardener= (100% trigger overlap; the more thorough persona absorbed it)                            |
-| =@summarizer=  | =@analyst='s SUMMARIZE mode (triggered by tl;dr / in N sentences / shorten)                          |
-| =@extractor=   | =@analyst='s EXTRACT mode (triggered by extract / pull out / list entities / find names\|dates)      |
+| =@triager=     | =@boothby= (100% trigger overlap; the more thorough persona absorbed it)                             |
+| =@summarizer=  | =@geordi='s SUMMARIZE mode (triggered by tl;dr / in N sentences / shorten)                           |
+| =@extractor=   | =@geordi='s EXTRACT mode (triggered by extract / pull out / list entities / find names\|dates)       |
 | =@writer=      | =@scribe='s DRAFTING mode (triggered by draft / essay / narrative / write me / compose / story)      |
 | =@classifier=  | =classify_items(items, criterion)= MCP tool. Was never user-facing — only manager called it via =delegate()=. Now a first-class tool — no agent-registry indirection.    |
 
@@ -232,7 +233,7 @@ Round-trips:
 
 This is how you re-add =@summarizer= / =@extractor= / =@writer=
 as specialists with their own model_role: just add a heading. The
-trigger lists in the built-in =@analyst= / =@scribe= won't conflict
+trigger lists in the built-in =@geordi= / =@scribe= won't conflict
 because the user override registers a NEW agent name.
 
 * Design rules (from the 2026-05-03 rationalisation)

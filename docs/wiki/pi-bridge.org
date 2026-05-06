@@ -10,33 +10,34 @@
 
 *Summary.* The Pi bridge is a TypeScript MCP-bridge extension that
 wires =org-llm='s tools into [[https://pi.dev][Pi]] — Mario Zechner's
-TS-extensible CLI agent. Pi is the third conversational interface
-alongside opencode and Claude Code; the bridge gives Pi sessions full
-access to all ~64 org-llm MCP tools as Pi-native =org_llm_<name>=
-tools.
+TS-extensible CLI agent. Pi is a second conversational interface
+alongside opencode (and any other MCP client like Claude Code); the
+bridge gives Pi sessions full access to all ~64 org-llm MCP tools as
+Pi-native =org_llm_<name>= tools.
 
-*Expanded.* What Pi adds over the other two surfaces is *per-turn
+*Expanded.* What Pi adds over the other surfaces is *per-turn
 dynamic system prompts* — every turn the bridge re-renders the
 org-llm system prompt with current vault stats, recent activity,
-active knob mix, and power-boost verdict. opencode and Claude Code
-only resolve the system prompt once at session start, so Pi's the
-surface where context updates land mid-session without a relaunch.
+active knob mix, and power-boost verdict. opencode (and other MCP
+clients) only resolve the system prompt once at session start, so
+Pi's the surface where context updates land mid-session without a
+relaunch.
 
-* Why Pi when opencode + Claude already exist
+* Why Pi when opencode already exists
 
 Each surface has its own strengths:
 
-| Host          | Strength                                                  |
-|---------------+-----------------------------------------------------------|
-| opencode      | Deeply themable TUI, plugin system, custom slot rendering |
-| Claude Code   | Anthropic's official CLI, GitHub integration, code edits  |
-| Pi            | Per-turn dynamic system prompts (others are static once)  |
+| Host                       | Strength                                                  |
+|----------------------------+-----------------------------------------------------------|
+| opencode                   | Deeply themable TUI, plugin system, custom slot rendering |
+| Pi                         | Per-turn dynamic system prompts (others are static once)  |
+| Claude Code (integration)  | Anthropic's official CLI, GitHub integration, code edits  |
 
 The Pi bridge unlocks the dynamic-system-prompt pattern: every
 turn, the bridge re-renders the org-llm system prompt with
 *current* vault stats / recent activity / active knob mix /
-power-boost verdict. opencode and Claude Code only resolve the
-system prompt once at session start.
+power-boost verdict. opencode (and other MCP clients) only resolve
+the system prompt once at session start.
 
 * What gets installed
 
@@ -75,8 +76,8 @@ Bridge prepends to Pi's system prompt
 LLM call runs with FRESH context every turn
 #+end_example
 
-Compare with opencode / Claude where the system prompt is
-captured at session-start and stays frozen until relaunch.
+Compare with opencode (and other MCP clients) where the system
+prompt is captured at session-start and stays frozen until relaunch.
 
 * Status surface
 
@@ -132,11 +133,11 @@ flag; remove the bridge file from =~/.pi/extensions/= manually
 * Related
 
 - [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]] — Pi speaks the
-  same protocol as opencode + Claude; the bridge is Pi-specific
-  glue, not a re-implementation
+  same protocol as opencode (and other MCP clients); the bridge is
+  Pi-specific glue, not a re-implementation
 - [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]] §
-  Surfaces — Pi sits beside opencode + Claude Code as the third
-  conversational interface; bypasses the LLM proxy
+  Surfaces — Pi sits beside opencode as a second conversational
+  interface; bypasses the LLM proxy
 - [[id:47ba2143-c53a-409a-8286-2b3759794608][LLM proxy]] — Pi
   bypasses the proxy (its LLM transport is outside org-llm);
   opencode is the proxy-aware host

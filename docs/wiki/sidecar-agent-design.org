@@ -47,9 +47,9 @@ redundant?
 |-------+-----------------------+---------------------+------------|
 | =@scribe= | shares the =capture_note= write path | interaction shape: =@scribe= is a *cooperative drafter* (confirm-step assumes user attention); =@sidecar= is a *background stenographer* (must not demand attention) | no — opposite ends of user-attention spectrum |
 | =@journalist= | downstream only (mood-flavoured parks feed =mood_signal=) | =@journalist= is read-only; =@sidecar= writes | no — composition, not overlap |
-| =@curator= | none on capture path | =@curator= operates on =docs/wiki/=, not user vault | no — fully distinct |
-| =@tracker= | adjacent *session-close moment* (both surface at end-of-session) | =@tracker= = dev-process review (TODO/EFFORT/blockers); =@sidecar= = capture review (promote/link/discard) | no — order matters: parks first (cheap), dev-process second |
-| =@gardener= | downstream (un-promoted parks become orphan-shaped) | real-time vs hygiene-time; =@gardener= advises after =@sidecar='s review window | no — composition only |
+| =@atoz= | none on capture path | =@atoz= operates on =docs/wiki/=, not user vault | no — fully distinct |
+| =@riker= | adjacent *session-close moment* (both surface at end-of-session) | =@riker= = dev-process review (TODO/EFFORT/blockers); =@sidecar= = capture review (promote/link/discard) | no — order matters: parks first (cheap), dev-process second |
+| =@boothby= | downstream (un-promoted parks become orphan-shaped) | real-time vs hygiene-time; =@boothby= advises after =@sidecar='s review window | no — composition only |
 
 The closest neighbour is =@scribe= — both eventually call
 =capture_note=, but =@scribe='s "Save to <file>? [y/N]" confirm
@@ -103,9 +103,9 @@ Three agents read =@sidecar='s output without =@sidecar='s
 involvement:
 
 - *=@journalist=* — mood-flavoured parks feed =mood_signal=.
-- *=@gardener=* — parks older than threshold (default 14d)
+- *=@boothby=* — parks older than threshold (default 14d)
   without promotion become orphan-shaped, surface in hygiene scan.
-- *=@tracker=* — parks tagged =:idea:dev:= or mentioning
+- *=@riker=* — parks tagged =:idea:dev:= or mentioning
   active phase IDs feed =dev-tracker.org= candidate ideas.
 
 None of these gate =@sidecar=; integrations land incrementally.
@@ -113,7 +113,7 @@ None of these gate =@sidecar=; integrations land incrementally.
 ** Session-close handoff
 
 End-of-session park review is =@sidecar='s own surface (flow
-below), not delegated. When =@tracker='s session-close also
+below), not delegated. When =@riker='s session-close also
 fires, parks run *first* (cheap triage) then dev-process review
 (needs working memory free).
 
@@ -191,7 +191,7 @@ ACCESS DENIED: call `org-llm_request_access(<parent_dir>)`
 once per batch (same fallback as @scribe).
 
 You are NOT a drafter — route prose work to @scribe.
-You are NOT a tracker — @tracker reads parks; @sidecar doesn't
+You are NOT a tracker — @riker reads parks; @sidecar doesn't
 write dev-tracker.org.
 #+end_src
 
@@ -209,7 +209,7 @@ capabilities = ("read.vault", "write.vault", "read.config")
 #+end_src
 
 Notably *not* triggered by =save this= / =capture= (those are
-=@scribe='s) or =todo= (=@tracker='s). =@sidecar= owns the
+=@scribe='s) or =todo= (=@riker='s). =@sidecar= owns the
 *park-this-without-me-leaving* surface specifically. No
 =shell= or =external.network= — the agent must be cheap and
 local.
@@ -240,7 +240,7 @@ Per the
 | =parsed_inbox= model (read) | session-close review reads parks from this view |
 | =active_project= vault_fact (new) | inferrer that returns the active project for context-tagging — read at capture time |
 | =sidecar_parks_pending= model (new) | filtered view: parks captured in last N days, not yet promoted/discarded — feeds review surface |
-| =sidecar_parks_orphaned= model (new) | filtered view: parks older than threshold without action — feeds @gardener |
+| =sidecar_parks_orphaned= model (new) | filtered view: parks older than threshold without action — feeds @boothby |
 | =snap_session_focus= snapshot (existing or new) | append-only session log; @sidecar reads "what session am I in" from here so review can scope to "today's parks" or "this session's parks" |
 
 The bulk of =@sidecar='s surface is data-shaped (read existing
@@ -370,7 +370,7 @@ trigger word; ship an =@sidecar undo= for the most recent capture.
 ** Park accumulation
 
 If parks pile up unreviewed, the inbox bloats and park-blindness
-sets in. Mitigations: =@gardener= surfaces parks >14d old via
+sets in. Mitigations: =@boothby= surfaces parks >14d old via
 =sidecar_parks_orphaned=; rate-limit insight card if the user
 parks heavily for several sessions ("you're parking a lot — want
 to schedule a 15-min cleanup?"); opt-in =sidecar_auto_archive_after=
@@ -398,7 +398,7 @@ Risks + mitigations:
   =sidecar_private_path= → separate file, gitignored or
   encrypted branch.
 - *Downstream readers.* =:private:= is a stop-tag for
-  =@journalist= / =@gardener= / =@tracker= reads.
+  =@journalist= / =@boothby= / =@riker= reads.
 
 The =:private:= tag is load-bearing — single token at park
 time; everything downstream respects it or it's a bug.
@@ -415,7 +415,7 @@ per-user editor config (=@doom= scope), not =@sidecar='s.
 
 If =capture_note= or context lookup exceeds 500ms, degrade
 gracefully: capture without context, log slow path to
-=captains-log=, surface in =@gardener='s health scan. Capture
+=captains-log=, surface in =@boothby='s health scan. Capture
 NEVER blocks on enrichment.
 
 * First-usable bar (criterion-3 substantial value)
@@ -437,7 +437,7 @@ v1 feature set:
    misfire recovery.
 
 Deferred to later versions: auto-surface on TUI close /
-session open (knobs default OFF); =@gardener= orphan
+session open (knobs default OFF); =@boothby= orphan
 integration; cross-session clustering; park
 summarization/synthesis.
 

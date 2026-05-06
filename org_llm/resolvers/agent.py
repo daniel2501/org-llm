@@ -2,7 +2,7 @@
 + one-line capability summary.
 
 Helps the sub-LLM disambiguate between "the user @-tagged
-@curator" (specific persona, specific tool roster) versus
+@atoz" (specific persona, specific tool roster) versus
 loose handle-shaped tokens that mean nothing.
 
 Sources from `org_llm.agents.get_builtins()` only — fast

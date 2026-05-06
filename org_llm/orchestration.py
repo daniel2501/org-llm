@@ -26,14 +26,26 @@ the recipe's own prompt shape AND no quality regression on neighbours.
 
 from __future__ import annotations
 
+import os as _os
 import re as _re
+import time as _time
+from pathlib import Path as _Path
 from typing import NamedTuple
 
+
+# ── Tiers ────────────────────────────────────────────────────────────────────
+# "shared"   = ships in this module's _RECIPES list. High bar — must clear
+#              the FOSS robustness check (pass A/B on sparse / missing-config
+#              / errors-injected vaults).
+# "personal" = user-defined in ~/org/org-llm-recipes.org. Whatever the user
+#              wants. Loaded at proxy time, mtime-cached. Wins over shared
+#              recipes when both match (user's intent overrides default).
 
 class RecipeMatch(NamedTuple):
     name:    str          # short id for crew_log
     body:    str          # the recipe text injected into the prompt
     target:  str          # which agent the recipe is built for
+    tier:    str = "shared"   # "shared" | "personal"
 
 
 # Each entry: (compiled regex over the user text, RecipeMatch). First
@@ -65,6 +77,7 @@ _RECIPES: list[tuple[_re.Pattern, RecipeMatch]] = [
         RecipeMatch(
             name="weather_aware_agenda",
             target="*",
+            tier="shared",
             body=(
                 "RECIPE — weather-aware agenda:\n"
                 "  1. The MANAGER PRE-FETCH block below contains "
@@ -107,6 +120,7 @@ _RECIPES: list[tuple[_re.Pattern, RecipeMatch]] = [
         RecipeMatch(
             name="count_across_vault",
             target="researcher",
+            tier="shared",
             body=(
                 "RECIPE — count across vault:\n"
                 "  1. Translate the user's phrase to a regex. "
@@ -126,12 +140,119 @@ _RECIPES: list[tuple[_re.Pattern, RecipeMatch]] = [
 ]
 
 
+# ── Personal-tier recipes ────────────────────────────────────────────────────
+# Loaded from ~/org/org-llm-recipes.org if present. File shape:
+#
+#   * <recipe-id>                                                 :recipe:
+#   :PROPERTIES:
+#   :NAME:    <short id used in manager-log>
+#   :TARGET:  <agent name | "*">
+#   :PATTERN: <regex; case-insensitive by default>
+#   :END:
+#
+#   <body — injected into the agent's prompt as advisory text;
+#    supports the same shape as the bodies in _RECIPES above.>
+#
+# The body is everything between the properties drawer's :END: and the
+# next heading or EOF. Patterns are compiled with re.IGNORECASE | re.DOTALL.
+# Personal recipes win over shared recipes when both match.
+
+_PERSONAL_RECIPES_PATH = _Path(
+    _os.environ.get("ORG_LLM_PERSONAL_RECIPES")
+    or "~/org/org-llm-recipes.org"
+).expanduser()
+
+# Cache: (mtime, [(compiled_pattern, RecipeMatch), ...])
+_personal_cache: tuple[float, list[tuple[_re.Pattern, RecipeMatch]]] = (0.0, [])
+
+
+def _parse_personal_recipes(text: str
+                             ) -> list[tuple[_re.Pattern, RecipeMatch]]:
+    """Parse the literate `~/org/org-llm-recipes.org` file shape into
+    compiled (pattern, RecipeMatch) pairs.
+
+    Tolerates missing properties (skips invalid entries silently —
+    a malformed personal recipe must never crash the proxy)."""
+    out: list[tuple[_re.Pattern, RecipeMatch]] = []
+    # Split on top-level :recipe:-tagged headings. Tolerate level-1 or
+    # level-2 nesting (= or ==).
+    blocks = _re.split(
+        r"(?m)^\*+\s+([^\n]*?):recipe:\s*$",
+        text,
+    )
+    # blocks alternates: [preamble, heading1, body1, heading2, body2, ...]
+    for i in range(1, len(blocks), 2):
+        body_block = blocks[i + 1] if i + 1 < len(blocks) else ""
+        # Pull the properties drawer.
+        prop_m = _re.search(
+            r":PROPERTIES:\s*\n(.*?)\n\s*:END:\s*\n?",
+            body_block,
+            _re.DOTALL,
+        )
+        if not prop_m:
+            continue
+        props = {}
+        for line in prop_m.group(1).splitlines():
+            kv = _re.match(r"\s*:([A-Z_]+):\s*(.*)$", line)
+            if kv:
+                props[kv.group(1)] = kv.group(2).strip()
+        name    = props.get("NAME", "").strip()
+        target  = props.get("TARGET", "*").strip() or "*"
+        pattern = props.get("PATTERN", "").strip()
+        if not name or not pattern:
+            continue
+        # Body is everything AFTER the :END: line, up to the next
+        # heading start (already stripped by the outer split).
+        body_text = body_block[prop_m.end():].strip()
+        try:
+            compiled = _re.compile(pattern, _re.IGNORECASE | _re.DOTALL)
+        except _re.error:
+            continue
+        out.append((
+            compiled,
+            RecipeMatch(name=name, body=body_text, target=target,
+                        tier="personal"),
+        ))
+    return out
+
+
+def _load_personal_recipes() -> list[tuple[_re.Pattern, RecipeMatch]]:
+    """Return the cached list of personal (user-defined) recipes,
+    reloading from disk on mtime change.
+
+    Returns [] when the file is absent or unparseable."""
+    global _personal_cache
+    try:
+        mtime = _PERSONAL_RECIPES_PATH.stat().st_mtime
+    except (FileNotFoundError, OSError):
+        _personal_cache = (0.0, [])
+        return []
+    cached_mtime, cached_list = _personal_cache
+    if mtime == cached_mtime:
+        return cached_list
+    try:
+        text = _PERSONAL_RECIPES_PATH.read_text(encoding="utf-8")
+    except OSError:
+        _personal_cache = (mtime, [])
+        return []
+    parsed = _parse_personal_recipes(text)
+    _personal_cache = (mtime, parsed)
+    return parsed
+
+
 def match_recipe(user_text: str) -> RecipeMatch | None:
     """Return the first matching RecipeMatch for `user_text`, or
     None if no recipe pattern fires. Cheap (~10µs) — runs at proxy
-    time per request."""
+    time per request.
+
+    *Tier order:* personal recipes (from =~/org/org-llm-recipes.org=)
+    are checked first; shared recipes (from `_RECIPES`) second.
+    First match wins. The user's literate config beats the default."""
     if not user_text:
         return None
+    for pat, recipe in _load_personal_recipes():
+        if pat.search(user_text):
+            return recipe
     for pat, recipe in _RECIPES:
         if pat.search(user_text):
             return recipe

@@ -122,7 +122,7 @@ org-llm personalize --apply                # auto-create them
 org-llm personalize --apply --max-themes 5
 #+end_src
 
-** Conversational (opencode / claude / pi)
+** Conversational (opencode / pi / MCP clients)
 - =add_theme_knob= MCP tool — model can register a knob mid-
   session ("dial up the cottagecore vibe")
 - =/personalize= slash command

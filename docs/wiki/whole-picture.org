@@ -117,19 +117,21 @@ Cross-refs: [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] § /Or
 deterministic by default/, [[id:5890fad2-9ba1-4801-ae8c-20daae475a8a][sync-architecture.org]],
 [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]], [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-006/011/012/013.
 
-* The agents (Magnificent Seven + extension)
+* The agents (Bridge Crew + extension)
 
-*Summary.* The curated core agent team — locked at ≤7 in [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014]]:
+*Summary.* The curated core agent team — locked at ≤7 in [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014]]
+(renamed from "Magnificent Seven" 2026-05-06 with Trek-canonical
+handles):
 
 | Agent       | Role                                          |
 |-------------+-----------------------------------------------|
 | =@picard=   | Manager — decompose / delegate / synthesise   |
 | =@spock=    | Researcher — workhorse over the vault         |
 | =@data=     | Scribe — capture-flow + drafting              |
-| =@gardener= | Hygiene — orphans, drift, broken links        |
-| =@analyst=  | Analytics — owns dashboards + Superset surface |
-| =@curator=  | Wiki concept-graph specialist (birth-name =atoz=) |
-| =@tracker=  | General-purpose project tracker (birth-name =boothby=, scope expanded 2026-05-05 — DIY/lab/book/sprints, not just dev) |
+| =@boothby=  | Hygiene — orphans, drift, broken links (Trek: Starfleet Academy gardener) |
+| =@geordi=   | Analytics — owns dashboards + Superset surface (Trek: TNG chief engineer) |
+| =@atoz=     | Wiki concept-graph specialist (Trek: TOS Mr. Atoz) |
+| =@riker=    | General-purpose project tracker (Trek: TNG first officer / XO; scope expanded 2026-05-05 — DIY/lab/book/sprints, not just dev) |
 
 Two patterns to know:
 
@@ -137,8 +139,9 @@ Two patterns to know:
   registry, recipe registry, doctor checks, config schema) without
   /becoming/ the substrate. Substrate stays deterministic code.
 - *Spawned subagents ≠ @-agents* — different concept layer. Spawned
-  subagents are ephemeral one-shot workers from the host (Claude Code
-  / opencode); @-agents are durable personas with registry entries.
+  subagents are ephemeral one-shot workers from the host (opencode,
+  or any other MCP client like Claude Code); @-agents are durable
+  personas with registry entries.
   They compose; they're not subsets.
 
 *Extension path is first-class* (not afterthought) — Phase 23.5
@@ -213,7 +216,7 @@ registry accepts recipes. 24.1 shipped; 24.2 + 24.3 are v1.0-gating.
 ** dbt tests as agent contracts
 
 Declarative tests in =schema.yml= run on every build. Agents trust
-=SELECT * FROM recent_activity= because tests pass. =@gardener='s job
+=SELECT * FROM recent_activity= because tests pass. =@boothby='s job
 sharpens from "vague hygiene" to "read failing tests, propose fixes."
 
 ** Phase 30.4 multi-judge (the meta-quality gate)
@@ -286,8 +289,8 @@ distro" means picking partners and shipping a cohesive experience.
 |------------------+-----------------------+-------------------------------------|
 | Editor           | Doom Emacs            | CORE_DISABLED experience (daily-driver dogfood) |
 | LLM frontend     | opencode              | CORE                                |
-| LLM frontend     | Claude Code           | CORE                                |
 | LLM frontend     | Pi (pi.dev — TS CLI)  | COMMUNITY                           |
+| MCP integration  | Claude Code (and other MCP clients) | integration option per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]] |
 | Local LLM        | ollama                | CORE                                |
 | Cloud LLM        | openrouter            | CORE                                |
 | Cloud LLM        | Anthropic / others    | effect-tier MCP                     |
@@ -305,7 +308,7 @@ Cross-refs: [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Open
 * What's next (live state)
 
 *Summary.* As of 2026-05-05: cull walkthrough complete (38/38);
-DEC-014 just locked; Magnificent Seven roster locked; ~3000 LoC
+DEC-014 just locked; Bridge Crew roster locked; ~3000 LoC
 retirement candidates queued for Phase 26.2; 24.1 shipped + verified
 live. Mobile + 24.2/24.3 are the v1.0 gates.
 
@@ -328,5 +331,5 @@ Cross-refs: [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] § YOU ARE HERE
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] — narrative phase catalog
 - [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] — structured actionable state
 - [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] — single-view dashboard ("YOU ARE HERE")
-- [[id:65c67408-a0de-4f93-9ffa-6800ea0f436f][cull.org]] — Phase 26.1 walkthrough; Magnificent Seven boundary
+- [[id:65c67408-a0de-4f93-9ffa-6800ea0f436f][cull.org]] — Phase 26.1 walkthrough; Bridge Crew boundary
 - [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki-conventions.org]] — Rule 2b summary+expanded format applies here

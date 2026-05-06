@@ -1,7 +1,7 @@
 """Repo resolver — turns repo-name mentions in a prompt into
 absolute repo roots.
 
-When the user says "in org-llm" or "@curator in org-llm,
+When the user says "in org-llm" or "@atoz in org-llm,
 fix …", this resolver maps the bare name to the repo root on
 disk (e.g. `/home/user/repos/org-llm/`). The downstream agent
 then knows where to glob, where `wiki/` actually means

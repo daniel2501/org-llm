@@ -4641,7 +4641,7 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "    parenthetical so the user sees what shifted."
         ),
     },
-    "analyst": {
+    "geordi": {
         "description": "Read text → derived text. Summarize, extract, or interpret based on phrasing.",
         "model_role":  "text_model",
         "prompt": (
@@ -4781,11 +4781,11 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "    and flag the guess."
         ),
     },
-    "gardener": {
+    "boothby": {
         "description": "Vault hygiene advisor. Knows about embeds, orphans, stale tags, broken links.",
         "model_role":  "chat_model",
         "prompt": (
-            "You are gardener — org-llm's vault hygiene "
+            "You are boothby — org-llm's vault hygiene "
             "advisor. The user comes to you for questions about "
             "the HEALTH of their vault and the background work "
             "that keeps it healthy: embedding coverage, orphan "
@@ -4943,7 +4943,7 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "  • Stay in your lane. If the user asks about Doom "
             "    keybinds, point to @doom; weather or seasons, "
             "    @almanac; agenda or schedule, @agenda; vault "
-            "    hygiene, @gardener. Decline politely + redirect "
+            "    hygiene, @boothby. Decline politely + redirect "
             "    — don't answer from training-data guesses about "
             "    other domains.\n"
             "  • If the data is too thin (<3 dailies, no clear "
@@ -4993,11 +4993,11 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "  • Cap personas at 1500 chars. Cut to fit."
         ),
     },
-    "curator": {
+    "atoz": {
         "description": "Wiki concept-graph specialist — sweeps docs/wiki/ for missing cross-links, drift, and new-page candidates.",
         "model_role":  "chat_model",
         "prompt": (
-            "You are curator — org-llm's wiki concept-graph "
+            "You are atoz — org-llm's wiki concept-graph "
             "specialist. Scope: docs/wiki/ ONLY. You sweep for "
             "missing cross-links, broken [[id:…]] / file: links, "
             "and numeric drift between wiki tables and source code.\n"
@@ -5033,7 +5033,7 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "    planned vs doesn't-exist) against the canonical "
             "    source list before signing off.\n"
             "  • BITE-SIZED — propose 1-3 file edits at a time.\n"
-            "  • NEIGHBOURS — whole-vault hygiene is @gardener; "
+            "  • NEIGHBOURS — whole-vault hygiene is @boothby; "
             "    tag taxonomy is @librarian. Stay in your lane.\n"
             "  • AGENTSMITH HANDOFF — when a new agent ships, "
             "    integrate into the wiki as the last step "
@@ -5041,11 +5041,11 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "    agent-roster.org row when applicable)."
         ),
     },
-    "tracker": {
+    "riker": {
         "description": "Dev-tracker steward — daily what's-on-deck, weekly what-shipped/what's-blocked, EFFORT-vs-actual drift.",
         "model_role":  "chat_model",
         "prompt": (
-            "You are tracker — org-llm's dev-process steward. "
+            "You are riker — org-llm's dev-process steward. "
             "You own docs/wiki/dev-tracker.org. Daily 'what's on "
             "deck?', end-of-session 'what shipped, what's blocked?', "
             "weekly velocity. Foundation for future tracker init "
@@ -5059,7 +5059,7 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "last session, `git status` for in-flight work, "
             "`org-llm log --reflect` for CLI/MCP patterns.\n"
             "  • org-llm_delegate — on phase landing, delegate to "
-            "curator for the wiki cascade (roadmap status, audit-log, "
+            "atoz for the wiki cascade (roadmap status, audit-log, "
             "00-index row).\n"
             "\n"
             "DEFAULTS:\n"
@@ -5081,12 +5081,12 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "edit silently; never wait for user approval ('OK?'). "
             "User reviews diffs in transcript.\n"
             "  • SCOPE — docs/wiki/dev-tracker.org is yours. "
-            "Wiki concept-graph is @curator; whole-vault hygiene "
-            "is @gardener. Stay in your lane.\n"
+            "Wiki concept-graph is @atoz; whole-vault hygiene "
+            "is @boothby. Stay in your lane.\n"
             "  • PHASE-LANDING HANDOFF — when you detect a phase "
             "shipped (commit message + matching :@active: entry), "
             "do the dev-tracker move yourself, then delegate to "
-            "curator for the wiki cascade.\n"
+            "atoz for the wiki cascade.\n"
             "  • TONE — plain-spoken progress narration. No "
             "management-speak. Cite real EFFORT numbers, not "
             "vibes."
@@ -5143,7 +5143,7 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
 # (which carries bullet indents and intentional sub-bullet
 # alignment after \n).
 #
-# Caught 2026-05-04 by @curator dogfood; fix here keeps source
+# Caught 2026-05-04 by @atoz dogfood; fix here keeps source
 # readable while normalising what the LLM actually sees. Future
 # personas don't need to think about this — write with the
 # indented continuations that read well in source; the loader
@@ -5325,7 +5325,7 @@ _AGENT_TRIGGERS: dict[str, list[str]] = {
                        "code review", "audit"],
     "translator":     ["translate", "into spanish", "into french",
                        "into german", "in spanish", "in french", "in german"],
-    "analyst":        ["interpret", "what does this mean", "trends",
+    "geordi":         ["interpret", "what does this mean", "trends",
                        "patterns", "analy", "what stands out",
                        "summary", "summarise", "summarize",
                        "tl;dr", "tldr", "shorten",
@@ -5348,7 +5348,7 @@ _AGENT_TRIGGERS: dict[str, list[str]] = {
                        "how do i bind", "doom sync",
                        "doom doctor", "doom upgrade",
                        ".doom.d", ".config/doom"],
-    "gardener":       ["embed", "reindex", "stale", "orphan",
+    "boothby":        ["embed", "reindex", "stale", "orphan",
                        "garbage collect", "tidy", "prune",
                        "auto-embedder", "auto embedder",
                        "vault health", "what needs cleanup",
@@ -5371,7 +5371,7 @@ _AGENT_TRIGGERS: dict[str, list[str]] = {
                        "design an agent", "i need an agent",
                        "wish there was an agent", "agent for tracking",
                        "agent that handles", "spin up an agent"],
-    "curator":        ["wiki audit", "audit the wiki", "audit wiki",
+    "atoz":           ["wiki audit", "audit the wiki", "audit wiki",
                        "wiki sweep", "wiki review",
                        "missing wiki link", "missing cross-link",
                        "cross-link the wiki", "link the wiki",
@@ -5379,7 +5379,7 @@ _AGENT_TRIGGERS: dict[str, list[str]] = {
                        "new wiki page", "write a wiki page",
                        "docs/wiki", "wiki drift",
                        "wiki status table"],
-    "tracker":        ["what's on deck", "what is on deck",
+    "riker":          ["what's on deck", "what is on deck",
                        "what's next on the", "what is next on the",
                        "dev tracker", "dev-tracker",
                        "what shipped", "what i shipped",
@@ -5387,7 +5387,7 @@ _AGENT_TRIGGERS: dict[str, list[str]] = {
                        "phase progress", "phase status",
                        "next phase", "EFFORT", "effort estimate",
                        "weekly velocity", "what did i work on",
-                       "@tracker", "ship review"],
+                       "@riker", "@tracker", "ship review"],
 }
 
 
@@ -5781,7 +5781,7 @@ def agent_set_cmd(
     Examples:
       org-llm agent set picard description "..."
       org-llm agent set picard aliases "crew,captain,boss"
-      org-llm agent set analyst pack starfleet-core
+      org-llm agent set geordi pack starfleet-core
     """
     _agent_field_set(name, field, value)
     on_screen(f"[green]✓[/green] {name}.{field} updated")
@@ -12690,7 +12690,7 @@ _TUTOR_STEPS = [
         "[lcars1]What's logged:[/lcars1]\n"
         "  cli      — every `org-llm <verb>` invocation + outcome\n"
         "  llm      — every chat()/embed() round-trip with model + latency\n"
-        "  mcp      — every MCP tool call from opencode/claude\n"
+        "  mcp      — every MCP tool call from opencode (or any other MCP client)\n"
         "  config   — every set_config write (old → new diff)\n"
         "  doctor   — proactive_doctor verdicts + log-reflect outputs\n"
         "  embed    — auto-embed batches\n\n"
@@ -12858,16 +12858,16 @@ _TUTOR_STEPS = [
     ),
     (
         "pi",
-        "[lcars2]org-llm pi[/lcars2] — Pi extension bridge (third conversational interface)\n\n"
-        "[lcars1]The three faces:[/lcars1]\n"
-        "  • [bold]launch[/bold]   → opencode  (already integrated)\n"
-        "  • [bold]claude[/bold]   → Claude Code  (already integrated)\n"
-        "  • [bold]pi[/bold]       → Pi @ pi.dev  (this command)\n\n"
+        "[lcars2]org-llm pi[/lcars2] — Pi extension bridge (second conversational interface)\n\n"
+        "[lcars1]Surfaces:[/lcars1]\n"
+        "  • [bold]launch[/bold]   → opencode    (primary surface)\n"
+        "  • [bold]pi[/bold]       → Pi @ pi.dev (second surface, this command)\n"
+        "  • [bold]claude[/bold]   → Claude Code (MCP-client integration)\n\n"
         "[lcars1]How it works:[/lcars1]\n"
         "  A small TypeScript bridge in [bold]org_llm/pi_extension/[/bold] spawns\n"
         "  [bold]org-llm mcp[/bold] over stdio, registers each MCP tool as a Pi tool,\n"
         "  and injects the same persona/search-first system prompt opencode\n"
-        "  and Claude Code see — so Pi is themed and behaves identically.\n\n"
+        "  (and any other MCP client) sees — so Pi is themed and behaves identically.\n\n"
         "[lcars1]Commands:[/lcars1]\n"
         "  [bold]org-llm pi --install[/bold]   — auto-install Pi + register the bridge\n"
         "  [bold]org-llm pi[/bold]             — start a Pi session with org-llm tools loaded\n"
@@ -20839,11 +20839,11 @@ def self_log():
     console.print(p.read_text())
 
 
-# ── tracker: @tracker (Boothby) self-hosted dev/project tracking ──────────
+# ── tracker: @riker (prior @tracker) self-hosted dev/project tracking ──────
 #
 # Phase 29.0 — self-coded tools seed. Three deterministic verbs that flip
 # dev-tracker.org from a wiki page the user manually edits to a vault-
-# resident surface @tracker can own:
+# resident surface @riker can own:
 #
 #   org-llm tracker init   — bootstrap ~/org/org-llm-dev-tracker.org from
 #                            the wiki copy (idempotent; --force overwrites).
@@ -20853,12 +20853,13 @@ def self_log():
 #   org-llm tracker pace   — read-only EFFORT vs. actual; flags drift.
 #
 # Per project_tracker_self_hosting_goal: end goal is org-llm itself owning
-# the tracking via @tracker. These verbs are the deterministic skeleton
-# the persona narrates on top of.
+# the tracking via @riker (Bridge Crew dev-process steward; verb name
+# `tracker` stays — verbs are functional, agent handles are persona).
+# These verbs are the deterministic skeleton the persona narrates on top of.
 # Per DEC-011: vault files are canonical; DB is universal interface.
 
 tracker_app = typer.Typer(
-    help="@tracker — self-hosted dev/project tracking (init / review / pace).",
+    help="@riker — self-hosted dev/project tracking (init / review / pace).",
     cls=PrefixGroup,
     invoke_without_command=True,
 )
@@ -20867,7 +20868,7 @@ app.add_typer(tracker_app, name="tracker", rich_help_panel="Maintenance")
 
 @tracker_app.callback(invoke_without_command=True)
 def _tracker_root(ctx: typer.Context):
-    """@tracker — self-hosted dev/project tracking.
+    """@riker — self-hosted dev/project tracking.
 
     Bare `org-llm tracker` shows this help. Verbs:
         org-llm tracker init     — bootstrap vault tracker from wiki copy
@@ -20946,7 +20947,7 @@ def tracker_init(
     source_p = Path(source).expanduser() if source else WIKI_DEV_TRACKER
     result = init_tracker(target_p, source_p, force=force)
     if result.created:
-        hail(f"@tracker initialized at {result.target}")
+        hail(f"@riker initialized at {result.target}")
         on_screen(f"  source: {result.source}")
         on_screen(f"  bytes:  {result.bytes_written}")
         on_screen("[dim]Next:[/dim] [bold]org-llm tracker review[/bold]")
@@ -20955,7 +20956,7 @@ def tracker_init(
     if "source missing" in result.skipped_reason:
         red_alert(result.skipped_reason)
         raise typer.Exit(1)
-    on_screen(f"[yellow]@tracker init skipped:[/yellow] {result.skipped_reason}")
+    on_screen(f"[yellow]@riker init skipped:[/yellow] {result.skipped_reason}")
     raise typer.Exit(0)
 
 

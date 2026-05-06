@@ -4,7 +4,7 @@
 
 A handful of working :skill: blocks you can run as-is or use as
 templates. Each one is a real `org-llm skill <name> "<input>"` you
-can invoke from the CLI, opencode, Claude Code, or Pi.
+can invoke from the CLI, opencode, Pi, or any other MCP client (Claude Code, …).
 
 How to use this file:
 - `org-llm skill-examples` copied this file into your vault.

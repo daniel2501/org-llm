@@ -90,8 +90,9 @@ def render_manpage() -> str:
     lines.append(_esc(
         "org-llm indexes an org-roam vault into SQLite + sqlite-vec, then\n"
         "exposes that index through ~30+ commands and an MCP server so\n"
-        "opencode and Claude Code can read/write the vault as a second\n"
-        "brain. Local-first (Ollama) by default; cloud routing (OpenRouter\n"
+        "opencode (and any other MCP client, e.g. Claude Code) can\n"
+        "read/write the vault as a second brain. Local-first (Ollama) by\n"
+        "default; cloud routing (OpenRouter\n"
         "et al.) is opt-in. Captain's Log records every CLI invocation,\n"
         "LLM call, and config change to BOTH the SQLite history table AND\n"
         "~/org/captains-log.org for vault-level analytics via dbt."))

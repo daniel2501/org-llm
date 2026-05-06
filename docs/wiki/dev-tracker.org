@@ -17,7 +17,9 @@
 *Summary.* The dev tracker's canonical location is now
 =~/org/org-llm-dev-tracker.org= (vault-resident, syncs via git per
 DEC-011 in [[file:decisions.org][decisions.org]]).
-Phase 29.0 — self-hosted via @tracker (Boothby).
+Phase 29.0 — self-hosted via @riker (Bridge Crew dev-process
+steward; alias =@tracker=). Verb name `tracker` stays — verbs are
+functional, agent handles are persona.
 
 *Expanded.* This file used to be the live tracker. As of
 [2026-05-05] it's a redirect stub kept here so:
@@ -42,13 +44,13 @@ org-llm tracker pace       # EFFORT vs. actual
 #+end_src
 
 The =org-llm tracker= verbs are the deterministic skeleton; the
-=@tracker= persona narrates on top of them. See
-[[file:agents.org][agents.org]] § @tracker for the persona spec.
+=@riker= persona (alias =@tracker=) narrates on top of them. See
+[[file:agents.org][agents.org]] § @riker for the persona spec.
 
 ** See also
 
 - =~/org/org-llm-dev-tracker.org= — the canonical live tracker
-- [[file:agents.org][agents.org]] — @tracker persona (Boothby — TNG/VOY groundskeeper)
+- [[file:agents.org][agents.org]] — @riker persona (TNG first officer / XO; alias =@tracker=)
 - [[file:roadmap.org][roadmap.org]] § Phase 29.0 — self-coded tools (this is the seed)
 - [[file:decisions.org][decisions.org]] DEC-011 — vault-and-DB symmetry; files canonical
 - [[file:active-claims.org][active-claims.org]] — live coordination half (sibling of this)
@@ -1253,7 +1255,7 @@ one macOS, hits =org-llm ask= successfully.
 Phase 9.7 validated 4 of 71 MCP tools live in opencode. The
 other 67 are tested via =test_workspace_mcp.py= structural
 assertions but no end-to-end exercise inside an actual
-opencode/claude session.
+opencode session (or another MCP client like Claude Code).
 
 *Pass criterion:* 10-20 prompts driven through opencode, each
 exercising a different tool family from the MCP architecture
@@ -2855,9 +2857,9 @@ Eight ways this matters:
 3. *Per-agent skill scoping.* @curator gets =org_link_graph=
    + =walk_*= but NOT =capture_note= or =delegate=. Today
    every agent sees all 71 MCP tools.
-4. *Cross-tool delegation by agent role.* @curator → Claude
-   Code, @doom → Codex, @tracker → OpenCode. Today routes
-   by recipe; Agor routes by agent identity.
+4. *Cross-tool delegation by agent role.* @curator → opencode,
+   @doom → Codex, @tracker → Claude Code (any MCP-client mix).
+   Today routes by recipe; Agor routes by agent identity.
 5. *Heartbeat-driven autonomy at agent level.* Concrete
    fleet: curator-stale-link-scan 6h, tracker-stuck-items
    daily, captain-weekly-reflect Sun, user-defined oncall
@@ -3336,8 +3338,8 @@ hyperlinked surface across vault + chat — not "chat that
 references vault" but "chat that IS in vault."
 
 Implications if accepted as CORE:
-- opencode / Claude Code TUI become *secondary* surfaces (not
-  where the user lives daily).
+- opencode (and other MCP-client TUIs like Claude Code) become
+  *secondary* surfaces (not where the user lives daily).
 - Mobile target uses an org-mode-aware editor (composes with
   the holy-grail mobile sprint item below).
 - Phase 16.3 — Emacs companion becomes load-bearing for v1.0.
@@ -3468,12 +3470,12 @@ two concept layers:
 - *@-agents* — org-llm personas with name, persona prompt, tool
   roster, recipes; long-lived definition; invoked many times via
   =@<name>= proxy interceptor.
-- *Spawned subagents* — Claude Code / opencode generic LLM
-  delegations to a fresh context; ephemeral, briefed per-spawn;
-  no persona of their own.
+- *Spawned subagents* — generic LLM delegations to a fresh
+  context from a host (opencode, Claude Code, …); ephemeral,
+  briefed per-spawn; no persona of their own.
 
 How they compose: @-agents' =delegate= tool *could* spawn
-Claude Code subagents under the hood as a model layer (vs
+host-side subagents under the hood as a model layer (vs
 direct-to-proxy). Tonight's three writer agents (no @-agent
 persona) demonstrated the pure ephemeral-writer pattern.
 
@@ -3788,17 +3790,18 @@ isolation fights the design:
   container is mostly cosmetic
 - Local Ollama needs GPU passthrough (NVIDIA Container
   Toolkit), real friction on laptops + Pis
-- Editor processes (Emacs, opencode, claude, pi) run *outside*
-  the container; their MCP subprocess (=org-llm mcp=) needs to
-  see the same DB the editor sees
+- Editor processes (Emacs, opencode, pi, MCP clients) run
+  *outside* the container; their MCP subprocess (=org-llm mcp=)
+  needs to see the same DB the editor sees
 - =pass=, =gpg-agent=, =ssh-agent= state doesn't compose with
   container isolation
 - Literate-programming workflow tangles Python from
   =20260425230731-org_llm.org=; running app needs to detect
   and reload — more wires through container boundaries
-- Our stack is mostly native (Ollama, opencode, Claude Code,
-  org-roam, dbt all native install) — containerizing org-llm
-  would make us the outlier in our own stack
+- Our stack is mostly native (Ollama, opencode, org-roam, dbt
+  all native install — Claude Code et al. as integration
+  options) — containerizing org-llm would make us the outlier
+  in our own stack
 - Per =feedback_foss_emacs_first.md=: containerization moves
   AWAY from native Emacs/CLI integration
 
@@ -4440,15 +4443,15 @@ promotion to deterministic.
 Captain's Log records every CLI/LLM/MCP call (mechanical). Phase
 journals capture design + bug ledger. Git records implementation.
 But the SESSION NARRATIVE — "we discovered X today, tried Y, the
-lever turned out to be Z" — currently lives only in the Claude
-session transcript, lost after the session ends. Not searchable
-from inside org-llm.
+lever turned out to be Z" — currently lives only in the agent
+harness session transcript, lost after the session ends. Not
+searchable from inside org-llm.
 
 *Two shapes considered:*
 - End-of-session walk variant that asks "what were today's key
   findings? what's the carry-over?" and writes
   =~/org/org-llm-test-session/<YYYY-MM-DD>-session-log.org=.
-- claude / opencode hook that periodically writes deltas as
+- opencode / MCP-client hook that periodically writes deltas as
   they happen.
 
 Phase 13.2-5 timeframe. Per the dog-food meta in this tracker —

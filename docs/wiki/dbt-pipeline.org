@@ -115,7 +115,7 @@ HEALTH card and captain's log.
 Why this changes the shape of the system: drift gets caught at
 write-time rather than query-time; agents trust the data layer
 unconditionally; tests are version-controlled alongside the
-models they guard; the @gardener job sharpens (read failing
+models they guard; the @boothby job sharpens (read failing
 tests → propose fixes); and the supervision rule from DEC-006
 extends naturally into the data layer.
 
@@ -188,7 +188,7 @@ column showing exactly what feeds what.
   sources/                    models/                       consumers
 
     org_files ──┐         ┌── parsed_nodes ──┐         ┌── @journalist
-                ├──parse──┤                  ├──join── @gardener
+                ├──parse──┤                  ├──join── @boothby
     attachments ┘         └── parsed_links ──┘         └── @scribe
                                                             recipes/
                                                             dashboards/
@@ -210,7 +210,7 @@ Specific to org-llm:
   24.5b primer) — dbt-docs is the schema reference they cite.
 - Users become legible to themselves at the schema level —
   the vault has a queryable shape, documented.
-- @curator gains a complete checkable target — sweep model
+- @atoz gains a complete checkable target — sweep model
   descriptions for drift the same way it sweeps wiki pages.
 
 Cost: roughly free. dbt-docs ships with dbt. Adding column

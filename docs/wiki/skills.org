@@ -160,7 +160,7 @@ There is no =SKILL_INPUT= or =SKILL_TIMEOUT= property. The
 input is whatever the caller passes; timeouts are governed at
 the =llm.chat()= layer.
 
-** Conversational (opencode / claude / pi)
+** Conversational (opencode / pi / MCP clients)
 - =/skills= slash command — list registered skills
 - =/skill <name>= — invoke
 - Natural language: "run my weekly review skill on the last 7

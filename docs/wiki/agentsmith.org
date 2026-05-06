@@ -59,10 +59,14 @@ there's nothing, it surfaces the gap ("you don't have any
 ** 2. Name + icons
 
 Lowercase, no spaces, no punctuation. Common naming patterns:
-- *Profession* — =@journalist=, =@analyst=, =@librarian=,
+- *Profession* — =@journalist=, =@geordi= (analyst alias), =@librarian=,
   =@bookkeeper=
-- *Role in a household / shop* — =@scribe=, =@gardener=,
+- *Role in a household / shop* — =@scribe=, =@boothby= (gardener alias),
   =@triager=¹, =@reviewer=, =@ops=
+- *Trek-canonical* — Bridge Crew per DEC-014 use the Trek
+  birth-name as the canonical handle (e.g. =@atoz=, =@riker=,
+  =@boothby=, =@geordi=); functional aliases (=@curator=,
+  =@tracker=, =@gardener=, =@analyst=) stay valid for back-compat.
 - *Concrete object* — =@almanac=, =@compass=, =@inbox=
 
 Avoid generic names (=@assistant=, =@helper=) and brand-y names
@@ -74,7 +78,7 @@ icon palette]] (nerd-font / utf-8 / ascii fallback ladder). If no
 existing icons fit, it suggests three new ones from the
 =nf-md-*= family for the user to pick.
 
-¹ Now merged into =@gardener= as of 2026-05-03 — see
+¹ Now merged into =@boothby= (alias =@gardener=) as of 2026-05-03 — see
 [[file:agents.org][agents.org]] for the rationalization. Use this
 list as a naming-pattern reference, not a complete roster.
 

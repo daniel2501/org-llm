@@ -1,8 +1,9 @@
 """Tests for `org-llm tracker {init,review,pace}` (Phase 29.0).
 
 Per project_tracker_self_hosting_goal: the dev-tracker is migrating
-from a wiki page to a vault file owned by @tracker. These tests pin
-the deterministic skeleton so the LLM persona has a stable substrate
+from a wiki page to a vault file owned by @riker (Bridge Crew rename
+2026-05-06; verb name `tracker` stays). These tests pin the
+deterministic skeleton so the LLM persona has a stable substrate
 to narrate on top of.
 
 Per feedback_test_before_handoff: tests pass before reporting.
@@ -199,7 +200,7 @@ class TestTrackerInit:
         assert target.exists()
         # Header was prepended
         text = target.read_text()
-        assert "Managed by @tracker" in text
+        assert "Managed by @riker" in text
         # Original body preserved
         assert "Build the tracker self-hosting verbs" in text
 
@@ -311,7 +312,7 @@ class TestTrackerCLI:
         ])
         assert result.exit_code == 0, result.output
         assert target.exists()
-        assert "@tracker initialized" in result.output
+        assert "@riker initialized" in result.output
 
     def test_init_idempotent_via_cli(self, tmp_path: Path, monkeypatch,
                                        tracker_fixture: Path):

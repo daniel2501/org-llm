@@ -1,10 +1,12 @@
 """Tests for org_llm.resolvers — Phase 24.1 pre-flight registry.
 
 Anchor scenario: the 2026-05-04 motivating bug. User says
-"@curator in org-llm, fix wiki/superset.org" — pre-24.1 the
+"@atoz in org-llm, fix wiki/superset.org" — pre-24.1 the
 agent guessed two wrong paths and gave up. Post-24.1 the
 PathResolver + RepoResolver hand the absolute path to the
-agent before the first tool call.
+agent before the first tool call. (Handle was `@curator` at
+time-of-bug; renamed @curator → @atoz in 2026-05-06 Bridge
+Crew rename.)
 """
 from __future__ import annotations
 

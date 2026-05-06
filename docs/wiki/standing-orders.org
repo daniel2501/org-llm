@@ -48,7 +48,7 @@ fails silently (specialist does the old thing).
 =standing_orders_digest= line listing changed orders by
 =(namespace, key, version)= → specialist fetches the body for
 namespaces its task touches → specialist acts on the current
-order, not the spawn-time-frozen prompt → @curator's next
+order, not the spawn-time-frozen prompt → @atoz's next
 sweep proposes graduating long-lived orders to wiki pages →
 graduated orders retire (=status=superseded=).
 
@@ -71,7 +71,7 @@ graduated orders retire (=status=superseded=).
    =standing_orders_get(namespace, key)= for the body —
    same lazy-loading discipline as primers. If no namespace
    touches, the specialist proceeds without further fetch.
-4. *Promote.* @curator's periodic sweep finds standing
+4. *Promote.* @atoz's periodic sweep finds standing
    orders that have survived N weeks (default: 3) without
    retraction. For each, it proposes a canonical home — a
    wiki page edit, a baseline rule, an =org-llm-config.org=
@@ -98,7 +98,7 @@ canonical life data).
 | layer | what                                                              | who reads/writes                            | example                                                |
 |-------+-------------------------------------------------------------------+---------------------------------------------+--------------------------------------------------------|
 | 1     | Developer-process memory (Claude Code style)                       | only the dev's harness, NOT the app         | =~/.claude/projects/.../memory/= — stays out of org-llm |
-| 2a    | Per-agent observations (an agent's notes about its own past work)  | one agent reads/writes; not broadcast        | "@curator: last sweep 2026-05-02; 7 drift items found" |
+| 2a    | Per-agent observations (an agent's notes about its own past work)  | one agent reads/writes; not broadcast        | "@atoz: last sweep 2026-05-02; 7 drift items found" |
 | 2b    | *Standing orders (this page)*                                      | captain + curator/tracker write; all read    | "wiki policy: every concept leads with *Summary.*"     |
 | 3     | Vault (canonical user-data)                                        | user writes; all agents read                 | =~/org/dailies/2026-05-04.org=, =~/org/projects/=      |
 
@@ -129,7 +129,7 @@ class AgentBaseline(Base):
     key          = Column(String, nullable=False)      # "rule_2b" | "groq_ban" | …
     body         = Column(Text,   nullable=False)      # the rule/decision body
     version      = Column(Integer, default=1)          # bumped on update
-    authored_by  = Column(String, nullable=False)      # "user" | "@curator" | …
+    authored_by  = Column(String, nullable=False)      # "user" | "@atoz" | …
     status       = Column(String, default="active")    # active | superseded | retracted | stale
     supersedes   = Column(String, nullable=True)       # → wiki page UUID or another order ID
     applies_to   = Column(JSON,   default=list)        # specialist names; empty = all
@@ -157,7 +157,7 @@ the captain.
 * Write authority + the promotion ladder
 
 *Summary.* Only the user (via the captain) authors a standing
-order; @curator and @tracker can retire/supersede when
+order; @atoz and @riker can retire/supersede when
 canonization lands; specialists *consume* orders, never write
 them. This narrowness is what keeps the table from sprawling.
 
@@ -169,13 +169,13 @@ them. This narrowness is what keeps the table from sprawling.
 2. *Auto-survival.* Order persists across sessions, across
    spawns. Specialists honor it. No expiration unless the user
    retracts.
-3. *Sweep + propose.* @curator's periodic sweep (or a
+3. *Sweep + propose.* @atoz's periodic sweep (or a
    side-quest spawn after N standing orders accumulate) lists
    orders with no canonical-home pointer and proposes:
    - "Order =design/shared-memories-shape= has been active 21
      days; propose graduating to a wiki page at
      =docs/wiki/<slug>.org=. Apply?"
-3. *Canonize + retire.* User accepts → @curator drafts the
+3. *Canonize + retire.* User accepts → @atoz drafts the
    wiki page (this is itself a [[id:7dcbce8b-0941-48ec-a17d-c623ba00883a][side-quest]] producing an
    agent-report) → on landing, =standing_orders_retire(id,
    supersedes=<wiki_page_id>)=. The manifest digest stops
@@ -221,7 +221,7 @@ namespaces. This makes mid-task re-orientation cheap and
 optional rather than expensive and forced.
 
 The staleness window — a specialist that ignores the hint and
-proceeds with stale orientation — is bounded by @curator's
+proceeds with stale orientation — is bounded by @atoz's
 sweep, which catches non-conformant artifacts post-hoc. Cost
 of one missed re-orientation is one redo, not silent drift.
 
@@ -236,7 +236,7 @@ machinery.
 
 - *Table sprawl.* Without auto-stale + the promotion ladder,
   standing orders accumulate indefinitely. Mitigations: M-week
-  auto-stale; @curator promotion sweep proposes graduation;
+  auto-stale; @atoz promotion sweep proposes graduation;
   user retraction always available.
 - *Write-authority leak.* If specialists could author orders,
   the table becomes a chat log. Mitigation: =write.standing_orders=
@@ -244,7 +244,7 @@ machinery.
   MCP dispatch (Phase 23.2 capability enforcement).
 - *Silent drift.* In-flight specialist proceeds with
   pre-change orientation. Mitigation A: the "changed since
-  spawn — refresh?" hint above. Mitigation B: @curator catches
+  spawn — refresh?" hint above. Mitigation B: @atoz catches
   non-conformant artifacts in next sweep. Cost is one redo.
 - *Primer overlap.* A standing order whose body duplicates a
   wiki rule is a promotion-ladder failure. Mitigation:
@@ -252,7 +252,7 @@ machinery.
   page exists, the primer wins. Standing orders are for
   decisions *without* a source-file home yet.
 - *Layer-2a confusion.* Tempting to write per-agent observations
-  ("@curator last sweep results") into standing orders. They
+  ("@atoz last sweep results") into standing orders. They
   belong in Layer 2a (per-agent journal), not 2b. Standing
   orders are *user-authoritative*; observations are
   *agent-derived*. Different write paths.
@@ -268,7 +268,7 @@ machinery.
 
 *Summary.* Standing orders sit *between* user input and primer
 fetches. They feed the manifest at spawn (one new digest line);
-they feed @curator's sweep (the source for graduation
+they feed @atoz's sweep (the source for graduation
 proposals); they feed primers indirectly (graduated orders
 land in source files primers read). Nothing they touch is new.
 
@@ -278,7 +278,7 @@ land in source files primers read). Nothing they touch is new.
 |----------------------------------------------------+--------------------------------------------------------------------|
 | [[id:32fe7314-0a69-4945-aef3-7105d507b201][Orientation manifest]]                                  | gains one digest line at spawn; everything else unchanged          |
 | [[id:cf466e65-0fa1-4f23-8103-8205f67a6ca3][Lazy loading]]                                          | standing orders inherit the policy: deterministic reads, no LLM    |
-| [[id:7dcbce8b-0941-48ec-a17d-c623ba00883a][Side-quests]]                                          | the canonization step is itself a side-quest (@curator drafts wiki) |
+| [[id:7dcbce8b-0941-48ec-a17d-c623ba00883a][Side-quests]]                                          | the canonization step is itself a side-quest (@atoz drafts wiki) |
 | =AgentBaseline=                                    | the table standing orders extend; existing rows become "system" authored |
 | [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][Vault facts]]                                          | parallel mechanism for vault-derived facts; standing orders are user-derived decisions |
 | [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's log]]                                        | every =standing_orders_set= call logs an event for replay          |
@@ -309,7 +309,7 @@ and MCP tools land.
    digest line to every =delegate()= call. ~1h.
 5. *"Changed since spawn" hint.* MCP tool wrappers include a
    delta note when the digest version moves. ~half-day.
-6. *@curator promotion sweep.* New scheduled job:
+6. *@atoz promotion sweep.* New scheduled job:
    list-active-orders > N weeks → propose canonical home.
    ~1d, gated on having ≥3 long-lived orders to sweep over.
 7. *Auto-stale transition.* Background job
@@ -333,7 +333,7 @@ rest can land incrementally as load justifies.
 * Related
 
 - [[id:7dcbce8b-0941-48ec-a17d-c623ba00883a][Side-quests]] —
-  the canonization step (@curator drafts the wiki page) is
+  the canonization step (@atoz drafts the wiki page) is
   itself a side-quest emitting an agent-report.
 - [[id:32fe7314-0a69-4945-aef3-7105d507b201][Agent orientation]] —
   the manifest gains one new line; everything else about the
@@ -350,5 +350,5 @@ rest can land incrementally as load justifies.
 - [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] —
   long-running phase entries; the canonical home for
   arc-scoped standing orders that graduate.
-- =docs/notes/= — the agent-report directory; @curator's
+- =docs/notes/= — the agent-report directory; @atoz's
   graduation side-quests land their reports here.

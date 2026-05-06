@@ -109,7 +109,7 @@ def chat(prompt: str, model: str, base_url: str, system: str = "",
                 _emit_lag_warning(warn, model)
                 # Record to the ring buffer so the MCP proactive_doctor
                 # can surface this lag event to the LLM next time it's
-                # called. opencode/claude don't render stderr, so the
+                # called. MCP clients don't render stderr, so the
                 # inline `_emit_lag_warning` print is invisible to them
                 # — the buffer is how they hear about it.
                 _perf.record_perf_alert(
