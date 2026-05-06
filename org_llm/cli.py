@@ -5709,6 +5709,137 @@ def _agent_field_reset(birth_name: str) -> bool:
         return True
 
 
+metrics_app = typer.Typer(
+    help=("Semantic-layer registry — agents query metrics by name "
+          "(e.g. `metric:llm_avg_ms group_by:[model]`) instead of "
+          "writing raw SQL. Same registry feeds Superset dataset "
+          "YAML so dashboards and `@analyst` answer with identical "
+          "numbers. Run `metrics ls` to discover, `metrics query` "
+          "to execute, `metrics emit` to export to Superset."),
+    rich_markup_mode="rich",
+)
+app.add_typer(metrics_app, name="metrics",
+              rich_help_panel="Querying")
+
+
+@metrics_app.command("ls")
+def metrics_ls_cmd():
+    """List metrics + dimensions, grouped by source."""
+    from .metrics import Registry
+    reg = Registry.load()
+    on_screen("[lcars1]org-llm metrics registry[/lcars1]")
+    for src in reg.sources.values():
+        ms = [m for m in reg.metrics.values() if m.source == src.name]
+        ds = [d for d in reg.dimensions.values() if d.source == src.name]
+        on_screen(f"  [lcars2]source[/lcars2] {src.name}  "
+                  f"[dim]({src.table}, time={src.time_col})[/dim]")
+        if ms:
+            on_screen("    [dim]metrics:[/dim]")
+            for m in ms:
+                on_screen(f"      [bold]{m.name}[/bold]  "
+                          f"[dim]{m.description}[/dim]")
+        if ds:
+            on_screen("    [dim]dimensions:[/dim]   "
+                      + ", ".join(d.name for d in ds))
+
+
+@metrics_app.command("describe")
+def metrics_describe_cmd():
+    """Full human-readable registry index (markdown-style)."""
+    from .metrics import Registry
+    reg = Registry.load()
+    on_screen(reg.describe())
+
+
+@metrics_app.command("query")
+def metrics_query_cmd(
+    metric: Annotated[str, typer.Argument(help="Metric name (run `metrics ls` to discover)")],
+    group_by: Annotated[
+        Optional[str],
+        typer.Option("--group-by", "-g",
+                     help="Comma-separated dimension names")
+    ] = None,
+    where: Annotated[
+        Optional[list[str]],
+        typer.Option("--where", "-w",
+                     help="Filter as KEY=VALUE; repeat for multiple")
+    ] = None,
+    since: Annotated[
+        Optional[str],
+        typer.Option("--since", help="Lower bound on the source's time column")
+    ] = None,
+    until: Annotated[
+        Optional[str],
+        typer.Option("--until", help="Upper bound on the source's time column")
+    ] = None,
+    limit: Annotated[
+        Optional[int],
+        typer.Option("--limit", "-n", help="Row limit")
+    ] = None,
+    sql_only: Annotated[
+        bool,
+        typer.Option("--sql", help="Print compiled SQL without executing")
+    ] = False,
+):
+    """Compile + run one metric query against the registry."""
+    from .metrics import Registry, RegistryError
+    reg = Registry.load()
+    gb = [g.strip() for g in group_by.split(",")] if group_by else None
+    wh: dict[str, str] = {}
+    for clause in (where or []):
+        if "=" not in clause:
+            raise typer.BadParameter(
+                f"--where {clause!r} must be KEY=VALUE")
+        k, v = clause.split("=", 1)
+        wh[k.strip()] = v.strip()
+    try:
+        sql, params = reg.compile(
+            metric=metric, group_by=gb, where=wh or None,
+            since=since, until=until, limit=limit,
+        )
+    except RegistryError as e:
+        on_screen(f"[red]registry error:[/red] {e}")
+        raise typer.Exit(1)
+    on_screen(f"[dim]SQL:[/dim] {sql}")
+    if params:
+        on_screen(f"[dim]params:[/dim] {params}")
+    if sql_only:
+        return
+    rows = reg.query(metric=metric, group_by=gb, where=wh or None,
+                     since=since, until=until, limit=limit)
+    if not rows:
+        on_screen("[dim](no rows)[/dim]")
+        return
+    cols = list(rows[0].keys())
+    on_screen("  " + "  ".join(f"[lcars2]{c}[/lcars2]" for c in cols))
+    for r in rows:
+        on_screen("  " + "  ".join(str(r[c]) for c in cols))
+
+
+@metrics_app.command("emit")
+def metrics_emit_cmd(
+    target: Annotated[
+        str, typer.Option("--target", "-t",
+                          help="Output format (superset)")
+    ] = "superset",
+    out: Annotated[
+        Path, typer.Option("--out", "-o",
+                           help="Output directory")
+    ] = Path("docs/superset/"),
+):
+    """Emit registry to an external dashboard format (Superset v1)."""
+    from .metrics import Registry
+    reg = Registry.load()
+    if target == "superset":
+        written = reg.emit_superset(out)
+        on_screen(f"[lcars2]wrote {len(written)} file(s) to {out}[/lcars2]")
+        for p in written:
+            on_screen(f"  {p}")
+    else:
+        on_screen(f"[red]unknown target:[/red] {target}")
+        raise typer.Exit(1)
+
+
 agent_app = typer.Typer(
     help=("Per-row CRUD on the `agent` DB table — Layer 2 of "
           "the agent resolution stack (Python builtins → DB → "
@@ -9812,6 +9943,134 @@ _WALKTHROUGH_PROBES: list[tuple[str, list[str], list[str], str]] = [
 ]
 
 
+def check_agor_pilot(
+    *,
+    daemon_url: str = "http://localhost:3030/health",
+    pass_slug: str = "org-llm/agor/admin-password",
+    smoke_script: Path | None = None,
+    timeout_s: float = 1.0,
+) -> list[tuple[str, str, str]]:
+    """Health-check probes for the Agor pilot integration.
+
+    Returns a list of `(kind, label, detail)` tuples where kind ∈
+    `{"ok", "warn", "fail", "info"}`. The caller dispatches each tuple
+    through its own `ok/warn/fail/info` helpers so output style stays
+    consistent with the rest of `doctor`.
+
+    Three traffic-light probes:
+
+      1. Daemon reachable — GET ``daemon_url`` returns 200 within
+         ``timeout_s`` seconds (default 1s).
+      2. Admin auth — ``pass <pass_slug>`` returns a non-empty secret
+         AND ``agor auth login`` exits 0 (best-effort; the agor binary
+         not being on PATH degrades to a warn, not a fail).
+      3. Smoke script — ``scripts/agor-smoke.sh`` exists, is
+         executable, and contains ``set -euo pipefail``.
+
+    Env-gated: this function is only called when
+    ``ORG_LLM_AGOR_HEALTHCHECK=1``. Users without Agor installed see no
+    output and no warnings.
+    """
+    import shutil as _sh
+    import subprocess as _sp
+    import urllib.request as _ur
+    import urllib.error as _ue
+
+    out: list[tuple[str, str, str]] = []
+
+    # ── 1. Daemon reachability ───────────────────────────────────────────
+    try:
+        with _ur.urlopen(daemon_url, timeout=timeout_s) as resp:
+            if resp.status == 200:
+                out.append(("ok", "Agor daemon", f"200 OK ← {daemon_url}"))
+            else:
+                out.append(("warn", "Agor daemon",
+                            f"HTTP {resp.status} ← {daemon_url}"))
+    except (_ue.URLError, TimeoutError, OSError) as e:
+        out.append(("fail", "Agor daemon",
+                    f"unreachable at {daemon_url}: {type(e).__name__}"))
+
+    # ── 2. Admin auth (pass + agor auth login) ───────────────────────────
+    pass_bin = _sh.which("pass")
+    if not pass_bin:
+        out.append(("fail", "Agor admin pass",
+                    "`pass` binary not on PATH"))
+    else:
+        try:
+            r = _sp.run([pass_bin, "show", pass_slug],
+                        capture_output=True, text=True, timeout=5)
+            if r.returncode != 0 or not r.stdout.strip():
+                out.append(("fail", "Agor admin pass",
+                            f"pass slug missing: {pass_slug}"))
+            else:
+                out.append(("ok", "Agor admin pass",
+                            f"slug present: {pass_slug}"))
+                # If we got a password, try `agor auth login`. Pipe the
+                # password to stdin so it's never on argv. Treat agor-
+                # not-installed as warn (don't punish users who haven't
+                # installed Agor yet — env-gating handles "real" cases).
+                agor_bin = _sh.which("agor")
+                if not agor_bin:
+                    out.append(("warn", "Agor auth login",
+                                "agor binary not on PATH"))
+                else:
+                    try:
+                        login = _sp.run(
+                            [agor_bin, "auth", "login", "--admin"],
+                            input=r.stdout, capture_output=True,
+                            text=True, timeout=10)
+                        if login.returncode == 0:
+                            out.append(("ok", "Agor auth login",
+                                        "admin login succeeded"))
+                        else:
+                            err = (login.stderr.strip().splitlines() or
+                                    [""])[-1][:80]
+                            out.append(("fail", "Agor auth login",
+                                        f"exit {login.returncode}: {err}"))
+                    except _sp.TimeoutExpired:
+                        out.append(("fail", "Agor auth login",
+                                    "timeout after 10s"))
+                    except Exception as e:
+                        out.append(("warn", "Agor auth login",
+                                    f"{type(e).__name__}: {e}"))
+        except _sp.TimeoutExpired:
+            out.append(("fail", "Agor admin pass", "pass timed out"))
+        except Exception as e:
+            out.append(("fail", "Agor admin pass",
+                        f"{type(e).__name__}: {e}"))
+
+    # ── 3. Smoke-script presence ─────────────────────────────────────────
+    if smoke_script is None:
+        # Default: scripts/agor-smoke.sh relative to this file's package.
+        smoke_script = (Path(__file__).resolve().parent.parent
+                        / "scripts" / "agor-smoke.sh")
+    if not smoke_script.exists():
+        out.append(("fail", "Agor smoke script",
+                    f"missing: {smoke_script}"))
+    else:
+        try:
+            executable = os.access(smoke_script, os.X_OK)
+            head = smoke_script.read_text(errors="replace").splitlines()[:30]
+            has_strict = any("set -euo pipefail" in ln for ln in head)
+            if executable and has_strict:
+                out.append(("ok", "Agor smoke script",
+                            f"executable + strict-mode: {smoke_script.name}"))
+            elif not executable and has_strict:
+                out.append(("warn", "Agor smoke script",
+                            f"not executable: chmod +x {smoke_script}"))
+            elif executable and not has_strict:
+                out.append(("warn", "Agor smoke script",
+                            "missing `set -euo pipefail` in first 30 lines"))
+            else:
+                out.append(("fail", "Agor smoke script",
+                            "not executable AND missing strict mode"))
+        except Exception as e:
+            out.append(("warn", "Agor smoke script",
+                        f"read failed: {type(e).__name__}: {e}"))
+
+    return out
+
+
 def _doctor_walkthrough(report_to: str = "") -> None:
     """LLM-driven self-test: run a curated set of read-only commands, ask the
     cloud LLM to judge each output, surface issues + suggestions.
@@ -11184,6 +11443,15 @@ def _doctor_impl(
         warn("LLM tuning available",
              f"{len(_recs)} role(s) have better FOSS options for your hardware")
         info("run tuner", "org-llm models --tune")
+
+    # ── Agor pilot (env-gated) ────────────────────────────────────────────────
+    # Off by default so users without Agor installed see no warnings.
+    # Opt in with: ORG_LLM_AGOR_HEALTHCHECK=1 org-llm doctor
+    if os.environ.get("ORG_LLM_AGOR_HEALTHCHECK") == "1":
+        section("Agor pilot")
+        _dispatch = {"ok": ok, "warn": warn, "fail": fail, "info": info}
+        for kind, label, detail in check_agor_pilot():
+            _dispatch.get(kind, info)(label, detail)
 
     # ── Render table ──────────────────────────────────────────────────────────
     table = Table(box=None, pad_edge=False, show_header=False)
@@ -21001,6 +21269,183 @@ def tracker_pace(
     on_screen(report)
 
 
+# ── tracker agor-sync (Phase 29.x — self-coded tools) ─────────────────────
+#
+# `bridge-crew materialize` writes the SOUL/IDENTITY/USER trio. `tracker
+# agor-sync` extends that with: structured manifest (agor.yaml) per
+# persona + a central index at ~/.agor/concepts/bridge-crew.json so spawn
+# helpers can resolve @<handle> without rescanning every worktree.
+#
+# v0.17.3 upstream gaps (verified live 2026-05-06):
+#   * No /assistants REST endpoint.
+#   * worktrees.custom_context.assistant PATCH does not persist.
+# Therefore agor-sync stays file-only on disk; the manifest's
+# `forward_compat` block documents the gap so we can flip to REST later
+# without restructuring the persona dirs.
+#
+# See docs/wiki/bridge-crew-agor-assistants.org § "tracker agor-sync".
+
+
+@tracker_app.command("agor-sync")
+def tracker_agor_sync(
+    persona: Annotated[Optional[str], typer.Option("--persona", "-p",
+        help="Restrict to one Bridge Crew handle (e.g. picard); "
+             "pairs with --worktree.")] = None,
+    worktree: Annotated[Optional[str], typer.Option("--worktree", "-w",
+        help="Explicit worktree path (single-persona mode; "
+             "pairs with --persona).")] = None,
+    all_crew: Annotated[bool, typer.Option("--all",
+        help="Sync all 7 Bridge Crew via REST auto-discovery on the agor "
+             "daemon.")] = False,
+    commit: Annotated[bool, typer.Option("--commit",
+        help="Actually write files + index (default = dry-run; nothing "
+             "touches disk).")] = False,
+):
+    """Sync Bridge Crew personas → Agor worktrees (manifest + index).
+
+    Two modes:
+      - --persona <handle> --worktree <path>   single-persona, explicit worktree
+      - --all                                  all 7, auto-discover via REST
+
+    Writes (per persona):
+      - SOUL.md / IDENTITY.md / USER.md trio  (delegates to materialize)
+      - agor.yaml manifest                     (persona + _AGENT_META join)
+      - entry in ~/.agor/concepts/bridge-crew.json   (central index)
+
+    Default is dry-run. Pass --commit to actually write.
+    """
+    from .bridge_crew import (
+        BRIDGE_CREW,
+        SyncResult,
+        central_index_path,
+        cross_check_meta,
+        discover_worktree_for_handle,
+        get_persona,
+        list_worktrees,
+        sync as _sync,
+    )
+
+    # ── argument validation ─────────────────────────────────────
+    if not (persona or worktree or all_crew):
+        on_screen("[yellow]Usage:[/yellow]")
+        on_screen("  org-llm tracker agor-sync --persona <handle> "
+                  "--worktree <path> [--commit]")
+        on_screen("  org-llm tracker agor-sync --all [--commit]")
+        on_screen("\n[dim]Default is dry-run. Pass --commit to write.[/dim]")
+        raise typer.Exit(0)
+    if all_crew and (persona or worktree):
+        red_alert("--all is mutually exclusive with --persona / --worktree.")
+        raise typer.Exit(2)
+    if (persona or worktree) and not (persona and worktree):
+        red_alert("--persona and --worktree must be used together.")
+        raise typer.Exit(2)
+
+    idx_path = central_index_path()
+    drift = cross_check_meta()  # surface metadata drift in summary
+    results: list[SyncResult] = []
+    discovery_warnings: list[str] = []
+
+    # ── single-persona explicit-worktree mode ───────────────────
+    if persona and worktree:
+        wt_path = Path(worktree).expanduser()
+        try:
+            p = get_persona(persona)
+        except KeyError as exc:
+            red_alert(str(exc))
+            raise typer.Exit(2)
+        results.append(_sync(p, wt_path, commit=commit, index_path=idx_path))
+
+    # ── --all auto-discovery mode ───────────────────────────────
+    elif all_crew:
+        # TODO(v0.1): --create-missing-worktrees flag — REST POST
+        # /repos/<id>/worktrees for each missing handle. Today we
+        # only skip + warn so the verb stays read-only on the
+        # daemon side.
+        try:
+            wts = list_worktrees()
+        except FileNotFoundError as exc:
+            red_alert(str(exc))
+            raise typer.Exit(20)
+        except Exception as exc:  # urllib / network / ValueError
+            red_alert(f"Agor REST discovery failed: {exc}")
+            on_screen("[dim]Hint:[/dim] is the daemon up? "
+                      "[bold]agor daemon start[/bold]")
+            raise typer.Exit(20)
+
+        for p in BRIDGE_CREW:
+            row = discover_worktree_for_handle(p.handle, wts)
+            if not row:
+                discovery_warnings.append(p.handle)
+                results.append(SyncResult(
+                    persona=p.handle,
+                    worktree_id=None,
+                    worktree_path=Path(""),
+                    files_written=(),
+                    manifest_path=Path(""),
+                    manifest_written=False,
+                    index_updated=False,
+                    skipped_reason="no matching worktree",
+                ))
+                continue
+            wt_path = Path(row["path"])
+            results.append(_sync(
+                p, wt_path,
+                worktree_id=row.get("worktree_id"),
+                commit=commit,
+                index_path=idx_path,
+            ))
+
+    # ── render summary ──────────────────────────────────────────
+    verb = "wrote" if commit else "would write"
+    table = Table(title=f"tracker agor-sync — {verb} "
+                        f"({'commit' if commit else 'dry-run'})")
+    table.add_column("persona")
+    table.add_column("worktree")
+    table.add_column("files")
+    table.add_column("manifest")
+    table.add_column("index")
+    for r in results:
+        if r.skipped_reason:
+            table.add_row(f"@{r.persona}",
+                          "[red]<skipped>[/red]", "—", "—", "—")
+            continue
+        files_cell = f"{len(r.files_written)} → .agor-assistants/{r.persona}/"
+        manifest_cell = "yaml" if r.manifest_written else (
+            "plan" if not commit else "—")
+        if commit:
+            index_cell = "updated" if r.index_updated else "unchanged"
+        else:
+            index_cell = "would update" if r.index_updated else "no change"
+        table.add_row(
+            f"@{r.persona}",
+            str(r.worktree_path),
+            files_cell,
+            manifest_cell,
+            index_cell,
+        )
+    console.print(table)
+
+    if discovery_warnings:
+        on_screen(f"\n[yellow]No worktree found for:[/yellow] "
+                  f"{', '.join('@' + h for h in discovery_warnings)}")
+        on_screen("[dim]Tried patterns:[/dim] bridge-crew-<handle> / "
+                  "<handle>-assistant / <handle>")
+        on_screen("[dim]Create with:[/dim] "
+                  "[bold]agor worktree add bridge-crew-<handle>[/bold]")
+
+    if drift:
+        on_screen(f"\n[yellow]Metadata drift:[/yellow] Bridge Crew "
+                  f"handles missing from _AGENT_META: "
+                  f"{', '.join('@' + h for h in drift)}")
+
+    n_synced = sum(1 for r in results if not r.skipped_reason)
+    n_skipped = sum(1 for r in results if r.skipped_reason)
+    on_screen(f"\n@riker: {verb} {n_synced} persona(s) "
+              f"({n_skipped} skipped). Index: {idx_path}")
+    if not commit:
+        on_screen("[dim]Pass --commit to write.[/dim]")
+
+
 # ── bridge-crew: materialize Bridge Crew personas into an Agor worktree ──
 #
 # DEC-014 — Bridge Crew locks the curated 7-persona core. This sub-app is
@@ -22960,6 +23405,113 @@ def completion(
         elif shell == "fish":
             on_screen("Reload:  source ~/.config/fish/completions/org-llm.fish")
     make_it_so()
+
+
+@app.command(rich_help_panel="Maintenance")
+def extract(
+    target: Annotated[str, typer.Argument(
+        help="Target component (e.g. =org_llm/walk.py= or just =walk.py=).")],
+    verdict_file: Annotated[Path, typer.Option(
+        "--verdict-file",
+        help="Cull verdict file. Default: docs/wiki/cull.org.")] = Path("docs/wiki/cull.org"),
+    dry_run: Annotated[bool, typer.Option(
+        "--dry-run",
+        help="Print prompt + would-be model; don't invoke the LLM.")] = False,
+):
+    """Phase 2026-05.01 — extract retire-verdicted code per cull verdict.
+
+    Reads a cull verdict for =target=, asks an org-llm @data agent
+    (cloud FOSS-floor: qwen2.5-72b) to produce a unified diff.
+    Default prints diff for review; =--dry-run= shows the prompt only.
+
+    Routing: bypasses =_ROUTING_RULES= local-7B-coder fallback by
+    calling =_cloud_chat_with_local_fallback= directly with the
+    @data persona injected as the system prompt.
+    """
+    from .extract import ExtractError, prepare_extraction
+
+    repo_root = Path(__file__).resolve().parent.parent
+    if not verdict_file.exists():
+        red_alert(f"Verdict file not found: {verdict_file}")
+        raise typer.Exit(1)
+
+    try:
+        ctx = prepare_extraction(target, verdict_file, repo_root)
+    except ExtractError as e:
+        red_alert(str(e))
+        raise typer.Exit(1)
+
+    rel = ctx.target_path.relative_to(repo_root)
+    on_screen(
+        f"[lcars2]Extract[/lcars2] "
+        f"[dim]{ctx.verdict.decision_keyword}[/dim] {rel}"
+    )
+
+    if dry_run:
+        console.rule("[lcars2]extract --dry-run[/lcars2]")
+        on_screen(f"[dim]Component: {ctx.verdict.component_heading}[/dim]")
+        on_screen(
+            f"[dim]Prompt: {len(ctx.prompt)} chars · "
+            f"{len(ctx.prompt.splitlines())} lines[/dim]"
+        )
+        console.rule("[lcars2]prompt (head — 50 lines)[/lcars2]")
+        console.print("\n".join(ctx.prompt.splitlines()[:50]))
+        console.rule("[dim]… (truncated for dry-run)[/dim]")
+        return
+
+    # Resolve cloud creds + persona
+    engine = _engine()
+    with get_session(engine) as session:
+        cloud_provider = _cfg(session, "cloud_provider")
+        cloud_endpoint = _cfg(session, "cloud_endpoint_url")
+        cloud_model    = (_cfg(session, "cloud_model")
+                          or "qwen/qwen-2.5-72b-instruct")
+        local_fallback = (_cfg(session, "chat_model")
+                          or MODEL_DEFAULTS["chat_model"])
+        url            = _ollama_url(session)
+        org_dir        = _org_dir(session)
+        db_api_key     = (_cfg(session, "cloud_api_key")
+                          or _cfg(session, "runpod_api_key"))
+
+    if not cloud_endpoint:
+        red_alert("No cloud_endpoint_url configured; extract needs cloud chat.")
+        on_screen("[dim]Run: org-llm cloud --quick-start openrouter[/dim]")
+        raise typer.Exit(1)
+
+    # @data persona for the system prompt
+    persona = ""
+    try:
+        for ag in _resolve_active_agents(org_dir):
+            if getattr(ag, "birth_name", "") == "data":
+                persona = (getattr(ag, "persona", "")
+                           or getattr(ag, "system_prompt", "")
+                           or getattr(ag, "prompt", ""))
+                break
+    except Exception:
+        pass
+
+    from . import creds as _creds
+    api_key = (_creds.read_secret(_creds.cloud_slug(cloud_provider))
+               if cloud_provider else None) or db_api_key
+
+    on_screen(
+        f"[dim]model: {cloud_model}  ·  fallback: {local_fallback}[/dim]"
+    )
+
+    diff = _cloud_chat_with_local_fallback(
+        ctx.prompt,
+        cloud_model=cloud_model,
+        cloud_endpoint=cloud_endpoint,
+        cloud_api_key=api_key,
+        local_model=local_fallback,
+        local_url=url,
+        system=persona,
+    )
+
+    console.rule(f"[lcars2]diff  ·  {cloud_model}[/lcars2]")
+    console.print(diff)
+    console.rule()
+    on_screen("[dim]Review the diff above. Apply manually if good.[/dim]")
 
 
 # Register skill commands at import time so they appear in --help
