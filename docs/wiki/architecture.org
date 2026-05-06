@@ -768,7 +768,9 @@ Four properties of the tool surface worth pinning:
    delegate=, =org-llm grant=…), an agent can invoke the same
    action over MCP with identical semantics. New surfaces are
    gated by this rule; UI-only actions are a smell. (Independent
-   convergence: [[https://github.com/preset-io/agor][preset-io/agor]] adopts the same principle.)
+   convergence: [[https://github.com/preset-io/agor][preset-io/agor]] adopts the same principle.
+   Citation is *prior-art reference* only, not a stack-membership
+   claim — see [[file:decisions.org][DEC-017 — stack composition vs. integration]].)
 
 Deep dive: [[id:72c7e988-1a60-4624-8090-fe1f7d9ef6a8][MCP]].
 

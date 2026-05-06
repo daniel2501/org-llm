@@ -3084,8 +3084,19 @@ during the mission walk: sync-architecture writer, dbt-pipeline
 writer, OpenTofu researcher) was a successful proof-of-concept
 that Claude Code's native subagent spawning works for
 documentation-shaped tasks. Open question: where does Agor add
-value *over native Claude Code subagents + DEC-005 strict claim
-hygiene*?
+value *over org-llm's own multi-agent surface (proxy +
+@-personas + delegate.fork + scout pattern) + DEC-005 strict
+claim hygiene*?
+
+(Framing note, 2026-05-05: an earlier draft compared Agor
+against "native Claude Code subagents." That's the wrong
+baseline under [[file:decisions.org][DEC-017 — stack composition vs. integration]]:
+Claude Code is the dev tool the developer uses, not part of
+the org-llm stack. The correct comparison is org-llm's own
+multi-agent surface. Per DEC-017, the user has resolved Agor
+posture as personal pilot incubation now → post-2029
+re-evaluation of FOSS-distribution roll-out using three years
+of accumulated personal experience.)
 
 Specific questions to investigate:
 1. Does Agor coordinate ACROSS instances (multiple Claude Code

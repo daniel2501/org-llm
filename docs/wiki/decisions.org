@@ -1204,6 +1204,127 @@ the user's own projects (per [[id:8e0c3b71-1f75-4a0f-9d3e-9b85f29c4ed1][DEC-003]
   main per DEC-005's trigger condition; the SDLC tiers compose with
   that, not replace it.
 
+** DEC-017 — Stack composition vs. integration: two relationship modes
+:PROPERTIES:
+:ID:       7d4e1a9c-8b62-4f37-9e5d-c1a9f3b8e6d2
+:STATUS:   accepted
+:DATE:     [2026-05-05]
+:DECIDERS: Daniel, Claude/opus-A
+:END:
+
+*Summary.* Org-llm has two distinct relationship modes with
+external software, and they have different license rules.
+*Integration* — org-llm talks to X as peer / dependency /
+external service — is open to any license; X's company shape
+gets sniffed under [[id:2c8f6b1d-4e9a-4c3f-86b7-9d5e1f2a8c47][DEC-010 — anti-capitalist FOSS]] but X's
+license itself can be anything. *Stack composition* — X is
+forked, embedded, or owned as an org-llm component — is
+*FOSS-only*, extending DEC-010's anti-enclosure rule into the
+org-llm tree itself. The user's framing: "org-llm may /allow/
+integration with Claude, Claude is not part of the org-llm
+stack. org-llm may (if warranted) fork, say, Superset and make
+Superset a component of org-llm if so desired."
+
+*Context.* Through 2026-05-04 the project lacked an explicit
+distinction between "we ship X as a dependency / talk to X over
+a wire" and "we own X as an org-llm component." DEC-010 covered
+license posture for the org-llm tree but didn't name the lane
+that lets *closed-source* peers (Claude, GitHub) sit at the
+table without contradicting anti-enclosure. The dev-tracker's
+2026-05-05 Agor research entry made the gap concrete: Agor is
+BSL 1.1 until 2029-01-15 and Apache 2.0 thereafter, which
+forecloses *stack* membership now while leaving *integration*
+clean. Without DEC-017, every yellow-zone license argument has
+to be re-litigated from first principles.
+
+*Decision.*
+
+1. *Two modes, named.*
+   | Relationship                     | Meaning                                                       | License rule                          |
+   |----------------------------------+---------------------------------------------------------------+---------------------------------------|
+   | *Allow integration with X*       | org-llm talks to X as peer / dependency / external service    | X can be any license                  |
+   | *X is part of the stack*         | X is forked / embedded / owned as an org-llm component        | *FOSS-only*; extends DEC-010          |
+
+2. *Stack rule (FOSS-only).* If org-llm forks X, vendors X
+   into the tree, or owns X as a component, X must be
+   compatible with the copyleft family chosen in
+   [[id:2c8f6b1d-4e9a-4c3f-86b7-9d5e1f2a8c47][DEC-010 — anti-capitalist FOSS]]. Permissive-FOSS upstreams
+   are absorbable (relicense at fork). Yellow-zone licenses
+   (BSL, SSPL, source-available) are *not* stackable while
+   the restrictive clause is active; revisit at the
+   change-date.
+
+3. *Integration rule (any license, with a sniff test).*
+   Integration targets aren't bound by license — closed
+   models (Claude), proprietary services (GitHub), and
+   yellow-zone projects (Agor under BSL) are all fair
+   integration peers. The DEC-010 anti-capitalist sniff still
+   applies at the *vendor / company shape* level (Groq is
+   excluded as a vendor even though it's technically
+   FOSS-compatible); the license itself is not the gate for
+   integration mode.
+
+4. *Yellow-zone flagging.* Integration with BSL /
+   source-available targets is permitted but flagged: no
+   doc-copy claim that they're "part of org-llm," no
+   stack-membership framing in marketing or wiki, and a
+   change-date watch in the dev-tracker so the integration
+   posture re-evaluates automatically when the license
+   converts.
+
+5. *Current ratifications (snapshot).*
+   - *Claude (Anthropic model + Claude Code CLI)* —
+     integrate-only, never stack. Closed-source; cannot be
+     forked into org-llm. The developer using Claude Code as
+     a dev tool is orthogonal to org-llm's stack composition.
+   - *Agor (=preset-io/agor=)* — integrate-now under BSL 1.1,
+     fork-and-stack *maybe* post-2029-01-15 when BSL → Apache
+     2.0. Three modes:
+     1. *Pre-2029:* personal pilot incubation only.
+        Integration-mode; principles + vocabulary borrowable
+        (already exercised in [[id:7dcbce8b-0941-48ec-a17d-c623ba00883a][side-quests.org]] § Agor
+        prior-art and [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] design rule 5).
+        *No public / FOSS-distribution claims around Agor as
+        part of org-llm; no fork; no n=many shipping.*
+     2. *Post-2029-01-15:* license auto-converts to Apache
+        2.0. Re-evaluate fork-and-stack-component using three
+        years of accumulated personal-pilot experience as the
+        foundation for any FOSS-distribution roll-out.
+     3. *Never while BSL active:* stack membership is off the
+        table.
+   - *Superset (Apache 2.0)* — currently integrate (Phase 27
+     dashboards talk to a Superset instance). FOSS-licensed,
+     so fork-and-stack is *available* if warranted; not
+     currently chosen, but the option is live under the stack
+     rule.
+
+*Consequences.*
+
+- DEC-010's anti-enclosure rule is now *layered*: license
+  family fixed for the org-llm tree (DEC-010); integration
+  lane explicitly opened for non-FOSS peers (DEC-017);
+  vendor sniff test applies to both lanes.
+- Future "should we adopt X?" arguments split cleanly: ask
+  *which mode* before asking *which license*. Many
+  arguments collapse once the mode is named.
+- The dev-tracker Agor entry's framing question ("value
+  over native Claude Code subagents") is wrong shape under
+  DEC-017 — Claude Code is a developer tool, not part of
+  the org-llm stack baseline. Correct comparison baseline
+  is org-llm's own multi-agent surface (proxy + @-personas
+  + delegate.fork + scout pattern). Fixed in the entry.
+- Forecloses: ad-hoc "let's just vendor X" decisions for
+  yellow-zone projects; marketing claims that frame
+  integration peers as stack components; treating Claude
+  Code subagents as the org-llm-side baseline for
+  multi-agent work.
+- Triggers revisit: any license auto-conversion (Agor's
+  2029-01-15 trigger is the first); any time a candidate
+  upstream sits ambiguously between modes (e.g. a project
+  we'd integrate today but might fork tomorrow — DEC-017
+  says: pick one explicitly, write the change-date if
+  applicable).
+
 * See also
 
 - [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] —

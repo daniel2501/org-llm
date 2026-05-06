@@ -345,6 +345,16 @@ runtime dependency. The dev-tracker entry's verdict stands —
 org-llm until 2029."* This page only borrows principles +
 vocabulary, which aren't licensed.
 
+Formalized 2026-05-05 under [[file:decisions.org][DEC-017 — stack composition vs.
+integration]]: the Agor relationship is *integration-only
+pre-2029-01-15*; fork-and-stack-component is unlocked
+*post-2029* when Agor's BSL 1.1 auto-converts to Apache 2.0,
+and even then is contingent on three years of accumulated
+personal-pilot experience pointing that way. The "borrowing
+principles, not bytes" framing above remains correct under
+the new rule — principles cross the integration boundary
+freely; bytes don't.
+
 * Related
 
 - [[id:32fe7314-0a69-4945-aef3-7105d507b201][Agent orientation]] —
