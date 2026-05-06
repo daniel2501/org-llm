@@ -1,0 +1,82 @@
+:PROPERTIES:
+:ID:       48349d41-8cff-487c-9e52-79efb686441f
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Budget org schema — personal-live-budget-with-all-trx.org example
+#+FILETAGS: :wiki:concept:life-as-code:budget:schema:
+#+OPTIONS: toc:nil num:nil
+
+* Summary
+*Summary.* =personal-live-budget-with-all-trx.org= is a worked example of a life-as-code domain: a single org file owns every transaction, every category, and every auto-categorize rule. An agent reconciles new entries; the file stays canonical (per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-011 — files canonical).
+
+*Expanded.* The shape below is the concrete schema referenced in [[file:life-as-code.org][life-as-code.org]]. It demonstrates the pattern other domains will copy: plaintext org subtrees as the database, property drawers as columns, headlines as rows, an agent as the reconcile loop, and =:PRIVATE:= as the privacy boundary that pairs with [[file:pii-redaction-pre-sms.org][pii-redaction-pre-sms.org]].
+
+* The org file shape
+#+begin_src org
+,#+TITLE: Personal live budget — all transactions
+,#+FILETAGS: :PRIVATE:budget:
+
+,* Transactions
+,** 2026-05
+,*** [DEBIT] $42.18 @ Star Market — groceries
+:PROPERTIES:
+:DATE:       [2026-05-04]
+:AMOUNT:     -42.18
+:CURRENCY:   USD
+:CATEGORY:   groceries
+:ACCOUNT:    checking-main
+:RECONCILED: yes
+:TAG-CSV:    food,weekly
+:END:
+,*** [PENDING] $9.99 @ unknown-merchant — needs review
+:PROPERTIES:
+:DATE:       [2026-05-05]
+:AMOUNT:     -9.99
+:CURRENCY:   USD
+:CATEGORY:
+:ACCOUNT:    checking-main
+:RECONCILED: no
+:END:
+
+,* Categories
+,** groceries          :budget:essential:
+,** dining-out         :budget:discretionary:
+,** subscriptions      :budget:recurring:
+
+,* Auto-categorize rules
+,** Star Market → groceries
+:MATCH: merchant ~ /star ?market/i
+,** Spotify → subscriptions
+:MATCH: merchant ~ /spotify/i
+#+end_src
+
+* Agent reconcile loop
+=@geordi= (or a future =@bookkeeper= specialist) runs this loop:
+1. Watches the file for new =*** [PENDING]= entries (file-mtime + headline scan).
+2. Auto-categorizes via =* Auto-categorize rules= subtree; first match wins.
+3. Falls back to LLM-judge if no rule matches; judge sees merchant + amount + recent same-merchant entries, returns a category + confidence.
+4. On success: rewrites =[PENDING]= → =[DEBIT]/[CREDIT]=, sets =:CATEGORY:=, sets =:RECONCILED: yes=.
+5. On low confidence: tags =:NEEDS-REVIEW:= and leaves =[PENDING]=; raises an =@curator= question card.
+6. After every reconcile pass, updates rollup tables (monthly totals, category arcs, week-over-week drift) in a sibling =* Rollups= subtree.
+
+* Render-hook contract
+When the agent writes a category back, the edit is a property-drawer mutation only — never a headline rewrite mid-tree, never a re-sort. This preserves user-authored ordering and keeps =DEC-011 — files canonical= honest. The edit goes through the standard org-llm render hook so the change appears in =captains-log= as a single =reconcile= event with the headline ID.
+
+* Privacy boundary
+The file is filetagged =:PRIVATE:= at the top. Every descendant inherits. Per [[file:pii-redaction-pre-sms.org][pii-redaction-pre-sms.org]], any agent answer that draws from this file MUST run the redactor before crossing to SMS, email, or any public channel. Internal MCP queries see plaintext; outbound never does.
+
+* Daily rollup view
+A custom agenda block produces, e.g.:
+#+begin_example
+Today (2026-05-06):
+  -$42.18  groceries     Star Market
+  -$ 9.99  [PENDING]     unknown-merchant   ← needs review
+
+May progress: $612 / $1,400 budget (44%, on pace)
+Top drift:    dining-out +$87 vs. April
+#+end_example
+
+* Cross-refs
+- [[file:life-as-code.org][life-as-code.org]] — parent concept
+- [[file:pii-redaction-pre-sms.org][pii-redaction-pre-sms.org]] — privacy pair
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-011 (files canonical)

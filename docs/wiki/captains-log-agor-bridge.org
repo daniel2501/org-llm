@@ -1,0 +1,70 @@
+:PROPERTIES:
+:ID:       f5602dc9-6987-4763-8163-fa1e589e2e88
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Captain's-log + Agor session-genealogy bridge
+#+FILETAGS: :wiki:design:agor:integration:audit:
+#+OPTIONS: toc:nil num:nil
+
+* Summary
+*Summary.* The captain's log holds narrative + outcome per event; Agor session genealogy holds graph + commit pin per session. Bridging them gives one auditable trail. Recommended bridge: a proxy-seam tee that writes to both sinks from a single upstream event (per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-006 — deterministic supervision).
+
+*Expanded.* Per [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] § Coordination patterns ("Captain's-log + session-genealogy reconciliation — provenance unifies"), the two systems describe the same agent activity from different angles. Joining them at write-time avoids drift; joining at read-time avoids lossy reconciliation. This page picks write-time tee and lays out the schema.
+
+* The two provenance systems
+| System            | Owns                                                  | Format          | Where it lives                |
+|-------------------+-------------------------------------------------------+-----------------+-------------------------------|
+| Captain's log     | =(action, agent, prompt, outcome, ts)= per event      | Rotated org     | =~/org/captains-log-*.org=    |
+| Agor genealogy    | =(parent_session_id, children, fork_point, spawn_point, worktree, commit_sha)= per session | LibSQL rows     | =~/.agor/agor.db=             |
+
+* Why bridge them
+- Captain's log answers /what happened and how did it land/.
+- Agor genealogy answers /which session did it, forked from where, against which commit/.
+- Together: full audit trail with both narrative and graph.
+- Per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-006 — deterministic supervision: provenance must be readable by a human and queryable by an agent; one system without the other is half-blind.
+
+* The bridge shape
+Three options:
+- *(A) Agor session-end webhook → captain's log.* Captain's log entry written w/ =:AGOR-SESSION:= property pointing at session_id. Real-time on session boundary; misses mid-session events.
+- *(B) Periodic reconciler.* A job reads Agor DB on a timer and writes captain's-log entries. Simple to add later; lossy on real-time; double-source-of-truth risk.
+- *(C) Tee at proxy.* Proxy interceptor knows about both sinks; emits to both from the same upstream event; same canonical event ID lands in each.
+
+*Recommended: (C).* One source-of-truth event, two sinks, no reconciliation needed. Matches [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-008 — proxy-seam @-prefix swap territory; the proxy already sees every interesting moment.
+
+* Schema unification
+Canonical event ID =event_id= (UUIDv7) shared by both systems.
+| Field          | Captain's log                | Agor row                     |
+|----------------+------------------------------+------------------------------|
+| =event_id=     | =:EVENT-ID:= property        | =event_id= column            |
+| =session_id=   | =:AGOR-SESSION:= property    | PK                           |
+| =agent=        | headline tag                 | =agent= column               |
+| =ts=           | inactive timestamp           | =created_at=                 |
+| =commit_sha=   | =:COMMIT:= property          | =commit_sha= column          |
+| =outcome=      | body text                    | =status= column              |
+
+Join key is =event_id=; =session_id= is the secondary join for session-scoped queries.
+
+* Implementation seam
+The tee lives at =org_llm/llm_proxy.py= interceptor chain, just after =intercept_agent_prefix=. Two writers: =org_llm/logbook.py= (existing) and a new =org_llm/agor_sink.py= (writes the row directly to =~/.agor/agor.db= via LibSQL). Same event object passed to both. Failure of either sink is logged but does not block the other.
+
+* Read paths
+An agent doing project review (e.g. =@riker=) queries:
+#+begin_src sql
+SELECT a.session_id, a.commit_sha, a.parent_session_id, a.created_at
+FROM   agor_sessions a
+WHERE  a.event_id IN (SELECT event_id FROM captains_log_index
+                      WHERE  agent = 'geordi' AND outcome = 'failed')
+ORDER  BY a.created_at DESC;
+#+end_src
+=captains_log_index= is a small SQLite shadow of the org log built by =logbook.py= for join-friendliness; the org files remain canonical.
+
+* Failure modes
+- *Agor down.* Captain's log keeps going; Agor sink errors are queued for retry; provenance degrades to narrative-only.
+- *Captain's log rotation crosses session boundary.* =event_id= is stable; cross-file join still works.
+- *Schema skew.* Agor adds a column → bridge ignores unknown columns; captain's log adds a property → Agor sink ignores. Bridge versioned by =:BRIDGE-VERSION:= property so future migrations are explicit.
+- *Both sinks fail.* Event written to a third =deadletter.org= for manual reconciliation.
+
+* Cross-refs
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — coordination patterns
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-006 (deterministic supervision), DEC-008 (proxy seam)
+- [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] — sibling design

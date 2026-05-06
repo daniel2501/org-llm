@@ -1,0 +1,60 @@
+:PROPERTIES:
+:ID:       25ae60fa-ca6c-4e6d-94d3-84f16b352d14
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: PII redaction pre-SMS — outbound channel safety
+#+FILETAGS: :wiki:concept:security:pii:remote:
+#+OPTIONS: toc:nil num:nil
+
+* Summary
+*Summary.* Any outbound message to a non-vault channel (SMS, email, GitHub PR comment, Slack) MUST run through a redaction pass before transport. Carrier and platform infrastructure see plaintext; the vault contains private content. Redaction is fail-closed.
+
+*Expanded.* The contract is: an agent generates a candidate response inside the trusted vault context, then a per-channel redactor downgrades it for the destination. Detection is layered (org markup → regex → LLM judge). The pass lives at the proxy seam (per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-008 — proxy-seam @-prefix swap), executes after generation and before transport, and refuses to ship rather than leak.
+
+* The problem
+- SMS is read in cleartext by carriers and SS7 intermediaries.
+- Email is read by every relay between sender and inbox.
+- GitHub PR comments are world-readable on public repos.
+- Slack channels persist forever and are searchable by every member.
+- The vault — by contrast — holds account numbers, names tagged =:PRIVATE:=, full addresses, financial detail, family names, medical context.
+- An agent that reads the vault to answer a question and then replies on a downgraded channel will, by default, leak. Redaction closes the gap.
+
+* What gets redacted
+| PII category         | Detection signal                          | Redaction strategy            | Example before → after            |
+|----------------------+-------------------------------------------+-------------------------------+-----------------------------------|
+| Account numbers      | Luhn-valid digit runs                     | Replace w/ =[ACCT]=           | =4111 1111 1111 1111= → =[ACCT]= |
+| Phone numbers        | E.164 + common US formats                 | Replace w/ =[PHONE]=          | =+1-617-555-0142= → =[PHONE]=    |
+| Email addresses      | RFC 5322 regex                            | Replace w/ =[EMAIL]=          | =a@b.com= → =[EMAIL]=             |
+| Names (private)      | =:PRIVATE:= property or subtree marker    | Replace w/ initials or =[N]=  | =Daniel Benedict= → =D.B.=        |
+| Postal addresses     | libpostal parse + zip presence            | Replace w/ city-only or =[ADDR]= | =1 Main St, Boston= → =[ADDR]= |
+| Financial amounts    | =$N= where N > configurable threshold     | Replace w/ bucketed range     | =$8,432= → =$1k–10k=              |
+| Dates of birth       | =:DOB:= property; YYYY-MM-DD ages 0–110   | Replace w/ age band           | =1985-03-12= → =[40s]=            |
+| =:PRIVATE:= subtrees | Any descendant of a =:PRIVATE:=-tagged headline | Drop entirely             | (subtree omitted from outbound)   |
+
+* Detection layers
+1. *Explicit org markup (highest precedence).* =:PRIVATE:= property drawer or =:PRIVATE:= filetag — author intent is law.
+2. *Regex rules per PII type.* Cheap, fast, deterministic; runs second.
+3. *LLM-judge fallback.* Context-dependent cases (e.g. "the apartment in Cambridge" — is "Cambridge" PII or a city name?) escalate to a small judge call. Judge sees only the candidate sentence, never the full vault.
+
+* Per-channel redaction policies
+| Channel              | Strictness | Format                | Fail-mode             |
+|----------------------+------------+-----------------------+-----------------------|
+| SMS                  | Strictest  | All categories on     | Refuse send           |
+| Email                | Medium     | Names + accts on      | Refuse send           |
+| GitHub PR (public)   | Configurable | Per-repo policy file | Refuse send           |
+| Slack (workspace)    | Medium     | Names + accts on      | Send w/ =[REDACTED]=  |
+| Internal MCP         | None       | Plaintext             | n/a                   |
+
+* Implementation seam
+The redactor is an outbound-rendering hook in the proxy interceptor chain (per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-008 — proxy-seam @-prefix swap). It runs *after* the agent finishes generating and *before* the channel transport call. One redactor; per-channel policy table; same code path for SMS, email, and PR.
+
+* Failure modes
+- *Fail-open.* PII leaks to the carrier — irreversible.
+- *Fail-closed.* Message refused; user sees =SEND BLOCKED: redaction failed=; nothing leaks. This is the default.
+- *Partial.* Regex catches account numbers, misses a name; LLM-judge layer is the safety net. Judge timeout → fail-closed.
+- *Cross-channel.* Same content rendered for two channels uses the stricter of the two policies.
+
+* Cross-refs
+- [[file:remote-control.org][remote-control.org]] — the page this requirement surfaced from
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-008 (proxy seam), DEC-010 (outbound surface)
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] — interceptor chain layout
