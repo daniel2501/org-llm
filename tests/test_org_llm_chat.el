@@ -145,5 +145,91 @@
               (should (string-match-p "answer body" content)))))
       (ignore-errors (delete-file tmp)))))
 
+;; ── DEC-015 v0.1 — proxy-port discovery ──────────────────────────────────
+
+(ert-deftest org-llm-chat/proxy-port-discovery ()
+  "Given a temp port file with a valid port, `--read-proxy-port' returns it."
+  (let* ((tmp (make-temp-file "org-llm-proxy-port-")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp (insert "54321\n"))
+          (let ((org-llm-chat-proxy-port-file tmp))
+            (should (equal (org-llm-chat--read-proxy-port) 54321))))
+      (ignore-errors (delete-file tmp)))))
+
+(ert-deftest org-llm-chat/proxy-port-missing-returns-nil ()
+  "Missing port file → nil → fallback to shell-out path."
+  (let ((org-llm-chat-proxy-port-file
+         (expand-file-name "definitely-not-a-real-file"
+                            temporary-file-directory)))
+    (ignore-errors
+      (delete-file (expand-file-name org-llm-chat-proxy-port-file)))
+    (should (null (org-llm-chat--read-proxy-port)))))
+
+(ert-deftest org-llm-chat/proxy-port-rejects-garbage ()
+  "Non-integer file content → nil (graceful fallback, no error)."
+  (let ((tmp (make-temp-file "org-llm-proxy-port-")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp (insert "not-a-port\n"))
+          (let ((org-llm-chat-proxy-port-file tmp))
+            (should (null (org-llm-chat--read-proxy-port)))))
+      (ignore-errors (delete-file tmp)))))
+
+(ert-deftest org-llm-chat/proxy-port-rejects-out-of-range ()
+  "Port outside 1..65535 → nil."
+  (let ((tmp (make-temp-file "org-llm-proxy-port-")))
+    (unwind-protect
+        (progn
+          (with-temp-file tmp (insert "70000\n"))
+          (let ((org-llm-chat-proxy-port-file tmp))
+            (should (null (org-llm-chat--read-proxy-port)))))
+      (ignore-errors (delete-file tmp)))))
+
+(ert-deftest org-llm-chat/build-proxy-payload-shape ()
+  "Payload is JSON, includes messages array, agent field when set,
+and the configured model."
+  (let* ((org-llm-chat-default-model "claude-sonnet-4.6")
+         (json (org-llm-chat--build-proxy-payload "spock" "hello"))
+         (parsed (let ((json-object-type 'alist)
+                       (json-array-type  'list)
+                       (json-key-type    'string))
+                   (json-read-from-string json))))
+    (should (equal (cdr (assoc "agent" parsed)) "spock"))
+    (should (equal (cdr (assoc "model" parsed)) "claude-sonnet-4.6"))
+    (let* ((msgs (cdr (assoc "messages" parsed)))
+           (first (car msgs)))
+      (should (equal (cdr (assoc "role" first)) "user"))
+      (should (string-match-p "@spock hello"
+                              (cdr (assoc "content" first)))))
+    ;; stream is JSON false (`:json-false' encodes to literal "false")
+    (should (string-match-p "\"stream\":[ \t]*false" json))))
+
+(ert-deftest org-llm-chat/build-proxy-payload-no-agent ()
+  "Without an agent, no `agent' field is emitted and prompt is verbatim."
+  (let* ((json (org-llm-chat--build-proxy-payload nil "plain prompt"))
+         (parsed (let ((json-object-type 'alist)
+                       (json-array-type  'list)
+                       (json-key-type    'string))
+                   (json-read-from-string json))))
+    (should (null (assoc "agent" parsed)))
+    (let* ((msgs (cdr (assoc "messages" parsed)))
+           (first (car msgs)))
+      (should (equal (cdr (assoc "content" first)) "plain prompt")))))
+
+(ert-deftest org-llm-chat/extract-openai-text-happy-path ()
+  "Pull content from a typical OpenAI-compat JSON body."
+  (let* ((json (concat
+                "{\"choices\":[{\"message\":"
+                "{\"role\":\"assistant\",\"content\":\"hi there\"}}]}"))
+         (out (org-llm-chat--extract-openai-text json)))
+    (should (equal out "hi there"))))
+
+(ert-deftest org-llm-chat/extract-openai-text-bad-json ()
+  "Malformed JSON → nil (caller falls back to raw body)."
+  (should (null (org-llm-chat--extract-openai-text "not json {{{")))
+  (should (null (org-llm-chat--extract-openai-text ""))))
+
+
 (provide 'test_org_llm_chat)
 ;;; test_org_llm_chat.el ends here

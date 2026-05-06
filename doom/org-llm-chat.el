@@ -38,6 +38,8 @@
 (require 'json)
 (require 'cl-lib)
 (require 'subr-x)
+(require 'url)
+(require 'url-http)
 
 ;; Soft-require the companion package so we share `org-llm-binary` etc.
 ;; If it's not loaded yet (e.g. tests), define minimal fallbacks.
@@ -83,6 +85,32 @@ will tell the user if the agent is unknown."
       (expand-file-name "~/.local/bin/org-llm"))
   "Path to the org-llm CLI binary."
   :type 'file
+  :group 'org-llm-chat)
+
+(defcustom org-llm-chat-proxy-port-file
+  (expand-file-name "~/.local/share/org-llm/proxy-port")
+  "File the running llm-proxy writes its bound port to.
+DEC-015 v0.1 — when this file exists and the port is reachable,
+the chat surface speaks OpenAI-compat HTTP directly to the proxy
+via `url-retrieve' instead of shelling `org-llm ask'. When missing
+or unreachable, we fall back to the v0 shell-out path."
+  :type 'file
+  :group 'org-llm-chat)
+
+(defcustom org-llm-chat-default-model "claude-sonnet-4.6"
+  "Model id forwarded to the proxy in the OpenAI-compat request.
+The proxy's interceptors (DEC-008 — proxy-seam @-prefix swap) may
+override this when an `@<agent>' prefix is detected; the value
+here is the no-prefix default. Set to nil to omit the field."
+  :type '(choice (const :tag "No model field" nil)
+                 (string :tag "Model id"))
+  :group 'org-llm-chat)
+
+(defcustom org-llm-chat-proxy-timeout 1.0
+  "Seconds to wait for a TCP connect to the proxy before falling
+back to shell-out. Kept short — if the proxy isn't running the
+fallback path needs to engage promptly."
+  :type 'number
   :group 'org-llm-chat)
 
 
@@ -301,8 +329,127 @@ is appended with the response. Auto-saves on completion."
       (setq-local org-llm-chat--pending-marker marker)
       (org-llm-chat--call-backend agent prompt marker))))
 
+(defun org-llm-chat--read-proxy-port ()
+  "Read the running proxy's port from `org-llm-chat-proxy-port-file'.
+Returns an integer port or nil if the file is missing/empty/unreadable.
+DEC-015 v0.1 — the file is written atomically by `start_proxy'."
+  (let ((path (expand-file-name org-llm-chat-proxy-port-file)))
+    (when (file-readable-p path)
+      (condition-case _err
+          (with-temp-buffer
+            (insert-file-contents path)
+            (let* ((raw (string-trim (buffer-string)))
+                   (n (and (string-match-p "\\`[0-9]+\\'" raw)
+                           (string-to-number raw))))
+              (when (and n (> n 0) (< n 65536))
+                n)))
+        (error nil)))))
+
+(defun org-llm-chat--proxy-reachable-p (port)
+  "Return non-nil if a TCP connect to 127.0.0.1:PORT succeeds within
+`org-llm-chat-proxy-timeout' seconds. Best-effort liveness probe."
+  (when (and port (integerp port))
+    (condition-case _err
+        (let ((proc (make-network-process
+                     :name "org-llm-chat-probe"
+                     :host "127.0.0.1"
+                     :service port
+                     :nowait nil
+                     :noquery t)))
+          (when (process-live-p proc)
+            (delete-process proc)
+            t))
+      (error nil))))
+
+(defun org-llm-chat--build-proxy-payload (agent prompt)
+  "Build the OpenAI-compat JSON body sent to the proxy.
+AGENT may be nil. The proxy's `intercept_agent_prefix' (DEC-008
+— proxy-seam @-prefix swap) reads the `agent' field server-side
+and rewrites the persona/model. We still forward the prefix in
+the user message so non-proxy upstreams degrade gracefully."
+  (let* ((user-text (if (and agent (not (string-empty-p agent)))
+                        (format "@%s %s" agent prompt)
+                      prompt))
+         (payload `(("messages" . [(("role" . "user")
+                                    ("content" . ,user-text))])
+                    ("stream" . :json-false))))
+    (when org-llm-chat-default-model
+      (push `("model" . ,org-llm-chat-default-model) payload))
+    (when (and agent (not (string-empty-p agent)))
+      (push `("agent" . ,agent) payload))
+    (json-encode payload)))
+
+(defun org-llm-chat--extract-openai-text (json-text)
+  "Pull the assistant message text from an OpenAI-compat response.
+Returns the content string or nil if the shape doesn't match."
+  (condition-case _err
+      (let* ((parsed (let ((json-object-type 'alist)
+                            (json-array-type  'list)
+                            (json-key-type    'string))
+                       (json-read-from-string json-text)))
+             (choices (cdr (assoc "choices" parsed)))
+             (first   (and choices (car choices)))
+             (msg     (and first (cdr (assoc "message" first))))
+             (content (and msg (cdr (assoc "content" msg)))))
+        content)
+    (error nil)))
+
 (defun org-llm-chat--call-backend (agent prompt marker)
-  "Call the backend ASYNC for AGENT + PROMPT, replacing MARKER on completion."
+  "Call the backend ASYNC for AGENT + PROMPT, replacing MARKER on completion.
+DEC-015 v0.1: prefer HTTP to the running llm-proxy when its port
+file is present + reachable; fall back to shell-out when the
+proxy isn't running (preserves v0 behaviour)."
+  (let ((port (org-llm-chat--read-proxy-port)))
+    (if (and port (org-llm-chat--proxy-reachable-p port))
+        (org-llm-chat--call-backend-proxy agent prompt marker port)
+      ;; fallback for when proxy not running — v0 shell-out path
+      (org-llm-chat--call-backend-shell agent prompt marker))))
+
+(defun org-llm-chat--call-backend-proxy (agent prompt marker port)
+  "Send the prompt to the local proxy at PORT via `url-retrieve'.
+Async by design — the callback edits the chat buffer in-place,
+replacing the `/thinking…/' placeholder under MARKER."
+  (let* ((url (format "http://127.0.0.1:%d/v1/chat/completions" port))
+         (url-request-method "POST")
+         (url-request-extra-headers
+          '(("Content-Type" . "application/json")))
+         (url-request-data
+          (encode-coding-string
+           (org-llm-chat--build-proxy-payload agent prompt) 'utf-8))
+         (buf (current-buffer)))
+    (condition-case err
+        (url-retrieve
+         url
+         (lambda (status &rest _)
+           (let ((rc 0)
+                 (raw ""))
+             (cond
+              ((plist-get status :error)
+               (setq rc -1
+                     raw (format "proxy error: %S"
+                                 (plist-get status :error))))
+              (t
+               ;; Skip past HTTP headers to body
+               (goto-char (point-min))
+               (when (re-search-forward "\r?\n\r?\n" nil t)
+                 (let* ((body (buffer-substring-no-properties
+                               (point) (point-max)))
+                        (text (org-llm-chat--extract-openai-text body)))
+                   (setq raw (or text body))))))
+             (let ((response-buf (current-buffer)))
+               (when (buffer-live-p buf)
+                 (with-current-buffer buf
+                   (org-llm-chat--finalise-response
+                    marker agent raw rc)))
+               (when (buffer-live-p response-buf)
+                 (let ((inhibit-message t)) (kill-buffer response-buf))))))
+         nil t t)
+      (error
+       (org-llm-chat--finalise-response
+        marker agent (format "ERROR calling proxy: %s" err) -1)))))
+
+(defun org-llm-chat--call-backend-shell (agent prompt marker)
+  "Shell-out backend (v0 path). Used when the proxy isn't running."
   (let* ((args (org-llm-chat--build-cli-args agent prompt))
          (buf (current-buffer))
          (output-buf (generate-new-buffer " *org-llm-chat-out*"))

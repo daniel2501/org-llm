@@ -42,6 +42,7 @@ Future interceptors (rough wishlist):
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import http.server
 import json
@@ -5025,12 +5026,59 @@ class _ProxyServer(socketserver.ThreadingMixIn,
         super().handle_error(request, client_address)
 
 
+def _proxy_port_file_path() -> Path:
+    """Resolve the port-file path used to advertise the running proxy.
+
+    Default is ``~/.local/share/org-llm/proxy-port``. The
+    ``ORG_LLM_PROXY_PORT_FILE`` env var overrides it (used by tests
+    + power users running multiple proxies). DEC-015 v0.1 — the
+    Emacs chat client reads this file to discover the OS-assigned
+    proxy port without shelling out.
+    """
+    override = os.environ.get("ORG_LLM_PROXY_PORT_FILE")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".local" / "share" / "org-llm" / "proxy-port"
+
+
+def _write_proxy_port_file(path: Path, port: int) -> None:
+    """Atomically write ``<port>\\n`` to ``path``.
+
+    We write to ``<path>.tmp.<pid>.<tid>`` then ``os.replace`` so a
+    concurrent reader sees either the prior file or the new one —
+    never a torn half-write. Per-thread tmp suffix avoids collisions
+    when multiple writers race (each thread owns its tmp until the
+    rename atomically swaps it into place). Parent dir is created
+    on demand.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(
+        path.suffix + f".tmp.{os.getpid()}.{threading.get_ident()}"
+    )
+    tmp.write_text(f"{int(port)}\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _remove_proxy_port_file(path: Path) -> None:
+    """Best-effort remove of the port file on shutdown.
+
+    Swallows OSError — if the file is gone (manual cleanup, tmpfs
+    unmount, alt-user clobber) we don't want to spam stderr at
+    interpreter exit.
+    """
+    try:
+        path.unlink()
+    except OSError:
+        pass
+
+
 def start_proxy(
     upstream_url: str,
     interceptors: Optional[list[Interceptor]] = None,
     host: str = "127.0.0.1",
     port: int = 0,
     audit: Optional[AuditLogger] = None,
+    write_port_file: bool = True,
 ) -> tuple[int, _ProxyServer]:
     """Start the proxy on `host:port` (port=0 → OS-assigned).
     Returns (actual_port, server). Caller can `server.shutdown()`
@@ -5043,7 +5091,13 @@ def start_proxy(
     a `.write(AuditEntry)` method to redirect (e.g. send to a
     metrics aggregator). Pass `audit=False` (well, None — but the
     semantics of None are "use default"); if you truly want to
-    disable, pass an instance whose path lives in /dev/null. """
+    disable, pass an instance whose path lives in /dev/null.
+
+    `write_port_file` (DEC-015 v0.1) controls whether we publish
+    the bound port to ``_proxy_port_file_path()`` so the Emacs
+    chat client can discover us without shelling out. Defaults
+    to True; tests pass False when they don't want the side-effect.
+    """
     server = _ProxyServer((host, port), _ProxyHandler)
     server.upstream     = upstream_url.rstrip("/")
     server.interceptors = list(interceptors or DEFAULT_INTERCEPTORS)
@@ -5051,4 +5105,28 @@ def start_proxy(
     server.cache        = _default_cache
     actual_port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    if write_port_file:
+        port_file = _proxy_port_file_path()
+        try:
+            _write_proxy_port_file(port_file, actual_port)
+        except OSError:
+            # Non-fatal: proxy still works, chat client falls back
+            # to shell-out path. Don't take down the proxy because
+            # we can't write a discovery file.
+            pass
+        else:
+            # Best-effort cleanup at interpreter exit. We use a
+            # closure so the path captured matches what we wrote.
+            atexit.register(_remove_proxy_port_file, port_file)
+            # Also wrap server.shutdown so an explicit tear-down
+            # removes the file immediately (before atexit fires).
+            _orig_shutdown = server.shutdown
+            def _shutdown_and_clean() -> None:        # noqa: E306
+                try:
+                    _orig_shutdown()
+                finally:
+                    _remove_proxy_port_file(port_file)
+            server.shutdown = _shutdown_and_clean    # type: ignore[method-assign]
+
     return actual_port, server
