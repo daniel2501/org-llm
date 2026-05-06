@@ -21001,6 +21001,91 @@ def tracker_pace(
     on_screen(report)
 
 
+# ── bridge-crew: materialize Bridge Crew personas into an Agor worktree ──
+#
+# DEC-014 — Bridge Crew locks the curated 7-persona core. This sub-app is
+# the on-disk side of the integration: write SOUL.md / IDENTITY.md / USER.md
+# trios into <worktree>/.agor-assistants/<handle>/ so Agor sessions can
+# load each persona at boot. Registering the worktree's custom_context
+# with Agor's API (so isAssistant() returns true) is the v0.1 follow-up.
+#
+# See docs/wiki/bridge-crew-agor-assistants.org for the canon.
+
+bridge_crew_app = typer.Typer(
+    help="@picard et al — materialize Bridge Crew personas into an Agor worktree.",
+    cls=PrefixGroup,
+    invoke_without_command=True,
+)
+app.add_typer(bridge_crew_app, name="bridge-crew", rich_help_panel="Maintenance")
+
+
+@bridge_crew_app.callback(invoke_without_command=True)
+def _bridge_crew_root(ctx: typer.Context):
+    """Bridge Crew → Agor assistant materializer.
+
+    Bare `org-llm bridge-crew` shows this help. Verbs:
+        org-llm bridge-crew materialize <worktree>   — plan or write SOUL/IDENTITY/USER
+    """
+    if ctx.invoked_subcommand is not None:
+        return
+    click_cmd = typer.main.get_command(bridge_crew_app)
+    try:
+        click_cmd.main(args=["--help"], prog_name="org-llm bridge-crew",
+                        standalone_mode=False)
+    except SystemExit:
+        pass
+
+
+@bridge_crew_app.command("materialize")
+def bridge_crew_materialize(
+    worktree: Annotated[str, typer.Argument(
+        help="Path to an existing Agor worktree (e.g. "
+             "~/.agor/worktrees/local/org-llm/<name>)")],
+    commit: Annotated[bool, typer.Option("--commit",
+        help="Actually write the files (default is dry-run; nothing touches disk)")] = False,
+    persona: Annotated[Optional[str], typer.Option("--persona", "-p",
+        help="Restrict to one persona handle (e.g. picard); default is all 7")] = None,
+):
+    """Materialize Bridge Crew personas into an Agor worktree.
+
+    Default is dry-run: prints the 21 file paths that *would*
+    be written. Pass --commit to actually create them. Pass
+    --persona <handle> to restrict to a single Bridge Crew
+    member (no @-prefix; e.g. `--persona picard`).
+    """
+    from .bridge_crew import (
+        BRIDGE_CREW,
+        get_persona,
+        materialize,
+        planned_writes,
+    )
+    wt = Path(worktree).expanduser()
+    pool = (get_persona(persona),) if persona else BRIDGE_CREW
+    if commit and not wt.exists():
+        red_alert(f"Worktree not found: {wt}")
+        on_screen("[dim]Hint:[/dim] create it via Agor first, then re-run.")
+        raise typer.Exit(1)
+    if commit:
+        records = materialize(wt, commit=True, personas=pool)
+        verb = "wrote"
+    else:
+        records = planned_writes(wt, personas=pool)
+        verb = "would write"
+    table = Table(title=f"Bridge Crew materialize → {wt}")
+    table.add_column("persona")
+    table.add_column("file")
+    table.add_column("path")
+    for r in records:
+        table.add_row(f"@{r.persona}", r.filename, str(r.path))
+    console.print(table)
+    n_files = len(records)
+    n_personas = len({r.persona for r in records})
+    on_screen(f"\n@picard: {verb} {n_files} files for "
+              f"{n_personas} persona(s).")
+    if not commit:
+        on_screen("[dim]Pass --commit to write to disk.[/dim]")
+
+
 # ── dbt: SQL transformations on top of the indexer schema ─────────────────
 #
 # org-llm ships a starter dbt project that materializes analytics-ready
