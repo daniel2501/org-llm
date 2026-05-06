@@ -1,0 +1,137 @@
+:PROPERTIES:
+:ID:       db57b919-9a7b-44f7-a4df-a206ecd79431
+:CREATED:  [2026-05-07]
+:END:
+#+TITLE: User-supplied agents library — Phase 23.5 design + extension path leg 1
+#+FILETAGS: :wiki:agents:literate-config:phase-23-5:extension-path:
+#+OPTIONS: toc:2 num:nil
+
+* Summary
+
+*Summary.* Phase 23.5 ships =org_llm/user_agents/= — a literate
+extension-path package that reads =~/org/org-llm-agents.org= and
+yields validated user-defined =@<handle>= personas the registry
+can register at startup. Sister surface to [[file:literate-tools.org][Phase 23.6 — literate
+MCP tools]]: same parser/validator/sandbox shape applied to agents
+instead of tools. This is the *first leg* of the extension path
+locked by [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009 — curated core agent team + extension path]].
+
+*Expanded.*
+
+[[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009]] (extended by [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014 — Bridge Crew]]) frames the agent
+roster as *curated core (≤7) + extension path (everything else)*.
+The Bridge Crew is the OOB experience; any agent the user (or
+community) wants beyond it lands through the extension path. Phase
+23.5 is the first leg of that path: a literate config file that
+turns user-authored personas into first-class agents without code
+edits.
+
+The package is intentionally *self-contained*: parser, validator,
+and dataclass — no registry mutation, no DB writes. Registry
+wiring (loading at launch, dedup against tangled-mirror DB rows,
+rendering into =opencode.json=) is the v0.1 follow-up and lives in
+[[file:../../org_llm/cli.py][=org_llm/cli.py=]] next to the existing =_apply_org_file_to_db= flow.
+
+* The literate config shape
+
+A user-defined persona is a top-level org heading tagged
+=:agent:=, followed by a =:PROPERTIES:= drawer + a system-prompt
+babel block (or heading body fallback).
+
+#+begin_src org
+,* @journalist                                                    :agent:
+,:PROPERTIES:
+,:DESCRIPTION:    Long-form drafts + interview-style summaries
+,:SKILLS:         writing,interviewing,structure
+,:TOOL_ALLOWLIST: read_file,search_notes,capture_note
+,:MODEL:          chat_model
+,:END:
+,
+,#+begin_src text :name system-prompt
+,You are @journalist. Long-form drafts...
+,Mirror tone from recent captures; lead with one-line summary.
+,#+end_src
+,
+,* @coach                                                         :agent:
+,:PROPERTIES:
+,:DESCRIPTION:    Fitness + workout pacing
+,:SKILLS:         coaching,goal-setting
+,:TOOL_ALLOWLIST: search_notes,org_clock_summary
+,:ALIASES:        trainer,fitness
+,:TRIGGERS:       workout,gym,reps,training plan
+,:END:
+,
+,#+begin_src text :name system-prompt
+,You are @coach. Help the user pace their training; never moralise
+,about missed sessions.
+,#+end_src
+#+end_src
+
+* Discovery
+
+Default path: =~/org/org-llm-agents.org= (same file as the existing
+tangled-mirror flow — the two surfaces co-exist; reconciliation is
+v0.1).
+
+Override: =ORG_LLM_USER_AGENTS_PATH=/some/other/path.org= for tests
++ alternate vault layouts. Pure env-var, mirrors the
+=ORG_LLM_LITERATE_TOOLS_PATH= knob from Phase 23.6.
+
+Missing file → empty list (soft failure; never crashes startup).
+
+* Per-persona schema
+
+| heading      | =* @<handle>= or =* <handle>= (leading ``@`` optional). Tag =:agent:= required.        |
+| =:DESCRIPTION:= | one-liner; surfaced to launcher / =list_agents= / opencode autocomplete                  |
+| =:SKILLS:=      | csv; informational, mirrors the documentation surface in [[file:agents.org][=agents.org=]]                  |
+| =:TOOL_ALLOWLIST:= | csv of MCP tool names this persona is allowed to call (Phase 23.6 — literate-MCP-tools Tier 2 groups also accepted) |
+| =:MODEL:=       | optional default model role (=chat_model= / =reason_model= / etc.). Falls back to host default. |
+| =:ALIASES:=     | csv; additional =@<name>=s that route to the same persona                                |
+| =:TRIGGERS:=    | csv; keywords for the lightning-fast keyword router ([[file:../../org_llm/cli.py][=cli.py=]] § =_AGENT_TRIGGERS=)   |
+| =#+begin_src text :name system-prompt= | multi-line system prompt (the load-bearing field)                  |
+
+System prompt resolution order:
+
+1. A =#+begin_src ... :name system-prompt ... #+end_src= block —
+   idiomatic; mirrors the literate-MCP-tools convention.
+2. The heading body (with the PROPERTIES drawer + any stray src
+   blocks stripped) — fallback so the existing tangled-mirror file
+   shape parses cleanly.
+
+* Sandbox boundary
+
+The user owns their vault; the validator is therefore *not* a
+hostile-input sandbox. It's a defence-in-depth boundary against
+typos + careless paste:
+
+- *No Bridge Crew handle override* — per [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014 — Bridge Crew]],
+  the seven canonical handles (=picard=, =spock=, =data=,
+  =boothby=, =geordi=, =atoz=, =riker=) and their documented
+  aliases (=crew=, =captain=, =researcher=, =scribe=, =analyst=,
+  =curator=, =tracker=, =gardener=) are reserved. A user-defined
+  =@spock= is a hard reject; pick =@spock_jr=.
+- *Aliases are also reserved-checked* — a user persona declaring
+  =:ALIASES: researcher= is rejected for the same reason.
+- *No code-eval markers in system prompts* — heuristic flag for
+  =exec(=, =eval(=, =__import__(= in the prompt text. The system
+  prompt is a string, not code, but a careless paste-from-the-web
+  shouldn't carry code-shaped instructions into a downstream layer.
+- *No empty system prompts* — an agent without a persona can't do
+  anything useful.
+- *Read-only on the registry* — user-defined personas register
+  *new* agents; they don't mutate Bridge Crew metadata. Future
+  user-overridable fields land via explicit allowlist, not by
+  silently widening the schema.
+
+Validation failures are *soft*: the persona is dropped from the
+load surface; the rest of the file loads. Callers wanting error
+visibility iterate =parse_file= + =validate_all= directly to see
+the rejection list.
+
+* Cross-refs
+
+- [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009 — curated core agent team + extension path]] (decision)
+- [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014 — Bridge Crew]] (the seven reserved handles)
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]], [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]] — agent canon + long-tail roster
+- [[id:c3e7a2f1-8b4d-4e9c-a1f2-d3e4b5a6c7d8][literate-tools.org]] — parallel extension-path leg (Phase 23.6)
+- [[file:../../org_llm/user_agents/__init__.py][=org_llm/user_agents/=]] · [[file:../../tests/test_user_agents.py][=tests/test_user_agents.py=]] · =~/org/org-llm-agents.org=
