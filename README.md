@@ -1928,7 +1928,14 @@ PR template lives at
 
 ## License
 
-GPL-3.0 — same energy as the rest of the FOSS LLM stack this builds on.
+AGPL-3.0-or-later — see [LICENSE](LICENSE) for the full canonical text
+of the GNU Affero General Public License v3.0. AGPL was chosen over
+plain GPL to close the SaaS-hosting hole: anyone running a modified
+org-llm as a network service must release source to its users. See
+[docs/wiki/decisions.org](docs/wiki/decisions.org) §§ DEC-010 —
+Anti-capitalist FOSS and DEC-018 — License: AGPL v3.0 for the
+reasoning trail.
+
 The org-llm idea, like solidarity, is freely shared.
 
 > *"From each according to ability, to each according to need."*

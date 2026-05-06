@@ -1382,6 +1382,261 @@ to be re-litigated from first principles.
   says: pick one explicitly, write the change-date if
   applicable).
 
+** DEC-018 — License: AGPL v3.0 (or later)
+:PROPERTIES:
+:ID:       ffbbdcfb-094d-4d06-b8f9-8ff9e9328878
+:STATUS:   accepted
+:DATE:     [2026-05-06]
+:DECIDERS: Daniel, Claude/opus
+:END:
+
+*Summary.* The org-llm code tree is licensed *AGPL-3.0-or-later*
+— the GNU Affero General Public License v3, with the standard
+"or any later version" upgrade clause. AGPL is the chosen
+realisation of [[id:2c8f6b1d-4e9a-4c3f-86b7-9d5e1f2a8c47][DEC-010 — anti-capitalist FOSS]]'s deferred
+license call: it is the strongest copyleft compatible with
+the existing dep tree (Apache 2.0 + GPL + MIT/BSD), it closes
+the SaaS-hosting enclosure hole via §13 (network-use trigger),
+and it carries OSI/FSF approval — keeping org-llm inside the
+"really FOSS" tent while still being structurally
+anti-enclosure. Vault content is *not* covered (org-roam files
+are user data, not org-llm code).
+
+*Expanded.* DEC-010 fixed the *family* (copyleft, anti-enclosure,
+share-alike) but explicitly deferred the *specific* license,
+flagging "likely AGPLv3" as the lean. The scoping memo
+(=/tmp/license-decision-2026-05-05.md=) compared eight options
+across five dimensions: anti-enclosure strength, anti-capitalist
+fit, dep-tree compatibility, OSI/FSF approval, adoption signal.
+AGPLv3 was the only license that scored well on all five
+without compatibility blow-ups.
+
+*Context.*
+
+- DEC-010 (2026-05-04) committed to copyleft, banned permissive,
+  banned commercial-enclosure, banned CLA-with-relicense; the
+  specific license was open.
+- The dep tree includes Apache 2.0 (ollama, dbt-core, sqlite-vec),
+  GPLv3 / Emacs (Doom + emacs core, on the integration side per
+  [[id:7d4e1a9c-8b62-4f37-9e5d-c1a9f3b8e6d2][DEC-017]]'s integration vs. stack distinction), MIT/BSD
+  (most Python deps). Apache 2.0 → AGPL is one-way compatible;
+  MIT/BSD trivially compatible.
+- The 2025 industry signal converged on AGPLv3 as the
+  anti-enclosure-without-bad-faith Schelling point: Redis
+  abandoned SSPL → AGPLv3, Elastic added AGPLv3 alongside ELv2,
+  Sentry adopted AGPLv3 long-form. SSPL is treated as a poison
+  pill by Debian/Fedora and by community discourse; ACSL/CSL/HL3
+  fail OSI/FSF approval and break dep-tree compat.
+- The user's framing in DEC-010 ("anti-capitalist, not just
+  FOSS") was tested against declarative options (HL3, ACSL) vs.
+  structural options (AGPL, EUPL). The structural reading won:
+  DEC-010 also forecloses CLA-with-relicense, which signals
+  "stay redistributable inside the FOSS commons" — i.e. accept
+  OSI/FSF as the credibility tent.
+
+*Decision.*
+
+1. *License is AGPL-3.0-or-later.* The "or any later version"
+   clause lets future AGPL revisions (e.g. an AGPLv4 if FSF
+   ships one) apply automatically. Repository =LICENSE= file
+   is the canonical GNU AGPL v3 text fetched verbatim from
+   the FSF / GitHub licenses API; *not paraphrased*.
+2. *=pyproject.toml= carries the SPDX identifier* via
+   =license = { text = "AGPL-3.0-or-later" }= and the OSI
+   trove classifier =License :: OSI Approved :: GNU Affero
+   General Public License v3 or later (AGPLv3+)=.
+3. *Vault content is excluded.* The license covers org-llm
+   code (Python, elisp, TypeScript, dbt SQL, shipped templates).
+   It does *not* cover the user's =~/org/= vault — those are
+   user data, owned by the user, distributed only with
+   explicit user action.
+4. *Fallback if AGPL ever blocks something genuinely valuable:*
+   EUPL v1.2 (rec'd in the scoping memo). EUPL has explicit
+   GPLv3/AGPLv3 compatibility appendix, so a future relicense
+   to EUPL is mechanically clean. Not on the table now;
+   recorded as a known escape hatch consistent with DEC-010's
+   "trigger revisit" clause.
+5. *Contributor model unchanged from DEC-010 §4.* No CLA;
+   contributions inbound under AGPL-3.0-or-later by submission;
+   no relicensing path that would let a corporate sponsor
+   re-enclose.
+
+*Consequences.*
+
+- *DEC-010 is now fully realised.* The deferred license call
+  is closed; future "what license?" questions point at this DEC.
+- *Vendor / integration sniff test* (DEC-010 §2 + [[id:7d4e1a9c-8b62-4f37-9e5d-c1a9f3b8e6d2][DEC-017]]) still
+  applies. AGPL is the *outbound* license for the org-llm tree;
+  it does not change the rules for who we *integrate* with.
+  Closed-source integration peers (Claude, GitHub) are unaffected
+  per DEC-017's two-mode framework.
+- *README license section flipped GPL-3.0 → AGPL-3.0-or-later*
+  on 2026-05-06 EST. Prior README copy was inherited drift, not
+  a deliberate license claim; no historical commits ever
+  distributed under GPLv3 (org-llm has not yet shipped a tagged
+  prod release).
+- *Stack-composition rule (DEC-017 §2) tightens.* "FOSS-only,
+  copyleft-compatible" now means "AGPL-3.0-or-later compatible"
+  in concrete terms. Apache 2.0 absorbable (one-way relicense
+  at fork). Permissive MIT/BSD absorbable. GPLv3 absorbable
+  upward to AGPLv3 (FSF-provided compat). BSL / SSPL / source-
+  available remain non-stackable.
+- *Forecloses* permissive relicensing, open-core / dual-license
+  shapes, CLA-based corporate-relicense pipelines, hosted-service
+  enclosure (the §13 trigger blocks it), proprietary forks
+  distributed without source.
+- *Triggers revisit:* (a) FSF publishes AGPLv4 — "or-later"
+  clause auto-applies, no DEC needed; (b) EUPL v1.2 becomes
+  necessary as fallback (e.g. AGPL paranoia blocks valuable
+  contributions from corp-employed devs whose employers
+  blanket-ban AGPL but allow EUPL) — file new DEC referencing
+  EUPL's GPLv3/AGPLv3 compat appendix; (c) anti-capitalist
+  intent statement filed as separate =LICENSE_PHILOSOPHY.md=
+  / README pull-quote per DEC-010's "spread the practice" tone.
+
+** DEC-019 — Versioning: Hybrid SemVer + acpt suffix
+:PROPERTIES:
+:ID:       08281ee7-b2ae-4126-b081-5885828be5e0
+:STATUS:   accepted
+:DATE:     [2026-05-06]
+:DECIDERS: Daniel, Claude/opus
+:END:
+
+*Summary.* Org-llm uses *Hybrid SemVer + acpt suffix*: prod
+releases tagged =vMAJOR.MINOR.PATCH= (strict SemVer), acpt
+candidates tagged =vMAJOR.MINOR.PATCH-acptN= (incrementing N
+within a target MINOR), trunk / dev builds versioned
+=MAJOR.MINOR.PATCH+devSHA= (PEP 440 local-version, derived
+from git). Promotion gate strips the suffix: =v0.2.0-acpt3=
+that survives the [[id:e2c47df1-3a86-4f9e-9d13-7c4b8e2f5a91][DEC-016]] 24h dogfood window becomes
+=v0.2.0=. v1.0 cuts only when the gate items in
+[[id:81d0f3bc-4b91-4cb3-8d22-5a83c3f6f7e2][whole-picture.org § The versioning shape]] all land — Phase
+24.2 (recovery hooks) ✓ today, Phase 24.3 (confusion detector)
+pending, Phase 26.2 (physical extraction) pending, retrieval-
+bug sweep, cross-platform install validation (macOS + Ubuntu).
+
+*Expanded.* This formalises the path already started: =v0.1.0=
+is the current =pyproject= version, =v0.1.0-acpt0= was the first
+acpt-tier tag (DEC-016 baseline, 2026-05-05). The scheme makes
+DEC-016's three branch tiers directly visible in the version
+string itself, which means a glance at =org-llm --version=
+tells you which tier the install came from without consulting
+config.
+
+*Context.*
+
+- DEC-016 (2026-05-05) created three SDLC tiers — dev / acpt
+  / prod — with code branches (=trunk → acpt → main=) and
+  install slots (=editable / acpt-pinned / tag-pinned=) but
+  did not specify the version-string shape.
+- The scoping memo (=/tmp/versioning-scheme-2026-05-05.md=)
+  compared six schemes: SemVer, CalVer, ZeroVer, Channel-based,
+  Hybrid SemVer + acpt suffix, plus the implicit "no scheme."
+  Hybrid won on three counts: (a) preserves the v1.0 milestone
+  as a *meaningful* event matching the "first usable" ladder,
+  (b) maps 1:1 onto DEC-016's tiers without inventing parallel
+  structure, (c) already running in the wild (=v0.1.0-acpt0=).
+- whole-picture.org § The versioning shape (2026-05-05) named
+  five stages of "first usable" — (a) personally usable today
+  → (e) self-sustaining ecosystem — and pinned v1.0 ≈ stage (c)
+  stranger-installable. That gives the version scheme a
+  concrete ratchet: v1.0 is not "we feel ready," it's "the
+  named gate items all closed."
+- Pre-1.0 SemVer is technically permissive (the spec says
+  "anything goes" before 1.0), but org-llm uses the stricter
+  local convention below to make the version number actually
+  carry information during the 0.x era.
+
+*Decision.*
+
+1. *Three version forms, one per tier:*
+   | Tier | Branch | Install slot          | Version form              | Example                     |
+   |------+--------+-----------------------+---------------------------+-----------------------------|
+   | dev  | =trunk= | editable              | =X.Y.Z+devSHA= (PEP 440)  | =0.2.0+dev.g4828f94=        |
+   | acpt | =acpt= | uv tool, acpt-pinned  | =vX.Y.Z-acptN= (git tag)  | =v0.2.0-acpt0=, =v0.2.0-acpt1= |
+   | prod | =main= | uv tool, tag-pinned   | =vX.Y.Z= (signed git tag) | =v0.2.0=                    |
+
+2. *PEP 440 translation at PyPI publish time* (when org-llm
+   eventually publishes wheels): =vX.Y.Z-acptN= → =X.Y.ZaN= for
+   sdist filenames; =X.Y.Z+devSHA= passes through unchanged
+   (PEP 440 supports local version identifiers). Translation
+   is automated by the release script, not hand-edited.
+
+3. *Bump rules.*
+   - *MAJOR* — breaking change to a stable surface (post-1.0:
+     CLI verbs, on-disk vault contract, =~/.config/org-llm/=
+     schema, public Python API; pre-1.0: only used if a major
+     conceptual reset happens — unlikely while 0.x).
+   - *MINOR* — new feature batch shipped (new agent, new MCP
+     tool, new CLI verb, new wiki concept that affects user
+     workflow). Pre-1.0, MINOR *may* break compatibly per
+     SemVer §4 — documented as such in CHANGELOG / wiki.
+   - *PATCH* — fix or doc-only / hotfix-tier acpt cycles.
+   - *acptN suffix* — increments per acpt iteration within a
+     target MINOR; resets to =acpt0= when the target MINOR
+     advances.
+
+4. *=pyproject.version= rule.* Holds the *next prod version
+   being cooked.* So during the =v0.2.0-acpt0..N= window,
+   =pyproject.version = "0.2.0"=. Immediately after =v0.2.0=
+   ships, flip =pyproject.version = "0.3.0"= so dev builds
+   downstream of the prod tag carry the right next-prod
+   anchor. Trunk dev installs encode their actual identity
+   via the =+devSHA= local-version suffix derived from
+   =git describe= at install / runtime.
+
+5. *Promotion gate is "strip the suffix."* When acpt-tier
+   passes the DEC-016 24h dogfood window + agent-runnable
+   tests + human sign-off (where required), the same SHA
+   gets re-tagged as =vX.Y.Z= (no suffix). =org-llm self
+   promote --to=prod --version=vX.Y.Z= enforces this rule
+   and refuses to skip the suffix-strip step.
+
+6. *v1.0 cut criteria.* v1.0 ships when *all five* gate
+   items in whole-picture.org § The versioning shape are
+   green: Phase 24.2 (recovery hooks), Phase 24.3 (confusion
+   detector), Phase 26.2 (physical extraction), retrieval-bug
+   sweep, cross-platform install validation (macOS + Ubuntu).
+   Snapshot 2026-05-06 EST: 24.2 shipped today; 24.3 + 26.2
+   pending; retrieval + cross-platform pending.
+
+7. *0.x → 1.0 transition example.* MINOR-per-feature-batch
+   pre-1.0: =v0.1.0= → =v0.2.0-acpt0..N= → =v0.2.0= → … →
+   when v1.0 gates close → =v1.0.0-acpt0..N= → ≥24h dogfood
+   → =v1.0.0=. v1.0 is also the moment FOSS-public announce
+   lands per [[id:2c8f6b1d-4e9a-4c3f-86b7-9d5e1f2a8c47][DEC-010]]'s "first usable = stranger-installable"
+   alignment.
+
+*Consequences.*
+
+- *DEC-016 is now operationally complete* — three tiers AND
+  three version forms. No more hand-waving about tag shape.
+- *The version string is self-documenting.* =org-llm
+  --version= alone tells a user / agent / log scrape which
+  tier they're in. No need to consult =ORG_LLM_ENV= or
+  =uv tool list= to disambiguate.
+- *PyPI publish path is unblocked* whenever org-llm decides
+  to publish — translation rule is fixed; alpha-release
+  semantics (=0.2.0a3= for =v0.2.0-acpt3=) match standard
+  Python ecosystem expectations.
+- *Pre-1.0 SemVer ambiguity is resolved* by the stricter
+  local bump rules above. =0.x= still honestly signals "API
+  may shift between MINORs," but each shift carries
+  intentional meaning (feature batch vs. fix).
+- *Forecloses* CalVer (no breaking-change signal), ZeroVer
+  drift (v1.0 has a concrete gate now, not a vibes call),
+  channel-based dual-history (DEC-016 already gives us tiers
+  without parallel branches), unmarked rolling releases,
+  silent post-1.0 breaking changes.
+- *Triggers revisit:* (a) we hit v1.0 → strict SemVer
+  promises kick in, MAJOR bumps now carry real cost; (b) we
+  decide to publish to PyPI before v1.0 — translation rule
+  works but adds publish step at every promotion (file as
+  separate decision when the time comes); (c) acpt iteration
+  count blows past =acpt9= regularly — likely signals MINOR
+  granularity is too coarse, revisit feature-batch boundary
+  rule.
+
 * See also
 
 - [[id:03be52bf-003f-4762-a274-e7c88f97847f][coordination.org]] —
