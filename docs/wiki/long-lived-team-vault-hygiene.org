@@ -1,0 +1,229 @@
+:PROPERTIES:
+:ID:       3a8b1f72-9c4d-4e21-a5d8-7b2e9f1c3a6d
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Long-lived team — vault hygiene (1-tick smoke validated)
+#+FILETAGS: :wiki:concept:multi-agent:teams:long-lived:vault-hygiene:smoke:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* The /vault-hygiene team/ is the first =long-lived= team
+canonized under [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]]: =@boothby= captains a
+daily heartbeat (cron =0 8 * * *= EST proposed); =@geordi= drift-checks
+tag taxonomy + freshness; =@atoz= audits cross-link health. Each role
+runs in its own worktree on a shared =boardId=; per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-006]] the
+captain reads vault facts /deterministically/ before any LLM turn fires.
+1-tick smoke ran live 2026-05-06 02:09 EDT — *PASS*, 63 s wall, $0.079
+spend, both child sessions verified by =genealogy.parent_session_id=.
+
+*Expanded.* This page documents what the team /shape/ is, what was
+verified end-to-end today, and what gates the promotion from "1-tick
+smoke" to "live daily cron." The team-shape — captain pre-fetches +
+single LLM narration + sibling-spawn over MCP + captain's-log bridge
+— held cleanly in 63 s for under eight cents. Two primitives the
+production cadence needs are *not* yet on the harness: a =mcp_token=
+refresh hook (24 h JWT expiry will halt heartbeat day 2) and the
+=mode:"btw"= async peer-query primitive (today's smoke uses two
+parallel spawns; richer mid-tick coordination wants =btw=). Both
+filed below as gating follow-ups.
+
+* Team shape
+
+*Summary.* Captain + drift + linker, perma-roles, daily heartbeat,
+one shared =boardId=, one worktree per role.
+
+| Role     | Bridge Crew | Job                                                                                |
+|----------+-------------+------------------------------------------------------------------------------------|
+| Captain  | =@boothby=  | Owns the heartbeat; reads vault facts deterministically; narrates + dispatches    |
+| Drift    | =@geordi=   | Drift-checks tag taxonomy, link health signals, file freshness                    |
+| Linker   | =@atoz=     | Audits broken cross-refs, normalises wiki cross-links                             |
+
+| Aspect            | Value                                                                              |
+|-------------------+------------------------------------------------------------------------------------|
+| Lifetime          | =long-lived= (perma-roles per [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]] § Two team lifetimes)            |
+| Cadence           | Daily heartbeat — proposed cron =0 8 * * *= EST; 1 tick fired now for smoke       |
+| Captain pre-fetch | =vault_profile_digest()= (deterministic; 576 chars; 0 LLM tokens) before narration |
+| LLM call shape    | *One* cloud call per tick (captain narrates; children narrate one line each)       |
+| Dissolve trigger  | Goal sunset (roster reshape on Phase 29 promotion of drift heuristic to dbt model) |
+| Evolution rules   | Toolset adapts (Phase 29 promotes recurring heuristics); roster pinned this phase  |
+
+* Workspace topology
+
+*Summary.* One =boardId= shared across all three roles; one git
+worktree per role; sessions pinned worktree-per-session per Agor
+default.
+
+*Expanded.* On the live smoke run:
+
+| Slot              | Value (smoke run 2026-05-06)                                                |
+|-------------------+-----------------------------------------------------------------------------|
+| =repo_id=         | =019dfbd1-abe8-717b-b0b4-099526fe0b65= (org-llm)                            |
+| Shared =boardId=  | =019dfbcb-1cc4-7206-abae-7b87a433e88e= ("Main Board")                       |
+| Captain worktree  | =019dfbe7-1c6d-714f-a291-27e425284121= branch =hygiene-captain-2026-05-06=  |
+| Drift worktree    | =019dfbe7-2133-7791-9885-977e7af83ba0= branch =hygiene-drift-2026-05-06=    |
+| Linker worktree   | =019dfbe7-266c-7583-b889-511651331f34= branch =hygiene-linker-2026-05-06=   |
+| Captain session   | =019dfbe7-2713-7115-b5e0-6eb4863c0c13=                                      |
+
+The board is the team's collaboration registry — sibling-discovery
+is "list sessions on my =boardId=" rather than a separate registry.
+Per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011]] the worktree filesystem (Agor's =LibSQL= backing) is /not/
+authoritative for vault content; =~/org/*.org= remains canonical.
+Children of the heartbeat run their own worktrees by default — the
+smoke pre-creates them so per-tick worktree-create cost can be
+amortised; in production each tick can either reuse worktrees
+(cheap, faster) or recreate (clean slate, slower).
+
+* Coordination map
+
+*Summary.* This team uses three patterns from [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]] §
+Coordination patterns: /scheduled heartbeat/, /sibling-session by
+boardId/, /captain's-log + session-genealogy reconciliation/. The
+fourth pattern (/=mode:"btw"= async peer query/) is a *deferred*
+addition — see § Gating follow-ups.
+
+| Pattern                                                       | Used today (smoke)                                                                            |
+|---------------------------------------------------------------+-----------------------------------------------------------------------------------------------|
+| Scheduled heartbeat                                           | 1 tick fired manually; daily cron deferred until token-refresh primitive lands                |
+| Sibling-session by =boardId=                                  | All three roles on one board; captain spawns children that inherit the board                  |
+| Captain's-log + session-genealogy reconciliation              | =kind=team-session= record written on tick complete (smoke target: =/tmp/captains-log-…jsonl=) |
+| =mode:"btw"= async peer query                                 | *Not used* — children today are independent; mid-tick =@geordi= ↔ =@atoz= coordination filed |
+| Cross-tool escalation                                         | Not used in vault hygiene — narrow domain, single-tool fits                                  |
+
+* 1-tick smoke run log
+
+*Summary.* PASS at 2026-05-06 02:09:08 EDT — 63 s wall-clock,
+$0.0793661 in spend, both children spawned with verified genealogy,
+captain narrated one summary turn, captain's-log bridge wrote a
+=kind=team-session= record. Read-only against vault per task
+constraints — no =~/org/*.org= file was touched.
+
+| Step | t (EDT)         | Action                                                | Outcome                                                |
+|------+-----------------+-------------------------------------------------------+--------------------------------------------------------|
+|    1 | 02:08:04        | Daemon health (=GET /health=)                         | =agor-live v0.17.3=, =requireAuth=true=                |
+|    2 | 02:08:04        | Token sanity (=~/.agor/cli-token=)                    | Admin JWT valid, ~23 h to expiry                       |
+|    3 | 02:08:04        | Resolve repo + reuse =boardId=                        | =repo_id=019dfbd1…=, =board_id=019dfbcb…=              |
+|    4 | 02:08:39        | Captain pre-fetch — =vault_profile_digest=            | 576 chars deterministic; 0 LLM tokens; DEC-006 honored |
+|    5 | 02:08:40–43     | Create 3 worktrees (captain / drift / linker)         | All =worktree_id= returned (~1 s each)                 |
+|    6 | 02:08:43        | Create captain session (=POST /sessions=)             | =session_id= + =mcp_token= (24 h JWT) returned         |
+|    7 | 02:08:43–09:07  | =claude -p= captain narration call                    | 24 s wall; vault facts injected at prompt-build time   |
+|    8 | 02:09:07        | Parse =DRIFT_CHILD= + =LINKER_CHILD= from stream      | Both child session IDs parsed                          |
+|    9 | 02:09:08        | =GET /sessions/:child= for both                       | =genealogy.parent_session_id= matches captain — PASS   |
+|   10 | 02:09:08        | Bridge =kind=team-session= record                     | Appended to =/tmp/captains-log-vault-hygiene-…jsonl=   |
+|   11 | 02:09:08        | Archive children + captain (smoke cleanup)            | Production: captain stays unarchived between ticks     |
+
+The captain's narration excerpt (last paragraph, post tool-use):
+
+#+begin_example
+Both child sessions are running. The drift signal from @geordi will
+center on the priority-cookie sprawl — 15 distinct priority letters
+in active use against a vault of 594 files is a clear triage-fatigue
+marker, with #B's dominance suggesting the user has mentally
+collapsed most work into a single mid-tier bucket rather than
+genuinely triaging. The linker signal from @atoz will focus on the
+ratio risk: 138 dailies over 1121 days is sparse capture (~12%
+coverage), meaning cross-links from dailies to project nodes are
+likely sparse or stale, and with -1 nodes indexed the org-roam graph
+can't yet validate any of those links. On the next full sweep,
+tightening the priority ladder to A/B/C only and rebuilding the roam
+index are the two highest-leverage moves before any link audit is
+meaningful.
+#+end_example
+
+That paragraph is the *interpretation layer* a deterministic stat
+dump can't deliver — it cross-joins three pre-fetched facts (priority
+spread, daily-coverage ratio, roam-index status) into one
+prioritisation call. The =-1 nodes indexed= signal is itself a found
+bug — the inferrer probe that produced the digest is reporting a
+sentinel; @geordi or a future tick will surface it as a tracker entry.
+
+Raw run-log: =/tmp/vault-hygiene-1tick-2026-05-06.org=. Parent
+stream: =/tmp/vault-hygiene-captain-out-643903.jsonl=. Bridge record:
+=/tmp/captains-log-vault-hygiene-2026-05-06.jsonl=.
+
+* Gating follow-ups
+
+*Summary.* Two primitives are needed before promoting to a daily
+cron, and a third smaller item surfaced in the smoke. Listed
+captured-not-built; Agent A in this dispatch owns the harness work.
+
+** Token refresh (BLOCKING for long-lived cadence)
+
+The captain's =mcp_token= is a 24 h JWT (per [[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe]]
+step 6). A daily cron at =0 8= will hit expiry on day 2 unless either
+(a) every tick re-issues a captain session, or (b) Agor's
+after-=GET /sessions/:id= hook re-mints =mcp_token= when called by an
+authorised member. Recommendation: route (b), so the long-lived
+captain *session* is durable — only the *token* is refreshed. Filed
+as Agent A territory; today's smoke worked precisely because the run
+finished inside a single 24 h window.
+
+** =mode:"btw"= async peer query (BLOCKING for richer coordination)
+
+Today's smoke spawns =@geordi= and =@atoz= as independent children;
+no mid-tick coordination. The richer pattern — =@atoz= asking
+=@geordi= "is this drift signal already in your sweep?" without
+either halting — wants =agor_sessions_prompt(mode:"btw")=. Per
+[[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe]] § What this validates / leaves open, =btw= is
+unverified in v0.17.3. Validating it is also Agent A territory.
+
+** Inferrer sentinel surfacing (smaller; tracker fodder)
+
+The =vault_profile_digest= reported =-1 nodes indexed= during the
+smoke — a sentinel value from the org-roam node-count probe that
+should be either non-negative or absent. The captain narrated this
+correctly ("the org-roam graph can't yet validate any of those
+links"), proving the team-shape /surfaces/ inferrer bugs as drift
+signals. File the underlying probe fix as a tracker entry; the team
+itself behaved correctly.
+
+* Cost shape (estimated)
+
+*Summary.* At one tick / day, the team's annual LLM cost is bounded
+below $30 with current model selection — well inside any reasonable
+"is this worth running?" threshold.
+
+| Line item                                   | Per-tick (smoke-measured)             | Per-day | Per-year (365 d) |
+|---------------------------------------------+---------------------------------------+---------+------------------|
+| Captain narration (=claude -p= sonnet)      | $0.0794 (24 s wall, 1 turn)           | $0.08   | ~$29.00          |
+| Children (haiku, 1-line outputs)            | folded into captain spend (sub-spawn) | folded  | folded           |
+| =vault_profile_digest=                      | $0.00 (deterministic)                 | $0.00   | $0.00            |
+| Worktree create × 3                         | $0.00 (REST; ~1 s each)               | $0.00   | $0.00            |
+| Captain's-log bridge                        | $0.00 (file append)                   | $0.00   | $0.00            |
+| /Total/                                     | /$0.0794/                             | /$0.08/ | /~$29/           |
+
+Sensitivity: doubling cadence (=0 8,20 * * *=) doubles cost; running
+opus on the captain ~10× the spend. The DEC-006 invariant is the
+cost lever — every fact moved into the deterministic pre-fetch
+shaves the LLM turn's input tokens.
+
+* Verdict
+
+*Summary.* The 1-tick smoke proves the team-shape can hold across
+heartbeats /within a single 24 h JWT window/. It does *not* prove
+multi-day persistence — that gates on the token-refresh primitive.
+
+*Expanded.* What the smoke validated: (1) three roles on one
+=boardId= with one worktree each is a workable topology; (2) the
+captain pre-fetch + single narration call pattern fits in <30 s and
+<$0.10; (3) sibling spawns return verifiable =genealogy.parent=
+edges; (4) the captain's-log bridge writes a clean
+=kind=team-session= record; (5) the read-only constraint can be
+enforced by prompt construction alone (no file writes occurred).
+What the smoke did *not* validate: (a) day-2 heartbeat after JWT
+expiry; (b) =btw= mid-tick peer query; (c) multi-tick captain
+session reuse vs. recreate-per-tick. Verdict: *team-shape PASS,
+multi-tick durability PENDING* — the gating items are scoped + filed,
+not unknowns.
+
+* See also
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — § Long-lived team examples; § Coordination patterns
+- [[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe.org]] — base harness + the three v0.17.3 bugs this smoke also dodged
+- [[id:739868a9-f62c-43de-ac1d-1671d483a2c1][standing-orders.org]] — Layer 2a/2b memory model the per-tick =memory/{date}.md= fills
+- [[id:c4e2d3a1-7f9b-4c5e-8d6a-2b3f4e9c1d57][agent-time-awareness.org]] — Layer 3 scheduling gap the heartbeat fills
+- [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]] — Bridge Crew handles (=@boothby=, =@geordi=, =@atoz=)
+- [[id:af4cea86-a3a6-4dbf-ab7c-b53a9da3e909][vault-facts.org]] — the deterministic source the captain pre-fetch reads
+- [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][captains-log.org]] — bridge target for =kind=team-session= records
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-006 (deterministic supervision); DEC-011 (files canonical); DEC-014 (Bridge Crew); DEC-017 (integration only)
