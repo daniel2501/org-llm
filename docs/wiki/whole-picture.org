@@ -63,9 +63,9 @@ the page it's canonized in.
 - *Opinionated EXPERIENCE × agnostic SUBSTRATE* — Doom + opencode +
   dbt is the curated UX; runs on any OS, any git host, any cloud
   provider. /dbt-shape/.
-- *Curated CORE × first-class EXTENSION path* — the Magnificent
-  Seven ship in core; everything else is community-developable per
-  [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-009]]/[[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014]].
+- *Curated CORE × first-class EXTENSION path* — the Bridge Crew
+  (≤7) ships in core; everything else is community-developable per
+  [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-009]]/[[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014 — Bridge Crew]].
 
 Cross-refs: [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] § design rules; [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]]
 DEC-006/009/010/014.
@@ -104,8 +104,8 @@ Mobile capture latency stays at local-disk speed.
 | Registry              | Status            | Wiring                  |
 |-----------------------+-------------------+-------------------------|
 | Pre-flight resolvers  | 24.1 *shipped*    | =intercept_agent_prefix= ([[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-008]]) |
-| Tool-failure recovery | 24.2 *pending*, v1.0-gating | =@recover= decorator at MCP tool sites |
-| Confusion detector    | 24.3 *pending*, v1.0-gating | Signal registry over =crew_log= |
+| Tool-failure recovery | 24.2 *shipped 2026-05-06* | =@recover= decorator wired at MCP tool sites |
+| Confusion detector    | 24.3 *shipped 2026-05-06* (wiring v0.1 in progress) | Signal registry over =crew_log= |
 | Manager quorum        | 24.4 open question | Async-only; never on critical path |
 
 Each layer is a /registry/ — adding entries is one file/decorator,
@@ -145,12 +145,21 @@ Two patterns to know:
   They compose; they're not subsets.
 
 *Extension path is first-class* (not afterthought) — Phase 23.5
-user-supplied agents + Phase 23.6 literate MCP tools. Anything beyond
-the Seven is community-developable per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-009]]/[[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014]].
+user-supplied agents + Phase 23.6 literate MCP tools (*shipped
+2026-05-06*; wiring v0.1 in progress). Anything beyond the Bridge
+Crew is community-developable per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-009]]/[[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014 — Bridge Crew]].
 
-Cross-refs: [[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][agent-framework.org]] (esp. § Spawned subagents — a
-different concept layer), [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]], [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]],
-[[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-009/014, [[id:65c67408-a0de-4f93-9ffa-6800ea0f436f][cull.org]].
+*=multi-agent-org-llm=* is the named feature where /agent teams build
+big things for you/. The unit is a *team* (roster + captain + purpose
++ lifetime); two lifetimes (spike, long-lived); delivered via the
+*Agor integration* (per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017 — stack composition vs.
+integration]], integration-only pre-2029-01-15). Smoke harness
+end-to-end green 2026-05-06; canon at [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]].
+
+Cross-refs: [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] (team layer canon),
+[[id:3c9d7e4a-5b8f-4d12-a6e9-b1c2d3e4f5a6][agent-framework.org]] (esp. § Spawned subagents — a different
+concept layer), [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]], [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]], [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]]
+DEC-009/014/017, [[id:65c67408-a0de-4f93-9ffa-6800ea0f436f][cull.org]].
 
 * The tools (data tier + effect tier)
 
@@ -211,7 +220,9 @@ wins on collision; git remembers; engine retries.
 
 Three registries — pre-flight resolvers, tool-failure recovery hooks,
 confusion detector. Each accepts new entries the way the recipe
-registry accepts recipes. 24.1 shipped; 24.2 + 24.3 are v1.0-gating.
+registry accepts recipes. 24.1 / 24.2 / 24.3 all shipped (24.3
+wiring v0.1 in progress); supervision trinity is feature-complete
+modulo wire-up polish.
 
 ** dbt tests as agent contracts
 
@@ -240,19 +251,24 @@ checkpoints.
 | (d)   | Multi-user community of practice                        |
 | (e)   | Self-sustaining ecosystem with external contributors    |
 
-*Where we are 2026-05-05:* late (a), reaching (b). v1.0 ≈ (c).
+*Where we are 2026-05-06:* late (a), reaching (b). v1.0 ≈ (c).
 
-*v1.0 gates:*
+*v1.0 gates (remaining):*
 
-- Phase 24.2 (recovery hooks) + 24.3 (confusion detector)
-- Phase 26.2 (extraction — physical cull)
+- Phase 26.2 — physical extraction (~3000 LoC retire / move)
 - Retrieval-bug sweep
 - Cross-platform install validation (macOS + Ubuntu)
 
-*Open:* version-number scheme not nailed yet (DEC-pending).
+(Phase 24.2 — recovery hooks + Phase 24.3 — confusion detector
+shipped 2026-05-06; both off the gate list.)
+
+*Version-number scheme* locked 2026-05-06 per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-019 — Hybrid
+SemVer + acpt suffix]]: SemVer for stable; =-acptN= suffix for the
+acceptance-tier rolling channel that survives the [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-016 —
+three-tier SDLC]] 24h dogfood window.
 
 Cross-refs: [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Punch list — beta → 1.0,
-[[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]].
+[[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]], [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] DEC-016/019.
 
 * The phase map (24 → 31)
 
@@ -263,10 +279,10 @@ Cross-refs: [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Punch li
 | 22 v2 | Manager pre-fetch + agent narrates          | *shipped*         | Zero-round-trip orchestration; loadbearing |
 | 23.1  | Agent dataclass + birth-names               | *shipped*         | Agent framework spine |
 | 23.5  | User-supplied agents (library)              | design pending    | Extension path leg 1 |
-| 23.6  | Literate MCP tools                          | tier 1 sprint-eligible | Extension path leg 2 |
+| 23.6  | Literate MCP tools                          | *shipped 2026-05-06* (wiring v0.1 in progress) | Extension path leg 2 |
 | 24.1  | Pre-flight resolver registry                | *shipped*         | Supervision trinity 1/3 |
-| 24.2  | Tool-failure recovery hooks                 | *pending* (v1.0-gating) | Supervision trinity 2/3 |
-| 24.3  | Confusion detector                          | *pending* (v1.0-gating) | Supervision trinity 3/3 |
+| 24.2  | Tool-failure recovery hooks                 | *shipped 2026-05-06* | Supervision trinity 2/3 |
+| 24.3  | Confusion detector                          | *shipped 2026-05-06* (wiring v0.1 in progress) | Supervision trinity 3/3 |
 | 24.4  | Manager quorum (async-only)                 | open question     | Reasoning-required exception |
 | 25    | DB-as-cache + git-canonical pipeline        | planned (rewritten 2026-05-05 per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011]]) | Universal SQL interface |
 | 26.1  | Cull walkthrough                            | *complete* (38/38) | Curated core team boundary |
@@ -300,34 +316,51 @@ distro" means picking partners and shipping a cohesive experience.
 | Infra            | OpenTofu              | planned (anti-cap aligned)          |
 | Vault transport  | git                   | CORE; substrate-agnostic per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011]] |
 | Vault host       | Forgejo / Codeberg / GitHub / USB | any (substrate-agnostic) |
-| Multi-agent      | Agor                  | research candidate                  |
+| Multi-agent      | Agor                  | integration; smoke validated 2026-05-06 (per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]]) — see [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] |
 
 Cross-refs: [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § OpenTofu + § Phase 28,
 [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] § Phase 27 / 28, [[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]].
 
 * What's next (live state)
 
-*Summary.* As of 2026-05-05: cull walkthrough complete (38/38);
-DEC-014 just locked; Bridge Crew roster locked; ~3000 LoC
-retirement candidates queued for Phase 26.2; 24.1 shipped + verified
-live. Mobile + 24.2/24.3 are the v1.0 gates.
+*Summary.* As of 2026-05-06 EDT: Bridge Crew roster locked (Trek
+handles canonized); supervision trinity feature-complete (24.1 +
+24.2 + 24.3 all shipped); Phase 23.6 — literate MCP tools shipped;
+=multi-agent-org-llm= named + smoke-validated against Agor;
+DEC-018 (license: AGPL v3.0+) + DEC-019 (versioning) locked.
+Remaining v1.0 gates: Phase 26.2 — physical extraction, retrieval
+bug sweep, cross-platform install validation.
 
-Recent shipped (2026-05-04 → 2026-05-05):
+Recent shipped (2026-05-06 EDT):
+- Phase 24.2 — recovery hooks (=@recover= decorator wired at MCP sites)
+- Phase 24.3 — confusion detector (signal registry over =crew_log=)
+- Phase 23.6 — literate MCP tools
+- Bridge Crew rename sweep (=@picard / @spock / @data / @boothby /
+  @geordi / @atoz / @riker=) + prose demotion
+- DEC-015 — org-mode-aware chat surface (v0.1 — proxy-port discovery
+  + =url-retrieve= backend)
+- DEC-018 — License: AGPL v3.0+
+- DEC-019 — Versioning: Hybrid SemVer + =-acptN= suffix
+- Agor smoke harness end-to-end green; long-lived-team-vault-hygiene
+  example canonized
+
+Earlier shipped (2026-05-04 → 2026-05-05):
 - 4 new wiki concept pages: data-integrity-laws, sync-architecture,
   dbt-pipeline, tools-as-dbt-models
-- DEC-006 through DEC-014 (10 architectural decisions in 36h)
-- Phase 24.1 motivating bug closed end-to-end
+- DEC-006 through DEC-017 (architectural decisions backbone)
+- Phase 24.1 — pre-flight resolver registry verified live
 - Phase 25 scope rewrite (DB-as-cache, not DB-authoritative inversion)
-- Phase 26.1 cull verdicts complete
+- Phase 26.1 — cull verdicts complete (38/38)
 
 Cross-refs: [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] § YOU ARE HERE, [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]],
-[[id:65c67408-a0de-4f93-9ffa-6800ea0f436f][cull.org]] § Subsumed / dead code.
+[[id:65c67408-a0de-4f93-9ffa-6800ea0f436f][cull.org]] § Subsumed / dead code, [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]].
 
 * See also
 
 - [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][00-index.org]] — full concept graph entry point
 - [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] — single-source-of-truth shape doc
-- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-001 through DEC-014, the directional record
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-001 through DEC-019, the directional record
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — agent teams build big things for you (Agor integration canon)
 - [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap.org]] — narrative phase catalog
 - [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] — structured actionable state
 - [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] — single-view dashboard ("YOU ARE HERE")

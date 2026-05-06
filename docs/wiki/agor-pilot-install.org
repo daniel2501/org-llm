@@ -10,110 +10,171 @@
 * Summary
 
 *Summary.* Pilot-install checklist for [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]]'s
-=Agor= integration on the user's Linux + Guix desktop. Per
-agent-tool-install rule, this page is a *checklist the user
-runs themselves* — not an automated install. FOSS-first,
-user-scope (no =sudo=), Node ≥ 22.12 prerequisite. Mobile /
-termux is *out of scope* — see the verifier artifact at
-=/tmp/agor-mobile-termux-verify-2026-05-06.org= for the
-separate sprint side-quest.
+=Agor= integration on the user's Linux + Guix desktop. *Verified
+live 2026-05-06 EDT* against =agor-live v0.17.3=, Node v22.14.0,
+npm 10.9.2. Per agent-tool-install rule this page is a *checklist
+the user runs themselves* — not an automated install. FOSS-first,
+user-scope (no =sudo=). Mobile / termux is *out of scope* — see
+=/tmp/agor-mobile-termux-verify-2026-05-06.org=.
 
 *Expanded.* Agor ships as npm package =agor-live=. Upstream
-install is =npm install -g agor-live=; on Guix this lands in
-=~/.guix-profile= (user-scope, no =sudo=). First-run is
-=agor init= → =agor daemon start= → =agor open=. The
-=@libsql/client= glibc-spoof workaround flagged in the termux
-verifier is *Bionic-only* and should not bite glibc Guix; the
-Guix Node TLS cert-bundle gotcha (per =project_guix_ssl_certs.md=)
-is the more likely first-foot stumble.
+install is =npm install -g agor-live=; with the user-scope npm
+prefix below it lands in =~/.npm-global/bin/= (no =sudo=,
+=guix gc=-safe). First-run is =agor init= → =agor daemon start=
+→ smoke harness. The =@libsql/client= glibc-spoof workaround
+flagged in the termux verifier is *Bionic-only* and *did not
+bite* on Guix glibc (verified). The Guix Node TLS cert-bundle
+gotcha (=project_guix_ssl_certs.md=) was already mitigated and
+also did not bite. One non-fatal =EBADENGINE= warning surfaced
+during =npm install= — documented under *Known gotchas*.
 
-* Prerequisites checklist
+* Prerequisites checklist (verified 2026-05-06 EDT)
 
-| Requirement       | Check command                  | Current state on this machine    | Action if missing                                         |
-|-------------------+--------------------------------+----------------------------------+-----------------------------------------------------------|
-| Node.js ≥ 22.12   | =node --version=               | unverified (bash blocked in agent) | =guix install node-lts= (user profile, ~/.guix-profile/bin) |
-| npm available     | =npm --version=                | unverified                       | comes with =node-lts=; verify after node install          |
-| Guix profile live | =which guix=                   | unverified (assumed per env)     | n/a — Guix is the package manager of record               |
-| SSL_CERT_FILE set | =echo $SSL_CERT_FILE=          | configured in =~/.config/fish/conf.d/ssl-cert.fish= | already handled per =project_guix_ssl_certs.md=         |
-| Git ≥ 2.45 (worktrees) | =git --version=          | already used by org-llm daily    | =guix install git= if missing                             |
-| Browser for canvas | n/a (Firefox / Chromium)       | already running (mobile + desktop) | n/a                                                       |
+| Requirement       | Check command                  | Current state on this machine                          | Action if missing                                          |
+|-------------------+--------------------------------+--------------------------------------------------------+------------------------------------------------------------|
+| Node.js ≥ 22.12   | =node --version=               | ✓ v22.14.0 (=guix install node=, =~/.guix-profile/bin=) | =guix install node= (user profile)                         |
+| npm available     | =npm --version=                | ✓ 10.9.2 (shipped with Guix node)                      | comes with =node=; verify after node install               |
+| Guix profile live | =which guix=                   | ✓ =~/.guix-profile/bin/guix=                           | n/a — Guix is the package manager of record                |
+| SSL_CERT_FILE set | =echo $SSL_CERT_FILE=          | ✓ =~/.config/fish/conf.d/ssl-cert.fish=                | already handled per =project_guix_ssl_certs.md=            |
+| Git ≥ 2.45 (worktrees) | =git --version=           | ✓ used by org-llm daily                                | =guix install git= if missing                              |
+| Agor itself       | =agor --version=               | ✓ v0.17.3 (=~/.npm-global/bin/agor=)                   | follow *Install steps* below                               |
+| =jq= (token parse) | =jq --version=                | ✓ 1.8.0 (=guix install jq=)                            | =guix install jq=                                          |
+| =pass= (creds)    | =which pass=                   | ✓ =~/.guix-profile/bin/pass=                           | =guix install password-store=                              |
 
-* Install steps (user-scope)
+* Install steps (user-scope, verified 2026-05-06 EDT)
 
-Run each block at a fish/bash shell. Per agent-tool-install rule,
-*do not run as root*; everything stays in =~/.guix-profile= or
-=~/.npm-global=.
+The exact pipeline that worked tonight, top to bottom. Everything
+stays in =~/.guix-profile= or =~/.npm-global=; *no =sudo=*.
 
-1. *Verify or install Node ≥ 22.12 via Guix (user-scope).*
+1. *Install Node + npm via Guix (user-scope).* ~50 packages,
+   landed clean.
 
-   # USER ACTION REQUIRED
    #+begin_src sh
-   node --version
-   # if absent or < 22.12:
-   guix install node-lts
-   hash -r   # refresh shell PATH cache (fish: rehash)
-   node --version
+   guix install node
+   ~/.guix-profile/bin/node --version    # → v22.14.0
+   ~/.guix-profile/bin/npm  --version    # → 10.9.2
    #+end_src
 
-2. *(Optional but recommended) Configure npm to install user-scope
-   without =-g= polluting Guix's node prefix.* This isolates Agor's
-   global bins under =~/.npm-global/bin/= so =guix gc= /
-   profile-rotation can't sweep them.
+2. *Point npm at a user-scope prefix* so global bins live under
+   =~/.npm-global/bin/= (=guix gc=-safe; never trips EACCES).
 
-   # USER ACTION REQUIRED
    #+begin_src sh
-   mkdir -p ~/.npm-global
-   npm config set prefix ~/.npm-global
-   # ensure on PATH (fish: add to ~/.config/fish/conf.d/path.fish):
-   set -gx PATH $HOME/.npm-global/bin $PATH
+   ~/.guix-profile/bin/npm config set prefix ~/.npm-global
    #+end_src
 
-3. *Install Agor.* Upstream-supported command is the global
-   install; with step 2's prefix it remains user-scope.
+3. *Add =~/.npm-global/bin= to fish PATH* (file persists across
+   shell sessions).
 
-   # USER ACTION REQUIRED
    #+begin_src sh
+   # write ~/.config/fish/conf.d/npm-global-path.fish:
+   #   fish_add_path -aP $HOME/.npm-global/bin
+   #+end_src
+
+4. *Install Agor (user-scope npm).* 826 packages, ~48 s.
+
+   #+begin_src sh
+   export PATH="$HOME/.npm-global/bin:$HOME/.guix-profile/bin:$PATH"
    npm install -g agor-live
+   agor --version                         # → 0.17.3
    #+end_src
 
-   /If step 2 was skipped/ and =npm install -g= refuses on Guix's
-   read-only node prefix, fall back to a per-tool prefix:
-   =npm install --prefix ~/.local/share/agor agor-live= and put
-   =~/.local/share/agor/bin= on =PATH=.
+   One =EBADENGINE= warning fires for =md-to-slack@1.1.7=
+   (Node 22.14 < required 22.16). *Non-fatal* — that package is
+   the Slack message-gateway sub-feature; we're not using it.
 
-4. *Initialize Agor.* Creates =~/.agor/= and the local DB.
+5. *Initialize Agor.* Creates =~/.agor/= + local DB + default admin.
+   Interactive prompt asks /Enable authentication and multiplayer
+   features?/ — answering =n= still seeds the default admin (see
+   BUG-4 below).
 
-   # USER ACTION REQUIRED
    #+begin_src sh
-   agor init
+   echo "n" | agor init --force
    #+end_src
 
-* First-spawn smoke test
+6. *Start the daemon.* Foregrounds briefly, then backgrounds.
 
-# USER ACTION REQUIRED
+   #+begin_src sh
+   agor daemon start
+   agor daemon status
+   curl -s http://localhost:3030/health   # → 200
+   #+end_src
+
+7. *Auth + smoke the REST surface.*
+
+   #+begin_src sh
+   agor auth login -e admin@agor.live -p admin   # writes ~/.agor/cli-token
+   TOKEN=$(jq -r .accessToken ~/.agor/cli-token)
+   curl -s -H "Authorization: Bearer $TOKEN" http://localhost:3030/sessions
+   # → {"total":0,"limit":10000,"skip":0,"data":[]}
+   #+end_src
+
+8. *Register a repo* (org-llm itself, for the smoke harness).
+
+   #+begin_src sh
+   agor repo add-local /home/daniel/repos/org-llm
+   # → repo_id: 019dfbd1-abe8-717b-b0b4-099526fe0b65
+   #+end_src
+
+* First-spawn smoke test (verified 2026-05-06 EDT)
+
+Use the working harness, not a manual curl recipe:
+
 #+begin_src sh
-agor --version          # 1. binary on PATH, prints version
-agor daemon start       # 2. background daemon comes up
-agor daemon status      # 3. reports running + port
-agor open               # 4. opens canvas in default browser
+bash scripts/agor-smoke.sh                       # full pipeline; ≈ $0.07 LLM
+SKIP_CLAUDE=1 bash scripts/agor-smoke.sh         # REST primitives only; $0
+bash scripts/agor-smoke-v01.sh                   # extended primitives; $0
 #+end_src
 
-If all four succeed, Agor is alive. Stop the daemon with
-=agor daemon stop= when done piloting.
+Live PASS from tonight: 12 s wall, $0.07 LLM, parent→child
+genealogy verified in DB. Full flow + exit codes in
+=docs/wiki/agor-smoke-recipe.org=. Stop the daemon with =agor daemon stop= when done.
 
-* Known gotchas
+* Credential management (verified 2026-05-06 EDT)
 
-| Gotcha                                  | Trigger                                                | Fix                                                                                          |
+Default admin password lives in =pass= per the agent-tool-install
+rule (no plaintext on disk, no shell history exposure):
+
+#+begin_src sh
+pass insert -m org-llm/agor/admin-password   # paste "admin" then Ctrl-D
+agor auth login -e admin@agor.live -p $(pass org-llm/agor/admin-password)
+#+end_src
+
+Rationale: =feedback_agent_tool_install_rule= — secrets stay in
+=pass=. The smoke harness reads =~/.agor/cli-token= directly so
+no live =pass= lookup per run. *BUG-4 follow-up:* default seed
+=admin@agor.live= / =admin= is hardcoded until rotated; filed in
+=now.org= § Open follow-ups — rotate via =agor user= verb before
+exposing the daemon to anything network-reachable.
+
+* Known gotchas (verified 2026-05-06 EDT)
+
+| Gotcha                                  | Trigger                                                | Fix / status                                                                                 |
 |-----------------------------------------+--------------------------------------------------------+----------------------------------------------------------------------------------------------|
-| Node TLS cert errors during =npm install= | Guix-shipped Node doesn't see system CA bundle by default | Already mitigated — =SSL_CERT_FILE= / =NODE_EXTRA_CA_CERTS= set in =~/.config/fish/conf.d/ssl-cert.fish= per =project_guix_ssl_certs.md=; verify env vars are exported in the install shell |
-| =npm install -g= EACCES on Guix node prefix | Guix's =~/.guix-profile/lib/node_modules= can be read-only | Use step 2's =npm config set prefix ~/.npm-global=, or =npm install --prefix ~/.local/share/agor= |
-| =@libsql/client= glibc-prebuilt mismatch | Bionic libc (termux) only — *N/A on Guix glibc desktop*  | Skip — termux-specific per =/tmp/agor-mobile-termux-verify-2026-05-06.org=                  |
-| Daemon can't bind / port already in use | Another Agor or dev server on default port             | =agor daemon stop= then restart; or set =AGOR_PORT= per Agor docs                            |
-| =agor= command not found after install  | =~/.npm-global/bin= or =~/.local/share/agor/bin= not on PATH | Add the prefix's =bin/= to =PATH= in =~/.config/fish/conf.d/=, then =exec fish=             |
-| =better-sqlite3= source build attempt   | If Agor pulls it transitively and prebuilt is missing  | =guix install gcc-toolchain python-3 make=; rerun =npm install=. Unlikely on glibc but possible |
+| Node TLS cert errors during =npm install= | Guix-shipped Node doesn't see system CA bundle by default | Pre-mitigated — =SSL_CERT_FILE= / =NODE_EXTRA_CA_CERTS= set in =~/.config/fish/conf.d/ssl-cert.fish=. *Did not bite* tonight. |
+| =EBADENGINE= for =md-to-slack@1.1.7=    | Node 22.14 < required 22.16 (transitive dep)           | *Non-fatal warning.* Slack-gateway-only; we don't use it. Ignore unless you wire Slack later. |
+| =npm install -g= EACCES on Guix prefix  | Guix's =~/.guix-profile/lib/node_modules= read-only    | Use step 2's =npm config set prefix ~/.npm-global=. Verified clean.                           |
+| =@libsql/client= glibc-prebuilt mismatch | Bionic libc (termux) only                              | *N/A on Guix glibc desktop* — verified, no spoof needed. Termux only per =/tmp/agor-mobile-termux-verify-2026-05-06.org=. |
+| Daemon can't bind / port already in use | Another Agor or dev server on :3030                    | =agor daemon stop= then restart; or set =AGOR_PORT=                                          |
+| =agor= command not found after install  | =~/.npm-global/bin= not on PATH                        | Use the fish PATH file from step 3, then =exec fish=                                          |
+| =agor init= prompt is interactive       | First boot asks /Enable auth + multiplayer?/           | =echo "n" \| agor init --force= still seeds default admin (see BUG-4)                        |
+
+* Bug list (against agor-live v0.17.3, found 2026-05-06 EDT)
+
+Full detail with code anchors at =/tmp/agor-test-log-2026-05-06.org=.
+
+| ID    | Title                                                                  | Workaround                                            |
+|-------+------------------------------------------------------------------------+-------------------------------------------------------|
+| BUG-1 | =agor worktree add= CLI errors =createWorktree is not a function=     | =POST /repos/:id/worktrees= via curl (smoke harness)  |
+| BUG-2 | =GET /sessions/:id/genealogy= returns 500 =undefined params.route=    | =GET /sessions/:id=, read =genealogy.children=        |
+| BUG-3 | Bare =POST /worktrees= fails NOT-NULL on =worktree_unique_id=         | Always =POST /repos/:id/worktrees=                    |
+| BUG-4 | Default creds =admin@agor.live= / =admin= seeded silently, no rotation prompt (UX) | Rotate via =agor user= verb; store in =pass= (above) |
 
 * Cross-refs
 
 - [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — canonical definition; integration's role
-- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-017 (stack composition vs. integration); DEC-010 (anti-capitalist FOSS)
+- [[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe.org]] — sister doc for the smoke harness (verified flow)
+- [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] § Open follow-ups — rotate-admin + filed sprint items
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-017 — stack composition vs. integration; DEC-010 — anti-capitalist FOSS
+- =/tmp/agor-test-log-2026-05-06.org= — full bug detail + working command transcript
+- =/tmp/agor-testing-report-2026-05-06.org= — synthesis report
 - =/tmp/agor-mobile-termux-verify-2026-05-06.org= — termux/mobile verifier (separate sprint side-quest)
