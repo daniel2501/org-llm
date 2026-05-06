@@ -319,6 +319,29 @@ def write_event(kind: str, command: str, *, args: str = "",
         pass
     _append_org_entry(kind, command, args, response, model,
                        duration_ms, outcome, level)
+    # Phase 24.3 — confusion detector wiring v0.1: post-emit hook
+    # into the in-memory event ring + sampled detector. Backward-
+    # compat: `notify_event` is a no-op until `install_detector` is
+    # called once at startup. Best-effort by contract — never lets
+    # a confusion-pipeline failure tax the caller's turn.
+    try:
+        from datetime import datetime as _dt
+        from .confusion.wiring import (
+            event_from_write_event as _to_event,
+            notify_event as _notify,
+        )
+        _notify(_to_event(
+            kind        = kind,
+            command     = command,
+            args        = args,
+            response    = response,
+            model       = model,
+            duration_ms = duration_ms,
+            outcome     = outcome,
+            timestamp   = _dt.utcnow().isoformat(timespec="seconds") + "Z",
+        ))
+    except Exception:
+        pass
 
 
 def export_rows_to_org(rows, dest: Path, *, title: str = "",
