@@ -99,7 +99,91 @@ snapshot= verb could regenerate this page from
 - *@doom* promoted to starfleet-core; tool-unreachable case
   handled.
 
-* ▶ TONIGHT — 2026-05-06 Wed, EDT (handoff snapshot)               :@here:
+* ▶ OVERNIGHT 2026-05-06 → 2026-05-07 (user asleep; agent in flight) :@here:
+
+#+begin_quote
+*State for resumption.* User went to bed after a heavy push session
+that landed *Phase 24 supervision trinity FULLY WIRED* (24.1 + 24.2
++ 24.3 all live), *Agor headless smoke END-TO-END GREEN*, +
+*multi-agent-org-llm canonical definition* + Bridge Crew rename.
+
+*In flight (overnight, won't transfer cross-session):*
+
+| Agent ID            | Job                                                | Bail-after | Cost ceiling |
+|---------------------+----------------------------------------------------+------------+--------------|
+| =ab8ae1a5b1299257c= | Agor admin cred rotation (BUG-4 fix)               | 30 min     | minimal LLM  |
+
+*Tonight's commits (12 total this session):*
+
+| Commit    | Theme                                                                              |
+|-----------+------------------------------------------------------------------------------------|
+| =b8bccd2= | docs(canon): multi-agent-org-llm definition + DEC-014 Bridge Crew + DEC-017 §6/§7  |
+| =6397cb1= | docs+code: Bridge Crew rename + Claude prose demotion sweeps                        |
+| =6df9bd0= | feat: validation FOSS-default + recovery hooks + DEC-015 v0 chat + agor-smoke       |
+| =6773edd= | feat: Phase 24.3 confusion detector + Phase 23.6 literate MCP tools                 |
+| =8d9f83a= | docs(canon): DEC-018 AGPLv3 + DEC-019 Hybrid SemVer + acpt suffix                   |
+| =d18c501= | docs(wiki): seeds round 2 — PII redaction · budget schema · captains-log-Agor bridge |
+| =684c6f2= | test(agor): smoke harness end-to-end green — corrected bootstrap flow              |
+| =16c3924= | feat(dec-015): v0.1 — proxy-port discovery + url-retrieve backend                   |
+| =55ccf8d= | feat(phase-24.2): wire @recover decorator at MCP tool sites                         |
+| =8217e03= | docs(wiki): long-lived-team-vault-hygiene — concrete team example from Agor smoke   |
+| =12bb829= | docs(canon): whole-picture.org + agor-pilot-install.org refresh post-Agor-smoke     |
+| =821cc6e= | feat(agor): mcp_token refresh primitive + Phase 24.2 async-loop test fix            |
+| =645f921= | feat(bridge-crew): Agor assistant configs canonized + materializer CLI verb          |
+| =0276933= | feat(phase-24.3): wire confusion detector into live captain's-log event stream      |
+| =eef64c9= | test(agor)+docs+template: validation suite — pilot examples + extended harness     |
+
+*v1.0 supervision-gate status: ALL THREE WIRED*
+- Phase 24.1 — pre-flight resolvers (shipped 2026-05-04, wired)
+- Phase 24.2 — recovery hooks (shipped + wired 2026-05-06)
+- Phase 24.3 — confusion detector (shipped + wired 2026-05-06)
+
+*v1.0 still gating:*
+- Phase 26.2 — physical extraction (~3000 LoC retire)
+- Cross-platform install validation (macOS + Ubuntu)
+- Retrieval-bug sweep
+
+*Agor pilot status:*
+- Installed (Node v22.14.0 + npm 10.9.2 via Guix; agor-live v0.17.3
+  user-scope; jq + pass via Guix).
+- Daemon up @ http://localhost:3030; admin auth working; pass slug
+  =org-llm/agor/admin-password= = =admin= (rotation in flight).
+- Smoke harness END-TO-END green; $0.07 / spike on Sonnet 4.6.
+- 4 BUGs filed against agor-live v0.17.3; all have workarounds.
+
+*Reviewable artifacts queued for wake-up:*
+
+| Path                                                          | What                                          |
+|---------------------------------------------------------------+-----------------------------------------------|
+| =/tmp/agor-testing-report-2026-05-06.org=                     | Synthesis report; landing-arc bookmark         |
+| =/tmp/agor-test-log-2026-05-06.org=                           | Raw test session log w/ live IDs + bugs       |
+| =/tmp/agor-cred-rotation-2026-05-06.org= (overnight agent)    | Rotation results; user reviews on wake        |
+| =docs/wiki/multi-agent-org-llm.org=                           | Canonical definition (443 lines)              |
+| =docs/wiki/bridge-crew-agor-assistants.org=                   | Per-persona SOUL/IDENTITY/USER + materializer |
+| =docs/wiki/agor-pilot-install.org= (refreshed)                | Reality-matched install checklist              |
+| =docs/wiki/agor-smoke-recipe.org= (refreshed)                 | Working harness + token-refresh section       |
+| =docs/wiki/2026-05-06-agor-validation.org=                    | Three-pilot validation suite                  |
+| =docs/wiki/spike-team-license-pilot.org=                      | Concrete spike-team example                   |
+| =docs/wiki/long-lived-team-vault-hygiene.org=                 | Concrete long-lived-team example              |
+| =docs/wiki/whole-picture.org= (refreshed)                     | Master synthesis fresh through DEC-019        |
+| =LICENSE= (NEW)                                               | AGPL-3.0-or-later canonical                   |
+
+*Open follow-ups filed for next session* (in =now.org= § Open follow-ups
+below + new ones): DEC-015 v0.2 SSE streaming · Phase 23.6 wiring
+v0.1 (register literate MCP tools at startup) · DEC-015 ratification
+(candidate → DEC) · Phase 26.2 physical extraction kickoff · Captain's
+log + Agor session-genealogy bridge implementation · Conversational
+discoverability v0 (first-touch persona self-intro at @-prefix seam) ·
+Phase 30.4 — multi-judge validation · Vault cut-over (=org-llm tracker
+init=).
+
+*Recommended first read on wake-up:* =now.org= §
+▶ OVERNIGHT (this section) → =/tmp/agor-testing-report-2026-05-06.org=
+→ then either commit overnight agent's work or pivot to a chosen
+follow-up.
+#+end_quote
+
+* ▶ TONIGHT — 2026-05-06 Wed, EDT (handoff snapshot)               :@stale:
 
 #+begin_quote
 *State for a new Claude Code session resuming this work.*
