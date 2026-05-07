@@ -3935,10 +3935,15 @@ def ask(
     if dashboard_url:
         from .superset_filter import superset_prelude_for_url
         try:
+            # Always pass base_url — form_data_key enrichment is the
+            # cheap-and-load-bearing default (qutebrowser-copied URLs
+            # almost always have form_data_key, never literal form_data).
+            # `enrich_filters` controls only the heavier extras
+            # (dashboard title + native filter values).
             base_url = dashboard_url.split("/superset/")[0].split("/explore")[0]
             prelude = superset_prelude_for_url(
                 dashboard_url,
-                base_url=base_url if enrich_filters else None,
+                base_url=base_url,
                 enrich=enrich_filters,
             )
         except Exception as e:

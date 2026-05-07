@@ -16,6 +16,7 @@ from org_llm.superset_filter import (
     SupersetUrlState,
     fetch_dashboard_title,
     fetch_filter_state,
+    fetch_form_data,
     format_prompt_prelude,
     parse_url,
     superset_prelude_for_url,
@@ -52,6 +53,18 @@ def test_parse_explore_url_with_form_data() -> None:
     assert s.slice_id == 42
     assert s.slug is None
     assert s.form_data == fd
+    assert s.has_state
+
+
+def test_parse_explore_url_with_form_data_key() -> None:
+    """The qutebrowser-copied URL shape — form_data lives server-side
+    behind an opaque key. Pure parse just captures the key; enrichment
+    via fetch_form_data resolves it."""
+    url = "http://127.0.0.1:8088/explore/?form_data_key=cdUlQJx2v0c&slice_id=5&standalone=1"
+    s = parse_url(url)
+    assert s.slice_id == 5
+    assert s.form_data_key == "cdUlQJx2v0c"
+    assert s.form_data == {}  # not yet enriched
     assert s.has_state
 
 
@@ -230,6 +243,90 @@ def test_fetch_filter_state_swallows_network_errors() -> None:
     with patch("requests.Session", return_value=sess):
         out = fetch_filter_state("http://x", s)
     assert out == {}
+
+
+def test_fetch_form_data_resolves_key_to_dict() -> None:
+    """v3.1: GET /api/v1/explore/form_data/<key> returns the form_data
+    JSON-encoded inside `{"form_data": "<json>"}`. Parser must JSON-decode
+    the inner string."""
+    inner = json.dumps({
+        "viz_type": "echarts_timeseries_bar",
+        "metrics": ["llm_calls"],
+        "groupby": ["outcome"],
+        "x_axis": "model",
+    })
+    plan = {
+        "http://x/api/v1/security/login":
+            _FakeResp(200, {"access_token": "T"}),
+        "http://x/api/v1/explore/form_data/KEY1":
+            _FakeResp(200, {"form_data": inner}),
+    }
+    sess = _FakeSession(plan)
+    with patch("requests.Session", return_value=sess):
+        out = fetch_form_data("http://x", "KEY1")
+    assert out == {
+        "viz_type": "echarts_timeseries_bar",
+        "metrics": ["llm_calls"],
+        "groupby": ["outcome"],
+        "x_axis": "model",
+    }
+
+
+def test_fetch_form_data_returns_empty_when_key_missing() -> None:
+    assert fetch_form_data("http://x", "") == {}
+
+
+def test_fetch_form_data_swallows_failures() -> None:
+    plan = {"http://x/api/v1/security/login": _FakeResp(500)}
+    sess = _FakeSession(plan)
+    with patch("requests.Session", return_value=sess):
+        out = fetch_form_data("http://x", "KEY")
+    assert out == {}
+
+
+def test_superset_prelude_auto_enriches_form_data_key() -> None:
+    """v3.1: when base_url is provided and the URL has form_data_key,
+    auto-fetch the form_data — even with enrich=False (default).
+
+    The form_data_key path is the load-bearing case; pure URL parse
+    yields a useless prelude (just slice_id). Without this auto-enrich,
+    the user's qutebrowser-copied URL produces nothing actionable."""
+    url = "http://x/explore/?form_data_key=KEY1&slice_id=5"
+    inner = json.dumps({
+        "viz_type": "echarts_timeseries_bar",
+        "metrics": ["llm_calls"],
+        "groupby": ["outcome"],
+        "x_axis": "model",
+        "time_range": "Last week",
+    })
+    plan = {
+        "http://x/api/v1/security/login":
+            _FakeResp(200, {"access_token": "T"}),
+        "http://x/api/v1/explore/form_data/KEY1":
+            _FakeResp(200, {"form_data": inner}),
+    }
+    sess = _FakeSession(plan)
+    with patch("requests.Session", return_value=sess):
+        out = superset_prelude_for_url(url, base_url="http://x")
+    # Rich prelude: chart + metric + groupby + x_axis + viz + time_range.
+    assert "exploring chart '#5'" in out
+    assert "metric='llm_calls'" in out
+    assert "groupby=['outcome']" in out
+    assert "x_axis='model'" in out
+    assert "viz='echarts_timeseries_bar'" in out
+    assert "time_range='Last week'" in out
+    # The "behind key …" hint should NOT appear — we successfully enriched.
+    assert "behind key" not in out
+
+
+def test_prelude_form_data_key_unenriched_flagged_for_enrichment() -> None:
+    """When base_url is None or fetch fails, the prelude flags that
+    the form_data behind the key wasn't reached — agent at least knows
+    its scope is incomplete."""
+    s = SupersetUrlState(slice_id=5, form_data_key="ABCDEFGH123")
+    out = format_prompt_prelude(s)
+    assert "form_data behind key" in out
+    assert "ABCDEFGH" in out
 
 
 def test_fetch_dashboard_title_returns_title_on_ok() -> None:

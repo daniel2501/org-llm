@@ -51,12 +51,18 @@ class SupersetUrlState:
     Fields are None / empty when not present. `has_state` tells the
     caller whether the URL carried *any* useful context — if False,
     the prelude should be empty and the chat path proceeds as normal.
+
+    `form_data_key` is the most common URL shape produced by Superset's
+    explore page (`?form_data_key=KEY&slice_id=N`) — the form_data is
+    stored server-side under the key. Pure URL parse can't resolve it;
+    the enricher below handles it via /api/v1/explore/form_data/<key>.
     """
 
     slug: Optional[str] = None
     slice_id: Optional[int] = None
     time_range: Optional[str] = None
     native_filters_key: Optional[str] = None
+    form_data_key: Optional[str] = None
     form_data: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -67,6 +73,7 @@ class SupersetUrlState:
                 self.slice_id,
                 self.time_range,
                 self.native_filters_key,
+                self.form_data_key,
                 self.form_data,
             )
         )
@@ -96,6 +103,7 @@ def parse_url(url: str) -> SupersetUrlState:
 
     time_range = qs.get("time_range", [None])[0]
     nfk = qs.get("native_filters_key", [None])[0]
+    fdk = qs.get("form_data_key", [None])[0]
 
     form_data: dict[str, Any] = {}
     if "form_data" in qs:
@@ -111,6 +119,7 @@ def parse_url(url: str) -> SupersetUrlState:
         slice_id=slice_id,
         time_range=time_range,
         native_filters_key=nfk,
+        form_data_key=fdk,
         form_data=form_data,
     )
 
@@ -175,6 +184,14 @@ def format_prompt_prelude(
         parts.append(
             f"native filters present (key={state.native_filters_key[:8]}…, "
             f"unparsed)"
+        )
+    # If form_data_key was in the URL but we couldn't enrich it (no
+    # base_url, or Superset offline), at least flag that the chart's
+    # configured state isn't reflected in the prelude.
+    if state.form_data_key and not state.form_data:
+        parts.append(
+            f"form_data behind key={state.form_data_key[:8]}… "
+            f"(call `superset_prelude_for_url` with `base_url=` to enrich)"
         )
     if extra_filters:
         for k, v in extra_filters.items():
@@ -274,6 +291,67 @@ def fetch_filter_state(
         return {}
 
 
+def fetch_form_data(
+    base_url: str,
+    key: str,
+    auth: Optional[tuple[str, str]] = None,
+) -> dict[str, Any]:
+    """Resolve a `?form_data_key=KEY` (the common explore-page URL
+    shape) into the actual form_data dict via Superset's
+    `/api/v1/explore/form_data/<key>` endpoint.
+
+    The endpoint returns `{"form_data": "<json string>"}`; we
+    JSON-decode the inner string. Best-effort: returns {} on any
+    network/auth failure so the chat path stays clean.
+    """
+    if not key:
+        return {}
+    try:
+        import requests
+    except ImportError:
+        return {}
+    auth = auth or ("admin", "admin")
+    sess = requests.Session()
+    try:
+        tok = sess.post(
+            f"{base_url}/api/v1/security/login",
+            json={
+                "username": auth[0],
+                "password": auth[1],
+                "provider": "db",
+                "refresh": True,
+            },
+            timeout=5,
+        ).json().get("access_token")
+        if not tok:
+            return {}
+        r = sess.get(
+            f"{base_url}/api/v1/explore/form_data/{key}",
+            headers={"Authorization": f"Bearer {tok}"},
+            timeout=5,
+        )
+        if not r.ok:
+            return {}
+        body = r.json()
+        # Two shapes seen in the wild: {"form_data": "<json string>"}
+        # and {"result": "<json string>"}. The string-or-dict logic
+        # below covers both — and we just got handed a literal dict.
+        raw = body.get("form_data")
+        if raw is None:
+            raw = body.get("result")
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+                return parsed if isinstance(parsed, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+        if isinstance(raw, dict):
+            return raw
+        return {}
+    except Exception:
+        return {}
+
+
 def fetch_dashboard_title(
     base_url: str,
     slug: str,
@@ -323,13 +401,39 @@ def superset_prelude_for_url(
 ) -> str:
     """High-level convenience: URL → prelude string in one call.
 
-    With `enrich=True` and a reachable Superset, the prelude includes
-    the dashboard title and resolved native-filter values. With
-    `enrich=False` (default), pure URL parse — no network.
+    `form_data_key` enrichment is *automatic* whenever a `base_url`
+    is provided — that's the default URL shape qutebrowser hands you
+    when you copy from Superset's explore page, and pure URL parse
+    yields a useless prelude (just a slice_id). One ~100ms round-trip
+    transforms it into a rich `metric=...; groupby=...; viz=...`
+    prelude. Enrichment failures (offline Superset, bad auth) fall
+    through silently — caller still gets the URL-parse-only prelude.
+
+    `enrich=True` additionally fetches the dashboard title and
+    native-filter values for dashboard URLs (the heavier extras).
+    `enrich=False` (default) keeps those off but still does the
+    cheap form_data_key resolution.
     """
     state = parse_url(url)
     if not state.has_state:
         return ""
+
+    # Cheap-and-load-bearing: form_data_key enrichment whenever
+    # we have a base_url. The URL-only prelude is meaningless here
+    # because the form_data lives behind the key, server-side.
+    if base_url and state.form_data_key and not state.form_data:
+        fetched = fetch_form_data(base_url, state.form_data_key, auth=auth)
+        if fetched:
+            # Re-create the state with the enriched form_data baked in.
+            state = SupersetUrlState(
+                slug=state.slug,
+                slice_id=state.slice_id,
+                time_range=state.time_range or fetched.get("time_range"),
+                native_filters_key=state.native_filters_key,
+                form_data_key=state.form_data_key,
+                form_data=fetched,
+            )
+
     title = None
     extra: dict[str, Any] = {}
     if enrich and base_url:
