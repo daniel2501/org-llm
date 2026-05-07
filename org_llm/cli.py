@@ -4428,6 +4428,23 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "delegate. Treat specialists as expert advisors and "
             "synthesise their findings into a coherent answer. "
             "Make it so.\n"
+            "BRIDGE CREW ROSTER (the ONLY specialists you may "
+            "invoke): @spock (researcher, vault search), @data "
+            "(scribe, capture/draft), @boothby (gardener, vault "
+            "tidy), @geordi (engineer, code/system), @atoz "
+            "(curator, links/refs), @riker (first officer, "
+            "coordination). NEVER invoke characters outside this "
+            "roster — Worf, Troi, Crusher, Wesley, etc. are NOT "
+            "specialists in this system. If a question needs a "
+            "skill no one on the roster covers, say so plainly.\n"
+            "TOOL ACCESS: when an MCP tool layer is wired (via "
+            "opencode), you may call `org-llm_delegate(agent, "
+            "prompt, context, model_override='qwen/qwen-2.5-7b-"
+            "instruct' for filter/classify/tag light work). When "
+            "no tool layer is available this turn (chat surface, "
+            "local models without tool-calling), do NOT pretend to "
+            "delegate — answer directly from general knowledge or "
+            "say you'd need a real tool call to find out.\n"
             "DECOMPOSE → DELEGATE: read request, pick specialists "
             "(`org-llm_list_agents()` if unsure), call "
             "`org-llm_delegate(agent, prompt, context, "
@@ -4450,9 +4467,27 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "EXPORT REQUESTS: call `org-llm_export_sidebar_snapshot` "
             "or `org-llm_export_manager_history` directly. Surface "
             "the path.\n"
-            "OUTPUT: cite drafter + reviewer briefly. No management-"
-            "speak. You don't capture/edit/shell — delegate to "
-            "scribe/engineer/coder for those."
+            "OUTPUT: Answer directly when you can. NEVER fabricate "
+            "tool calls, delegations, or specialist quotes — only "
+            "mention a specialist if you actually invoked one this "
+            "turn via a real tool call. If a question requires data "
+            "you can't access (vault counts, system status, etc.), "
+            "say so plainly rather than inventing a result. Cite a "
+            "drafter only when there genuinely was one. No "
+            "management-speak; no parenthetical asides about your "
+            "own instructions.\n"
+            "STYLE — TRIAGE, DON'T DUMP: when you have facts "
+            "(telemetry, vault state, vitals, etc.), do NOT "
+            "regurgitate the table. Synthesise like a manager: "
+            "(1) lead with the 1–2 items that need attention — "
+            "alerts, anomalies, things threatening the user's "
+            "session (low battery, memory pressure, empty vault, "
+            "stale indexer); (2) dismiss the rest as 'otherwise "
+            "nominal'; (3) end with ONE concrete next action you "
+            "offer to take (doctor probe, gather, delegate to a "
+            "specialist) when warranted. If everything truly is "
+            "nominal, say so in a sentence — don't list 10 fields. "
+            "A status report should fit in 4–6 lines, not 15."
         ),
     },
     "researcher": {
@@ -7507,6 +7542,91 @@ def route(
     else:
         on_screen("[dim](no triggers matched — falling back to "
                   "session default)[/dim]")
+
+
+@app.command(rich_help_panel="Querying")
+def telemetry(
+    pretty: Annotated[bool, typer.Option("--pretty", "-P",
+            help="Pretty-print the JSON (indent=2). Default off — "
+                 "tools that consume this expect minified.")] = False,
+    proxy_state: Annotated[bool, typer.Option("--proxy-state/--no-proxy-state",
+            help="Include proxy state (active model + route) by querying "
+                 "the running proxy via its port file. Adds a small "
+                 "lookup; default on.")] = True,
+):
+    """Emit fresh live telemetry as JSON — vault counts, vitals
+    (battery / memory / thermal), MCP info, recent activity, sensor
+    alerts, and the actual proxy routing decision.
+
+    Single source of truth for chat-surface grounding and any future
+    consumer that needs current state. Always probes live; never reads
+    stale snapshots like .opencode/sidebar-status.json (which is
+    launch-time-only by design).
+
+    Read-only: this verb does not consume pending-prompt.txt or
+    rewrite any sidebar files — safe to call from a hot loop.
+
+    Output goes to stdout. On any internal error, emits an empty
+    object `{}` and exits 0 — callers degrade gracefully rather than
+    seeing a Python traceback in the middle of their chat buffer.
+    """
+    import json as _json
+    import os as _os
+    from pathlib import Path as _Path
+    payload: dict = {}
+    try:
+        from .db import Node as _N, File as _F
+        engine = _engine()
+        with get_session(engine) as session:
+            # Pre-compute vault stats — _opencode_sidebar_status reads
+            # these from ctx (the launcher pre-populates; we mirror).
+            n_files = session.query(_F).count() or 0
+            n_nodes = session.query(_N).count() or 0
+            try:
+                n_embed = session.query(_N).filter(
+                    _N.embedding.isnot(None)).count() or 0
+            except Exception:
+                n_embed = 0
+            pct = round((100.0 * n_embed / n_nodes), 1) if n_nodes else 0
+            org_dir = _os.environ.get("ORG_LLM_ORG_DIR") or str(
+                _Path.home() / "org")
+            ctx = {
+                "n_files":    n_files,
+                "n_nodes":    n_nodes,
+                "n_embedded": n_embed,
+                "pct_e":      pct,
+                "org_dir":    org_dir,
+            }
+            payload = _opencode_sidebar_status(
+                session, ctx=ctx, workspace="all",
+                read_only=True,
+            )
+        # Augment with the actual proxy routing decision (the sidebar
+        # `model` block reflects launch-time config, but the proxy may
+        # be cloud-routing at runtime). Best-effort — never fail the
+        # whole verb if the proxy is down.
+        if proxy_state:
+            try:
+                from . import llm_proxy as _proxy
+                cf  = _proxy._cloud_first_enabled()
+                tgt = _proxy._resolve_cloud_failover_target() if cf else None
+                if tgt:
+                    payload["model"] = {
+                        "active":   tgt["model"],
+                        "provider": "openrouter",
+                        "route":    "cloud",
+                        "endpoint": tgt["endpoint"],
+                    }
+                payload["proxy"] = {
+                    "cloud_first_enabled": cf,
+                    "cloud_target_resolved": bool(tgt),
+                }
+            except Exception:
+                pass
+    except Exception:
+        payload = {}
+    indent = 2 if pretty else None
+    typer.echo(_json.dumps(payload, indent=indent))
 
 
 @app.command(rich_help_panel="Maintenance")
@@ -16183,7 +16303,8 @@ references that slip through.
 
 def _opencode_sidebar_status(session, *, ctx: dict, workspace: str,
                                 use_cloud: bool | None = None,
-                                chat_mdl: str | None = None) -> dict:
+                                chat_mdl: str | None = None,
+                                read_only: bool = False) -> dict:
     """Phase 17.1: build the live sidebar status payload that the TUI
     plugin renders via sidebar_content slot AND home_bottom slot.
     Snapshot of vault stats, active palette + knobs, MCP info,
@@ -16247,13 +16368,14 @@ def _opencode_sidebar_status(session, *, ctx: dict, workspace: str,
         _pending_path = _DBP.parent / "pending-prompt.txt"
         if _pending_path.exists():
             pending_prompt = _pending_path.read_text().strip()
-            try:
-                _pending_path.unlink()
-            except OSError:
-                pass
-            if pending_prompt:
-                on_screen("[dim]auto-session: restoring pending prompt "
-                          "from previous launch[/dim]")
+            if not read_only:
+                try:
+                    _pending_path.unlink()
+                except OSError:
+                    pass
+                if pending_prompt:
+                    on_screen("[dim]auto-session: restoring pending prompt "
+                              "from previous launch[/dim]")
     except Exception:
         pending_prompt = ""
 

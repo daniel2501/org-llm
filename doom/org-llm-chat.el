@@ -113,6 +113,117 @@ fallback path needs to engage promptly."
   :type 'number
   :group 'org-llm-chat)
 
+(defcustom org-llm-chat-sidebar-status-file
+  (expand-file-name "~/org/.opencode/sidebar-status.json")
+  "Path to the launch-time sidebar status JSON.
+Used as a FALLBACK when the `org-llm telemetry' CLI verb isn't
+reachable — see `org-llm-chat-telemetry-source'. By itself this
+file's vitals are stale (launch-time only); the CLI verb is the
+single source of truth for fresh data."
+  :type '(choice (const :tag "Disabled" nil) (file :tag "Path"))
+  :group 'org-llm-chat)
+
+(defcustom org-llm-chat-telemetry-source 'cli
+  "How to fetch live telemetry for system-message injection.
+
+`cli'  — Shell out to `org-llm telemetry --pretty' (the
+         single source of truth — fresh probes + DB queries +
+         live proxy state). 1–2s startup overhead is masked by
+         the cloud round-trip. Falls back to `json-file' on any
+         CLI error.
+`json-file' — Read `org-llm-chat-sidebar-status-file' directly
+         (legacy path; vitals are stale)."
+  :type '(choice (const :tag "CLI verb (recommended)" cli)
+                 (const :tag "JSON file (legacy/fallback)" json-file))
+  :group 'org-llm-chat)
+
+(defcustom org-llm-chat-telemetry-cli
+  (or (and (boundp 'org-llm-binary) org-llm-binary)
+      (expand-file-name "~/.local/bin/org-llm"))
+  "Path to the `org-llm' CLI binary used by the telemetry source.
+Only consulted when `org-llm-chat-telemetry-source' is `cli'."
+  :type 'file
+  :group 'org-llm-chat)
+
+(defcustom org-llm-chat-telemetry-cache-ttl 30
+  "Seconds to cache the result of `org-llm telemetry' between calls.
+Avoids paying CLI startup latency on every chat turn while still
+keeping the data fresh (default 30s — values like memory + battery
+move on a slower scale than that). Set to 0 to disable caching."
+  :type 'number
+  :group 'org-llm-chat)
+
+(defvar org-llm-chat--telemetry-cache nil
+  "Cons of (TIMESTAMP . PARSED-ALIST) for the last successful CLI fetch.")
+
+(defcustom org-llm-chat-inject-sidebar t
+  "When non-nil, prepend a system message with live sidebar telemetry
+to every chat backend call. Combined with the proxy's persona-swap
+(DEC-008 — proxy-seam @-prefix swap), this gives the agent ground
+truth instead of letting it free-associate.
+
+The injected message lands at `messages[1]' so the proxy's
+`intercept_agent_prefix' (which overwrites `messages[0]') leaves
+it intact. Toggle off if the extra context tokens hurt latency
+on a small local model."
+  :type 'boolean
+  :group 'org-llm-chat)
+
+(defcustom org-llm-chat-agent-glyphs
+  '(("picard"   . "Δ")
+    ("crew"     . "Δ")
+    ("captain"  . "Δ")
+    ("spock"    . "🖖")
+    ("data"     . "🤖")
+    ("boothby"  . "🌱")
+    ("geordi"   . "👁")
+    ("atoz"     . "📚")
+    ("riker"    . "📡"))
+  "Per-agent glyph prepended to response headings.
+Format is `((AGENT . GLYPH) …)' — agent names are bare handles
+(no `@'). Pairings:
+  picard/crew/captain → `Δ'  (Federation delta)
+  spock               → `🖖' (Vulcan salute)
+  data                → `🤖' (android)
+  boothby             → `🌱' (gardener)
+  geordi              → `👁' (VISOR / sensor)
+  atoz                → `📚' (library reference)
+  riker               → `📡' (comms relay)
+Unknown agents fall back to a bare `@<agent>' heading."
+  :type '(alist :key-type string :value-type string)
+  :group 'org-llm-chat)
+
+(defcustom org-llm-chat-user-heading "🖖 Captain ❯❯❯❯"
+  "Heading text for the user's turn (after the leading `** ').
+Default is the Trek-themed `🖖 Captain ❯❯❯❯' — Vulcan salute, rank,
+and four chevrons standing in for Captain's four collar pips
+(also reads as a shell-prompt). Set to `Me' for the v0 plain look.
+
+Existing sessions written before the heading was customised
+(literal `** Me') are still recognised — `--user-heading-regex'
+matches both the configured heading and `Me'."
+  :type 'string
+  :group 'org-llm-chat)
+
+(defcustom org-llm-chat-prompt-frame t
+  "When non-nil, draw an LCARS-style outline around the active
+user-prompt area (the trailing `** 🖖 Captain ❯❯❯❯' heading and
+its body). The frame is purely visual — it renders through
+overlay before/after strings, so the saved .org file is unchanged.
+
+Lifecycle: drawn at chat-buffer open; cleared on submit so the
+agent response renders cleanly under the heading; redrawn around
+the auto-appended next-turn heading after the response lands."
+  :type 'boolean
+  :group 'org-llm-chat)
+
+(defface org-llm-chat-prompt-frame-face
+  '((t :foreground "#ff9c00" :weight bold))
+  "Face for the LCARS-orange prompt frame.
+Mirrors the LCARS UI palette used by the Trek-themed chat surface.
+Customise to taste — any colour reads as the active-input marker."
+  :group 'org-llm-chat)
+
 (defcustom org-llm-chat-streaming t
   "When non-nil, prefer SSE streaming for proxy backend calls.
 DEC-015 v0.2 — when t, the chat surface sends `stream: true` to
@@ -155,22 +266,95 @@ Both default to today + a fresh random id."
               "* Capture from chat — "
               (format-time-string "%Y-%m-%d") "\n"
               "\n"
-              "** Me\n"
+              "** " org-llm-chat-user-heading "\n"
               ""))))
 
 
 ;;; ── prompt parsing ─────────────────────────────────────────────────────────
 
+(defun org-llm-chat--agent-heading-text (agent &optional suffix)
+  "Return the heading body (after `** ') for AGENT.
+Looks up `org-llm-chat-agent-glyphs'; falls back to bare `@AGENT'.
+Optional SUFFIX is appended (e.g. ` ERROR') for non-success paths."
+  (let* ((name  (or agent "agent"))
+         (glyph (or (cdr (assoc name org-llm-chat-agent-glyphs)) ""))
+         (lead  (if (string-empty-p glyph) "" (concat glyph " "))))
+    (concat lead "@" name (or suffix ""))))
+
+;; ── LCARS prompt frame ─────────────────────────────────────────────────
+;;
+;; Pure-overlay outline drawn around the active `** 🖖 Captain ❯❯❯❯'
+;; heading + its body, signalling to the user "this is the live compose
+;; box". When the user submits, the frame is cleared (the agent will
+;; render under that heading); after the response finalises and the
+;; auto-next-turn heading lands, the frame is redrawn around the new
+;; compose region. No buffer text is added — the saved .org file stays
+;; identical regardless of whether the frame is on or off.
+
+(defvar-local org-llm-chat--prompt-frame-overlays nil
+  "List of overlays currently rendering the LCARS prompt frame.")
+
+(defun org-llm-chat--prompt-frame-strings ()
+  "Return (TOP . BOTTOM) propertised strings for the prompt frame.
+Built fresh each draw so face changes take effect immediately."
+  (let* ((face 'org-llm-chat-prompt-frame-face)
+         (top    (propertize "▰▰▰▰▰ COMPOSE ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n"
+                              'face face))
+         (bot    (propertize "\n▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n"
+                              'face face)))
+    (cons top bot)))
+
+(defun org-llm-chat--clear-prompt-frame ()
+  "Remove all prompt-frame overlays. Idempotent."
+  (dolist (ov org-llm-chat--prompt-frame-overlays)
+    (when (overlayp ov) (delete-overlay ov)))
+  (setq-local org-llm-chat--prompt-frame-overlays nil))
+
+(defun org-llm-chat--draw-prompt-frame ()
+  "Outline the trailing user-turn heading + its body with overlays.
+Idempotent — clears any prior frame first. No-op when
+`org-llm-chat-prompt-frame' is nil or no user heading is found."
+  (org-llm-chat--clear-prompt-frame)
+  (when org-llm-chat-prompt-frame
+    (save-excursion
+      (goto-char (point-max))
+      (when (re-search-backward
+              (org-llm-chat--user-heading-line-regex) nil t)
+        (let* ((bounds  (org-llm-chat--prompt-frame-strings))
+               (top-pt  (line-beginning-position))
+               (bot-pt  (point-max))
+               (top-ov  (make-overlay top-pt top-pt))
+               (bot-ov  (make-overlay bot-pt bot-pt)))
+          (overlay-put top-ov 'before-string (car bounds))
+          (overlay-put bot-ov 'after-string  (cdr bounds))
+          (setq-local org-llm-chat--prompt-frame-overlays
+                      (list top-ov bot-ov)))))))
+
+(defun org-llm-chat--user-heading-regex ()
+  "Regex matching a user-turn heading title (without the `** ' prefix).
+Accepts the configured `org-llm-chat-user-heading' AND the legacy
+`Me' so sessions written by older versions still parse. An optional
+trailing tag like `[Y]' (used for confirmation hints) is tolerated."
+  (concat "\\`\\(?:"
+          (regexp-quote org-llm-chat-user-heading)
+          "\\|Me\\)\\(?:\\s-*\\[[A-Za-z0-9?]+\\]\\)?\\'"))
+
+(defun org-llm-chat--user-heading-line-regex ()
+  "Anchored line regex for a user-turn heading (for re-search).
+Matches `^** <heading>\\s-*$' for the configured heading or `Me'."
+  (concat "^\\*\\* \\(?:"
+          (regexp-quote org-llm-chat-user-heading)
+          "\\|Me\\)\\s-*$"))
+
 (defun org-llm-chat--at-me-heading-p ()
-  "True iff point is inside a `** Me` heading subtree."
+  "True iff point is inside a user-turn heading subtree."
   (save-excursion
     (and (not (org-before-first-heading-p))
          (progn (ignore-errors (org-back-to-heading t)) t)
          (let ((title (nth 4 (org-heading-components))))
            (and title
-                (string-match-p
-                 "\\`Me\\(\\s-*\\(\\[[A-Za-z0-9?]+\\]\\)\\)?\\'"
-                 (string-trim title)))))))
+                (string-match-p (org-llm-chat--user-heading-regex)
+                                (string-trim title)))))))
 
 (defun org-llm-chat--current-heading-body ()
   "Return the body text under the current heading (no subheadings stripped).
@@ -220,15 +404,79 @@ runs `ask` with the (possibly prefixed) prompt as argument."
 (defvar-local org-llm-chat--pending-process nil
   "The async process producing the current response, if any.")
 
+;;; ── thinking spinner ─────────────────────────────────────────────────────
+
+(defconst org-llm-chat--spinner-frames
+  '("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+  "Braille spinner frames cycled while waiting on a response.")
+
+(defvar-local org-llm-chat--spinner-timer nil
+  "Active spinner timer object; nil when no response is in flight.")
+
+(defvar-local org-llm-chat--spinner-marker nil
+  "Marker on the BOL of the placeholder line being animated.")
+
+(defvar-local org-llm-chat--spinner-idx 0
+  "Current index into `org-llm-chat--spinner-frames'.")
+
+(defun org-llm-chat--spinner-tick (buf)
+  "Replace the placeholder line in BUF with the next spinner frame."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (let ((mk org-llm-chat--spinner-marker))
+        (when (and mk (marker-buffer mk))
+          (save-excursion
+            (goto-char mk)
+            (let ((inhibit-read-only t)
+                  (frame (nth (mod org-llm-chat--spinner-idx
+                                    (length org-llm-chat--spinner-frames))
+                              org-llm-chat--spinner-frames)))
+              (delete-region (line-beginning-position)
+                             (line-end-position))
+              (insert frame " thinking…")))
+          (setq-local org-llm-chat--spinner-idx
+                      (1+ org-llm-chat--spinner-idx)))))))
+
+(defun org-llm-chat--start-spinner (placeholder-marker)
+  "Start the spinner animating the line after PLACEHOLDER-MARKER.
+PLACEHOLDER-MARKER points at the `** @<agent>' heading line; the
+spinner animates the line below it (the `/thinking…/' line that
+`--insert-placeholder' just wrote)."
+  (org-llm-chat--stop-spinner)
+  (let ((line-marker (save-excursion
+                       (goto-char placeholder-marker)
+                       (forward-line 1)
+                       (point-marker))))
+    (set-marker-insertion-type line-marker nil)
+    (setq-local org-llm-chat--spinner-marker line-marker)
+    (setq-local org-llm-chat--spinner-idx 0)
+    (let ((buf (current-buffer)))
+      (setq-local org-llm-chat--spinner-timer
+                  (run-at-time 0 0.1
+                                #'org-llm-chat--spinner-tick buf)))))
+
+(defun org-llm-chat--stop-spinner ()
+  "Cancel the spinner timer + clear its state. Idempotent."
+  (when (timerp org-llm-chat--spinner-timer)
+    (cancel-timer org-llm-chat--spinner-timer))
+  (setq-local org-llm-chat--spinner-timer nil)
+  (when (markerp org-llm-chat--spinner-marker)
+    (set-marker org-llm-chat--spinner-marker nil))
+  (setq-local org-llm-chat--spinner-marker nil)
+  (setq-local org-llm-chat--spinner-idx 0))
+
 (defun org-llm-chat--insert-placeholder (agent)
-  "Insert a `** @<agent> /thinking…/` heading after the current `** Me` subtree.
-Returns a marker pointing at the start of the placeholder line."
+  "Insert a `** @<agent>' heading + `/thinking…/' line after the current
+user-turn subtree, start the spinner, and return a marker at the start
+of the placeholder heading line."
   (save-excursion
     (org-back-to-heading t)
     (org-end-of-subtree t t)
     (unless (bolp) (insert "\n"))
     (let ((start (point-marker)))
-      (insert (format "** @%s\n/thinking…/\n" (or agent "agent")))
+      (insert (format "** %s\n/thinking…/\n"
+                       (org-llm-chat--agent-heading-text agent)))
+      (org-llm-chat--start-spinner start)
       start)))
 
 (defun org-llm-chat--replace-placeholder (marker rendered)
@@ -256,7 +504,7 @@ output org-flavoured src blocks; if it emits markdown ```…``` we
 convert below)."
   (let* ((normalised (org-llm-chat--markdown->org body))
          (txt (string-trim (or normalised ""))))
-    (concat (format "** @%s\n" (or agent "agent"))
+    (concat (format "** %s\n" (org-llm-chat--agent-heading-text agent))
             (if (string-empty-p txt) "(empty response)" txt)
             "\n")))
 
@@ -308,9 +556,11 @@ Bind `C-c C-c' under `** Me' to submit."
         (org-llm-chat-mode 1))
       (pop-to-buffer buf)
       (goto-char (point-max))
-      (when (re-search-backward "^\\*\\* Me\\s-*$" nil t)
+      (when (re-search-backward (org-llm-chat--user-heading-line-regex) nil t)
         (forward-line 1)
-        (end-of-line)))))
+        (end-of-line))
+      (with-current-buffer buf
+        (org-llm-chat--draw-prompt-frame)))))
 
 ;;;###autoload
 (defun org-llm-chat-submit ()
@@ -324,12 +574,12 @@ is appended with the response. Auto-saves on completion."
     (ignore-errors (org-back-to-heading t))
     (let* ((title (nth 4 (org-heading-components)))
            (is-me (and title
-                       (string-match-p "\\`Me\\(\\s-*\\[[A-Za-z0-9?]+\\]\\)?\\'"
+                       (string-match-p (org-llm-chat--user-heading-regex)
                                         (string-trim title)))))
       (unless is-me
         (user-error
-         "Place point under a `** Me' heading to submit (got %S)"
-         title))))
+         "Place point under a `** %s' heading to submit (got %S)"
+         org-llm-chat-user-heading title))))
   (let* ((body  (org-llm-chat--current-heading-body))
          (parsed (org-llm-chat-parse-agent-prefix body))
          (agent  (or (and parsed (car parsed))
@@ -337,6 +587,7 @@ is appended with the response. Auto-saves on completion."
          (prompt (or (and parsed (cdr parsed)) body)))
     (when (string-empty-p (string-trim (or prompt "")))
       (user-error "Prompt body is empty — write your question under `** Me'"))
+    (org-llm-chat--clear-prompt-frame)
     (let ((marker (org-llm-chat--insert-placeholder agent)))
       (setq-local org-llm-chat--pending-marker marker)
       (org-llm-chat--call-backend agent prompt marker))))
@@ -373,6 +624,165 @@ DEC-015 v0.1 — the file is written atomically by `start_proxy'."
             t))
       (error nil))))
 
+(defun org-llm-chat--parse-json-region ()
+  "Parse the current buffer (point at start) as JSON → alist.
+Uses string keys, alist objects, list arrays — matches what the
+sidebar formatter expects."
+  (let ((json-object-type 'alist)
+        (json-array-type  'list)
+        (json-key-type    'string))
+    (json-read)))
+
+(defun org-llm-chat--telemetry-from-cli ()
+  "Run `org-llm telemetry' synchronously + parse stdout.
+Returns the parsed alist or nil on any error (CLI missing, exit
+≠0, JSON broken, etc.). Honors `org-llm-chat-telemetry-cache-ttl'
+so successive calls within the TTL window reuse the prior result."
+  (let* ((bin org-llm-chat-telemetry-cli)
+         (now (float-time))
+         (cache org-llm-chat--telemetry-cache)
+         (cached-ts   (car-safe cache))
+         (cached-data (cdr-safe cache)))
+    (cond
+     ;; Cache hit within TTL.
+     ((and cached-data
+           cached-ts
+           (> org-llm-chat-telemetry-cache-ttl 0)
+           (< (- now cached-ts) org-llm-chat-telemetry-cache-ttl))
+      cached-data)
+     ;; CLI missing or unreadable — caller falls back to JSON file.
+     ((not (and bin (file-executable-p bin)))
+      nil)
+     (t
+      (condition-case _err
+          (with-temp-buffer
+            (let ((rc (call-process bin nil t nil "telemetry")))
+              (when (zerop rc)
+                (goto-char (point-min))
+                (let ((data (org-llm-chat--parse-json-region)))
+                  (when data
+                    (setq org-llm-chat--telemetry-cache
+                          (cons now data))
+                    data)))))
+        (error nil))))))
+
+(defun org-llm-chat--telemetry-from-file ()
+  "Legacy path: parse the sidebar JSON file directly.
+Used as a fallback when the CLI verb isn't reachable. The vitals
+in this file are launch-time only — see `org-llm-chat-sidebar-
+status-file' docstring."
+  (when (and org-llm-chat-sidebar-status-file
+             (file-readable-p org-llm-chat-sidebar-status-file))
+    (condition-case _err
+        (with-temp-buffer
+          (insert-file-contents org-llm-chat-sidebar-status-file)
+          (goto-char (point-min))
+          (org-llm-chat--parse-json-region))
+      (error nil))))
+
+(defun org-llm-chat--read-sidebar-status ()
+  "Return live telemetry as an alist, or nil.
+Tries the CLI verb first (fresh probes, single source of truth);
+falls back to the launch-time JSON file when CLI fails or is
+unreachable. Returns nil when injection is disabled."
+  (when org-llm-chat-inject-sidebar
+    (or (and (eq org-llm-chat-telemetry-source 'cli)
+             (org-llm-chat--telemetry-from-cli))
+        (org-llm-chat--telemetry-from-file))))
+
+(defun org-llm-chat--fmt-knobs (knobs)
+  "Render KNOBS list as `name=level' pairs, comma-joined."
+  (when (consp knobs)
+    (mapconcat (lambda (k)
+                 (let ((name  (cdr (assoc "name"  k)))
+                       (level (cdr (assoc "level" k))))
+                   (if level (format "%s=%s" name level) name)))
+               knobs ", ")))
+
+(defun org-llm-chat--fmt-vitals (vitals)
+  "Render VITALS list as `label (status)' pieces, joined by ` | '."
+  (when (consp vitals)
+    (mapconcat (lambda (v)
+                 (let ((label  (cdr (assoc "label"  v)))
+                       (status (cdr (assoc "status" v))))
+                   (if (and status (not (equal status "nominal")))
+                       (format "%s (%s)" label status)
+                     label)))
+               vitals " | ")))
+
+(defun org-llm-chat--format-sidebar-system-message (status)
+  "Format STATUS alist as a tight system-message string for picard et al.
+Tolerant of missing keys — degrades gracefully so the message is
+always well-formed even if the sidebar JSON drops a section."
+  (let* ((vault   (cdr (assoc "vault"    status)))
+         (act     (cdr (assoc "active"   status)))
+         (model   (cdr (assoc "model"    status)))
+         (mcp     (cdr (assoc "mcp"      status)))
+         (hw      (cdr (assoc "hardware" status)))
+         (vitals  (cdr (assoc "vitals"   status)))
+         (sensors (cdr (assoc "sensors"  status)))
+         (alerts  (and sensors (cdr (assoc "recent_alerts" sensors))))
+         (activ   (cdr (assoc "activity" status)))
+         (tags    (cdr (assoc "top_tags" status)))
+         (sd      (cdr (assoc "stardate" status)))
+         (n-files (and vault (cdr (assoc "n_files"      vault))))
+         (n-nodes (and vault (cdr (assoc "n_nodes"      vault))))
+         (n-embed (and vault (cdr (assoc "n_embedded"   vault))))
+         (pct-emb (and vault (cdr (assoc "pct_embedded" vault))))
+         (org-dir (and vault (cdr (assoc "org_dir"      vault))))
+         (palette (and act   (cdr (assoc "palette"      act))))
+         (intent  (and act   (cdr (assoc "intent_agent" act))))
+         (knobs   (org-llm-chat--fmt-knobs
+                    (and act (cdr (assoc "knobs" act)))))
+         (m-active (and model (cdr (assoc "active"   model))))
+         (m-prov   (and model (cdr (assoc "provider" model))))
+         (m-route  (and model (cdr (assoc "route"    model))))
+         (m-end    (and model (cdr (assoc "endpoint" model))))
+         (mcp-srv  (and mcp   (cdr (assoc "server"     mcp))))
+         (mcp-tn   (and mcp   (cdr (assoc "tool_count" mcp))))
+         (mcp-cfg  (and mcp   (cdr (assoc "configured" mcp))))
+         (ram      (and hw    (cdr (assoc "free_ram_gb" hw))))
+         (act-n    (and activ (cdr (assoc "nodes"       activ))))
+         (act-f    (and activ (cdr (assoc "files"       activ))))
+         (act-w    (and activ (cdr (assoc "window_days" activ))))
+         (vit-line (org-llm-chat--fmt-vitals vitals))
+         (tag-line (when (consp tags)
+                      (mapconcat (lambda (s) (format "%s" s)) tags ", "))))
+    (mapconcat
+     #'identity
+     (delq nil
+       (list
+        "[LIVE BRIDGE TELEMETRY — read-only context. Do NOT fabricate beyond these facts.]"
+        ""
+        (when sd      (format "STARDATE: %s" sd))
+        (when vault   (format "VAULT (%s): %s files · %s nodes · %s embedded (%s%%)"
+                                (or org-dir "?") (or n-files "?") (or n-nodes "?")
+                                (or n-embed "?") (or pct-emb "?")))
+        (when activ   (format "ACTIVITY (last %sd): %s nodes / %s files"
+                                (or act-w "?") (or act-n "?") (or act-f "?")))
+        (when tags    (format "TOP TAGS: %s"
+                                (if (and tag-line (not (string-empty-p tag-line)))
+                                    tag-line "(none)")))
+        (when act     (format "ACTIVE: palette=%s · intent=@%s%s"
+                                (or palette "?") (or intent "?")
+                                (if (and knobs (not (string-empty-p knobs)))
+                                    (concat " · knobs=[" knobs "]") "")))
+        (when model   (format "MODEL: %s (%s, %s%s)"
+                                (or m-active "?") (or m-prov "?") (or m-route "?")
+                                (if m-end (concat " @ " m-end) "")))
+        (when mcp     (format "MCP: %s — %s tools%s"
+                                (or mcp-srv "?") (or mcp-tn "?")
+                                (if mcp-cfg ", configured" "")))
+        (when hw      (format "HARDWARE: %s GB RAM free" (or ram "?")))
+        (when vit-line (concat "VITALS: " vit-line))
+        (when sensors (format "RECENT ALERTS: %s"
+                                (if (and alerts (consp alerts))
+                                    (format "%d in last cycle" (length alerts))
+                                  "(none)")))
+        ""
+        "When asked about state/status/activity: TRIAGE these facts — lead with the 1–2 items that warrant attention (alerts, anomalies, vault empty, low battery, memory pressure), dismiss the rest as 'otherwise nominal', and offer ONE concrete next action when useful. Do NOT just paraphrase this table. If a fact isn't here, say \"I don't have that in current telemetry\" — do not invent. Keep it tight: 4–6 lines."))
+     "\n")))
+
 (defun org-llm-chat--build-proxy-payload (agent prompt &optional streaming)
   "Build the OpenAI-compat JSON body sent to the proxy.
 AGENT may be nil. The proxy's `intercept_agent_prefix' (DEC-008
@@ -381,12 +791,31 @@ and rewrites the persona/model. We still forward the prefix in
 the user message so non-proxy upstreams degrade gracefully.
 
 When STREAMING is non-nil, sets `stream: true' in the payload so
-the proxy emits SSE (DEC-015 v0.2)."
+the proxy emits SSE (DEC-015 v0.2).
+
+When `org-llm-chat--read-sidebar-status' returns a non-nil status
+alist, the messages array becomes a 3-entry vector:
+  [0] persona-slot system message (proxy overwrites)
+  [1] live bridge telemetry system message (survives the swap)
+  [2] user message
+Otherwise the array is the original single-user-message form."
   (let* ((user-text (if (and agent (not (string-empty-p agent)))
                         (format "@%s %s" agent prompt)
                       prompt))
-         (payload `(("messages" . [(("role" . "user")
-                                    ("content" . ,user-text))])
+         (status (org-llm-chat--read-sidebar-status))
+         (messages
+          (if status
+              (vector
+               '(("role" . "system")
+                 ("content" . "(persona slot — proxy overwrites this)"))
+               `(("role" . "system")
+                 ("content" . ,(org-llm-chat--format-sidebar-system-message
+                                 status)))
+               `(("role" . "user")
+                 ("content" . ,user-text)))
+            (vector `(("role" . "user")
+                      ("content" . ,user-text)))))
+         (payload `(("messages" . ,messages)
                     ("stream" . ,(if streaming t :json-false)))))
     (when org-llm-chat-default-model
       (push `("model" . ,org-llm-chat-default-model) payload))
@@ -526,12 +955,14 @@ nil. Tolerant of `data: [DONE]', empty data, malformed JSON."
 (defun org-llm-chat--sse-init-render (state)
   "Initialise the chat buffer for SSE rendering.
 Replaces the `/thinking…/' placeholder with the heading + an
-empty body, and stores the running insertion marker on STATE."
+empty body, and stores the running insertion marker on STATE.
+Stops the thinking spinner — first byte arrived."
   (let ((marker (plist-get state :marker))
         (agent  (plist-get state :agent))
         (buf    (plist-get state :buffer)))
     (when (and marker (marker-buffer marker) (buffer-live-p buf))
       (with-current-buffer buf
+        (org-llm-chat--stop-spinner)
         (save-excursion
           (goto-char marker)
           (let ((begin (point))
@@ -542,7 +973,8 @@ empty body, and stores the running insertion marker on STATE."
                            (point-max)))))
             (delete-region begin end)
             (goto-char begin)
-            (insert (format "** @%s\n" (or agent "agent")))
+            (insert (format "** %s\n"
+                             (org-llm-chat--agent-heading-text agent)))
             (let ((ins (point-marker)))
               (set-marker-insertion-type ins t)
               (plist-put state :inserted-pos ins))))))))
@@ -600,7 +1032,12 @@ fence → org src) and auto-save the chat buffer. Idempotent."
               (let* ((normalised (org-llm-chat--markdown->org content))
                      (begin (save-excursion
                               (goto-char ins)
-                              (re-search-backward "^\\*\\* @" nil t)
+                              ;; Walk back to start of agent heading line.
+                              ;; Heading is now `** [glyph ]@<agent>' so
+                              ;; just match any `** ' line — going backward
+                              ;; from inside the agent body, the FIRST
+                              ;; `** ' we hit is the agent heading itself.
+                              (re-search-backward "^\\*\\* " nil t)
                               (forward-line 1)
                               (point))))
                 (when (and normalised
@@ -615,9 +1052,11 @@ fence → org src) and auto-save the chat buffer. Idempotent."
               (save-excursion
                 (goto-char ins)
                 (insert "(empty response)\n"))))
+          (org-llm-chat--append-next-turn)
           (ignore-errors (save-buffer)))
          (t
           ;; Error path — render an ERROR heading + message.
+          (org-llm-chat--stop-spinner)
           (when (and ins (marker-buffer ins))
             (save-excursion
               (goto-char ins)
@@ -751,12 +1190,50 @@ or anything else here fails."
        (org-llm-chat--finalise-response
         marker agent (format "ERROR launching process: %s" err) -1)))))
 
+(defun org-llm-chat--append-next-turn ()
+  "Append a fresh user-turn heading at end of buffer + move point
+under it, ready for the next prompt. Called from both finalise
+paths so chat ergonomics 'just work' (no manual `** Me' insert).
+Idempotent — does nothing if the buffer already ends with an
+empty user heading."
+  (save-restriction
+    (widen)
+    (goto-char (point-max))
+    ;; Idempotent: if last non-blank line is already our heading
+    ;; with an empty body below, don't double-insert.
+    (let ((last-heading (save-excursion
+                          (goto-char (point-max))
+                          (when (re-search-backward "^\\*\\* "
+                                                     nil t)
+                            (buffer-substring-no-properties
+                             (line-beginning-position)
+                             (line-end-position))))))
+      (unless (and last-heading
+                   (string-match-p (org-llm-chat--user-heading-regex)
+                                    (string-trim
+                                     (substring last-heading 3)))
+                   (save-excursion
+                     (goto-char (point-max))
+                     (skip-chars-backward " \t\n")
+                     (= (line-beginning-position)
+                        (save-excursion
+                          (re-search-backward "^\\*\\* " nil t)
+                          (line-beginning-position)))))
+        (unless (bolp) (insert "\n"))
+        (insert "\n** " org-llm-chat-user-heading "\n")))
+    (goto-char (point-max))
+    (end-of-line)
+    (org-llm-chat--draw-prompt-frame)))
+
 (defun org-llm-chat--finalise-response (marker agent raw rc)
   "Render RAW as the response under MARKER for AGENT; auto-save on success."
   (let* ((cleaned (org-llm-chat--strip-ansi (or raw "")))
          (heading-prefix (if (zerop rc)
-                             (format "** @%s" agent)
-                           (format "** @%s ERROR" agent)))
+                             (format "** %s"
+                                     (org-llm-chat--agent-heading-text agent))
+                           (format "** %s"
+                                   (org-llm-chat--agent-heading-text
+                                    agent " ERROR"))))
          (rendered
           (concat heading-prefix "\n"
                   (let ((md (org-llm-chat--markdown->org cleaned)))
@@ -765,12 +1242,12 @@ or anything else here fails."
                       md))
                   "\n")))
     (org-llm-chat--replace-placeholder marker rendered)
+    (org-llm-chat--stop-spinner)
     (when (zerop rc)
+      (org-llm-chat--append-next-turn)
       (ignore-errors (save-buffer)))
     (setq-local org-llm-chat--pending-marker nil)
-    (setq-local org-llm-chat--pending-process nil)
-    (when (re-search-forward "^\\*\\* @" nil t)
-      (goto-char (line-end-position)))))
+    (setq-local org-llm-chat--pending-process nil)))
 
 (defun org-llm-chat--strip-ansi (s)
   "Strip ANSI color escape sequences from S."

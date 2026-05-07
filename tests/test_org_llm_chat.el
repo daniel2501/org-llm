@@ -188,8 +188,10 @@
 
 (ert-deftest org-llm-chat/build-proxy-payload-shape ()
   "Payload is JSON, includes messages array, agent field when set,
-and the configured model."
-  (let* ((org-llm-chat-default-model "claude-sonnet-4.6")
+and the configured model. Sidebar injection disabled here so we
+test the bare single-user-message form."
+  (let* ((org-llm-chat-inject-sidebar nil)
+         (org-llm-chat-default-model "claude-sonnet-4.6")
          (json (org-llm-chat--build-proxy-payload "spock" "hello"))
          (parsed (let ((json-object-type 'alist)
                        (json-array-type  'list)
@@ -206,8 +208,10 @@ and the configured model."
     (should (string-match-p "\"stream\":[ \t]*false" json))))
 
 (ert-deftest org-llm-chat/build-proxy-payload-no-agent ()
-  "Without an agent, no `agent' field is emitted and prompt is verbatim."
-  (let* ((json (org-llm-chat--build-proxy-payload nil "plain prompt"))
+  "Without an agent, no `agent' field is emitted and prompt is verbatim.
+Sidebar injection disabled here so we test the bare form."
+  (let* ((org-llm-chat-inject-sidebar nil)
+         (json (org-llm-chat--build-proxy-payload nil "plain prompt"))
          (parsed (let ((json-object-type 'alist)
                        (json-array-type  'list)
                        (json-key-type    'string))
@@ -272,10 +276,12 @@ predicate handles it separately."
   "When `org-llm-chat-streaming' is nil, the dispatcher must NOT
 take the SSE branch — confirmed by checking the build payload's
 `stream' field reflects the toggle."
-  (let* ((org-llm-chat-streaming nil)
+  (let* ((org-llm-chat-inject-sidebar nil)
+         (org-llm-chat-streaming nil)
          (json (org-llm-chat--build-proxy-payload "spock" "hi" nil)))
     (should (string-match-p "\"stream\":[ \t]*false" json)))
-  (let* ((org-llm-chat-streaming t)
+  (let* ((org-llm-chat-inject-sidebar nil)
+         (org-llm-chat-streaming t)
          (json (org-llm-chat--build-proxy-payload "spock" "hi" t)))
     (should (string-match-p "\"stream\":[ \t]*true" json))))
 
@@ -343,6 +349,198 @@ line in place for the next chunk."
       (org-llm-chat--sse-process-buffer state)
       (should (plist-get state :done))
       (should (equal (plist-get state :content) "ok")))))
+
+;; ── DEC-015 — sidebar injection ──────────────────────────────────────────
+
+(ert-deftest org-llm-chat/format-sidebar-tight-shape ()
+  "Given a small synthesised STATUS, the formatted message contains
+the bridge-telemetry header, key sections, and the no-fabricate
+guidance footer."
+  (let* ((status
+          '(("vault"   . (("n_files" . 312)
+                          ("n_nodes" . 1487)
+                          ("n_embedded" . 1402)
+                          ("pct_embedded" . 94)
+                          ("org_dir" . "~/org")))
+            ("vitals"  . ((("label" . "vault")  ("status" . "nominal"))
+                          (("label" . "proxy")  ("status" . "nominal"))
+                          (("label" . "tracker") ("status" . "yellow"))))
+            ("active"  . (("palette" . "bridge-night")
+                          ("intent_agent" . "picard")))
+            ("model"   . (("active" . "claude-sonnet-4.6")
+                          ("provider" . "anthropic")
+                          ("route" . "cloud")))))
+         (out (org-llm-chat--format-sidebar-system-message status)))
+    (should (stringp out))
+    (should (string-match-p "LIVE BRIDGE TELEMETRY" out))
+    (should (string-match-p "VAULT" out))
+    (should (string-match-p "VITALS" out))
+    (should (string-match-p "MODEL" out))
+    (let ((case-fold-search t))
+      (should (string-match-p "do not invent" out)))))
+
+(ert-deftest org-llm-chat/format-sidebar-graceful-missing-keys ()
+  "Empty alist still produces a well-formed string with header +
+no-fabricate guidance footer; no error raised."
+  (let ((out (org-llm-chat--format-sidebar-system-message '())))
+    (should (stringp out))
+    (should (> (length out) 0))
+    (should (string-match-p "LIVE BRIDGE TELEMETRY" out))
+    (let ((case-fold-search t))
+      (should (string-match-p "do not invent" out)))))
+
+(ert-deftest org-llm-chat/build-payload-injects-sidebar-when-present ()
+  "With injection ON and a stubbed status, payload has 3 messages
+ordered system/system/user. With injection OFF, payload has 1
+message (user only)."
+  (cl-letf (((symbol-function 'org-llm-chat--read-sidebar-status)
+             (lambda ()
+               '(("vault" . (("n_files" . 1) ("n_nodes" . 2)))
+                 ("model" . (("active" . "test")))))))
+    (let* ((org-llm-chat-inject-sidebar t)
+           (json (org-llm-chat--build-proxy-payload "picard" "hi"))
+           (parsed (let ((json-object-type 'alist)
+                         (json-array-type  'list)
+                         (json-key-type    'string))
+                     (json-read-from-string json)))
+           (msgs (cdr (assoc "messages" parsed))))
+      (should (= (length msgs) 3))
+      (should (equal (cdr (assoc "role" (nth 0 msgs))) "system"))
+      (should (equal (cdr (assoc "role" (nth 1 msgs))) "system"))
+      (should (equal (cdr (assoc "role" (nth 2 msgs))) "user"))
+      (should (string-match-p "persona slot"
+                              (cdr (assoc "content" (nth 0 msgs)))))
+      (should (string-match-p "LIVE BRIDGE TELEMETRY"
+                              (cdr (assoc "content" (nth 1 msgs)))))
+      (should (string-match-p "@picard hi"
+                              (cdr (assoc "content" (nth 2 msgs)))))))
+  ;; Toggle off → `--read-sidebar-status' returns nil → 1 message.
+  ;; The real `--read-sidebar-status' guards on `org-llm-chat-inject-sidebar',
+  ;; so we stub it to nil here to model that guarded behaviour.
+  (cl-letf (((symbol-function 'org-llm-chat--read-sidebar-status)
+             (lambda () nil)))
+    (let* ((org-llm-chat-inject-sidebar nil)
+           (json (org-llm-chat--build-proxy-payload "picard" "hi"))
+           (parsed (let ((json-object-type 'alist)
+                         (json-array-type  'list)
+                         (json-key-type    'string))
+                     (json-read-from-string json)))
+           (msgs (cdr (assoc "messages" parsed))))
+      (should (= (length msgs) 1))
+      (should (equal (cdr (assoc "role" (nth 0 msgs))) "user")))))
+
+
+;; ── per-agent glyphs ──────────────────────────────────────────────────────
+
+(ert-deftest org-llm-chat/agent-heading-text-known-agent ()
+  "Bridge Crew handles get their canonical glyph + `@<name>'."
+  (should (equal (org-llm-chat--agent-heading-text "picard") "Δ @picard"))
+  (should (equal (org-llm-chat--agent-heading-text "spock")  "🖖 @spock")))
+
+(ert-deftest org-llm-chat/agent-heading-text-unknown-falls-back ()
+  "Unknown agent name renders as bare `@<name>' with no glyph."
+  (should (equal (org-llm-chat--agent-heading-text "stranger")
+                  "@stranger")))
+
+(ert-deftest org-llm-chat/agent-heading-text-suffix ()
+  "Optional SUFFIX is appended after the handle (used by ERROR path)."
+  (should (equal (org-llm-chat--agent-heading-text "picard" " ERROR")
+                  "Δ @picard ERROR")))
+
+;; ── user heading + auto-next-turn ─────────────────────────────────────────
+
+(ert-deftest org-llm-chat/user-heading-regex-accepts-both-shapes ()
+  "Regex must match the configured heading AND legacy `Me' for back-compat."
+  (let ((rgx (org-llm-chat--user-heading-regex)))
+    (should (string-match-p rgx (string-trim org-llm-chat-user-heading)))
+    (should (string-match-p rgx "Me"))
+    (should (string-match-p rgx "Me [Y]"))
+    (should-not (string-match-p rgx "Captain Picard"))))
+
+(ert-deftest org-llm-chat/append-next-turn-inserts-heading ()
+  "After a response, the buffer ends with a fresh user heading + point on it."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Capture\n** " org-llm-chat-user-heading "\nq?\n** @picard\nans\n")
+    (org-llm-chat--append-next-turn)
+    (goto-char (point-min))
+    (let ((count 0))
+      (while (re-search-forward (org-llm-chat--user-heading-line-regex)
+                                  nil t)
+        (cl-incf count))
+      (should (= count 2)))))
+
+(ert-deftest org-llm-chat/append-next-turn-idempotent ()
+  "Calling twice doesn't double-insert when buffer already ends with a heading."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Capture\n** " org-llm-chat-user-heading "\n")
+    (org-llm-chat--append-next-turn)
+    (org-llm-chat--append-next-turn)
+    (goto-char (point-min))
+    (let ((count 0))
+      (while (re-search-forward (org-llm-chat--user-heading-line-regex)
+                                  nil t)
+        (cl-incf count))
+      (should (= count 1)))))
+
+;; ── telemetry source switch ───────────────────────────────────────────────
+
+(ert-deftest org-llm-chat/telemetry-cli-respects-toggle ()
+  "When `inject-sidebar' is nil, --read-sidebar-status returns nil."
+  (let ((org-llm-chat-inject-sidebar nil))
+    (should (null (org-llm-chat--read-sidebar-status)))))
+
+(ert-deftest org-llm-chat/telemetry-cli-fallbacks-to-file ()
+  "When CLI verb is missing, fall back to JSON file (legacy path)."
+  (let* ((tmp (make-temp-file "telemetry-" nil ".json"
+                                "{\"vault\":{\"n_files\":42}}"))
+         (org-llm-chat-inject-sidebar t)
+         (org-llm-chat-telemetry-source 'cli)
+         (org-llm-chat-telemetry-cli "/nonexistent/no-such-bin")
+         (org-llm-chat-sidebar-status-file tmp)
+         (org-llm-chat--telemetry-cache nil))
+    (unwind-protect
+        (let ((data (org-llm-chat--read-sidebar-status)))
+          (should data)
+          (should (equal (cdr (assoc "n_files" (cdr (assoc "vault" data))))
+                          42)))
+      (ignore-errors (delete-file tmp)))))
+
+;; ── LCARS prompt frame ────────────────────────────────────────────────────
+
+(ert-deftest org-llm-chat/prompt-frame-strings-shape ()
+  "Strings carry the configured face + the COMPOSE label."
+  (let ((bounds (org-llm-chat--prompt-frame-strings)))
+    (should (stringp (car bounds)))
+    (should (stringp (cdr bounds)))
+    (should (string-match-p "COMPOSE" (car bounds)))
+    (should (eq (get-text-property 0 'face (car bounds))
+                 'org-llm-chat-prompt-frame-face))))
+
+(ert-deftest org-llm-chat/prompt-frame-draw-clear-cycle ()
+  "Draw creates 2 overlays; clear removes them; idempotent."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Capture\n** " org-llm-chat-user-heading "\nq\n")
+    (let ((org-llm-chat-prompt-frame t))
+      (org-llm-chat--draw-prompt-frame)
+      (should (= (length org-llm-chat--prompt-frame-overlays) 2))
+      (org-llm-chat--clear-prompt-frame)
+      (should (null org-llm-chat--prompt-frame-overlays))
+      ;; double-clear is fine.
+      (org-llm-chat--clear-prompt-frame)
+      (should (null org-llm-chat--prompt-frame-overlays)))))
+
+(ert-deftest org-llm-chat/prompt-frame-disabled-no-op ()
+  "When defcustom is nil, draw inserts no overlays."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Capture\n** " org-llm-chat-user-heading "\n")
+    (let ((org-llm-chat-prompt-frame nil))
+      (org-llm-chat--draw-prompt-frame)
+      (should (null org-llm-chat--prompt-frame-overlays)))))
+
 
 (provide 'test_org_llm_chat)
 ;;; test_org_llm_chat.el ends here
