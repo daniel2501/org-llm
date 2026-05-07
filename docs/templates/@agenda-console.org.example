@@ -1,0 +1,57 @@
+#+TITLE: @agenda — Scheduling + planning specialist console
+#+SUPERSET_DASHBOARD: agenda-console
+#+SUPERSET_DATABASE: org-llm
+#+FILETAGS: :template:superset:dashboard:agenda:specialist:
+#+OPTIONS: toc:nil num:nil
+
+# Specialist console for @agenda (Scheduling + planning specialist). Designed by
+# @geordi via deepseek-r1 askbook on 2026-05-07. Each chart's
+# metric is verbatim from org_llm/metrics/registry.yaml.
+
+* LLM Call Performance by Model
+:PROPERTIES:
+:VIZ_TYPE: line
+:END:
+
+Tracks the average response time of LLM calls by model over time to
+identify performance trends and potential bottlenecks.
+
+#+BEGIN_SRC sql :name llm_call_performance_by_model :metric llm_avg_ms :group_by [model, llm_day]
+SELECT model, substr(timestamp, 1, 10) AS llm_day, AVG(duration_ms) AS llm_avg_ms FROM llm_calls GROUP BY model, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Crew Action Outcomes
+:PROPERTIES:
+:VIZ_TYPE: area
+:END:
+
+Provides a detailed view of crew actions and their outcomes over time,
+helping to identify areas of frequent success or failure.
+
+#+BEGIN_SRC sql :name crew_action_outcomes :metric crew_actions :group_by [crew_action, crew_outcome, crew_day]
+SELECT action AS crew_action, outcome AS crew_outcome, substr(timestamp, 1, 10) AS crew_day, COUNT(*) AS crew_actions FROM crew_log GROUP BY action, outcome, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Historical Command Usage
+:PROPERTIES:
+:VIZ_TYPE: bar
+:END:
+
+Shows the frequency of different commands used over time, aiding in
+understanding the most common and least used functionalities.
+
+#+BEGIN_SRC sql :name historical_command_usage :metric hist_command_count :group_by [hist_command, hist_day]
+SELECT command AS hist_command, substr(timestamp, 1, 10) AS hist_day, COUNT(DISTINCT command) AS hist_command_count FROM history GROUP BY command, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Sensor Alert Rate by Probe
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Visualizes the alert rate of different probes over time to quickly
+identify which sensors are most active or problematic.
+
+#+BEGIN_SRC sql :name sensor_alert_rate_by_probe :metric probe_alert_rate :group_by [probe, sensor_day]
+SELECT probe, date(ts, 'unixepoch') AS sensor_day, AVG(CASE WHEN status IN ('watch','alert','critical') THEN 1.0 ELSE 0.0 END) AS probe_alert_rate FROM sensor_log GROUP BY probe, date(ts, 'unixepoch')
+#+END_SRC

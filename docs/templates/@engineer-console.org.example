@@ -1,0 +1,57 @@
+#+TITLE: @engineer — Code-corpus + dbt specialist console
+#+SUPERSET_DASHBOARD: engineer-console
+#+SUPERSET_DATABASE: org-llm
+#+FILETAGS: :template:superset:dashboard:engineer:specialist:
+#+OPTIONS: toc:nil num:nil
+
+# Specialist console for @engineer (Code-corpus + dbt specialist). Designed by
+# @geordi via deepseek-r1 askbook on 2026-05-07. Each chart's
+# metric is verbatim from org_llm/metrics/registry.yaml.
+
+* LLM Call Performance Over Time
+:PROPERTIES:
+:VIZ_TYPE: line
+:END:
+
+Tracks the average latency of LLM calls by model over time to identify
+performance trends and potential issues.
+
+#+BEGIN_SRC sql :name llm_call_performance_over_time :metric llm_avg_ms :group_by [llm_day, model]
+SELECT substr(timestamp, 1, 10) AS llm_day, model, AVG(duration_ms) AS llm_avg_ms FROM llm_calls GROUP BY substr(timestamp, 1, 10), model
+#+END_SRC
+
+* LLM Error Rate by Model and Outcome
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Visualizes the error rate by LLM model and outcome to pinpoint models
+with high error rates and specific failure modes.
+
+#+BEGIN_SRC sql :name llm_error_rate_by_model_and_outcome :metric llm_error_rate :group_by [model, outcome]
+SELECT model, outcome, AVG(CASE WHEN outcome != 'ok' THEN 1.0 ELSE 0.0 END) AS llm_error_rate FROM llm_calls GROUP BY model, outcome
+#+END_SRC
+
+* Crew Delegations by Agent
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Shows the delegation patterns between agents to optimize workload
+distribution and identify potential bottlenecks.
+
+#+BEGIN_SRC sql :name crew_delegations_by_agent :metric crew_delegations :group_by [agent_from, agent_to]
+SELECT agent_from, agent_to, COUNT(*) AS crew_delegations FROM crew_log WHERE action = 'delegate' GROUP BY agent_from, agent_to
+#+END_SRC
+
+* Sensor Alerts by Probe
+:PROPERTIES:
+:VIZ_TYPE: area
+:END:
+
+Tracks the number of sensor alerts by probe over time to monitor the
+health and reliability of sensor systems.
+
+#+BEGIN_SRC sql :name sensor_alerts_by_probe :metric sensor_alerts :group_by [probe, sensor_day]
+SELECT probe, date(ts, 'unixepoch') AS sensor_day, SUM(CASE WHEN status IN ('watch','alert','critical') THEN 1 ELSE 0 END) AS sensor_alerts FROM sensor_log GROUP BY probe, date(ts, 'unixepoch')
+#+END_SRC

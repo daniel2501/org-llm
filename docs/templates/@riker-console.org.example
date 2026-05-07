@@ -1,0 +1,57 @@
+#+TITLE: @riker — Project tracking specialist console
+#+SUPERSET_DASHBOARD: riker-console
+#+SUPERSET_DATABASE: org-llm
+#+FILETAGS: :template:superset:dashboard:riker:specialist:
+#+OPTIONS: toc:nil num:nil
+
+# Specialist console for @riker (Project tracking specialist). Designed by
+# @geordi via deepseek-r1 askbook on 2026-05-07. Each chart's
+# metric is verbatim from org_llm/metrics/registry.yaml.
+
+* LLM Call Performance Over Time
+:PROPERTIES:
+:VIZ_TYPE: line
+:END:
+
+Track the average latency of LLM calls over days to identify trends
+and potential performance issues.
+
+#+BEGIN_SRC sql :name llm_call_performance_over_time :metric llm_avg_ms :group_by [llm_day]
+SELECT substr(timestamp, 1, 10) AS llm_day, AVG(duration_ms) AS llm_avg_ms FROM llm_calls GROUP BY substr(timestamp, 1, 10)
+#+END_SRC
+
+* Crew Delegation and Failure Rate
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Visualize the distribution of crew failures over days and by outcome
+to identify patterns and areas for improvement.
+
+#+BEGIN_SRC sql :name crew_delegation_and_failure_rate :metric crew_failures :group_by [crew_day, crew_outcome]
+SELECT substr(timestamp, 1, 10) AS crew_day, outcome AS crew_outcome, SUM(CASE WHEN outcome != 'ok' THEN 1 ELSE 0 END) AS crew_failures FROM crew_log GROUP BY substr(timestamp, 1, 10), outcome
+#+END_SRC
+
+* Sensor Alert Rate by Probe
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Monitor the alert rate of different probes over days to quickly
+identify which probes are frequently triggering alerts.
+
+#+BEGIN_SRC sql :name sensor_alert_rate_by_probe :metric sensor_alerts :group_by [probe, sensor_day]
+SELECT probe, date(ts, 'unixepoch') AS sensor_day, SUM(CASE WHEN status IN ('watch','alert','critical') THEN 1 ELSE 0 END) AS sensor_alerts FROM sensor_log GROUP BY probe, date(ts, 'unixepoch')
+#+END_SRC
+
+* Historical Event Distribution by Type
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Understand the distribution of historical events by type and day to
+identify significant events and their frequency.
+
+#+BEGIN_SRC sql :name historical_event_distribution_by_type :metric hist_events :group_by [hist_kind, hist_day]
+SELECT kind AS hist_kind, substr(timestamp, 1, 10) AS hist_day, COUNT(*) AS hist_events FROM history GROUP BY kind, substr(timestamp, 1, 10)
+#+END_SRC

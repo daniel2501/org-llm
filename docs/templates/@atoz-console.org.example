@@ -1,0 +1,60 @@
+#+TITLE: @atoz — Wiki concept-graph specialist console
+#+SUPERSET_DASHBOARD: atoz-console
+#+SUPERSET_DATABASE: org-llm
+#+FILETAGS: :template:superset:dashboard:atoz:specialist:
+#+OPTIONS: toc:nil num:nil
+
+# Specialist console for @atoz (Wiki concept-graph specialist). Designed by
+# @geordi via deepseek-r1 askbook on 2026-05-07. Each chart's
+# metric is verbatim from org_llm/metrics/registry.yaml.
+
+* LLM Model Performance Over Time
+:PROPERTIES:
+:VIZ_TYPE: line
+:END:
+
+Tracks the average response time of different LLM models over days to
+identify performance trends and potential degraded models.
+
+#+BEGIN_SRC sql :name llm_model_performance_over_time :metric llm_avg_ms :group_by [model, llm_day]
+SELECT model, substr(timestamp, 1, 10) AS llm_day, AVG(duration_ms) AS llm_avg_ms FROM llm_calls GROUP BY model, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Crew Actions by Agent and Outcome
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Visualizes the distribution of crew actions by the agent they are
+delegated to and the outcome of those actions, helping to identify
+high-error or high-success patterns.
+
+#+BEGIN_SRC sql :name crew_actions_by_agent_and_outcome :metric crew_actions :group_by [agent_to, crew_outcome]
+SELECT agent_to, outcome AS crew_outcome, COUNT(*) AS crew_actions FROM crew_log GROUP BY agent_to, outcome
+#+END_SRC
+
+* Historical Events by Kind
+:PROPERTIES:
+:VIZ_TYPE: area
+:END:
+
+Shows the count of historical events by kind over days, providing
+insights into the frequency and types of events that occur, which can
+inform content curation and maintenance.
+
+#+BEGIN_SRC sql :name historical_events_by_kind :metric hist_kind_count :group_by [hist_kind, hist_day]
+SELECT kind AS hist_kind, substr(timestamp, 1, 10) AS hist_day, COUNT(DISTINCT kind) AS hist_kind_count FROM history GROUP BY kind, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Sensor Readings by Probe Status
+:PROPERTIES:
+:VIZ_TYPE: bar
+:END:
+
+Displays the number of sensor readings by probe and status, helping to
+identify issues with specific sensors or probes and ensuring data
+integrity.
+
+#+BEGIN_SRC sql :name sensor_readings_by_probe_status :metric sensor_readings :group_by [probe, probe_status]
+SELECT probe, status AS probe_status, COUNT(*) AS sensor_readings FROM sensor_log GROUP BY probe, status
+#+END_SRC

@@ -1,0 +1,57 @@
+#+TITLE: @reviewer — Code review specialist console
+#+SUPERSET_DASHBOARD: reviewer-console
+#+SUPERSET_DATABASE: org-llm
+#+FILETAGS: :template:superset:dashboard:reviewer:specialist:
+#+OPTIONS: toc:nil num:nil
+
+# Specialist console for @reviewer (Code review specialist). Designed by
+# @geordi via deepseek-r1 askbook on 2026-05-07. Each chart's
+# metric is verbatim from org_llm/metrics/registry.yaml.
+
+* LLM Error Rate by Model and Outcome
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Identifies which LLM models and outcomes are most prone to errors,
+helping to focus optimization efforts.
+
+#+BEGIN_SRC sql :name llm_error_rate_by_model_and_outcome :metric llm_error_rate :group_by [model, outcome]
+SELECT model, outcome, AVG(CASE WHEN outcome != 'ok' THEN 1.0 ELSE 0.0 END) AS llm_error_rate FROM llm_calls GROUP BY model, outcome
+#+END_SRC
+
+* LLM Average Response Time by Model and Call Kind
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Reveals which LLM models and call kinds have the highest average
+response times, guiding performance improvements.
+
+#+BEGIN_SRC sql :name llm_average_response_time_by_model_and_call_kind :metric llm_avg_ms :group_by [model, call_kind]
+SELECT model, call_kind, AVG(duration_ms) AS llm_avg_ms FROM llm_calls GROUP BY model, call_kind
+#+END_SRC
+
+* Crew Failures by Agent and Outcome
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Highlights specific agents and outcomes with the highest failure
+rates, aiding in identifying and addressing operational issues.
+
+#+BEGIN_SRC sql :name crew_failures_by_agent_and_outcome :metric crew_failures :group_by [agent_to, crew_outcome]
+SELECT agent_to, outcome AS crew_outcome, SUM(CASE WHEN outcome != 'ok' THEN 1 ELSE 0 END) AS crew_failures FROM crew_log GROUP BY agent_to, outcome
+#+END_SRC
+
+* Sensor Alerts by Probe and Status
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Shows which probes and statuses generate the most alerts, helping to
+prioritize maintenance and calibration activities.
+
+#+BEGIN_SRC sql :name sensor_alerts_by_probe_and_status :metric sensor_alerts :group_by [probe, probe_status]
+SELECT probe, status AS probe_status, SUM(CASE WHEN status IN ('watch','alert','critical') THEN 1 ELSE 0 END) AS sensor_alerts FROM sensor_log GROUP BY probe, status
+#+END_SRC

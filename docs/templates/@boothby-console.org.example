@@ -1,0 +1,57 @@
+#+TITLE: @boothby — Vault hygiene advisor console
+#+SUPERSET_DASHBOARD: boothby-console
+#+SUPERSET_DATABASE: org-llm
+#+FILETAGS: :template:superset:dashboard:boothby:specialist:
+#+OPTIONS: toc:nil num:nil
+
+# Specialist console for @boothby (Vault hygiene advisor). Designed by
+# @geordi via deepseek-r1 askbook on 2026-05-07. Each chart's
+# metric is verbatim from org_llm/metrics/registry.yaml.
+
+* Broken‑link alerts by probe and day
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Shows which link‑checking probes fire most alerts and when,
+highlighting hot spots of broken [[id:]] references.
+
+#+BEGIN_SRC sql :name broken_link_alerts_by_probe_and_day :metric sensor_alerts :group_by [probe, sensor_day]
+SELECT probe, date(ts, 'unixepoch') AS sensor_day, SUM(CASE WHEN status IN ('watch','alert','critical') THEN 1 ELSE 0 END) AS sensor_alerts FROM sensor_log GROUP BY probe, date(ts, 'unixepoch')
+#+END_SRC
+
+* TODO lifecycle – created vs resolved per day
+:PROPERTIES:
+:VIZ_TYPE: bar
+:END:
+
+Lets the vault‑hygiene specialist see daily trends of new TODOs and
+their resolution rate, exposing stale or forgotten tasks.
+
+#+BEGIN_SRC sql :name todo_lifecycle___created_vs_resolved_per_day :metric hist_kind_count :group_by [hist_kind, hist_day]
+SELECT kind AS hist_kind, substr(timestamp, 1, 10) AS hist_day, COUNT(DISTINCT kind) AS hist_kind_count FROM history GROUP BY kind, substr(timestamp, 1, 10)
+#+END_SRC
+
+* LLM error rate over time (potential embedding staleness)
+:PROPERTIES:
+:VIZ_TYPE: line
+:END:
+
+Correlates spikes in LLM errors with later content‑staleness issues,
+helping to decide if model reliability impacts vault hygiene.
+
+#+BEGIN_SRC sql :name llm_error_rate_over_time__potential_embedding_staleness :metric llm_error_rate :group_by [llm_day]
+SELECT substr(timestamp, 1, 10) AS llm_day, AVG(CASE WHEN outcome != 'ok' THEN 1.0 ELSE 0.0 END) AS llm_error_rate FROM llm_calls GROUP BY substr(timestamp, 1, 10)
+#+END_SRC
+
+* Crew link‑audit actions by day
+:PROPERTIES:
+:VIZ_TYPE: bar
+:END:
+
+Tracks how often agents run link‑audit or orphan‑node checks,
+revealing gaps in proactive hygiene maintenance.
+
+#+BEGIN_SRC sql :name crew_link_audit_actions_by_day :metric crew_actions :group_by [crew_action, crew_day]
+SELECT action AS crew_action, substr(timestamp, 1, 10) AS crew_day, COUNT(*) AS crew_actions FROM crew_log GROUP BY action, substr(timestamp, 1, 10)
+#+END_SRC

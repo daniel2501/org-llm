@@ -1,0 +1,57 @@
+#+TITLE: @journalist — Mood + sentiment specialist console
+#+SUPERSET_DASHBOARD: journalist-console
+#+SUPERSET_DATABASE: org-llm
+#+FILETAGS: :template:superset:dashboard:journalist:specialist:
+#+OPTIONS: toc:nil num:nil
+
+# Specialist console for @journalist (Mood + sentiment specialist). Designed by
+# @geordi via deepseek-r1 askbook on 2026-05-07. Each chart's
+# metric is verbatim from org_llm/metrics/registry.yaml.
+
+* LLM Error Rate by Model and Outcome
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Identifies models and outcomes with higher error rates, helping to
+pinpoint areas for improvement in the LLM system.
+
+#+BEGIN_SRC sql :name llm_error_rate_by_model_and_outcome :metric llm_error_rate :group_by [model, outcome]
+SELECT model, outcome, AVG(CASE WHEN outcome != 'ok' THEN 1.0 ELSE 0.0 END) AS llm_error_rate FROM llm_calls GROUP BY model, outcome
+#+END_SRC
+
+* Crew Action Success Rate by Agent and Action
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Reveals which agents and actions have higher failure rates, guiding
+focus on specific agents or actions that need optimization.
+
+#+BEGIN_SRC sql :name crew_action_success_rate_by_agent_and_action :metric crew_failures :group_by [agent_to, crew_action]
+SELECT agent_to, action AS crew_action, SUM(CASE WHEN outcome != 'ok' THEN 1 ELSE 0 END) AS crew_failures FROM crew_log GROUP BY agent_to, action
+#+END_SRC
+
+* Historical Event Distribution by Kind and Day
+:PROPERTIES:
+:VIZ_TYPE: area
+:END:
+
+Shows the trend of different event kinds over time, providing insights
+into system behavior and potential areas of concern.
+
+#+BEGIN_SRC sql :name historical_event_distribution_by_kind_and_day :metric hist_kind_count :group_by [hist_kind, hist_day]
+SELECT kind AS hist_kind, substr(timestamp, 1, 10) AS hist_day, COUNT(DISTINCT kind) AS hist_kind_count FROM history GROUP BY kind, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Sensor Alert Rate by Probe and Day
+:PROPERTIES:
+:VIZ_TYPE: line
+:END:
+
+Tracks the alert rate of different probes over time, helping to
+identify patterns or anomalies in sensor readings.
+
+#+BEGIN_SRC sql :name sensor_alert_rate_by_probe_and_day :metric probe_alert_rate :group_by [probe, sensor_day]
+SELECT probe, date(ts, 'unixepoch') AS sensor_day, AVG(CASE WHEN status IN ('watch','alert','critical') THEN 1.0 ELSE 0.0 END) AS probe_alert_rate FROM sensor_log GROUP BY probe, date(ts, 'unixepoch')
+#+END_SRC

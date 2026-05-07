@@ -1,0 +1,60 @@
+#+TITLE: @almanac — External context specialist console
+#+SUPERSET_DASHBOARD: almanac-console
+#+SUPERSET_DATABASE: org-llm
+#+FILETAGS: :template:superset:dashboard:almanac:specialist:
+#+OPTIONS: toc:nil num:nil
+
+# Specialist console for @almanac (External context specialist). Designed by
+# @geordi via deepseek-r1 askbook on 2026-05-07. Each chart's
+# metric is verbatim from org_llm/metrics/registry.yaml.
+
+* LLM Error Rates by Model
+:PROPERTIES:
+:VIZ_TYPE: line
+:END:
+
+Identifies trends in error rates for different LLM models over time,
+helping to pinpoint which models are experiencing more frequent
+issues.
+
+#+BEGIN_SRC sql :name llm_error_rates_by_model :metric llm_error_rate :group_by [model, llm_day]
+SELECT model, substr(timestamp, 1, 10) AS llm_day, AVG(CASE WHEN outcome != 'ok' THEN 1.0 ELSE 0.0 END) AS llm_error_rate FROM llm_calls GROUP BY model, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Crew Actions by Agent
+:PROPERTIES:
+:VIZ_TYPE: bar
+:END:
+
+Provides a clear view of the workload distribution among agents,
+highlighting any agents that might be overloaded or underutilized.
+
+#+BEGIN_SRC sql :name crew_actions_by_agent :metric crew_actions :group_by [agent_to, crew_day]
+SELECT agent_to, substr(timestamp, 1, 10) AS crew_day, COUNT(*) AS crew_actions FROM crew_log GROUP BY agent_to, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Historical Event Counts by Type
+:PROPERTIES:
+:VIZ_TYPE: area
+:END:
+
+Reveals patterns and trends in the types of historical events
+occurring over time, aiding in understanding the operational history
+and planning for future scenarios.
+
+#+BEGIN_SRC sql :name historical_event_counts_by_type :metric hist_kind_count :group_by [hist_kind, hist_day]
+SELECT kind AS hist_kind, substr(timestamp, 1, 10) AS hist_day, COUNT(DISTINCT kind) AS hist_kind_count FROM history GROUP BY kind, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Sensor Alerts by Probe
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Visualizes the frequency of alerts from different probes over time,
+helping to identify which probes are most active and may require
+maintenance or attention.
+
+#+BEGIN_SRC sql :name sensor_alerts_by_probe :metric sensor_alerts :group_by [probe, sensor_day]
+SELECT probe, date(ts, 'unixepoch') AS sensor_day, SUM(CASE WHEN status IN ('watch','alert','critical') THEN 1 ELSE 0 END) AS sensor_alerts FROM sensor_log GROUP BY probe, date(ts, 'unixepoch')
+#+END_SRC

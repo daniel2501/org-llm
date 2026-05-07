@@ -1,0 +1,57 @@
+#+TITLE: @scribe — Capture & DRAFTING specialist console
+#+SUPERSET_DASHBOARD: scribe-console
+#+SUPERSET_DATABASE: org-llm
+#+FILETAGS: :template:superset:dashboard:scribe:specialist:
+#+OPTIONS: toc:nil num:nil
+
+# Specialist console for @scribe (Capture & DRAFTING specialist). Designed by
+# @geordi via deepseek-r1 askbook on 2026-05-07. Each chart's
+# metric is verbatim from org_llm/metrics/registry.yaml.
+
+* LLM Model Performance by Error Rate
+:PROPERTIES:
+:VIZ_TYPE: line
+:END:
+
+Identify trends in error rates across different LLM models over time
+to optimize model selection and performance.
+
+#+BEGIN_SRC sql :name llm_model_performance_by_error_rate :metric llm_error_rate :group_by [model, llm_day]
+SELECT model, substr(timestamp, 1, 10) AS llm_day, AVG(CASE WHEN outcome != 'ok' THEN 1.0 ELSE 0.0 END) AS llm_error_rate FROM llm_calls GROUP BY model, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Crew Delegation Outcomes
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Visualize the effectiveness of delegations by agent to identify
+bottlenecks and areas for improving crew coordination.
+
+#+BEGIN_SRC sql :name crew_delegation_outcomes :metric crew_delegations :group_by [agent_to, crew_outcome]
+SELECT agent_to, outcome AS crew_outcome, COUNT(*) AS crew_delegations FROM crew_log WHERE action = 'delegate' GROUP BY agent_to, outcome
+#+END_SRC
+
+* Historical Event Distribution by Kind
+:PROPERTIES:
+:VIZ_TYPE: area
+:END:
+
+Understand the distribution of different types of historical events
+over time to identify patterns and significant periods.
+
+#+BEGIN_SRC sql :name historical_event_distribution_by_kind :metric hist_kind_count :group_by [hist_kind, hist_day]
+SELECT kind AS hist_kind, substr(timestamp, 1, 10) AS hist_day, COUNT(DISTINCT kind) AS hist_kind_count FROM history GROUP BY kind, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Sensor Alert Rate by Probe
+:PROPERTIES:
+:VIZ_TYPE: bar
+:END:
+
+Monitor the alert frequency of different probes to identify potential
+issues in the sensor network and prioritize maintenance.
+
+#+BEGIN_SRC sql :name sensor_alert_rate_by_probe :metric probe_alert_rate :group_by [probe, sensor_day]
+SELECT probe, date(ts, 'unixepoch') AS sensor_day, AVG(CASE WHEN status IN ('watch','alert','critical') THEN 1.0 ELSE 0.0 END) AS probe_alert_rate FROM sensor_log GROUP BY probe, date(ts, 'unixepoch')
+#+END_SRC
