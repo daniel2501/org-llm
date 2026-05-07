@@ -25,6 +25,20 @@ opencode plugin rendering into Emacs). MVP scope is identified
 and sprint-shaped (≤2 weeks). The candidate decision is filed in
 [[file:dev-tracker.org][dev-tracker.org]] as DEC-015 (TODO).
 
+* Ship log
+
+| Cut  | Date       | What landed                                                                                  |
+|------+------------+----------------------------------------------------------------------------------------------|
+| v0   | 2026-05-05 | =M-x org-llm-chat= + session file + =@<agent>= prefix + shell-out backend (=org-llm ask=).   |
+| v0.1 | 2026-05-05 | HTTP-to-proxy backend via =url-retrieve= when =~/.local/share/org-llm/proxy-port= present.   |
+| v0.2 | 2026-05-07 | SSE streaming via =make-network-process=; per-token render at the placeholder; auto-fallback to v0.1 on socket error. New =org-llm-chat-streaming= defcustom (default =t=). |
+
+Path 1 (native Emacs UI to MCP/proxy) is the chosen implementation.
+v0.2 closes the "feels live" gate; refile / export-subtree / pin
+all work against the live chat buffer because it's a real org file.
+28/28 elisp ert tests green; live-wire smoke against ollama
+phi4-mini round-trips streaming deltas under =** @<agent>=.
+
 * The user-facing experience (mock)
 
 A faux session — what an actual chat buffer looks like at rest:
