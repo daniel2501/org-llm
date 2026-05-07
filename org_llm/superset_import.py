@@ -564,18 +564,32 @@ def _emit_chart_yaml(
     # see comment on _VIZ_TYPE_MIGRATION above).
     viz_type = _VIZ_TYPE_MIGRATION.get(chart.viz_type, chart.viz_type)
 
+    # echarts_timeseries_* (bar / line / area) require an explicit
+    # x_axis or they render as "Datetime column not provided".
+    # Templates put the time-like dimension last in :group_by (e.g.
+    # [model, llm_day]), so promoting the last column to x_axis works
+    # for both time-axis charts (llm_day → x_axis) and pure
+    # categorical ones (chart 3: [model] → x_axis=model, groupby=[];
+    # chart 6: [call_kind, model] → x_axis=model, groupby=[call_kind]).
+    chart_groupby = list(chart.group_by)
+    x_axis: str | None = None
+    if viz_type.startswith("echarts_timeseries") and chart_groupby:
+        x_axis = chart_groupby.pop()
+
     # `params` is a free-form JSON-blob dict matching whatever the
     # viz_type's controlPanel expects. For agent-shaped use the table
     # viz is the safe default; the Babel block's :metric arg lands in
     # the metrics array, and :group_by populates groupby.
-    params = {
+    params: dict[str, Any] = {
         "datasource": f"{dataset_uuid}__table",
         "viz_type": viz_type,
-        "groupby": chart.group_by,
+        "groupby": chart_groupby,
         "metrics": [chart.metric_name],
         "adhoc_filters": [],
         "row_limit": 1000,
     }
+    if x_axis is not None:
+        params["x_axis"] = x_axis
 
     # Without a populated query_context, GET /api/v1/chart/<id>/data
     # fails with "Chart has no query context saved" until the user

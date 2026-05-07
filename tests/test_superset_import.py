@@ -154,7 +154,11 @@ def test_chart_yaml_carries_registry_metric_expression(org_path: Path) -> None:
     # (avoids the form_data-stringification side effect).
     assert chart["viz_type"] == "echarts_timeseries_bar"
     assert chart["params"]["metrics"] == ["llm_avg_ms"]
-    assert chart["params"]["groupby"] == ["call_kind"]
+    # echarts_timeseries_* requires an x_axis; preprocessor promotes
+    # the last :group_by column. With a single-element :group_by, that
+    # leaves groupby empty and call_kind on x_axis.
+    assert chart["params"]["groupby"] == []
+    assert chart["params"]["x_axis"] == "call_kind"
 
     # Walk to the dataset YAML and confirm the metric expression matches
     # what the registry would emit. This is the load-bearing assertion —
