@@ -1,0 +1,159 @@
+table_name: llm_x_history_event
+main_dttm_col: llm_timestamp
+description: "org-llm cross-source join: llm \u2194 history (inner)"
+default_endpoint: null
+offset: 0
+cache_timeout: null
+schema: null
+sql: SELECT llm.model AS model, llm.outcome AS outcome, llm.call_kind AS call_kind,
+  llm.command AS command, substr(llm.timestamp, 1, 10) AS llm_day, history.kind AS
+  hist_kind, history.command AS hist_command, substr(history.timestamp, 1, 10) AS
+  hist_day, llm.timestamp AS llm_timestamp, llm.model AS llm_model, llm.outcome AS
+  llm_outcome, llm.call_kind AS llm_call_kind, llm.command AS llm_command, llm.duration_ms
+  AS llm_duration_ms, history.timestamp AS history_timestamp, history.kind AS history_kind,
+  history.command AS history_command, history.duration_ms AS history_duration_ms FROM
+  llm_calls AS llm INNER JOIN history AS history ON llm.id = history.id AND history.kind
+  = 'llm'
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+uuid: 74dbc2b4-d1de-5746-a492-e21b783689ae
+metrics:
+- metric_name: llm_calls
+  verbose_name: llm_calls
+  metric_type: null
+  expression: COUNT(*)
+  description: Total LLM calls
+  d3format: null
+  warning_text: null
+- metric_name: llm_errors
+  verbose_name: llm_errors
+  metric_type: null
+  expression: SUM(CASE WHEN llm_outcome != 'ok' THEN 1 ELSE 0 END)
+  description: Failed LLM calls (outcome != 'ok')
+  d3format: null
+  warning_text: null
+- metric_name: llm_error_rate
+  verbose_name: llm_error_rate
+  metric_type: null
+  expression: AVG(CASE WHEN llm_outcome != 'ok' THEN 1.0 ELSE 0.0 END)
+  description: Error rate, 0..1
+  d3format: null
+  warning_text: null
+- metric_name: llm_avg_ms
+  verbose_name: llm_avg_ms
+  metric_type: null
+  expression: AVG(llm_duration_ms)
+  description: Mean call duration (ms)
+  d3format: null
+  warning_text: null
+- metric_name: llm_max_ms
+  verbose_name: llm_max_ms
+  metric_type: null
+  expression: MAX(llm_duration_ms)
+  description: Slowest call duration (ms)
+  d3format: null
+  warning_text: null
+- metric_name: hist_events
+  verbose_name: hist_events
+  metric_type: null
+  expression: COUNT(*)
+  description: Total history rows
+  d3format: null
+  warning_text: null
+- metric_name: hist_avg_ms
+  verbose_name: hist_avg_ms
+  metric_type: null
+  expression: AVG(history_duration_ms)
+  description: Mean history-event duration (ms)
+  d3format: null
+  warning_text: null
+- metric_name: hist_kind_count
+  verbose_name: hist_kind_count
+  metric_type: null
+  expression: COUNT(DISTINCT history_kind)
+  description: Distinct history kinds in the window (drift / new-kind detector)
+  d3format: null
+  warning_text: null
+- metric_name: hist_command_count
+  verbose_name: hist_command_count
+  metric_type: null
+  expression: COUNT(DISTINCT history_command)
+  description: Distinct history commands in the window (vocabulary breadth)
+  d3format: null
+  warning_text: null
+columns:
+- column_name: llm_timestamp
+  is_dttm: true
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: history_timestamp
+  is_dttm: true
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: model
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: outcome
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: call_kind
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: command
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: llm_day
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: hist_kind
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: hist_command
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: hist_day
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+version: 1.0.0
+database_uuid: e208c207-65af-52ef-87b4-62769969e6fc

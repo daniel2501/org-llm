@@ -212,6 +212,76 @@ def test_emit_superset_writes_bundle(registry: Registry, tmp_path: Path) -> None
     assert Path(f"datasets/{db_dirname}/crew_log.yaml") in files
 
 
+def test_emit_superset_writes_join_virtual_datasets(
+    registry: Registry, tmp_path: Path
+) -> None:
+    """v1.1.1: each declared join becomes a Superset virtual dataset.
+
+    The dataset's SQL projects every dim + raw column from both sides
+    (with `<source>_<col>` prefix to dodge collisions like `timestamp` /
+    `id`); metric expressions are rewritten to reference the prefixed
+    columns; columns block lists each registry dim as a bare alias.
+    """
+    target = tmp_path / "bundle"
+    registry.emit_superset(target)
+    db_dirname = SUPERSET_DATABASE_NAME.replace("-", "_")
+    join_path = target / f"datasets/{db_dirname}/llm_x_history_event.yaml"
+    assert join_path.exists()
+    ds = yaml.safe_load(join_path.read_text())
+    assert ds["table_name"] == "llm_x_history_event"
+
+    # SQL has explicit JOIN with the right ON clause + filter.
+    sql = ds["sql"]
+    assert "FROM llm_calls AS llm" in sql
+    assert "INNER JOIN history AS history" in sql
+    assert "ON llm.id = history.id" in sql
+    assert "history.kind = 'llm'" in sql
+    # Dim exprs aliased to dim name; raw cols prefixed by source.
+    assert "llm.model AS model" in sql
+    assert "history.kind AS hist_kind" in sql
+    assert "llm.duration_ms AS llm_duration_ms" in sql
+    assert "history.duration_ms AS history_duration_ms" in sql
+
+    # Metric expressions reference the prefixed columns (so the
+    # virtual dataset's aggregations stay correct over the joined
+    # row stream).
+    metrics = {m["metric_name"]: m["expression"] for m in ds["metrics"]}
+    assert metrics["llm_avg_ms"] == "AVG(llm_duration_ms)"
+    assert metrics["hist_avg_ms"] == "AVG(history_duration_ms)"
+    # COUNT(*) has no column refs so passes through unchanged.
+    assert metrics["llm_calls"] == "COUNT(*)"
+    # CASE-WHEN folds (from metric where-clauses) get prefixed too.
+    assert "llm_outcome != 'ok'" in metrics["llm_errors"]
+
+    # All declared joins emit a dataset.
+    expected_join_files = {
+        "llm_x_history_event.yaml",
+        "crew_x_llm_command.yaml",
+        "llm_x_sensors_temporal.yaml",
+    }
+    actual = {p.name for p in (target / f"datasets/{db_dirname}").iterdir()}
+    assert expected_join_files.issubset(actual)
+
+
+def test_emit_superset_join_dataset_main_dttm_col_picks_left_side(
+    registry: Registry, tmp_path: Path
+) -> None:
+    """main_dttm_col (Superset's default time column) is the left
+    source's prefixed time column. Charts default to using that as
+    the X axis."""
+    target = tmp_path / "bundle"
+    registry.emit_superset(target)
+    db_dirname = SUPERSET_DATABASE_NAME.replace("-", "_")
+    ds = yaml.safe_load(
+        (target / f"datasets/{db_dirname}/llm_x_sensors_temporal.yaml").read_text()
+    )
+    # llm side comes first in the join's `sources: [llm, sensors]`.
+    assert ds["main_dttm_col"] == "llm_timestamp"
+    # Both sides' time columns appear as is_dttm columns.
+    dttm_cols = {c["column_name"] for c in ds["columns"] if c.get("is_dttm")}
+    assert {"llm_timestamp", "sensors_ts"} == dttm_cols
+
+
 def test_emit_superset_idempotent_uuids(registry: Registry, tmp_path: Path) -> None:
     """Two emits must produce byte-identical YAML for stable round-trip."""
     a = tmp_path / "a"

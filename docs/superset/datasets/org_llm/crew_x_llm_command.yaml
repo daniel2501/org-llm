@@ -1,0 +1,174 @@
+table_name: crew_x_llm_command
+main_dttm_col: crew_timestamp
+description: "org-llm cross-source join: crew \u2194 llm (left)"
+default_endpoint: null
+offset: 0
+cache_timeout: null
+schema: null
+sql: SELECT llm.model AS model, llm.outcome AS outcome, llm.call_kind AS call_kind,
+  llm.command AS command, substr(llm.timestamp, 1, 10) AS llm_day, crew.agent_to AS
+  agent_to, crew.agent_from AS agent_from, crew.action AS crew_action, crew.outcome
+  AS crew_outcome, substr(crew.timestamp, 1, 10) AS crew_day, crew.timestamp AS crew_timestamp,
+  crew.agent_to AS crew_agent_to, crew.agent_from AS crew_agent_from, crew.action
+  AS crew_action, crew.outcome AS crew_outcome, llm.timestamp AS llm_timestamp, llm.model
+  AS llm_model, llm.outcome AS llm_outcome, llm.call_kind AS llm_call_kind, llm.command
+  AS llm_command, llm.duration_ms AS llm_duration_ms FROM crew_log AS crew LEFT JOIN
+  llm_calls AS llm ON crew.agent_to = llm.command
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+uuid: 4851aee5-58c2-5121-98c8-786e50e43391
+metrics:
+- metric_name: llm_calls
+  verbose_name: llm_calls
+  metric_type: null
+  expression: COUNT(*)
+  description: Total LLM calls
+  d3format: null
+  warning_text: null
+- metric_name: llm_errors
+  verbose_name: llm_errors
+  metric_type: null
+  expression: SUM(CASE WHEN llm_outcome != 'ok' THEN 1 ELSE 0 END)
+  description: Failed LLM calls (outcome != 'ok')
+  d3format: null
+  warning_text: null
+- metric_name: llm_error_rate
+  verbose_name: llm_error_rate
+  metric_type: null
+  expression: AVG(CASE WHEN llm_outcome != 'ok' THEN 1.0 ELSE 0.0 END)
+  description: Error rate, 0..1
+  d3format: null
+  warning_text: null
+- metric_name: llm_avg_ms
+  verbose_name: llm_avg_ms
+  metric_type: null
+  expression: AVG(llm_duration_ms)
+  description: Mean call duration (ms)
+  d3format: null
+  warning_text: null
+- metric_name: llm_max_ms
+  verbose_name: llm_max_ms
+  metric_type: null
+  expression: MAX(llm_duration_ms)
+  description: Slowest call duration (ms)
+  d3format: null
+  warning_text: null
+- metric_name: crew_actions
+  verbose_name: crew_actions
+  metric_type: null
+  expression: COUNT(*)
+  description: Manager (crew) audit-log rows
+  d3format: null
+  warning_text: null
+- metric_name: crew_delegations
+  verbose_name: crew_delegations
+  metric_type: null
+  expression: SUM(CASE WHEN (crew_action = 'delegate') THEN 1 ELSE 0 END)
+  description: Manager delegations to specialists
+  d3format: null
+  warning_text: null
+- metric_name: crew_failures
+  verbose_name: crew_failures
+  metric_type: null
+  expression: SUM(CASE WHEN crew_outcome != 'ok' THEN 1 ELSE 0 END)
+  description: Crew actions whose outcome wasn't 'ok'
+  d3format: null
+  warning_text: null
+- metric_name: agent_fan_out
+  verbose_name: agent_fan_out
+  metric_type: null
+  expression: COUNT(DISTINCT crew_agent_to)
+  description: Distinct downstream agents an agent_from has talked to (proxy-vs-manager
+    dominance lens)
+  d3format: null
+  warning_text: null
+columns:
+- column_name: crew_timestamp
+  is_dttm: true
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: llm_timestamp
+  is_dttm: true
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: model
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: outcome
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: call_kind
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: command
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: llm_day
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: agent_to
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: agent_from
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: crew_action
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: crew_outcome
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: crew_day
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+version: 1.0.0
+database_uuid: e208c207-65af-52ef-87b4-62769969e6fc

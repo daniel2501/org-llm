@@ -67,14 +67,20 @@ _SQL_KEYWORDS: frozenset[str] = frozenset(
 _IDENT_RE = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
 
 
-def _qualify_columns(expr: str, alias: str) -> str:
-    """Rewrite bare column identifiers in `expr` by prepending `alias.`.
+def _qualify_columns(expr: str, alias: str, separator: str = ".") -> str:
+    """Rewrite bare column identifiers in `expr` by prepending `alias<sep>`.
 
     Heuristic: walk the string; skip single-quoted string literals; for each
-    bare identifier token, prepend `<alias>.` UNLESS it's a SQL keyword,
+    bare identifier token, prepend `<alias><sep>` UNLESS it's a SQL keyword,
     already qualified (preceded by `.`), or a function call (followed by `(`
     after optional whitespace). Numbers don't match `_IDENT_RE` so they pass
     through unchanged.
+
+    `separator` defaults to "." (the SQL `<table>.<col>` form used by
+    Registry.compile() for cross-source queries). Pass "_" for the
+    virtual-dataset emitter, which projects raw columns as
+    `<source>.<col> AS <source>_<col>` and needs metric expressions
+    rewritten to reference the underscore-aliased form.
     """
     out: list[str] = []
     i = 0
@@ -106,7 +112,7 @@ def _qualify_columns(expr: str, alias: str) -> str:
                 and prev != "."
                 and not is_func_call
             ):
-                out.append(f"{alias}.{tok}")
+                out.append(f"{alias}{separator}{tok}")
             else:
                 out.append(tok)
             i = end
@@ -663,7 +669,213 @@ class Registry:
             )
             written.append(ds_path)
 
+        # v1.1.1 — emit a Superset virtual SQL dataset for each declared
+        # cross-source join. The dataset projects every dim + raw column
+        # both sides need (with a `<source>_` prefix to dodge collisions
+        # like `timestamp` / `id`), and re-binds each registry metric on
+        # to the prefixed columns. Charts can then group by any
+        # registered dim from either side and apply any registered
+        # metric, just like a single-source dataset.
+        for j in self.joins.values():
+            ds_path = self._emit_join_dataset(j, db_uuid, datasets_dir)
+            written.append(ds_path)
+
         return written
+
+    def _raw_cols_for_source(self, source_name: str) -> list[str]:
+        """Stable list of raw column identifiers referenced by this
+        source's time_col + dimensions + metrics + metric where-clauses.
+
+        Used by the virtual-dataset emitter to know which columns to
+        project from each base table. Order is deterministic so the
+        emitter is idempotent."""
+        seen: dict[str, None] = {}
+        seen[self.sources[source_name].time_col] = None
+        for d in self.dimensions.values():
+            if d.source == source_name:
+                for tok in self._extract_idents(d.expr):
+                    seen.setdefault(tok, None)
+        for m in self.metrics.values():
+            if m.source == source_name:
+                for tok in self._extract_idents(m.expr):
+                    seen.setdefault(tok, None)
+                for w in m.where:
+                    for tok in self._extract_idents(w):
+                        seen.setdefault(tok, None)
+        return list(seen.keys())
+
+    @staticmethod
+    def _extract_idents(expr: str) -> list[str]:
+        """Bare-identifier tokens in a SQL fragment, minus keywords +
+        anything that looks like a function call. Lowercase comparison
+        only; preserves original casing in the return."""
+        out: list[str] = []
+        i = 0
+        n = len(expr)
+        while i < n:
+            c = expr[i]
+            if c == "'":
+                j = i + 1
+                while j < n and expr[j] != "'":
+                    j += 1
+                i = j + 1
+                continue
+            m = _IDENT_RE.match(expr, i)
+            if m:
+                tok = m.group(0)
+                end = m.end()
+                after = expr[end:].lstrip()
+                if (
+                    tok.upper() not in _SQL_KEYWORDS
+                    and not after.startswith("(")
+                    and (i == 0 or expr[i - 1] != ".")
+                ):
+                    out.append(tok)
+                i = end
+                continue
+            i += 1
+        return out
+
+    def _emit_join_dataset(
+        self, j: Join, db_uuid: str, datasets_dir: Path
+    ) -> Path:
+        """Emit a Superset virtual SQL dataset for one declared join.
+
+        Layout:
+          - SQL: SELECT <prefixed raw cols> + <aliased dim exprs>
+                 FROM <a> AS <a> [INNER|LEFT] JOIN <b> AS <b>
+                 ON <on.left> = <on.right> [AND <on.filter>]
+          - columns: each registered dim covered by either source
+                     (column_name = dim name; no expression — bare
+                     SELECT alias from the SQL above)
+          - metrics: each registered metric from either source,
+                     expression rewritten to reference the
+                     `<source>_<col>` prefix form
+        """
+        a, b = j.sources
+        src_a = self.sources[a]
+        src_b = self.sources[b]
+        alias_a, alias_b = a, b
+
+        # SQL projection — registry dim exprs first (aliased to dim
+        # name; dim names are unique across sources), then raw columns
+        # with `<source>_<col>` prefix so metric expressions can rebind
+        # without collision.
+        select_parts: list[str] = []
+        for d in self.dimensions.values():
+            if d.source not in (a, b):
+                continue
+            alias = a if d.source == a else b
+            qualified = _qualify_columns(d.expr, alias)
+            select_parts.append(f"{qualified} AS {d.name}")
+        for src_name, src in ((a, src_a), (b, src_b)):
+            for col in self._raw_cols_for_source(src_name):
+                select_parts.append(f"{src_name}.{col} AS {src_name}_{col}")
+
+        # ON clause — same logic as Registry._compile_join.
+        on_left_q = _qualify_columns(j.on_left, alias_a)
+        on_right_q = _qualify_columns(j.on_right, alias_b)
+        on_parts = [f"{on_left_q} = {on_right_q}"]
+        if j.filter:
+            on_parts.append(self._rewrite_filter(j.filter, alias_a, alias_b))
+        join_kw = "LEFT JOIN" if j.kind == "left" else "INNER JOIN"
+        sql = (
+            f"SELECT {', '.join(select_parts)} "
+            f"FROM {src_a.table} AS {alias_a} "
+            f"{join_kw} {src_b.table} AS {alias_b} "
+            f"ON {' AND '.join(on_parts)}"
+        )
+
+        # Dataset columns — registry dims (no expression; they're
+        # already aliased in the SQL output) plus a date-typed entry
+        # for each side's time_col so charts can use them on the X axis.
+        seen_cols: set[str] = set()
+        columns: list[dict[str, Any]] = []
+        for src_name, src in ((a, src_a), (b, src_b)):
+            tcol_name = f"{src_name}_{src.time_col}"
+            seen_cols.add(tcol_name)
+            columns.append(
+                {
+                    "column_name": tcol_name,
+                    "is_dttm": True,
+                    "is_active": True,
+                    "type": "INTEGER" if src.time_col == "ts" else "TEXT",
+                    "groupby": True,
+                    "filterable": True,
+                    "expression": None,
+                }
+            )
+        for d in self.dimensions.values():
+            if d.source not in (a, b) or d.name in seen_cols:
+                continue
+            seen_cols.add(d.name)
+            columns.append(
+                {
+                    "column_name": d.name,
+                    "is_dttm": False,
+                    "is_active": True,
+                    "type": "TEXT",
+                    "groupby": True,
+                    "filterable": True,
+                    "expression": None,
+                }
+            )
+
+        # Dataset metrics — each registry metric from either source,
+        # with column refs rewritten to the `<source>_<col>` prefix.
+        # Reuse _superset_metric_expression to fold metric where-clauses
+        # into CASE-WHEN, then prefix.
+        metrics_yaml: list[dict[str, Any]] = []
+        for m in self.metrics.values():
+            if m.source not in (a, b):
+                continue
+            base_expr = self._superset_metric_expression(m)
+            prefixed = _qualify_columns(base_expr, m.source, separator="_")
+            metrics_yaml.append(
+                {
+                    "metric_name": m.name,
+                    "verbose_name": m.name,
+                    "metric_type": None,
+                    "expression": prefixed,
+                    "description": m.description,
+                    "d3format": None,
+                    "warning_text": None,
+                }
+            )
+
+        ds_uuid = self._stable_uuid("dataset", f"join:{j.name}")
+        # Pick a reasonable main_dttm_col — the side-A time column.
+        main_dttm = f"{a}_{src_a.time_col}"
+        ds_path = datasets_dir / f"{j.name}.yaml"
+        ds_path.write_text(
+            yaml.safe_dump(
+                {
+                    "table_name": j.name,
+                    "main_dttm_col": main_dttm,
+                    "description": (
+                        f"org-llm cross-source join: {a} ↔ {b} "
+                        f"({j.kind})"
+                    ),
+                    "default_endpoint": None,
+                    "offset": 0,
+                    "cache_timeout": None,
+                    "schema": None,
+                    "sql": sql,
+                    "params": None,
+                    "template_params": None,
+                    "filter_select_enabled": True,
+                    "fetch_values_predicate": None,
+                    "extra": None,
+                    "uuid": ds_uuid,
+                    "metrics": metrics_yaml,
+                    "columns": columns,
+                    "version": SUPERSET_IMPORT_VERSION,
+                    "database_uuid": db_uuid,
+                },
+                sort_keys=False,
+            )
+        )
+        return ds_path
 
 
 def _demo() -> None:
