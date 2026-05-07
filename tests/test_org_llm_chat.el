@@ -456,20 +456,32 @@ message (user only)."
 
 ;; ── per-agent glyphs ──────────────────────────────────────────────────────
 
-(ert-deftest org-llm-chat/agent-heading-text-known-agent ()
-  "Bridge Crew handles get their canonical glyph + `@<name>'."
-  (should (equal (org-llm-chat--agent-heading-text "picard") "Δ @picard"))
-  (should (equal (org-llm-chat--agent-heading-text "spock")  "🖖 @spock")))
+(ert-deftest org-llm-chat/agent-heading-text-uses-configured-glyph ()
+  "Configured handles render as `<glyph> @<name>'.
+Test owns its fixture — chat module ships with NO default
+roster (per the architectural rule that agent names must not be
+hardcoded outside the core agent registry)."
+  (let ((org-llm-chat-agent-glyphs '(("foo" . "★")
+                                       ("bar" . "Δ"))))
+    (should (equal (org-llm-chat--agent-heading-text "foo") "★ @foo"))
+    (should (equal (org-llm-chat--agent-heading-text "bar") "Δ @bar"))))
 
 (ert-deftest org-llm-chat/agent-heading-text-unknown-falls-back ()
-  "Unknown agent name renders as bare `@<name>' with no glyph."
-  (should (equal (org-llm-chat--agent-heading-text "stranger")
-                  "@stranger")))
+  "Unconfigured agent names render as bare `@<name>' with no glyph."
+  (let ((org-llm-chat-agent-glyphs '()))
+    (should (equal (org-llm-chat--agent-heading-text "stranger")
+                    "@stranger"))))
+
+(ert-deftest org-llm-chat/agent-heading-text-empty-default ()
+  "Default `org-llm-chat-agent-glyphs' is empty — chat surface
+is roster-agnostic out of the box."
+  (should (equal org-llm-chat-agent-glyphs '())))
 
 (ert-deftest org-llm-chat/agent-heading-text-suffix ()
   "Optional SUFFIX is appended after the handle (used by ERROR path)."
-  (should (equal (org-llm-chat--agent-heading-text "picard" " ERROR")
-                  "Δ @picard ERROR")))
+  (let ((org-llm-chat-agent-glyphs '(("foo" . "★"))))
+    (should (equal (org-llm-chat--agent-heading-text "foo" " ERROR")
+                    "★ @foo ERROR"))))
 
 ;; ── user heading + auto-next-turn ─────────────────────────────────────────
 

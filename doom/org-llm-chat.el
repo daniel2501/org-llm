@@ -27,9 +27,11 @@
 ;;
 ;; Assumptions:
 ;;   - The user has org-llm installed (`org-llm doctor` passes).
-;;   - The Bridge Crew agents (@picard, @spock, @data, @boothby,
-;;     @geordi, @atoz, @riker) are seeded in the agents table.
-;;     `org-llm agents --tangle` writes ~/org/org-llm-agents.org if not.
+;;   - The agent registry is seeded. The chat surface does NOT presume
+;;     any specific agent roster — it dispatches whatever `@<name>'
+;;     prefix the user types, and the proxy / backend resolves it
+;;     against the core registry (`org_llm/agents/_builtins.py' +
+;;     user customisations via `org-llm agents --tangle').
 ;;   - Optional: `org-llm launch` is running somewhere (for proxy-side
 ;;     @-prefix interception). v0 works without it; agent dispatch
 ;;     degrades gracefully to "ask" semantics.
@@ -62,21 +64,29 @@
   :type 'file
   :group 'org-llm-chat)
 
-(defcustom org-llm-chat-default-agent "picard"
-  "Agent name used when the prompt body has no `@<agent>` prefix.
-The default `picard` is the manager — it dispatches to specialists
-internally. To force user-supplied routing on every turn, set this
-to nil."
+(defcustom org-llm-chat-default-agent nil
+  "Agent name used when the prompt body has no `@<agent>' prefix.
+Default is nil — every turn must specify `@<name>'. Set to a
+specific handle (e.g. `\"crew\"' or `\"picard\"') in your local
+config to route un-prefixed prompts somewhere by default. The
+chat surface deliberately ships with no opinionated roster — the
+agent registry is owned by the core (see
+`org_llm/agents/_builtins.py' and `~/org/.opencode/opencode.json'
+which `org-llm launch' regenerates) and is reconfigurable by the
+user, so we don't hardcode handles here."
   :type '(choice (const :tag "No default (require @prefix)" nil)
                  (string :tag "Agent name"))
   :group 'org-llm-chat)
 
-(defcustom org-llm-chat-known-agents
-  '("picard" "spock" "data" "gardener" "analyst" "curator" "tracker"
-    "crew" "scribe" "researcher" "reviewer" "classifier")
-  "Known agent names for `@<name>` prefix detection. Treated as a
-hint set — unknown names still pass through; the proxy or backend
-will tell the user if the agent is unknown."
+(defcustom org-llm-chat-known-agents '()
+  "Optional hint list of known agent handles for `@<name>' prefix
+detection (used only as a soft hint — unknown names still pass
+through, and the proxy/backend reports invalid handles).
+
+Default is empty: the chat surface does not presume any agent
+roster. The authoritative agent list is the core registry
+(`org_llm/agents/_builtins.py' + user customisations); set this
+in your local config to mirror it if you want the hint behaviour."
   :type '(repeat string)
   :group 'org-llm-chat)
 
@@ -169,33 +179,29 @@ on a small local model."
   :type 'boolean
   :group 'org-llm-chat)
 
-(defcustom org-llm-chat-agent-glyphs
-  '(("picard"   . "Δ")
-    ("crew"     . "Δ")
-    ("captain"  . "Δ")
-    ("spock"    . "🖖")
-    ("data"     . "🤖")
-    ("boothby"  . "🌱")
-    ("geordi"   . "👁")
-    ("atoz"     . "📚")
-    ("riker"    . "📡"))
+(defcustom org-llm-chat-agent-glyphs '()
   "Per-agent glyph prepended to response headings.
-Format is `((AGENT . GLYPH) …)' — agent names are bare handles
-(no `@'). Defaults are FUNCTIONAL emoji that telegraph each
-agent's role:
-  picard/crew/captain → `Δ'   (Federation delta — manager)
-  spock               → `🖖'  (Vulcan salute — researcher)
-  data                → `🤖'  (android — scribe)
-  boothby             → `🌱'  (gardener — vault tidy)
-  geordi              → `👁'  (VISOR / sensor — engineer)
-  atoz                → `📚'  (library — curator)
-  riker               → `📡'  (comms relay — coordinator)
-Unknown agents fall back to a bare `@<agent>' heading.
+Format is `((AGENT . GLYPH) …)' — keys are bare agent handles
+(no `@'), values are strings (single chars, emoji, or any text;
+may carry text properties like `:family' for font-faces).
 
-Personal Trek-canon overrides (violin for data, roses for
-boothby, hourglass for atoz, trombone for riker, etc.) belong
-in your local Doom config — see `org-llm-chat-heading-font'
-docstring for the rationale."
+Default is empty: the chat surface deliberately ships with NO
+opinionated roster. The authoritative agent registry lives in
+the core (`org_llm/agents/_builtins.py' + user customisations
+via `org-llm agents --tangle'). Coupling the elisp-side
+glyph map to specific handles (picard/spock/etc.) would lock
+the chat surface against agent renames or user-added agents.
+
+Configure this in your local Doom config, e.g.:
+
+  (after! org-llm-chat
+    (setq org-llm-chat-agent-glyphs
+          '((\"picard\" . \"Δ\")
+            (\"spock\"  . \"🖖\")
+            ...)))
+
+Unknown agents (no entry here) fall back to a bare `@<agent>'
+heading — works without any glyph mapping at all."
   :type '(alist :key-type string :value-type string)
   :group 'org-llm-chat)
 
@@ -268,10 +274,15 @@ font is visible to fontconfig."
   :group 'org-llm-chat)
 
 (defface org-llm-chat-prompt-frame-face
-  '((t :foreground "#ff9c00" :weight bold))
+  '((t :foreground "#ff9c00" :weight bold :family "monospace"
+       :inherit nil))
   "Face for the LCARS-orange prompt frame.
-Mirrors the LCARS UI palette used by the Trek-themed chat surface.
-Customise to taste — any colour reads as the active-input marker."
+Family pinned to `monospace' (and `:inherit nil') so the ▰ bars
+render at fixed-width columns even when the heading face has
+been remapped to a variable-width font (e.g. FederationDS9Title)
+— without that, the top bar with `COMPOSE' label rendered at a
+different visual width than the plain bottom bar, making the
+frame look misaligned."
   :group 'org-llm-chat)
 
 (defcustom org-llm-chat-streaming t
@@ -377,15 +388,19 @@ solves the problem at the source: the cursor naturally lands
 mid-window because there's room below."
   (let* ((face 'org-llm-chat-prompt-frame-face)
          (pad  (org-llm-chat--prompt-frame-pad))
-         (top  (propertize (concat pad "▰▰▰▰▰ COMPOSE ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n")
-                            'face face))
+         (bar-width 39)  ; total visible width of the LCARS bar
+         (label " COMPOSE ")  ; 9 chars including padding spaces
+         (lead 5)
+         (trail (- bar-width (+ lead (length label))))
+         (top-bar (concat (make-string lead ?▰) label (make-string trail ?▰)))
+         (bot-bar (make-string bar-width ?▰))
+         (top  (propertize (concat pad top-bar "\n") 'face face))
          ;; 12 trailing blank lines: gives cursor at marker enough
          ;; visual padding below that natural scroll keeps it mid-
          ;; window. These are overlay strings — buffer text + saved
          ;; file are unaffected.
          (bot  (concat
-                 (propertize (concat "\n" pad "▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n")
-                              'face face)
+                 (propertize (concat "\n" pad bot-bar "\n") 'face face)
                  (make-string 12 ?\n))))
     (cons top bot)))
 
@@ -810,7 +825,7 @@ unreachable. Returns nil when injection is disabled."
                vitals " | ")))
 
 (defun org-llm-chat--format-sidebar-system-message (status)
-  "Format STATUS alist as a tight system-message string for picard et al.
+  "Format STATUS alist as a tight system-message string for any agent.
 Tolerant of missing keys — degrades gracefully so the message is
 always well-formed even if the sidebar JSON drops a section."
   (let* ((vault   (cdr (assoc "vault"    status)))
