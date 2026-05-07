@@ -6035,6 +6035,136 @@ def superset_import_org_cmd(
         on_screen(f"  response: {resp}")
 
 
+@superset_app.command("prune")
+def superset_prune_cmd(
+    older_than: Annotated[
+        str,
+        typer.Option("--older-than",
+                     help="Cutoff age, e.g. 30d / 7d / 24h / 2w "
+                          "(default: 30d)")
+    ] = "30d",
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run/--apply",
+                     help="Default --dry-run lists candidates without "
+                          "deleting; --apply performs DELETEs")
+    ] = True,
+    url: Annotated[
+        str,
+        typer.Option("--url",
+                     help="Superset base URL")
+    ] = "http://localhost:8088",
+    auth: Annotated[
+        Optional[str],
+        typer.Option("--auth",
+                     help="USER:PASS for the Superset login flow. If "
+                          "omitted, falls back to admin:admin (the "
+                          "single-user default per superset.org § "
+                          "Hosting & install).")
+    ] = None,
+):
+    """Prune old org-llm-created Superset dashboards.
+
+    Recognizes org-llm dashboards by slug convention — anything
+    matching `oneoff-…` or `pinned-…` is considered owned by the
+    preprocessor / persistent-console templates. User-authored
+    dashboards with arbitrary slugs are left alone.
+
+    Cascade order on --apply: charts → dashboards → datasets. The
+    shared database link is never deleted — it is reused across all
+    org-llm dashboards.
+    """
+    from .superset_prune import (
+        SupersetClient,
+        build_candidates,
+        execute_prune,
+        parse_duration,
+        split_auth,
+    )
+
+    try:
+        cutoff = parse_duration(older_than)
+    except ValueError as e:
+        on_screen(f"[red]invalid --older-than:[/red] {e}")
+        raise typer.Exit(1)
+
+    if auth is None:
+        creds = ("admin", "admin")
+    else:
+        try:
+            creds = split_auth(auth)
+        except ValueError as e:
+            on_screen(f"[red]invalid --auth:[/red] {e}")
+            raise typer.Exit(1)
+
+    try:
+        client = SupersetClient(url, creds)
+    except Exception as e:
+        on_screen(f"[red]auth failed against {url}:[/red] {e}")
+        raise typer.Exit(2)
+
+    try:
+        dashboards = client.list_dashboards()
+    except Exception as e:
+        on_screen(f"[red]list dashboards failed:[/red] {e}")
+        raise typer.Exit(2)
+
+    candidates = build_candidates(
+        dashboards,
+        cutoff=cutoff,
+        fetch_charts=client.get_dashboard_charts,
+        fetch_datasets=client.get_dashboard_datasets,
+    )
+
+    if not candidates:
+        on_screen(
+            f"[lcars2]no org-llm dashboards found at[/lcars2] {url} "
+            "[dim](slug must start with oneoff- or pinned-)[/dim]"
+        )
+        return
+
+    tbl = Table(box=None, pad_edge=False, show_header=True)
+    tbl.add_column("slug", style="lcars2")
+    tbl.add_column("created_at", style="dim")
+    tbl.add_column("age", justify="right")
+    tbl.add_column("will_delete?", justify="center")
+    for c in candidates:
+        flag = "[red]yes[/red]" if c.will_delete else "[dim]no[/dim]"
+        tbl.add_row(
+            c.slug,
+            c.created_at.strftime("%Y-%m-%d %H:%M"),
+            c.age_human(),
+            flag,
+        )
+    console.print(tbl)
+
+    targets = [c for c in candidates if c.will_delete]
+    if not targets:
+        on_screen(
+            f"[lcars2]nothing older than {older_than}[/lcars2]"
+        )
+        return
+
+    if dry_run:
+        on_screen(
+            f"[lcars2]dry-run:[/lcars2] {len(targets)} dashboard(s) "
+            f"would be deleted (re-run with --apply to do it)"
+        )
+        return
+
+    try:
+        counts = execute_prune(client, candidates)
+    except Exception as e:
+        on_screen(f"[red]prune failed mid-run:[/red] {e}")
+        raise typer.Exit(2)
+    on_screen(
+        f"[lcars2]pruned[/lcars2] "
+        f"{counts['charts']} charts, "
+        f"{counts['dashboards']} dashboards, "
+        f"{counts['datasets']} datasets"
+    )
+
+
 agent_app = typer.Typer(
     help=("Per-row CRUD on the `agent` DB table — Layer 2 of "
           "the agent resolution stack (Python builtins → DB → "

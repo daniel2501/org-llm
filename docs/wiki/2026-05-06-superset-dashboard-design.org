@@ -203,8 +203,13 @@ time range" ping-pong without the dashboard.
   shim is ~200 LOC, not ~50.
 - *Re-import pruning.* Each one-off creates a database link,
   datasets, charts, dashboard. Without =org-llm superset prune
-  --older-than 30d= Superset's metadata DB grows unboundedly. Must
-  ship before any of this goes from demo to daily-driver.
+  --older-than 30d= Superset's metadata DB grows unboundedly.
+  *Shipped 2026-05-06* — =org_llm/superset_prune.py= +
+  =superset_app.prune= verb. Recognition by slug convention
+  (=oneoff-= / =pinned-= prefix). Cascade order on =--apply=:
+  charts → dashboards → datasets; shared database link is
+  preserved. Example: =org-llm superset prune --older-than 30d
+  --dry-run= lists candidates; rerun with =--apply= to delete.
 - *Auth model.* Solo-user default is no-login (per the
   [[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org § Hosting & install]]
   proposal); =@boothby= writing dashboards as the same user as
@@ -221,7 +226,7 @@ time range" ping-pong without the dashboard.
 | Layer 2 — persistent consoles | per-agent =.org= templates                        | not started         |
 | Layer 3 — Pattern A         | chat↔URL shim (~200 LOC)                            | not started         |
 | Layer 3 — Pattern B         | =org-protocol://= chart link template               | not started         |
-| Pruning verb                | =org-llm superset prune --older-than=               | not started         |
+| Pruning verb                | =org-llm superset prune --older-than=               | shipped 2026-05-06  |
 
 The preprocessor is the keystone — it landed via the 2026-05-06
 multi-agent run on branch =worktree-agent-a5af204f898d78db3=
