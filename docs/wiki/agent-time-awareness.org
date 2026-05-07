@@ -34,7 +34,7 @@ not a near-term one.
 | Payload         | Current date + time injected into system prompt of every call     |
 | Implication     | Agents reason about "today" / "yesterday" / "next Tuesday" anchored |
 | Failure mode    | Without it: hallucinated dates, drift to training-cutoff           |
-| Cross-ref       | [[file:llm-proxy.org][llm-proxy.org]] § interceptor chain                                |
+| Cross-ref       | [[id:47ba2143-c53a-409a-8286-2b3759794608][llm-proxy.org]] § interceptor chain                                |
 
 User-facing times in this page are *EST* (per house convention).
 
@@ -52,7 +52,7 @@ inherits these for free.
 | =org-habit=           | Recurrence (=+1d=, =++1w=, =.+1d=) | @boothby, @riker             |
 | =org-agenda= dispatch | Query/view layer                   | All agents via babel/SQL     |
 
-Per [[file:dbt-pipeline.org][dbt-pipeline.org]] § derived models, these primitives get
+Per [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]] § derived models, these primitives get
 materialized as queryable columns (=parsed_clocks=, =parsed_dates=,
 =scheduled_at=, =deadline_at=) — agents query them via SQL. No new
 infrastructure needed; this layer is just /reading what's there/.
@@ -73,7 +73,7 @@ file. Today's mechanisms are ad-hoc.
 | Recipe-promotion review       | one-shot 2026-05-17      | scheduled remote agent        |
 | Weather refresh               | hourly                   | (knob)                        |
 | Embeddings backfill           | event-driven             | auto-embedder daemon          |
-| Promotion gate (acpt → prod)  | manual + ≥24h dogfood    | DEC-016 (dogfood window is itself a scheduling primitive) |
+| Promotion gate (acpt → prod)  | manual + ≥24h dogfood    | [[id:e2c47df1-3a86-4f9e-9d13-7c4b8e2f5a91][DEC-016]] (dogfood window is itself a scheduling primitive) |
 
 * Airflow tie-in — when does it earn its keep?
 
@@ -157,9 +157,9 @@ are emitted as a structured row the harness collects so an agent
 result table.  This is the empirical prior the recommendation
 above rests on.
 
-* Two-tier tools and scheduling (DEC-013)
+* Two-tier tools and scheduling ([[id:e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63][DEC-013]])
 
-Per DEC-013 (two-tier tools: data + effect), scheduling sits exactly
+Per [[id:e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63][DEC-013]] (two-tier tools: data + effect), scheduling sits exactly
 on the boundary:
 
 | Tier   | Example scheduling tool             | Notes                          |
@@ -193,12 +193,12 @@ Today: out of scope. Filed for the future.
 | Topic                                                      | Why it links                                  |
 |------------------------------------------------------------+-----------------------------------------------|
 | [[file:llm-proxy.org][llm-proxy.org]] § interceptor chain                          | Layer 1 substrate (=intercept_time_grounding=) |
-| [[file:dbt-pipeline.org][dbt-pipeline.org]] § Snapshots                               | Layer 2's relational view of scheduling       |
-| [[file:cull.org][cull.org]] § Subsumed                                        | Captain's-log =--reflect= weekly cron as subsumed example |
-| DEC-013 — two-tier tools                                   | Scheduling sits at the data/effect boundary   |
+| [[id:20046fc6-8b1e-4211-911b-b96f431d1f9e][dbt-pipeline.org]] § Snapshots                               | Layer 2's relational view of scheduling       |
+| [[id:65c67408-a0de-4f93-9ffa-6800ea0f436f][cull.org]] § Subsumed                                        | Captain's-log =--reflect= weekly cron as subsumed example |
+| [[id:e1f47a83-3df0-4b2c-9265-7c2e1d8a4f63][DEC-013]] — two-tier tools                                   | Scheduling sits at the data/effect boundary   |
 | DEC-014 — cull rubric (Bridge Crew)                        | Time-aware @riker, @geordi, @boothby          |
 | [[file:dev-tracker.org][dev-tracker.org]] § Hosting matrix                           | Airflow integration TODO                      |
-| [[file:sdlc.org][sdlc.org]] — DEC-016 promotion gates                         | "≥24h dogfood" is itself a scheduling primitive |
+| [[file:sdlc.org][sdlc.org]] — [[id:e2c47df1-3a86-4f9e-9d13-7c4b8e2f5a91][DEC-016]] promotion gates                         | "≥24h dogfood" is itself a scheduling primitive |
 | [[file:agents.org][agents.org]] — agent roster                                  | Which agents are time-shaped                  |
 
 * Open questions
