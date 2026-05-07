@@ -747,6 +747,97 @@ def create_mcp_server():
         return _themed("get_vault_stats",
                         f"{n_nodes} nodes across {n_files} files", body)
 
+    # ── metrics_describe / metrics_query ──────────────────────────────────────
+    # Semantic-layer surface — Phase 27 (Superset). Agents ask for
+    # numbers by metric name; the registry compiles SQL and runs it.
+    # Same definitions feed Superset dataset YAML, so the dashboard and
+    # the @analyst agent answer with identical numbers.
+    @server.tool()
+    def metrics_describe() -> str:
+        """List all org-llm metrics + dimensions, grouped by source.
+
+        Use this BEFORE metrics_query to discover what numbers are
+        available without writing raw SQL. Returns a human-readable
+        index — feed it back into your prompt to pick a metric name.
+        """
+        from .metrics import Registry
+        reg = Registry.load()
+        return _themed(
+            "metrics_describe",
+            f"{len(reg.metrics)} metric(s), {len(reg.dimensions)} dimension(s)",
+            reg.describe(),
+        )
+
+    @server.tool()
+    @recover_on_failure
+    def metrics_query(
+        metric: str,
+        group_by: str = "",
+        where: str = "",
+        since: str = "",
+        until: str = "",
+        limit: int = 50,
+        join: str = "",
+    ) -> str:
+        """Run one semantic-layer metric query against the org-llm DB.
+
+        Args:
+          metric: metric name (call metrics_describe to discover).
+          group_by: comma-separated dimension names, e.g. "model,call_kind".
+          where: filters as KEY=VALUE,KEY=VALUE (use "" for none).
+          since/until: bounds on the source's time column (ISO date).
+          limit: row cap (default 50).
+          join: opt into a sanctioned cross-source join by name (see
+            metrics_describe for declared joins). When set, group_by
+            dimensions can come from either source covered by the join.
+            Requires ORG_LLM_REGISTRY_V1_JOINS=1 in the runtime env;
+            without the flag, cross-source queries still fail loud.
+
+        Returns a markdown table. group_by dimensions and where keys
+        must come from the metric's source — or, with `join`, from
+        either source covered by the named join.
+        """
+        from .metrics import Registry, RegistryError
+        reg = Registry.load()
+        gb = [g.strip() for g in group_by.split(",") if g.strip()] or None
+        wh: dict[str, str] = {}
+        if where:
+            for clause in where.split(","):
+                clause = clause.strip()
+                if not clause:
+                    continue
+                if "=" not in clause:
+                    return f"metrics_query error: bad filter '{clause}' (use KEY=VALUE)"
+                k, v = clause.split("=", 1)
+                wh[k.strip()] = v.strip()
+        try:
+            rows = reg.query(
+                metric=metric,
+                group_by=gb,
+                where=wh or None,
+                since=since or None,
+                until=until or None,
+                limit=limit,
+                join=join or None,
+            )
+        except RegistryError as e:
+            return f"metrics_query error: {e}"
+        if not rows:
+            return _themed("metrics_query",
+                           f"metric:{metric} → 0 rows", "(no rows)")
+        cols = list(rows[0].keys())
+        header = " | ".join(cols)
+        sep = " | ".join("---" for _ in cols)
+        body_lines = [
+            " | ".join(str(r[c]) for c in cols) for r in rows
+        ]
+        body = "\n".join([header, sep, *body_lines])
+        return _themed(
+            "metrics_query",
+            f"metric:{metric} → {len(rows)} row(s)",
+            body,
+        )
+
     # ── list_skills ───────────────────────────────────────────────────────────
     @server.tool()
     def list_skills() -> str:

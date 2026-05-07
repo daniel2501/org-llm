@@ -345,12 +345,15 @@ class Registry:
             raise RegistryError(f"unknown join {join_name!r}")
         j = self.joins[join_name]
 
-        if j.kind == "time_bucket":
-            raise RegistryError("kind 'time_bucket' deferred to v1.1")
-        if j.kind not in ("inner", "left"):
+        # `time_bucket` is structurally an INNER JOIN with both `on.left`
+        # and `on.right` already cast to a common temporal grain (e.g.
+        # `substr(timestamp, 1, 10)` vs `date(ts, 'unixepoch')`). Same
+        # SQL shape; the kind name is a documentation knob telling
+        # readers "this join matches on time, not foreign keys."
+        if j.kind not in ("inner", "left", "time_bucket"):
             raise RegistryError(
-                f"join {join_name!r} kind {j.kind!r} not supported in v1 "
-                f"(supported: inner, left)"
+                f"join {join_name!r} kind {j.kind!r} not supported in v1.1 "
+                f"(supported: inner, left, time_bucket)"
             )
         if m.source not in j.sources:
             raise RegistryError(
@@ -426,7 +429,7 @@ class Registry:
         if j.filter:
             on_parts.append(self._rewrite_filter(j.filter, alias_a, alias_b))
 
-        join_kw = "INNER JOIN" if j.kind == "inner" else "LEFT JOIN"
+        join_kw = "LEFT JOIN" if j.kind == "left" else "INNER JOIN"
 
         sql = (
             f"SELECT {', '.join(select_cols)} "
@@ -482,6 +485,15 @@ class Registry:
                 lines.append("  dimensions:")
                 for d in ds:
                     lines.append(f"    - {d.name}")
+            lines.append("")
+        if self.joins:
+            lines.append("## cross-source joins  (opt-in via "
+                         "`--join NAME` + ORG_LLM_REGISTRY_V1_JOINS=1)")
+            for j in self.joins.values():
+                lines.append(
+                    f"  - {j.name}: {j.kind} "
+                    f"{j.sources[0]} ↔ {j.sources[1]}"
+                )
             lines.append("")
         return "\n".join(lines)
 

@@ -5817,6 +5817,14 @@ def metrics_query_cmd(
         bool,
         typer.Option("--sql", help="Print compiled SQL without executing")
     ] = False,
+    join: Annotated[
+        Optional[str],
+        typer.Option("--join",
+                     help="Opt into a sanctioned cross-source join by name "
+                          "(see `metrics describe` for declared joins). "
+                          "Requires ORG_LLM_REGISTRY_V1_JOINS=1 — without "
+                          "the flag, cross-source queries still fail loud.")
+    ] = None,
 ):
     """Compile + run one metric query against the registry."""
     from .metrics import Registry, RegistryError
@@ -5832,7 +5840,7 @@ def metrics_query_cmd(
     try:
         sql, params = reg.compile(
             metric=metric, group_by=gb, where=wh or None,
-            since=since, until=until, limit=limit,
+            since=since, until=until, limit=limit, join=join,
         )
     except RegistryError as e:
         on_screen(f"[red]registry error:[/red] {e}")
@@ -16583,10 +16591,18 @@ def _opencode_sidebar_status(session, *, ctx: dict, workspace: str,
         pass
 
     # Hardware probe — same calls doctor uses.
-    hw = {"free_ram_gb": None, "vram_gb": None}
+    # `local_ram_gb()` returns MemTotal (the SYSTEM total), not free RAM.
+    # The accurate "currently available" number lives in the vitals
+    # block under `memory.label' (formatted by life_support). Use the
+    # right name here so consumers don't conflate "total" with "free".
+    # `free_ram_gb' is kept as a back-compat alias for any caller still
+    # reading the prior key.
+    hw = {"total_ram_gb": None, "free_ram_gb": None, "vram_gb": None}
     try:
         from .cloud import local_ram_gb, local_vram_gb
-        hw["free_ram_gb"] = round(local_ram_gb(), 1)
+        total = round(local_ram_gb(), 1)
+        hw["total_ram_gb"] = total
+        hw["free_ram_gb"]  = total  # deprecated alias; same value
         v = local_vram_gb()
         hw["vram_gb"] = round(v, 1) if v else None
     except Exception:

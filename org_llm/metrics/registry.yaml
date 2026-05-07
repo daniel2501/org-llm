@@ -159,3 +159,15 @@ joins:
     "on":
       left: agent_to
       right: command
+
+  # v1.1 — time_bucket joins two sources on a shared time grain.
+  # llm.timestamp is ISO-string; sensors.ts is unix-epoch int. We cast
+  # both to YYYY-MM-DD so cells line up at day-grain. Powers the
+  # chat-burst × memory-pressure correlation chart noted in
+  # docs/wiki/2026-05-06-superset-tier1-probe.org.
+  llm_x_sensors_temporal:
+    sources: [llm, sensors]
+    kind: time_bucket
+    "on":
+      left: substr(timestamp, 1, 10)
+      right: date(ts, 'unixepoch')

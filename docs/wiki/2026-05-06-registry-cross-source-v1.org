@@ -292,6 +292,46 @@ Still on the v1.1 list:
 - MCP =metrics_query= accepting a =join= field
 - =emit_superset()= emitting virtual SQL datasets per join
 
+* v1.1 landed (2026-05-07)
+
+Of the 5 v1.1 follow-ups above, four landed in this round:
+
+- *=kind: time_bucket=* — compiles to =INNER JOIN= where both
+  =on.left= and =on.right= are already cast to a comparable temporal
+  grain (e.g. =substr(timestamp, 1, 10)= vs =date(ts, 'unixepoch')=).
+  Same SQL shape as a =kind: inner= join; the kind label is documentation
+  saying "this matches on time, not foreign keys."
+- *Third declared join* — =llm_x_sensors_temporal= (llm + sensors,
+  time_bucket on day-grain). Powers the chat-burst × memory-pressure
+  correlation chart noted in the
+  [[id:5f59c6a3-db42-4410-81e4-5ea9daa33d9b][2026-05-06 tier-1 probe]].
+- *=Registry.describe()=* now appends a "## cross-source joins"
+  section listing each declared join with its kind + source pair, so
+  agent prompts (=metrics_describe= MCP tool, =org-llm metrics describe=
+  CLI) discover joins automatically.
+- *CLI =--join NAME=* — =org-llm metrics query <metric> --join <name>=
+  passes through to =Registry.compile()=. Same =ORG_LLM_REGISTRY_V1_JOINS=1=
+  flag still required.
+- *MCP =metrics_query=* gained a =join: str= parameter. In-editor
+  agents can now answer cross-source questions through the same tool
+  surface as single-source.
+
+Deferred to v1.1.1:
+
+- *=emit_superset()= virtual SQL datasets per join.* Each declared
+  join becomes a Superset dataset with a =sql:= field containing the
+  JOIN query, exposing the union of dimensions + metrics from both
+  sources. Heavier than the other v1.1 work because it has to handle
+  duplicate column names across sources (=timestamp= / =id= live on
+  multiple) via aliasing strategy. Designed but not yet shipped.
+
+Tests (=tests/test_metrics_registry.py=): 33 cases covering all v1
++ v1.1 paths. Notable additions:
+- =test_join_time_bucket_compiles= — positive test that swapped the
+  v1 rejection test on the same fixture.
+- =test_join_unknown_kind_rejected= — defensive: any kind outside
+  ={inner, left, time_bucket}= fails loud naming the supported set.
+
 Sharp edges hit during the build:
 
 - *YAML =on:= is a boolean.* PyYAML parses the bare key =on= as

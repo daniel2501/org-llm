@@ -273,14 +273,18 @@ def test_emit_superset_folds_metric_where_clause(registry: Registry, tmp_path: P
 
 
 def test_join_block_loaded(registry: Registry) -> None:
-    """The shipping registry.yaml should expose the v1 joins."""
+    """The shipping registry.yaml should expose the v1 + v1.1 joins."""
     assert "llm_x_history_event" in registry.joins
     assert "crew_x_llm_command" in registry.joins
+    assert "llm_x_sensors_temporal" in registry.joins  # v1.1
     j = registry.joins["llm_x_history_event"]
     assert j.sources == ("llm", "history")
     assert j.kind == "inner"
     assert j.on_left == "id" and j.on_right == "id"
     assert j.filter == "right.kind = 'llm'"
+    tb = registry.joins["llm_x_sensors_temporal"]
+    assert tb.kind == "time_bucket"
+    assert tb.sources == ("llm", "sensors")
 
 
 def test_join_llm_x_history_event(
@@ -375,39 +379,69 @@ def test_join_dim_not_covered(
         )
 
 
-def test_join_time_bucket_rejected(tmp_path: Path) -> None:
-    """v1 supports inner+left only — time_bucket must fail loud."""
-    bad = tmp_path / "tb.yaml"
+def test_join_time_bucket_compiles(
+    registry: Registry, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v1.1: time_bucket joins compile to INNER JOIN with both `on.left`
+    and `on.right` already cast to a comparable temporal grain. This
+    powers the chat-burst × memory-pressure correlation chart."""
+    monkeypatch.setenv("ORG_LLM_REGISTRY_V1_JOINS", "1")
+    sql, params = registry.compile(
+        metric="llm_avg_ms",
+        group_by=["probe"],
+        join="llm_x_sensors_temporal",
+    )
+    assert "FROM llm_calls AS llm" in sql
+    # time_bucket renders as INNER JOIN — same SQL shape as a `kind: inner`
+    # join; the `time_bucket` label is documentation, not a different operator.
+    assert "INNER JOIN sensor_log AS sensors" in sql
+    # ON clause uses the user-supplied time-cast expressions, qualified to
+    # each side's alias.
+    assert "ON substr(llm.timestamp, 1, 10) = date(sensors.ts, 'unixepoch')" in sql
+    # Dim from sensors side is qualified.
+    assert "sensors.probe AS probe" in sql
+    # Metric expr qualified to its source.
+    assert "AVG(llm.duration_ms)" in sql
+    assert "GROUP BY probe" in sql
+    assert params == []
+
+
+def test_join_unknown_kind_rejected(tmp_path: Path) -> None:
+    """Defensive: any kind outside {inner, left, time_bucket} fails loud
+    with a message naming the supported set so authors don't bikeshed."""
+    bad = tmp_path / "bad-kind.yaml"
     bad.write_text(yaml.safe_dump({
         "sources": {
             "llm": {"table": "llm_calls", "time_col": "timestamp"},
-            "sensors": {"table": "sensor_log", "time_col": "ts"},
+            "history": {"table": "history", "time_col": "timestamp"},
         },
         "dimensions": {
             "model": {"source": "llm", "expr": "model"},
-            "probe": {"source": "sensors", "expr": "probe"},
+            "hist_kind": {"source": "history", "expr": "kind"},
         },
         "metrics": {
             "llm_avg_ms": {"source": "llm", "expr": "AVG(duration_ms)"},
         },
         "joins": {
-            "llm_x_sensors_temporal": {
-                "sources": ["llm", "sensors"],
-                "kind": "time_bucket",
-                "on": {
-                    "left": "substr(timestamp, 1, 10)",
-                    "right": "date(ts, 'unixepoch')",
-                },
+            "bad_join": {
+                "sources": ["llm", "history"],
+                "kind": "asof",  # not yet supported — must fail loud
+                "on": {"left": "id", "right": "id"},
             },
         },
     }))
     reg = Registry.load(path=bad)
-    with pytest.raises(RegistryError, match="time_bucket.*deferred to v1.1"):
-        reg.compile(
-            metric="llm_avg_ms",
-            group_by=["probe"],
-            join="llm_x_sensors_temporal",
-        )
+    import os as _os
+    _os.environ["ORG_LLM_REGISTRY_V1_JOINS"] = "1"
+    try:
+        with pytest.raises(RegistryError, match="kind 'asof' not supported"):
+            reg.compile(
+                metric="llm_avg_ms",
+                group_by=["hist_kind"],
+                join="bad_join",
+            )
+    finally:
+        _os.environ.pop("ORG_LLM_REGISTRY_V1_JOINS", None)
 
 
 def test_v0_rejection_unchanged_without_flag(registry: Registry) -> None:
