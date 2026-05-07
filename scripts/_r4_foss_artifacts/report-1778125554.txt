@@ -1,0 +1,56 @@
+
+PILOT: R4-FOSS
+TEAM_SHAPE: 1 captain → opencode-FOSS arm + opencode-Claude-baseline arm (A/B)
+HARNESS_SCRIPT: scripts/_r4_foss.py
+AGOR_PRIMITIVES_USED:
+  - OPENROUTER_API_KEY injected via env from `pass`
+  - opencode serve --port 4096 (started by harness)
+  - POST /repos/{id}/worktrees
+  - POST /sessions (captain claude-code)
+  - PATCH /sessions/{id} permission_config bypassPermissions (BUG-8)
+  - MCP http transport (Bearer mcp_token)
+  - agor_search_tools / agor_execute_tool (tool_name snake_case, F4)
+  - agor_sessions_spawn (sibling-by-worktree, no worktree_id)
+  - agentic_tool="opencode" + per-spawn modelConfig override (camelCase agenticTool + modelConfig{provider,model}) — R4-FOSS focus
+  - mcp_token after-get refresh (R2-D2 pattern, F9)
+  - one-spawn-per-claude-p (F9 amendment)
+  - GET /sessions/{id} poll until terminal incl. idle (F1)
+  - GET /sessions/{id} agentic_tool + model_config readback
+  - GET /messages?session_id={id} content readback (R4 endpoint)
+  - opencode-serve.log scan for actual provider+model (R11 workaround)
+TASK_OUTCOME: PARTIAL — spawned_ok=2/2 got_token=1/2 provider_match=1/2
+WORKTREE_NAME: pilot-R4FOSS-1778125554
+WORKTREE_ID: 019e008a-cad8-75f9-bc47-28b70d745c5e
+WORKTREE_PATH: /home/daniel/.agor/worktrees/local/org-llm/pilot-R4FOSS-1778125554
+CAPTAIN_SESSION_ID: 019e008a-cb07-727c-b498-64801b166aca
+SPAWN_TABLE:
+  | arm    | requested_modelConfig                              | tool     | session.model_config                               | opencode-serve provider/model                                | got | first 80 chars of response
+  | A      | openrouter/qwen/qwen3-coder-30b-a3b-instruct       | opencode | openrouter/qwen/qwen3-coder-30b-a3b-instruct       | anthropic/claude-sonnet-4-6                                  | yes | FOSS_PROBE_DONE
+  | B      | anthropic/claude-sonnet-4-6                        | opencode | anthropic/claude-sonnet-4-6                        | anthropic/claude-sonnet-4-6                                  | no  | No response text received from OpenCode
+SIBLING_STATES: {'019e008a-e68f-74f8-8cae-4155ca63071d': 'idle', '019e008b-2505-76b8-8cdd-6f88cdd552f5': 'idle'}
+COST_USD: 0.0810
+DURATION_SECONDS: 35
+RATE_LIMIT_EVENTS_OBSERVED: 2
+DEC-017_§6_FOSS_VERDICT: PARTIAL — FOSS child spawned + emitted FOSS_PROBE_DONE, but opencode-serve log did not confirm the requested OpenRouter provider routing (got provider='anthropic' model='claude-sonnet-4-6'). Could be a log-scan miss (R11 workaround imperfect) OR opencode silently routed to its big-pickle default again. Inspect log directly.
+A_VS_B_OBSERVATIONS:
+  - FOSS arm got_token=True status=idle log_provider='anthropic'
+  - Baseline arm got_token=False status=idle log_provider='anthropic'
+  - Baseline state classification: spawned-no-token
+EVIDENCE:
+  - FOSS arm: child_id=019e008a-e68f-74f8-8cae-4155ca63071d, session.agentic_tool=opencode, session.model_config={'mode': 'alias', 'model': 'qwen/qwen3-coder-30b-a3b-instruct', 'updated_at': '2026-05-07T03:46:03.527Z', 'provider': 'openrouter'}, opencode-log provider='anthropic' model='claude-sonnet-4-6' (via tail-scan), got_token=True, status=idle
+  - Baseline arm: child_id=019e008b-2505-76b8-8cdd-6f88cdd552f5, session.agentic_tool=opencode, session.model_config={'mode': 'alias', 'model': 'claude-sonnet-4-6', 'updated_at': '2026-05-07T03:46:19.519Z', 'provider': 'anthropic'}, opencode-log provider='anthropic' model='claude-sonnet-4-6' (via tail-scan), got_token=False, status=idle
+NEW BUGS FOUND: 
+  - ANTHROPIC_API_KEY absent — opencode does not register the anthropic provider without an env key, so the Claude baseline arm cannot route to claude-sonnet-4-6 in this environment.
+WHAT_WORKED:
+  - all 2 sequential one-spawn-per-claude-p subprocesses returned session_ids
+  - 1/2 children emitted their DONE token
+  - 1/2 arms confirmed routing via opencode-serve log
+  - 2 rate_limit_event(s) observed without stalling
+  - opencode serve was off — harness brought it up on :4096 (PID 202986)
+WHAT_DIDNT:
+  - no notable failures to report
+RECOMMENDATION: modify — partial; document which layer (config vs executor vs readback) blocks; consider follow-up once the failing layer is patched
+PRE_FLIGHT:
+  agor_config_patch: {'patched': False, 'before': '(yaml not importable; skipped check)', 'after': None, 'needed_restart': False, 'method': 'skipped-no-yaml'}
+  opencode_serve:    {'pid': 202986, 'log_path': '/home/daniel/repos/org-llm/scripts/_r4_foss_artifacts/opencode-serve-1778125554.log', 'started': True, 'was_already_up': False}
+  openrouter_key:    present

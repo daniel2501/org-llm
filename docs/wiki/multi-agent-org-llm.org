@@ -325,8 +325,17 @@ substrate.
   to-end (the crew-runtime substrate works).
 - Round-2 R2-Model-RETRY + round-3 R9 validated that =modelConfig=
   is plumbed at the schema layer and persisted on the session row.
-- Round-4 R4-FOSS (in flight) closes the FOSS-route end-to-end
-  question: opencode + modelConfig + qwen actually emitting tokens.
+- Round-4 R4-FOSS *(VERIFIED 2026-05-06 EDT, $0.08, 35s)* closed
+  the FOSS-route end-to-end: =agentic_tool="opencode"= +
+  =modelConfig={provider:"openrouter", model:"qwen/qwen3-coder-30b-a3b-instruct"}=
+  routed through Agor → opencode-serve → OpenRouter → child reached
+  =idle= → emitted =FOSS_PROBE_DONE=. Production shape now achievable.
+  Note: the originally-tested =qwen/qwen-2.5-72b-instruct= was
+  delisted from OpenRouter; =org_llm/cloud.py= catalog updated to
+  the live =qwen3-coder-30b-a3b-instruct= replacement. Anthropic
+  baseline arm in the same pilot failed at the opencode-runtime
+  layer (no =ANTHROPIC_API_KEY= in env) but corroborated the FOSS
+  verdict by error-reporting the exact provider+model passed in.
 
 * Coordination patterns
 

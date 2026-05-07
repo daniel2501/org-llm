@@ -1,0 +1,16 @@
+Warning: OPENCODE_SERVER_PASSWORD is not set; server is unsecured.
+opencode server listening on http://127.0.0.1:4096
+ProviderModelNotFoundError: ProviderModelNotFoundError
+ data: {
+  providerID: "anthropic",
+  modelID: "claude-sonnet-4-6",
+  suggestions: [],
+},
+
+      at <anonymous> (/$bunfs/root/chunk-v1wmx3bn.js:553:63345)
+      at ~effect/Effect/successCont (/$bunfs/root/chunk-812qsrfz.js:25:7738)
+      at runLoop (/$bunfs/root/chunk-812qsrfz.js:25:2045)
+      at evaluate (/$bunfs/root/chunk-812qsrfz.js:25:1435)
+      at runTasks (/$bunfs/root/chunk-812qsrfz.js:11:12688)
+      at afterScheduled (/$bunfs/root/chunk-812qsrfz.js:11:12575)
+

@@ -1,0 +1,24 @@
+[r4-foss 23:43:02] pre-flight A — agor config opencode block
+[r4-foss 23:43:02] pre-flight B — opencode serve on :4096 (with OPENROUTER_API_KEY env)
+[r4-foss 23:43:02]   OPENROUTER_API_KEY available from `pass org-llm/cloud/openrouter/api-key`
+[r4-foss 23:43:02]   starting opencode serve on :4096 (log: /home/daniel/repos/org-llm/scripts/_r4_foss_artifacts/opencode-serve-1778125382.log)
+[r4-foss 23:43:02]     pid=200705 — waiting up to 30s for HTTP readiness
+[r4-foss 23:43:03]     opencode HTTP up
+[r4-foss 23:43:03] step 1 — create worktree pilot-R4FOSS-1778125382
+[r4-foss 23:43:03]   401 — forcing token refresh and retrying once
+[r4-foss 23:43:04]   worktree_id=019e0088-2b0d-757b-89c0-d1479732862a path=/home/daniel/.agor/worktrees/local/org-llm/pilot-R4FOSS-1778125382
+[r4-foss 23:43:04] step 2 — create captain pilot session (claude-code)
+[r4-foss 23:43:04]   pilot_session_id=019e0088-2b39-70bf-bb27-c9fac8d63bbe mcp_token_prefix=eyJhbGciOiJIUzI1NiIsInR5...
+[r4-foss 23:43:04]   PATCH bypassPermissions on pilot session (BUG-8)
+[r4-foss 23:43:04] step 3.A — spawn child agentic_tool=opencode modelConfig={'provider': 'openrouter', 'model': 'qwen/qwen-2.5-72b-instruct'}
+[r4-foss 23:43:04]   spawn[A/opencode/openrouter] attempt 1/3
+[r4-foss 23:43:12]   spawn[A/opencode/openrouter] rc=0 rate_limits=1 tool_uses=1 cost=$0.0581 sid=019e0088-3c75-765b-b06e-e0c5c6d27d4c
+[r4-foss 23:43:12]   spawn[A/opencode] OK on attempt 1
+[r4-foss 23:43:12]   PATCHed bypass on child 019e0088-3c75-765b-b06e-e0c5c6d27d4c
+[r4-foss 23:43:20] step 3.B — spawn child agentic_tool=opencode modelConfig={'provider': 'anthropic', 'model': 'claude-sonnet-4-6'}
+[r4-foss 23:43:20]   spawn[B/opencode/anthropic] attempt 1/3
+[r4-foss 23:43:29]   spawn[B/opencode/anthropic] rc=0 rate_limits=1 tool_uses=1 cost=$0.0575 sid=019e0088-7f95-72ea-93b5-6befd72514d6
+[r4-foss 23:43:29]   spawn[B/opencode] OK on attempt 1
+[r4-foss 23:43:29]   PATCHed bypass on child 019e0088-7f95-72ea-93b5-6befd72514d6
+[r4-foss 23:43:37] step 5 — polling children to terminal status (≤ 600s)
+[r4-foss 23:43:37]   states: 019e0088=idle 019e0088=idle

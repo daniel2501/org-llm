@@ -221,7 +221,7 @@ PROVIDERS: list[ProviderInfo] = [
         # except the trailing two.
         paid_examples = ("deepseek/deepseek-r1",                   # MIT, open weights
                           "meta-llama/llama-3.3-70b-instruct",       # Meta Llama community, open weights
-                          "qwen/qwen-2.5-72b-instruct",              # Apache 2.0, open weights
+                          "qwen/qwen3-coder-30b-a3b-instruct",       # Apache 2.0, open weights
                           "openai/gpt-oss-120b",                     # Apache 2.0 (OpenAI's open release)
                           "anthropic/claude-sonnet-4.6",             # closed API; long-context tool use
                           "openai/gpt-5.5"),                         # closed API; structured-JSON specialist

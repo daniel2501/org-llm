@@ -1,0 +1,73 @@
+{
+  "spawn_table": [
+    {
+      "label": "A",
+      "requested_modelConfig": {
+        "provider": "openrouter",
+        "model": "qwen/qwen-2.5-72b-instruct"
+      },
+      "session_agentic_tool": "opencode",
+      "session_model_config": {
+        "mode": "alias",
+        "model": "qwen/qwen-2.5-72b-instruct",
+        "updated_at": "2026-05-07T03:43:08.909Z",
+        "provider": "openrouter"
+      },
+      "sdk_session_id": "ses_1ff77bba0ffef1leBf135Geu7b",
+      "log_provider": "anthropic",
+      "log_model": "claude-sonnet-4-6",
+      "log_method": "tail-scan",
+      "child_id": "019e0088-3c75-765b-b06e-e0c5c6d27d4c",
+      "got_token": false,
+      "excerpt": "No response text received from OpenCode",
+      "status": "idle"
+    },
+    {
+      "label": "B",
+      "requested_modelConfig": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6"
+      },
+      "session_agentic_tool": "opencode",
+      "session_model_config": {
+        "mode": "alias",
+        "model": "claude-sonnet-4-6",
+        "updated_at": "2026-05-07T03:43:26.098Z",
+        "provider": "anthropic"
+      },
+      "sdk_session_id": "ses_1ff777940ffebNVaBRqXeAfKpV",
+      "log_provider": "anthropic",
+      "log_model": "claude-sonnet-4-6",
+      "log_method": "tail-scan",
+      "child_id": "019e0088-7f95-72ea-93b5-6befd72514d6",
+      "got_token": false,
+      "excerpt": "No response text received from OpenCode",
+      "status": "idle"
+    }
+  ],
+  "states": {
+    "019e0088-3c75-765b-b06e-e0c5c6d27d4c": "idle",
+    "019e0088-7f95-72ea-93b5-6befd72514d6": "idle"
+  },
+  "cost_usd": 0.11558474999999999,
+  "duration_s": 35,
+  "rate_limit_events": 2,
+  "verdict": "PARTIAL",
+  "foss_verdict": "NO \u2014 opencode child spawned but reached status 'idle' without emitting FOSS_PROBE_DONE and without log evidence of OpenRouter routing. Check opencode-serve log for auth/model-not-found errors.",
+  "pre_flight": {
+    "agor_config_patch": {
+      "patched": false,
+      "before": "(yaml not importable; skipped check)",
+      "after": null,
+      "needed_restart": false,
+      "method": "skipped-no-yaml"
+    },
+    "opencode_serve": {
+      "pid": 200705,
+      "log_path": "/home/daniel/repos/org-llm/scripts/_r4_foss_artifacts/opencode-serve-1778125382.log",
+      "started": true,
+      "was_already_up": false
+    },
+    "openrouter_key": true
+  }
+}
