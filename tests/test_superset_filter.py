@@ -19,6 +19,7 @@ from org_llm.superset_filter import (
     fetch_form_data,
     format_prompt_prelude,
     parse_url,
+    query_chart_data,
     superset_prelude_for_url,
 )
 
@@ -362,6 +363,103 @@ def test_superset_prelude_for_url_url_only_no_enrich() -> None:
     out = superset_prelude_for_url(url)
     assert "viewing dashboard 'cb'" in out
     assert "time_range='Last week'" in out
+
+
+# ---------- v3.2: query_chart_data (manager pre-fetch) ------------------
+
+
+def _fake_registry(rows: list[dict]):
+    """Minimal stand-in for org_llm.metrics.Registry.query()."""
+    class _R:
+        def query(self, **kw):
+            self.last_kw = kw
+            return rows
+    return _R()
+
+
+def test_query_chart_data_renders_compact_table() -> None:
+    state = SupersetUrlState(
+        slice_id=5,
+        form_data={
+            "viz_type": "echarts_timeseries_bar",
+            "metrics": ["llm_calls"],
+            "groupby": ["outcome"],
+            "x_axis": "model",
+        },
+    )
+    rows = [
+        {"outcome": "ok", "model": "phi3.5", "llm_calls": 23},
+        {"outcome": "error", "model": "phi3.5", "llm_calls": 23},
+    ]
+    reg = _fake_registry(rows)
+    out = query_chart_data(state, registry=reg)
+    assert out is not None
+    # x_axis gets folded into the registry call's group_by alongside
+    # the explicit groupby fields.
+    assert reg.last_kw["metric"] == "llm_calls"
+    assert set(reg.last_kw["group_by"]) == {"outcome", "model"}
+    # Output is plain text (no rich codes) and includes the rows.
+    assert "Chart data (2 rows" in out
+    assert "phi3.5" in out
+    assert "23" in out
+
+
+def test_query_chart_data_returns_none_when_no_metric() -> None:
+    """No metric in form_data → can't query → caller falls through."""
+    state = SupersetUrlState(form_data={"viz_type": "table"})
+    assert query_chart_data(state, registry=_fake_registry([])) is None
+
+
+def test_query_chart_data_swallows_registry_errors() -> None:
+    """A RegistryError (e.g. cross-source rejected without a join)
+    must not crash the chat path — return None and let the prelude
+    proceed without data."""
+    class _Boom:
+        def query(self, **kw):
+            raise RuntimeError("synthetic failure")
+    state = SupersetUrlState(
+        form_data={"metrics": ["llm_calls"], "groupby": ["model"]},
+    )
+    assert query_chart_data(state, registry=_Boom()) is None
+
+
+def test_query_chart_data_returns_none_on_empty_rows() -> None:
+    state = SupersetUrlState(form_data={"metrics": ["llm_calls"], "groupby": ["x"]})
+    assert query_chart_data(state, registry=_fake_registry([])) is None
+
+
+def test_superset_prelude_appends_chart_data_when_requested() -> None:
+    """End-to-end: with_chart_data=True splices the rows under the prelude."""
+    url = "http://x/explore/?form_data_key=KEY&slice_id=5"
+    inner = json.dumps({
+        "viz_type": "echarts_timeseries_bar",
+        "metrics": ["llm_calls"],
+        "groupby": ["outcome"],
+        "x_axis": "model",
+    })
+    plan = {
+        "http://x/api/v1/security/login":
+            _FakeResp(200, {"access_token": "T"}),
+        "http://x/api/v1/explore/form_data/KEY":
+            _FakeResp(200, {"form_data": inner}),
+    }
+    sess = _FakeSession(plan)
+    rows = [{"outcome": "ok", "model": "phi3.5", "llm_calls": 23}]
+    fake_reg = _fake_registry(rows)
+
+    class _RegistryStub:
+        @staticmethod
+        def load():
+            return fake_reg
+
+    with patch("requests.Session", return_value=sess), \
+         patch("org_llm.metrics.Registry", _RegistryStub):
+        out = superset_prelude_for_url(
+            url, base_url="http://x", with_chart_data=True,
+        )
+    assert "[Superset context:" in out
+    assert "[Chart data (1 row," in out
+    assert "phi3.5" in out
 
 
 @pytest.mark.skipif(

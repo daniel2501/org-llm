@@ -3574,6 +3574,18 @@ def ask(
                           "round-trip (~100ms local). Default off — the "
                           "URL alone is usually enough for scope.")
     ] = False,
+    with_chart_data: Annotated[
+        bool,
+        typer.Option("--with-chart-data/--no-chart-data",
+                     help="With --dashboard-url: also run the chart's "
+                          "underlying metric query against the registry "
+                          "and splice the actual rows into the prompt as "
+                          "a `[Chart data: ...]` block. Lets the agent "
+                          "answer over real numbers instead of "
+                          "RAG-adjacent vault notes. Default on — "
+                          "manager-pre-fetch + agent-narrates is the "
+                          "v3.2 default flow.")
+    ] = True,
 ):
     """Ask a question answered from your org notes (RAG).
 
@@ -3945,6 +3957,7 @@ def ask(
                 dashboard_url,
                 base_url=base_url,
                 enrich=enrich_filters,
+                with_chart_data=with_chart_data,
             )
         except Exception as e:
             on_screen(f"[dim](dashboard-url parse failed: {e})[/dim]")
@@ -24019,6 +24032,8 @@ def completion(
 # Register skill commands at import time so they appear in --help
 from . import cli_skills as _cs
 _cs.register(app)
+from . import cli_specialist as _cs_specialist
+_cs_specialist.register(app)
 
 
 _SINGLE_QUERY_VERBS = {

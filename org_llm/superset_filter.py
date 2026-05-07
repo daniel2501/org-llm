@@ -392,12 +392,86 @@ def fetch_dashboard_title(
         return None
 
 
+def query_chart_data(
+    state: SupersetUrlState,
+    *,
+    registry: Optional[Any] = None,
+    limit: int = 50,
+) -> Optional[str]:
+    """Run the chart's underlying metric query and format the rows
+    as a compact text block ready to splice into the chat prompt.
+
+    Returns None if the chart's metric/groupby isn't in our registry,
+    if the form_data hasn't been enriched, or if the query fails —
+    caller should fall through to prelude-only behavior.
+
+    This is the "manager pre-fetch" half of the Pattern A v3.2 split:
+    the URL parse tells us *what* the user is looking at; this fetches
+    the *numbers behind it*; the chat agent narrates the answer in
+    ONE cloud call instead of guessing from RAG-adjacent vault notes.
+    """
+    fd = state.form_data or {}
+    metric_names = fd.get("metrics") or []
+    group_by = fd.get("groupby") or []
+    x_axis = fd.get("x_axis")
+
+    if not metric_names:
+        return None
+    metric = metric_names[0] if isinstance(metric_names[0], str) else None
+    if not metric:
+        return None  # adhoc metrics (dict shape) aren't registered names
+
+    # x_axis on echarts_timeseries_* is part of the SELECT but lives
+    # outside groupby in form_data. To run the registry's compile, we
+    # rebuild the full dimension list.
+    full_group_by = list(group_by)
+    if x_axis and x_axis not in full_group_by:
+        full_group_by.append(x_axis)
+
+    try:
+        if registry is None:
+            from .metrics import Registry
+            registry = Registry.load()
+        rows = registry.query(
+            metric=metric,
+            group_by=full_group_by or None,
+            limit=limit,
+        )
+    except Exception:
+        return None
+
+    if not rows:
+        return None
+
+    # Compact text-table — column widths match the actual data, no
+    # rich-format codes (this becomes prompt content, not display).
+    cols = list(rows[0].keys())
+    widths = {c: max(len(str(c)),
+                     max(len(str(r.get(c, ""))) for r in rows))
+              for c in cols}
+    header = "  ".join(f"{c:<{widths[c]}}" for c in cols)
+    sep = "  ".join("-" * widths[c] for c in cols)
+    body = "\n".join(
+        "  ".join(f"{str(r.get(c, '')):<{widths[c]}}" for c in cols)
+        for r in rows
+    )
+    return (
+        f"[Chart data ({len(rows)} row{'' if len(rows) == 1 else 's'}, "
+        f"metric={metric!r}, group_by={full_group_by}):\n"
+        f"  {header}\n"
+        f"  {sep}\n"
+        + "\n".join(f"  {line}" for line in body.split("\n"))
+        + "\n]"
+    )
+
+
 def superset_prelude_for_url(
     url: str,
     *,
     base_url: Optional[str] = None,
     auth: Optional[tuple[str, str]] = None,
     enrich: bool = False,
+    with_chart_data: bool = False,
 ) -> str:
     """High-level convenience: URL → prelude string in one call.
 
@@ -413,6 +487,11 @@ def superset_prelude_for_url(
     native-filter values for dashboard URLs (the heavier extras).
     `enrich=False` (default) keeps those off but still does the
     cheap form_data_key resolution.
+
+    `with_chart_data=True` (v3.2) appends a `[Chart data: ...]` block
+    with actual rows from the chart's underlying metric query. The
+    agent then narrates the answer over real numbers instead of
+    RAG-adjacent vault notes (manager-pre-fetch pattern).
     """
     state = parse_url(url)
     if not state.has_state:
@@ -439,8 +518,13 @@ def superset_prelude_for_url(
     if enrich and base_url:
         title = fetch_dashboard_title(base_url, state.slug or "", auth=auth)
         extra = fetch_filter_state(base_url, state, auth=auth)
-    return format_prompt_prelude(
+    prelude = format_prompt_prelude(
         state,
         dashboard_title=title,
         extra_filters=extra,
     )
+    if with_chart_data:
+        chart_block = query_chart_data(state)
+        if chart_block:
+            prelude = (prelude or "") + "\n" + chart_block + "\n"
+    return prelude
