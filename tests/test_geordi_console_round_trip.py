@@ -96,7 +96,7 @@ def test_charts_carry_viz_types(dashboard: OrgDashboard) -> None:
     expected_viz = {
         "tail_latency_by_model": "line",
         "mean_latency_drift": "line",
-        "embed_vs_chat_throughput": "bar",
+        "embed_vs_chat_throughput": "line",
         "crew_action_mix": "heatmap",
     }
     by_name = {c.name: c for c in dashboard.charts}

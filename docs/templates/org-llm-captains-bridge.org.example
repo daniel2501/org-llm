@@ -46,19 +46,20 @@ FROM llm_calls
 GROUP BY call_kind, model
 #+END_SRC
 
-* Error rate by model
+* Model usage by outcome
 :PROPERTIES:
-:VIZ_TYPE: bar
+:VIZ_TYPE: dist_bar
 :END:
 
-Fraction of LLM calls whose outcome wasn't =ok=, per model. Catches
-silent breakage like the phi3.5 50/50 failure pattern from the
-2026-05-06 tier-1 probe.
+Total LLM calls per model, stacked by outcome. Bar height surfaces
+sample size; segment proportions surface error rate. Solves the
+"phi3.5 50% from n=46 looks like mistral 100% from n=2" problem the
+flat error-rate bar hid. (Redesigned by =@geordi= 2026-05-07.)
 
-#+BEGIN_SRC sql :name error_rate_by_model :metric llm_error_rate :group_by [model]
-SELECT model, AVG(CASE WHEN outcome != 'ok' THEN 1.0 ELSE 0.0 END) AS llm_error_rate
+#+BEGIN_SRC sql :name model_usage_by_outcome :metric llm_calls :group_by [outcome, model]
+SELECT model, outcome, COUNT(*) AS llm_calls
 FROM llm_calls
-GROUP BY model
+GROUP BY model, outcome
 #+END_SRC
 
 * Captain's-log heatmap
@@ -76,34 +77,39 @@ FROM history
 GROUP BY kind, substr(timestamp, 1, 10)
 #+END_SRC
 
-* Memory-pressure timeline
+* Memory probe alert pattern
 :PROPERTIES:
-:VIZ_TYPE: line
+:VIZ_TYPE: heatmap
 :END:
 
-Fraction of sensor readings at =watch=, =alert=, or =critical=, per
-status × day. The system-health pulse — when this trends up the
-captain should drill into =@geordi='s console for root cause.
+Daily alert counts per sensor probe. Heatmap localizes alerts to
+specific probes (memory, cpu, battery, …) instead of averaging the
+overall alert rate, which hid the spike pattern. (Redesigned by
+=@geordi= 2026-05-07: switched from line of =probe_alert_rate= to
+heatmap of =sensor_alerts=.)
 
-#+BEGIN_SRC sql :name memory_pressure_timeline :metric probe_alert_rate :group_by [probe_status, sensor_day]
-SELECT status AS probe_status, date(ts, 'unixepoch') AS sensor_day, AVG(CASE WHEN status IN ('watch','alert','critical') THEN 1.0 ELSE 0.0 END) AS probe_alert_rate
+#+BEGIN_SRC sql :name probe_alert_pattern :metric sensor_alerts :group_by [sensor_day, probe]
+SELECT date(ts, 'unixepoch') AS sensor_day, probe, SUM(CASE WHEN status IN ('watch','alert','critical') THEN 1 ELSE 0 END) AS sensor_alerts
 FROM sensor_log
-GROUP BY status, date(ts, 'unixepoch')
+GROUP BY date(ts, 'unixepoch'), probe
 #+END_SRC
 
-* History kind drift
+* History workload composition
 :PROPERTIES:
-:VIZ_TYPE: line
+:VIZ_TYPE: area
 :END:
 
-Distinct =hist_kind= values per day — the new-event-kind detector.
-A bump means a new subsystem started writing to history (worth
-naming); a drop means something stopped (worth investigating).
+Total events per =hist_kind= per day, stacked. Replaces the flat
+=COUNT(DISTINCT kind)= line (which always read 3-5) with actual
+workload composition — dominant kinds form the baseline, spikes in
+specific kinds appear as steep rises. (Redesigned by =@geordi=
+2026-05-07: =hist_kind_count= → =hist_events= grouped by both =hist_day=
+and =hist_kind=.)
 
-#+BEGIN_SRC sql :name history_kind_drift :metric hist_kind_count :group_by [hist_day]
-SELECT substr(timestamp, 1, 10) AS hist_day, COUNT(DISTINCT kind) AS hist_kind_count
+#+BEGIN_SRC sql :name history_workload_composition :metric hist_events :group_by [hist_kind, hist_day]
+SELECT kind AS hist_kind, substr(timestamp, 1, 10) AS hist_day, COUNT(*) AS hist_events
 FROM history
-GROUP BY substr(timestamp, 1, 10)
+GROUP BY kind, substr(timestamp, 1, 10)
 #+END_SRC
 
 # Run:

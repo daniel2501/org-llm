@@ -47,14 +47,14 @@ GROUP BY model, substr(timestamp, 1, 10)
 
 * Embed vs chat throughput
 :PROPERTIES:
-:VIZ_TYPE: bar
+:VIZ_TYPE: line
 :END:
 
-Total LLM calls per =call_kind= per day. The captain measures
-*latency* by =call_kind= but not *volume* — an embed pipeline
-stall or a chat-turn explosion shows up here first as a
-collapsing or runaway bar before either error-rate or latency
-notices.
+Parallel trend lines for embed and chat call volume per day. The
+ratio reads as the vertical gap between the lines — a closing gap
+means chat is growing relative to embed (or vice versa) and is the
+*actually* interesting question, hidden by the previous side-by-side
+bars. (Redesigned by =@geordi= 2026-05-07: bar → line.)
 
 #+BEGIN_SRC sql :name embed_vs_chat_throughput :metric llm_calls :group_by [call_kind, llm_day]
 SELECT call_kind, substr(timestamp, 1, 10) AS llm_day, COUNT(*) AS llm_calls

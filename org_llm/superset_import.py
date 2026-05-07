@@ -86,6 +86,19 @@ _VIZ_TYPE_MIGRATION = {
     "dual_line": "mixed_timeseries",
 }
 
+# Viz types whose controlPanel requires an explicit `x_axis` field —
+# omitting it surfaces as "Datetime column not provided as part table
+# configuration" in the browser. Heatmaps and pies derive their axes
+# from `groupby` so are excluded.
+_X_AXIS_REQUIRED_VIZ_TYPES = frozenset(
+    {
+        "echarts_timeseries_bar",
+        "echarts_timeseries_line",
+        "echarts_area",
+        "mixed_timeseries",
+    }
+)
+
 
 _HEADER_RE = re.compile(r"^#\+(\w+):\s*(.*?)\s*$", re.MULTILINE)
 _BABEL_BLOCK_RE = re.compile(
@@ -564,16 +577,16 @@ def _emit_chart_yaml(
     # see comment on _VIZ_TYPE_MIGRATION above).
     viz_type = _VIZ_TYPE_MIGRATION.get(chart.viz_type, chart.viz_type)
 
-    # echarts_timeseries_* (bar / line / area) require an explicit
-    # x_axis or they render as "Datetime column not provided".
-    # Templates put the time-like dimension last in :group_by (e.g.
-    # [model, llm_day]), so promoting the last column to x_axis works
-    # for both time-axis charts (llm_day → x_axis) and pure
-    # categorical ones (chart 3: [model] → x_axis=model, groupby=[];
-    # chart 6: [call_kind, model] → x_axis=model, groupby=[call_kind]).
+    # echarts_timeseries_* + echarts_area + mixed_timeseries all
+    # require an explicit x_axis or they render as "Datetime column
+    # not provided". Templates put the x-axis dimension last in
+    # :group_by, so promoting the last column to x_axis works for
+    # both time-axis charts (llm_day → x_axis) and categorical ones
+    # ([outcome, model] → x_axis=model, groupby=[outcome] → bars per
+    # model stacked by outcome).
     chart_groupby = list(chart.group_by)
     x_axis: str | None = None
-    if viz_type.startswith("echarts_timeseries") and chart_groupby:
+    if viz_type in _X_AXIS_REQUIRED_VIZ_TYPES and chart_groupby:
         x_axis = chart_groupby.pop()
 
     # `params` is a free-form JSON-blob dict matching whatever the

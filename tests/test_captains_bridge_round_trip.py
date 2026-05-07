@@ -43,14 +43,24 @@ TEMPLATE_PATH = (
 EXPECTED_CHARTS: list[tuple[str, str, str]] = [
     ("agent_delegation_heatmap", "crew_actions", "COUNT(*)"),
     ("model_cost_latency", "llm_avg_ms", "AVG(duration_ms)"),
-    ("error_rate_by_model", "llm_error_rate", "AVG(CASE WHEN outcome"),
+    # Redesigned 2026-05-07 by @geordi: error_rate single bar lacked
+    # sample-size context — replaced with stacked outcome bars per model.
+    ("model_usage_by_outcome", "llm_calls", "COUNT(*)"),
     ("captains_log_heatmap", "hist_events", "COUNT(*)"),
+    # Redesigned 2026-05-07 by @geordi: probe_alert_rate averaged
+    # away spikes — replaced with sensor_alerts heatmap per probe.
     (
-        "memory_pressure_timeline",
-        "probe_alert_rate",
-        "AVG(CASE WHEN status IN",
+        "probe_alert_pattern",
+        "sensor_alerts",
+        "SUM(CASE WHEN status IN",
     ),
-    ("history_kind_drift", "hist_kind_count", "COUNT(DISTINCT kind)"),
+    # Redesigned 2026-05-07 by @geordi: hist_kind_count flat-line
+    # → hist_events stacked area for actual workload composition.
+    (
+        "history_workload_composition",
+        "hist_events",
+        "COUNT(*)",
+    ),
 ]
 
 
@@ -100,10 +110,10 @@ def test_charts_carry_viz_types(dashboard: OrgDashboard) -> None:
     expected_viz = {
         "agent_delegation_heatmap": "heatmap",
         "model_cost_latency": "bar",
-        "error_rate_by_model": "bar",
+        "model_usage_by_outcome": "dist_bar",
         "captains_log_heatmap": "heatmap",
-        "memory_pressure_timeline": "line",
-        "history_kind_drift": "line",
+        "probe_alert_pattern": "heatmap",
+        "history_workload_composition": "area",
     }
     by_name = {c.name: c for c in dashboard.charts}
     for name, viz in expected_viz.items():
