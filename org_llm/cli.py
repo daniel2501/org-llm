@@ -3555,6 +3555,25 @@ def ask(
                   "probe, lists each finding, ends with a prioritized "
                   "action list. Use when the user's question is "
                   "'what's wrong with my laptop?'")] = False,
+    dashboard_url: Annotated[
+        Optional[str],
+        typer.Option("--dashboard-url",
+                     help="Superset URL the user is looking at. The URL's "
+                          "filter state (time_range, metric, group_by, "
+                          "viz_type, native filter values) gets prepended "
+                          "as a `[Superset context: ...]` prelude to the "
+                          "prompt so the agent answers in that scope. "
+                          "Layer-3 Pattern A.")
+    ] = None,
+    enrich_filters: Annotated[
+        bool,
+        typer.Option("--enrich-filters/--no-enrich-filters",
+                     help="With --dashboard-url: also fetch the dashboard "
+                          "title + resolve native_filters_key into actual "
+                          "filter values via Superset's API. Adds one "
+                          "round-trip (~100ms local). Default off — the "
+                          "URL alone is usually enough for scope.")
+    ] = False,
 ):
     """Ask a question answered from your org notes (RAG).
 
@@ -3908,6 +3927,27 @@ def ask(
             border_style="lcars2", padding=(1, 2),
         ))
         return
+    # Layer-3 Pattern A: if the user passed --dashboard-url, prepend a
+    # [Superset context: ...] prelude so the agent answers in the
+    # scope the user is looking at without restating constraints.
+    # Pure URL parse by default; --enrich-filters fetches dashboard
+    # title + native filter values from the Superset API.
+    if dashboard_url:
+        from .superset_filter import superset_prelude_for_url
+        try:
+            base_url = dashboard_url.split("/superset/")[0].split("/explore")[0]
+            prelude = superset_prelude_for_url(
+                dashboard_url,
+                base_url=base_url if enrich_filters else None,
+                enrich=enrich_filters,
+            )
+        except Exception as e:
+            on_screen(f"[dim](dashboard-url parse failed: {e})[/dim]")
+            prelude = ""
+        if prelude:
+            on_screen(f"[dim]→ {prelude.strip()}[/dim]")
+            query = prelude + query
+
     # Reject empty / whitespace queries upfront — otherwise the embed
     # call fails deep in the pipeline with a misleading error that
     # implicates Ollama. Catch it here so the recovery message points
