@@ -17,7 +17,11 @@ models:
       # as tables they snapshot at last `dbt build` and silently drift
       # — the data-integrity bug surfaced by the 2026-05-06 Superset
       # tier-1 probe (llm_calls.timestamp 6 days behind history).
-      llm_calls:        { +materialized: view }
-      cli_invocations:  { +materialized: view }
-      recent_activity:  { +materialized: view }
-      recent_nodes:     { +materialized: view }
+      llm_calls:
+        +materialized: view
+      cli_invocations:
+        +materialized: view
+      recent_activity:
+        +materialized: view
+      recent_nodes:
+        +materialized: view
