@@ -1,0 +1,508 @@
+:PROPERTIES:
+:ID:       a2af071e-8244-444d-8954-61317cc1ec4d
+:CREATED:  [2026-05-04]
+:UPDATED:  [2026-05-04]
+:REVISIONS: 2026-05-04 — added Hosting & install stub
+:END:
+#+TITLE: Apache Superset in org-llm — integration ladder + semantic layer
+#+FILETAGS: :wiki:superset:phase-27:analytics:semantic-layer:
+#+OPTIONS: toc:nil num:nil
+
+* What this page is
+
+The longer-form companion to roadmap §Phase 2026-07.01 — Apache Superset dashboards. The roadmap entry
+says /that/ Superset will ship as an optional analytics surface;
+this page is /how/ — a ladder of integration shapes from
+"point-and-click" to "fork the importer," plus the first concrete
+piece of work that's already landed (the semantic layer).
+
+Superset is Apache 2.0, FOSS, and speaks SQLAlchemy natively —
+which means it can read [[file:../../org_llm/db.py][=org_llm/db.py=]]'s
+SQLite file with zero glue code. The interesting questions
+aren't /can/ it connect, they're: which shape of integration
+earns its keep, and what should we build on /our/ side so the
+two stay coherent.
+
+* The 7-tier ladder
+
+Light-to-heavy. Each tier subsumes the ones below; you don't need
+the higher tiers to use the lower ones, but if you commit to a
+higher tier the lower ones get cleaner.
+
+** Tier 1 — Read-only point-and-click
+
+Connect Superset to =~/.local/share/org-llm/org-llm.db= and explore.
+First charts that pay rent: cost-per-recipe by provider, judge-score
+distribution from recipe A/B runs, agent-call latency p50/p95,
+captain's-log event heatmap by hour-of-day. The
+[[id:a3b1c4d2-7e8f-4a59-b2c3-d4e5f6a7b8c9][recipe A/B harness]] output
+is shaped exactly the way Superset eats best.
+
+** Tier 2 — Dashboards-as-code in the vault
+
+Superset's import/export covers databases / datasets / charts /
+dashboards as YAML; =preset-cli= (or upstream =superset
+import-dashboards=) handles CI sync. So
+=~/org/superset/<dashboard>/{charts,datasets,dashboards}/*.yaml=
+is just another file tree, version-controlled with the rest of
+the vault.
+
+This ties cleanly to [[id:b91f980e-5699-4994-843a-00532f1770b3][Memory Alpha]]'s
+DB-authoritative model: the YAML in =~/org/= is the rendered
+artifact; truth is the DB plus the registry. Same pattern as
+=vault_facts= → org files.
+
+*Known sharp edge:* upstream import/export ID-shuffles across
+environments (apache/superset disc #30190). For solo-user
+dogfooding it's fine; for the n=many FOSS future a
+normalizer will be needed.
+
+** Tier 3 — Jinja2 templates as the agent surface
+
+Superset's YAML supports Jinja2. That means an agent authoring
+a chart fills a template instead of composing JSON by hand —
+the same pattern as org-template culture. Maps naturally to
+Phase 2026-05.20 — sync verb POC (self-coded tools): when the LLM keeps answering
+"show me weekly token spend," detect → propose a parameterised
+chart YAML → register → next call skips the LLM and renders the
+chart deterministically. Charts are an unusually clean
+self-coded-tool target because the YAML *is* the tool.
+
+** Tier 4 — Agent surface
+
+A new =@geordi= specialist (alias =@analyst=; interaction-lens audit pending vs.
+=@atoz= — read [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]]
+before sketching it). Tool exposure: Superset's REST API gives
+agents =chart.create=, =dashboard.get=, =sqllab.execute= — a
+cleaner agent toolset than handing them raw matplotlib.
+
+Alerts → captain's log: Superset alerts can hit a webhook;
+webhook appends to =~/org/captains-log-*.org=. Closes the loop
+without inventing a new pager.
+
+** Tier 5 — Org-native embedding
+
+=#+BEGIN_SRC superset= Babel block that POSTs to SQL Lab and
+inlines the result as an Org table. Falls out for free once
+the API is wired; matches the FOSS-Emacs-first preference.
+
+Embed thumbnail PNGs in Org via Superset's chart-screenshot
+endpoint; click-through opens the live Superset URL. Lets the
+dashboard live in /both/ worlds (Emacs viewer / browser editor).
+
+** Tier 6 — Semantic layer (canonical metrics)
+
+*This is the tier already shipping (see
+[[*Semantic-layer prototype][prototype]] below).*
+
+Superset's datasets define metrics and dimensions once. Agents
+reference =metric:weekly_tokens= by name, not raw SQL. Removes
+a class of agent hallucination (wrong column names,
+double-counted joins). The same registry that drives agent
+queries can later emit Superset dataset YAML, so a Superset
+dashboard and an =@geordi= agent answer with /identical/
+numbers.
+
+This is the highest-leverage move because it's the seam every
+higher tier passes through.
+
+** Tier 7 — Fork territory
+
+Stops being integration. Per the
+[[id:93b87da8-bca5-409a-8fdf-8ed20ca739ef][2026-05-06 fork-spike survey]]
+two of the three originally-listed candidates are misframed —
+revised below.
+
+- *Org-as-source-format.* (Confirmed.) Fork the importer to
+  consume =.org= files with literate Babel SQL blocks as the
+  dashboards-as-code DSL. Single chokepoint at
+  =superset/commands/importers/v1/utils.py= (=load_yaml= +
+  =is_valid_config= + =get_contents_from_bundle=). Possibly
+  zero-fork as an org-llm-side pre-processor that emits
+  Superset's standard zip and POSTs to
+  =/api/v1/dashboard/import/=. Most-aligned with the "Claude
+  Code for Org Mode" thesis.
+- *Headless render binary.* (Withdrawn.) Structurally
+  infeasible at reasonable cost — the renderer /is/ the 85 MB
+  React frontend driven by Playwright (=utils/webdriver.py=).
+  No matplotlib/altair alternative exists in the Python tree.
+  Realistic options collapse to "boot existing Playwright
+  headlessly" (doesn't reduce footprint) or "rebuild server-
+  side renderer from scratch" (months of work). Recorded as
+  closed in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] §Phase 2026-07.02 — containerization strategy.
+- *Auth swap.* (Demoted — not a fork.) Upstream already
+  exposes =CUSTOM_SECURITY_MANAGER= + =AUTH_REMOTE_USER=
+  (=superset/config.py:182, 339=). The =~/.authinfo.gpg=
+  solo-user mode is a ~30-line org-llm-side
+  =CustomSecurityManager= subclass. Belongs at tier 4–5
+  (extension), not tier 7 (fork).
+
+* Semantic-layer prototype
+
+Shipped 2026-05-04. v0 scope: agents query metrics by name
+against the existing SQLite. The Superset YAML emitter is
+deferred to a follow-up — first establish that one registry
+across all consumers is the right shape.
+
+** Files
+
+- [[file:../../org_llm/metrics/registry.yaml][=org_llm/metrics/registry.yaml=]]
+  — 4 sources, 14 dimensions, 12 metrics over =llm_calls=,
+  =crew_log=, =history=, =sensor_log=.
+- [[file:../../org_llm/metrics.py][=org_llm/metrics.py=]] —
+  =Registry.load()= / =.compile()= / =.query()= / =.describe()=.
+  Strict validation: cross-source group-by raises
+  =RegistryError=. No CLI verb wired yet (deliberately — surface
+  decision is downstream).
+
+** Run the demo
+
+#+begin_src sh
+uv run python -m org_llm.metrics
+#+end_src
+
+Real findings the demo surfaced on first run against the
+1000-row =llm_calls= table:
+
+- =phi3.5= had a 50% error rate (23/46 calls). Worth chasing.
+- =mistral-nemo= 100% error rate (n=2).
+- Chat-call mean is 33s; embed mean is 384ms. 87× gap, surfaced
+  by =metric:llm_avg_ms group_by:[call_kind]=.
+
+** Why this is the seam
+
+Every higher tier passes through the registry:
+
+| Tier               | What it consumes from the registry              |
+|--------------------+-------------------------------------------------|
+| Dashboards-as-code | Emit Superset dataset YAML from same metrics    |
+| Agent surface      | =@geordi= asks by metric name, not raw SQL      |
+| Org-native embed   | Babel block resolves =metric:foo= → SQL → table |
+| Self-coded tools   | "Always-asked" metrics get registered as tools  |
+
+Without the registry, each consumer redefines what
+=weekly_tokens= means and they drift.
+
+* What's intentionally out of v0 scope
+
+- *Cross-source joins.* Registry rejects them with a clear error.
+  v1 problem.
+- *Superset YAML emitter.* The highest-leverage follow-up. Same
+  registry → =docs/superset/datasets/*.yaml= so a Superset
+  dashboard and an agent answer with identical numbers.
+- *CLI verb.* =org-llm metrics ls= / =org-llm metrics query …=
+  is easy once we know which surface (CLI? MCP tool? both?).
+- *Agent tool registration.* Once the CLI exists, exposing
+  =metrics_query= as an MCP tool is the Phase-29 self-coded-tool
+  seam.
+- *Time aggregation helpers.* =since=/=until= work but no
+  rolling windows, no week-of-year, no LAG/LEAD.
+
+* Why this asymmetric
+
+Superset is heavyweight (Celery + supporting services +
+Postgres recommended). It's an /asymmetric/ component per
+[[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] §Phase 2026-07.02 — containerization strategy: the
+laptop install never requires it; opt-in containerised
+deployment when the analytics value is wanted.
+
+The semantic layer ships /first/ precisely because it's the
+piece that earns its keep with or without Superset running.
+Even if Superset never gets installed, =metric:llm_error_rate=
+is useful from any agent or =org-llm ask= flow.
+
+* Hosting & install — proposal (2026-05-06)                   :proposal:
+
+*Summary.* Recommend a *native uv-venv-first* install path
+behind a thin =org-llm superset= CLI verb (start/stop/status/
+upgrade/reset) with no TUI panel until the CLI proves itself.
+The 2026-05-06 tier-1 probe demonstrated end-to-end native
+install in ~10 minutes against the live SQLite — no Docker
+needed, friendlier to FOSS-Emacs-first + Guix preferences. Bind-
+mount the org-llm SQLite read-only; pin Superset's own metadata
+DB under =~/.local/share/org-llm/superset/= so it survives
+re-installs; default auth is solo-user passthrough via the
+upstream =AUTH_REMOTE_USER= seam (per the
+[[id:93b87da8-bca5-409a-8fdf-8ed20ca739ef][fork survey]],
+~30 lines on our side, no fork). Compose stays a documented
+*alternative*, not the default. Asymmetric reminder remains
+load-bearing: zero Superset bits get installed unless the user
+runs =org-llm superset install=.
+
+*Expanded.*
+
+** Recommendation summary
+
+| # | Question                | Recommendation                                                      | Confidence |
+|---+-------------------------+---------------------------------------------------------------------+------------|
+| 1 | Surface                 | CLI verb day one; defer TUI panel until CLI matures                 | high       |
+| 2 | Compose vs. native      | Native =uv venv= default; compose documented as alternative         | high       |
+| 3 | DB sharing              | Bind-mount org-llm SQLite read-only (=mode=ro=)                     | high       |
+| 4 | Superset metadata DB    | =~/.local/share/org-llm/superset/superset.db= (SQLite, persistent)  | high       |
+| 5 | Auth                    | =AUTH_REMOTE_USER= + =CustomSecurityManager= → authinfo lookup      | high       |
+| 6 | Updates                 | Pinned version in =pyproject= extras; =org-llm superset upgrade=    | medium     |
+| 7 | Dashboards-pre-imported | Import on first start only; idempotent =--skip-existing= thereafter | low (TODO) |
+| 8 | Asymmetric reminder     | =install= verb is opt-in; nothing pulled at base install            | high       |
+
+** Per-question recommendations
+
+*** 1. Surface — CLI verb first, TUI panel later
+
+*Recommend.* Ship =org-llm superset {install,start,stop,status,
+upgrade,reset}= as a Typer subcommand group. Defer a Doom TUI
+panel until the CLI surface is stable and we know what status
+fields users actually want.
+
+*Rationale.* "Keep CLI pristine" memory rule says the CLI stays
+a co-equal surface even as focus shifts elsewhere; this is a
+classic OpenTofu-shaped verb (long-running process, environment
+state, version pin). A status panel is easy to add later once
+=org-llm superset status --json= exists; the elisp side can
+just shell out and render. Building both at once doubles the
+surface area before we know what "Superset is healthy" needs to
+mean.
+
+*Alternative if W changes.* If daily-driver ergonomics surface
+that =start/stop= happens often enough to deserve a keybinding,
+add a thin =M-x org-llm-superset-toggle= wrapper — still backed
+by the CLI verb, no duplicated logic.
+
+*** 2. Compose vs. native — native default
+
+*Recommend.* Native =uv venv= path is the default and the only
+documented "happy path." Docker compose stays as a one-page
+alternative for users who already run a container stack.
+
+*Rationale.* The 2026-05-06 tier-1 probe stood up Superset
+end-to-end in ~10 min via =uv venv= with no Docker bits — that
+*is* the install. FOSS-first + Guix-friendly + native primary
+all point the same way; the only argument for compose is "it's
+how Superset's docs install it," which loses to "we already
+proved native works on /our/ machine." Two paths on day one
+violates complexity gate-2 (manage required complexity well)
+when the tier-1 probe established only one is required.
+
+*Alternative if W changes.* If a future user reports
+intractable native-install friction on a non-Guix non-uv host
+(e.g. RHEL/no-uv), the compose alternative gets promoted from
+"documented" to "supported." The native path stays primary.
+
+*** 3. DB sharing — bind-mount read-only
+
+*Recommend.* Mount =~/.local/share/org-llm/org-llm.db= as the
+Superset SQLAlchemy URI in *read-only* mode (=?mode=ro&uri=true=).
+Override =PREVENT_UNSAFE_DB_CONNECTIONS = False= as the probe
+already requires.
+
+*Rationale.* "No stateful service owns truth — SQLite/vault
+canonical" is non-negotiable; Superset is a /reader/, not a
+writer. Read-only is the smallest contract. Periodic snapshot
+adds operational complexity (cron, freshness lag, "why is my
+chart stale") without solving any problem the read-only mount
+doesn't already solve. Phase 2026-05.17 — DB-as-cache + git-canonical
+pipeline doesn't change this — it changes /how/ the SQLite gets
+written, not who reads it.
+
+*Alternative if W changes.* If Superset's query load ever
+contends with org-llm's writers (lock pressure, busy-timeout
+errors), promote to a periodic =VACUUM INTO= snapshot at
+=~/.local/share/org-llm/superset/snapshot.db=. Solo-user
+workload is nowhere near that today.
+
+*** 4. State (Superset metadata DB) — pinned local SQLite
+
+*Recommend.* =SQLALCHEMY_DATABASE_URI=
+sqlite:////~/.local/share/org-llm/superset/superset.db=. Lives
+alongside org-llm's own data dir, survives venv rebuilds, lives
+in =~/.local/share= so XDG-respecting backups pick it up.
+
+*Rationale.* The probe used =/tmp/superset-emitter-meta.db=
+which is fine for one-shot dogfooding but would lose dashboards
+on next reboot. Pinning under =~/.local/share/org-llm/superset/=
+matches where the rest of org-llm's persistent state already
+lives and keeps the asymmetric promise (one directory to nuke
+for full uninstall). SQLite is fine for solo-user; Superset
+docs warn against SQLite metadata for production but explicitly
+allow it for dev — solo-user dogfood *is* dev.
+
+*Alternative if W changes.* If Superset Celery/alerts get
+turned on (tier-4 work), revisit — Celery wants Postgres-class
+locking. Until then, SQLite metadata is the right default.
+
+*** 5. Auth — =AUTH_REMOTE_USER= + authinfo
+
+*Recommend.* Default to =AUTH_TYPE = AUTH_REMOTE_USER= with a
+~30-line =CustomSecurityManager= subclass that resolves the
+=Remote-User= header (or peer cred on a unix socket) against
+=~/.authinfo.gpg=. Bind to =127.0.0.1= only; let a local
+reverse proxy (nginx / =caddy= / qutebrowser localhost) inject
+the header, or accept anonymous solo-user when no proxy is
+configured.
+
+*Rationale.* The fork survey already nailed this: upstream
+exposes =CUSTOM_SECURITY_MANAGER= + =AUTH_REMOTE_USER= at
+=superset/config.py:182,339=, no fork needed. =~/.authinfo.gpg=
+is the existing org-llm credential surface (used by the proxy +
+mail). Solo-user-no-login is too sharp a default — even
+loopback-bound, leaving it open contradicts the "manages
+required complexity well" gate when 30 lines fixes it.
+
+*Alternative if W changes.* If an n=many FOSS user wants OAuth
+or LDAP, both are upstream config-only swaps — flip
+=AUTH_TYPE=, no org-llm code change. Document the seam, don't
+build for it on day one.
+
+*** 6. Updates — pinned extras + upgrade verb
+
+*Recommend.* Pin =apache-superset==<X.Y.Z>= as a =[superset]=
+extra in =pyproject.toml=. =org-llm superset upgrade= bumps the
+pin, runs =uv sync --extra superset=, then =superset db
+upgrade=. Fail-loudly if the metadata DB schema migration fails.
+
+*Rationale.* Pinning prevents surprise breakage; an explicit
+verb makes upgrades a deliberate user act (matches the
+daily-driver dogfood pattern — upgrades happen when the user
+chooses, not on every =start=). Compose-style "always pull
+:latest" is the worst of both worlds — surprise upgrades plus
+docker complexity.
+
+*Alternative if W changes.* If Superset releases break
+=metrics.emit_superset()= round-trips often, add a CI matrix
+that round-trips against the next minor *before* bumping the
+pin. Probably overkill until it bites once.
+
+*Open question.* Whether =upgrade= should also re-run
+=superset import-directory docs/superset/= or leave that to
+a separate =org-llm superset reimport= verb. Recommend
+*separate* — re-import is a user-edited-dashboards risk surface
+(see #7 below) and shouldn't ride along with a version bump.
+
+*** 7. Dashboards-pre-imported — import-once + skip-existing
+
+*Recommend.* =org-llm superset install= runs the bundle import
+*once*, marks it done in =~/.local/share/org-llm/superset/.imported=.
+Subsequent =start= / =upgrade= invocations do *not* re-import.
+A separate =org-llm superset reimport [--overwrite]= verb
+exists for explicit user-driven refresh; default is
+=--skip-existing=.
+
+*Rationale.* User-edited dashboards are the load-bearing risk —
+clobbering them on next start is exactly the failure mode the
+roadmap stub flagged. Import-once + opt-in re-import keeps the
+"DB-authoritative for /metrics/, dashboards are user state"
+boundary clean. Memory Alpha framing helps: the registry +
+emitter are =vault_facts=-shaped (truth → render); the *user's*
+dashboard edits are not — once a user touches a chart, their
+edit is the truth.
+
+*Open questions (genuine TODO).*
+
+- *TODO.* What's the conflict-resolution UX when a user *did*
+  edit a shipped dashboard /and/ the bundle has a newer version
+  of the same chart? Need user input — git-style 3-way merge is
+  overkill for a chart YAML; "keep mine / take theirs / show
+  diff" CLI prompt is probably the right primitive but unclear
+  whether =reimport= should be that interactive.
+- *TODO.* Dashboard /provenance/ — should shipped dashboards
+  carry a marker (custom property in YAML, registry-managed
+  tag) so the import logic can tell shipped-and-untouched from
+  shipped-and-edited? Recommend yes, but the marker mechanism
+  needs a quick spike.
+
+*** 8. Asymmetric reminder — opt-in install verb
+
+*Recommend.* =apache-superset= lives strictly behind a
+=[superset]= extra in =pyproject.toml=. Base =uv sync= installs
+*zero* Superset bits. =org-llm superset install= is what pulls
+the 480 MB of Celery/Playwright/Selenium/etc. =org-llm superset
+uninstall= reverses it cleanly (rm the venv extras +
+=~/.local/share/org-llm/superset/=).
+
+*Rationale.* Phase 2026-07.02 — containerization strategy says
+the laptop install must work with zero Superset bits installed;
+the probe measured ~480 MB venv + ~200 transitive deps which is
+strictly too heavy for the base path. Opt-in extra is the same
+pattern Python already has for optional integrations; matches
+"native primary" without forcing every user to absorb the
+analytics stack's footprint.
+
+*Alternative if W changes.* If Superset eventually becomes
+load-bearing for non-analytics features (unlikely — the
+semantic layer already keeps the registry useful without
+Superset running), promote out of the extra. Not on the
+horizon.
+
+** What this proposal does NOT decide
+
+- *TUI panel design.* Deferred until CLI matures.
+- *=@geordi= agent shape.* Tier-4 work, separate decision; the
+  install path here doesn't constrain it.
+- *Compose recipe content.* Documented as alternative but no
+  =docker-compose.yml= shipped on day one; if/when written, it
+  bind-mounts the same paths.
+- *Cross-host dashboard sync.* If a user runs Superset on a
+  different machine than org-llm, the read-only mount story
+  needs revisiting — out of scope for solo-user dogfood.
+
+* Status (overnight 2026-05-06)
+
+All three "next concrete steps" *shipped* tonight (in reverse
+of the originally-proposed order — emitter first because B's
+agent had already mapped the bundle layout):
+
+1. *Superset YAML emitter.* =Registry.emit_superset(target_dir)=
+   in [[file:../../org_llm/metrics.py][=metrics.py=]]; round-trip validated against
+   =apache-superset 4.1.1= via =superset import-directory=.
+   Bundle lives at [[file:../../docs/superset/][=docs/superset/=]].
+2. *CLI verb.* =org-llm metrics ls/describe/query/emit= — see
+   [[file:../../org_llm/cli.py][=cli.py=]] near =metrics_app=. Dogfoodable from any shell.
+3. *MCP tools.* =metrics_describe= + =metrics_query= registered
+   in [[file:../../org_llm/mcp_server.py][=mcp_server.py=]]; in-editor agents now query the registry
+   without raw SQL.
+
+Plus: 4 new metrics (=agent_fan_out=, =hist_kind_count=,
+=hist_command_count=, =probe_alert_rate=), 2 new dimensions
+(=hist_day=, =sensor_day=), 21 pytest cases at
+[[file:../../tests/test_metrics_registry.py][=tests/test_metrics_registry.py=]] (all green), and
+[[id:5f59c6a3-db42-4410-81e4-5ea9daa33d9b][tier-1 probe]] surfacing 3 substantive anomalies the
+registry doesn't catch — including a real data-integrity bug
+(=llm_calls.timestamp= and =history.timestamp= disagree by
+~6 days for the same events).
+
+* Next concrete step (after 2026-05-06)
+
+1. *Resolve =llm_calls.timestamp= drift.* Tier-1 probe finding;
+   load-bearing for any cross-source query. Memory Alpha
+   (Phase 2026-05.17 — DB-as-cache + git-canonical pipeline) is meant to surface this kind of drift.
+2. *Org-as-source pre-processor (tier 7 zero-fork).* Per the
+   [[id:93b87da8-bca5-409a-8fdf-8ed20ca739ef][fork survey]] recommendation: =org-llm superset import-org
+   <path.org>= that emits a Superset bundle and POSTs to
+   =/api/v1/dashboard/import/=. 30-line .org → live chart matching
+   =metric:llm_avg_ms=.
+3. *Re-import =--force=.* Idempotent re-emits get rejected on
+   second import; surface =--overwrite= in the CLI wrapper.
+4. *Cross-source v1 of the registry.* Three of the eight
+   tier-2 dashboard charts named in the [[id:5f59c6a3-db42-4410-81e4-5ea9daa33d9b][tier-1 probe]] need
+   joins across sources, which v0 rejects by design.
+
+* Source files
+
+- [[file:../../org_llm/metrics.py][=org_llm/metrics.py=]] —
+  registry loader + compiler + runner
+- [[file:../../org_llm/metrics/registry.yaml][=org_llm/metrics/registry.yaml=]]
+  — the YAML registry
+- [[file:../../org_llm/db.py][=org_llm/db.py=]] — the SQLAlchemy
+  schemas the registry compiles against
+
+* Related
+
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 2026-07.01 — Apache Superset dashboards
+  (Superset) and § Phase 2026-07.02 — containerization strategy (containerization)
+- [[id:b91f980e-5699-4994-843a-00532f1770b3][Memory Alpha]] —
+  same DB-authoritative pattern the registry follows
+- [[id:1b0a2186-0759-492b-bb67-b21074779e6c][dbt walkthrough]] —
+  Superset over dbt models is the canonical "modern data stack"
+  shape; the registry sits one level higher (semantic) than dbt
+  (physical models)
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] §
+  Phase 2026-07.01 — Apache Superset dashboards — concrete work surface
