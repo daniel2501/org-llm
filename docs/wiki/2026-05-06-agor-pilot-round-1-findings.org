@@ -1,0 +1,285 @@
+:PROPERTIES:
+:ID:       4f3e7a2c-8b91-4c5d-9e6f-2a1b3c4d5e6f
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Agor pilot round-1 findings — multi-agent-org-llm validation
+#+FILETAGS: :wiki:agor:findings:multi-agent:pilot:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Six Claude sub-agents were spawned in parallel as "human
+pilots" to drive Agor v0.17.3 + org-llm Bridge Crew on small coding
+tasks. Two delivered real work end-to-end (C: 33 passing tests
+committed; D: memory-file primitive validated). Three reported their
+sub-agent sandbox blocked authenticated curl + bash exec against the
+local daemon. One stalled after a rate-limit event. Total spend ~$0.81
+on a $30 ceiling. Round produced 11 distinct findings worth canonizing,
+including 2 load-bearing structural gaps in v0.17.3.
+
+*Expanded.* Pilot round-1 was both (a) a working-shape validation of
+the =multi-agent-org-llm= integration and (b) a stress test of the
+"Claude as human user piloting Agor" experiment shape. Both axes
+produced load-bearing findings. The Pilot C deliverable
+(=tests/test_perf.py=, commit =5bae5e3=) is the first
+Agor-orchestrated org-llm crew code to land on trunk. The Pilot D
+deliverable (=.agor-assistants/atoz/memory/2026-05-06.md=) is the
+first proof-of-life for the per-agent journal Layer 2a slot.
+
+* Pilot outcomes
+
+| # | Team shape                                  | Outcome              | Cost     | Wall    | Headline                                                                |
+|---+---------------------------------------------+----------------------+----------+---------+-------------------------------------------------------------------------|
+| A | Solo @data (control)                        | exec-blocked report  | $0.00    | ~2 min  | bash-only harness; sub-agent sandbox blocked authenticated curl         |
+| B | Sibling pair @data + @spock on one board    | exec-blocked report  | $0.00    | ~2 min  | same blocker; harness =scripts/_pilot_b_run.sh= ready                   |
+| C | Captain + scout fork mixed-tool             | *PASS*               | $0.45    | 19 min  | 33 tests committed; cross-tool plumbed; 5 BUGs surfaced                 |
+| C2| Captain + fork ALL-FOSS                     | exec-blocked, static | $0.00    | ~3 min  | structural finding: no FOSS-native agentic_tool installed on this box   |
+| D | 1-tick scheduled @atoz solo                 | *PASS*               | $0.36    | 19 min  | memory-file primitive works; *scheduler primitive missing from MCP*     |
+| D2| 3-member long-lived (vault-hygiene, 1-tick) | partial (stalled)    | unknown  | ~6 min  | hit rate_limit_event after MCP discovery; sibling spawns never reached  |
+
+Total burn: ~$0.81 of the $30 budget cap. Two real shipped artifacts.
+
+* Findings (11)
+
+** F1 — =idle= IS the terminal status for spawned children (CONFIRMED 2x)
+
+*Severity.* High — silently breaks every poll loop in canon.
+
+*Evidence.* Independently hit by Pilots C and D. The smoke harness
+(=scripts/agor-smoke.sh=) and =agor-test-fanout.sh= both poll for
+=status ∈ {completed, stopped, archived, failed, errored}= and would
+hang forever waiting; =idle= is what an MCP-spawned child actually
+settles to once its claude-code SDK turn returns.
+
+*Action.* Update =scripts/agor-smoke.sh= + =scripts/agor-test-fanout.sh=
+poll loops to break on =idle= as well. Canonize in
+=docs/wiki/agor-smoke-recipe.org= alongside the BUG-1..6 list.
+
+** F2 — Cross-tool override is plumbed end-to-end at schema level
+
+*Severity.* Important positive finding.
+
+*Evidence.* Pilot C requested =agenticTool="opencode"= for @geordi
+on spawn; Agor accepted the override, registered the child as
+=agentic_tool="opencode"= in its DB, and assigned a session ID. The
+spawn succeeded at the schema/DB level. Failure was at execution time
+only (no opencode binary on PATH).
+
+*Action.* Update =multi-agent-org-llm.org= § "Cross-tool escalation"
+to mark this primitive as *validated* (was: aspirational). The gap
+is now host-level dependency installation, not Agor-level capability.
+
+** F3 — Scheduler primitive is NOT MCP-exposed in v0.17.3
+
+*Severity.* Load-bearing — the canon describes it as available.
+
+*Evidence.* Pilot D probed =agor_search_tools= with queries
+=schedule=, =cron=, =heartbeat=, =tick=, =repeat=, =recurring=,
+=board=, plus =domain="boards"=. Zero scheduler/cron/heartbeat tools
+surfaced. Only schedule-adjacent hit was =agor_assistants_list=
+(read-only), which returned ={"total":0,"assistants":[]}=. No
+write-side via MCP for assistants OR schedules.
+
+*Action.* Update =multi-agent-org-llm.org= line 162-175 to mark the
+scheduler as *unreachable from MCP in v0.17.3*; document the
+direct-spawn-now-+-systemd-timer fallback path. File upstream as a
+v0.18 ask: "promote scheduler tooling to MCP surface for the
+long-lived team primitive."
+
+** F4 — =agor_execute_tool= requires =tool_name= (snake_case), NOT =toolName=
+
+*Severity.* Medium — wastes 1-2 captain turns to discover.
+
+*Evidence.* Pilot C's captain hit this twice before adapting; the
+schema documentation suggests camelCase elsewhere. The schema field
+inside =agor_execute_tool= itself is snake_case.
+
+*Action.* Document explicitly in =multi-agent-org-llm.org= § "MCP
+surface shape — progressive disclosure" so future agents skip the
+trial-and-error.
+
+** F5 — Per-spawn =modelConfig= override (PARTIALLY CLOSED 2026-05-06 EDT)
+
+*Severity.* Medium — affects DEC-017 § 6 Defaults rule testability.
+
+*Status.* CONFIG layer YES, RUNTIME layer NO for FOSS. Closed by
+Pilot R2-Model-RETRY 2026-05-06 EDT. Agor persists every requested
+=modelConfig.model= verbatim at =session.model_config.model= (3/3
+match: =sonnet-4-6=, =haiku-4-5=, =qwen-2.5-72b=). Sonnet + haiku
+actually ran end-to-end. *Qwen was rejected at runtime by the
+claude-code adapter* with "model may not exist or you may not have
+access" — see Round-2 R7 in
+=2026-05-06-agor-pilot-round-2-findings.org=.
+
+*Implication.* The override knob is plumbed through Agor cleanly;
+the runtime floor is the *agentic tool's* model registry, not Agor.
+To run FOSS/OpenRouter routes per DEC-017 § 6, spawn with a
+*different =agenticTool=* (likely opencode + provider config), NOT
+claude-code with an OR model id in modelConfig.model.
+
+*Original action (closed).* Done — single-pilot test in
+=scripts/_r2_model_retry.py= validated all 3 model IDs land at the
+config layer; haiku and sonnet validated at runtime.
+
+*Follow-up action.* In round 3+, install opencode and re-test the
+FOSS path via =agenticTool="opencode"= rather than via
+=modelConfig.model= on a claude-code session.
+
+** F6 — opencode silent failure when binary not installed
+
+*Severity.* Medium — degrades cross-tool experimentation.
+
+*Evidence.* Pilot C's @geordi child landed in DB with
+=status=failed= and empty =raw_sdk_response= within ~5s. No spawn-time
+warning, no fallback to claude-code, no diagnostic message. The
+override succeeded; only execution failed.
+
+*Action.* Either install opencode (Guix / npm-global) before next
+cross-tool round, OR file upstream: "spawn-time check that the
+requested =agenticTool= binary resolves on PATH; warn or fall back
+if not."
+
+** F7 — Agor REST returns null for child session cost/timing fields
+
+*Severity.* Medium — degrades cost observability.
+
+*Evidence.* Pilot D found that =cost_usd=, =token_usage=,
+=started_at=, =completed_at= on the child session row stay null
+even after the child reaches =idle= and on-disk artifacts prove the
+work ran. May populate only on full session archive or via a
+different code path.
+
+*Mitigation.* Aggregate cost via parent's claude -p stream-json
+=result.total_cost_usd= instead of polling child REST.
+
+** F8 — JWT TTL 15 min bites repeatedly during multi-step pilots (BUG-6 reconfirmed)
+
+*Severity.* Medium — ergonomics drag on every long pilot.
+
+*Evidence.* Pilot D refreshed the token mid-run via
+=POST /authentication=. Pilot A also flagged ~11 min remaining at
+script-prep time. Already documented as BUG-6 in
+=multi-agent-org-llm.org= line 224.
+
+*Action.* Wire =scripts/agor-token-refresh.sh= invocations into the
+pilot harness boilerplate so multi-leg pilots auto-refresh. Or better:
+canonize the auto-refresh as part of the pilot template documented
+in =agor-smoke-recipe.org=.
+
+** F9 — Captain stalls when one =claude -p= invocation issues multiple sequential spawns under rate-limit pressure
+
+*Severity.* Important — affects sub-agent reliability.
+
+*ROUND-2 AMENDMENT (2026-05-06 21:31 EDT).* Original F9 framing
+("rate_limit_event causes the stall") was *misdiagnosed*. Round-2
+pilots R2-A, R2-B, R2-D2, and R2-Model all observed
+=rate_limit_event= payloads, but with =rate_limit_info.status="allowed"=
+— purely informational =five_hour=-window pings, not block events.
+Pilots R2-A/R2-B/R2-D2 each fired through them with no retry needed.
+Pilot R2-Model reproduced the round-1 stall *exactly* — and the
+common factor was *one =claude -p= captain process attempting
+multiple sequential spawn calls in the same context*, which
+compounds with the informational rate-limit ping into a stall mode.
+*Splitting into one-spawn-per-=claude -p=-invocation eliminates the
+stall* (R2-D2 verified: 3 sequential spawns over 3 separate
+captain subprocesses, all succeeded; total cost $0.21).
+
+*Corrected diagnosis.* The stall is caused by:
+- Multiple spawn tool_uses queued in one =claude -p= context, *plus*
+- Anthropic's parallel-tool-use shape under MCP indirection not
+  being honored by claude-code+sonnet (it serializes into multiple
+  assistant messages anyway — see Round-2 Finding R6 in the
+  round-2 findings doc), *plus*
+- Token-budget pressure from carrying the discovery transcript +
+  multiple spawn responses in the same context window.
+
+*Evidence (round-1).* D2's captain JSONL: 1 =rate_limit_event=
+(=allowed=), 2 assistant messages, no =result= event. Last
+assistant text: "Spawning all three sibling sessions in parallel
+now." Captain announced but never emitted the tool_use.
+
+*Evidence (round-2 reproduction).* R2-Model's captain JSONL:
+3 assistant messages, 1 =rate_limit_event= (=allowed=), no =result=
+event. Same shape — captain stalled before completing all 3
+sequential spawns.
+
+*Evidence (round-2 fix).* R2-D2 used 3 separate =claude -p=
+invocations (one per sibling spawn), each with a tiny prompt and a
+single tool_use. All 3 spawns landed; all 3 children reached =idle=;
+total wall 257s; cost $0.21.
+
+*Action (corrected).* In the round-3+ pilot template:
+1. *Use one-spawn-per-=claude -p= invocation* for any captain that
+   spawns 2+ children. The captain script orchestrates the
+   sequence; each spawn is its own short-lived subprocess.
+2. *Catch =rate_limit_event= in parent stream* but only retry when
+   =rate_limit_info.status != "allowed"= OR when no =result= event
+   ever arrives. Treating all rate_limit_events as failures (the
+   original F9 action) burns budget unnecessarily.
+3. *Refresh =mcp_token= via =GET /sessions/{captain_id}= between
+   spawn invocations* (R2-D2 pattern — preserves the captain's MCP
+   context across the multiple subprocess invocations).
+
+** F10 — Sub-agent sandbox blocks bash + curl auth; Python+subprocess works
+
+*Severity.* High — defines the working pattern for all future pilots.
+
+*Evidence.* Pilots A, B, C2 reported "exec-blocked" when invoking
+=bash scripts/agor-pilot-*.sh= or =curl -H "Authorization: …"=. Pilot
+D2 used a Python harness (=scripts/_pilot_d2.py=) that subprocess-calls
+=claude -p= and got =bypassPermissions= + Agor MCP attached cleanly.
+Pilot D used a hybrid (=urllib= for REST, subprocess for =claude -p=)
+and ran end-to-end. Pilot C used bash and got through (suggests the
+block isn't 100% deterministic — may depend on prompt phrasing or
+sandbox state at spawn time).
+
+*Action.* Round-2 pilot prompts should explicitly direct sub-agents
+to use Python+subprocess as the primary pattern. The hybrid approach
+in Pilot D's harness (urllib for REST + subprocess for =claude -p=)
+is the most-reliable observed shape.
+
+** F11 — Pilot prompts referencing in-flight uncommitted files need fallback target
+
+*Severity.* Low — brief-design concern.
+
+*Evidence.* Pilot C's brief specified =org_llm/metrics.py= and
+=tests/test_metrics_registry.py= as the SUT; both turned out to be
+untracked in trunk (work from a parallel agent). Captain pivoted
+gracefully to =org_llm/perf.py= without help — but that pivot only
+worked because @picard had latitude in the prompt.
+
+*Action.* Round-2 pilot briefs should include 1-2 fallback targets
+when referencing in-flight files: "preferred: X; if X is untracked
+or unsuitable, fall back to Y or Z."
+
+* Round-2 design implications
+
+| Round-1 finding | Round-2 implication                                                              |
+|-----------------+----------------------------------------------------------------------------------|
+| F1              | Update smoke harness poll loops to recognize =idle= as terminal                  |
+| F3              | Drop the "scheduled" pilot shape until v0.18+ exposes scheduler via MCP          |
+| F5              | Add a focused single-pilot test that just validates per-spawn modelConfig        |
+| F6              | Install opencode (or aider/cline) before next cross-tool round                   |
+| F8              | Bake auto-refresh into the pilot template; canon it in agor-smoke-recipe.org     |
+| F9              | Catch =rate_limit_event= in parent stream; sleep+retry instead of die            |
+| F10             | Round-2 pilot prompts explicitly require Python+subprocess pattern (Pilot D shape) |
+| F11             | All round-2 briefs include fallback targets                                      |
+
+* Real artifacts on disk
+
+- =tests/test_perf.py= — 33 tests, all green, committed to trunk =5bae5e3= (Pilot C deliverable, renamed from misnomer =test_metrics_registry.py=)
+- =~/.agor/worktrees/local/org-llm/pilot-D-1778115247/.agor-assistants/atoz/memory/2026-05-06.md= — Pilot D's audit findings, working memory-file shape
+- =scripts/agor-pilot-a.sh= — Pilot A bash harness (not yet executed from top-level)
+- =scripts/_pilot_b_run.sh= — Pilot B bash harness (not yet executed)
+- =scripts/agor-pilot-c.sh= — Pilot C bash harness (executed, success)
+- =scripts/_pilot_d2.py= — Pilot D2 Python harness (working pattern template; captain stalled on rate-limit)
+- =scripts/_pilot_d2_artifacts/= — D2 captain + discovery transcripts
+- =/tmp/agor-pilot-c-parent-70662.jsonl= — Pilot C full captain stream (223 KB)
+- =/tmp/agor-pilot-c-state-70023/= and =-state-70662/= — Pilot C state captures
+
+* See also
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — canonical definition; will be updated per F2/F3
+- [[file:agor-smoke-recipe.org][agor-smoke-recipe.org]] — needs F1 + F8 updates
+- [[file:bridge-crew-agor-assistants.org][bridge-crew-agor-assistants.org]] — persona convention validated by F (D's memory-file path)
