@@ -430,6 +430,30 @@ message (user only)."
       (should (equal (cdr (assoc "role" (nth 0 msgs))) "user")))))
 
 
+;; ── prompt-marker body strip ──────────────────────────────────────────────
+
+(ert-deftest org-llm-chat/body-strips-prompt-marker ()
+  "Leading `❯ ' (configured marker) is stripped from the body the LLM sees."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Capture\n** " org-llm-chat-user-heading "\n"
+            "❯ system status?\n")
+    (goto-char (point-min))
+    (re-search-forward (org-llm-chat--user-heading-line-regex))
+    (let ((body (org-llm-chat--current-heading-body)))
+      (should (equal body "system status?")))))
+
+(ert-deftest org-llm-chat/body-no-marker-still-clean ()
+  "Body without the marker prefix is returned trimmed, unchanged."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Capture\n** " org-llm-chat-user-heading "\n"
+            "  hello there  \n")
+    (goto-char (point-min))
+    (re-search-forward (org-llm-chat--user-heading-line-regex))
+    (let ((body (org-llm-chat--current-heading-body)))
+      (should (equal body "hello there")))))
+
 ;; ── per-agent glyphs ──────────────────────────────────────────────────────
 
 (ert-deftest org-llm-chat/agent-heading-text-known-agent ()

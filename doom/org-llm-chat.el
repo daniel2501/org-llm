@@ -181,28 +181,53 @@ on a small local model."
     ("riker"    . "📡"))
   "Per-agent glyph prepended to response headings.
 Format is `((AGENT . GLYPH) …)' — agent names are bare handles
-(no `@'). Pairings:
-  picard/crew/captain → `Δ'  (Federation delta)
-  spock               → `🖖' (Vulcan salute)
-  data                → `🤖' (android)
-  boothby             → `🌱' (gardener)
-  geordi              → `👁' (VISOR / sensor)
-  atoz                → `📚' (library reference)
-  riker               → `📡' (comms relay)
-Unknown agents fall back to a bare `@<agent>' heading."
+(no `@'). Defaults are FUNCTIONAL emoji that telegraph each
+agent's role:
+  picard/crew/captain → `Δ'   (Federation delta — manager)
+  spock               → `🖖'  (Vulcan salute — researcher)
+  data                → `🤖'  (android — scribe)
+  boothby             → `🌱'  (gardener — vault tidy)
+  geordi              → `👁'  (VISOR / sensor — engineer)
+  atoz                → `📚'  (library — curator)
+  riker               → `📡'  (comms relay — coordinator)
+Unknown agents fall back to a bare `@<agent>' heading.
+
+Personal Trek-canon overrides (violin for data, roses for
+boothby, hourglass for atoz, trombone for riker, etc.) belong
+in your local Doom config — see `org-llm-chat-heading-font'
+docstring for the rationale."
   :type '(alist :key-type string :value-type string)
   :group 'org-llm-chat)
 
-(defcustom org-llm-chat-user-heading "🖖 Captain ❯❯❯❯"
+(defcustom org-llm-chat-user-heading "Me"
   "Heading text for the user's turn (after the leading `** ').
-Default is the Trek-themed `🖖 Captain ❯❯❯❯' — Vulcan salute, rank,
-and four chevrons standing in for Captain's four collar pips
-(also reads as a shell-prompt). Set to `Me' for the v0 plain look.
+Default is the v0 plain `Me' — neutral, no theming, works in any
+font. The shell-prompt-style line where you actually type lives
+on a separate line below (see `org-llm-chat-prompt-marker').
 
-Existing sessions written before the heading was customised
-(literal `** Me') are still recognised — `--user-heading-regex'
-matches both the configured heading and `Me'."
+Themed alternatives (Trek styling, etc.) belong in your personal
+Doom config, e.g.:
+
+    (after! org-llm-chat
+      (setq org-llm-chat-user-heading \"🪪 Captain ●●●●\"))
+
+Older sessions written under any historical default — `Me',
+`🖖 Captain …', `🪪 Captain …', etc. — are still parsed
+correctly by `--user-heading-regex' (permissive)."
   :type 'string
+  :group 'org-llm-chat)
+
+(defcustom org-llm-chat-prompt-marker "❯  "
+  "Prefix on the line where the user types their prompt.
+Inserted on a new line under the user-turn heading. The arrow
+gives the active line a shell-prompt feel; the trailing whitespace
+gives the cursor visual breathing room from the chevron. Stripped
+(with any surrounding whitespace) from the body before the prompt
+is sent to the backend so the LLM sees a clean message.
+
+Set to nil or empty string to disable (the body is then read
+from the line directly under the heading, no marker prefix)."
+  :type '(choice (const :tag "Disabled" nil) (string :tag "Marker"))
   :group 'org-llm-chat)
 
 (defcustom org-llm-chat-prompt-frame t
@@ -215,6 +240,31 @@ Lifecycle: drawn at chat-buffer open; cleared on submit so the
 agent response renders cleanly under the heading; redrawn around
 the auto-appended next-turn heading after the response lands."
   :type 'boolean
+  :group 'org-llm-chat)
+
+(defcustom org-llm-chat-heading-font nil
+  "Font family applied to the agent + user turn headings.
+When non-nil, `org-llm-chat-mode' buffer-locally remaps the
+`org-level-2' face to use this family, giving the chat headings
+a custom look without modifying the underlying .org file (the
+file remains plain text — only rendering changes).
+
+Default is nil — org-llm itself does NOT bundle Trek fonts (per
+DEC-010 — Anti-capitalist FOSS, ambiguous-license assets are
+excluded from the repo). To use a Trek font, install one
+locally on your machine (your call, not the project's), e.g.:
+
+  git clone https://github.com/leonawicz/trekfont /tmp/trekfont
+  mkdir -p ~/.local/share/fonts/trek
+  cp /tmp/trekfont/inst/fonts/*.ttf ~/.local/share/fonts/trek/
+  fc-cache -f ~/.local/share/fonts/
+
+Then `M-x customize-variable RET org-llm-chat-heading-font' and
+set to e.g. \"Federation\", \"FederationDS9Title\", or \"Final
+Frontier\". Verify with `fc-list | grep -i federation' that the
+font is visible to fontconfig."
+  :type '(choice (const :tag "Default (no remap)" nil)
+                 (string :tag "Font family"))
   :group 'org-llm-chat)
 
 (defface org-llm-chat-prompt-frame-face
@@ -267,7 +317,7 @@ Both default to today + a fresh random id."
               (format-time-string "%Y-%m-%d") "\n"
               "\n"
               "** " org-llm-chat-user-heading "\n"
-              ""))))
+              (or org-llm-chat-prompt-marker "")))))
 
 
 ;;; ── prompt parsing ─────────────────────────────────────────────────────────
@@ -294,14 +344,49 @@ Optional SUFFIX is appended (e.g. ` ERROR') for non-success paths."
 (defvar-local org-llm-chat--prompt-frame-overlays nil
   "List of overlays currently rendering the LCARS prompt frame.")
 
+(defun org-llm-chat--prompt-frame-pad ()
+  "Return leading padding for LCARS frame strings.
+When `display-line-numbers-mode' is on, the buffer's line-number
+gutter takes N columns to the left of the text area. Overlay
+strings render INSIDE the text area, so without compensation the
+LCARS top/bottom lines start N columns left of the heading text
+they're framing — visually misaligned. Compute the gutter width
+in columns and return that many spaces. Returns \"\" when no
+gutter is active."
+  (cond
+   ((not (bound-and-true-p display-line-numbers-mode)) "")
+   (t
+    (let* ((win (or (get-buffer-window (current-buffer) t)
+                    (selected-window)))
+           (cols (when (and win (fboundp 'line-number-display-width))
+                   (with-selected-window win
+                     (line-number-display-width 'columns)))))
+      (if (and cols (numberp cols) (> cols 0))
+          (make-string (max 0 (round cols)) ?\s)
+        "")))))
+
 (defun org-llm-chat--prompt-frame-strings ()
   "Return (TOP . BOTTOM) propertised strings for the prompt frame.
-Built fresh each draw so face changes take effect immediately."
+The BOTTOM string includes trailing blank visual lines so the
+cursor on the marker line has visual space below it. Without
+this, the buffer ends right after the marker and Emacs's auto-
+scroll glues the cursor to the visible window bottom — fighting
+that with hooks is fragile (evil/Doom hooks keep undoing it).
+Letting the visible region extend past the marker via overlay
+solves the problem at the source: the cursor naturally lands
+mid-window because there's room below."
   (let* ((face 'org-llm-chat-prompt-frame-face)
-         (top    (propertize "▰▰▰▰▰ COMPOSE ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n"
-                              'face face))
-         (bot    (propertize "\n▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n"
-                              'face face)))
+         (pad  (org-llm-chat--prompt-frame-pad))
+         (top  (propertize (concat pad "▰▰▰▰▰ COMPOSE ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n")
+                            'face face))
+         ;; 12 trailing blank lines: gives cursor at marker enough
+         ;; visual padding below that natural scroll keeps it mid-
+         ;; window. These are overlay strings — buffer text + saved
+         ;; file are unaffected.
+         (bot  (concat
+                 (propertize (concat "\n" pad "▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰\n")
+                              'face face)
+                 (make-string 12 ?\n))))
     (cons top bot)))
 
 (defun org-llm-chat--clear-prompt-frame ()
@@ -332,18 +417,24 @@ Idempotent — clears any prior frame first. No-op when
 
 (defun org-llm-chat--user-heading-regex ()
   "Regex matching a user-turn heading title (without the `** ' prefix).
-Accepts the configured `org-llm-chat-user-heading' AND the legacy
-`Me' so sessions written by older versions still parse. An optional
-trailing tag like `[Y]' (used for confirmation hints) is tolerated."
+Accepts the configured `org-llm-chat-user-heading', any past
+`🖖 Captain …' / `🪪 Captain …' variant (so older sessions still
+parse), and the legacy `Me'. An optional trailing tag like `[Y]'
+(used for confirmation hints) is tolerated."
   (concat "\\`\\(?:"
           (regexp-quote org-llm-chat-user-heading)
+          "\\|🖖 Captain[^\n]*"
+          "\\|🪪 Captain[^\n]*"
           "\\|Me\\)\\(?:\\s-*\\[[A-Za-z0-9?]+\\]\\)?\\'"))
 
 (defun org-llm-chat--user-heading-line-regex ()
   "Anchored line regex for a user-turn heading (for re-search).
-Matches `^** <heading>\\s-*$' for the configured heading or `Me'."
+Matches `^** <heading>\\s-*$' for the configured heading, any
+historical `🖖 Captain …' / `🪪 Captain …' variant, or `Me'."
   (concat "^\\*\\* \\(?:"
           (regexp-quote org-llm-chat-user-heading)
+          "\\|🖖 Captain[^\n]*"
+          "\\|🪪 Captain[^\n]*"
           "\\|Me\\)\\s-*$"))
 
 (defun org-llm-chat--at-me-heading-p ()
@@ -358,7 +449,9 @@ Matches `^** <heading>\\s-*$' for the configured heading or `Me'."
 
 (defun org-llm-chat--current-heading-body ()
   "Return the body text under the current heading (no subheadings stripped).
-Trims leading/trailing whitespace + `:PROPERTIES:` drawer if present."
+Trims leading/trailing whitespace, the `:PROPERTIES:' drawer if
+present, AND a leading `org-llm-chat-prompt-marker' (e.g. `❯ ')
+so the LLM sees a clean prompt."
   (save-excursion
     (org-back-to-heading t)
     (let ((begin (progn (forward-line 1) (point)))
@@ -370,6 +463,15 @@ Trims leading/trailing whitespace + `:PROPERTIES:` drawer if present."
         (when (string-match
                "\\`[ \t]*:PROPERTIES:\\(.\\|\n\\)*?:END:[ \t]*\n?" raw)
           (setq raw (substring raw (match-end 0))))
+        ;; Strip the prompt-marker prefix (e.g. `❯ ') so the LLM
+        ;; doesn't see it. Tolerant of leading whitespace.
+        (when (and org-llm-chat-prompt-marker
+                    (not (string-empty-p org-llm-chat-prompt-marker)))
+          (let ((mk (regexp-quote
+                      (string-trim-right org-llm-chat-prompt-marker))))
+            (when (string-match
+                    (concat "\\`[ \t]*" mk "[ \t]*") raw)
+              (setq raw (substring raw (match-end 0))))))
         (string-trim raw)))))
 
 (defun org-llm-chat-parse-agent-prefix (body)
@@ -555,11 +657,8 @@ Bind `C-c C-c' under `** Me' to submit."
         (auto-save-mode 1)
         (org-llm-chat-mode 1))
       (pop-to-buffer buf)
-      (goto-char (point-max))
-      (when (re-search-backward (org-llm-chat--user-heading-line-regex) nil t)
-        (forward-line 1)
-        (end-of-line))
       (with-current-buffer buf
+        (org-llm-chat--goto-compose-position)
         (org-llm-chat--draw-prompt-frame)))))
 
 ;;;###autoload
@@ -718,7 +817,7 @@ always well-formed even if the sidebar JSON drops a section."
          (act     (cdr (assoc "active"   status)))
          (model   (cdr (assoc "model"    status)))
          (mcp     (cdr (assoc "mcp"      status)))
-         (hw      (cdr (assoc "hardware" status)))
+         (hw      (cdr (assoc "hardware" status)))   ; kept for the future; not formatted here — see VITALS
          (vitals  (cdr (assoc "vitals"   status)))
          (sensors (cdr (assoc "sensors"  status)))
          (alerts  (and sensors (cdr (assoc "recent_alerts" sensors))))
@@ -741,7 +840,7 @@ always well-formed even if the sidebar JSON drops a section."
          (mcp-srv  (and mcp   (cdr (assoc "server"     mcp))))
          (mcp-tn   (and mcp   (cdr (assoc "tool_count" mcp))))
          (mcp-cfg  (and mcp   (cdr (assoc "configured" mcp))))
-         (ram      (and hw    (cdr (assoc "free_ram_gb" hw))))
+         (ram      (and hw    (cdr (assoc "free_ram_gb" hw))))  ; deprecated alias; not surfaced — see VITALS line
          (act-n    (and activ (cdr (assoc "nodes"       activ))))
          (act-f    (and activ (cdr (assoc "files"       activ))))
          (act-w    (and activ (cdr (assoc "window_days" activ))))
@@ -773,7 +872,11 @@ always well-formed even if the sidebar JSON drops a section."
         (when mcp     (format "MCP: %s — %s tools%s"
                                 (or mcp-srv "?") (or mcp-tn "?")
                                 (if mcp-cfg ", configured" "")))
-        (when hw      (format "HARDWARE: %s GB RAM free" (or ram "?")))
+        ;; Note: HARDWARE: <total RAM> GB used to be surfaced here but
+        ;; the field is total, not free, and got conflated with the
+        ;; per-vital memory line. The VITALS line below carries the
+        ;; accurate "X.X / Y.Y GB free" memory data — keep that as the
+        ;; only memory signal the model sees.
         (when vit-line (concat "VITALS: " vit-line))
         (when sensors (format "RECENT ALERTS: %s"
                                 (if (and alerts (consp alerts))
@@ -1055,14 +1158,20 @@ fence → org src) and auto-save the chat buffer. Idempotent."
           (org-llm-chat--append-next-turn)
           (ignore-errors (save-buffer)))
          (t
-          ;; Error path — render an ERROR heading + message.
+          ;; Error path — render an ERROR heading + message, then
+          ;; STILL append a fresh user-turn heading + redraw the
+          ;; prompt frame so the user can immediately retry. Without
+          ;; this, the buffer dead-ends on a stream-drop with no
+          ;; obvious way forward.
           (org-llm-chat--stop-spinner)
           (when (and ins (marker-buffer ins))
             (save-excursion
               (goto-char ins)
               (insert (format "\nERROR: %s\n"
                               (or (plist-get state :error)
-                                  "stream failed")))))))
+                                  "stream failed")))))
+          (org-llm-chat--append-next-turn)
+          (ignore-errors (save-buffer))))
         (setq-local org-llm-chat--pending-marker nil)
         (setq-local org-llm-chat--pending-process nil)
         (setq-local org-llm-chat--sse-process nil)
@@ -1190,39 +1299,235 @@ or anything else here fails."
        (org-llm-chat--finalise-response
         marker agent (format "ERROR launching process: %s" err) -1)))))
 
+(defun org-llm-chat--goto-compose-position ()
+  "Move point + window scroll to the typing position of the active turn.
+Walks back to the trailing user-turn heading, advances one line
+into the body (the prompt-marker line), and lands at end-of-line —
+right after `❯' (or wherever the marker ends).
+
+ALSO scrolls every window showing this buffer so the prompt is
+visible: `set-window-point' alone doesn't auto-scroll, so if the
+user has scrolled up to read past responses, the cursor would
+land off-screen at the buffer's natural bottom — making it look
+like the cursor jumped 'somewhere weird'. `recenter' brings the
+prompt into the visible region near the bottom of the window
+(chat-style: prompt at bottom, prior context above)."
+  (goto-char (point-max))
+  (when (re-search-backward (org-llm-chat--user-heading-line-regex) nil t)
+    (forward-line 1)
+    (end-of-line))
+  ;; Use `--force-prompt-window-start' which sets window-start
+  ;; explicitly via `set-window-start' — far more reliable than
+  ;; `recenter' under evil-mode + Doom's hook stack.
+  (org-llm-chat--force-prompt-window-start)
+  (redisplay t))
+
+(defun org-llm-chat--has-valid-trailing-prompt-p ()
+  "Return non-nil iff the buffer ends with a well-formed prompt.
+Validation requires ALL of:
+  (1) A trailing line matching `^** <CONFIGURED-HEADING>$' EXACTLY
+      (no permissive matches — a heading missing dots or with
+      typed-into chars fails here, triggering repair).
+  (2) The heading is followed by at least one body line below
+      (i.e. there's a place to type — the heading isn't the
+      buffer's last line).
+  (3) No further `** ' heading appears AFTER the user heading
+      (catches stray empty `** ' from accidental
+      M-RET-as-org-meta-return)."
+  (save-excursion
+    (goto-char (point-max))
+    (let* ((strict-line-rgx
+             (concat "^\\*\\* "
+                      (regexp-quote org-llm-chat-user-heading)
+                      "\\s-*$"))
+           (heading-pos (re-search-backward strict-line-rgx nil t)))
+      (when heading-pos
+        (let ((heading-line (line-number-at-pos)))
+          (forward-line 1)
+          (and
+           ;; (2) we moved off the heading line — body line exists
+           (> (line-number-at-pos) heading-line)
+           ;; (3) no further `** ' after the heading
+           (save-excursion
+             (not (re-search-forward "^\\*\\* " nil t)))))))))
+
+(defun org-llm-chat--strip-stub-headings ()
+  "Delete empty `** ' heading stubs from the buffer.
+These are typically left over from accidental
+M-RET-as-org-meta-return presses. Returns the count deleted."
+  (save-excursion
+    (goto-char (point-min))
+    (let ((count 0))
+      (while (re-search-forward "^\\*\\*\\s-*$" nil t)
+        (delete-region (line-beginning-position)
+                        (min (point-max)
+                             (1+ (line-end-position))))
+        (cl-incf count))
+      count)))
+
+(defun org-llm-chat-repair-prompt ()
+  "Detect a broken trailing prompt and append a fresh one.
+Idempotent: if the prompt is already well-formed AND there are
+no stub headings, no-op. Otherwise:
+  - Empty `** ' stub lines (left over from accidental
+    M-RET-as-org-meta-return) are deleted.
+  - If the trailing prompt is broken (missing marker, truncated
+    heading, content past it), a fresh `** <heading>' + marker
+    is appended at point-max."
+  (interactive)
+  (let ((stripped (org-llm-chat--strip-stub-headings)))
+    (unless (org-llm-chat--has-valid-trailing-prompt-p)
+      (org-llm-chat--append-next-turn))
+    (org-llm-chat--clear-prompt-frame)
+    (org-llm-chat--draw-prompt-frame)
+    (ignore-errors (save-buffer))
+    (when (or (> stripped 0)
+              (not (org-llm-chat--has-valid-trailing-prompt-p)))
+      (message "Prompt repaired — %d stub heading(s) stripped." stripped))))
+
+;;;###autoload
+(defun org-llm-chat-jump-to-prompt ()
+  "Jump to the active typing position in the chat buffer.
+Hotkey for the active compose box — useful when you've scrolled
+up reading prior turns and want to start a new prompt without
+fishing for the trailing heading manually.
+
+Self-repairing: if the prompt structure was broken (e.g. by
+accidental editing of the heading or marker line), a fresh
+heading is appended automatically before the jump."
+  (interactive)
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not in an org-mode buffer"))
+  (org-llm-chat-repair-prompt)
+  (org-llm-chat--goto-compose-position))
+
+(defun org-llm-chat--at-prompt-position-p ()
+  "Return non-nil iff point is in the prompt compose area.
+The compose area is from the trailing user-turn heading line to
+the end of the buffer, with NO other `** ' heading in between.
+Generous on purpose: evil's `a' (append) command pushes point
+past end-of-line into trailing whitespace / overlay padding,
+and we still want recenter hooks to fire there."
+  (and (derived-mode-p 'org-mode)
+       (bound-and-true-p org-llm-chat-mode)
+       (let ((p (point))
+             (heading-pos (save-excursion
+                            (goto-char (point-max))
+                            (re-search-backward
+                              (org-llm-chat--user-heading-line-regex)
+                              nil t))))
+         (and heading-pos
+              (>= p heading-pos)
+              ;; no `** ' heading appears between (heading + 1 line)
+              ;; and point — i.e., we're inside this turn, not past it
+              (save-excursion
+                (goto-char heading-pos)
+                (forward-line 1)
+                (not (re-search-forward "^\\*\\* " p t)))))))
+
+(defun org-llm-chat--force-prompt-window-start ()
+  "Set window-start so cursor lands roughly mid-window.
+Computes the target as ~half the window height in logical lines
+above point. Larger displacements (e.g. fixed `-8') broke when
+the buffer had many tiny stub lines above the prompt — the
+cursor still ended up near the visible bottom because 8 short
+lines barely fill a few visual rows."
+  (when-let ((win (get-buffer-window (current-buffer))))
+    (let* ((p (point))
+           (h (max 4 (/ (window-height win) 2)))
+           (start (save-excursion
+                    (goto-char p)
+                    (forward-line (- h))
+                    (line-beginning-position))))
+      (set-window-start win start nil)
+      (set-window-point win p)
+      (org-llm-chat--scroll-log
+        "force-window-start: p=%d h=%d start=%d delta=%d"
+        p h start (- p start)))))
+
+(defun org-llm-chat--maybe-reassert-prompt-scroll ()
+  "Re-assert window-start when entering insert state at the prompt.
+evil-mode's state-change machinery + various Doom hooks can
+re-scroll the window after we've placed the cursor. This hook
+fires after insert state is fully entered, ONLY when point is
+on the prompt-marker line."
+  (when (org-llm-chat--at-prompt-position-p)
+    (org-llm-chat--scroll-log "insert-state-entry: forcing window-start")
+    (org-llm-chat--force-prompt-window-start)))
+
+(defvar-local org-llm-chat--last-prompt-line nil
+  "Cache of the line number where the prompt was last asserted.
+The post-command hook only force-recenters when point is on the
+prompt line AND that line was changed since last assertion — keeps
+us from fighting the user's deliberate scrolling on the same line.")
+
+(defcustom org-llm-chat-debug-scroll nil
+  "When non-nil, the chat surface logs scroll-related decisions to
+the `*Messages*' buffer. Useful for diagnosing why the visible
+cursor lands somewhere unexpected after state changes. Set to
+`t' temporarily, reproduce the issue, then check `*Messages*'."
+  :type 'boolean
+  :group 'org-llm-chat)
+
+(defun org-llm-chat--scroll-log (fmt &rest args)
+  (when org-llm-chat-debug-scroll
+    (apply #'message (concat "[chat-scroll] " fmt) args)))
+
+(defun org-llm-chat--post-command-keep-prompt-visible ()
+  "Buffer-local `post-command-hook' for chat buffers.
+After every command, if point is on the prompt-marker line AND
+either (a) point's screen position is at/near the visual bottom,
+or (b) we haven't yet asserted scroll on this prompt line, force
+a recenter. Cache prevents fighting the user's deliberate scroll."
+  (when (and (bound-and-true-p org-llm-chat-mode)
+             (org-llm-chat--at-prompt-position-p))
+    (when-let ((win (get-buffer-window (current-buffer))))
+      (let* ((p     (point))
+             (line  (line-number-at-pos p))
+             (start (window-start win))
+             (end   (window-end win t))
+             (first-time (not (eq org-llm-chat--last-prompt-line line)))
+             (offscreen  (or (< p start) (> p end)))
+             (near-bottom (< (- end p) 3))
+             (will-recenter (or first-time offscreen near-bottom)))
+        (org-llm-chat--scroll-log
+          "post-cmd cmd=%S p=%d start=%d end=%d near-bot=%s recenter=%s"
+          this-command p start end near-bottom will-recenter)
+        (when will-recenter
+          (org-llm-chat--force-prompt-window-start)
+          (setq-local org-llm-chat--last-prompt-line line))))))
+
+;;;###autoload
+(defun org-llm-chat-submit-from-anywhere ()
+  "Submit the active prompt from anywhere in the chat buffer.
+Convenience wrapper: jumps to the compose position first so the
+caller doesn't need point on the user heading. Identical end
+state to typing under `** 🪪 Captain ●●●●' and pressing
+`C-c C-c' — useful from a quick localleader chord (e.g. `, RET'
+in evil normal state)."
+  (interactive)
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Not in an org-mode buffer"))
+  (org-llm-chat--goto-compose-position)
+  (org-llm-chat-submit))
+
 (defun org-llm-chat--append-next-turn ()
   "Append a fresh user-turn heading at end of buffer + move point
-under it, ready for the next prompt. Called from both finalise
-paths so chat ergonomics 'just work' (no manual `** Me' insert).
-Idempotent — does nothing if the buffer already ends with an
-empty user heading."
+under it, ready for the next prompt.
+
+Idempotent via `--has-valid-trailing-prompt-p': if the buffer
+already ends with a well-formed prompt (strict heading match,
+body line exists, no junk between), this is a no-op. Otherwise
+a fresh `** <heading>' + marker is appended — including the
+case where user editing has broken the trailing structure."
   (save-restriction
     (widen)
     (goto-char (point-max))
-    ;; Idempotent: if last non-blank line is already our heading
-    ;; with an empty body below, don't double-insert.
-    (let ((last-heading (save-excursion
-                          (goto-char (point-max))
-                          (when (re-search-backward "^\\*\\* "
-                                                     nil t)
-                            (buffer-substring-no-properties
-                             (line-beginning-position)
-                             (line-end-position))))))
-      (unless (and last-heading
-                   (string-match-p (org-llm-chat--user-heading-regex)
-                                    (string-trim
-                                     (substring last-heading 3)))
-                   (save-excursion
-                     (goto-char (point-max))
-                     (skip-chars-backward " \t\n")
-                     (= (line-beginning-position)
-                        (save-excursion
-                          (re-search-backward "^\\*\\* " nil t)
-                          (line-beginning-position)))))
-        (unless (bolp) (insert "\n"))
-        (insert "\n** " org-llm-chat-user-heading "\n")))
-    (goto-char (point-max))
-    (end-of-line)
+    (unless (org-llm-chat--has-valid-trailing-prompt-p)
+      (unless (bolp) (insert "\n"))
+      (insert "\n** " org-llm-chat-user-heading "\n"
+               (or org-llm-chat-prompt-marker "")))
+    (org-llm-chat--goto-compose-position)
     (org-llm-chat--draw-prompt-frame)))
 
 (defun org-llm-chat--finalise-response (marker agent raw rc)
@@ -1243,9 +1548,11 @@ empty user heading."
                   "\n")))
     (org-llm-chat--replace-placeholder marker rendered)
     (org-llm-chat--stop-spinner)
-    (when (zerop rc)
-      (org-llm-chat--append-next-turn)
-      (ignore-errors (save-buffer)))
+    ;; Always append the next turn + save, even on error, so a stream
+    ;; drop or non-zero exit isn't a dead-end. The ERROR line stays
+    ;; in the buffer so the user knows what happened.
+    (org-llm-chat--append-next-turn)
+    (ignore-errors (save-buffer))
     (setq-local org-llm-chat--pending-marker nil)
     (setq-local org-llm-chat--pending-process nil)))
 
@@ -1348,11 +1655,99 @@ a one-shot answer you want to come back to later."
   (let ((m (make-sparse-keymap)))
     ;; Don't shadow C-c C-c globally; we install a local override at
     ;; the heading level via `org-ctrl-c-ctrl-c-hook'.
+    ;; Plain-Emacs / non-evil bindings — always available.
+    (define-key m (kbd "C-c C-l c") #'org-llm-chat-jump-to-prompt)
     (define-key m (kbd "C-c C-l p") #'org-llm-chat-pin)
     (define-key m (kbd "C-c C-l r") #'org-llm-chat-refile)
     (define-key m (kbd "C-c C-l e") #'org-llm-chat-export-subtree)
+    ;; Universal chords — work in all states, mirror standard chat-UI
+    ;; conventions (M-RET = jump to input, C-RET = submit).
+    ;; Bind BOTH ASCII (`M-RET') and function-key (`M-<return>') forms
+    ;; — different terminals + Emacs builds emit one or the other,
+    ;; and `org-mode-map' binds `M-RET' to `org-meta-return' which
+    ;; would otherwise shadow our binding via key-translation.
+    (define-key m (kbd "M-RET")      #'org-llm-chat-jump-to-prompt)
+    (define-key m (kbd "M-<return>") #'org-llm-chat-jump-to-prompt)
+    (define-key m (kbd "C-RET")      #'org-llm-chat-submit-from-anywhere)
+    (define-key m (kbd "C-<return>") #'org-llm-chat-submit-from-anywhere)
     m)
   "Keymap for `org-llm-chat-mode'.")
+
+;; ── evil / Doom ergonomics ──────────────────────────────────────────────
+;;
+;; Loaded only when `evil' is on the system. In normal/visual/motion
+;; states, `g RET' jumps to the active prompt — mnemonic "go to input".
+;; Doom's localleader (`SPC m' / `,') is also wired so `SPC m c'
+;; (compose), `SPC m p' (pin), `SPC m r' (refile), `SPC m e' (export)
+;; all work the way a Doom user expects from a major-mode-flavoured
+;; minor mode.
+(with-eval-after-load 'evil
+  (when (fboundp 'evil-define-key*)
+    (evil-define-key* '(normal visual motion) org-llm-chat-mode-map
+                       (kbd "g RET")      #'org-llm-chat-jump-to-prompt
+                       (kbd "g <return>") #'org-llm-chat-jump-to-prompt
+                       (kbd "g s")        #'org-llm-chat-submit-from-anywhere)
+    (evil-define-key* '(normal visual motion insert emacs) org-llm-chat-mode-map
+                       (kbd "M-RET")      #'org-llm-chat-jump-to-prompt
+                       (kbd "M-<return>") #'org-llm-chat-jump-to-prompt
+                       (kbd "C-RET")      #'org-llm-chat-submit-from-anywhere
+                       (kbd "C-<return>") #'org-llm-chat-submit-from-anywhere))
+  ;; Force chat-mode-map's bindings to win over evil's state keymaps
+  ;; AND over the underlying major-mode (org-mode) bindings. Without
+  ;; this, `M-RET' falls through to `org-meta-return' in normal state
+  ;; because org-mode's binding lives in `evil-normal-state-map's
+  ;; auxiliary table at higher precedence than the minor-mode map.
+  (when (fboundp 'evil-make-overriding-map)
+    (evil-make-overriding-map org-llm-chat-mode-map 'normal)
+    (evil-make-overriding-map org-llm-chat-mode-map 'insert)
+    (evil-make-overriding-map org-llm-chat-mode-map 'visual)
+    (evil-make-overriding-map org-llm-chat-mode-map 'motion))
+  (when (fboundp 'evil-normalize-keymaps)
+    (evil-normalize-keymaps))
+  ;; Re-assert cursor placement when entering insert state at the
+  ;; prompt. APPEND=t so we run AFTER evil-mc, evil-snipe, etc.
+  (when (boundp 'evil-insert-state-entry-hook)
+    (add-hook 'evil-insert-state-entry-hook
+               #'org-llm-chat--maybe-reassert-prompt-scroll t))
+  ;; Same on state EXIT (covers normal→insert transitions where the
+  ;; exit hook fires for normal state before the entry hook fires for
+  ;; insert state — some Doom configs do scroll work on either edge).
+  (when (boundp 'evil-normal-state-exit-hook)
+    (add-hook 'evil-normal-state-exit-hook
+               #'org-llm-chat--maybe-reassert-prompt-scroll t)))
+  ;; Doom localleader — only registers when Doom's `general' is
+  ;; around. `general-define-key' is safe outside Doom too (general.el
+  ;; is a regular MELPA package).
+  ;;
+  ;; CRITICAL: `:states' MUST exclude `insert' and `emacs'. Doom's
+  ;; `doom-localleader-key' is `SPC m' by default — including SPC as
+  ;; a prefix in insert mode breaks the spacebar (every space typed
+  ;; would start a prefix sequence). Localleader bindings only fire
+  ;; in normal/visual/motion. For typing-time access, the alt-leader
+  ;; (`,') is added separately for insert mode below.
+  (with-eval-after-load 'general
+    (when (fboundp 'general-define-key)
+      (let ((leader     (or (and (boundp 'doom-localleader-key)
+                                  doom-localleader-key)
+                            ",")))
+        ;; Primary localleader (SPC m / ,) — normal/visual/motion only.
+        (general-define-key
+          :keymaps 'org-llm-chat-mode-map
+          :states '(normal visual motion)
+          :prefix leader
+          "c"   '(org-llm-chat-jump-to-prompt       :which-key "compose / jump to prompt")
+          "RET" '(org-llm-chat-submit-from-anywhere :which-key "submit prompt")
+          "s"   '(org-llm-chat-submit-from-anywhere :which-key "submit prompt")
+          "p"   '(org-llm-chat-pin                  :which-key "pin subtree")
+          "r"   '(org-llm-chat-refile               :which-key "refile to vault")
+          "e"   '(org-llm-chat-export-subtree       :which-key "export subtree"))
+        ;; Insert/emacs states: NO leader prefixes. Bound prefixes in
+        ;; insert mode break ordinary typing of the prefix character
+        ;; (e.g. `,foo' would consume the comma). The universal
+        ;; chords (`C-RET' submit, `M-RET' jump) and the standard
+        ;; `C-c C-l <key>' bindings cover insert-mode needs without
+        ;; the prefix hazard.
+        )))   ; closes let + when + with-eval-after-load
 
 (defun org-llm-chat--ctrl-c-ctrl-c ()
   "Hook fn: when point is on a `** Me' heading subtree, submit and
@@ -1369,18 +1764,83 @@ return non-nil so `org-ctrl-c-ctrl-c' stops here."
 lands as a sibling `** @<agent>' heading. All other org keys
 continue to work.
 
-Export keys:
-  C-c C-l p — pin current subtree to ~/org/chat-pins.org
-  C-c C-l r — refile current subtree to an org-roam node
-  C-c C-l e — export current subtree as standalone .org"
+Bindings (plain Emacs):
+  C-c C-c        submit (when point is on/under user heading)
+  C-<return>     submit from anywhere in the buffer
+  M-<return>     jump to active prompt (from anywhere)
+  C-c C-l c      jump to active prompt
+  C-c C-l p      pin current subtree to ~/org/chat-pins.org
+  C-c C-l r      refile current subtree to an org-roam node
+  C-c C-l e      export current subtree as standalone .org
+
+Bindings (evil + Doom localleader, when those packages are loaded):
+  g RET          jump to active prompt          (normal/visual/motion)
+  g s            submit from anywhere           (normal/visual/motion)
+  SPC m c / ,c   compose / jump to prompt       (Doom localleader)
+  SPC m RET      submit                         (Doom localleader)
+  SPC m s        submit (alt)                   (Doom localleader)
+  SPC m p / ,p   pin subtree
+  SPC m r / ,r   refile subtree
+  SPC m e / ,e   export subtree"
   :init-value nil
   :lighter " ✱chat"
   :keymap org-llm-chat-mode-map
-  (if org-llm-chat-mode
-      (add-hook 'org-ctrl-c-ctrl-c-hook
-                #'org-llm-chat--ctrl-c-ctrl-c nil t)
+  (cond
+   (org-llm-chat-mode
+    (add-hook 'org-ctrl-c-ctrl-c-hook
+               #'org-llm-chat--ctrl-c-ctrl-c nil t)
+    ;; APPEND=t so our hook runs LAST in the chain — after evil and
+    ;; Doom hooks have done their state-change re-scrolling. We're the
+    ;; "settle the dust" pass.
+    (add-hook 'post-command-hook
+               #'org-llm-chat--post-command-keep-prompt-visible
+               t t)
+    (org-llm-chat--apply-heading-font))
+   (t
     (remove-hook 'org-ctrl-c-ctrl-c-hook
-                 #'org-llm-chat--ctrl-c-ctrl-c t)))
+                  #'org-llm-chat--ctrl-c-ctrl-c t)
+    (remove-hook 'post-command-hook
+                  #'org-llm-chat--post-command-keep-prompt-visible t)
+    (org-llm-chat--remove-heading-font))))
+
+(defvar-local org-llm-chat--heading-font-cookies nil
+  "List of cookies returned by `face-remap-add-relative' for the
+heading-font remaps. Multiple faces are remapped (org-level-2 plus
+any theme-specific overlay faces like `doom-themes-org-at-tag' that
+otherwise override the family on `@<agent>' tokens).")
+
+(defcustom org-llm-chat-heading-font-faces
+  '(org-level-2
+    doom-themes-org-at-tag
+    org-tag)
+  "Faces to remap to `org-llm-chat-heading-font' when chat-mode
+turns on. `org-level-2' carries the heading body; theme overlays
+like `doom-themes-org-at-tag' (Doom Emacs) and `org-tag' apply
+narrower coverage to `@<agent>' tokens or trailing :tags: and
+override the family unless we remap them too."
+  :type '(repeat face)
+  :group 'org-llm-chat)
+
+(defun org-llm-chat--apply-heading-font ()
+  "Buffer-locally remap heading faces to `org-llm-chat-heading-font'.
+No-op when the defcustom is nil. The remap is purely visual; the
+underlying .org file is unchanged."
+  (when (and org-llm-chat-heading-font
+             (not (string-empty-p org-llm-chat-heading-font)))
+    (org-llm-chat--remove-heading-font)
+    (let (cookies)
+      (dolist (face org-llm-chat-heading-font-faces)
+        (when (facep face)
+          (push (face-remap-add-relative
+                  face :family org-llm-chat-heading-font)
+                cookies)))
+      (setq-local org-llm-chat--heading-font-cookies cookies))))
+
+(defun org-llm-chat--remove-heading-font ()
+  "Revert all heading-font remaps. Idempotent."
+  (dolist (c org-llm-chat--heading-font-cookies)
+    (when c (face-remap-remove-relative c)))
+  (setq-local org-llm-chat--heading-font-cookies nil))
 
 (provide 'org-llm-chat)
 ;;; org-llm-chat.el ends here
