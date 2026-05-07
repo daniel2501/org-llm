@@ -9,18 +9,24 @@
 # verbatim from =org_llm/metrics/registry.yaml= so the dashboard and
 # the =@analyst=-style agents agree on numbers byte-for-byte.
 
-* Agent fan-out heatmap
+* Agent delegation heatmap
 :PROPERTIES:
 :VIZ_TYPE: heatmap
 :END:
 
-Distinct downstream agents that each =agent_from= has talked to —
-the proxy-vs-manager dominance lens. A fat row on =@proxy= means the
-manager is not earning its keep; a fat row on =@picard= means
+Total =crew_log= actions from each =agent_from= to each =agent_to= —
+the proxy-vs-manager dominance lens. A bright row on =proxy= means
+the manager is not earning its keep; a bright row on =@picard= means
 delegation is healthy.
 
-#+BEGIN_SRC sql :name agent_fan_out_heatmap :metric agent_fan_out :group_by [agent_from, agent_to]
-SELECT agent_from, agent_to, COUNT(DISTINCT agent_to) AS agent_fan_out
+(Originally used =agent_fan_out= but that metric is =COUNT(DISTINCT
+agent_to)= — degenerate when =agent_to= is also in the group, which
+gives every cell =1= and breaks heatmap color-scale legend
+computation. =crew_actions= = =COUNT(*)= shows real interaction
+volume.)
+
+#+BEGIN_SRC sql :name agent_delegation_heatmap :metric crew_actions :group_by [agent_from, agent_to]
+SELECT agent_from, agent_to, COUNT(*) AS crew_actions
 FROM crew_log
 GROUP BY agent_from, agent_to
 #+END_SRC

@@ -41,7 +41,7 @@ TEMPLATE_PATH = (
 # registry's metric expression). Order matches the .org file and
 # defines the dashboard layout order.
 EXPECTED_CHARTS: list[tuple[str, str, str]] = [
-    ("agent_fan_out_heatmap", "agent_fan_out", "COUNT(DISTINCT agent_to)"),
+    ("agent_delegation_heatmap", "crew_actions", "COUNT(*)"),
     ("model_cost_latency", "llm_avg_ms", "AVG(duration_ms)"),
     ("error_rate_by_model", "llm_error_rate", "AVG(CASE WHEN outcome"),
     ("captains_log_heatmap", "hist_events", "COUNT(*)"),
@@ -98,7 +98,7 @@ def test_charts_bind_registered_metrics(dashboard: OrgDashboard) -> None:
 
 def test_charts_carry_viz_types(dashboard: OrgDashboard) -> None:
     expected_viz = {
-        "agent_fan_out_heatmap": "heatmap",
+        "agent_delegation_heatmap": "heatmap",
         "model_cost_latency": "bar",
         "error_rate_by_model": "bar",
         "captains_log_heatmap": "heatmap",
