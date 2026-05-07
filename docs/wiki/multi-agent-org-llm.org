@@ -269,6 +269,10 @@ the two compose.
 *Summary.* All members of a team open sessions on the *same*
 =boardId=; sibling-discovery is "list sessions on my board." The
 board IS the registry — the captain doesn't need a separate one.
+*Captains spawn siblings sequentially via one-=claude -p=-per-spawn
+invocation* (not parallel; see also "Async peer query" coordination
+note below). *(3-member team verified end-to-end 2026-05-06 EDT
+via vault-hygiene pilot; cost $0.21 wall 257s.)*
 
 *Expanded.* Each role spawns a session pinned to a worktree on
 the team's shared board; members see each other in the facepile.
@@ -276,13 +280,34 @@ Maps cleanly to Bridge Crew roles, each as one assistant
 with its own =model_role=. Replaces in-process =delegate()=
 when peers must remain alive across multiple captain turns.
 
+*Sibling-spawn pattern (verified 2026-05-06 EDT).* Captains that
+spawn 2+ children must do so via *one =claude -p= subprocess per
+spawn*, not by queueing multiple =agor_sessions_spawn= tool_uses
+inside one captain context. Two reasons: (1) claude-code+sonnet
+under MCP indirection does not honor parallel-tool-use — it
+serializes into multiple assistant messages anyway; (2) multiple
+queued tool_uses in one captain context, combined with token-budget
+pressure + informational =rate_limit_event= pings, can stall the
+captain mid-narration (round-1 D2 + round-2 R2-Model both
+reproduced this stall). Refresh =mcp_token= via =GET
+/sessions/{captain_id}= between spawn invocations to preserve
+captain MCP context. /Pattern in/ =scripts/_r2_d2.py=.
+
+*Sibling-discovery shape (verified 2026-05-06 EDT).* Within an
+Agor session, peer enumeration is =GET /sessions?worktree_id=<wt>=.
+=session.genealogy.children= is a /list of session ID strings/
+(not list[obj]); to read any child's =fork_origin= or other
+metadata, callers must =GET /sessions/{child_id}= individually.
+
 ** Async peer query (=mode:"btw"=)
 
 *Summary.* Agent A asks agent B a focused question mid-turn
 without blocking; B's answer arrives as a /new session/ with
 =fork_origin:"btw"= + =callback_config.callback_mode:"once"=,
 which the caller polls (or the daemon invokes via callback).
-Fills a real gap in org-llm. *(verified 2026-05-07 EDT)*
+Fills a real gap in org-llm. *(end-to-end verified 2026-05-06 EDT
+via Pilot R2-B; concrete child session
+=019e000e-2305-70d9-bb8e-5735e577652f=.)*
 
 *Expanded.* =agor_sessions_prompt(mode:"btw", target:<peer>,
 prompt:…)= spawns an ephemeral child session tagged with
@@ -297,6 +322,16 @@ synchronous-string-return; it can't ask =@geordi= a clarifier
 mid-turn without forcing the caller to wait. Use case: =@atoz=
 mid-wiki-sweep asks =@spock= "is this the canonical link?"
 without halting the sweep.
+
+*Discovery shape (verified 2026-05-06 EDT — canon-correcting).*
+The =btw= ephemeral child lands on the *target's*
+=genealogy.children=, NOT the *caller's*. =forked_from_session_id=
+points at the target; =callback_config.callback_session_id= points
+at the caller. To find btw children spawned by AGENT_A targeting
+AGENT_B, inspect AGENT_B's =genealogy.children=, GET each child,
+filter by =fork_origin == "btw"=. Round-2 R2-B initially probed
+the caller's children and found nothing — fix landed in
+=scripts/_r2_b.py=.
 
 ** Scheduled heartbeat
 

@@ -1,0 +1,243 @@
+:PROPERTIES:
+:ID:       7c8d4e1b-9f5a-4d3e-8b7c-1e2f3a4b5c6d
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Agor pilot round-2 findings — corrections + new primitive validations
+#+FILETAGS: :wiki:agor:findings:multi-agent:pilot:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Round 2 of the Agor + Bridge Crew pilot suite re-ran with
+the round-1 working pattern (Python+subprocess hybrid) baked into
+every harness. Three of four pilots delivered PASS at total spend
+~$0.40 (under 2% of the $20 cap). One pilot stalled informatively,
+reproducing round-1 D2's failure mode and proving its actual cause
+(not rate-limit per se — multi-spawn-in-one-=claude -p= under rate
+pressure). Round 2 verified =mode:"btw"=, sibling-by-boardId,
+3-member long-lived team coordination end-to-end, and produced 6
+new findings + 1 major round-1 amendment (F9).
+
+*Expanded.* Where round 1 was about "does any of this work end-to-end
+for a Claude sub-agent," round 2 was about "does the corrected
+working pattern survive a more diverse pilot matrix." It did. The
+big open question from round 1 — F5, per-spawn =modelConfig=
+override — remains unclosed because R2-Model stalled before
+producing data; closing it now requires the one-spawn-per-=claude -p=
+fix this round established. The =mode:"btw"= primitive, previously
+designed-not-run, has its first verified end-to-end execution as of
+2026-05-06 EDT.
+
+* Pilot outcomes
+
+| #         | Team shape                                          | Outcome           | Cost     | Wall    | Headline                                                         |
+|-----------+-----------------------------------------------------+-------------------+----------+---------+------------------------------------------------------------------|
+| R2-A      | Solo @data, Python+subprocess (control)             | *PASS*            | $0.0707  | 86 s    | F10 confirmed; 3 new findings on harness/canon                   |
+| R2-B      | Sibling pair @data + @spock on one board            | *PASS*            | $0.1153  | 165 s   | =mode:"btw"= verified end-to-end; 3 canon corrections            |
+| R2-Model  | 1 captain → 3 sequential children (modelConfig probe) | *STALLED*       | unknown  | died    | Reproduced round-1 D2 stall; F5 still open                       |
+| R2-D2     | 3-member vault-hygiene (sequential spawn)           | *PASS*            | $0.21    | 257 s   | 3-member team works; F9 round-1 misdiagnosis identified          |
+
+Total spend: ~$0.40 across the round.
+
+* Round-1 amendments
+
+** F9 — Misdiagnosed; corrected in round-1 findings doc
+
+Round-1 F9 framed the stall as caused by =rate_limit_event=. Round 2
+confirms that =rate_limit_event= with =rate_limit_info.status="allowed"=
+is *informational*, not a block. The actual stall mode is *one
+=claude -p= captain process queuing multiple sequential spawn
+=tool_use= calls under any rate-limit pressure*. R2-Model
+reproduced this exactly. R2-D2 *eliminated* it by splitting into
+*one-spawn-per-=claude -p=-invocation*. Full corrected text in
+=2026-05-06-agor-pilot-round-1-findings.org= § F9.
+
+* New findings (R-series)
+
+** R1 — =mode:"btw"= verified end-to-end (Pilot R2-B)
+
+*Severity.* High positive — first verified execution of a primitive
+that was previously canon-designed-only.
+
+*Evidence.* R2-B's captain instructed @spock to use =mode:"btw"= to
+ask @data a clarifier mid-review. Direct REST inspection of the
+resulting child session =019e000e-2305-70d9-bb8e-5735e577652f=
+showed:
+
+- =fork_origin: "btw"=
+- =callback_config.callback_mode: "once"=
+- =forked_from_session_id: <data session id>=
+- =callback_config.callback_session_id: <spock session id>=
+
+The child auto-archived on completion. @spock incorporated the
+answer into its review and produced =APPROVED= verdict.
+
+*Action.* Update =multi-agent-org-llm.org= § "Async peer query
+(=mode:'btw'=)" to mark this primitive as *VERIFIED 2026-05-06 EDT*
+(was: validated 2026-05-07 per the smoke run, but =btw= shape
+specifically wasn't end-to-end-tested until R2-B).
+
+** R2 — =btw= child lands on TARGET's =genealogy.children=, NOT caller's
+
+*Severity.* Important — canon shape was under-specified.
+
+*Evidence.* R2-B initially looked at @spock's (the caller's)
+=genealogy.children= for the btw ephemeral and found nothing. The
+=btw= child actually lives at @data's (the target's)
+=genealogy.children= since =forked_from_session_id= points to the
+target. The canon-correct discovery rule is: *to find btw children
+spawned by AGENT_A targeting AGENT_B, inspect AGENT_B's genealogy*.
+
+*Action.* Document explicitly in =multi-agent-org-llm.org= § "Async
+peer query" + add a note in any future btw helper utilities.
+
+** R3 — =genealogy.children= is =list[str]=, not =list[obj]=
+
+*Severity.* Medium — under-documented schema shape.
+
+*Evidence.* The =genealogy.children= field on =GET /sessions/{id}=
+is a list of session ID *strings*, not a list of session objects.
+To inspect any child's =fork_origin= or other metadata, callers must
+GET each child individually.
+
+*Action.* Document in =multi-agent-org-llm.org= § "Coordination
+patterns" preamble; update any harness helpers that assumed
+=list[obj]=.
+
+** R4 — REST endpoint canon: =/messages?session_id={id}=, NOT =/sessions/{id}/messages=
+
+*Severity.* Medium — reference scripts are wrong.
+
+*Evidence.* R2-A discovered that =/sessions/{id}/messages?$limit=200=
+(used in =scripts/agor-test-fanout.sh=) returns HTTP 404. The working
+endpoint is =/messages?session_id={id}&$limit=N= — the Feathers
+list-with-filter shape.
+
+*Action.* Fix =scripts/agor-test-fanout.sh=; canonize the correct
+endpoint shape in =agor-smoke-recipe.org=.
+
+** R5 — claude-code + sonnet does not honor parallel-tool-use under MCP indirection
+
+*Severity.* Important — sets a ceiling on captain fan-out shapes.
+
+*Evidence.* R2-B's captain prompt explicitly instructed "issue both
+spawns in ONE response, two tool_use blocks immediately after each
+other." The captain serialized into two assistant messages instead.
+This means captains cannot fan out parallel spawns within a single
+=claude -p= context — they must serialize OR (better, per F9
+amendment) use one-spawn-per-=claude -p=-invocation for any 2+
+spawn captain.
+
+*Action.* Document in =multi-agent-org-llm.org= § "Sibling-session
+by boardId" — note that parallel fan-out within a single captain
+turn is not currently achievable in the claude-code+sonnet+MCP
+combination; sequential spawn is the working pattern.
+
+** R7 — claude-code adapter has its own model registry; rejects non-Anthropic IDs at runtime even when Agor accepts them at config layer
+
+*Severity.* High — load-bearing for DEC-017 § 6 (FOSS-defaults rule).
+
+*Evidence.* Pilot R2-Model-RETRY (the F9-corrected modelConfig probe)
+spawned 3 children with =modelConfig.model= =
+{=claude-sonnet-4-6=, =claude-haiku-4-5-20251001=,
+=qwen/qwen-2.5-72b-instruct=}. Agor persisted ALL THREE verbatim at
+=session.model_config.model= (3/3 match). Sonnet + haiku actually
+ran (emitted MODEL_PROBE_DONE). The qwen child returned: "There's
+an issue with the selected model (qwen/qwen-2.5-72b-...) — model may
+not exist or you may not have access." Concrete child:
+=019e0053-82e5-...=.
+
+*Implication.* The runtime floor for which model can actually run is
+*the agentic tool's adapter*, not Agor. Agor's =modelConfig.model=
+override is a config-layer pass-through; it does NOT inject a route
+or adapter for arbitrary providers. To run FOSS/OpenRouter routes
+per DEC-017 § 6, the spawn must use a different =agenticTool= (e.g.
+=opencode= with OpenRouter provider wired) rather than
+=claude-code= with an OR model id in modelConfig.
+
+*Action.* (1) Install opencode in the dev environment
+(=npm install -g @opencode-ai/cli= or canonical equivalent). (2)
+Round-3 pilot R3-CrossTool: validate FOSS path end-to-end via
+=agenticTool="opencode"= + provider config. (3) Update DEC-017 § 6
+implementation notes to specify "FOSS-default = opencode/aider with
+provider config", not "claude-code with FOSS modelConfig". (4)
+Update =multi-agent-org-llm.org= § "Cross-tool escalation" to mark
+this caveat (config layer ≠ runtime layer for cross-provider routing).
+
+** R6 — Spawn response leaks child =mcp_token= in =tool_result= content
+
+*Severity.* Low — minor information disclosure in transcript-sharing
+scenarios.
+
+*Evidence.* R2-D2 observed: =agor_sessions_spawn= response includes
+the spawned child's =mcp_token= JWT inside the captain's
+=tool_result= content. Visible in
+=scripts/_r2_d2_artifacts/spawn-geordi-1778117315-a1.jsonl= line 5.
+
+*Mitigation.* In trusted local-dev contexts, no real risk. If
+captain transcripts are ever shared (debugging, walkthroughs, public
+write-ups), redact the child =mcp_token= field. File upstream as a
+v0.18 ask: "consider returning child =mcp_token= via a side channel
+rather than embedded in =tool_result=."
+
+* Cross-pilot reconfirmations (high confidence now)
+
+| Round-1 finding | Round-2 confirmation count                        |
+|-----------------+---------------------------------------------------|
+| F1 (=idle= terminal)            | RECONFIRMED 4× (R2-A, R2-B, R2-D2, plus R2-Model partial) |
+| F4 (=tool_name= snake_case)     | RECONFIRMED 3×                                    |
+| F7 (null child REST cost)       | RECONFIRMED 3× — aggregate via parent stream-json |
+| F8 (JWT 15-min TTL)             | RECONFIRMED 1× (R2-B refreshed mid-run)           |
+| F10 (Python+subprocess pattern) | RECONFIRMED 4× — *strongly validated*             |
+| BUG-8 (PATCH bypassPermissions) | RECONFIRMED in every spawn captain                |
+
+* Team-vs-solo verdict (R2-A vs R2-B controlled comparison)
+
+R2-A and R2-B targeted the same task (type hints + docstrings on
+=org_llm/notices.py=, 61 LoC) with solo-vs-team team shapes. The
+ground-truth result was that the file was already fully type-hinted
+in the source repo, so both pilots correctly no-op'd at the code
+level.
+
+*The team layer DID NOT earn its keep on a 61-LoC task.* The
+=mode:"btw"= clarifier from @spock was sensible but its answer was
+already in the brief; @spock's review took ~2 min and produced a
+verdict that mostly restated the brief. ROI for the reviewer layer
+on this task was negative.
+
+*Where the team layer would earn its keep* — tasks where the
+reviewer's clarifier could actually *redirect* the author:
+architecture trades, ambiguous specs, multi-file refactors,
+trade-off decisions. Round-3 should pick a task in this class to
+actually measure team value, not just team wiring.
+
+* Real artifacts
+
+- =scripts/_r2_a.py= (27 KB) — solo-pilot template; reusable for any single-spawn captain
+- =scripts/_r2_b.py= (27 KB) — sibling-pair + =mode:"btw"= template; canonical pattern
+- =scripts/_r2_d2.py= (24 KB) — *3-member team template* with one-spawn-per-=claude -p= shape
+- =scripts/_r2_model.py= (30 KB) — modelConfig probe; needs F9-amendment (split into 3 invocations) to run successfully
+- =scripts/_r2_b_artifacts/= — captain stream + report
+- =scripts/_r2_d2_artifacts/= — 3 captain transcripts + report + log
+- =scripts/_r2_model_artifacts/captain-1778117482.jsonl= — stalled captain (informative)
+- =~/.agor/worktrees/local/org-llm/pilot-R2D2-1778117315/.agor-assistants/{boothby,geordi,atoz}/memory/2026-05-06.md= — 3 vault-hygiene memory files
+- =~/.agor/worktrees/local/org-llm/pilot-R2B-1778117297/org_llm/resolvers/agent.py= — R2-B's 1-line diff (minor; not promoted to trunk this round)
+
+* Round-3 design implications
+
+| Round-2 finding | Round-3 implication                                                                              |
+|-----------------+--------------------------------------------------------------------------------------------------|
+| F9 amendment    | Every captain that spawns 2+ children uses one-spawn-per-=claude -p= invocation                   |
+| R5              | Don't expect captains to issue parallel tool_uses; design captains as serial orchestrators         |
+| R2 + R3         | btw-helper utility: takes (caller, target) → polls TARGET's =genealogy.children= as =list[str]=, GETs each, filters by =fork_origin=="btw"=. Worth shipping as part of canon. |
+| R4              | Replace =/sessions/{id}/messages= with =/messages?session_id={id}= in =scripts/agor-test-fanout.sh= |
+| Team-vs-solo    | Round-3 picks a HARDER task — multi-file refactor, architecture trade, or ambiguous-spec design — to measure when team layer adds value |
+| F5 (still open) | Re-run R2-Model with one-spawn-per-=claude -p= shape (3 captain subprocesses, one per modelConfig variant) |
+
+* See also
+
+- [[file:2026-05-06-agor-pilot-round-1-findings.org][2026-05-06-agor-pilot-round-1-findings.org]] — round-1 findings (F9 amended in-place)
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — canon to update per R1, R2, R3, R5
+- [[file:agor-smoke-recipe.org][agor-smoke-recipe.org]] — needs R4 endpoint correction
+- [[file:bridge-crew-agor-assistants.org][bridge-crew-agor-assistants.org]] — memory-file convention reconfirmed (R2-D2)
