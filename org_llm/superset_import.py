@@ -42,6 +42,7 @@ metric is the authoritative numerator.
 from __future__ import annotations
 
 import io
+import json
 import re
 import uuid
 import zipfile
@@ -62,6 +63,29 @@ from .metrics import (
 # `Registry.emit_superset` so dataset/database UUIDs stay byte-stable
 # across the registry emitter and the dashboard preprocessor. That's
 # load-bearing — Superset matches charts to datasets via UUID.
+
+# Pre-translate legacy viz_type names to their modern equivalents so the
+# import path skips Superset's auto-migrator. The migrator's side effect
+# (superset/commands/chart/importers/v1/utils.py:115,126) stringifies
+# `query_context.form_data`, which then breaks GET /api/v1/chart/<id>/data
+# with `'str' object has no attribute 'get'`. Templates keep friendly
+# names (`:viz bar`); we canonicalize on emit. Mapping is verbatim from
+# superset/migrations/shared/migrate_viz/processors.py.
+_VIZ_TYPE_MIGRATION = {
+    "bar": "echarts_timeseries_bar",
+    "dist_bar": "echarts_timeseries_bar",
+    "line": "echarts_timeseries_line",
+    "area": "echarts_area",
+    "heatmap": "heatmap_v2",
+    "histogram": "histogram_v2",
+    "treemap": "treemap_v2",
+    "pivot_table": "pivot_table_v2",
+    "sunburst": "sunburst_v2",
+    "bubble": "bubble_v2",
+    "sankey": "sankey_v2",
+    "dual_line": "mixed_timeseries",
+}
+
 
 _HEADER_RE = re.compile(r"^#\+(\w+):\s*(.*?)\s*$", re.MULTILINE)
 _BABEL_BLOCK_RE = re.compile(
@@ -535,17 +559,53 @@ def _emit_chart_yaml(
 
     chart_uuid = _stable_uuid("chart", chart.name)
 
+    # Canonicalize viz_type up-front so Superset's import-time
+    # auto-migrator doesn't run (which would corrupt query_context —
+    # see comment on _VIZ_TYPE_MIGRATION above).
+    viz_type = _VIZ_TYPE_MIGRATION.get(chart.viz_type, chart.viz_type)
+
     # `params` is a free-form JSON-blob dict matching whatever the
     # viz_type's controlPanel expects. For agent-shaped use the table
     # viz is the safe default; the Babel block's :metric arg lands in
     # the metrics array, and :group_by populates groupby.
     params = {
         "datasource": f"{dataset_uuid}__table",
-        "viz_type": chart.viz_type,
+        "viz_type": viz_type,
         "groupby": chart.group_by,
         "metrics": [chart.metric_name],
         "adhoc_filters": [],
         "row_limit": 1000,
+    }
+
+    # Without a populated query_context, GET /api/v1/chart/<id>/data
+    # fails with "Chart has no query context saved" until the user
+    # opens the chart in the explore UI once. Synthesize one from the
+    # form_data so the data API works on first request after import.
+    # `datasource.id = 0` is a placeholder; Superset's
+    # `update_chart_config_dataset` rewrites it to the real id at
+    # import time (see superset/commands/utils.py:191).
+    query_context = {
+        "datasource": {"id": 0, "type": "table"},
+        "force": False,
+        "queries": [
+            {
+                "filters": [],
+                "extras": {"having": "", "where": ""},
+                "applied_time_extras": {},
+                "columns": chart.group_by,
+                "metrics": [chart.metric_name],
+                "row_limit": params["row_limit"],
+                "timeseries_limit": 0,
+                "order_desc": True,
+                "url_params": {},
+                "custom_params": {},
+                "custom_form_data": {},
+                "annotation_layers": [],
+            }
+        ],
+        "form_data": params,
+        "result_format": "json",
+        "result_type": "full",
     }
 
     payload = {
@@ -555,9 +615,9 @@ def _emit_chart_yaml(
         ),
         "certified_by": None,
         "certification_details": None,
-        "viz_type": chart.viz_type,
+        "viz_type": viz_type,
         "params": params,
-        "query_context": None,
+        "query_context": json.dumps(query_context),
         "cache_timeout": None,
         "uuid": chart_uuid,
         "version": SUPERSET_IMPORT_VERSION,

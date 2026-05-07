@@ -149,7 +149,10 @@ def test_chart_yaml_carries_registry_metric_expression(org_path: Path) -> None:
     bundle = od.to_bundle()
     chart = yaml.safe_load(bundle["llm_health/charts/avg_ms_by_kind.yaml"])
     assert chart["slice_name"] == "Average call duration by kind"
-    assert chart["viz_type"] == "bar"
+    # Preprocessor canonicalizes legacy viz types to their modern
+    # equivalents so Superset's import-time auto-migrator skips
+    # (avoids the form_data-stringification side effect).
+    assert chart["viz_type"] == "echarts_timeseries_bar"
     assert chart["params"]["metrics"] == ["llm_avg_ms"]
     assert chart["params"]["groupby"] == ["call_kind"]
 
@@ -165,6 +168,33 @@ def test_chart_yaml_carries_registry_metric_expression(org_path: Path) -> None:
     assert metric_expr["llm_avg_ms"] == expected
     # Sanity: the AVG(duration_ms) shape should literally appear.
     assert "AVG(duration_ms)" in metric_expr["llm_avg_ms"]
+
+
+def test_chart_query_context_is_populated(org_path: Path) -> None:
+    """Without query_context, GET /api/v1/chart/<id>/data fails with
+    "Chart has no query context saved" until the user clicks the chart
+    in the UI once. The preprocessor synthesizes one from form_data so
+    the data API works on first request after import."""
+    import json as _json
+    od = OrgDashboard.from_org(org_path)
+    bundle = od.to_bundle()
+    chart = yaml.safe_load(bundle["llm_health/charts/avg_ms_by_kind.yaml"])
+    qc_str = chart["query_context"]
+    assert qc_str is not None and isinstance(qc_str, str), (
+        "query_context must be a JSON string for Superset to translate "
+        "datasource refs at import time"
+    )
+    qc = _json.loads(qc_str)
+    # Datasource id is a placeholder that Superset rewrites at import.
+    assert qc["datasource"] == {"id": 0, "type": "table"}
+    # Single-query shape with the chart's metric + group_by reflected.
+    assert len(qc["queries"]) == 1
+    q = qc["queries"][0]
+    assert q["metrics"] == ["llm_avg_ms"]
+    assert q["columns"] == ["call_kind"]
+    # form_data must equal the chart's params so Superset's
+    # update_chart_config_dataset can swap the datasource ref atomically.
+    assert qc["form_data"] == chart["params"]
 
 
 def test_chart_dataset_uuid_matches_registry_uuid(org_path: Path) -> None:
