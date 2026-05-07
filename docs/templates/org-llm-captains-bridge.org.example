@@ -1,0 +1,107 @@
+#+TITLE: Captain's Bridge — org-llm vital signs
+#+SUPERSET_DASHBOARD: captains-bridge
+#+SUPERSET_DATABASE: org-llm
+#+FILETAGS: :template:superset:dashboard:captain:
+#+OPTIONS: toc:nil num:nil
+
+# The admin-pulse dashboard owned by =@picard=. Six charts, one per
+# vital sign, single-column layout. Every metric expression here is
+# verbatim from =org_llm/metrics/registry.yaml= so the dashboard and
+# the =@analyst=-style agents agree on numbers byte-for-byte.
+
+* Agent fan-out heatmap
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Distinct downstream agents that each =agent_from= has talked to —
+the proxy-vs-manager dominance lens. A fat row on =@proxy= means the
+manager is not earning its keep; a fat row on =@picard= means
+delegation is healthy.
+
+#+BEGIN_SRC sql :name agent_fan_out_heatmap :metric agent_fan_out :group_by [agent_from, agent_to]
+SELECT agent_from, agent_to, COUNT(DISTINCT agent_to) AS agent_fan_out
+FROM crew_log
+GROUP BY agent_from, agent_to
+#+END_SRC
+
+* Model cost & latency
+:PROPERTIES:
+:VIZ_TYPE: bar
+:END:
+
+Mean wall-clock duration of LLM calls bucketed by =call_kind= ×
+=model=. The 87× chat/embed gap should jump out instantly; new
+spikes flag slow models or context-bloat regressions.
+
+#+BEGIN_SRC sql :name model_cost_latency :metric llm_avg_ms :group_by [call_kind, model]
+SELECT call_kind, model, AVG(duration_ms) AS llm_avg_ms
+FROM llm_calls
+GROUP BY call_kind, model
+#+END_SRC
+
+* Error rate by model
+:PROPERTIES:
+:VIZ_TYPE: bar
+:END:
+
+Fraction of LLM calls whose outcome wasn't =ok=, per model. Catches
+silent breakage like the phi3.5 50/50 failure pattern from the
+2026-05-06 tier-1 probe.
+
+#+BEGIN_SRC sql :name error_rate_by_model :metric llm_error_rate :group_by [model]
+SELECT model, AVG(CASE WHEN outcome != 'ok' THEN 1.0 ELSE 0.0 END) AS llm_error_rate
+FROM llm_calls
+GROUP BY model
+#+END_SRC
+
+* Captain's-log heatmap
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+When activity happens, by category. Rows = =hist_kind= (capture,
+chat, agent, …), columns = day. Sparse rows or sudden bands flag
+either a quiet day or a runaway agent loop.
+
+#+BEGIN_SRC sql :name captains_log_heatmap :metric hist_events :group_by [hist_kind, hist_day]
+SELECT kind AS hist_kind, substr(timestamp, 1, 10) AS hist_day, COUNT(*) AS hist_events
+FROM history
+GROUP BY kind, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Memory-pressure timeline
+:PROPERTIES:
+:VIZ_TYPE: line
+:END:
+
+Fraction of sensor readings at =watch=, =alert=, or =critical=, per
+status × day. The system-health pulse — when this trends up the
+captain should drill into =@geordi='s console for root cause.
+
+#+BEGIN_SRC sql :name memory_pressure_timeline :metric probe_alert_rate :group_by [probe_status, sensor_day]
+SELECT status AS probe_status, date(ts, 'unixepoch') AS sensor_day, AVG(CASE WHEN status IN ('watch','alert','critical') THEN 1.0 ELSE 0.0 END) AS probe_alert_rate
+FROM sensor_log
+GROUP BY status, date(ts, 'unixepoch')
+#+END_SRC
+
+* History kind drift
+:PROPERTIES:
+:VIZ_TYPE: line
+:END:
+
+Distinct =hist_kind= values per day — the new-event-kind detector.
+A bump means a new subsystem started writing to history (worth
+naming); a drop means something stopped (worth investigating).
+
+#+BEGIN_SRC sql :name history_kind_drift :metric hist_kind_count :group_by [hist_day]
+SELECT substr(timestamp, 1, 10) AS hist_day, COUNT(DISTINCT kind) AS hist_kind_count
+FROM history
+GROUP BY substr(timestamp, 1, 10)
+#+END_SRC
+
+# Run:
+#   org-llm superset import-org docs/templates/org-llm-captains-bridge.org.example \
+#       --emit-only /tmp/captains-bridge.zip
+#   org-llm superset import-org docs/templates/org-llm-captains-bridge.org.example \
+#       --post http://localhost:8088
