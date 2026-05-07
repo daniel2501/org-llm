@@ -99,7 +99,72 @@ snapshot= verb could regenerate this page from
 - *@doom* promoted to starfleet-core; tool-unreachable case
   handled.
 
-* ▶ OVERNIGHT 2026-05-06 → 2026-05-07 (user asleep; agent in flight) :@here:
+* ▶ AFTERNOON 2026-05-07 (round-13 post-mortem + round-14 launched) :@here:
+
+#+begin_quote
+*State for resumption.* Round-13 was the first sweep using the new
+W4 production runtime (=org_llm.specialist=, opencode bypassed). Its
+first completed cell (B1 K1-qwen30) read like a substrate regression
+— 61i/78d across 3 files for a 5-link single-file task — but
+post-mortem found *both* alarms were false:
+
+- The 61i/78d came from uncommitted dirty trunk leaking into Agor's
+  worktree base, not from the specialist eating extra files.
+- The "fabricated" UUIDs were real =:ID:= values for the wiki pages
+  (mistaken for fake-shaped on visual inspection).
+
+Specialist actually did 5 clean on-candidate wraps. Comparison to
+rounds-6-7 Claude-solo K5 cells: qwen30 was MORE on-spec than
+Claude on B1; Claude wrapped =Host= → =llm-proxy.org= and
+=db.Config= → =architecture.org= — real IDs but loose targets.
+
+The bug is *measurement, not capability*. Round-14 fixes the
+measurement.
+
+*Tonight's commits (this arc):*
+
+| Commit    | Theme                                                                 |
+|-----------+-----------------------------------------------------------------------|
+| =d07cd85= | chore(trunk): commit in-flight work — clean baseline for round-14    |
+
+*In flight (background, won't transfer cross-session):*
+
+| Process                             | Wall    | Cells                                |
+|-------------------------------------+---------+--------------------------------------|
+| =python3 _round14_clean_baseline.py= | ~30 min | 25 (5 tasks × 5 variants)            |
+
+*Round-14 fix batch* (seven fixes; #7 added mid-flight; see
+[[id:7ce85fa3-c4dc-4c0c-9e8d-2a5ebea9a436][2026-05-07-round-13-postmortem.org]] for full breakdown):
+
+1. Clean baseline — trunk committed (=d07cd85=), worktrees branch from clean HEAD
+2. Diff-stat granularity — =diff_in_scope= vs =diff_out_of_scope= per cell
+3. Per-cell =cell_result.json= — full SpecialistResult + plan + analysis
+4. ID verification (record-only) — flag =[[id:X]]= insertions where X ∉ workdir =:ID:= map
+5. Wrap-target categorization — =on_candidate= / =creative= / =unmatched=
+6. Prefetch echo — =prompts/<handle>.txt= per cell with the actual instruction sent
+7. Diff against merge-base, not =trunk= — Agor caches stale trunk SHA;
+   always diff against worktree's own branch base, never a moving ref
+
+*Reviewable artifacts queued for next-touch:*
+
+| Path                                                     | What                                              |
+|----------------------------------------------------------+---------------------------------------------------|
+| =scripts/_round14_clean_baseline_artifacts/summary-*.json= | Slim per-cell summary table (post-run)            |
+| =scripts/_round14_clean_baseline_artifacts/{TASK}/{VARIANT}/cell_result.json= | Full per-cell record (post-run)                  |
+| =docs/wiki/2026-05-07-round-13-postmortem.org=          | Canonical write-up + open R15 candidates         |
+| =docs/wiki/multi-agent-org-llm.org= § Bench measurement  | Lesson appended to canonical surface             |
+
+*Open R15 candidates* (deferred so R14 stays a clean A/B vs R13):
+
+- Wrap-precision via blind Opus-judge per insertion
+- Auto-fail on =id_fabrication_count > 0= (promote from record-only)
+- Prefetch as structured tool (=find_canonical_id(label)=) instead of inline JSON
+
+*Recommended first read on next-touch:* this section → R14's
+=summary-*.json= table → spot-check 1-2 cells via =cell_result.json=.
+#+end_quote
+
+* ▶ OVERNIGHT 2026-05-06 → 2026-05-07 (user asleep; agent in flight) :@stale:
 
 #+begin_quote
 *State for resumption.* User went to bed after a heavy push session

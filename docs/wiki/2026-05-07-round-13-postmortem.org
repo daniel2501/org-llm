@@ -1,0 +1,213 @@
+:PROPERTIES:
+:ID:       7ce85fa3-c4dc-4c0c-9e8d-2a5ebea9a436
+:CREATED:  [2026-05-07]
+:END:
+#+TITLE: Round-13 post-mortem + Round-14 fix batch
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:postmortem:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Round-13 was the first sweep using the new W4 production
+runtime (=org_llm.specialist= — direct OpenRouter + tool-use, opencode
+bypassed). First completed cell (B1 K1-qwen30) showed a 61i/78d diff
+across three files when the task was 5 link insertions on one file —
+which read like a path-safety regression and possibly fabricated UUIDs.
+
+Both alarms turned out to be false. The 61i/78d came from *uncommitted
+trunk state leaking into Agor's worktree base*; the "fabricated" UUIDs
+were the real =:ID:= values for those wiki pages. Specialist did 5
+clean wraps on the target file with prefetch-supplied IDs.
+
+The actual bug is *measurement, not capability* — diff artifacts
+couldn't tell the user (or the assistant peeking on their behalf)
+whether the work was good or bad. Round-14 fixes the measurement.
+
+* What round-13 actually did
+
+| Aspect                   | Reality                                                                                  |
+|--------------------------+------------------------------------------------------------------------------------------|
+| @picard's plan           | Correct: classified pattern-match/recurring/low → flat playbook → single @atoz           |
+| Brief to specialist      | Correct: "exactly 5 changes", "Only modify the target file"                              |
+| Prefetch coverage        | Real candidates list with real canonical_id values from workdir =:ID:= properties        |
+| Specialist (qwen30) work | 5 wraps in "See also" section of =literate-tools.org=, all on prefetch candidates, real IDs |
+| Diff inflation           | =doom/org-llm-chat.el= + =tests/test_org_llm_chat.el= contaminated by uncommitted trunk  |
+
+Comparison to Claude baselines (rounds 6-7 K5):
+
+- Round-6 K5 (Claude-solo): 4 wraps; 3 from prefetch + 1 invented label match.
+- Round-7 K5 (Claude-solo): 4 wraps; included creative stretches —
+  wrapped =Host= → =llm-proxy.org=, =db.Config= → =architecture.org=.
+  Real IDs, but loose semantic fit to the task.
+- *Read:* qwen30 was MORE on-spec than Claude here. Claude is more
+  agentic in a way that drifts off-target.
+
+* The seven fixes (round-14)
+
+*Note:* started as six fixes; round-14's first run surfaced a seventh
+(see Fix 7 below). The original six were planned from artifact
+review; the seventh emerged from R14's first cells and was patched
+in before the rerun.
+
+
+
+** Fix 1 — clean baseline
+
+*Why:* worktrees branch from =trunk= HEAD; if trunk has uncommitted
+modifications, those leak into every cell's diff regardless of cell
+work.
+
+*Implementation:* commit =d07cd85= bundles all in-flight Bridge Crew
+work (specialist + CLI verb + Doom surface + Bridge Crew agents +
+captain's-log Agor bridge + scratch experiment harnesses + wiki
+sprawl). =scripts/_*_artifacts/= and =tests/_artifacts/= moved to
+=.gitignore= — harness output is regenerable, doesn't belong in git.
+
+** Fix 2 — diff-stat granularity
+
+*Why:* a single =diff_stat= can't tell "good cell, contaminated
+baseline" from "bad cell, ate other files".
+
+*Implementation:* harness parses each cell's diff and splits into
+=diff_in_scope= (changes inside =task["target_file"]=) vs
+=diff_out_of_scope= (everything else), plus =files_touched=. Both
+land in =cell_result.json= and the summary table.
+
+** Fix 3 — per-cell =cell_result.json=
+
+*Why:* round-13 only persisted =diff.patch= + =phase1_plan.json=. To
+audit a cell we had to grep the patch + reason from artifacts.
+
+*Implementation:* each cell directory now also gets a single
+=cell_result.json= containing the plan, classification, all
+specialist results (including =edits_applied=, =text_output=,
+=duration_seconds=), the analysis (fixes 2/4/5), and the prefetch
+itself.
+
+** Fix 4 — ID verification (record-only)
+
+*Why:* "is this UUID real?" needs a deterministic check. Eyeballing
+fails (see round-13 false alarm).
+
+*Implementation:* harness builds the workdir's =:ID:= → file map
+once, then for every =[[id:X][label]]= insertion in the diff
+records =id_in_workdir= (bool) and aggregates =id_fabrication_count=
+per cell. *Per user 2026-05-07: just record, do not auto-fail*.
+Lets us see drift without over-penalizing legitimate creative-link
+cases (e.g. linking to a page whose ID isn't in our wiki tree).
+
+** Fix 5 — wrap-target categorization
+
+*Why:* "real ID" isn't enough — Claude's R7 wraps used real IDs but
+loose targets. Need to distinguish on-spec from creative.
+
+*Implementation:* for each insertion, check whether the label
+matches one of =prefetch.candidates[].matched_text=. Categorize as:
+- =on_candidate= — label maps to a prefetch candidate
+- =creative= — real workdir ID, label is not a candidate match
+- =unmatched= — ID not in workdir at all
+
+Per-cell counts in =wrap_categories= surface the qwen-on-spec vs
+Claude-creative pattern as a Tier-1 metric.
+
+** Fix 6 — prefetch echo
+
+*Why:* @picard's brief said "use the provided list of canonical_id
+candidates." Without seeing the actual specialist prompt, we can't
+verify the prefetch reached it.
+
+*Implementation:* harness writes =prompts/<handle>.txt= per cell
+containing persona + model + target_files + the full instruction
+text actually sent (with the prefetch JSON inlined). Removes
+ambiguity.
+
+** Fix 7 — diff against merge-base, not trunk
+
+*Why:* discovered mid-flight on R14's first run. Even with trunk
+committed clean, Agor's daemon caches the trunk SHA at startup (or
+in its internal repo state). When real trunk advances during a bench
+run, Agor's worktree-create REST endpoint still branches new
+worktrees from the older cached SHA. =git diff trunk= from such a
+worktree includes the *inverse* of every commit trunk has seen
+since — for R14, that meant 22,662 phantom deletions corresponding
+to the contents of =d07cd85= itself.
+
+*Implementation:* in =wt_diff_vs_base()= the harness now computes
+=base = git merge-base HEAD trunk= and runs =git diff $base HEAD=.
+This compares the worktree against whatever it actually branched
+from, regardless of where trunk has since moved.
+
+*Verified on the killed-R14 worktree:*
+
+|                | Files touched | Insertions | Deletions |
+|----------------+---------------+------------+-----------|
+| =diff trunk=   | many          | 141        | 22662     |
+| =diff base...= | 1             | 4          | 4         |
+
+The merge-base diff matches what the specialist actually did (4 link
+wraps; each = 1 line replaced).
+
+*Implication:* future bench harnesses should NEVER diff against a
+moving named ref like =trunk= — always against the worktree's own
+branch base. Add to the harness template.
+
+* What round-14 will discriminate
+
+| Question                                                          | Round-14 metric                                  |
+|-------------------------------------------------------------------+--------------------------------------------------|
+| Does the specialist runtime stay scope-clean?                     | =diff_out_of_scope.insertions= per cell          |
+| Does the FOSS substrate hallucinate UUIDs?                        | =id_fabrication_count= per cell                  |
+| Does qwen-on-spec pattern hold across tasks beyond B1?            | =wrap_categories.on_candidate= vs =creative=     |
+| Does Claude over-explore on more constrained tasks too?           | K5 cells' =creative= count vs FOSS cells'        |
+| Did the prefetch actually reach the specialist?                   | =prompts/<handle>.txt= contains the JSON inline  |
+| Cost / wall ratio for direct-API specialist vs round-12 opencode? | =phase1_cost_usd= + =specialist_cost_usd= + wall |
+
+* Open R15 candidates (not in this batch)
+
+These are deliberately deferred so R14 stays a clean A/B against R13
+on the diagnostics:
+
+- *Wrap-precision via patch-level review* — beyond category counts,
+  blind-judge correctness of each wrap (right ID for right text).
+  Needs an Opus-judge pass per [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Phase 2026-05.10 — A/B harness]].
+- *Auto-fail on fabrication* — promote =id_fabrication_count > 0=
+  from record-only to cell-fail signal once R14 confirms it's a real
+  signal and not noise.
+- *Prefetch surface widening* — feed candidates as a structured tool
+  (=find_canonical_id(label)=) instead of inline JSON; tests whether
+  smaller models use a tool more reliably than a blob.
+- *Capture =raw_messages= in =SpecialistResult=* — currently
+  =org_llm.specialist= discards the per-iteration API request /
+  response payloads. Without them, "model returned nothing" is
+  indistinguishable from "model returned malformed tool calls we
+  failed to parse." Filed in response to round-14 B1 K2-kimi-k2.6's
+  silent no-op (1 iteration, $0.018, no edits, empty text, no
+  error). Needs raw payload logging to root-cause.
+- *Silent-no-op detection in =SpecialistResult.success=* — the
+  current runtime treats "no exception thrown" as success. Should
+  be: =success = bool(edits_applied) or bool(text_output)=. With
+  this, round-14's kimi cell would have surfaced as failed instead
+  of looking identical to a legitimate "task already done, no-op
+  correct" cell.
+
+* Status
+
+Round-14 launched 2026-05-07 with PID 809174 against
+=scripts/_round14_clean_baseline.py= (artifacts in
+=scripts/_round14_clean_baseline_artifacts/=). 25 cells (5 tasks × 5
+variants); ETA ~25-30 min; budget ceiling kept at $25 from earlier
+allowance.
+
+* See also
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]]
+  — the canonical surface this benches
+- [[file:picard-agor-primer.org][picard-agor-primer.org]] — the SOP
+  fed into @picard at PHASE 1
+- [[file:foss-vs-claude-cloud-compute-2026-05.org][foss-vs-claude-cloud-compute-2026-05.org]]
+  — landscape this round samples from
+- =scripts/_round14_clean_baseline.py= — the harness
+- =org_llm/specialist.py= — the W4 runtime

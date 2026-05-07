@@ -707,6 +707,40 @@ canon, not a recipe book.
 | [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-016]]   | Three-tier SDLC — team sessions honor =ORG_LLM_ENV= per worktree; dev-tier teams don't touch prod         |
 | [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017]]   | Integration-only pre-2029; no FOSS-distribution shipping Agor as dependency until BSL→Apache              |
 
+* Bench measurement — diff hygiene vs cell signal
+
+*Summary.* Cell-level diff stats can lie when worktrees branch from a
+dirty trunk: uncommitted parent-state edits leak into every cell's
+diff and look like specialist regressions. Round-13's first cell
+showed 61i/78d across 3 files for a task targeting 5 link insertions
+on 1 file — read as a path-safety bug; was actually trunk
+contamination.
+
+*Expanded.* The fix is procedural + diagnostic, not capability-side.
+
+| Lesson                              | Mechanism in round-14+ harnesses                                          |
+|-------------------------------------+---------------------------------------------------------------------------|
+| Commit trunk before benching        | Worktrees branch off clean HEAD; no parent dirty-state leakage            |
+| Split diff by scope                 | =diff_in_scope= (target_files) vs =diff_out_of_scope= (everything else)   |
+| Verify inserted IDs deterministically | Map workdir =:ID:= properties; flag any =[[id:X]]= where X ∉ map         |
+| Categorize wrap targets             | =on_candidate= / =creative= / =unmatched= per insertion                   |
+| Persist what the specialist saw     | Write =prompts/<handle>.txt= per cell — confirms prefetch reached it      |
+| Diff against merge-base, not trunk  | Agor caches stale trunk SHA; =git diff trunk= shows trunk-since's inverse |
+
+*Cross-finding (rounds 6-7-13 K5 vs K1-qwen30 on B1).* Claude is more
+agentic than smaller FOSS models in a way that drifts off-spec. On
+"wrap exactly 5 prose mentions from this candidate list," round-13
+qwen30 produced 5 on-candidate wraps; rounds 6-7 Claude-solo
+produced 4 wraps including creative stretches (=Host= →
+=llm-proxy.org=, =db.Config= → =architecture.org=). Real IDs in both,
+but Claude's interpretation was looser. Implication for the W4
+runtime: smaller FOSS model + good prefetch + tight brief beats
+larger model + loose brief — at least for tasks shaped like "use this
+list."
+
+See [[id:7ce85fa3-c4dc-4c0c-9e8d-2a5ebea9a436][2026-05-07 round-13 post-mortem + round-14 plan]] for the full
+six-fix breakdown.
+
 * Open questions
 
 Grouped thematically. Research can't answer these — the user
