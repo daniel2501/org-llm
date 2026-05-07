@@ -1,0 +1,86 @@
+#+TITLE: @geordi — analytics-infrastructure console
+#+SUPERSET_DASHBOARD: geordi-console
+#+SUPERSET_DATABASE: org-llm
+#+FILETAGS: :template:superset:dashboard:geordi:specialist:
+#+OPTIONS: toc:nil num:nil
+
+# The first persistent Layer 2 specialist console for org-llm. Owned
+# by =@geordi= (alias =@analyst=, TNG chief engineer) — analytics
+# *infrastructure* health, not the data flowing through it. Where
+# =@picard='s Captain's Bridge is one chart per vital sign, this
+# console goes deeper on a narrower slice: the LLM call layer + the
+# crew-log audit. Every metric expression is verbatim from
+# =org_llm/metrics/registry.yaml=.
+
+* Tail latency by model
+:PROPERTIES:
+:VIZ_TYPE: line
+:END:
+
+Worst-case wall-clock duration of LLM calls per =model= per day —
+the P99-shaped lens the Captain's mean-latency bar can't surface.
+A single 60-second outlier on =qwen2.5-coder= won't move the
+captain's average but will dominate this line; that's the point.
+
+#+BEGIN_SRC sql :name tail_latency_by_model :metric llm_max_ms :group_by [model, llm_day]
+SELECT model, substr(timestamp, 1, 10) AS llm_day, MAX(duration_ms) AS llm_max_ms
+FROM llm_calls
+GROUP BY model, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Mean latency drift
+:PROPERTIES:
+:VIZ_TYPE: line
+:END:
+
+Mean call duration per =model= per day. The captain shows mean
+latency once (call_kind × model snapshot); =@geordi= tracks it
+across time so context-bloat regressions and model-swap
+performance shifts are visible as slope changes, not as a single
+bar that may already be polluted with last week's data.
+
+#+BEGIN_SRC sql :name mean_latency_drift :metric llm_avg_ms :group_by [model, llm_day]
+SELECT model, substr(timestamp, 1, 10) AS llm_day, AVG(duration_ms) AS llm_avg_ms
+FROM llm_calls
+GROUP BY model, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Embed vs chat throughput
+:PROPERTIES:
+:VIZ_TYPE: bar
+:END:
+
+Total LLM calls per =call_kind= per day. The captain measures
+*latency* by =call_kind= but not *volume* — an embed pipeline
+stall or a chat-turn explosion shows up here first as a
+collapsing or runaway bar before either error-rate or latency
+notices.
+
+#+BEGIN_SRC sql :name embed_vs_chat_throughput :metric llm_calls :group_by [call_kind, llm_day]
+SELECT call_kind, substr(timestamp, 1, 10) AS llm_day, COUNT(*) AS llm_calls
+FROM llm_calls
+GROUP BY call_kind, substr(timestamp, 1, 10)
+#+END_SRC
+
+* Crew action mix
+:PROPERTIES:
+:VIZ_TYPE: heatmap
+:END:
+
+Manager (crew) audit-log rows by =crew_action= × =crew_outcome=.
+The captain's fan-out heatmap answers "who talks to whom";
+=@geordi='s answers "what kind of work and did it succeed". A fat
+=delegate / not-ok= cell is the infra-quality signal — the manager
+is dispatching but specialists are failing the handoff.
+
+#+BEGIN_SRC sql :name crew_action_mix :metric crew_actions :group_by [crew_action, crew_outcome]
+SELECT action AS crew_action, outcome AS crew_outcome, COUNT(*) AS crew_actions
+FROM crew_log
+GROUP BY action, outcome
+#+END_SRC
+
+# Run:
+#   org-llm superset import-org docs/templates/@geordi-console.org.example \
+#       --emit-only /tmp/geordi-console.zip
+#   org-llm superset import-org docs/templates/@geordi-console.org.example \
+#       --post http://localhost:8088
