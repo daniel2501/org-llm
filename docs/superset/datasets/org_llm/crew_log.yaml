@@ -1,0 +1,89 @@
+table_name: crew_log
+main_dttm_col: timestamp
+description: 'org-llm source: crew'
+default_endpoint: null
+offset: 0
+cache_timeout: null
+schema: null
+sql: null
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+uuid: 89826fde-6cc6-501f-9890-179e3a508113
+metrics:
+- metric_name: crew_actions
+  verbose_name: crew_actions
+  metric_type: null
+  expression: COUNT(*)
+  description: Manager (crew) audit-log rows
+  d3format: null
+  warning_text: null
+- metric_name: crew_delegations
+  verbose_name: crew_delegations
+  metric_type: null
+  expression: SUM(CASE WHEN (action = 'delegate') THEN 1 ELSE 0 END)
+  description: Manager delegations to specialists
+  d3format: null
+  warning_text: null
+- metric_name: crew_failures
+  verbose_name: crew_failures
+  metric_type: null
+  expression: SUM(CASE WHEN outcome != 'ok' THEN 1 ELSE 0 END)
+  description: Crew actions whose outcome wasn't 'ok'
+  d3format: null
+  warning_text: null
+- metric_name: agent_fan_out
+  verbose_name: agent_fan_out
+  metric_type: null
+  expression: COUNT(DISTINCT agent_to)
+  description: Distinct downstream agents an agent_from has talked to (proxy-vs-manager
+    dominance lens)
+  d3format: null
+  warning_text: null
+columns:
+- column_name: timestamp
+  is_dttm: true
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: agent_to
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: agent_from
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: crew_action
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: action
+- column_name: crew_outcome
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: outcome
+- column_name: crew_day
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: substr(timestamp, 1, 10)
+version: 1.0.0
+database_uuid: e208c207-65af-52ef-87b4-62769969e6fc

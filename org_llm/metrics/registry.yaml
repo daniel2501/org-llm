@@ -1,0 +1,138 @@
+# org-llm semantic layer — single source of truth for "what does X mean?"
+#
+# Agents query metrics by name (metric:llm_avg_ms group_by:[model, day]) instead
+# of writing raw SQL. Same definitions are intended to emit Superset dataset
+# YAML so a Superset dashboard and an `@analyst` agent answer with the *same*
+# numbers.
+#
+# Schema:
+#   sources    — physical tables in ~/.local/share/org-llm/org-llm.db
+#   dimensions — group-by surfaces (must reference an existing source)
+#   metrics    — aggregations (must reference an existing source; group_by
+#                must come from the same source — cross-source joins are out
+#                of scope for v0)
+
+sources:
+  llm:
+    table: llm_calls
+    time_col: timestamp           # ISO-8601 string, sortable lexically
+  crew:
+    table: crew_log
+    time_col: timestamp
+  history:
+    table: history
+    time_col: timestamp
+  sensors:
+    table: sensor_log
+    time_col: ts                  # unix epoch seconds (int)
+
+dimensions:
+  # llm_calls
+  model:        {source: llm,     expr: "model"}
+  outcome:      {source: llm,     expr: "outcome"}
+  call_kind:    {source: llm,     expr: "call_kind"}
+  command:      {source: llm,     expr: "command"}
+  llm_day:      {source: llm,     expr: "substr(timestamp, 1, 10)"}
+
+  # crew_log
+  agent_to:     {source: crew,    expr: "agent_to"}
+  agent_from:   {source: crew,    expr: "agent_from"}
+  crew_action:  {source: crew,    expr: "action"}
+  crew_outcome: {source: crew,    expr: "outcome"}
+  crew_day:     {source: crew,    expr: "substr(timestamp, 1, 10)"}
+
+  # history
+  hist_kind:    {source: history, expr: "kind"}
+  hist_command: {source: history, expr: "command"}
+  hist_day:     {source: history, expr: "substr(timestamp, 1, 10)"}
+
+  # sensors
+  probe:        {source: sensors, expr: "probe"}
+  probe_status: {source: sensors, expr: "status"}
+  sensor_day:   {source: sensors, expr: "date(ts, 'unixepoch')"}
+
+metrics:
+  # ---- llm_calls ----------------------------------------------------------
+  llm_calls:
+    description: Total LLM calls
+    source: llm
+    expr: "COUNT(*)"
+
+  llm_errors:
+    description: Failed LLM calls (outcome != 'ok')
+    source: llm
+    expr: "SUM(CASE WHEN outcome != 'ok' THEN 1 ELSE 0 END)"
+
+  llm_error_rate:
+    description: Error rate, 0..1
+    source: llm
+    expr: "AVG(CASE WHEN outcome != 'ok' THEN 1.0 ELSE 0.0 END)"
+
+  llm_avg_ms:
+    description: Mean call duration (ms)
+    source: llm
+    expr: "AVG(duration_ms)"
+
+  llm_max_ms:
+    description: Slowest call duration (ms)
+    source: llm
+    expr: "MAX(duration_ms)"
+
+  # ---- crew_log -----------------------------------------------------------
+  crew_actions:
+    description: Manager (crew) audit-log rows
+    source: crew
+    expr: "COUNT(*)"
+
+  crew_delegations:
+    description: Manager delegations to specialists
+    source: crew
+    expr: "COUNT(*)"
+    where: ["action = 'delegate'"]
+
+  crew_failures:
+    description: Crew actions whose outcome wasn't 'ok'
+    source: crew
+    expr: "SUM(CASE WHEN outcome != 'ok' THEN 1 ELSE 0 END)"
+
+  agent_fan_out:
+    description: Distinct downstream agents an agent_from has talked to (proxy-vs-manager dominance lens)
+    source: crew
+    expr: "COUNT(DISTINCT agent_to)"
+
+  # ---- history ------------------------------------------------------------
+  hist_events:
+    description: Total history rows
+    source: history
+    expr: "COUNT(*)"
+
+  hist_avg_ms:
+    description: Mean history-event duration (ms)
+    source: history
+    expr: "AVG(duration_ms)"
+
+  hist_kind_count:
+    description: Distinct history kinds in the window (drift / new-kind detector)
+    source: history
+    expr: "COUNT(DISTINCT kind)"
+
+  hist_command_count:
+    description: Distinct history commands in the window (vocabulary breadth)
+    source: history
+    expr: "COUNT(DISTINCT command)"
+
+  # ---- sensors ------------------------------------------------------------
+  sensor_readings:
+    description: Total sensor readings
+    source: sensors
+    expr: "COUNT(*)"
+
+  sensor_alerts:
+    description: Sensor readings at watch/alert/critical
+    source: sensors
+    expr: "SUM(CASE WHEN status IN ('watch','alert','critical') THEN 1 ELSE 0 END)"
+
+  probe_alert_rate:
+    description: Fraction of readings at watch/alert/critical (0..1) — memory pressure detector
+    source: sensors
+    expr: "AVG(CASE WHEN status IN ('watch','alert','critical') THEN 1.0 ELSE 0.0 END)"

@@ -1,0 +1,14 @@
+database_name: org-llm
+sqlalchemy_uri: sqlite:////home/daniel/.local/share/org-llm/org-llm.db
+cache_timeout: null
+expose_in_sqllab: true
+allow_run_async: false
+allow_ctas: false
+allow_cvas: false
+allow_dml: false
+allow_csv_upload: false
+extra:
+  engine_params: {}
+  metadata_params: {}
+uuid: e208c207-65af-52ef-87b4-62769969e6fc
+version: 1.0.0

@@ -1,0 +1,162 @@
+:PROPERTIES:
+:ID:       93b87da8-bca5-409a-8fdf-8ed20ca739ef
+:CREATED:  [2026-05-06]
+:UPDATED:  [2026-05-06]
+:END:
+#+TITLE: Superset fork-spike survey — three tier-7 candidates
+#+FILETAGS: :wiki:phase-27:superset:fork:survey:
+#+OPTIONS: toc:nil num:nil
+
+* Summary
+
+Read-only survey of the three [[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]]
+tier-7 fork candidates against =apache/superset= tag =4.1.1= (commit
+=6264ff5=, shallow-cloned to =/tmp/superset-fork-survey=). Two of the
+three are misframed in the current wiki. *Auth swap* is not a fork at
+all — upstream already ships =CUSTOM_SECURITY_MANAGER= +
+=AUTH_REMOTE_USER=, so the work is a ~30-line org-llm extension.
+*Headless render binary* is structurally infeasible at reasonable cost;
+the renderer /is/ the 85 MB React frontend driven by Playwright.
+*Org-as-source-format importer* is the only candidate that's actually a
+fork-shaped problem, and it's a small one — a single chokepoint at
+=superset/commands/importers/v1/utils.py=, possibly zero-fork via a
+pre-processor.
+
+* Expanded
+
+** Compact estimate table
+
+| Candidate              | Files touched               | LOC diff   | Merge risk | Maint. burden | Verdict                          |
+|------------------------+-----------------------------+------------+------------+---------------+----------------------------------|
+| Auth swap              | 0 upstream / 1 in org-llm   | ~30        | n/a        | low           | Not a fork — config + extension  |
+| Headless render        | 50+, new render engine      | thousands  | high       | high          | Bordering on rewrite             |
+| Org-as-source importer | 0 (preproc) or 1 (=utils.py=) | 0 or ~50   | low        | low           | Small fork, possibly zero-fork   |
+
+** Auth swap — turns out to not be a fork
+
+Upstream already exposes the seam:
+
+- =superset/config.py:182= — =CUSTOM_SECURITY_MANAGER = None= (user-overridable plugin point).
+- =superset/initialization/__init__.py:555–565= — runtime applies it via =appbuilder.security_manager_class = custom_sm=.
+- =superset/config.py:339= — =AUTH_TYPE = AUTH_DB= (the only assignment in the entire =superset/= tree). =AUTH_REMOTE_USER= is one constant change away.
+- =superset/config.py:45= — auth constants (=AUTH_DB= / =AUTH_LDAP= / =AUTH_OAUTH= / =AUTH_REMOTE_USER= / =AUTH_OID=) are inherited from FAB, not Superset-specific.
+
+Upstream docs cover the path: =docs/docs/configuration/configuring-superset.mdx:291=, =networking-settings.mdx:80=.
+
+So the =~/.authinfo.gpg= solo-user mode is a small *org-llm-side*
+=CustomSecurityManager= subclass that resolves the user from the
+=Remote-User= header (or local socket peer cred) backed by an
+authinfo lookup. No upstream patch. The wiki at
+[[file:superset.org::*Fork territory][superset.org tier 7]] overstates
+this rung; recommend rewriting it as a tier-4-or-5 extension.
+
+** Headless render — infeasible at reasonable cost
+
+The existing thumbnail/screenshot path is browser-driven end-to-end:
+
+- =superset/tasks/thumbnails.py:64–71, 101–108= — both thumbnail tasks build a URL and hand it to =ChartScreenshot= / =DashboardScreenshot=.
+- =superset/utils/screenshots.py= — 274 LOC wrapper, all URL-driven.
+- =superset/utils/webdriver.py:71–84= — abstract =WebDriverProxy.get_screenshot(url, …)=.
+- =superset/utils/webdriver.py:85–243= (Playwright) and =:245–438= (Selenium) — both =goto(url)= then wait for chart-container DOM nodes (=webdriver.py:181=: =page.locator(f".{element_name}")=).
+- =superset-frontend/= is 85 MB, 1216 =*.ts= / =*.tsx= files in =src/= plus 22 chart-plugin packages in =plugins/=.
+
+There is *no* matplotlib/altair/vega-cli alternative anywhere in the
+Python tree (verified by grep). "Strip the React frontend and ship
+=superset render dashboard.yaml > out.png=" is therefore not a fork —
+it's a months-long server-side renderer rewrite from scratch.
+
+Realistic alternatives, both unattractive:
+
+1. *CLI verb that boots existing Playwright headlessly.* Smaller, but
+   doesn't reduce the 85 MB frontend footprint or the Chromium dep —
+   defeats the original "lightweight CLI for agents" motivation.
+2. *Server-side renderer rebuild* using altair/vega-cli or matplotlib.
+   Months of work; high upstream divergence; Superset's chart catalog
+   is large enough that even partial coverage is a slog.
+
+Recommend dropping headless-render from tier 7 entirely and recording
+this as a closed question in [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap §Phase 2026-07.02 — containerization strategy]].
+
+** Org-as-source importer — single chokepoint, possibly zero-fork
+
+This is the candidate that's actually shaped like a small fork. The
+import pipeline funnels through one file:
+
+- =superset/commands/importers/v1/utils.py:50–56= — =load_yaml()= is the one parse call.
+- =superset/commands/importers/v1/utils.py:196–207= — =is_valid_config()= extension allowlist =.yaml=/=.yml=.
+- =superset/commands/importers/v1/utils.py:210–216= — =get_contents_from_bundle(ZipFile) → {filename: text}=. Single integration boundary.
+- =superset/dashboards/api.py:1368–1369= — uploaded zip flows through this funnel.
+- Per-domain dispatchers (=superset/commands/{dataset,chart,dashboard,database,query,saved_query}/importers/v1/__init__.py=) consume already-parsed dicts; format-agnostic.
+- Schemas (=superset/dashboards/schemas.py= 479 LOC, =superset/datasets/schemas.py= 330 LOC) operate on dicts not YAML AST — no schema work needed.
+- Hard-coded constant: =superset/commands/importers/v1/utils.py:31= =METADATA_FILE_NAME = "metadata.yaml"=.
+
+Two viable shapes:
+
+1. *Zero-fork pre-processor.* New =org-llm superset import-org <path.org>=
+   verb that parses Org with =orgparse=, extracts named =#+BEGIN_SRC sql
+   :name foo= blocks + headline metadata, emits an in-memory zip in
+   upstream's =metadata.yaml= + =databases/= + =datasets/= + =charts/= +
+   =dashboards/= shape, and POSTs to =POST /api/v1/dashboard/import/=.
+2. *Small upstream fork.* Patch =is_valid_config= + =load_yaml= in
+   =importers/v1/utils.py= to recognise =.org= and dispatch to an
+   =orgparse=-based loader. ~50 LOC; one-file diff; rebases trivially.
+
+Shape 1 first; shape 2 if we ever want Superset's UI uploader to accept
+=.org= directly. The semantic-layer registry already shipping
+([[file:../../org_llm/metrics.py][=org_llm/metrics.py=]],
+[[file:../../org_llm/metrics/registry.yaml][registry.yaml]]) makes this
+much cheaper than it would have been pre-Phase-26 — the hard part of
+"what does target schema look like" is partially answered by the
+emitter work in [[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]]
+tier 6.
+
+* Recommended next probe
+
+*Zero-fork Org-as-source pre-processor.* Concretely:
+
+1. Parse one =.org= with =orgparse=.
+2. Extract named =#+BEGIN_SRC sql :name foo= blocks plus headline
+   metadata (=#+TITLE=, =#+SUPERSET_DASHBOARD=, etc.).
+3. Emit an in-memory zip in upstream's =metadata.yaml= +
+   =databases/= + =datasets/= + =charts/= + =dashboards/= shape.
+4. POST to local Superset's =POST /api/v1/dashboard/import/=.
+
+Why this one:
+
+- Small (one Python file in =org_llm/=, no upstream patch).
+- Fast (reuses semantic-layer registry's =metrics.compile()= shape).
+- Informative (validates Org-as-source ergonomics before committing to
+  fork maintenance).
+- Aligned with the "Claude Code for Org Mode" thesis cited in
+  [[file:superset.org::115][superset.org:115–117]].
+- If it works cleanly, the one-file fork (~50 LOC in
+  =superset/commands/importers/v1/utils.py=) is a trivial follow-up.
+
+*Success metric.* A 30-line =.org= file with one SQL Babel block
+round-trips to a Superset chart whose numbers match the registry's
+=metric:llm_avg_ms=.
+
+* Wiki-correction implications
+
+Two updates owed to [[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]]:
+
+- *Tier 7 / auth swap.* Demote from "fork territory" to "tier 4–5
+  extension." Upstream already provides the seam.
+- *Tier 7 / headless render.* Either drop entirely, or rewrite as
+  "closed — infeasible at reasonable cost; the renderer is the
+  frontend." Roadmap §Phase 2026-07.02 — containerization strategy should mirror.
+
+The semantic-layer (tier 6) framing stands. The fork ladder is really
+"tier 7 = Org-as-source importer," everything else is integration.
+
+* Source files
+
+- =/tmp/superset-fork-survey/= — apache/superset @ 4.1.1, shallow clone
+- [[file:superset.org][docs/wiki/superset.org]] — parent integration ladder
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]] § Phase 2026-07.01 — Apache Superset dashboards, § Phase 2026-07.02 — containerization strategy
+
+* Related
+
+- [[id:a2af071e-8244-444d-8954-61317cc1ec4d][Superset integration ladder]]
+- [[id:b91f980e-5699-4994-843a-00532f1770b3][Memory Alpha]] — DB-authoritative pattern the importer would re-use
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][Dev tracker]] § Phase 2026-07.01 — Apache Superset dashboards

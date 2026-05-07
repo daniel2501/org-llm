@@ -1,0 +1,74 @@
+table_name: history
+main_dttm_col: timestamp
+description: 'org-llm source: history'
+default_endpoint: null
+offset: 0
+cache_timeout: null
+schema: null
+sql: null
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+uuid: 55624bf5-95fe-5a9a-aa4f-17bb86f5d903
+metrics:
+- metric_name: hist_events
+  verbose_name: hist_events
+  metric_type: null
+  expression: COUNT(*)
+  description: Total history rows
+  d3format: null
+  warning_text: null
+- metric_name: hist_avg_ms
+  verbose_name: hist_avg_ms
+  metric_type: null
+  expression: AVG(duration_ms)
+  description: Mean history-event duration (ms)
+  d3format: null
+  warning_text: null
+- metric_name: hist_kind_count
+  verbose_name: hist_kind_count
+  metric_type: null
+  expression: COUNT(DISTINCT kind)
+  description: Distinct history kinds in the window (drift / new-kind detector)
+  d3format: null
+  warning_text: null
+- metric_name: hist_command_count
+  verbose_name: hist_command_count
+  metric_type: null
+  expression: COUNT(DISTINCT command)
+  description: Distinct history commands in the window (vocabulary breadth)
+  d3format: null
+  warning_text: null
+columns:
+- column_name: timestamp
+  is_dttm: true
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: hist_kind
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: kind
+- column_name: hist_command
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: command
+- column_name: hist_day
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: substr(timestamp, 1, 10)
+version: 1.0.0
+database_uuid: e208c207-65af-52ef-87b4-62769969e6fc

@@ -1,0 +1,69 @@
+table_name: sensor_log
+main_dttm_col: ts
+description: 'org-llm source: sensors'
+default_endpoint: null
+offset: 0
+cache_timeout: null
+schema: null
+sql: null
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+uuid: 38b0cd82-df77-5932-919d-7d6802f9d03c
+metrics:
+- metric_name: sensor_readings
+  verbose_name: sensor_readings
+  metric_type: null
+  expression: COUNT(*)
+  description: Total sensor readings
+  d3format: null
+  warning_text: null
+- metric_name: sensor_alerts
+  verbose_name: sensor_alerts
+  metric_type: null
+  expression: SUM(CASE WHEN status IN ('watch','alert','critical') THEN 1 ELSE 0 END)
+  description: Sensor readings at watch/alert/critical
+  d3format: null
+  warning_text: null
+- metric_name: probe_alert_rate
+  verbose_name: probe_alert_rate
+  metric_type: null
+  expression: AVG(CASE WHEN status IN ('watch','alert','critical') THEN 1.0 ELSE 0.0
+    END)
+  description: "Fraction of readings at watch/alert/critical (0..1) \u2014 memory\
+    \ pressure detector"
+  d3format: null
+  warning_text: null
+columns:
+- column_name: ts
+  is_dttm: true
+  is_active: true
+  type: INTEGER
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: probe
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: probe_status
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: status
+- column_name: sensor_day
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: date(ts, 'unixepoch')
+version: 1.0.0
+database_uuid: e208c207-65af-52ef-87b4-62769969e6fc

@@ -1,0 +1,95 @@
+table_name: llm_calls
+main_dttm_col: timestamp
+description: 'org-llm source: llm'
+default_endpoint: null
+offset: 0
+cache_timeout: null
+schema: null
+sql: null
+params: null
+template_params: null
+filter_select_enabled: true
+fetch_values_predicate: null
+extra: null
+uuid: 3acc72e0-8109-5531-a74b-321b2f0da100
+metrics:
+- metric_name: llm_calls
+  verbose_name: llm_calls
+  metric_type: null
+  expression: COUNT(*)
+  description: Total LLM calls
+  d3format: null
+  warning_text: null
+- metric_name: llm_errors
+  verbose_name: llm_errors
+  metric_type: null
+  expression: SUM(CASE WHEN outcome != 'ok' THEN 1 ELSE 0 END)
+  description: Failed LLM calls (outcome != 'ok')
+  d3format: null
+  warning_text: null
+- metric_name: llm_error_rate
+  verbose_name: llm_error_rate
+  metric_type: null
+  expression: AVG(CASE WHEN outcome != 'ok' THEN 1.0 ELSE 0.0 END)
+  description: Error rate, 0..1
+  d3format: null
+  warning_text: null
+- metric_name: llm_avg_ms
+  verbose_name: llm_avg_ms
+  metric_type: null
+  expression: AVG(duration_ms)
+  description: Mean call duration (ms)
+  d3format: null
+  warning_text: null
+- metric_name: llm_max_ms
+  verbose_name: llm_max_ms
+  metric_type: null
+  expression: MAX(duration_ms)
+  description: Slowest call duration (ms)
+  d3format: null
+  warning_text: null
+columns:
+- column_name: timestamp
+  is_dttm: true
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: model
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: outcome
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: call_kind
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: command
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: null
+- column_name: llm_day
+  is_dttm: false
+  is_active: true
+  type: TEXT
+  groupby: true
+  filterable: true
+  expression: substr(timestamp, 1, 10)
+version: 1.0.0
+database_uuid: e208c207-65af-52ef-87b4-62769969e6fc

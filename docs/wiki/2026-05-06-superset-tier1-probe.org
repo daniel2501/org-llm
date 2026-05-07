@@ -1,0 +1,199 @@
+:PROPERTIES:
+:ID:       5f59c6a3-db42-4410-81e4-5ea9daa33d9b
+:CREATED:  [2026-05-06]
+:UPDATED:  [2026-05-06]
+:END:
+#+TITLE: Superset Tier 1 dogfood probe — anomalies the registry misses
+#+FILETAGS: :wiki:phase-27:superset:probe:
+#+OPTIONS: toc:nil num:nil
+
+* Summary
+
+Stood up apache-superset in a =uv venv= against
+=~/.local/share/org-llm/org-llm.db= (no Docker) and ran a battery of
+analytical queries the [[id:a2af071e-8244-444d-8954-61317cc1ec4d][semantic registry]] can't express in v0.
+The exercise surfaced *three substantive findings the registry doesn't
+catch*, and one is a real data-integrity bug: =llm_calls.timestamp= and
+=history.timestamp= for kind='llm' disagree by ~6 days for the same
+events. Tier 1 earns its keep — Superset's job is to ask questions the
+registry was never asked to answer, and the registry is therefore
+working as designed (it's the seam, not the surface).
+
+* Expanded
+
+** Setup notes (no Docker)
+
+- =uv venv --python 3.11 /tmp/superset-emitter-venv=
+- =uv pip install apache-superset= (~7 min, pulls Celery + redis-py + 200 deps)
+- Minimal config at =/tmp/superset_config.py=: =SQLALCHEMY_DATABASE_URI=
+  pointing at =/tmp/superset-emitter-meta.db=,
+  =PREVENT_UNSAFE_DB_CONNECTIONS = False= (Superset blocks SQLite
+  data sources by default for security; one-line override).
+- =superset db upgrade= → =superset import-directory docs/superset/=
+  (the bundle written by [[file:../../org_llm/metrics.py::emit_superset][=Registry.emit_superset()=]]).
+- All 4 datasets + 12 metrics imported on first try after the SQLite
+  override. Superset metadata DB at =/tmp/superset-emitter-meta.db= is
+  6 MB.
+
+Total wall time, cold start to first chart: ~10 min. Most of it is
+=uv pip install=. The actual import is sub-second.
+
+** Friction points (top 5)
+
+1. *SQLite is blocked by default* (=PREVENT_UNSAFE_DB_CONNECTIONS=).
+   Reasonable security default for hosted Superset; pure friction for
+   solo-user. Phase 2026-07.01 — Apache Superset dashboards — Superset's hosting-and-install stub
+   (=superset.org=) needs to bake the override into the shipped config.
+2. *Heavyweight install*. =apache-superset= pulls Celery, redis-py,
+   selenium, playwright, slack-sdk, and ~200 transitive deps. ~480 MB
+   venv. Roadmap §28's "asymmetric" framing is well-justified.
+3. *Validates_schema needs a Flask app context*. Direct
+   marshmallow-validate of YAML files (light-weight roundtrip) fails
+   because =ImportV1DatabaseSchema.validate_password= touches
+   =db.session=. The only reliable round-trip path is full
+   =superset import-directory= against an initialised metadata DB.
+4. *Re-import refuses without =overwrite=true=*. Idempotent re-emits
+   from the registry produce byte-identical YAML, but Superset rejects
+   them on second import. CLI flag is =--overwrite= but
+   =import-directory= doesn't surface it; have to use =--force= or call
+   the lower-level =import-datasources= verb. Worth a follow-up.
+5. *Warnings during import*. =SAWarning= about "related attribute set"
+   and "collection append" within the flush stage. Imports succeed but
+   the noise looks like a real bug; tracked upstream as
+   apache/superset disc #30190 or similar. Cosmetic for solo-user.
+
+** The five queries (sqlite3, the same ones a chart would compile)
+
+1. =call_kind= cohort latency (registry covers this; baseline).
+2. =call_kind = 'chat'= per-minute concentration in hour 15 — *registry has
+   no minute granularity dimension*.
+3. =model × outcome × command= cross-tab — *registry can't group by
+   two dimensions of distinct cardinality at once.*
+4. =sensor_log.ts (unix) → date= alignment vs =llm_calls.timestamp= and
+   =history.timestamp= — *registry can't cross sources at all in v0.*
+5. Top-K =agent_from × agent_to × action= delegations from =crew_log=
+   — registry covers the metric but not the joint dimension.
+
+The chart YAMLs themselves were not written tonight; the chart YAML
+emitter is a separate Phase-27 follow-up (tier 2 = dashboards-as-code).
+The five queries are the seed.
+
+** Three anomalies the registry doesn't catch
+
+*** 1. =llm_calls.timestamp= disagrees with =history.timestamp= by ~6 days
+
+Same event count (1000), totally disjoint time windows:
+
+#+begin_src text
+llm_calls.timestamp range:    2026-04-28T01:09:59 → 2026-04-28T16:01:44
+history.timestamp range
+  for kind='llm' (1000 rows):  2026-05-04 → 2026-05-06
+#+end_src
+
+Hypothesis: =llm_calls= is fed by a separate writer (=cli_invocations=
+or a dbt model) that backdates =timestamp= to a fixed seed, while
+=history= is the live event log from =org_llm/logbook.py=. Worth
+tracing — if =llm_calls= is a stage-of-truth view, it should be a
+=stg_= view, not a table. Either way: the registry's =llm_day=
+dimension is reading the wrong column.
+
+*Action item.* Audit =org_llm/db.py= for what writes to =llm_calls=
+vs =history=. Memory Alpha (Phase 2026-05.17 — DB-as-cache + git-canonical pipeline) says DB-authoritative; this is
+exactly the kind of drift the inversion is meant to surface.
+
+*** 2. =phi3.5= failure split is suspiciously exact: 23 ok / 23 error
+
+#+begin_src sql
+SELECT model, outcome, COUNT(*) FROM llm_calls
+WHERE model IN ('phi3.5','mistral-nemo')
+GROUP BY model, outcome;
+-- phi3.5        | error | 23
+-- phi3.5        | ok    | 23
+-- mistral-nemo  | error | 2
+#+end_src
+
+Exact 50/50 isn't random. Could be (a) a deterministic chunking pattern
+where =phi3.5= alternates ok/error, (b) a paired-call retry pattern
+where the first fails and the second succeeds, or (c) a test fixture
+with deliberate balance. The registry's =llm_error_rate= reports 50.0%
+but doesn't expose the *shape* of failure — sequential, paired, or
+random. Adding a "failure run-length" dimension would catch this.
+
+*Action item.* Pull the timestamps and confirm whether phi3.5
+failures cluster (run-length) or alternate (paired retry).
+
+*** 3. =sensor_log= and =llm_calls= occupy disjoint days
+
+#+begin_src text
+sensor_log distinct days:  2026-04-29 (759), 2026-05-02 (8), 2026-05-04 (8)
+llm_calls distinct day:    2026-04-28 (1000)
+chat-burst window query:   0 sensor readings during 2026-04-28 14:00–16:30
+#+end_src
+
+The cross-source correlation question "did memory pressure during the
+chat burst correlate with slow chat latency" *cannot be answered*
+because the two sources don't overlap in time. Either sensor_log was
+backfilled later (started 2026-04-29) or =llm_calls= was backdated
+(point 1 above). The 8 memory-watch events that exist all happened on
+2026-04-29 — 24 hours after the alleged chat burst.
+
+*Action item.* This is a downstream consequence of finding 1.
+=llm_calls.timestamp= integrity is the load-bearing fix.
+
+** Side observations (not anomalies, just useful)
+
+- *Crew_log proxy dominance.* =proxy → scribe= has 28 "recipe" actions,
+  =proxy → researcher= has 25 — both higher than any =manager → *=
+  count. The "manager is central orchestrator" mental model is wrong;
+  proxy is the dominant author of actions. Worth a doc check on
+  agents.org.
+- *History kind drift.* =team-session= appeared on 2026-05-06 (3 rows)
+  — a new event kind. Registry should grow a =new_kind_first_seen=
+  alert metric. Phase-29 self-coded-tools target.
+- *Memory pressure clustering.* 8/96 memory readings (8.3%) at status=watch.
+  All other probes are nominal. Memory is the only systemic-pressure probe.
+
+** What tier-2 dashboards-as-code would look like
+
+The five queries above plus the three anomaly queries → 8 charts.
+Group as one dashboard called "org-llm vital signs":
+
+| Row | Chart                                       | Source                        |
+|-----+---------------------------------------------+-------------------------------|
+| 1   | Call-kind cohort latency p50/p95/p99        | =llm_calls=                   |
+| 1   | Error rate by model (with n)                | =llm_calls=                   |
+| 2   | Chat-call hour-of-day heatmap               | =llm_calls=                   |
+| 2   | Phi3.5 ok/error sequence (line chart)       | =llm_calls=                   |
+| 3   | =llm_calls= vs =history kind=llm= overlay   | both — *needs cross-source*   |
+| 3   | Memory probe status over time               | =sensor_log=                  |
+| 4   | Agent fan-out (=agent_from → agent_to=)     | =crew_log=                    |
+| 4   | History kind drift (first-seen, last-seen)  | =history=                     |
+
+Three of these (rows 3+4 partial) need cross-source joins, which the
+v0 registry rejects by design. v1 work item.
+
+** Hand-off pointers
+
+- Bundle: =docs/superset/= (=metadata.yaml= + =databases/= + =datasets/=)
+- Emitter: [[file:../../org_llm/metrics.py::emit_superset][=Registry.emit_superset=]]
+- Round-trip command:
+  =SUPERSET_CONFIG_PATH=/tmp/superset_config.py /tmp/superset-emitter-venv/bin/superset import-directory docs/superset/=
+- Superset metadata DB: =/tmp/superset-emitter-meta.db= (left in place
+  for follow-up exploration; safe to delete)
+- Test config: =/tmp/superset_config.py=
+
+** Container teardown decision
+
+Did *not* run Docker. Native =uv venv= path worked end-to-end and is
+much friendlier to the FOSS-Emacs-first preference. Recommend the
+hosting-and-install plan in [[file:superset.org][superset.org]] document
+both paths but default to native when the user has =uv= available.
+
+* Related
+
+- [[id:a2af071e-8244-444d-8954-61317cc1ec4d][Superset integration ladder]] (parent)
+- [[id:93b87da8-bca5-409a-8fdf-8ed20ca739ef][Fork survey]] (companion)
+- [[file:../../org_llm/metrics.py][=org_llm/metrics.py=]] — emitter source
+- [[id:b91f980e-5699-4994-843a-00532f1770b3][Memory Alpha]] —
+  =llm_calls.timestamp= drift is exactly the integrity issue Phase 2026-05.17 — DB-as-cache + git-canonical pipeline
+  is meant to surface
