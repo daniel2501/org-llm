@@ -231,5 +231,118 @@ and the configured model."
   (should (null (org-llm-chat--extract-openai-text ""))))
 
 
+;; ── DEC-015 v0.2 — SSE streaming ─────────────────────────────────────────
+
+(ert-deftest org-llm-chat/sse-parse-data-chunk-extracts-delta ()
+  "A typical OpenAI-compat SSE chunk yields the delta.content string."
+  (let* ((line (concat
+                "data: {\"id\":\"x\",\"choices\":[{\"index\":0,"
+                "\"delta\":{\"content\":\"Hello\"}}]}"))
+         (out (org-llm-chat--sse-parse-data-chunk line)))
+    (should (equal out "Hello"))))
+
+(ert-deftest org-llm-chat/sse-parse-data-chunk-role-marker-no-delta ()
+  "First chunk often only carries `delta.role' — no content yet → nil."
+  (let* ((line (concat
+                "data: {\"choices\":[{\"index\":0,"
+                "\"delta\":{\"role\":\"assistant\"}}]}"))
+         (out (org-llm-chat--sse-parse-data-chunk line)))
+    (should (null out))))
+
+(ert-deftest org-llm-chat/sse-parse-data-chunk-malformed-returns-nil ()
+  "Malformed JSON in a `data:' line returns nil — caller skips it."
+  (should (null (org-llm-chat--sse-parse-data-chunk
+                 "data: not-json {{{")))
+  (should (null (org-llm-chat--sse-parse-data-chunk
+                 "data: ")))
+  (should (null (org-llm-chat--sse-parse-data-chunk
+                 "not even a data line"))))
+
+(ert-deftest org-llm-chat/sse-parse-data-chunk-done-returns-nil ()
+  "`data: [DONE]' yields nil from the chunk parser; the done-marker
+predicate handles it separately."
+  (should (null (org-llm-chat--sse-parse-data-chunk "data: [DONE]")))
+  (should (org-llm-chat--sse-done-marker-p "data: [DONE]"))
+  (should (org-llm-chat--sse-done-marker-p "data:[DONE]"))
+  (should (org-llm-chat--sse-done-marker-p "data:  [DONE]  "))
+  (should (null (org-llm-chat--sse-done-marker-p
+                 "data: {\"choices\":[]}"))))
+
+(ert-deftest org-llm-chat/streaming-defcustom-toggle ()
+  "When `org-llm-chat-streaming' is nil, the dispatcher must NOT
+take the SSE branch — confirmed by checking the build payload's
+`stream' field reflects the toggle."
+  (let* ((org-llm-chat-streaming nil)
+         (json (org-llm-chat--build-proxy-payload "spock" "hi" nil)))
+    (should (string-match-p "\"stream\":[ \t]*false" json)))
+  (let* ((org-llm-chat-streaming t)
+         (json (org-llm-chat--build-proxy-payload "spock" "hi" t)))
+    (should (string-match-p "\"stream\":[ \t]*true" json))))
+
+(ert-deftest org-llm-chat/sse-process-buffer-multi-chunk ()
+  "Drain a buffer of multiple SSE lines + leave a partial trailing
+line in place for the next chunk."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* C\n** Me\nhello\n** @picard\n/thinking…/\n")
+    (goto-char (point-min))
+    (re-search-forward "^\\*\\* @picard$")
+    (beginning-of-line)
+    (let* ((marker (point-marker))
+           (state (list :marker marker
+                        :agent  "picard"
+                        :buffer (current-buffer)
+                        :inserted-pos nil
+                        :raw-buffer (concat
+                                     "data: {\"choices\":[{\"delta\":"
+                                     "{\"role\":\"assistant\"}}]}\n"
+                                     "data: {\"choices\":[{\"delta\":"
+                                     "{\"content\":\"Hi \"}}]}\n"
+                                     "data: {\"choices\":[{\"delta\":"
+                                     "{\"content\":\"there\"}}]}\n"
+                                     "data: {\"choices\":[{\"delta\":"  ; partial
+                                     )
+                        :header-done t
+                        :content ""
+                        :done nil
+                        :rc 0
+                        :error nil)))
+      ;; Initialise rendering to drop the placeholder + set ins.
+      (org-llm-chat--sse-init-render state)
+      (org-llm-chat--sse-process-buffer state)
+      (should (equal (plist-get state :content) "Hi there"))
+      (should (string-match-p "Hi there" (buffer-string)))
+      (should (not (plist-get state :done)))
+      ;; Trailing partial line must still be in :raw-buffer
+      (should (string-match-p "data: {\"choices\""
+                              (plist-get state :raw-buffer))))))
+
+(ert-deftest org-llm-chat/sse-process-buffer-handles-done ()
+  "Encountering `data: [DONE]' flips :done."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* C\n** Me\nq\n** @picard\n/thinking…/\n")
+    (goto-char (point-min))
+    (re-search-forward "^\\*\\* @picard$")
+    (beginning-of-line)
+    (let* ((marker (point-marker))
+           (state (list :marker marker
+                        :agent  "picard"
+                        :buffer (current-buffer)
+                        :inserted-pos nil
+                        :raw-buffer (concat
+                                     "data: {\"choices\":[{\"delta\":"
+                                     "{\"content\":\"ok\"}}]}\n"
+                                     "data: [DONE]\n")
+                        :header-done t
+                        :content ""
+                        :done nil
+                        :rc 0
+                        :error nil)))
+      (org-llm-chat--sse-init-render state)
+      (org-llm-chat--sse-process-buffer state)
+      (should (plist-get state :done))
+      (should (equal (plist-get state :content) "ok")))))
+
 (provide 'test_org_llm_chat)
 ;;; test_org_llm_chat.el ends here

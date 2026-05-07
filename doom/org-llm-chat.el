@@ -113,6 +113,18 @@ fallback path needs to engage promptly."
   :type 'number
   :group 'org-llm-chat)
 
+(defcustom org-llm-chat-streaming t
+  "When non-nil, prefer SSE streaming for proxy backend calls.
+DEC-015 v0.2 — when t, the chat surface sends `stream: true` to
+the OpenAI-compat proxy and renders incoming `delta.content`
+chunks at the placeholder location as they arrive. When nil,
+falls back to v0.1 non-streaming `url-retrieve' behaviour.
+
+If SSE setup fails (network-process spawn errors, no proxy port,
+etc.) the call automatically degrades to the non-streaming path."
+  :type 'boolean
+  :group 'org-llm-chat)
+
 
 ;;; ── filename + buffer plumbing ─────────────────────────────────────────────
 
@@ -361,18 +373,21 @@ DEC-015 v0.1 — the file is written atomically by `start_proxy'."
             t))
       (error nil))))
 
-(defun org-llm-chat--build-proxy-payload (agent prompt)
+(defun org-llm-chat--build-proxy-payload (agent prompt &optional streaming)
   "Build the OpenAI-compat JSON body sent to the proxy.
 AGENT may be nil. The proxy's `intercept_agent_prefix' (DEC-008
 — proxy-seam @-prefix swap) reads the `agent' field server-side
 and rewrites the persona/model. We still forward the prefix in
-the user message so non-proxy upstreams degrade gracefully."
+the user message so non-proxy upstreams degrade gracefully.
+
+When STREAMING is non-nil, sets `stream: true' in the payload so
+the proxy emits SSE (DEC-015 v0.2)."
   (let* ((user-text (if (and agent (not (string-empty-p agent)))
                         (format "@%s %s" agent prompt)
                       prompt))
          (payload `(("messages" . [(("role" . "user")
                                     ("content" . ,user-text))])
-                    ("stream" . :json-false))))
+                    ("stream" . ,(if streaming t :json-false)))))
     (when org-llm-chat-default-model
       (push `("model" . ,org-llm-chat-default-model) payload))
     (when (and agent (not (string-empty-p agent)))
@@ -398,12 +413,26 @@ Returns the content string or nil if the shape doesn't match."
   "Call the backend ASYNC for AGENT + PROMPT, replacing MARKER on completion.
 DEC-015 v0.1: prefer HTTP to the running llm-proxy when its port
 file is present + reachable; fall back to shell-out when the
-proxy isn't running (preserves v0 behaviour)."
+proxy isn't running (preserves v0 behaviour).
+
+DEC-015 v0.2: when `org-llm-chat-streaming' is non-nil (default)
+AND the proxy is reachable, request SSE streaming and rerender
+the placeholder per-token. Setup failures fall back to the v0.1
+non-streaming path automatically."
   (let ((port (org-llm-chat--read-proxy-port)))
-    (if (and port (org-llm-chat--proxy-reachable-p port))
-        (org-llm-chat--call-backend-proxy agent prompt marker port)
+    (cond
+     ((and port (org-llm-chat--proxy-reachable-p port)
+           org-llm-chat-streaming)
+      ;; Try SSE; on setup error fall back to non-streaming proxy.
+      (condition-case _err
+          (org-llm-chat--call-backend-proxy-sse agent prompt marker port)
+        (error
+         (org-llm-chat--call-backend-proxy agent prompt marker port))))
+     ((and port (org-llm-chat--proxy-reachable-p port))
+      (org-llm-chat--call-backend-proxy agent prompt marker port))
+     (t
       ;; fallback for when proxy not running — v0 shell-out path
-      (org-llm-chat--call-backend-shell agent prompt marker))))
+      (org-llm-chat--call-backend-shell agent prompt marker)))))
 
 (defun org-llm-chat--call-backend-proxy (agent prompt marker port)
   "Send the prompt to the local proxy at PORT via `url-retrieve'.
@@ -447,6 +476,249 @@ replacing the `/thinking…/' placeholder under MARKER."
       (error
        (org-llm-chat--finalise-response
         marker agent (format "ERROR calling proxy: %s" err) -1)))))
+
+;;; ── SSE streaming (DEC-015 v0.2) ──────────────────────────────────────────
+
+(defvar-local org-llm-chat--sse-process nil
+  "The active SSE network process, if any.")
+
+(defvar-local org-llm-chat--sse-state nil
+  "Plist tracking the in-flight SSE stream:
+  :marker        — placeholder marker to render under
+  :agent         — agent name for the heading
+  :buffer        — chat buffer (where to render)
+  :inserted-pos  — marker for the running insertion point inside chat buffer
+  :raw-buffer    — accumulating raw SSE bytes (string)
+  :header-done   — t once we've consumed HTTP response headers
+  :content       — accumulated content text rendered so far
+  :done          — t once we've seen `data: [DONE]'
+  :rc            — final exit code (0 ok, -1 error)
+  :error         — error message if rc < 0")
+
+(defun org-llm-chat--sse-parse-data-chunk (line)
+  "Parse a single `data: {json}' SSE LINE.
+Returns the assistant `delta.content' string when present, or
+nil. Tolerant of `data: [DONE]', empty data, malformed JSON."
+  (when (and (stringp line)
+             (string-prefix-p "data:" line))
+    (let ((payload (string-trim (substring line 5))))
+      (cond
+       ((string-empty-p payload) nil)
+       ((string= payload "[DONE]") nil)
+       (t
+        (condition-case _err
+            (let* ((json-object-type 'alist)
+                   (json-array-type  'list)
+                   (json-key-type    'string)
+                   (obj (json-read-from-string payload))
+                   (choices (cdr (assoc "choices" obj)))
+                   (first   (and choices (car choices)))
+                   (delta   (and first (cdr (assoc "delta" first))))
+                   (content (and delta (cdr (assoc "content" delta)))))
+              (and (stringp content) content))
+          (error nil)))))))
+
+(defun org-llm-chat--sse-done-marker-p (line)
+  "Return non-nil iff LINE is the SSE terminator `data: [DONE]'."
+  (and (stringp line)
+       (string-match-p "\\`data:\\s-*\\[DONE\\]\\s-*\\'" line)))
+
+(defun org-llm-chat--sse-init-render (state)
+  "Initialise the chat buffer for SSE rendering.
+Replaces the `/thinking…/' placeholder with the heading + an
+empty body, and stores the running insertion marker on STATE."
+  (let ((marker (plist-get state :marker))
+        (agent  (plist-get state :agent))
+        (buf    (plist-get state :buffer)))
+    (when (and marker (marker-buffer marker) (buffer-live-p buf))
+      (with-current-buffer buf
+        (save-excursion
+          (goto-char marker)
+          (let ((begin (point))
+                (end   (save-excursion
+                         (forward-line 1)
+                         (if (re-search-forward "^\\*\\* " nil t)
+                             (line-beginning-position)
+                           (point-max)))))
+            (delete-region begin end)
+            (goto-char begin)
+            (insert (format "** @%s\n" (or agent "agent")))
+            (let ((ins (point-marker)))
+              (set-marker-insertion-type ins t)
+              (plist-put state :inserted-pos ins))))))))
+
+(defun org-llm-chat--sse-append-delta (state delta)
+  "Append DELTA text to the live chat buffer at STATE's insertion point."
+  (let ((ins (plist-get state :inserted-pos))
+        (buf (plist-get state :buffer)))
+    (when (and (stringp delta) (not (string-empty-p delta))
+               ins (marker-buffer ins) (buffer-live-p buf))
+      (with-current-buffer buf
+        (save-excursion
+          (goto-char ins)
+          (insert delta)
+          (set-marker ins (point))))
+      (plist-put state :content
+                 (concat (or (plist-get state :content) "") delta)))))
+
+(defun org-llm-chat--sse-process-buffer (state)
+  "Drain newline-terminated SSE lines from STATE's :raw-buffer.
+For each `data:' line, append the parsed delta to the chat buffer.
+Sets :done when `data: [DONE]' is observed. Leaves any partial
+trailing line in the buffer for the next chunk."
+  (let ((raw (or (plist-get state :raw-buffer) "")))
+    (while (string-match "\\(.*\\)\n" raw)
+      (let ((line (match-string 1 raw)))
+        (setq raw (substring raw (match-end 0)))
+        (cond
+         ((org-llm-chat--sse-done-marker-p line)
+          (plist-put state :done t))
+         ((string-prefix-p "data:" (string-trim-left line))
+          (let ((delta (org-llm-chat--sse-parse-data-chunk
+                        (string-trim-left line))))
+            (when delta
+              (org-llm-chat--sse-append-delta state delta)))))))
+    (plist-put state :raw-buffer raw)))
+
+(defun org-llm-chat--sse-finalise (state)
+  "Finalise an SSE stream: post-process the rendered body (markdown
+fence → org src) and auto-save the chat buffer. Idempotent."
+  (let* ((buf (plist-get state :buffer))
+         (ins (plist-get state :inserted-pos))
+         (rc  (or (plist-get state :rc) 0))
+         (agent (plist-get state :agent))
+         (content (or (plist-get state :content) "")))
+    (when (buffer-live-p buf)
+      (with-current-buffer buf
+        (cond
+         ((zerop rc)
+          ;; Convert any markdown fences in the rendered body to
+          ;; org src blocks. We replace the rendered region in
+          ;; place — the streamed text was inserted verbatim.
+          (when (and ins (marker-buffer ins))
+            (save-excursion
+              (let* ((normalised (org-llm-chat--markdown->org content))
+                     (begin (save-excursion
+                              (goto-char ins)
+                              (re-search-backward "^\\*\\* @" nil t)
+                              (forward-line 1)
+                              (point))))
+                (when (and normalised
+                           (not (string= normalised content))
+                           (>= ins begin))
+                  (delete-region begin ins)
+                  (goto-char begin)
+                  (insert normalised)
+                  (set-marker ins (point))))))
+          (when (string-empty-p (string-trim content))
+            (when (and ins (marker-buffer ins))
+              (save-excursion
+                (goto-char ins)
+                (insert "(empty response)\n"))))
+          (ignore-errors (save-buffer)))
+         (t
+          ;; Error path — render an ERROR heading + message.
+          (when (and ins (marker-buffer ins))
+            (save-excursion
+              (goto-char ins)
+              (insert (format "\nERROR: %s\n"
+                              (or (plist-get state :error)
+                                  "stream failed")))))))
+        (setq-local org-llm-chat--pending-marker nil)
+        (setq-local org-llm-chat--pending-process nil)
+        (setq-local org-llm-chat--sse-process nil)
+        (setq-local org-llm-chat--sse-state nil)))))
+
+(defun org-llm-chat--sse-filter (proc chunk)
+  "Process filter for the SSE network process. Accumulates CHUNK
+into the per-process state, strips HTTP headers on first chunk,
+then drains SSE lines."
+  (let ((state (process-get proc 'org-llm-chat-state)))
+    (when state
+      (let* ((existing (or (plist-get state :raw-buffer) ""))
+             (combined (concat existing chunk)))
+        (plist-put state :raw-buffer combined)
+        ;; Strip HTTP response headers on first chunk: the first
+        ;; blank line ("\r\n\r\n" or "\n\n") separates headers
+        ;; from the SSE body.
+        (unless (plist-get state :header-done)
+          (when (string-match "\r?\n\r?\n" combined)
+            (let ((body-start (match-end 0)))
+              (plist-put state :raw-buffer
+                         (substring combined body-start))
+              (plist-put state :header-done t)
+              ;; Initialise rendering now that we've got the
+              ;; first byte (cleanest moment to drop the
+              ;; placeholder).
+              (org-llm-chat--sse-init-render state))))
+        (when (plist-get state :header-done)
+          (org-llm-chat--sse-process-buffer state)
+          (when (plist-get state :done)
+            (org-llm-chat--sse-finalise state)))))))
+
+(defun org-llm-chat--sse-sentinel (proc event)
+  "Process sentinel: when the network connection closes, finalise
+the response (in case [DONE] never arrived)."
+  (when (memq (process-status proc) '(closed exit signal failed))
+    (let ((state (process-get proc 'org-llm-chat-state)))
+      (when state
+        (unless (plist-get state :done)
+          ;; Closed without [DONE] — still render whatever we have
+          ;; and call it ok if any content arrived; else mark error.
+          (let ((content (or (plist-get state :content) "")))
+            (if (string-empty-p (string-trim content))
+                (progn
+                  (plist-put state :rc -1)
+                  (plist-put state :error
+                             (format "stream closed early (%s)"
+                                     (string-trim event))))
+              (plist-put state :rc 0)))
+          (org-llm-chat--sse-finalise state))))))
+
+(defun org-llm-chat--call-backend-proxy-sse (agent prompt marker port)
+  "Send PROMPT to the proxy at PORT with `stream: true' and render
+SSE deltas as they arrive. Falls back (via condition-case in the
+caller) to the v0.1 non-streaming path if `make-network-process'
+or anything else here fails."
+  (let* ((host "127.0.0.1")
+         (body (encode-coding-string
+                (org-llm-chat--build-proxy-payload agent prompt t)
+                'utf-8))
+         (req (format
+               (concat "POST /v1/chat/completions HTTP/1.1\r\n"
+                       "Host: %s:%d\r\n"
+                       "Content-Type: application/json\r\n"
+                       "Accept: text/event-stream\r\n"
+                       "Content-Length: %d\r\n"
+                       "Connection: close\r\n"
+                       "\r\n")
+               host port (length body)))
+         (state (list :marker        marker
+                      :agent         agent
+                      :buffer        (current-buffer)
+                      :inserted-pos  nil
+                      :raw-buffer    ""
+                      :header-done   nil
+                      :content       ""
+                      :done          nil
+                      :rc            0
+                      :error         nil))
+         (proc (make-network-process
+                :name     "org-llm-chat-sse"
+                :host     host
+                :service  port
+                :nowait   nil
+                :noquery  t
+                :coding   '(no-conversion . no-conversion)
+                :filter   #'org-llm-chat--sse-filter
+                :sentinel #'org-llm-chat--sse-sentinel)))
+    (process-put proc 'org-llm-chat-state state)
+    (setq-local org-llm-chat--sse-process proc)
+    (setq-local org-llm-chat--sse-state state)
+    (setq-local org-llm-chat--pending-process proc)
+    (process-send-string proc (concat req body))
+    proc))
+
 
 (defun org-llm-chat--call-backend-shell (agent prompt marker)
   "Shell-out backend (v0 path). Used when the proxy isn't running."
