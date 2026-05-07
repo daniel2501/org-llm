@@ -5816,6 +5816,60 @@ def metrics_query_cmd(
         on_screen("  " + "  ".join(str(r[c]) for c in cols))
 
 
+def _superset_import_argv(
+    superset_bin: str,
+    directory: Path,
+    overwrite: bool,
+) -> list[str]:
+    """Build the argv for `superset import-directory`.
+
+    Upstream apache-superset 4.1.x exposes `--overwrite/-o` directly on
+    `import-directory` (verified against the 4.1.1 source —
+    superset/cli/importexport.py::import_directory). The wiki's tier-1
+    probe note suggested otherwise; the source is the truth, so we
+    stay on `import-directory` for both flag states rather than
+    falling back to the lower-level `import-datasources` verb.
+    """
+    argv = [superset_bin, "import-directory", str(directory)]
+    if overwrite:
+        argv.append("--overwrite")
+    return argv
+
+
+def _run_superset_import(directory: Path, overwrite: bool) -> int:
+    """Locate the `superset` CLI on PATH and exec `import-directory`.
+
+    Returns the subprocess exit code. Raises typer.Exit(2) if the
+    binary isn't found. Inherits the caller's environment so
+    SUPERSET_CONFIG_PATH (and anything else the user has exported)
+    flows through untouched.
+    """
+    import shutil
+    import subprocess
+
+    superset_bin = shutil.which("superset")
+    if superset_bin is None:
+        on_screen(
+            "[red]superset CLI not found on PATH.[/red] "
+            "Install apache-superset (e.g. `pip install apache-superset`) "
+            "in a venv and re-run with that venv active. "
+            "SUPERSET_CONFIG_PATH is honoured if exported."
+        )
+        raise typer.Exit(2)
+
+    if not directory.exists():
+        on_screen(f"[red]bundle directory not found:[/red] {directory}")
+        raise typer.Exit(2)
+
+    argv = _superset_import_argv(superset_bin, directory, overwrite)
+    on_screen("[dim]$ " + " ".join(argv) + "[/dim]")
+    try:
+        return subprocess.run(argv, env=os.environ.copy()).returncode
+    except FileNotFoundError:
+        on_screen(f"[red]failed to exec {superset_bin}[/red]")
+        raise typer.Exit(2)
+
+
 @metrics_app.command("emit")
 def metrics_emit_cmd(
     target: Annotated[
@@ -5826,18 +5880,67 @@ def metrics_emit_cmd(
         Path, typer.Option("--out", "-o",
                            help="Output directory")
     ] = Path("docs/superset/"),
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite/--no-overwrite",
+            help=("After emitting, also run `superset import-directory "
+                  "--overwrite` to push the fresh bundle into a running "
+                  "Superset. The dogfood loop: edit YAML → one command "
+                  "→ live in dashboards."),
+        ),
+    ] = False,
 ):
-    """Emit registry to an external dashboard format (Superset v1)."""
+    """Emit registry to an external dashboard format (Superset v1).
+
+    With --overwrite, also re-imports the bundle into Superset in the
+    same call. Equivalent to `metrics emit && metrics import -o`.
+    """
     from .metrics import Registry
     reg = Registry.load()
-    if target == "superset":
-        written = reg.emit_superset(out)
-        on_screen(f"[lcars2]wrote {len(written)} file(s) to {out}[/lcars2]")
-        for p in written:
-            on_screen(f"  {p}")
-    else:
+    if target != "superset":
         on_screen(f"[red]unknown target:[/red] {target}")
         raise typer.Exit(1)
+    written = reg.emit_superset(out)
+    on_screen(f"[lcars2]wrote {len(written)} file(s) to {out}[/lcars2]")
+    for p in written:
+        on_screen(f"  {p}")
+    if overwrite:
+        on_screen("[lcars1]importing bundle into Superset[/lcars1]")
+        rc = _run_superset_import(out, overwrite=True)
+        if rc != 0:
+            raise typer.Exit(rc)
+
+
+@metrics_app.command("import")
+def metrics_import_cmd(
+    out: Annotated[
+        Path, typer.Option("--out", "-d",
+                           help="Bundle directory to import")
+    ] = Path("docs/superset/"),
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite/--no-overwrite", "-o/-O",
+            help=("Pass --overwrite to `superset import-directory` so "
+                  "existing UUIDs are replaced. Required for re-imports "
+                  "of byte-identical YAML."),
+        ),
+    ] = False,
+):
+    """Push the emitted Superset bundle into a running Superset.
+
+    Wraps `superset import-directory <out>`; with -o/--overwrite,
+    appends `--overwrite` so re-emits don't get rejected on UUID
+    collision. Honours SUPERSET_CONFIG_PATH from the environment.
+
+    Verb name: `import` (not `load`) mirrors the upstream
+    `superset import-directory` we shell out to — users who already
+    know the manual incantation get the obvious mapping.
+    """
+    rc = _run_superset_import(out, overwrite=overwrite)
+    if rc != 0:
+        raise typer.Exit(rc)
 
 
 agent_app = typer.Typer(
