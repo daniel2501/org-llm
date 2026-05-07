@@ -1,0 +1,25 @@
+#+TITLE: LLM Health
+#+SUPERSET_DASHBOARD: llm-health
+#+SUPERSET_DATABASE: org-llm
+#+OPTIONS: toc:nil num:nil
+
+* Average call duration by kind
+:PROPERTIES:
+:VIZ_TYPE: bar
+:END:
+
+Mean wall-clock duration of LLM calls bucketed by =call_kind= (chat /
+embed / completion). Sourced from the semantic layer so this chart
+agrees byte-for-byte with =metric:llm_avg_ms group_by:[call_kind]=.
+
+#+BEGIN_SRC sql :name avg_ms_by_kind :metric llm_avg_ms :group_by call_kind
+SELECT call_kind, AVG(duration_ms) AS llm_avg_ms
+FROM llm_calls
+GROUP BY call_kind
+#+END_SRC
+
+# Run:
+#   org-llm superset import-org docs/templates/org-llm-superset-dashboard.org.example \
+#       --emit-only /tmp/llm-health.zip
+#   org-llm superset import-org docs/templates/org-llm-superset-dashboard.org.example \
+#       --post http://localhost:8088
