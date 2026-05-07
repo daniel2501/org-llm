@@ -218,7 +218,7 @@ time range" ping-pong without the dashboard.
 |-----------------------------+-----------------------------------------------------+---------------------|
 | Layer 1 — Captain's Bridge  | =.org= template + round-trip test against preproc   | shipped (worktree)  |
 | Layer 2 — one-offs          | Org-as-source preprocessor                          | shipped (worktree)  |
-| Layer 2 — persistent consoles | per-agent =.org= templates                        | not started         |
+| Layer 2 — persistent consoles | per-agent =.org= templates                        | =@geordi= shipped (worktree); 9 specialist consoles remaining |
 | Layer 3 — Pattern A         | chat↔URL shim (~200 LOC)                            | not started         |
 | Layer 3 — Pattern B         | =org-protocol://= chart link template               | not started         |
 | Pruning verb                | =org-llm superset prune --older-than=               | not started         |
@@ -236,6 +236,15 @@ six charts, one dashboard, all metric expressions verbatim from
 the bridge's =llm_calls= dataset UUID is byte-identical to
 =Registry.emit_superset()='s emission, so it imports cleanly
 alongside the registry bundle.
+
+The first persistent Layer 2 specialist console — =@geordi= —
+shipped at
+[[file:../../docs/templates/@geordi-console.org.example][=docs/templates/@geordi-console.org.example=]]
+with round-trip coverage at =tests/test_geordi_console_round_trip.py=
+(14/14 green). Four charts focused on analytics-infrastructure
+quality (tail latency, mean-latency drift, embed-vs-chat
+throughput, crew action mix) — deeper on a narrower slice than
+the captain's all-up triage. Nine specialist consoles remain.
 
 * Source files
 
