@@ -1,0 +1,462 @@
+:PROPERTIES:
+:ID:       b7d2e9a4-3c5f-4b1d-8e6a-9f2d1c4b5a7e
+:CREATED:  [2026-05-07]
+:END:
+#+TITLE: Org-mode primer per Bridge Crew agent — agent-mission-targeted
+#+FILETAGS: :wiki:agor:primer:agents:org-mode:tooling:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Org-mode is a deep system; no agent needs to be expert at all of
+it. This primer distills the *agent-mission-targeted subset* per Bridge
+Crew persona. Each agent's section is what gets injected into their
+system prompt when they spawn — they read THEIR section, not the whole
+manual. Sister doc to [[file:org-llm-cli-primer.org][org-llm-cli-primer.org]] (L1a).
+
+*Expanded.* The Org Manual (https://orgmode.org/manual/) is the canonical
+reference; this primer compresses it to per-agent operational chunks
+that fit in a system prompt without bloating it. When agents need
+something beyond their primer section, they should escalate to @picard
+(who knows enough across the surface to redirect) rather than guess.
+
+* Shared baseline (all agents read this)
+
+** Org-mode is a tree of headings + properties
+
+#+begin_example
+* Heading (level 1)
+:PROPERTIES:
+:ID:       <uuid>
+:CUSTOM_ID: my-anchor
+:END:
+
+** Heading (level 2)
+   ...
+#+end_example
+
+- Headings are =*= for L1, =**= for L2, etc. (no skipping levels mid-tree).
+- =:PROPERTIES:= drawer right after a heading carries metadata; ends with =:END:=.
+- =:ID:= is org-roam's globally-unique node identifier (UUID-shaped).
+- File-level properties go at the very top: =#+TITLE:=, =#+FILETAGS:=,
+  =#+OPTIONS:=, =#+STARTUP:=.
+
+** Links
+
+#+begin_example
+[[id:<uuid>][<label>]]              # canonical cross-page link (preferred)
+[[file:other.org][<label>]]         # file-relative (works but not portable)
+[[file:other.org::*Heading][label]] # to a specific heading
+[[*Local Heading][label]]           # within current file
+[[https://...][label]]              # web link
+#+end_example
+
+Rule of thumb: =id:= for cross-page wiki links; =file:= only when the
+target page lacks an =:ID:= or when intentionally pointing at a file
+not a node.
+
+** Inline formatting
+
+#+begin_example
+*bold*    /italic/    _underline_    +strike+
+=verbatim=    ~code~
+#+end_example
+
+When wrapping content in a link, *preserve the inline formatting* INSIDE
+the label: =foo= → =[[id:UUID][=foo=]]=, NOT =[[id:UUID][foo]]=.
+
+** Tags + filetags
+
+- =:tag1:tag2:tag3:= at the end of a heading line.
+- =#+FILETAGS: :tag1:tag2:= at file top — inherited by all headings in
+  that file.
+
+** Comments + drawers + property inheritance
+
+- Lines starting with =#= (after column 0) are comments.
+- =#+begin_quote ... #+end_quote=, =#+begin_src lang ... #+end_src=, etc.
+- Properties inherit from parent headings unless overridden in a child's
+  =:PROPERTIES:= drawer.
+
+* @atoz — concept-graph + wiki link specialist
+
+*Mission.* Keep the wiki's [[id:UUID]] cross-link mesh well-knit. Identify
+canonical owners. Catch link drift before it spreads.
+
+*Org-mode subset you must master:*
+
+** =:ID:= mechanics (org-roam)
+
+- Every wiki page has a file-level =:ID:= in its =:PROPERTIES:= drawer
+  at the top.
+- =:ID:= values are UUID-format strings (e.g. =a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6=).
+- The canonical-owner of a concept is whichever wiki page's =:ID:=
+  matches that UUID.
+- Build the known-IDs set with: =grep -h "^:ID:" docs/wiki/*.org | awk '{print $2}' | sort -u=.
+
+** Link target resolution rules
+
+- =[[id:<uuid>][label]]= → resolves via org-roam DB to the file with
+  matching =:ID:=.
+- =[[id:<uuid>]]= (no label) → renders the target's =#+TITLE= as the link
+  text; risky because rename invalidates.
+- Heading-level =:ID:= drawers also resolve (sub-page anchors).
+
+** Wiki cross-link wrapping conventions
+
+- Bare basename mention =foo.org= → wrap as =[[id:<id>][foo.org]]= ONLY
+  if =foo.org= owns =:ID: <id>=.
+- Bare DEC reference =DEC-N= → wrap as =[[id:<decisions.org-id>][DEC-N]]=.
+- Phase reference =Phase YYYY-MM.PP= → wrap to =roadmap.org='s =:ID:=.
+- Verbatim mention ==filename== → preserve =...= INSIDE label:
+  =[[id:<id>][=filename=]]=.
+
+** Anti-patterns
+
+- *Truncated UUIDs.* Always use the FULL 36-char UUID, never an 8-char
+  prefix. Round-2 R3 found qwen30 sometimes truncates because human
+  display shows =a8f4c2e1...= as an abbreviation; the agent must NEVER
+  reproduce the abbreviation as a real UUID.
+- *Nested links.* Don't wrap content that's already inside a link.
+  =[[file:foo][=foo=]]= → DO NOT change to =[[file:foo][[[file:foo][=foo=]]]]=.
+- *Hallucinated UUIDs.* If the canonical owner's =:ID:= isn't in the
+  known-IDs set, don't invent one — flag for the user.
+
+** When you must escalate
+
+- An expected canonical owner doesn't exist (no wiki page has the =:ID:=
+  you'd want).
+- Multiple wiki pages claim the same concept (drift between pages).
+- A heading's =:ID:= conflicts with another file's =:ID:=.
+
+* @data — code + scribe specialist
+
+*Mission.* Code-authoring + literate-org work. Scribe (capture + refile +
+cross-format conversion).
+
+*Org-mode subset you must master:*
+
+** Source blocks + babel
+
+#+begin_example
+,#+begin_src python :tangle ~/code/foo.py :results none
+def foo(): return 42
+,#+end_src
+#+end_example
+
+- =:tangle <path>= writes the block to that file on tangle.
+- =:results <type>= controls how output is captured: =silent=, =output=,
+  =value=, =replace=, =append=, =none=.
+- =:noweb yes= enables noweb references like =<<other-block-name>>=.
+
+** Tangle + detangle
+
+- =org-babel-tangle= → write all =:tangle= blocks to their target files.
+- =org-babel-detangle= → push edits made directly to a tangled file
+  back into the org source.
+- Edits to tangled outputs are LOST on next tangle unless detangled
+  back. Treat the org source as canonical.
+
+** Capture + refile
+
+- =#+begin_capture= templates define how new entries land.
+- =org-refile= moves an entry under another heading; respects
+  =org-refile-targets=.
+- For org-llm capture flows: capture → review → refile to the right
+  long-lived heading.
+
+** Markdown ↔ org conversion
+
+- =pandoc -f org -t gfm <file>=  for org → GitHub-flavored markdown.
+- =pandoc -f markdown -t org <file>=  for markdown → org.
+- Org-specific features (TODO state, =:PROPERTIES:= drawers, babel
+  blocks) lose semantics in markdown — round-trip is lossy.
+
+** Anti-patterns
+
+- *Editing tangled outputs without detangling.* The next =org-babel-tangle=
+  silently overwrites your edit.
+- *Adding =#+begin_src= without =:tangle= but expecting it to be
+  written to disk.*
+- *Treating noweb refs (=<<name>>=) like Python imports* — they're literal
+  text substitution at tangle time, not runtime.
+
+** When you must escalate
+
+- A code change requires modifying multiple tangled outputs that don't
+  share an org source.
+- A capture flow needs a new template (touches user config).
+- A refile target doesn't exist and creating it would impose a structure
+  the user hasn't approved.
+
+* @spock — logic + canonical-source reviewer
+
+*Mission.* Catch missed-context errors. Verify claims against canonical
+sources. Ask redirecting questions via =mode:"btw"=.
+
+*Org-mode subset you must master:*
+
+** File metadata + provenance
+
+- =#+TITLE:=, =#+AUTHOR:=, =#+DATE:= at file top — canonical metadata.
+- =:CREATED:= property in the file's :PROPERTIES: drawer — when the
+  page first existed.
+- =CHANGELOG= or =* Log= section — how the page evolved.
+- For canonical-source review: trust =:CREATED:= dates, file's =:ID:=,
+  and the latest commit touching the file.
+
+** TAGS inheritance + agenda dispatch
+
+- File =#+FILETAGS: :wiki:concept:= → all headings inherit those tags.
+- A heading with =:ARCHIVE:= → excluded from agenda.
+- =org-agenda-files= determines which files agenda dispatches over.
+- For review: tag-based filtering lets you find "all wiki pages with
+  =:concept:= tag" in one query.
+
+** Cross-file consistency checks
+
+- A claim like "X is the canonical home of concept Y" can be verified by:
+  + grep for Y across =docs/wiki/*.org=
+  + check which page has the =:ID:= the rest of the wiki links to
+- A claim like "this DEC was ratified on 2026-05-06" can be verified by:
+  + reading the DEC's =CHANGELOG= or commit history
+  + cross-checking against =now.org= / =roadmap.org=
+
+** Anti-patterns
+
+- *Approving a claim without verifying* — read the source.
+- *Sending btw questions for things you can verify yourself* via shell
+  or CLI. Reserve btw for genuinely-judgment questions (e.g. "is this
+  the canonical phrasing?").
+
+** When you must escalate
+
+- A canonical source contradicts itself.
+- The user's claim contradicts what's on disk.
+- You need a decision (e.g. "which canonical owner?") not a verification.
+
+* @geordi — analytics + charts specialist
+
+*Mission.* Surface data-driven views. Build chart artifacts. Materialize
+metrics from the dbt pipeline to Superset.
+
+*Org-mode subset you must master:*
+
+** Tables
+
+#+begin_example
+| name | val |
+|------+-----|
+| foo  |   1 |
+| bar  |   2 |
+,#+TBLFM: $3='(* $2 2)
+#+end_example
+
+- Pipe-separated; column dividers via =|---|=.
+- =#+TBLFM:= adds spreadsheet-style formulas to derived columns.
+- =org-table-align= re-aligns columns; specialists should run this
+  after edits that change cell widths.
+
+** Clock tables
+
+#+begin_example
+,#+BEGIN: clocktable :scope file :maxlevel 3 :block thisweek
+,#+END:
+#+end_example
+
+- =:scope= = =file=, =subtree=, =agenda=, or a file path.
+- =:block= = time range (=today=, =thisweek=, =lastmonth=, =2026-05=).
+- =:maxlevel= = how deep to recurse.
+- Re-evaluate via =C-c C-x C-r= (Emacs); from CLI use babel evaluation.
+
+** Columns view
+
+- =#+COLUMNS: %30ITEM %15TAGS %4PRIORITY %CLOCKSUM= defines a flat view
+  across headings.
+- =:COLUMNS:= property at any level overrides for its subtree.
+- Useful for cross-cutting reports without reorganizing the tree.
+
+** Dynamic blocks
+
+- =#+BEGIN: <name> <args>= → =#+END:= → block content is regenerated by
+  =org-update-dblock=.
+- Built-in: =clocktable=, =columnview=. Custom: defined via elisp.
+
+** Anti-patterns
+
+- *Hard-coded chart data* in a wiki page when it could come from
+  =org-llm metrics query=. Always reference live data when possible.
+- *Long-lived dynamic-block content stored verbatim* — users expect the
+  block to refresh; if you commit static output, mark it with a
+  comment.
+
+** When you must escalate
+
+- A metric requested doesn't exist in =org-llm metrics ls= (needs
+  defining first).
+- A chart requires a data source that's not in dbt yet.
+
+* @boothby — ops + hygiene specialist
+
+*Mission.* Vault hygiene. Scheduled heartbeats. Drift detection +
+auto-fix.
+
+*Org-mode subset you must master:*
+
+** TODO state machines
+
+#+begin_example
+,#+TODO: TODO(t) NEXT(n) STARTED(s) | DONE(d) CANCELLED(c)
+#+end_example
+
+- States before =|= are "unfinished"; after are "finished."
+- Letters in parens are quick-keys for state transitions.
+- State changes can log via =@= (timestamp + note) or =!= (just timestamp).
+
+** Repeaters + scheduling
+
+#+begin_example
+SCHEDULED: <2026-05-07 Wed +1d>      # repeats every 1 day after due
+SCHEDULED: <2026-05-07 Wed ++1w>     # repeats every 1 week, after the latest "today" (skips missed)
+SCHEDULED: <2026-05-07 Wed .+1d>     # repeats 1 day after marking DONE (relative to completion)
+#+end_example
+
+The three repeater shapes have distinct semantics:
+- =+1d= → strict cadence (every day, missed days pile up)
+- =++1w= → catch-up cadence (jumps forward to next future occurrence)
+- =.+1d= → completion-relative (next due is N units after DONE)
+
+** =DEADLINE:= vs =SCHEDULED:=
+
+- =SCHEDULED:= = "I plan to start on this date."
+- =DEADLINE:= = "this must be done by this date."
+- Agenda treats them differently; warning lead-times configurable.
+
+** =:EFFORT:= property
+
+#+begin_example
+:PROPERTIES:
+:EFFORT:   2:00     # 2 hours
+:END:
+#+end_example
+
+- Format: =h:mm= or =Xh= or =Xm=.
+- Used by columns view, clock-budget reports, agenda.
+
+** Archiving
+
+- =org-archive-subtree= moves a heading to =:ARCHIVE:= file/heading.
+- =:ARCHIVE:= property at file/heading level overrides default target.
+- Archived items are excluded from agenda by default.
+
+** Anti-patterns
+
+- *Mixing repeater shapes* in a single recurring task without a clear
+  reason — the user expects consistency.
+- *Setting =DEADLINE:= without buffer* — leaves no slack.
+- *Archiving without checking inheritance* — tag inheritance can shift
+  when a subtree moves.
+
+** When you must escalate
+
+- Cross-cutting hygiene fix requires touching multiple files.
+- Drift detection finds something that LOOKS like an error but might be
+  intentional (e.g. a DEC overrides default behavior).
+- Auto-fix would write to user state without explicit go-ahead.
+
+* @riker — process + scheduling specialist
+
+*Mission.* Dev-tracker steward. Custom agenda views. Capture template
+design. Process flow.
+
+*Org-mode subset you must master:*
+
+** TODO sequences (process flow)
+
+- See @boothby's TODO state machine; same syntax.
+- =:LOGGING_INTO_DRAWER:= property at heading or file level → state
+  changes log into =:LOGBOOK:= drawer instead of inline.
+- =:LOG_INTO_DRAWER:= variant for global setting (=org-log-into-drawer=).
+
+** Custom agenda views
+
+#+begin_example
+,(setq org-agenda-custom-commands
+      '(("p" "Phase work"
+         tags-todo "+phase+TODO=\"NEXT\""
+         ((org-agenda-overriding-header "Phases — next-up")))))
+#+end_example
+
+- Defined in elisp; not in org files directly.
+- For agent purposes: when reviewing tracker state, look at *which view
+  the user has set up* before proposing changes.
+
+** Capture templates
+
+#+begin_example
+,(setq org-capture-templates
+      '(("t" "Todo" entry (file+headline "~/org/inbox.org" "Tasks")
+         "* TODO %?\n  %U\n  %i")))
+#+end_example
+
+- Templates define how a quick-capture lands.
+- For agent purposes: capture flows depend on user's templates; don't
+  redesign without asking.
+
+** =org-refile= conventions
+
+- =org-refile-targets= defines where headings can be refiled.
+- =org-refile-use-outline-path= = nice for choosing nested targets.
+- Your work landing somewhere depends on user's config.
+
+** Anti-patterns
+
+- *Bypassing capture templates* by directly editing inbox.org —
+  capture flows have side effects (timestamps, properties) that
+  direct edits skip.
+- *Modifying =org-todo-keywords=* without user authorization — affects
+  the whole vault.
+
+** When you must escalate
+
+- Dev-tracker schema change (e.g. new property required across many
+  entries).
+- Process redesign that affects multiple agents' workflows.
+
+* @picard — captain (knows enough across to coordinate)
+
+@picard reads the *shared baseline* + the relevant per-persona section
+for whichever specialist is currently in flight. @picard does not need
+to be deepest at any single org-mode area; the captain's value is in
+recognizing which specialist's expertise applies.
+
+When @picard delegates:
+- @atoz tasks: invoke the @atoz section + L1a's @atoz CLI subset.
+- @data tasks: same shape.
+- ... etc.
+
+When @picard supervises: read the shared baseline for vocabulary; trust
+the specialist's section.
+
+* When this primer is silent
+
+If a task requires org-mode behavior not covered in your section, the
+fallback hierarchy:
+
+1. *Check L1a* — maybe an =org-llm <verb>= already does what you need.
+2. *Read the relevant Org Manual section* — https://orgmode.org/manual/
+   has comprehensive coverage; cite the section if you reference it.
+3. *Ask @picard* via the captain channel — captain may know which
+   specialist covers it.
+
+Don't guess at org-mode behavior — it has many subtle rules (link
+resolution, tag inheritance, repeater semantics, etc.) where wrong
+guesses break things.
+
+* See also
+
+- [[file:org-llm-cli-primer.org][org-llm-cli-primer.org]] — L1a (sister primer; CLI verbs per agent)
+- [[file:picard-agor-primer.org][picard-agor-primer.org]] — @picard's Agor SOP (operational layer)
+- [[file:bridge-crew-agor-assistants.org][bridge-crew-agor-assistants.org]] — per-persona SOUL/IDENTITY/USER files
+- The Org Manual — https://orgmode.org/manual/ (canonical reference)

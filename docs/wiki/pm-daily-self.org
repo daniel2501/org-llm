@@ -1,0 +1,138 @@
+:PROPERTIES:
+:ID:       pm-daily-self
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: PM profile — daily-self
+#+FILETAGS: :wiki:concept:pm:daily:methodology:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+=daily-self= is org-llm's first PM profile — *agentic
+personal-day-running*: today's daily file becomes a 1-day sprint
+artifact, =@riker= as coach (asks kickoff questions, surfaces
+structure, records commits + done-if criteria, runs retro EOD,
+carries forward what slipped). It's the simplest non-trivial
+profile in a *PM-agnostic framework* where methodology lives in
+profile data (=~/org/org-llm-pm.org=), not in agent code. If the
+framework supports =daily-self= cleanly, it supports scrum,
+6-sigma, kanban-owner, book-cadence, etc.
+
+* Expanded
+
+** Why =daily-self= specifically
+
+Most personal productivity systems are either too heavy (full
+scrum applied to one person) or too light (timer apps without
+goals). =daily-self= picks the middle: 1–3 explicit commits per
+day, each with a done-if criterion, with a brief retro EOD. The
+cadence is small enough to retro honestly, structured enough to
+learn from, and matches how a single day actually shapes.
+
+It is also the *smallest non-trivial* PM profile — perfect first
+test for the framework. If =org-llm pm <action>= can drive
+=daily-self= cleanly through =@riker=, the same plumbing carries
+the heavier methodologies without each needing custom code.
+
+** Profile data vs agent code (the design rule)
+
+| Profile data (=org-llm-pm.org=) | Agent code (=@riker=)              |
+|---------------------------------+-------------------------------------|
+| Cadence                         | Read profile, route action          |
+| Ceremonies + their prompts      | Run prompt, write artifacts         |
+| Capture path                    | Compose with =@agenda= / =@journalist= |
+| Done-if shape                   | Carry-forward semantics             |
+| Agenda integration on/off       | Tool invocation                     |
+
+=@riker= stays small. Profiles do the work. Same pattern as
+=org-llm-{agents,themes,tools,config}.org=.
+
+** Daily-self mapping to sprint artifacts
+
+| Sprint concept | =daily-self= equivalent                              |
+|----------------+-------------------------------------------------------|
+| Sprint goal    | Top section: "Today's commits"                        |
+| Backlog        | =org-agenda= view (TODO + SCHEDULED today + overdue)  |
+| Doing → done   | TODO state transitions during the day                 |
+| Demo           | Retro section appended EOD                            |
+| Retro          | "shipped / slipped / dropped" + mood + carry-forward  |
+| Velocity       | Aggregate over last N daily files (later)             |
+
+The mapping is structural, not metaphorical: a daily file
+already has the shape of a sprint backlog, just shrunk to a
+single day. =daily-self= surfaces that shape rather than imposing
+new structure.
+
+** Substrate already in place
+
+Almost everything =daily-self= needs already exists:
+
+- =~/org/daily/{YYYY-MM-DD}.org= — Doom =org-roam-dailies=
+  canonical location for date-stamped capture
+- =org-agenda= — gives the kanban view for free via custom
+  agenda commands per profile
+- =@journalist= — mood signal over dailies → feeds the retro
+- =@agenda= — weather-aware GTD → feeds the kickoff
+- captain's-log — events → "evidence" half of the retro
+
+What's new: the profile schema, the =pm= verb, and =@riker='s
+polymorphic-dispatch loop.
+
+** Verb shape
+
+=org-llm pm <action> [--profile <name>]= where the profile is
+read from active context (vault default + per-project override)
+and =<action>= ∈ {=kickoff=, =checkpoint=, =retro=, =status=,
+=next=}. Each action's body lives in the profile heading; =@riker=
+runs it.
+
+For =daily-self= specifically:
+
+- =org-llm pm kickoff= — opens today's daily file, runs the
+  kickoff prompt, records commits + done-if as TODO entries with
+  =:DONE_IF:= property.
+- =org-llm pm checkpoint= — midday touch (optional). Surfaces
+  any commit-at-risk based on time elapsed + open work.
+- =org-llm pm retro= — appends the retro section, fills in
+  shipped/slipped/dropped per commit, captures carry-forward.
+- =org-llm pm status= — what's still open today, time elapsed,
+  any commits at risk.
+- =org-llm pm next= — given current state, propose the next
+  action (a single highest-leverage TODO).
+
+Same surface in opencode: =/pm kickoff=, =/pm retro=, etc.
+
+** What kind of agent is =@riker= here?
+
+A *coach*, not a project manager:
+
+- *Asks* the kickoff questions (doesn't dictate the answers)
+- *Surfaces* structure that already exists (overdue, yesterday's
+  slips, today's scheduled)
+- *Records* commits + done-if criteria as TODO entries with
+  properties
+- *Runs* the retro EOD (or on next kickoff if you skipped)
+- *Carries forward* what slipped with one-line "why" notes
+
+The coach metaphor matters because it sets the *interaction
+style*: =@riker= isn't shipping decisions, it's making the user's
+own decisions visible + retrospectable.
+
+** Phase delivery
+
+See [[file:roadmap.org][roadmap.org]] § =Phase 2026-05.14 — agentic
+PM (profiles + daily-self pilot)=. Three sub-phases:
+
+- =Phase 2026-05.14.01= — PM-profile literate config + =pm= verb
+- =Phase 2026-05.14.02= — =daily-self= profile + =~/org/daily=
+  integration
+- =Phase 2026-05.14.03= — =@riker= polymorphic dispatch
+
+** Companions
+
+- [[file:agent-framework.org][agent-framework.org]] — how agents compose; =@riker= entry
+- [[file:agent-roster.org][agent-roster.org]] — full roster
+- [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] — current sprint state
+- [[file:life-as-code.org][life-as-code.org]] — broader frame: PM as one face of life-as-code
+- =docs/templates/org-llm-pm.org.example= — bundled template

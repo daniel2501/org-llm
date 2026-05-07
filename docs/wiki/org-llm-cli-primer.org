@@ -1,0 +1,221 @@
+:PROPERTIES:
+:ID:       a3e8f2c1-9d4b-4e7a-8f5c-1d2e3f4a5b6c
+:CREATED:  [2026-05-07]
+:END:
+#+TITLE: org-llm CLI primer for Bridge Crew agents
+#+FILETAGS: :wiki:agor:cli:primer:agents:tooling:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* This primer is what Bridge Crew specialists read to know which
+=org-llm <group> <verb>= commands to reach for during their work. CLI use
+via Bash is reliable for FOSS specialists (round-3 R3-Hard verified shell
+ops); MCP =tool_use= is not (round-6 finding). So when an agent needs
+deterministic data — facts about the vault, agent registry, code state,
+metrics, dbt pipeline, captain's log — they should *invoke the CLI*, not
+ask another agent to look it up.
+
+*Expanded.* Each agent gets the per-persona-relevant subset of this
+primer injected into their system prompt. The full surface is too big
+(~70 subcommands across 14 sub-typers) to dump verbatim; per-agent
+distillation gives each specialist the verbs they'd actually reach for.
+Pair with [[file:org-mode-per-agent-primer.org][org-mode-per-agent-primer.org]] (L1b) for org-mode-specific
+expertise per persona.
+
+* The general rule
+
+When you (any specialist) need information from the org-llm system,
+*prefer the CLI* over LLM reasoning:
+
+#+begin_example
+# bad: ask another agent or guess
+# good: just run the verb
+$ org-llm <group> <verb> [args]
+#+end_example
+
+CLI output is deterministic, free, and instant. Every CLI call you make
+is a CLI call you don't have to make via expensive LLM inference.
+
+* The full surface (overview)
+
+| Sub-typer | Purpose | Most-used verbs |
+|-----------+---------+-----------------|
+| =metrics= | Data-tier metric inspection + emission to Superset | =ls=, =describe=, =query=, =emit= |
+| =superset= | Superset bundle import/verify | =import-org=, =verify=, =prune= |
+| =agent= | Agent registry — list, inspect, toggle | =list=, =show=, =enable=, =disable= |
+| =doctor= | Health checks + auto-fix workflows | =diagnose=, =fix=, =walkthrough=, =list-tools= |
+| =code= | Codebase search + index | =search=, =index=, =generate= |
+| =knob= | Configuration knob CRUD | =list=, =add=, =edit=, =remove= |
+| =theme-studio= | Theme regen + verify | =show=, =regenerate=, =verify= |
+| =context= | LLM context-window mgmt | =show=, =add=, =build=, =tangle=, =stale=, =clear= |
+| =history= | Session history | =build=, =show=, =tangle= |
+| =askbook= | Q&A primitives over the corpus | =list=, =show=, =run=, =add= |
+| =self= | Agent self-introspection (read your own persona, snapshot, rollback) | =show=, =edit=, =snapshot=, =rollback= |
+| =tracker= | Dev-tracker (the org-llm-internal todo / phase tracker) | =review=, =pace=, =init=, =agor-sync= |
+| =bridge-crew= | Bridge Crew assistant materializer | =materialize= |
+| =dbt= | dbt-pipeline (data-tier transforms) | =run=, =test=, =build=, =models=, =status=, =doctor= |
+
+Top-level commands (no sub-typer):
+
+| Command | What it does |
+|---------+--------------|
+| =baselines= | Cross-cutting agent defaults |
+| =crew-log= | Crew's shared event log |
+| =validate= | Run the validation framework over recipes / agents |
+| =doom-sync= | Sync to Doom Emacs |
+| =man= | Show inline doc |
+| =life-support= | System-health watchdog |
+| =sensors= | Read device sensors (battery, location, etc.) |
+| =log= | Captain's-log access (rotated event records) |
+| =db= | Direct SQL/REPL on org-llm's SQLite |
+| =install-tools= | Install dev tools |
+| =code-index= | Index codebase (top-level alias) |
+| =code-gen= | Code-generation (top-level alias) |
+| =review-emacs= | Emacs configuration review |
+| =claude= | Claude-Code helpers |
+| =grants= / =grant-root= / =grant-browser= / =revoke-*= | Permission grants |
+| =skills= / =skill= / =skill-index= / =skill-examples= / =skill-new= | Skill mgmt |
+
+* Anti-patterns (don't do these without explicit user authorization)
+
+| ✗ | Why |
+|---+-----|
+| =org-llm tracker init= unsolicited | Mutates the user's vault state |
+| =org-llm grant-root= / =grants edit= | Permission escalation |
+| =org-llm dbt build / run= against prod | Runs the data pipeline; touches DB |
+| =org-llm bridge-crew materialize= | Writes assistant config files |
+| =org-llm self edit= / =rollback= | Mutates your own persona |
+| =org-llm db= with mutating SQL | Writes to org-llm's state |
+
+If a task implies one of these, *ask the harness or the user first*. Read-only
+verbs (=list=, =show=, =review=, =diagnose=, =status=, =describe=, =query=) are
+always safe.
+
+* Per-persona subsets (what each specialist reaches for)
+
+** @atoz — concept-graph + wiki link
+
+Primary verbs:
+- =org-llm context show <node-id>= — pull a wiki node's content + properties
+- =org-llm context tangle <file>= — extract literate blocks from an org file
+- =org-llm db= — query org-roam :ID: index, cross-references
+- =org-llm askbook list / show= — see what Q&As exist for a concept
+- =org-llm log= (captain's log) — find when a concept was first introduced
+
+Common workflow: identify a target → pull canonical text via =context show= →
+build the known-IDs set via =grep ^:ID: docs/wiki/*.org= or =db= →
+propose link insertions → apply edits in worktree → commit.
+
+** @data — code + scribe
+
+Primary verbs:
+- =org-llm code search <pattern>= — codebase-wide search
+- =org-llm code index= — get the indexed view
+- =org-llm dbt models= — list dbt models
+- =org-llm dbt compile / test= — verify a dbt change without running it
+- =org-llm context tangle= — extract code blocks from literate org
+- =org-llm validate= — run the validation framework after a code change
+
+Common workflow: identify the file/function → run tests via
+=.venv/bin/pytest <path>= → make edit → re-run tests → commit.
+
+** @spock — logic + canonical-source review
+
+Primary verbs:
+- =org-llm doctor diagnose= — full system health
+- =org-llm validate= — run validation framework
+- =org-llm db= — verify claims against DB state
+- =org-llm context show= — pull canonical text for the claim under review
+- =org-llm log= — verify provenance via captain's log
+
+Common workflow: read another specialist's draft → use CLI to verify
+specific claims → ask redirecting btw question if claim doesn't check
+out → approve when satisfied.
+
+** @geordi — analytics + charts
+
+Primary verbs:
+- =org-llm metrics ls= — list available metrics
+- =org-llm metrics describe <metric>= — schema + dimensions
+- =org-llm metrics query <metric> --where ...= — actually fetch data
+- =org-llm metrics emit <metric>= — write metric definition
+- =org-llm superset import-org / verify= — Superset bundle ops
+- =org-llm dbt models= — what data is available
+
+Common workflow: assess which metric/data is requested → query it →
+shape into a chart artifact → emit (or =agor_artifacts_publish=).
+
+** @boothby — ops + hygiene
+
+Primary verbs:
+- =org-llm doctor diagnose= / =fix= / =walkthrough= — primary health flow
+- =org-llm doctor list-tools= — see what fixers are available
+- =org-llm validate= — full validation pass
+- =org-llm context stale= — find stale context entries
+- =org-llm dbt doctor= — pipeline health
+- =org-llm life-support= / =sensors= — system-level health
+
+Common workflow: scheduled heartbeat → run =doctor diagnose= → if drift
+spotted, propose fix → apply via =doctor fix= or escalate to user.
+
+** @riker — process + scheduling
+
+Primary verbs:
+- =org-llm tracker review= — current tracker state
+- =org-llm tracker pace= — pace metrics (what's overdue / coming)
+- =org-llm tracker init= (with caution — mutates vault)
+- =org-llm tracker agor-sync= — sync to Agor session-genealogy
+- =org-llm askbook list / show= — process knowledge
+- =org-llm history build / show= — past activity
+
+Common workflow: read tracker state → identify next-up items → coordinate
+specialists for parallel work → integrate.
+
+** @picard — captain (knows enough of all to coordinate)
+
+Primary verbs (in addition to per-persona subsets above):
+- =org-llm agent list= / =show <handle>= — see crew + their state
+- =org-llm bridge-crew materialize= — when forming a new team and need
+  assistant configs on disk
+- =org-llm db= — direct query for any data not exposed via specialized
+  verb
+
+Common workflow: assess task (Tier-1 axes per primer) → query CLI for
+relevant deterministic data → form team → spawn specialists with
+pre-fetched data injected.
+
+* Worked example — @atoz uses CLI to bootstrap a cross-link audit
+
+Task: "audit cross-links on docs/wiki/literate-tools.org."
+
+Without CLI:
+1. Read the file (LLM tokens)
+2. Search for canonical owners (LLM tokens)
+3. Hope the IDs are right (LLM tokens)
+
+With CLI (cheaper + more reliable):
+#+begin_src bash
+# Step 1: known IDs (deterministic, instant, free)
+grep -h "^:ID:" docs/wiki/*.org | awk '{print $2}' | sort -u > /tmp/known_ids.txt
+
+# Step 2: target page mentions (deterministic)
+grep -nE "Phase|DEC-|\\.org" docs/wiki/literate-tools.org
+
+# Step 3: pull canonical owner for a specific concept
+org-llm context show <node-id>
+
+# Step 4: now apply edits with that pre-fetched intelligence
+#+end_src
+
+The deterministic steps replace ~3000 LLM tokens of "read + reason"
+with ~50ms of shell. The LLM only does what only the LLM can: judge
+which mention should link to which canonical owner.
+
+* See also
+
+- [[file:picard-agor-primer.org][picard-agor-primer.org]] — @picard's Agor SOP (the operational layer)
+- [[file:org-mode-per-agent-primer.org][org-mode-per-agent-primer.org]] — L1b: per-agent org-mode expertise (next sibling primer)
+- [[file:bridge-crew-agor-assistants.org][bridge-crew-agor-assistants.org]] — per-persona SOUL/IDENTITY/USER files
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — canon definition

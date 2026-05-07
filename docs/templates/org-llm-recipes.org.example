@@ -1,0 +1,64 @@
+#+TITLE: org-llm — user-defined recipes (personal tier)
+#+AUTHOR: you
+#+OPTIONS: toc:nil num:nil
+#+FILETAGS: :org-llm:recipes:personal:
+
+# Copy this file to ~/org/org-llm-recipes.org to enable. The proxy
+# auto-loads it (mtime-cached); no relaunch needed for new entries.
+#
+# Each :recipe:-tagged heading defines ONE personal recipe. Required
+# properties: NAME, TARGET, PATTERN. The body (everything after :END:
+# and before the next heading) is injected into the agent's prompt
+# as advisory text when the pattern matches.
+#
+# Personal recipes WIN over shared recipes (the ones shipped in
+# org_llm/orchestration.py) when both match the same input — your
+# intent overrides the default.
+#
+# Patterns are compiled with re.IGNORECASE | re.DOTALL. Backslashes
+# in patterns must be escaped per org-mode's text rules (\\b not \b).
+#
+# A malformed entry (missing required property, invalid regex) is
+# silently skipped — a personal recipe must never crash the proxy.
+
+* my_finance_summary                                              :recipe:
+:PROPERTIES:
+:NAME:    my_finance_summary
+:TARGET:  researcher
+:PATTERN: \b(net worth|balance|spending|budget|expenses?)\b
+:END:
+
+RECIPE — finance summary:
+  1. Call the my_finance_query MCP tool with the user's window.
+  2. Format the result with currency symbols and a 1-line trend
+     comment.
+  3. Cite the source ledger file in your reply.
+Run STEP 1 → STEP 2 → STEP 3.
+
+* my_reading_log                                                   :recipe:
+:PROPERTIES:
+:NAME:    my_reading_log
+:TARGET:  researcher
+:PATTERN: \b(what.{0,10}reading|finished reading|book.{0,5}log)\b
+:END:
+
+RECIPE — reading log lookup:
+  1. Look in ~/org/reading-log.org for entries with =DONE= marks.
+  2. Return the most recent 5 with title, author, finished date.
+  3. If the user asked "currently reading", filter to in-progress
+     items instead.
+
+* override_count_for_my_workflow                                   :recipe:
+:PROPERTIES:
+:NAME:    my_count_override
+:TARGET:  *
+:PATTERN: how many times.*\b(commits?|prs?|merges?)\b
+:END:
+
+# This overrides the shared count_across_vault recipe ONLY when the
+# user is asking about commits/PRs/merges — those route to my custom
+# git-history tool instead of the org-mode regex search.
+
+RECIPE — git activity count:
+  1. Call my_git_query MCP tool with the time window from the question.
+  2. Return the count and the top 3 commit messages.

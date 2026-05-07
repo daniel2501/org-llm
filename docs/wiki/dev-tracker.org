@@ -882,6 +882,19 @@ canary" risk is about.
 # Items I plan to start within the current sprint. Pull from
 # below as I'm ready. Keep this list short — 3-7 items max.
 
+** TODO Graphical Agor sessions                                :agor:ui:multi-agent:
+:PROPERTIES:
+:CAPTURED:  [2026-05-07]
+:RELATES:   multi-agent-org-llm.org § Coordination patterns
+:END:
+
+Surface live Agor team sessions graphically — facepile / canvas /
+zone visualization in Emacs (xwidget-webkit or native) so the user
+can watch teams form, monitor specialists in flight, intervene via
+the captain's-log surface. Currently sessions are tracked in Agor's
+own UI at =localhost:3030=; should also be reachable from the
+org-llm chat surface or sidebar.
+
 ** TODO Visual-verify route-preview Stage 1 in real opencode  :validation:opencode:plugin:
 :PROPERTIES:
 :CAPTURED:  [2026-05-04]

@@ -1,0 +1,386 @@
+#+TITLE: org-llm — agent avatar themes (literate config)
+#+AUTHOR: you
+#+OPTIONS: toc:nil num:nil
+#+FILETAGS: :org-llm:themes:avatars:
+
+# Copy to ~/org/org-llm-themes.org to enable. The proxy + avatar
+# generator auto-loads it (mtime-cached); add/edit themes without a
+# relaunch. Default theme is `trek` if no theme is named on
+# `org-llm config avatar_theme <name>`.
+#
+# Schema (see § Design notes at the end for full details):
+#
+#   * <theme-name>                                                :theme:
+#   :PROPERTIES:
+#   :NAME:             <unique theme id>
+#   :MODE:             character_map | archetypal_generation
+#   :STYLE_TAGS:       comma-separated aesthetic tags
+#   :PROMPT_TEMPLATE:  prompt skeleton with {placeholders}
+#   :BACKEND_HINT:     together | replicate | local | dalle  (optional)
+#   :END:
+#
+# Then per-character or per-archetype headings:
+#
+#   ** <name>                                        :character: | :archetype:
+#   :PROPERTIES:
+#   :FEATURES:  feature description used in prompts
+#   :END:
+#
+# Per-agent assignment lives in agents' own metadata (see
+# ~/org/org-llm-agents.org § visual.default_seed). The theme controls
+# the AESTHETIC; the agent's seed picks WHICH character/archetype.
+#
+# Trademark note: theme prompts describe FEATURES, not name-tokens.
+# "Vulcan with pointed ears, bowl cut, blue uniform" produces stable
+# Spock-shaped output across SDXL/FLUX/DALL-E without invoking
+# trademarks that get filtered or hallucinated inconsistently.
+
+
+* trek                                                            :theme:
+:PROPERTIES:
+:NAME:             trek
+:MODE:             character_map
+:STYLE_TAGS:       1990s sci-fi headshot, photorealistic portrait, neutral plain backdrop, soft studio lighting, professional Starfleet personnel file aesthetic, sharp focus, three-quarter view from shoulders up
+:PROMPT_TEMPLATE:  Professional headshot portrait. {features}. {expression}. {style_tags}.
+:BACKEND_HINT:     together
+:END:
+
+# ── TNG bridge crew ──────────────────────────────────────────────────
+
+** picard                                                     :character:
+:PROPERTIES:
+:NAME:       picard
+:AGENT:      crew
+:FEATURES:   Bald middle-aged human captain, narrow oval face, fair complexion, calm authoritative expression, burgundy red Starfleet command uniform with black yoke shoulders and four gold rank pips on collar
+:EXPRESSION: composed, decisive, slight gravity in the brow
+:END:
+
+** data                                                       :character:
+:PROPERTIES:
+:NAME:       data
+:AGENT:      gardener
+:FEATURES:   Pale-yellow android complexion with subtle metallic sheen, golden contact-lens-style eyes, jet-black hair in a precise side-parted style, mustard gold Starfleet operations uniform with black yoke shoulders
+:EXPRESSION: neutral curious, head slightly tilted, methodical attention
+:END:
+
+** worf                                                       :character:
+:PROPERTIES:
+:NAME:       worf
+:AGENT:      ops
+:FEATURES:   Klingon warrior with prominent ridged forehead crest, dark olive complexion, long black hair pulled back tight, mustard gold operations uniform with metallic Klingon house bandolier sash across chest
+:EXPRESSION: stern intent, lowered brow, formidable
+:END:
+
+** laforge                                                    :character:
+:PROPERTIES:
+:NAME:       laforge
+:AGENT:      researcher
+:FEATURES:   Black man with horizontal silver banded VISOR device wrapping across his eyes (covering forehead-to-cheekbones), short cropped hair, mustard gold operations uniform with black yoke shoulders
+:EXPRESSION: warm engaged, head turned slightly toward viewer
+:END:
+
+** troi                                                       :character:
+:PROPERTIES:
+:NAME:       troi
+:AGENT:      journalist
+:FEATURES:   Half-Betazoid woman, dark wavy shoulder-length hair, fair complexion with large dark empathic eyes, teal Starfleet sciences uniform with black yoke shoulders
+:EXPRESSION: warm understanding, gentle smile, attentive
+:END:
+
+** riker                                                      :character:
+:PROPERTIES:
+:NAME:       riker
+:AGENT:      planner
+:FEATURES:   Tall human first officer with neatly trimmed full brown beard, brown hair, fair complexion, burgundy red Starfleet command uniform with black yoke shoulders
+:EXPRESSION: confident easy smile, slight smirk, ready
+:END:
+
+# ── TOS bridge ───────────────────────────────────────────────────────
+
+** spock                                                      :character:
+:PROPERTIES:
+:NAME:       spock
+:AGENT:      summarizer
+:FEATURES:   Vulcan with prominent pointed ears, jet-black bowl-cut hair with straight bangs across the forehead, upswept eyebrows, fair complexion with subtle greenish-tan tint, blue Starfleet sciences tunic with black collar
+:EXPRESSION: calm logical, single eyebrow raised, restrained intelligence
+:END:
+
+** mccoy                                                      :character:
+:PROPERTIES:
+:NAME:       mccoy
+:AGENT:      triager
+:FEATURES:   Human medical officer with brown side-parted hair, lined fair complexion, blue Starfleet sciences tunic with black collar
+:EXPRESSION: skeptical concerned, knit brow, world-weary doctor
+:END:
+
+** scotty                                                     :character:
+:PROPERTIES:
+:NAME:       scotty
+:AGENT:      engineer
+:FEATURES:   Human engineer with sandy reddish-brown hair side-parted, fair complexion, deep red Starfleet engineering tunic with black collar
+:EXPRESSION: focused practical, slight smile, tools-of-the-trade attention
+:END:
+
+** sarek                                                      :character:
+:PROPERTIES:
+:NAME:       sarek
+:AGENT:      librarian
+:FEATURES:   Elder Vulcan ambassador with pointed ears, swept-back silver-gray hair, distinguished lined fair complexion with subtle greenish tint, formal plum and dark-burgundy Vulcan ambassadorial robes with high collar
+:EXPRESSION: dignified composed, eyes carrying centuries of knowledge
+:END:
+
+# ── DS9 ─────────────────────────────────────────────────────────────
+
+** sisko                                                      :character:
+:PROPERTIES:
+:NAME:       sisko
+:AGENT:      analyst
+:FEATURES:   Bald Black Starfleet captain, full goatee beard, weathered confident face, deep gray and burgundy DS9-era command uniform with raised collar
+:EXPRESSION: weathered determined, settled into command
+:END:
+
+** jake                                                       :character:
+:PROPERTIES:
+:NAME:       jake
+:AGENT:      scribe
+:FEATURES:   Young Black writer in his late teens or early twenties, short cropped hair, alert intelligent eyes, casual civilian DS9-era jumpsuit in olive or earth tones (NO Starfleet uniform)
+:EXPRESSION: thoughtful curious, head slightly tilted as if listening
+:END:
+
+** odo                                                        :character:
+:PROPERTIES:
+:NAME:       odo
+:AGENT:      extractor
+:FEATURES:   Changeling shapeshifter with deliberately unfinished smooth face (reduced detail nose and ear shapes, slightly putty-like complexion), short auburn hair slicked back, brown DS9 security constable uniform
+:EXPRESSION: skeptical observant, narrowed eyes, perpetual investigator
+:END:
+
+** garak                                                      :character:
+:PROPERTIES:
+:NAME:       garak
+:AGENT:      writer
+:FEATURES:   Cardassian male tailor with characteristic gray-tan complexion, prominent inverted-teardrop spoon-shaped indent in the center of the forehead, vertical bony neck ridges flanking the throat, slicked-back dark brown hair, civilian Cardassian-cut tunic in muted teal or dark olive
+:EXPRESSION: enigmatic amused, slight knowing smile, plain and simple tailor
+:END:
+
+** keiko                                                      :character:
+:PROPERTIES:
+:NAME:       keiko
+:AGENT:      curator
+:FEATURES:   Japanese woman botanist with long straight black hair, gentle warm complexion, teal Starfleet sciences uniform with black yoke shoulders
+:EXPRESSION: focused gentle, attentive to detail, cultivator of growing things
+:END:
+
+** pulaski                                                    :character:
+:PROPERTIES:
+:NAME:       pulaski
+:AGENT:      reviewer
+:FEATURES:   Older woman chief medical officer with short graying brown hair, fair complexion, TNG-era teal sciences uniform with black yoke shoulders
+:EXPRESSION: no-nonsense direct, raised eyebrow, sharp clinical gaze
+:END:
+
+# ── VOY ─────────────────────────────────────────────────────────────
+
+** janeway                                                    :character:
+:PROPERTIES:
+:NAME:       janeway
+:AGENT:      agenda
+:FEATURES:   Female Starfleet captain with auburn hair pulled into a tight high bun (early Voyager era), fair complexion, burgundy red Voyager-era command uniform with gray shoulders and four gold rank pips
+:EXPRESSION: determined commanding, jaw set, captain in deep space
+:END:
+
+** tuvok                                                      :character:
+:PROPERTIES:
+:NAME:       tuvok
+:AGENT:      classifier
+:FEATURES:   Black Vulcan tactical officer with pointed ears, short neat black-gray hair, dark complexion with subtle greenish tint, mustard gold Voyager-era operations uniform with gray shoulders
+:EXPRESSION: composed serious, perfect logical control
+:END:
+
+** seven                                                      :character:
+:PROPERTIES:
+:NAME:       seven
+:AGENT:      vision-analyst
+:FEATURES:   Tall blonde woman former Borg drone with platinum-blonde hair swept up tight, distinctive metallic silver implants above the left eyebrow and along the left cheekbone, very fair complexion, form-fitting silver-gray catsuit (NOT a Starfleet uniform)
+:EXPRESSION: intense analytical, piercing direct gaze, slight detachment
+:END:
+
+** btorres                                                    :character:
+:PROPERTIES:
+:NAME:       btorres
+:AGENT:      doom
+:FEATURES:   Half-Klingon woman engineer with subtle low-relief forehead ridges (less prominent than full Klingon), dark wavy shoulder-length hair, olive complexion, mustard gold Voyager-era operations uniform with gray shoulders
+:EXPRESSION: intense focused, slight challenge in the brow, expert at her craft
+:END:
+
+# ── ENT ─────────────────────────────────────────────────────────────
+
+** hoshi                                                      :character:
+:PROPERTIES:
+:NAME:       hoshi
+:AGENT:      translator
+:FEATURES:   Japanese woman ENT-era communications officer with chin-length straight black bobbed hair, gentle features, Enterprise-era blue Starfleet jumpsuit with mission-patch shoulder
+:EXPRESSION: attentive listening, slight head tilt, ear for languages
+:END:
+
+# ── Special / non-Starfleet ──────────────────────────────────────────
+
+** q                                                          :character:
+:PROPERTIES:
+:NAME:       q
+:AGENT:      agentsmith
+:FEATURES:   Smug ageless humanoid male with neatly groomed dark hair, expressive arched eyebrows, plum and gold ornamental robes (NOT a Starfleet uniform — flowing fabric with embroidered trim), cosmic detached air
+:EXPRESSION: mischievous superior, eyebrow raised, knowing smile, omnipotent amusement
+:END:
+
+** barclay                                                    :character:
+:PROPERTIES:
+:NAME:       barclay
+:AGENT:      bookworm
+:FEATURES:   Human male engineer with thinning brown hair receding from forehead, fair complexion, mustard gold Starfleet operations uniform with black yoke shoulders
+:EXPRESSION: nervous earnest, slight worried smile, anxiously trying to do the right thing
+:END:
+
+
+* garfield                                                        :theme:
+:PROPERTIES:
+:NAME:             garfield
+:MODE:             archetypal_generation
+:STYLE_TAGS:       Jim Davis comic strip illustration, simple flat color fills, thick black outlines, bright friendly palette, cartoon proportions, cheerful Sunday-funnies feel
+:PROMPT_TEMPLATE:  Comic strip cartoon character. {features}. Garfield comic strip illustration style. {style_tags}.
+:BACKEND_HINT:     together
+:END:
+
+# Garfield universe has fewer characters than Trek (~6), so this theme
+# uses archetypal generation: agents map to ARCHETYPES, not specific
+# canon characters. The image-gen produces a cat / dog / human variant
+# representing each archetype.
+
+** scientist                                                  :archetype:
+:PROPERTIES:
+:NAME:       scientist
+:AGENTS:     researcher, summarizer, classifier, vision-analyst
+:FEATURES:   Orange-striped cartoon tabby cat wearing oversized round eyeglasses, holding a clipboard with paw, scholarly demeanor, alert curious eyes
+:EXPRESSION: thoughtful pondering
+:END:
+
+** commander                                                  :archetype:
+:PROPERTIES:
+:NAME:       commander
+:AGENTS:     crew, planner, agenda, analyst
+:FEATURES:   Confident orange tabby cat with imperious posture, sitting upright on a small captain's chair, paw raised in a "make it so" gesture
+:EXPRESSION: authoritative bemused
+:END:
+
+** engineer                                                   :archetype:
+:PROPERTIES:
+:NAME:       engineer
+:AGENTS:     engineer, doom, ops
+:FEATURES:   Brown-and-tan beagle dog wearing a tool belt and oversized goggles, holding a wrench, ready-for-anything posture
+:EXPRESSION: eager focused
+:END:
+
+** healer                                                     :archetype:
+:PROPERTIES:
+:NAME:       healer
+:AGENTS:     gardener, journalist, triager, reviewer
+:FEATURES:   Calico cat wearing a small caretaker apron with herbs, holding a small watering can, gentle nurturing posture
+:EXPRESSION: warm concerned
+:END:
+
+** scholar                                                    :archetype:
+:PROPERTIES:
+:NAME:       scholar
+:AGENTS:     librarian, scribe, writer, translator, curator, bookworm
+:FEATURES:   Gray-and-white cat surrounded by stacks of books, wearing a small reading scarf, paw resting on an open tome
+:EXPRESSION: serene contemplative
+:END:
+
+** trickster                                                  :archetype:
+:PROPERTIES:
+:NAME:       trickster
+:AGENTS:     agentsmith, extractor
+:FEATURES:   Orange tabby cat with a particularly mischievous grin, wearing a tiny purple cape, eyes glinting with knowing amusement
+:EXPRESSION: smug delighted
+:END:
+
+
+* Design notes
+
+** Schema details
+
+The theme system has TWO modes selected by =:MODE:= in the theme
+properties:
+
+- *=character_map=* — every agent gets a 1:1 character. Used when
+  the source universe has at least as many distinct characters as
+  org-llm has agents (Trek: 23 canon characters for 23 agents).
+  Per-character heading carries =:AGENT:= mapping and =:FEATURES:=.
+
+- *=archetypal_generation=* — agents are bucketed into archetypes;
+  each archetype has a feature block; same archetype renders
+  similar avatars across multiple agents. Used when source universe
+  has few characters (Garfield: 6 archetypes for 23 agents).
+
+The runtime picks =:FEATURES:= text and substitutes into
+=:PROMPT_TEMPLATE:='s ={features}= placeholder, then appends
+=:STYLE_TAGS:= and the agent's =:EXPRESSION:= field.
+
+** Why FEATURES not NAMES in prompts
+
+Image-gen models behave differently with named-character tokens:
+
+- DALL-E 3 filters most trademarks (Star Trek, Star Wars,
+  Garfield by name).
+- SDXL / FLUX know franchise characters loosely but produce
+  inconsistent likenesses across runs.
+- Feature descriptions ("Vulcan with pointed ears, bowl cut, blue
+  uniform") work reliably across all backends and don't trigger
+  trademark filters.
+- The =:NAME:= and =:AGENT:= fields are for HUMAN readability —
+  they let the user know "researcher → spock" without affecting
+  what the model generates.
+
+** Conversational tuning hooks
+
+When =@avatarsmith= takes a refinement like "make picard more J.J.
+Abrams reboot," the agent:
+1. Reads the current theme + character feature block
+2. Composes a tweak: appends/modifies =:STYLE_TAGS:= for the
+   theme (NOT for one character — style tweaks affect all
+   characters in the theme)
+3. OR forks the character feature block to a variant with
+   adjusted features (e.g. Picard-Abrams might add "modern
+   cinematic blue color grade, lens flare"
+4. Regenerates and caches the new variant
+5. Surfaces the prompt diff via show-your-work mode
+
+** Backend selection
+
+=:BACKEND_HINT:= is advisory; runtime falls back through the
+priority list if the hint isn't available:
+
+1. Local SDXL (when GPU available + user opted in)
+2. Together AI / Replicate with FLUX or SDXL (default — open
+   weights, hosted compute, FOSS-aligned)
+3. DALL-E 3 (gated behind =proprietary_models_enabled=)
+
+** Cache layout
+
+  ~/.local/share/org-llm/avatars/<theme>/<agent>.<sha>.png
+
+The =<sha>= is a hash of (theme prompt template + character
+features + style tags + agent expression). Changing any input
+produces a new file; old variants stay until the user clears
+them. =org-llm avatar history <agent>= shows the variants;
+=org-llm avatar pin <agent> <sha>= picks one.
+
+** Adding a custom theme
+
+Three steps:
+1. Add a =* mytheme :theme:= heading with the schema above.
+2. Add =:character:= or =:archetype:= sub-headings.
+3. Run =org-llm config avatar_theme mytheme= to switch.
+
+The proxy + avatar generator pick up the change on next request
+(mtime-cached).

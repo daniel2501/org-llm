@@ -187,6 +187,12 @@ def get_builtins() -> list[Agent]:
     Agents listed in `_AGENT_META` but missing from cli.py's
     dict are skipped silently — covers the case where someone
     deletes a persona without updating the metadata.
+
+    Extension personas (e.g. @sidecar) whose persona text lives
+    in their own module (not in cli.py's `_PRECONFIGURED_AGENT_PROMPTS`)
+    are appended at the end via `_extension_agents()`. They land
+    in `pack="extension"` so the launcher can opt-in / opt-out
+    independent of starfleet-core / legacy-extras.
     """
     from ..cli import _PRECONFIGURED_AGENT_PROMPTS as _P
     from ..cli import _AGENT_TRIGGERS as _T
@@ -208,6 +214,41 @@ def get_builtins() -> list[Agent]:
             pack=meta.pack,
             addressable=meta.addressable,
         ))
+    out.extend(_extension_agents())
+    return out
+
+
+def _extension_agents() -> list[Agent]:
+    """Long-tail extension personas whose persona/triggers live
+    in their own module rather than cli.py. Additive only — these
+    do not affect any Bridge Crew or legacy-extras agent.
+
+    Adding an extension persona here is a 5-line touch:
+      1. import the persona's module
+      2. append one Agent(...) to the returned list
+      3. ship the persona module's prompt + triggers
+    No cli.py edit required.
+    """
+    out: list[Agent] = []
+    try:
+        from .. import sidecar as _sidecar
+        out.append(Agent(
+            birth_name="morn",                       # DS9 Quark's-bar patron
+            aliases=("sidecar",),
+            description=_sidecar.SIDECAR_DESCRIPTION,
+            persona=_sidecar.SIDECAR_PERSONA,
+            model_role="chat_model",
+            triggers=_sidecar.SIDECAR_TRIGGERS,
+            capabilities=(_R, _W),
+            recipes=("park_capture",),
+            origin="builtin",
+            pack="extension",
+            addressable=True,
+        ))
+    except Exception:
+        # Importing sidecar must never break the agent registry —
+        # if it fails, the extension persona is simply absent.
+        pass
     return out
 
 

@@ -1,0 +1,254 @@
+:PROPERTIES:
+:ID:       6aa21db3-1bae-4c6c-ae11-fb02a64e0a56
+:CREATED:  [2026-05-04]
+:UPDATED:  [2026-05-04]
+:END:
+#+TITLE: Promotions & See-something-say-something — turning recurring LLM use into deterministic artifacts
+#+FILETAGS: :wiki:promotions:sssm:phase-29:orchestration:
+#+OPTIONS: toc:nil num:nil
+
+* What this is
+
+*Summary.* Two coupled signal-to-artifact mechanisms. *Promotions*
+is top-down: the manager watches recent LLM use, detects
+recurring intent, and dispatches a builder agent (e.g.
+=@data-analyst=) to ship a deterministic artifact — a chart, a
+tool, a dashboard, a snippet — that answers the recurring
+question without another cloud round-trip. *See-something-
+say-something* (SSSS) is bottom-up: specialist agents *report*
+typed observations into a manager inbox; the manager reviews
+them on a heartbeat and may dispatch a builder for the same
+artifact-ship outcome. Different signal sources, same dispatch
+downstream.
+
+*Expanded.* These two ideas crystallised together because they
+fill the same gap in the [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][roadmap]]'s Phase 2026-05.20 — sync verb POC (self-coded
+tools): Phase 2026-05.20 — sync verb POC specifies the mechanics — discover repeated
+LLM patterns, synthesise a tool, validate, register — but
+leaves *who notices* unspecified. Promotions and SSSS are the
+two complementary "who notices" answers. Promotions is the
+manager noticing from the audit log; SSSS is the specialists
+noticing from inside their own work and telling the manager.
+
+* Promotions (top-down)
+
+*Summary.* Manager watches the LLM-audit stream, recognises
+when the same intent has surfaced N times in a window,
+dispatches a builder agent to ship a deterministic artifact,
+and records a promotion. Future calls matching that intent
+short-circuit through the artifact instead of round-tripping
+to a cloud LLM.
+
+*Expanded.* The flow is one loop:
+
+1. *Observe.* Every cloud call passes through [[id:47ba2143-c53a-409a-8286-2b3759794608][the LLM proxy]] and
+   leaves an audit row. The manager scans recent rows on a
+   heartbeat (or on natural pause — see SSSS) and clusters
+   them by *intent*, not surface phrasing.
+2. *Match.* Same intent, different phrasing, must collapse to
+   one bucket. "How many ldb calls last week?" and "give me
+   ldb call counts for the past 7 days" are the same intent.
+3. *Threshold.* If a bucket clears the watch's threshold (see
+   below), it qualifies for promotion.
+4. *Dispatch.* The manager hands the bucket + a brief to a
+   builder agent. The natural builder is =@data-analyst= for
+   chart/dashboard artifacts; it could be =@engineer= for a
+   pure-Python tool, or =@agentsmith= if the right answer is
+   a whole new agent.
+5. *Ship.* The builder writes a small artifact (e.g. a chart
+   YAML) and registers it. Future matching intents are
+   intercepted in the proxy and short-circuited to the
+   artifact, or surfaced via an [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][insight card]] that offers it.
+
+** Worked example — the dashboard case
+
+The user has asked =metric:llm_error_rate group_by:[model]=-shaped
+questions four times this week, in four different phrasings
+("which model is misbehaving", "show me error counts per
+model", "why does the proxy keep retrying — break it down by
+model", …). The manager's clustering recognises one intent;
+=@data-analyst= gets dispatched, writes a chart YAML keyed on
+=metric:llm_error_rate group_by:[model]=, and registers it in the
+[[id:a2af071e-8244-444d-8954-61317cc1ec4d][Superset]] semantic-layer registry. The fifth time the user
+asks the question, the proxy interceptor matches the
+registered intent and renders the chart inline — or an
+insight card pops "I built a chart for this; want it pinned?".
+
+* See-something-say-something — SSSS (bottom-up)
+
+*Summary.* Specialists notice things mid-task and write a
+typed *notice* into the manager's inbox. Notices are
+structured (kind, evidence, dedup key) so the manager can
+review them in batch on a heartbeat without drowning. The
+manager may then choose to dispatch a builder — same downstream
+path as promotions.
+
+*Expanded.* Promotions watch the LLM-audit log; SSSS watches
+*the specialists themselves*. Examples: =@boothby= scanning
+files notices the same orphan pattern across 30 nodes →
+notice =cleanup_candidate=; =@scribe= captures three "I
+should track X" notes in a week with no tool to actually
+track X → notice =tracker_candidate=; =@agenda= sees the
+user reschedule the same outdoor item three times → notice
+=reschedule_pattern=.
+
+Notices have a uniform shape (=kind=, =evidence=,
+=dedup_key=, agent_from, timestamp). The =dedup_key= is the
+load-bearing field — it's what stops one observation from
+becoming N notices over a week. The manager processes the
+inbox in batches on a heartbeat (post-turn, session end,
+scheduled idle), not per-turn. Dispatch downstream is
+identical to promotions: if a batch of related notices
+clears the relevant threshold, the manager dispatches a
+builder. The two mechanisms differ only in *signal source*.
+
+* The threshold problem
+
+*Summary.* "Repeated enough" is the hard part of both
+mechanisms. String match doesn't work — same intent
+surfaces with different phrasing. The threshold layer needs
+semantic match, a recency window, a cost gate, and (in the
+n=many future) user-distinctness.
+
+*Expanded.* Four pieces compose:
+
+- *Semantic match.* Bucket by embedding of the *intent*, not
+  the literal query. The wiki's existing embedding stack does
+  this work (=nomic-embed-text-v1.5= via [[file:../../org_llm/llm.py][=org_llm/llm.py=]]).
+  An intent is a normalised "user wants X about Y, scoped Z"
+  shape; raw query text is too noisy.
+- *Recency window.* Default 7 days, configurable per watch.
+  Older occurrences age out; the bucket only counts what's
+  current. Stops eternal-accumulation false positives.
+- *Cost gate.* Don't promote 50ms calls — the artifact
+  earning its keep is about replacing *expensive* repeats.
+  Promote 30s+ chats or repeated multi-turn flows. Cheap
+  recipes-eligible work already has [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes]].
+- *User-distinctness (n=many future).* If org-llm ever runs
+  for multiple users, one user's repetition is not
+  everyone's signal. The shared-promotion bar should require
+  N distinct users. Today (n=1), this is a no-op slot.
+
+Default first-cut: *N=4 occurrences across 7d, ≥10s mean
+cloud time, semantic-bucket cosine ≥ 0.82*. These are
+guesses; the LOG layer (below) is the substrate that lets us
+re-tune from real evidence.
+
+* Literate config trio
+
+*Summary.* Three new files round-trip to the DB via the same
+machinery as =~/org/org-llm-baselines.org= and
+=~/org/org-llm-agents.org= (see [[file:../../org_llm/db.py][=org_llm/db.py=]]'s =AgentBaseline=
+/ =AgentRow= classes for the pattern). Together they make
+both mechanisms inspectable, editable, and reversible from
+the user's vault.
+
+*Expanded.*
+
+| file                                  | role              | edited by                      |
+|---------------------------------------+-------------------+--------------------------------|
+| =~/org/org-llm-watches.org=           | pattern library   | user (or =@agentsmith=)        |
+| =~/org/org-llm-promotions.org=        | promotion log     | manager (writes); user (audits)|
+| =~/org/org-llm-notices.org=           | SSSS inbox        | specialists (write)            |
+
+- *=org-llm-watches.org=* — manager's pattern library: one
+  heading per watch with =:INTENT_MATCHER:=, =:THRESHOLD:=
+  (count + window), =:DISPATCH_TARGET:=, body advisory.
+  Same shape as personal recipes (see [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes]]).
+- *=org-llm-promotions.org=* — audit-and-rollback log. One
+  heading per promotion; body links to the artifact; a
+  single =:ROLLBACK: t= property line undoes it.
+- *=org-llm-notices.org=* — SSSS inbox. Specialists append;
+  manager reads on heartbeat; processed notices are archived
+  but not deleted.
+
+All three follow the existing pattern: =org-llm <verb>
+--tangle= writes from DB rows, =--apply= reads the file
+back, edits land on next request. Malformed entries are
+silently skipped — never crash the host.
+
+* Overlap audit — how this composes with existing surfaces
+
+The project's culture is to compare any new agent / mechanism
+against the existing roster before shipping. Doing that here:
+
+- *vs [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][@atoz]] (alias =@curator=).* Atoz *prunes* facts; =@data-analyst=
+  *summons views*. Distinct.
+- *vs [[id:b9e5d3c2-4a7f-48a6-9c1d-e2f3a4b5c6d7][@agentsmith]].* Agentsmith creates *agents*;
+  =@data-analyst= creates *artifacts*. Adjacent and
+  composable — agentsmith could ship =@data-analyst= itself,
+  and =@data-analyst= might delegate to agentsmith when the
+  right answer is a whole new specialist rather than one
+  chart.
+- *vs [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][insight cards]].* Cards are *current observations*;
+  promotions are *standing answers*. Cards become the
+  natural announce surface for promotions — the user finds
+  out a chart was built via a card on next open, never
+  silently.
+- *vs manager pre-fetch + agent narrate ([[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][recipes]]).* Same
+  idea, time-shifted. Recipes pre-fetch *during* a turn;
+  promotions ship *across* turns. Mature promotions can
+  graduate into shared recipes.
+
+* Risks and pre-committed mitigations
+
+*Summary.* Spam, drift, volume, and opacity. Each gets a
+default behaviour now so we don't have to think about it
+when shipping the first concrete slice.
+
+*Expanded.*
+
+- *Promotion spam.* Default threshold *N=4 occurrences
+  across 7d* before any promotion fires. Tunable per watch.
+- *Drift.* Each promotion has a *TTL* (default 30 days). If
+  the underlying data shape changes, the next dispatch
+  re-promotes and supersedes the old artifact rather than
+  silently serving stale results. The promotions log
+  records the supersede chain.
+- *SSSS volume.* Notices are *typed* and carry a
+  =dedup_key=. The manager reviews on *heartbeat* (natural
+  pause), not per-turn, so a chatty specialist can't flood
+  the loop. Inbox depth is bounded; oldest notices archive
+  on overflow.
+- *Opacity.* No promotion is invisible. Every one ships an
+  insight card the user can dismiss or pin. Every one writes
+  to =org-llm-promotions.org= with the rollback flag. The
+  user always has the receipts.
+
+* Concrete first slice — the LOG layer
+
+*Summary.* The substrate is being built first: specialists
+write =notice= rows into a SQLite table; nothing reads them
+yet. The goal is *4 weeks of evidence* before designing the
+dispatch layer or the threshold knobs.
+
+*Expanded.* This mirrors the trigger-1 evidence loop from
+[[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] — instrument first, design from data, ship
+the active layer once we know what the signal actually
+looks like. The LOG layer is *in progress*; treat code-side
+details as unstable until the substrate-only slice lands and
+bakes. The DB-side notice table and the writer API are being
+built in parallel; specific filenames and table names may
+shift. No reader, no dispatch, no thresholds yet — pure
+observation. After ~4 weeks we look at the notice
+distribution (which kinds fire most, what =dedup_key=s
+collide, whether SSSS volume is even close to overwhelming)
+before engineering rate-limits.
+
+This is deliberate. The threshold problem above is hard
+*because* we don't yet know the shape of the data. Building
+the threshold layer first is exactly the move that ages
+poorly.
+
+* See also
+
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase 2026-05.20 — sync verb POC — the parent self-coded-tools arc
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][Agents]] — the @-tag roster the dispatch targets
+- [[id:3ed81ee4-e28d-4daf-87fb-c1645b58a05c][Recipes]] — proxy-time pre-fetch (within-turn cousin)
+- [[id:902bea52-585b-4a1a-9fe0-1b8c43edcf12][Insight cards]] — the natural announce surface for
+  shipped promotions
+- [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][Wiki conventions]] — the rules this page follows
+- [[file:../../org_llm/db.py][=org_llm/db.py=]] :: =AgentBaseline= / =AgentRow= — the
+  literate-config round-trip pattern the trio reuses
+- [[file:../../org_llm/llm_proxy.py][=org_llm/llm_proxy.py=]] — where the eventual short-circuit
+  interceptor lands once promotions are live

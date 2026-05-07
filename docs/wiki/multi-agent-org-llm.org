@@ -174,6 +174,40 @@ v0.17.3; the working shape is to nudge the agent through the
 discovery indirection. *(verified 2026-05-07 EDT — was assumed flat
 in canon prior to the 2026-05-06 smoke run)*
 
+*Python-as-MCP-client (the FOSS-only harness shape — verified
+2026-05-07 EDT).* claude-code is one MCP client; *Python is another*.
+A harness that wants to spawn opencode-FOSS specialists without
+involving claude-code anywhere can speak the Streamable-HTTP MCP
+protocol directly:
+
+1. Admin-token =POST /sessions= to create a captain pilot session;
+   the response carries an =mcp_token=.
+2. =POST /mcp= with =Authorization: Bearer <mcp_token>= +
+   =initialize= JSON-RPC request → server returns capabilities.
+3. =POST /mcp= with =notifications/initialized= notification (no body
+   reply expected).
+4. =POST /mcp= with =tools/call= → =agor_execute_tool= → inner
+   =agor_sessions_spawn= with =agenticTool="opencode"= +
+   =modelConfig={...}= + =prompt=. Returns the spawned session_id.
+5. Poll =GET /sessions/{id}= until terminal (idle is terminal — F1).
+
+This eliminates =claude-code= as an MCP client wrapper from the
+harness entirely. Per the *Crew runtime — FOSS-only* rule, Claude is
+no longer needed in the production spawn path; only the top-level
+human pilot + labeled-baseline arms remain Claude-using.
+
+/Reference implementation:/ =scripts/_path_a2_python_mcp_client.py=
+(150 LoC; Streamable-HTTP MCP client + admin-REST mix; verified
+end-to-end with opencode + qwen3-coder-30b on 2026-05-07).
+
+/Why direct REST alone doesn't work:/ Agor's executor is
+MCP-tool-triggered. =POST /sessions= + =POST /tasks= creates database
+records but leaves status =created= forever — no REST endpoint
+triggers the executor (verified by probe sweep 2026-05-07; filed
+upstream as [[https://github.com/preset-io/agor/issues/1118][preset-io/agor#1118 — REST trigger
+endpoint feature request]]). Python-as-MCP-client is the path until
+upstream ships a non-MCP trigger.
+
 What the integration does *not* replace:
 
 - The *@-prefix proxy seam* per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-008 — Phase 2026-05.02.01 — pre-flight resolvers wires at the @-prefix seam]]

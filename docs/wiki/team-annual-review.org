@@ -1,0 +1,121 @@
+:PROPERTIES:
+:ID:       e45c1226-e914-4ed5-9fdb-d84a89ac66a1
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Long-lived team — annual review (=@atoz= + =@geordi= + =@data=)
+#+FILETAGS: :wiki:concept:multi-agent:teams:long-lived:annual-review:design:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* The /annual-review team/ is a *long-lived* team under
+[[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]]: =@atoz= pulls the year-arc (org-roam nodes,
+tags, concept additions); =@geordi= computes longitudinal drift
+metrics (mood trend, topic distribution, productivity arc) over the
+dbt pipeline; =@data= drafts the narrative review tying observations
+together. Cron-fires every January 1 (00:01 EST), or on user-invoked
+month-boundary for partial-year reviews. The same roster runs each
+year; this is the *anti-mediocre-year primitive* — surfaces drift
+before it crystallizes.
+
+*Expanded.* Most "year in review" tools are summary engines —
+they tell you what /happened/. The annual-review team is a /drift
+detector/: it surfaces patterns the user wouldn't see by scrolling
+their journal. The three-role shape forces the team off summary-
+mode and into interpretation-mode: =@atoz='s structural pull
+(/what concepts entered the vault?/) + =@geordi='s metric pull
+(/which directions trended?/) + =@data='s synthesis (/where is the
+arc bending, and is that the bend you want?/). The team is
+long-lived /not/ because it runs continuously, but because the
+roster + toolset + memory persist across years — Year N's review
+references Year N-1's narrative, gradually building a lineage the
+user can re-read.
+
+* Roster
+
+| Role         | Bridge Crew | Job                                                                                  |
+|--------------+-------------+--------------------------------------------------------------------------------------|
+| Year-arc     | =@atoz=     | Queries org-roam for year's nodes + tags + cross-link evolution + concept additions  |
+| Drift metrics | =@geordi=  | Longitudinal SQL over dbt: mood, topic distribution, productivity arc, theme drift   |
+| Narrator     | =@data=     | Drafts the review; ties the two pulls into one prioritisation call                    |
+
+| Aspect            | Value                                                                          |
+|-------------------+--------------------------------------------------------------------------------|
+| Lifetime          | =long-lived= (perma-roles; same roster runs every January 1)                  |
+| Cadence           | Cron =1 0 1 1 *= EST (Jan 1, 00:01) + ad-hoc on user-invoked month-boundary    |
+| Captain pre-fetch | =year_arc_digest= (deterministic; per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-006]]) — node count, tag spread, dbt aggregates |
+| LLM call shape    | One captain call (synthesis) + one =@data= narration; pulls are deterministic |
+| Dissolve trigger  | Goal sunset (rare — would require user opting out of the practice)             |
+| Evolution         | Review template; pace metrics; new probes as life-domain coverage widens       |
+
+* Triggers
+
+| # | Trigger source                                            | What it carries                                       |
+|---+-----------------------------------------------------------+-------------------------------------------------------|
+| 1 | Cron =1 0 1 1 *= EST                                      | Year boundary (Year N-1 → Year N); auto-fires         |
+| 2 | =M-x org-llm-annual-review= (user-invoked, any month)     | Window override (e.g. "review the last 90 days")      |
+| 3 | Mid-year inflection — significant life event imported     | Mini-review tick; same shape, narrower window          |
+
+* Tick-by-tick
+
+*Setup* (T0): captain reads previous year's review (if exists) — establishes lineage continuity per the long-lived team's persistent memory.
+
+*Pull phase* (parallel sibling spawns):
+
+1. =@atoz= queries org-roam: nodes created in window, tag deltas (new tags, retired tags), concept additions to wiki, cross-link density change
+2. =@geordi= runs longitudinal SQL: mood-trend dbt model, topic distribution by quarter, productivity arc (commits + clocked hours by week), theme drift (which agents got called most often)
+
+*Synthesis phase*: captain narrates one turn, integrating both pulls + last year's review. =@data= drafts the prose narrative under =* Year N review= heading; cross-links to source nodes; flags drift signals as tracker entries.
+
+*Closeout*: review committed to =~/org/annual-review-{year}.org=; =kind=team-session= entry to captain's log; previous year's =memory/{date}.md= per-agent notes archived as priors for next cycle.
+
+* Inputs / outputs
+
+| Direction | What                                                          | Surface                                  |
+|-----------+---------------------------------------------------------------+------------------------------------------|
+| In        | All =~/org/*.org= modified in window                          | Vault scan via =@atoz='s tools           |
+| In        | dbt models (mood, productivity, theme distribution)           | =@geordi='s data tools                   |
+| In        | Previous year's review                                        | =annual-review-{N-1}.org= as prior       |
+| In        | Per-agent =memory/{date}.md= from past year                   | Agor assistant memory                    |
+| Out       | =annual-review-{year}.org= (committed)                        | =~/org/= top-level                       |
+| Out       | Drift signals as tracker entries                              | =dev-tracker.org= or new follow-up file  |
+| Out       | Updated agent priors                                          | Agent memory (Layer 2a per [[id:739868a9-f62c-43de-ac1d-1671d483a2c1][standing-orders.org]]) |
+
+* Per-tick cost
+
+| Line item                              | Per-run estimate         | Notes                                    |
+|----------------------------------------+--------------------------+------------------------------------------|
+| =@atoz= year-arc pull (deterministic)  | $0.00                    | Pure SQL over org-roam DB                |
+| =@geordi= longitudinal SQL pull        | $0.00                    | dbt models pre-computed                  |
+| Captain synthesis turn (sonnet/opus)   | ~$0.30–0.80              | Long context; year of input              |
+| =@data= narration draft                | ~$0.20–0.40              | Length-driven; ~1500–3000-word review    |
+| Total per annual run                   | ~$0.50–1.20              | Once per year — cost is negligible       |
+
+* Evolution
+
+- *Toolset adapts every year.* First runs lean on raw counts; subsequent years promote the recurring metrics (e.g. "topic-shift detector") to first-class dbt models per Phase 2026-05.20 — sync verb POC — self-coded tools.
+- *Pace metrics widen.* Year 1 might track only commits + journal entries. Year 3 might include sleep, workout, finance, GPS-derived movement patterns — every life domain that landed under [[id:b537c80a-4451-4d5e-a191-6769e86a93f9][life-as-code.org]] is a candidate column.
+- *Review template hardens.* The narrative shape (intro / arc / drift / asks-of-Year-N+1) stabilises; later runs use it as a literate template rather than re-deriving.
+- *Lineage compounds.* Year 5's review references Year 1's "asks of Year 2" + answers them — the team becomes the user's longitudinal mirror.
+
+* Failure modes
+
+| Mode                                       | Likely cause                                       | Mitigation                                       |
+|--------------------------------------------+----------------------------------------------------+--------------------------------------------------|
+| Cron didn't fire on Jan 1                  | Daemon down / 24 h JWT expired                     | Token-refresh primitive (landed); =org-llm doctor= weekly |
+| Pull returned empty (no nodes in window)   | Vault relocated, indexer broken                    | Pre-fetch fails LOUD; captain refuses to narrate |
+| Drift signal is noise, not signal          | Single-year sample size                            | Year ≥ 2: cross-reference against prior; Year 1: flagged-not-acted |
+| Review reads "summary" not "interpretation" | Captain prompt drifted toward stat-dump            | Manager pre-fetch + agent narrates pattern (per memory =feedback_manager_prefetch_pattern=) |
+| =:PRIVATE:= material leaks into review     | Year-arc pull doesn't honor tag                    | =@atoz= filters =:PRIVATE:= at query time        |
+| Cron fires while user is asleep            | Naive cron without quiet-hours awareness           | =1 0 1 1 *= = 00:01 EST; review available on wake |
+
+* Cross-refs
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — § Long-lived team examples; § Coordination patterns (scheduled heartbeat)
+- [[id:3a8b1f72-9c4d-4e21-a5d8-7b2e9f1c3a6d][long-lived-team-vault-hygiene.org]] — sibling long-lived team (sub-daily heartbeat shape)
+- [[id:b537c80a-4451-4d5e-a191-6769e86a93f9][life-as-code.org]] — life domains feeding longitudinal metrics
+- [[id:c4e2d3a1-7f9b-4c5e-8d6a-2b3f4e9c1d57][agent-time-awareness.org]] — Layer 3 cron-style scheduling
+- [[id:739868a9-f62c-43de-ac1d-1671d483a2c1][standing-orders.org]] — Layer 2a per-agent journal feeds priors
+- [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]] — =@atoz= / =@geordi= / =@data= handle detail
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-006 (deterministic supervision); DEC-011 (files canonical); DEC-014 (Bridge Crew)

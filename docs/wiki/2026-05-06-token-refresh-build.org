@@ -1,0 +1,184 @@
+:PROPERTIES:
+:ID:       a1f3d289-7c5e-4f82-b94d-6e2a5c3f8d1b
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Token-refresh primitive build — full report
+#+FILETAGS: :wiki:test:agor:integration:primitive:token-refresh:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Built and live-tested the =mcp_token= refresh primitive that
+the [[id:8c41a7b9-f8d3-4b21-9e74-5a1c3f8b2d09][2026-05-06 Agor validation]] flagged as the *single gating dependency*
+for promoting any long-lived team to a real cron cadence.
+=scripts/agor-token-refresh.sh= ships as a sourceable bash library + a
+standalone CLI; verified live against =agor-live v0.17.3=, *9/9 tests
+PASS*. Total wall clock: ~30 minutes from "start build" to "all docs
+updated, gap closed in canon." Total spend: *$0.00* — primitive is
+pure deterministic REST, no LLM in the loop. The long-lived
+vault-hygiene team's token-refresh blocker is now closed; daily cron
+promotion is no longer gated.
+
+*Expanded.* This page documents the build session as a single
+artifact: contract verification, design choices, test matrix, the one
+bug found en route (v0.17.3 returns 500 instead of 404 for bogus
+session ids), and what changed in the canon. The user requested a
+full org doc report after sleep; this is it.
+
+* Why this primitive matters
+
+Per [[id:3a8b1f72-9c4d-4e21-a5d8-7b2e9f1c3a6d][long-lived-team-vault-hygiene.org]] § "Gating follow-ups", the
+captain's =mcp_token= is a 24 h JWT. A daily cron at =0 8= would hit
+expiry on day 2 — silently — without a refresh hook. Two paths were
+on the table:
+
+| Option | Strategy                                          | Tradeoff                                              |
+|--------+---------------------------------------------------+-------------------------------------------------------|
+| (a)    | Re-issue a fresh captain session every tick      | Loses per-session state; spawn cost; genealogy churn  |
+| (b)    | Refresh token via =GET /sessions/:id= after-get hook | Captain *session* persists; only the *token* rotates  |
+
+Path (b) was the recommendation in C's report. This build verified
+the contract, codified the call shape, and made it callable from any
+heartbeat script.
+
+* Contract verification (pre-flight)
+
+The premise — Agor's =GET /sessions/:id= regenerates =mcp_token= in
+the response — was claimed in C's run report but not directly
+verified. First action: confirm it.
+
+#+begin_src sh
+# Two GET calls 2 s apart against the same archived session
+T1=$(curl … "/sessions/$SID" | jq -r .mcp_token)
+sleep 2
+T2=$(curl … "/sessions/$SID" | jq -r .mcp_token)
+[[ "$T1" != "$T2" ]] && echo "TOKEN_DIFFERS=YES"
+exp1=$(decode "$T1") ; exp2=$(decode "$T2")
+echo "exp delta: $((exp2 - exp1)) s"
+#+end_src
+
+Result: =TOKEN_DIFFERS=YES=, =EXP_INCREASED=YES=, =delta = 2 s= (matches
+sleep). The hook /always/ re-mints — there's no caching window. For
+high-frequency callers this means it's worth gating refresh on a
+threshold; for once-a-day heartbeat ticks, "refresh always" is fine.
+
+* Primitive design
+
+*Sourceable + standalone.* Bash, ~150 lines. Five public functions:
+
+| Function                                     | Returns                                      | Use case                       |
+|----------------------------------------------+----------------------------------------------+--------------------------------|
+| =agor_decode_jwt_exp <jwt>=                 | exp epoch (positive int)                     | Diagnostics; debugging          |
+| =agor_token_seconds_until_expiry <jwt>=     | int seconds (negative = expired)             | Monitoring                      |
+| =agor_token_near_expiry <jwt> [thresh=300]= | exit 0 if near or past expiry                | Branching                       |
+| =agor_refresh_session_token <sid>=          | fresh mcp_token JWT                          | Heartbeat re-mint               |
+| =agor_refresh_if_near_expiry <sid> <jwt> [thresh]= | fresh JWT or current JWT unchanged    | Amortised heartbeat re-mint     |
+
+*Standalone CLI* mirrors each function: =decode= / =seconds-left= /
+=check= / =refresh= / =refresh-if-needed=.
+
+*Defaults.* =AGOR_REFRESH_THRESHOLD_SECONDS=300= (5 min). For daily
+heartbeats this is a reasonable margin; for sub-minute polling, lower
+it to ~30 s; for "every tick refresh", call =agor_refresh_session_token=
+directly.
+
+*Exit codes.* Reuses the v0 harness's code space (=10 PREREQ=, =20
+AUTH=, =30 NOTFOUND=, =35 NOMCP=, =40 USAGE=) so callers can branch
+uniformly across the smoke + refresh primitives.
+
+*No new dependencies.* =jq=, =curl=, =base64= only — same set the v0
+harness already requires.
+
+* Test matrix (9/9 PASS)
+
+| #  | Test                                                       | Expected                          | Result                            |
+|----+------------------------------------------------------------+-----------------------------------+-----------------------------------|
+| 1  | =decode= a fresh JWT                                       | positive int exp                  | =1778136995=                       |
+| 2  | =seconds-left= on fresh 24h JWT                            | ~86400                            | =86400=                            |
+| 3  | =check= fresh token, default 300s threshold                | rc=1, =OK=                        | rc=1, =OK=                         |
+| 4  | =check= with 90000s threshold (>24h)                        | rc=0, =NEAR_EXPIRY=               | rc=0, =NEAR_EXPIRY=                |
+| 5  | =refresh= rotates token + advances exp                     | new prefix; exp_new > exp_old    | delta=2s, prefix differs           |
+| 6  | =refresh-if-needed= with adequate margin                   | input returned unchanged          | unchanged                          |
+| 7  | =refresh-if-needed= with absurd threshold                  | refreshed; exp ≥ prior            | refreshed cleanly                  |
+| 8  | =refresh= against bogus UUID                               | exit 30 NOTFOUND                  | rc=30 (after v0.17.3 fix)          |
+| 9  | Missing =cli-token= file                                   | exit 20 AUTH                      | rc=20                              |
+
+Live test artifact: =/tmp/agor-token-refresh-test-2026-05-06.org=.
+
+* Bug found en route (v0.17.3, addendum to recipe — bug #9)
+
+*=GET /sessions/<bogus_id>= returns HTTP 500 with =GeneralError=
+"Session not found: …" instead of a proper 404.* This is the second
+"500 instead of correct status" pattern in v0.17.3 (the first was
+=GET /sessions/:id/genealogy= which 500s on undefined params).
+
+#+begin_quote
+=BUG-09= — =GET /sessions/<unknown_id>= returns =HTTP 500= with body
+=={"name":"GeneralError","message":"Session not found: <id>","code":500,"className":"general-error"}==.
+A proper REST contract would return 404. Workaround in
+=agor-token-refresh.sh:_atr_die path=: pattern-match
+=message =~ /[Ss]ession not found/= on 500 responses and treat as
+404 / NOTFOUND. Caller-side code stays clean; the daemon-side fix is
+upstream.
+#+end_quote
+
+* What changed in the canon
+
+| File                                                  | Change                                                                                              |
+|-------------------------------------------------------+-----------------------------------------------------------------------------------------------------|
+| =scripts/agor-token-refresh.sh= (NEW)                | The primitive itself — sourceable + standalone, 9/9 live PASS                                       |
+| =docs/wiki/agor-smoke-recipe.org=                    | Added § /Exercised in v0.2/ + § /v0.2 — token refresh primitive/ + § /New bugs found in v0.2/ (bug #9) |
+| =docs/wiki/2026-05-06-agor-validation.org=           | Marked =mcp_token= refresh row *CLOSED 2026-05-06* in § /Primitives NOT validated yet/              |
+| =docs/wiki/2026-05-06-agor-validation.org=           | Updated § /What this changes in the integration plan/ — vault-hygiene cron promotion *unblocked*    |
+| =docs/wiki/long-lived-team-vault-hygiene.org=        | Renamed § /Token refresh (BLOCKING)/ → § /Token refresh — CLOSED 2026-05-06/ with usage example     |
+| =/tmp/agor-token-refresh-test-2026-05-06.org=        | Live test report (9/9 PASS, bug #9 reproduced)                                                      |
+
+* Use from a heartbeat script
+
+#+begin_src sh
+# Source the library
+. scripts/agor-token-refresh.sh
+
+# Each tick, refresh the captain's token if it's within 5 min of expiry
+# (otherwise pass through unchanged — amortises the round-trip)
+captain_jwt=$(agor_refresh_if_near_expiry "$CAPTAIN_SID" "$captain_jwt" 300)
+
+# Re-write the MCP config so claude -p / opencode pick up the new bearer
+jq --arg auth "Bearer $captain_jwt" \
+   '.mcpServers.agor.headers.Authorization = $auth' \
+   "$MCP_CONFIG" > "$MCP_CONFIG.new" && mv "$MCP_CONFIG.new" "$MCP_CONFIG"
+
+# Now spawn the heartbeat children — token will outlive the tick
+# even on day 2 of a long-running cron
+#+end_src
+
+For sub-minute polling, drop the threshold:
+=agor_refresh_if_near_expiry "$SID" "$jwt" 30=. For "every tick refresh
+unconditionally", call =agor_refresh_session_token "$SID"= directly.
+
+* Recommended next steps
+
+The token-refresh primitive unblocks the long-lived-team backlog.
+Three plausible nexts, ranked:
+
+| Pri | Item                                                                  | Why                                                                       | Cost  |
+|-----+-----------------------------------------------------------------------+---------------------------------------------------------------------------+-------|
+| ★1  | Promote vault-hygiene to daily cron (=0 8 * * *= EST)                 | Full validation of the long-lived shape now technically possible          | ~1 hr |
+| 2   | =tracker agor-sync= — read =_AGENT_META=, write per-assistant SOUL.md | Turns Bridge Crew into actual Agor assistants; unblocks Q2 implementation arc | ~3 hrs |
+| 3   | Cross-tool spawn primitive (Q1 #2 from earlier)                        | Validates DEC-017 § 6 Defaults rule in code; closes =delegate(model_override=…)= gap | ~1 hr |
+
+After ★1, day-2/day-3 of vault-hygiene running becomes the next
+real-world data point — does the team-shape /actually/ catch drift the
+@-prefix flow doesn't, or does it just produce diff-shaped noise?
+That's the kind of question only a multi-day live run answers.
+
+* Cross-refs
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — canonical integration definition
+- [[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe.org]] — § v0.2 / token refresh primitive
+- [[id:8c41a7b9-f8d3-4b21-9e74-5a1c3f8b2d09][2026-05-06-agor-validation.org]] — gap CLOSED row
+- [[id:3a8b1f72-9c4d-4e21-a5d8-7b2e9f1c3a6d][long-lived-team-vault-hygiene.org]] — gating follow-up CLOSED
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-006 (deterministic supervision); DEC-017 (integration only)
+- =scripts/agor-token-refresh.sh= — the primitive
+- =/tmp/agor-token-refresh-test-2026-05-06.org= — live run log

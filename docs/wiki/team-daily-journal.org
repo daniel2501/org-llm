@@ -1,0 +1,138 @@
+:PROPERTIES:
+:ID:       026faa7c-256f-4eda-95d1-98919100ce86
+:CREATED:  [2026-05-07]
+:END:
+#+TITLE: Long-lived team — daily-journal (capture → cross-ref → drift)
+#+FILETAGS: :wiki:concept:multi-agent:teams:long-lived:life-as-code:journal:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* The /daily-journal team/ is a =long-lived= team under
+[[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]]: =@data= finalizes each capture into
+=~/org/dailies/<YYYY-MM-DD>.org= (cleans formatting, lifts intentions);
+=@atoz= cross-references the capture against the org-roam graph;
+=@geordi= watches for drift across the day (mood / topic / project
+shifts) and emits a /today's themes/ digest at end-of-day. The team
+is fired by /each capture/ (per-capture micro-tick) plus a daily roll-up
+heartbeat at 21:00 EST. Persistent memory under
+=memory/{YYYY-MM-DD}.md= per assistant grows the team's situational
+read of the user over time — this is the [[id:b537c80a-4451-4d5e-a191-6769e86a93f9][life-as-code]] /capture/
+domain wearing a Claude-Code-shaped agent system.
+
+*Expanded.* The vault-hygiene team (per
+[[id:3a8b1f72-9c4d-4e21-a5d8-7b2e9f1c3a6d][long-lived-team-vault-hygiene]]) cleans the /substrate/; this team
+reads the /signal/. Every capture is a tiny event; the cumulative
+shape across captures is the day's interpretation. Per
+[[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-006 — supervision is deterministic by default]], the per-capture
+tick is fully deterministic (formatter + roam-link rewriter); only
+the end-of-day digest fires an LLM call.
+
+* Roster
+
+| Persona  | Role-in-team                                              | Agor primitive used                                   |
+|----------+-----------------------------------------------------------+-------------------------------------------------------|
+| =@data=  | Capture finalizer — formatting, intention extraction      | /scout-pattern dispatch/ (per-capture, deterministic) |
+| =@atoz=  | Cross-referencer — link capture to org-roam concept graph | /sibling-session by boardId/                          |
+| =@geordi=| Drift-spotter — mood / topic / project deltas + digest    | /scheduled heartbeat/ (21:00 EST end-of-day)          |
+
+Captain rotates: =@data= captains the per-capture micro-ticks;
+=@geordi= captains the end-of-day digest. =@picard= is *not* in
+this team — the work is too narrow.
+
+* Triggers
+
+| Trigger                                            | Fires which sub-tick                              |
+|----------------------------------------------------+---------------------------------------------------|
+| =org-capture= save into =~/org/dailies/<date>.org= | Per-capture tick — =@data= → =@atoz=              |
+| =org-after-save-hook= on dailies file              | Per-save tick — same shape, idempotent            |
+| Cron =0 21 * * *= EST                              | End-of-day digest — =@geordi= reads day, narrates |
+| Manual =M-x org-llm-daily-themes=                  | Same as cron tick, on-demand                      |
+
+The per-capture tick is sub-second deterministic; the end-of-day
+digest is ~30s wall + one LLM call.
+
+* Tick-by-tick walkthrough
+
+Sample per-capture micro-tick (illustrative) for a capture at
+2026-05-07 14:23 EST: "feeling stuck on Phase 2026-05.01 — physical extraction — physical
+extraction; want to take a walk."
+
+| Step | t (EST)    | Action                                                                 | Outcome                                                       |
+|------+------------+------------------------------------------------------------------------+---------------------------------------------------------------|
+|    1 | 14:23:00.0 | =org-capture= saves into =~/org/dailies/2026-05-07.org=               | Raw entry on disk                                             |
+|    2 | 14:23:00.1 | =org-after-save-hook= fires =@data= scout                              | Worktree-isolated dispatch on shared boardId                  |
+|    3 | 14:23:00.4 | =@data= deterministic format pass — heading, timestamp, =:CAPTURE:=    | Vault-write committed with =Co-Authored-By: @data=            |
+|    4 | 14:23:00.5 | Intention extractor — surfaces /walk/ as a candidate next-action       | Filed under =* Intentions= sub-tree (deterministic, no LLM)   |
+|    5 | 14:23:00.6 | =@atoz= sibling-session reads org-roam DB                              | Matches "Phase 2026-05.01 — physical extraction" → existing roam node; "walk" → no match  |
+|    6 | 14:23:00.8 | =@atoz= writes =[[id:…][Phase 2026-05.01 — physical extraction]]= link in-place                   | Capture now graph-connected; 0 LLM tokens                     |
+|    7 | 14:23:01.0 | Per-capture tick complete — writes one line to =memory/2026-05-07.md=  | "14:23 stuck-on-26.2 walk-intent" — 12 captures so far        |
+
+End-of-day digest (cron 21:00 EST) reads the day's twelve memory
+lines, the dailies file, and =@geordi='s rolling 7-day baseline;
+emits a /today's themes/ paragraph into a =* Day digest= subtree.
+Mirror-shape to vault-hygiene's narration paragraph — interpretation
+layer over deterministic facts, not stat dump.
+
+* Inputs / Outputs
+
+| Direction | Source                                       | Sink                                                       |
+|-----------+----------------------------------------------+------------------------------------------------------------|
+| In        | =~/org/dailies/<date>.org= captures          | Per-capture tick                                           |
+| In        | =~/org/.org-roam/= sqlite                    | =@atoz= cross-ref step                                     |
+| In        | =memory/{YYYY-MM-DD}.md= (rolling 7-day)     | =@geordi= drift baseline                                   |
+| Out       | Formatted entry + =:CAPTURE:= tag in-place   | Same dailies file                                          |
+| Out       | =[[id:…]]= cross-links inserted in-place     | Same dailies file                                          |
+| Out       | =* Day digest= subtree, end-of-day           | Same dailies file                                          |
+| Out       | =memory/{date}.md= per-assistant lines       | =.agor-assistants/<handle>/memory/=                        |
+| Out       | =kind=team-session= bridge record per tick   | =~/org/captains-log-*.org= (rotated)                       |
+
+Files canonical per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011 — DB is universal interface; files canonical]];
+DB = render-side cache only.
+
+* Per-tick cost estimate
+
+| Sub-tick                          | LLM spend  | Wall clock   | Notes                                       |
+|-----------------------------------+------------+--------------+---------------------------------------------|
+| Per-capture tick (deterministic)  | $0.000     | <1 s         | Format + intention + roam-link, no LLM      |
+| End-of-day digest (1 LLM turn)    | ~$0.04     | ~30 s        | =@geordi= sonnet narrates over pre-fetch    |
+| Per-day total (~12 captures + 1)  | ~$0.04     | ~32 s        | Conservative; light days hit ~3 captures    |
+| Per-year (365 days)               | ~$15       | ~3.2 h total | Inside the "is this worth it?" threshold    |
+
+Sensitivity: if drift-spotting itself is promoted to LLM-narrated
+mid-day (instead of end-of-day only), cost ~3× per the captain
+narration shape in =long-lived-team-vault-hygiene=.
+
+* Evolution path
+
+| After N runs | What changes                                                                            |
+|--------------+-----------------------------------------------------------------------------------------|
+| 7 days       | =@geordi= has a rolling baseline; drift signals stop firing on noise                    |
+| 30 days      | Common topics reach Phase 2026-05.20 — sync verb POC — self-coded tools promotion (auto-tagger as deterministic) |
+| 90 days      | Mood deltas become a first-class metric on the analytics surface (=@geordi= dbt model)   |
+| 180 days     | Intention-extraction patterns yield a /captured intentions tracker/ — recurring goals   |
+| 365 days     | Annual /year-in-review/ digest fires from =memory/= corpus — a side-quest the team owns |
+
+Roster pinned this phase per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-014 — Bridge Crew]] cap = 7;
+toolset adapts under the same three personas.
+
+* Failure modes
+
+| Mode                                              | Symptom                                              | Mitigation                                                  |
+|---------------------------------------------------+------------------------------------------------------+-------------------------------------------------------------|
+| =org-after-save-hook= fires recursively           | Tick re-fires on its own write                       | Skip when buffer modification source = =@data=              |
+| =@atoz= writes broken =[[id:…]]= (stale node)     | Capture cross-links to a deleted node                | =@boothby= vault-hygiene team catches on next sweep         |
+| End-of-day digest hits day-2 JWT expiry           | Cron fails silently after 24 h                       | =scripts/agor-token-refresh.sh= per multi-agent-org-llm § validated primitives |
+| =memory/{date}.md= grows unbounded                | Per-assistant memory becomes the bottleneck          | Monthly archive into =memory/archive/<YYYY-MM>.md=          |
+| Mood-delta misread (sarcasm, irony)               | Drift signal fires on tone, not state                | Surface as draft only; never auto-act on mood signal        |
+| PII leak via end-of-day digest                    | Sensitive capture surfaces in shared digest          | Pre-narration redactor per [[id:25ae60fa-ca6c-4e6d-94d3-84f16b352d14][pii-redaction-pre-sms]]; same shape |
+
+* Cross-refs
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — § Long-lived team examples; § Coordination patterns
+- [[id:3a8b1f72-9c4d-4e21-a5d8-7b2e9f1c3a6d][long-lived-team-vault-hygiene.org]] — sibling team; cleans the substrate this one reads
+- [[id:b537c80a-4451-4d5e-a191-6769e86a93f9][life-as-code.org]] — Capture domain; this team is its first multi-agent shape
+- [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]] — =@data=, =@atoz=, =@geordi= persona detail
+- [[id:25ae60fa-ca6c-4e6d-94d3-84f16b352d14][pii-redaction-pre-sms.org]] — redaction shape reused for digest privacy
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-006 (deterministic supervision); DEC-011 (files canonical); DEC-014 (Bridge Crew); DEC-017 (integration only)

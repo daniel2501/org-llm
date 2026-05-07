@@ -1,0 +1,190 @@
+:PROPERTIES:
+:ID:       a1f9c8b4-7e2d-4f3a-9c6b-5d4e1a2b3c8f
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Airflow ⇄ org-llm — eleven candidate use cases (2026-05-06)
+#+FILETAGS: :wiki:report:scheduling:airflow:validation:
+#+OPTIONS: toc:2 num:nil
+
+* Summary
+
+*Summary.*  This report walks the eleven candidate use cases for an
+[[https://airflow.apache.org][Apache Airflow]] integration with org-llm, validates each one against
+an in-process headless harness (=tests/test_airflow_candidates.py=,
+all 11 green as of 2026-05-06 EST), and lands a recommendation:
+*defer Airflow integration*; the candidates that genuinely need
+DAG + sensors + retries + backfill are real, but four of them
+(*#2, #7, #8, #10*) are /internal/ Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) / Phase 2026-06.01–.03 — self-coded tools agent ecosystem needs
+that arrive before cross-vault federation and may therefore
+collapse the deferral window.
+
+*Expanded.*  Two sister documents — [[file:agent-time-awareness.org][agent-time-awareness.org]] § Real
+candidates (the canonical layer) and the [[file:dev-tracker.org][dev-tracker.org]] § Apache
+Airflow integration TODO (the operational queue) — were updated
+in lock-step.  This report is the empirical pass: each candidate
+has an agent-managed headless test asserting which of the four
+Airflow primitives the candidate actually exercises, so the
+"earns its keep" question is answered against simulator output
+rather than vibes.
+
+* Background — why this report exists
+
+The 2026-05-05 layer-3 walk
+([[file:agent-time-awareness.org][agent-time-awareness.org]]) listed four real candidates and four
+anti-candidates and recommended deferral.  On 2026-05-06 the
+candidate list was expanded to eleven and the user asked for
+each to be validated by an /agent-managed headless test/.
+
+Per =feedback_validate_orchestration_with_ab=: when a layer's
+"earns its keep" question is open, propose a harness with a
+pre-committed bar.  The bar here: a candidate "passes" if its
+simulation actually composes ≥2 of {DAG, Sensor, Retry, Backfill};
+failing that, simpler primitives (=systemd= timer, cron, NATS,
+Phase 2026-05.20 — sync verb POC promoted-tool runtime) win.
+
+* Methodology — the headless harness
+
+** Primitives
+
+=tests/airflow_candidate_harness.py= ships four tiny in-process
+simulators:
+
+| Primitive  | Shape                                                 | What it proves                            |
+|------------+-------------------------------------------------------+-------------------------------------------|
+| =DAG=      | Named nodes + upstream-dep edges, topological run     | Multi-step orchestration with deps        |
+| =Sensor=   | Predicate poll up to N times                          | Wait-for-external-condition semantics     |
+| =retry()=  | Bounded attempts with exception passthrough           | Tolerance to flake (model, network, lock) |
+| =Backfill= | Replay one fn over a list of partition keys           | Historical / windowed reprocessing        |
+
+These are *not* a re-implementation of Airflow.  They are exactly
+big enough to demonstrate each candidate's shape.  Headless: no
+sleeps, no I/O, no network.
+
+** Agent-managed run
+
+An agent (today: =@geordi= per [[file:agents.org][agents.org]] roster) runs::
+
+  pytest tests/test_airflow_candidates.py -q
+
+The session-end fixture writes the per-candidate verdict table to
+=tests/_artifacts/airflow_verdicts.json= so the agent can narrate
+the result in one cloud call (per
+=feedback_manager_prefetch_pattern=).
+
+* Verdicts — the eleven candidates
+
+All eleven tests pass (=11 passed in 0.11s=, 2026-05-06 EST).
+Primitives column is exactly what the simulation exercises.
+
+| #  | Candidate                                                                        | Primitives exercised | Verdict                                  |
+|----+----------------------------------------------------------------------------------+----------------------+------------------------------------------|
+|  1 | Cross-vault federation                                                           | DAG + Sensor         | DAG-shape; Airflow-fit                   |
+|  2 | DB ↔ vault re-render (Phase 2026-05.17 — DB-as-cache + git-canonical pipeline)                                                  | DAG + Retry          | DAG-shape; Airflow-fit (early trigger)   |
+|  3 | External-data ingest fan-in (calendar / email / RSS / finance / health / weather) | DAG + Sensor + Retry | DAG-shape; Airflow-fit                   |
+|  4 | Cross-app egress (org → dbt → Superset → digest)                                 | DAG                  | DAG-shape; could carry on dbt-cloud too  |
+|  5 | Heavy daily snapshot rolls                                                       | DAG + Retry          | DAG-shape; Airflow-fit                   |
+|  6 | Agor multi-day campaign                                                          | DAG + Retry          | DAG-shape; Airflow-fit                   |
+|  7 | Phase 2026-05.20 — sync verb POC — self-coded tools runtime                                              | Retry                | NOT DAG-shape; cron/systemd/Phase-29 wins |
+|  8 | Embedding refresh + vault re-index                                               | Backfill             | Backfill-shape; Airflow-fit (early trigger) |
+|  9 | Multi-device fleet coordination                                                  | DAG + Sensor         | DAG-shape; Airflow-fit                   |
+| 10 | Provenance / vault-history backfill                                              | Backfill             | Backfill-shape; Airflow-fit (early trigger) |
+| 11 | A/B / multivariate fan-out at scale                                              | DAG                  | DAG-shape; could carry on simpler runner |
+
+** Earlier-trigger sub-set (collapses the deferral window)
+
+Four candidates are /internal/ Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) / Phase 2026-06.01–.03 — self-coded tools agent ecosystem needs that
+arrive *before* cross-vault federation:
+
+- *#2 — DB ↔ vault re-render* (Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family))
+- *#7 — self-coded tools runtime* (Phase 2026-06.01–.03 — self-coded tools agent ecosystem — but verdict is
+  NOT DAG-shape; the bar fails, so cron/systemd is the right
+  call, not Airflow)
+- *#8 — embedding refresh* (Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family))
+- *#10 — provenance backfill* (Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) cleanup)
+
+Net of the #7 strike-out: *three* internal triggers (#2, #8, #10)
+arrive before federation and could justify Airflow earlier than
+the layer-3 walk's "Phase 2026-06.04 — FOSS agent value-adds+ federation" window suggested.
+
+** Off-shape candidate — #7
+
+Candidate 7 (self-coded tools runtime) only exercised =Retry=.
+It is mass-cron-of-many, not DAG.  Phase 2026-05.20 — sync verb POC's own runtime, plus
+=systemd= timers and =cron=, carry it.  Keeping it on the
+Airflow candidate list would muddy the signal — surface it on
+the dev-tracker as a Phase 2026-05.20 — sync verb POC internal item instead.
+
+* Anti-candidates (unchanged + new)
+
+| Anti-candidate                                          | Right tool                                |
+|---------------------------------------------------------+-------------------------------------------|
+| Single-vault @boothby nightly                           | cron / =systemd= timer                    |
+| Save-hook dbt build                                     | file-watch / babel                        |
+| Recipe A/B harness                                      | scheduled remote agent / cron             |
+| Captain's-log rotation                                  | in-process size check                     |
+| Chat-surface latency path                               | direct RPC                                |
+| One-off "remind me at 3pm"                              | =schedule= skill / scheduled remote agent |
+| In-frame agent calls                                    | live cloud call                           |
+| NATS-shape event fan-out (notify-on-write)              | NATS event fabric                         |
+
+* Decision lens — when Airflow vs. alternatives
+
+| Alternative                              | Wins when                                                               |
+|------------------------------------------+-------------------------------------------------------------------------|
+| =systemd= / cron                         | Single host, single vault, no dependencies                              |
+| NATS                                     | Event-shape (something happened → fan out), not time-shape              |
+| Phase 2026-05.20 — sync verb POC — promoted-tool runtime         | Recurring deterministic call, n=1 today                                 |
+| Apache Airflow                           | DAG + sensors + retries + backfill across hosts/vaults/apps             |
+| Prefect / Dagster                        | Same shape as Airflow, lighter footprint — side-look once "yes orchestrator" lands |
+
+* Recommendation
+
+1. *Keep deferral.* The 2026-05-05 layer-3 walk's recommendation
+   stands: defer Airflow integration; revisit once cross-vault
+   federation lights up (Phase 2026-06.04 — FOSS agent value-adds+ — federation).
+2. *Watch the early triggers.* If any of *#2, #8, #10* lands
+   inside Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) cleanup before federation, re-open the
+   question — the internal trigger may collapse the deferral
+   window by 12+ months.
+3. *Drop #7 from the candidate list.* Self-coded tools runtime
+   is mass-cron-of-many, not DAG-shape; it belongs in Phase 2026-06.01–.03 — self-coded tools agent ecosystem
+   as an internal scheduling item, not an Airflow candidate.
+   *Resolved 2026-05-06*: rerouted in =dev-tracker.org= as "Phase
+   29 — promoted-tool scheduling runtime" sub-item.
+4. *Side-look at Prefect / Dagster* before any actual adoption
+   call — same shape, lighter footprint, same FOSS posture.
+
+* Reproducing the harness
+
+#+begin_src sh
+.venv/bin/python -m pytest tests/test_airflow_candidates.py -q
+cat tests/_artifacts/airflow_verdicts.json
+#+end_src
+
+Expected: =11 passed= and a JSON array of eleven verdict rows
+with =primitives= matching the verdict table above.
+
+* Connections
+
+| Topic                                                      | Why it links                                                |
+|------------------------------------------------------------+-------------------------------------------------------------|
+| [[file:agent-time-awareness.org][agent-time-awareness.org]] § Real candidates                  | Canonical 11-candidate table the report validates           |
+| [[file:dev-tracker.org][dev-tracker.org]] § Apache Airflow integration?              | Operational queue; carries the same 11-item enumeration     |
+| DEC-010 — anti-capitalist alignment                        | Airflow itself is ASF/FOSS; managed Airflow is the question |
+| DEC-013 — two-tier tools                                   | Scheduling sits at the data/effect boundary                 |
+| DEC-017 — Agor stack composition                           | Candidate #6 (Agor multi-day campaign)                      |
+| project_db_authoritative_inversion                         | Candidates #2, #8, #10 — Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) triggers                |
+| project_self_coded_tools                                   | Candidate #7 — strike-out + reroute                         |
+| project_containerization_strategy                          | NATS as event-shape sibling for the anti-candidates row     |
+| =feedback_validate_orchestration_with_ab=                  | The harness pattern this report rests on                    |
+| =feedback_manager_prefetch_pattern=                        | How the agent narrates the verdicts                         |
+
+* Open questions
+
+| Question                                                                                                    | Status                            |
+|-------------------------------------------------------------------------------------------------------------+-----------------------------------|
+| Does Phase 2026-05.17 — DB-as-cache + git-canonical pipeline (legacy 25.x family) land any of #2 / #8 / #10 inside the next two sprints?                                       | Open — sprint planning input      |
+| If yes, is Prefect / Dagster (lighter) the right tool before reaching for Airflow proper?                   | Open                              |
+| Does the harness need a "real Airflow" comparison run (DAG → Airflow DAG) once a candidate is greenlit?     | Open — would close the A/B story  |
+| Should =@geordi= own a recurring run of this harness so verdicts stay fresh as candidates evolve?           | *Resolved 2026-05-06*: yes — filed in [[file:dev-tracker.org][dev-tracker.org]] § @geordi recurring Airflow-candidate harness run |
+| Do anti-candidates need their own headless tests proving the simpler primitive suffices?                    | Open — symmetric A/B would        |

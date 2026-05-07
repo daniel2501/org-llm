@@ -1,0 +1,91 @@
+:PROPERTIES:
+:ID:       1b0a2186-0759-492b-bb67-b21074779e6c
+:CREATED:  [2026-05-04]
+:UPDATED:  [2026-05-04]
+:REVISIONS: step 3 rewritten 2026-05-04 — clearer step-by-step framing
+:END:
+#+TITLE: Walkthrough — how dbt works with org-llm
+#+FILETAGS: :wiki:walkthrough:dbt:phase-12-7:
+#+OPTIONS: toc:nil num:nil
+
+* Audience
+
+Someone who has used =org-llm= a bit, knows there's a SQLite
+DB at =~/.cache/org-llm/index.db=, and wants to understand
+where dbt fits — without reading the dbt docs cold.
+
+Pace: small steps. Reader controls "next." Branches welcome.
+
+* Step 1 — what dbt is, in this app
+
+dbt = a SQL-only build tool. It reads the existing SQLite DB
+at =~/.cache/org-llm/index.db= and produces *new tables and
+views* in that same DB by running ordered =.sql= files. It does
+not touch your vault, doesn't call an LLM, and doesn't write to
+org files. Pure read → transform → write, inside one SQLite
+file.
+
+* Step 2 — where the SQL lives
+
+Templates ship inside the package at
+[[file:../../../org_llm/dbt_templates/][=org_llm/dbt_templates/=]]:
+
+- =models/staging/= — 3 files: =stg_files.sql=, =stg_nodes.sql=,
+  =stg_history.sql=. Thin views over the raw tables that
+  [[file:../../../org_llm/auto_embedder.py][=auto_embedder.py=]]
+  and [[file:../../../org_llm/logbook.py][=logbook.py=]] write
+  to.
+- =models/marts/= — 7 files: =recent_nodes.sql=,
+  =recent_activity.sql=, =daily_notes.sql=, =nodes_by_tag.sql=,
+  =orphan_nodes.sql=, =cli_invocations.sql=, =llm_calls.sql=.
+  These join staging views into queryable analytics tables.
+
+Staging = "rename + clean." Marts = "the actual answers."
+
+* Step 3 — how =org-llm dbt …= actually runs
+
+When you type =org-llm dbt build=, here's the chain:
+
+1. *CLI dispatch.* =dbt= is a Typer subcommand group in
+   [[file:../../../org_llm/cli.py][=org_llm/cli.py=]] (=dbt_app=
+   near line 20830). Typer routes =build= to =dbt_build()=.
+2. *Pick the project dir.* =_dbt_dir()= looks for your editable
+   copy at =~/.local/share/org-llm/dbt/=. If it doesn't exist
+   yet, it falls back to the bundled read-only templates inside
+   the package — so dbt commands work immediately on a fresh
+   install, before you've ever run =dbt init=.
+3. *Set two env vars.* =DBT_PROFILES_DIR= → that project dir
+   (so dbt finds =profiles.yml=). =ORG_LLM_DB= →
+   =~/.cache/org-llm/index.db= (so =profiles.yml= knows which
+   SQLite file to open).
+4. *Shell out.* =subprocess.run(["dbt", "build", "--project-dir",
+   …])=. Stdout streams to your terminal live; org-llm doesn't
+   wrap or interpret it.
+5. *dbt does the rest.* Reads the =.sql= files, builds a DAG,
+   runs staging models first then marts, writes the results
+   back into the same SQLite file as new tables/views.
+
+The mental model: org-llm is a thin launcher. It picks the dir,
+sets env, and gets out of the way. All the actual SQL-running
+is plain dbt against plain SQLite.
+
+* Step 4 — (next, when reader says "go")
+
+* Branches
+
+- "Why SQLite, why not Postgres?" → see
+  [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][architecture.org]] §
+  data plane
+- "Where does Superset fit?" → roadmap Phase 2026-07.01 — Apache Superset dashboards
+- "I just want to query without dbt" → use the SQLite CLI
+  against =~/.cache/org-llm/index.db= directly; staging views
+  exist only after a dbt run
+
+* Related
+
+- [[id:ce2e4d01-4e45-4acd-8ca1-310085c8b821][Walkthroughs concept]]
+- [[id:30d4ee70-0472-4bcb-a02e-efde52bef3c6][Architecture]]
+- [[id:32f134ee-dc89-41a0-9a7b-930a7cad452a][Captain's Log]] —
+  one of the raw tables dbt reads from
+- [[id:43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d][Roadmap]] § Phase
+  12.7 — the planned dbt analytics layer

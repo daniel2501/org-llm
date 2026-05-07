@@ -1,0 +1,56 @@
+# ── ARCHIVED [2026-05-03] ────────────────────────────────────────────
+# Live progress tracker for the 2026-05-03 evening test campaign;
+# campaign is complete (20/20 prompts done). Synthesised findings live
+# in 2026-05-03-test-session.org (also archived); raw per-run detail
+# lives in 2026-05-03-test-campaign-detail.org (kept as ground truth).
+# Active items folded into dev-tracker.org bugs/findings + validation.
+# Do not edit.
+# See: ~/repos/org-llm/docs/wiki/dev-tracker.org
+# ─────────────────────────────────────────────────────────────────────
+
+#+TITLE: Test campaign — COMPLETE (2026-05-03, ARCHIVED)
+#+STARTUP: showall
+#+OPTIONS: toc:nil num:nil
+#+FILETAGS: :archived:
+# Final state. Full per-run detail (60 narrations, all reasoning
+# excerpts) lives in [[file:2026-05-03-test-campaign-detail.org][test-campaign-detail.org]];
+# the synthesised findings (verdicts + new findings 6-9 + improvement
+# queue + multi-model comparison) live in [[file:2026-05-03-test-session.org::*Headless test-campaign — 2026-05-03 evening][test-session.org → "Headless test-campaign"]].
+
+* Progress  [████████████████████████████████████████] 20/20
+
+- *Stage:* done
+- *Done:* 20 / 20
+- *Pending:* 0 — all done
+- *Avg per prompt:* 114.2s (342.7s incl. 3 model variants? actually elapsed_total covers all 3)
+- *ETA:* 0s
+
+* Per-prompt summary
+
+| #    | v | recipe                 | tool                     | fastest model           | narr     | best snippet |
+|------+---+------------------------+--------------------------+-------------------------+----------+--------------|
+| #2   | ✓ | count_across_vault     | org_count_matches        | llama3.2:latest         24.1s |  207c avg | Total hits = 0, no relevant notes found about exercising fre… |
+| #3   | ✓ | count_across_vault     | org_count_matches        | llama3.2:latest        12.86s |  179c avg | Based on my org-roam vault search, there are zero hits for m… |
+| #6   | ✓ | —                      | org_grep                 | llama3.2:latest        12.25s |   95c avg | MANAGER search_notes (tool=org_grep, query="Postgres", limit… |
+| #7   | ✓ | —                      | org_id_find → org_link_g | llama3.2:latest          7.7s |  185c avg | MANAGER PRE-FETCH (tool=org_id_find → org_link_graph): {"err… |
+| #8   | ✓ | —                      | org_property_search      | llama3.2:latest        11.55s |  221c avg | Search Notes: - search for :CUSTOM_ID:  Results should list … |
+| #9   | ✓ | —                      | org_orphans              | llama3.2:latest        57.26s |  221c avg | org_orphans:   - file="/home/daniel/org/20220123170709-tatto… |
+| #10  | ✓ | —                      | org_agenda               | llama3.2:latest        38.55s |  107c avg | MANAGER PRE-FETCH (tool=org_agenda)  {"today": [], "upcoming… |
+| #11  | ✓ | —                      | org_id_find → org_file_m | llama3.2:latest         13.1s |  194c avg | To find the number of headings in your Phase 2026-05.12 — orchestration v2 roadmap entr… |
+| #12  | ✓ | —                      | org_tag_suggest          | phi4-mini:latest       36.57s |  255c avg | To resolve this, you can use the `search_notes` function wit… |
+| #13  | ✓ | —                      | org_refile_candidates    | llama3.2:latest        13.45s |  446c avg | Answer: Save the draft in chat with a heading like "[Postgre… |
+| #14  | ✓ | dailies_routine_filter | routine_chores           | llama3.2:latest        39.55s |  118c avg | The top 5 routine items are:  1. Make bed (first 2025-10-26 … |
+| #15  | ✓ | —                      | org_agenda + org_clock_s | llama3.2:latest        26.33s |  335c avg | To view your agenda for this week, you can run the following… |
+| #16  | ✓ | —                      | doom_keybinds            | llama3.2:latest        10.85s |  120c avg | To find nodes by query, use `search_notes` instead: ```elisp… |
+| #17  | ✓ | count_across_vault     | org_count_matches        | llama3.2:latest        14.34s |  194c avg | It appears you're most active in the area of “MANAGER PRE-FE… |
+| #18  | ✓ | weekly_mood_review     | mood_signal              | llama3.2:latest        40.37s |  248c avg | Based on the provided data, your mood has been relatively st… |
+| #19  | ✓ | —                      | doom_packages            | phi4-mini:latest       52.95s |  379c avg | You have the following non-default Doom packages enabled in … |
+| #20  | ✓ | —                      | vault_profile + org_orph | phi4-mini:latest       60.06s |   41c avg | <<ollama error: TimeoutError: timed out>> |
+| #21  | ✓ | weather_aware_agenda   | org_agenda + weather     | llama3.2:latest        60.03s |   41c avg | <<ollama error: TimeoutError: timed out>> |
+| #22  | ✓ | —                      | doctor / sysstats / conf | llama3.2:latest        25.13s |   75c avg | To check the health of your org-llm setup, run `org-llm doct… |
+| #23  | ✓ | dailies_general        | list_dailies             | phi4-mini:latest       60.06s |   41c avg | <<ollama error: TimeoutError: timed out>> |
+
+* See also
+
+- [[file:2026-05-03-test-session.org][2026-05-03-test-session.org]] — final findings will be appended there
+- [[file:test-prompts.org][test-prompts.org]] — prompt catalog

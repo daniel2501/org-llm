@@ -11,3 +11,9 @@ wheels/
 
 # Claude Code session-local state (agent metadata, not source)
 .claude/
+
+# Scratch experiment harness artifacts (round/AB/pilot output dirs).
+# Harness scripts (scripts/_*.py) are tracked; their *_artifacts/ output is not.
+scripts/_*_artifacts/
+tests/_artifacts/
+

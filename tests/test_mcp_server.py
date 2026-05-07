@@ -108,6 +108,8 @@ class TestServerBuilds:
             "performance_status", "index_vault", "embed_pending",
             "code_search", "recent_files", "list_models",
             "org_llm_run",
+            # phase-27 (Superset) — semantic-layer surface
+            "metrics_describe", "metrics_query",
         }
         assert expected <= names, f"Missing tools: {expected - names}"
 

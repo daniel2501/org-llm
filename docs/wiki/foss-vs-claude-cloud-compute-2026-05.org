@@ -1,0 +1,194 @@
+:PROPERTIES:
+:ID:       c4f9e7b2-8a1d-4e3c-9f6b-2a7d5c8e1b4f
+:CREATED:  [2026-05-07]
+:END:
+#+TITLE: FOSS vs Claude on cloud compute — May 2026 landscape
+#+FILETAGS: :wiki:research:foss:claude:cloud-compute:dials:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* As of May 2026, FOSS still trails Claude on *general*
+intelligence (Arena ~220-point gap, AA Intelligence Index ~24-point
+gap), but matches or beats Claude on *coding-specialized*
+benchmarks via Kimi K2.6 (1T-param MoE, open MIT-modified weights,
+SWE-Bench Pro 58.6% — tied with GPT-5.5). Cost: top FOSS is 5-36×
+cheaper than Claude; Kimi K2.6 specifically is ~8-10× cheaper than
+Opus 4.7. The realistic path to "competitive with Claude on cloud
+compute" today is *Kimi K2.6 via Moonshot direct API* for
+coding-shaped work; for non-coding it remains a quality compromise
+that pays in cost/speed.
+
+*Expanded.* This page captures the May 2026 snapshot of the FOSS
+landscape relevant to org-llm's "Agor crew uses no Claude" rule
+(see =feedback_agor_no_claude= memory + [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]]
+§ Crew runtime). The rule is achievable today *for coding-shaped
+team work* via Kimi K2.6; for general open-ended judgment, the
+quality gap remains real and is closed via *D3 — per-role training/
+RAG* rather than raw model power. The four-dial framing below maps
+each lever to current evidence + practical paths.
+
+* The four dials
+
+| Dial | What it controls | Org-llm status |
+|------+------------------+-----------------|
+| *D1 — Model power/size* | Raw parameter count + architecture quality | Validated qwen30 (rounds 5-10), tested 70b/r1/120b (round-11 cut short); Kimi K2.6 + DeepSeek-V4 + gpt-oss-120b sweep planned (round-12) |
+| *D2 — Cloud hardware/provider* | Inference latency, throughput, cost | Currently OpenRouter only; direct Moonshot/DeepSeek APIs are 5-20× cheaper for same models; Modal/RunPod self-host viable past ~5K daily calls |
+| *D3 — Per-role training/RAG* | Persona-targeted knowledge (org-mode, our wiki, code corpus) | Untested; *highest leverage* for closing org-llm-task-specific gap |
+| *D4 — Operating model + harness design* | How agents coordinate, monitor, intervene | Two-phase + harness-as-mailman validated (rounds 8-10); D+B (contingencies + bounded re-prompts) per [[file:picard-agor-primer.org][picard-agor-primer.org]] is next step |
+
+The dials are *interrelated*: D2 only matters once D1 is fixed; D3
+multiplies whichever D1 you pick; D4 is largely orthogonal but
+amplifies D1+D3 results.
+
+* The May 2026 FOSS landscape
+
+** Top contenders + benchmarks
+
+| Model | Params | License | SWE-Bench Pro | AA Intel Index | Arena score | vs Claude Opus 4.7 |
+|-------+--------+---------+---------------+----------------+-------------+--------------------|
+| *Kimi K2.6* | 1T MoE / 32B active | modified MIT | *58.6% — tied with GPT-5.5* | (n/a) | (n/a) | *competitive on coding* |
+| gpt-oss-120B | 120B dense | Apache 2.0 | (n/a) | 33 | (n/a) | -24 intel index |
+| DeepSeek-R1 | (large MoE) | MIT | (strong) | (strong reasoning) | ~1280 | -220 arena |
+| Llama-3.3-70B | 70B dense | Llama community | (mid) | (mid) | (n/a) | weakest of contenders |
+| Qwen-3-235B | 235B MoE | Apache 2.0 | (strong on code) | (n/a) | (n/a) | strong if available |
+| (reference) Claude Opus 4.7 | proprietary | proprietary | (top tier) | 57 | 1503 (rank 1) | — |
+
+*Headline:* Kimi K2.6 (released 2026-04-20) is the first open-weights
+model to *match* a top-tier closed model (GPT-5.5) on a real coding
+benchmark (SWE-Bench Pro), at ~1/10th the cost. For coding-shaped
+team work this is the inflection point.
+
+** Pricing comparison (per million tokens)
+
+| Model | Provider | Input ($/M) | Output ($/M) |
+|-------+----------+-------------+--------------|
+| *Kimi K2.6* | Moonshot direct | *0.60* | *2.50* |
+| Kimi K2.6 | OpenRouter | 0.75 | 3.50 |
+| DeepSeek-V4-Pro (75% off until 2026-05-31) | DeepSeek direct | 0.435 | 0.87 |
+| DeepSeek-V4-Flash | DeepSeek direct | 0.14 | 0.28 |
+| DeepSeek-R1-0528 | Together AI | 3.00 | 7.00 |
+| Llama-3.3-70B | Together AI | 0.88 | 0.88 |
+| Qwen-3-235B-A22B | Together AI | 0.20 | 0.60 |
+| gpt-oss-120B | various (21 providers) | ~0.15 | ~0.15 |
+| (reference) Claude Opus 4.7 | Anthropic | ~5.45 | ~5.45 |
+
+*Cache discounts.* DeepSeek dropped cache-hit pricing to ~1/10 of
+launch (April 2026) — DeepSeek-V4-Pro cache hit is $0.003625/M.
+Effectively free for repeated-prompt workloads.
+
+*Reseller markup.* Direct provider APIs are 5-20× cheaper than
+OpenRouter for the same models. For production, switch to direct;
+for prototyping, OpenRouter's uniform interface is worth the markup.
+
+** Inference speed
+
+| Model | Provider | Tokens/sec |
+|-------+----------+------------|
+| gpt-oss-120B | (best provider) | 235 |
+| Llama-3.3-70B | Together Turbo | ~120-180 |
+| Claude Opus 4.7 | Anthropic | 44 |
+
+*Top FOSS at best providers is 4-6× faster than Claude.* Speed wins
+clearly; the question is whether the intelligence trade is acceptable.
+
+* Cloud hosting paths
+
+** Direct provider APIs (cheapest for our scale)
+
+| Path | Best for | Cost |
+|------+----------+------|
+| Moonshot Kimi K2.6 | Coding tasks; agent orchestration | $0.60/$2.50 per M |
+| DeepSeek-V4-Flash/Pro | Reasoning; cheap general | $0.14-0.87 per M |
+| Anthropic (Claude) | Baseline + test apparatus only — *NOT crew* | $5.45/M (ref) |
+| OpenRouter (aggregator) | Prototyping multiple models with one auth | ~25% markup vs direct |
+
+** GPU rental (self-hosted via vLLM / SGLang)
+
+| GPU | Modal $/hr | RunPod $/hr | Best for |
+|-----+------------+--------------+----------|
+| RTX 4090 (24GB) | n/a | 1.10 | Small models (7-13B) |
+| L40S (48GB) | 1.95 | 1.90 | Mid models (13-34B) |
+| A100 80GB | 2.50 | 2.72 | 70B with quantization |
+| H100 80GB | 3.95 | 4.18 | 70B FP16; large models w/ quant |
+| H200 141GB | 4.54 | 5.58 | Larger models, more headroom |
+| B200 180GB | 6.25 | n/a | Cutting-edge; future proofing |
+
+*Per-second billing on both Modal + RunPod.* Modal slightly cheaper
+on H100; RunPod has more SKU breadth + Community Cloud tier
+(cheaper but less reliable).
+
+** Crossover point: API vs self-hosted
+
+For typical org-llm task (~50K tokens):
+- API: ~$0.04/task (Kimi K2.6 via Moonshot)
+- Self-hosted on H100: $3.95/hr / 200K tokens/hr serving = $0.02/task break-even
+
+*Crossover ≈ 5,000-10,000 tasks/day.* Below that, API wins on cost.
+Above, self-host wins. Org-llm is currently far below — *use direct
+APIs*. Revisit when scaling to thousands of daily agent calls.
+
+* Path to "competitive with Claude on cloud compute"
+
+The honest answer depends on which axis you optimize:
+
+| If you optimize for… | Winner today | How to get there |
+|----------------------+--------------+------------------|
+| Lowest cost | gpt-oss-120B / DeepSeek-V4-Flash | Just swap model id in harness |
+| Fastest latency | gpt-oss-120B (235 t/s) | Pick provider with batched serving (Fireworks turbo, Together turbo) |
+| Best coding quality | *Kimi K2.6* | Moonshot direct API; swap into specialist modelConfig |
+| Best general intelligence | Claude Opus 4.7 (proprietary) | Cannot match with FOSS today |
+| Best on a *specific* org-llm task | *FOSS + RAG + per-role fine-tune* (D3) | Highest leverage; biggest setup |
+
+** For org-llm specifically (May 2026 recommendation)
+
+1. *Adopt Kimi K2.6 as the default specialist model* for coding/wiki
+   tasks. Replaces qwen3-coder-30b in the production crew runtime.
+2. *Keep DeepSeek-V4-Pro on the menu* for reasoning-heavy tasks
+   while the 75% discount runs (until 2026-05-31).
+3. *Defer self-hosting* until daily agent-call volume crosses ~5K.
+4. *Invest in D3* — RAG over =docs/wiki/= + per-persona retrieval
+   over corpus + fine-tuning on org-llm-shaped tasks. This is the
+   one dial that *closes the gap on org-llm-specific work* rather
+   than chasing general intelligence.
+5. *Operating-model improvements (D4)* — D+B pattern (plan with
+   contingency branches + bounded re-prompts) per
+   [[file:picard-agor-primer.org][picard-agor-primer.org]] amplifies
+   whichever D1 we pick.
+
+* Round-12 sweep design (2026-05-07)
+
+| Variant | Specialist model | Provider | Hypothesis |
+|---------+------------------+----------+-------------|
+| K1 (control) | qwen3-coder-30b | OpenRouter | round-10 baseline |
+| *K2* | *Kimi K2.6* | OpenRouter (or Moonshot direct) | *the headline test — coding-tier FOSS* |
+| K3 | DeepSeek (V4 / R1) | OpenRouter | reasoning-strong contender |
+| K4 | gpt-oss-120B | OpenRouter | best AA-index FOSS |
+| K5 (external baseline) | claude-sonnet-4-6 | direct =claude -p= (NOT via Agor — Claude is test apparatus only) | external benchmark for comparison |
+
+5 tasks × 5 variants = 25 cells. Sequential. Cap $1/cell, total $25.
+
+* Sources
+
+- [[https://artificialanalysis.ai/][Artificial Analysis — leaderboard + cost/perf]]
+- [[https://arena.ai/leaderboard][Arena leaderboard]]
+- [[https://www.together.ai/pricing][Together AI pricing]]
+- [[https://api-docs.deepseek.com/quick_start/pricing][DeepSeek API pricing docs]]
+- [[https://modal.com/pricing][Modal GPU pricing]]
+- [[https://www.runpod.io/pricing][RunPod pricing]]
+- [[https://openrouter.ai/moonshotai/kimi-k2.6][Kimi K2.6 on OpenRouter]]
+- Medium — Kimi K2.6 review (saving 88% coding costs)
+- CodeRouter — Kimi K2.6 vs GPT-5.5 SWE-Bench Pro review
+- Codersera — Kimi K2.6 complete guide 2026
+- AkitaOnRails — LLM coding benchmark May 2026
+
+* See also
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] § Crew runtime — the FOSS-only-crew rule
+- [[file:picard-agor-primer.org][picard-agor-primer.org]] — @picard's operational SOP (D4 layer)
+- [[file:org-llm-cli-primer.org][org-llm-cli-primer.org]] — L1a (per-agent CLI subset)
+- [[file:org-mode-per-agent-primer.org][org-mode-per-agent-primer.org]] — L1b (per-agent org-mode subset)
+- [[file:2026-05-06-agor-pilot-round-1-findings.org][2026-05-06-agor-pilot-round-1-findings.org]] — F-series pilot findings
+- [[file:2026-05-06-agor-pilot-round-2-findings.org][2026-05-06-agor-pilot-round-2-findings.org]] — R-series + team-vs-solo
+- [[file:2026-05-06-agor-pilot-round-3-findings.org][2026-05-06-agor-pilot-round-3-findings.org]] — R8-R16

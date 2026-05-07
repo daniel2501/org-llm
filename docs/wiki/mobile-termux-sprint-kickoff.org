@@ -1,0 +1,204 @@
+:PROPERTIES:
+:ID:       05c57161-9252-4b26-baf6-88b31ce10bc7
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Mobile / Termux sprint — on-device Agor + org-llm validation
+#+FILETAGS: :wiki:sprint:mobile:termux:agor:integration:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Sprint that validates the full org-llm + Agor stack
+running cleanly on Termux + termux-x11 + sway. Per the verifier
+(=/tmp/agor-mobile-termux-verify-2026-05-06.org=) the Agor daemon
+is /plausibly/ installable on aarch64 Android — Node 22 LTS is
+packaged, but =@libsql/client= ships glibc prebuilts that need a
+=npm_config_libc=glibc= spoof under Bionic. User's experienced
+termux take 2026-05-06: "promising"; default lean = native daemon
+as primary path, canvas-only as fallback. /Goal of sprint:
+validation, not feature-build./
+
+*Expanded.* Mobile is a *peer device*, not a text-mode reduction
+(per memory =project_mobile_is_full_graphical_emacs=). Termux +
+termux-x11 + sway already runs Doom Emacs, xwidget-webkit, full
+agent surfaces. What's *unverified* is whether Agor's daemon — the
+substrate for [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]] team coordination — survives on
+that stack. The verifier's evidence is structural ("Node 22 ships
+on Termux" / "libsql has a glibc-spoof escape hatch") but no public
+report of Agor specifically running on Termux exists. This sprint
+closes that loop with on-device install + smoke + one spike-team
+run. Mobile-org is an unachieved holy grail per memory
+=project_mobile_org_holy_grail=; this work is /interface design on
+a working substrate/, not a port — different knobs, different
+interface, same agents.
+
+* Mission
+
+Verify the full org-llm + Agor stack runs cleanly on the user's
+existing mobile Doom setup. Three validation gates:
+
+1. *org-llm itself* boots and =org-llm doctor= comes back clean
+2. *Agor daemon* installs + initializes + accepts smoke harness
+3. *One spike-team run* (license-decision-shaped or smaller) completes end-to-end on the phone alone
+
+Mobile is a peer device. The sprint doesn't try to replicate the
+desktop flow — it captures /what's different/ (interface notes,
+ergonomic deltas, knobs that need to differ) for a follow-on
+interface-design pass.
+
+* Pre-flight checklist (user verifies on the phone before sprint kicks)
+
+| # | Check                                          | Verify command                                  | Expected                                    |
+|---+------------------------------------------------+-------------------------------------------------+---------------------------------------------|
+| 1 | Termux installed (F-Droid, not Play Store)     | =termux-info \| grep "Termux variant"=          | =apt= variant; recent build                 |
+| 2 | termux-x11 + sway running                      | =pgrep sway && pgrep Xwayland=                  | Both alive; Doom frame visible              |
+| 3 | Doom Emacs ports cleanly                       | =emacs --version=                               | ≥ 29.x; org / org-roam available            |
+| 4 | =pkg search nodejs= shows ≥ 22.12              | =pkg search nodejs=                             | =nodejs/stable 22.x= or LTS variant         |
+| 5 | =git clone= of org-llm works                   | =git clone <repo> ~/repos/org-llm=              | Clean clone, no auth surprises              |
+| 6 | =uv= installed (Python tooling)                | =uv --version=                                  | ≥ 0.4.x                                     |
+| 7 | =pass= installed + initialized                 | =pass ls=                                       | Vault unlocked or unlock works              |
+| 8 | =SSL_CERT_FILE= set if Guix-style PATH used    | =echo $SSL_CERT_FILE=                           | Path or N/A on pure Termux                  |
+| 9 | Termux:API installed (wakelock + sensors)      | =termux-wake-lock; termux-wake-unlock=          | No errors; allowlist granted                |
+
+* Stage 1 — org-llm bare-bones install on Termux
+
+Bring org-llm itself up; verify =org-llm doctor= runs. Expect some
+failures — bash-flavor differences, missing system tools (e.g.
+=dbus=, =libnotify=), Termux-specific PATH quirks. /Failures here
+are data, not blockers./
+
+#+begin_src sh
+cd ~/repos/org-llm
+uv sync
+uv run org-llm doctor          # capture full output
+uv run org-llm --help          # verify CLI surface visible
+uv run pytest -x -q            # full suite; document red lines
+#+end_src
+
+Document each failure under § Risks below as it surfaces. Common
+suspects: bash-strict-mode hangs, =psutil= probes that assume
+desktop /proc layout, =org-roam= DB path expectations.
+
+* Stage 2 — Agor daemon install
+
+Apply the agor-pilot-install pipeline (per [[id:9dc47d5a-5efe-4a04-8a3a-45b69643e982][agor-pilot-install.org]])
+adapted for Termux — user-scope npm, glibc-spoof on libsql.
+
+#+begin_src sh
+pkg install nodejs git
+node --version                                 # ≥ 22.12
+
+# user-scope npm prefix
+npm config set prefix ~/.npm-global
+mkdir -p ~/.npm-global/bin
+# add to ~/.bashrc / ~/.config/fish/conf.d/:
+#   export PATH="$HOME/.npm-global/bin:$PATH"
+
+# glibc-spoof per verifier
+export npm_config_platform=linux
+export npm_config_libc=glibc
+
+npm install -g agor-live
+agor --version                                 # → 0.17.3 hopefully
+echo "n" | agor init --force
+agor daemon start
+curl -s http://localhost:3030/health           # → 200 hopefully
+#+end_src
+
+Document failures under § Risks. Most likely break-points: (a)
+=@libsql/client= post-install probe under Bionic; (b) =better-sqlite3=
+transitive build (clang on Termux ≠ standard); (c) port :3030
+already in use; (d) daemon crashes on first session-create due to
+filesystem-permissions issue.
+
+* Stage 3 — Smoke harness on-device
+
+Rotate the default admin password before any spawn (per
+=agor-pilot-install.org= BUG-4):
+
+#+begin_src sh
+# rotate admin per pass-store
+NEW_PW=$(pass org-llm/agor/admin-password)
+# direct sqlite UPDATE per BUG-5 workaround until /users PATCH works
+sqlite3 ~/.agor/agor.db \
+  "UPDATE users SET password='$(node -e 'console.log(require("bcryptjs").hashSync(process.argv[1],10))' "$NEW_PW")' \
+   WHERE email='admin@agor.live';"
+
+agor auth login -e admin@agor.live -p "$NEW_PW"
+agor repo add-local ~/repos/org-llm
+
+bash scripts/agor-smoke.sh                     # green/red?
+SKIP_CLAUDE=1 bash scripts/agor-smoke.sh       # REST primitives only
+#+end_src
+
+Log the green/red. Compare against desktop run from
+=docs/wiki/agor-smoke-recipe.org=. Note any timing differences
+(Termux clang-built libs may be slower than Guix prebuilts).
+
+* Stage 4 — Interface-design notes
+
+Per memory =project_mobile_org_holy_grail=, mobile needs different
+knobs + interface, not just a port. Capture observations as the
+sprint runs:
+
+- *Input ergonomics.* Soft keyboard vs. Bluetooth vs. external — does =@<agent>= prefix friction differ?
+- *Frame topology.* Single full-screen frame vs. desktop's split-pane — sidebar widget needs?
+- *Notification model.* Termux notifications vs. Doom inline — where do agent responses land most ergonomically?
+- *Capture latency.* Voice → org-capture → vault — is the chain fast enough that the user reaches for it instead of the messaging app?
+- *Daemon visibility.* Is the user aware Agor is running? Should there be a status-bar widget?
+- *Battery feel.* After 1 hour of use, what does the battery cost?
+- *Offline shape.* What still works with no network? (Should be: vault edits, agent prefetch, deterministic tools.)
+
+These notes feed a follow-on /mobile interface design/ work item —
+*not part of this sprint's exit criteria*.
+
+* Risks / Known gotchas
+
+| Risk                                                          | Likelihood | Mitigation / Detection                                                    |
+|---------------------------------------------------------------+------------+---------------------------------------------------------------------------|
+| Doze + battery management kills daemon overnight              | High       | Termux:Boot + wakelock; "Battery Unrestricted" toggle per OEM             |
+| Bionic libc vs. glibc — =@libsql/client= post-install crash   | Medium     | =npm_config_libc=glibc= spoof per verifier; fall back to canvas-only      |
+| =better-sqlite3= source build fails on Termux clang           | Medium     | Drizzle uses libsql primarily; check transitive deps before installing    |
+| Storage permissions — Termux can't read =~/org/=              | Low-Med    | =termux-setup-storage=; symlink =~/org → /storage/emulated/0/org=         |
+| Multi-process contention (Node daemon + Emacs + sway)         | Low        | OOM-killer on 6GB devices; monitor; document RAM ceiling                  |
+| xwidget-webkit availability inside Termux Emacs               | Unknown    | Test early — needed for Agor canvas viewer fallback                       |
+| Port :3030 collision with another mobile dev tool             | Low        | =AGOR_PORT= override; document chosen port                                |
+| =agor init= prompt is interactive (Termux terminal quirks)    | Low        | =echo "n" \| agor init --force= per pilot-install                         |
+| /proc layout differences break psutil probes                  | Medium     | =org-llm doctor= will surface; capture, don't fix unless blocking         |
+| Daemon-crash on backgrounded Termux                           | Med-High   | Wakelock + Termux:Boot; if still flaky → cron-style health-check restart  |
+
+* Sprint exit criteria
+
+Sprint is *DONE* when all three are true:
+
+1. =org-llm doctor= returns clean (or only documented-acceptable warnings) on the phone
+2. =bash scripts/agor-smoke.sh= returns green on the phone
+3. *One spike-team run* — any minimal multi-agent dispatch (e.g. a 2-child investigation) — completes end-to-end on the phone alone, with verified =genealogy.parent_session_id= edges and a captain's-log entry written
+
+Anything beyond those three is bonus. Specifically /not/ in scope:
+mobile-specific UI work, sidebar redesign, notification integration,
+multi-agent canvas tuning. Those are follow-ons.
+
+* Open questions
+
+| Q                                                                                       | Resolves how                                              |
+|-----------------------------------------------------------------------------------------+-----------------------------------------------------------|
+| Does Agor's UI canvas render in Termux's Firefox / Chromium?                            | Stage 2 includes browser smoke; document               |
+| Does Doze eventually nuke the daemon overnight?                                         | 24 h soak test post-sprint; needs separate session     |
+| Do we need a wakelock CLI verb (=org-llm mobile wakelock=)?                             | Decided post-sprint based on Doze observation           |
+| Is the canvas-only fallback (remote daemon, phone as viewer) materially worse?          | A/B with native daemon once both work                   |
+| Should mobile run a /smaller/ agent roster (e.g. drop =@geordi='s longitudinal pulls)?  | Phase-26.x interface-design pass; not this sprint       |
+| Battery cost of 1 hour active use?                                                      | Stage 4 capture; benchmark needed                       |
+| Storage-permissions friction — does =termux-setup-storage= survive Android updates?     | Document on first hit; add to checklist                 |
+
+* Cross-refs
+
+- [[id:9dc47d5a-5efe-4a04-8a3a-45b69643e982][agor-pilot-install.org]] — desktop pipeline; this sprint adapts it
+- [[id:4e05d9b8-9399-4e88-9409-11dfe9cf390a][agor-smoke-recipe.org]] — smoke-harness reference
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — what we're trying to keep working on mobile
+- [[id:b537c80a-4451-4d5e-a191-6769e86a93f9][life-as-code.org]] — mobile is core, not peripheral
+- [[id:10b267cb-79a6-41af-bef1-5577e23e7559][remote-control.org]] — conversational-UI-as-remote framing
+- [[id:d2a4fe88-890e-460a-93dd-de9d0590edbc][now.org]] § Open follow-ups — sprint item filed 2026-05-06
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-017 (integration); DEC-016 (per-device config)
+- =/tmp/agor-mobile-termux-verify-2026-05-06.org= — verifier artifact (works-with-caveats verdict)

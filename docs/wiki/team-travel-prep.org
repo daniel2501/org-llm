@@ -1,0 +1,119 @@
+:PROPERTIES:
+:ID:       a436a83e-ab89-461a-b5b3-e7151b162a26
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Spike team — travel prep (=@riker= + =@data= + =@geordi=)
+#+FILETAGS: :wiki:concept:multi-agent:teams:spike:travel:design:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* The /travel-prep team/ is a *spike team* under
+[[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]]: =@riker= owns the pre-trip TODO checklist
++ =SCHEDULED:= cookies, =@data= drafts the itinerary (locations +
+legs + notes), =@geordi= pulls live weather + flight status into a
+=:DATA:= drawer that auto-refreshes 24 h pre-departure. Trigger is
+a new org-roam node tagged =:trip:= or a calendar event imported
+into the agenda. Dissolves once the post-trip debrief is written
+(usually D+1 to D+3 after return).
+
+*Expanded.* Travel prep is a /coordinated checklist + live-data/
+job: deterministic structure (the booking/packing/paperwork ladder
+is the same every trip) plus volatile inputs (weather, flight delay,
+hotel cancellation deadlines). Solo =delegate()= can draft the
+checklist, but it can't keep =:DATA:= drawers fresh as departure
+approaches. The team-shape buys two things solo doesn't: (1) the
+=@geordi= refresher fires deterministically on schedule, not when
+the user remembers to ask; (2) the /post-trip debrief/ closes the
+loop — observations feed the next trip's checklist priors. This is
+classic spike-team work per [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]] § Spike-team
+examples.
+
+* Roster
+
+| Role        | Bridge Crew | Job                                                                          |
+|-------------+-------------+------------------------------------------------------------------------------|
+| Scheduler   | =@riker=    | Reads departure/return; emits TODO ladder w/ =SCHEDULED:= cookies            |
+| Itinerist   | =@data=     | Drafts itinerary (legs, locations, notes, contingency one-liners)            |
+| Data feed   | =@geordi=   | Pulls weather forecast + flight status into =:DATA:= drawer; refresh hooks   |
+
+| Aspect            | Value                                                                  |
+|-------------------+------------------------------------------------------------------------|
+| Lifetime          | =spike= (one-off per trip; same shape recurs)                          |
+| Cadence           | Trigger-fired + scheduled refreshes (D-7, D-1, D-0)                    |
+| Captain pre-fetch | Trip node front-matter + agenda-imported calendar entry (DEC-006)      |
+| LLM call shape    | One captain call per ladder-emit; one =@geordi= refresh per scheduled tick |
+| Dissolve trigger  | Post-trip debrief written; trip node tagged =:trip:done:=              |
+
+* Triggers
+
+The team can be /spawned/ from any of three seams; all converge on
+the same captain dispatch.
+
+| # | Trigger source                                              | What it carries                                |
+|---+-------------------------------------------------------------+------------------------------------------------|
+| 1 | New org-roam node tagged =:trip:=                           | Title, dates, destination, optional confirmation # |
+| 2 | =:trip:= node modified to add =SCHEDULED:= depart/return    | Auto-promote → ladder rebuild                  |
+| 3 | Calendar import (gcal/ics) into agenda w/ =CATEGORY: travel= | Synthesises a stub trip node, then trigger 1 |
+
+* Tick-by-tick
+
+*Initial tick* (T0, when trigger fires):
+
+1. Captain (=@picard=, default) reads trip node + agenda entry — pre-fetch per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-006 — supervision is deterministic by default]]
+2. Spawn =@riker= — emits TODO ladder: booking checks (T-30→T-7), packing list (T-3), paperwork (passport/visa, T-14), check-in (T-1)
+3. Spawn =@data= in sibling session — drafts itinerary skeleton (legs, locations, note slots) under =* Itinerary= heading
+4. Spawn =@geordi= — fills =:DATA:= drawer with first weather + flight pull; sets refresh-hook schedule
+
+*Refresh ticks* (D-7, D-1, D-0): scheduled =@geordi= sessions only — re-pull, diff into drawer, no LLM if values unchanged.
+
+*Closeout tick* (D+1 to D+3): captain reads post-trip notes; =@data= drafts a debrief; ladder priors written back to agent memory.
+
+* Inputs / outputs
+
+| Direction | What                                                          | Surface                                  |
+|-----------+---------------------------------------------------------------+------------------------------------------|
+| In        | Trip dates + destination + confirmation #s                    | Org-roam node front-matter               |
+| In        | Calendar entry (when stub-synthesised)                        | =org-agenda= imported event              |
+| In        | Weather API (OpenWeather or wttr.in)                          | =@geordi='s data tools                   |
+| In        | Flight status API (FlightAware free / openflights)            | =@geordi='s data tools                   |
+| Out       | TODO ladder w/ =SCHEDULED:= cookies                           | Trip node body                           |
+| Out       | =:DATA:= drawer (weather + flight)                            | Trip node properties drawer              |
+| Out       | Post-trip debrief paragraph                                   | Trip node body, under =** Debrief=       |
+| Out       | =kind=team-session= captain's-log entries (per tick)          | =captains-log-*.org=                     |
+
+* Per-tick cost
+
+| Line item                                | Per-tick estimate     | Notes                                  |
+|------------------------------------------+-----------------------+----------------------------------------|
+| Captain dispatch (sonnet, 1 turn)        | ~$0.05–0.10           | One call per ladder-emit               |
+| =@riker= ladder draft (haiku)            | folded                | Sub-spawn under captain                |
+| =@data= itinerary draft (sonnet)         | ~$0.04–0.08           | Length-driven; single trip → 1 turn    |
+| =@geordi= refresh (deterministic)        | $0.00 (no LLM if diff = ∅) | LLM only fires on /significant/ delta |
+| Per-trip total (T0 + 3 refreshes + debrief) | ~$0.15–0.30        | Bounded by trip complexity             |
+
+* Evolution
+
+- *Toolset adapts.* First trips the agent calls a generic =fetch_weather=. After ~5 trips, Phase 2026-05.20 — sync verb POC — self-coded tools promotes the per-destination-pattern (e.g. "EU summer" vs "tropical wet") to a deterministic profile, and the LLM stops re-deriving each time.
+- *Roster pinned this phase.* The 3-role shape covers the validated work; a 4th /booking-actuator/ role (one that actually books a flight, not just lists actions) is a future spike, gated on outbound effect-tool review per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-013 — two-tier tool model (data / effect)]].
+- *Cross-team graduation.* If a user travels weekly, the spike pattern graduates to a /long-lived/ travel-cadence team per [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]] § Transitions between lifetimes.
+
+* Failure modes
+
+| Mode                                       | Likely cause                                  | Mitigation                                       |
+|--------------------------------------------+-----------------------------------------------+--------------------------------------------------|
+| Stale =:DATA:= drawer at departure         | Refresh-hook scheduler missed (24 h JWT exp)  | Token-refresh primitive landed (=agor-token-refresh.sh=) |
+| Wrong dates → wrong ladder                 | Trip node parsed before user finalised dates  | Ladder is /idempotent/ — re-emit on date change  |
+| API outage (weather/flight)                | External provider down                        | Drawer keeps last-known + timestamp; captain narrates "stale @ T" |
+| Conflicting calendar import + roam node    | Same trip captured twice                      | Dedupe on (destination, depart-date) tuple       |
+| User redacts trip mid-flight (privacy)     | =:PRIVATE:= retag on roam node                | Refresh-hook reads tag; halts data pulls         |
+
+* Cross-refs
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — § Spike-team examples; § Coordination patterns
+- [[id:73649a8c-c9d8-4691-9959-c726615b6635][spike-team-license-pilot.org]] — sibling validated spike-team run
+- [[id:b537c80a-4451-4d5e-a191-6769e86a93f9][life-as-code.org]] — travel as a life domain
+- [[id:c4e2d3a1-7f9b-4c5e-8d6a-2b3f4e9c1d57][agent-time-awareness.org]] — Layer 3 scheduling for refresh ticks
+- [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]] — =@riker= / =@data= / =@geordi= handle detail
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-006 (deterministic supervision); DEC-011 (files canonical); DEC-013 (data/effect tool tiers)

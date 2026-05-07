@@ -1,0 +1,139 @@
+:PROPERTIES:
+:ID:       86ed81e4-5b38-4c59-b16b-d2163b84ebcf
+:CREATED:  [2026-05-07]
+:END:
+#+TITLE: Long-lived team — personal-CI (verify → graph-update → digest)
+#+FILETAGS: :wiki:concept:multi-agent:teams:long-lived:life-as-code:ci:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* The /personal-CI team/ is a =long-lived= team under
+[[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]] that runs Claude-Code-style continuous-
+integration over the vault as if it were a codebase. =@boothby= runs
+hygiene checks (orphans, broken =[[id:…]]= links, freshness drift);
+=@atoz= updates the org-roam concept graph against the change set;
+=@data= writes a /what changed today/ digest at end-of-day. Trigger
+fires on each vault change (file save via =org-after-save-hook=, or
+git commit). The team surfaces drift /before it bites/ — broken
+cross-refs caught the day they appear, not the next time you open
+the wiki and notice nothing renders.
+
+*Expanded.* This is the [[id:b537c80a-4451-4d5e-a191-6769e86a93f9][life-as-code]] dev-as-code analogy at its
+sharpest: vault = repo, save/commit = push, this team = CI. The
+sibling /vault-hygiene/ team (per [[id:3a8b1f72-9c4d-4e21-a5d8-7b2e9f1c3a6d][long-lived-team-vault-hygiene]])
+runs /scheduled/ (daily cron); /personal-CI/ runs /reactive/ (per
+change). They share =@boothby= but with different cadence
+contracts — hygiene is the deep nightly sweep, CI is the cheap
+fast check. Per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-006 — supervision is deterministic by default]],
+the verify + graph-update steps fire data tools first; only the
+end-of-day digest narrates via LLM.
+
+* Roster
+
+| Persona   | Role-in-team                                          | Agor primitive used                                  |
+|-----------+-------------------------------------------------------+------------------------------------------------------|
+| =@boothby=| Verifier — orphans, broken links, freshness checks    | /sibling-session by boardId/ (captain on each tick)  |
+| =@atoz=   | Graph updater — org-roam concept graph reconciliation | /async peer query/ (=btw=) when verify finds drift   |
+| =@data=   | Digest writer — end-of-day "what changed today"       | /scheduled heartbeat/ (21:30 EST roll-up)            |
+
+Captain is =@boothby= per-tick (verify owns the gate); =@data=
+captains the end-of-day digest tick.
+
+* Triggers
+
+| Trigger                                            | Fires which sub-tick                              |
+|----------------------------------------------------+---------------------------------------------------|
+| =org-after-save-hook= on any =~/org/*.org=         | Reactive tick — verify + graph-update             |
+| =post-commit= git hook in =~/org=                  | Same reactive tick on commit batch                |
+| =org-roam-db-sync-after= signal                    | Graph-update only (no verify needed)              |
+| Cron =30 21 * * *= EST                             | End-of-day digest — =@data= narrates day's deltas |
+| Manual =M-x org-llm-ci-verify=                     | Same as reactive tick, on-demand                  |
+
+Reactive tick is sub-second on a single-file save; the digest is
+~25 s + one LLM call.
+
+* Tick-by-tick walkthrough
+
+Sample reactive tick at 2026-05-07 11:42 EST: user saves
+=docs/wiki/team-daily-journal.org= which links to a not-yet-written
+=intention-tracker.org=.
+
+| Step | t (EST)    | Action                                                                          | Outcome                                                       |
+|------+------------+---------------------------------------------------------------------------------+---------------------------------------------------------------|
+|    1 | 11:42:00.0 | =org-after-save-hook= fires on dailies write                                    | Reactive tick begins; boardId resolved                        |
+|    2 | 11:42:00.1 | =@boothby= verifier — diff vs. last commit; cheap orphan + link probe          | Detects new =[[id:…][intention-tracker]]= → no matching node  |
+|    3 | 11:42:00.2 | Verifier files broken-link signal in =/tmp/personal-ci-2026-05-07.jsonl=        | Deterministic; 0 LLM tokens                                   |
+|    4 | 11:42:00.3 | =@boothby= fires =btw= peer query → =@atoz= "is this a deferred concept?"      | =@atoz= reads roam DB; answers "no node, no draft" in 80 ms   |
+|    5 | 11:42:00.4 | =@atoz= updates concept graph — adds /pending/ marker for intention-tracker     | Graph stays self-consistent; pending node tracked             |
+|    6 | 11:42:00.5 | =@boothby= surfaces a non-blocking notice via sidebar JSON                      | User sees a soft hint; no modal interrupt                     |
+|    7 | 11:42:00.6 | Reactive tick complete — appends one line to =memory/2026-05-07.md=             | "11:42 broken-link team-daily-journal→intention-tracker"      |
+
+End-of-day digest tick (21:30 EST) reads the day's =memory/= lines
+(say 6 reactive ticks fired), groups by file/concept, and =@data=
+narrates a /what changed today/ subtree into
+=~/org/dailies/2026-05-07.org=. Mirror-shape to vault-hygiene's
+narration: interpretation over deterministic facts.
+
+* Inputs / Outputs
+
+| Direction | Source                                                 | Sink                                                       |
+|-----------+--------------------------------------------------------+------------------------------------------------------------|
+| In        | Saved/committed =~/org/*.org= files (diff vs. HEAD)    | Reactive tick                                              |
+| In        | =~/org/.org-roam/= sqlite                              | =@atoz= graph-update                                       |
+| In        | =memory/{YYYY-MM-DD}.md= per assistant                 | =@data= end-of-day digest                                  |
+| Out       | =/tmp/personal-ci-<date>.jsonl= signal log             | Sidebar JSON + captain's-log bridge                        |
+| Out       | Updated org-roam graph (pending markers)               | =~/org/.org-roam/=                                         |
+| Out       | Sidebar non-blocking notices                           | =org-llm= sidebar widget                                   |
+| Out       | =* What changed today= subtree, end-of-day             | =~/org/dailies/<date>.org=                                 |
+| Out       | =kind=team-session= bridge record per tick             | =~/org/captains-log-*.org= (rotated)                       |
+
+Files canonical per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011]]; org-roam DB stays render-side.
+
+* Per-tick cost estimate
+
+| Sub-tick                            | LLM spend  | Wall clock   | Notes                                       |
+|-------------------------------------+------------+--------------+---------------------------------------------|
+| Reactive tick (verify + graph)      | $0.000     | <1 s         | Fully deterministic; data-tier tools only   |
+| End-of-day digest (1 LLM turn)      | ~$0.05     | ~25 s        | =@data= sonnet narrates over pre-fetch      |
+| Per-day total (~10 reactive + 1)    | ~$0.05     | ~26 s        | Heavy edit days hit 30+ ticks, still ~$0.05 |
+| Per-year (365 days)                 | ~$18       | ~2.6 h total | Inside reasonable threshold                 |
+
+Cost is *flat* in number of saves because reactive ticks are
+deterministic — only the digest narrates. This is the DEC-006
+invariant earning its keep at the team level.
+
+* Evolution path
+
+| After N runs | What changes                                                                       |
+|--------------+------------------------------------------------------------------------------------|
+| 1 week       | =@boothby='s probe set tunes — false-positive orphans drop                         |
+| 1 month      | Phase 2026-05.20 — sync verb POC — self-coded tools promotes recurring verify patterns to dbt models       |
+| 3 months     | Pre-commit elisp lint emerges — block save on guaranteed-broken =[[id:…]]=         |
+| 6 months     | Concept-graph health score on the analytics dashboard (=@geordi= dbt model)        |
+| 1 year       | /Personal-CI badge/ on the README mirrors GitHub-CI ergonomics for the vault       |
+
+Roster pinned this phase; toolset evolves underneath. =@geordi= may
+join later for the analytics surface but is not in the v0 roster.
+
+* Failure modes
+
+| Mode                                              | Symptom                                                      | Mitigation                                                  |
+|---------------------------------------------------+--------------------------------------------------------------+-------------------------------------------------------------|
+| =org-after-save-hook= recursion                   | CI tick fires on its own write                               | Hook skips when modification source = =@boothby=            |
+| Save-storm (mass refile / bulk edit)              | 100+ ticks fired in one minute                               | Debounce to 1 s; coalesce into batch tick                   |
+| =@atoz= roam-DB write contention                  | Two ticks racing on the same node                            | Per-claim board entry per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-005 — claim before touch]] |
+| Pending markers accumulate forever                | Graph clutters with never-resolved /pending/ nodes           | Vault-hygiene team sweeps pendings >30 d on its nightly run |
+| Digest fires on day with zero CI signal           | Empty "what changed today" wastes a turn                     | Skip digest when memory line count = 0                      |
+| JWT expiry on the digest cron (day 2 of cron)     | Silent end-of-day failure                                    | =scripts/agor-token-refresh.sh= per multi-agent-org-llm § validated primitives |
+| Privacy leak via digest                           | Sensitive change description surfaces                        | Redactor pre-narration per [[id:25ae60fa-ca6c-4e6d-94d3-84f16b352d14][pii-redaction-pre-sms]] |
+
+* Cross-refs
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — § Long-lived team examples; § Coordination patterns
+- [[id:3a8b1f72-9c4d-4e21-a5d8-7b2e9f1c3a6d][long-lived-team-vault-hygiene.org]] — sibling team; nightly deep sweep vs. this team's reactive shape
+- [[id:b537c80a-4451-4d5e-a191-6769e86a93f9][life-as-code.org]] — dev-as-code special case; CI is the canonical analogy
+- [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster.org]] — =@boothby=, =@atoz=, =@data= persona detail
+- [[id:25ae60fa-ca6c-4e6d-94d3-84f16b352d14][pii-redaction-pre-sms.org]] — redaction shape for digest privacy
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-005 (claim before touch); DEC-006 (deterministic supervision); DEC-011 (files canonical); DEC-014 (Bridge Crew); DEC-017 (integration only)

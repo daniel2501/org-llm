@@ -1,0 +1,104 @@
+:PROPERTIES:
+:ID:       ce2e4d01-4e45-4acd-8ca1-310085c8b821
+:CREATED:  [2026-05-04]
+:UPDATED:  [2026-05-04]
+:END:
+#+TITLE: Walkthroughs — small-step explainers agents drive
+#+FILETAGS: :wiki:concept:walkthroughs:teaching:
+#+OPTIONS: toc:nil num:nil
+
+* What a walkthrough is
+
+A *walkthrough* is a small-step explainer that an agent uses to
+guide a user through a complex idea or plan one beat at a time.
+Each step is as long as it needs to be — and no longer. The
+default contract is: the user never has to scroll back to take
+in a single step.
+
+Walkthroughs live at =docs/wiki/walkthroughs/<topic>.org=. One
+file per topic. The topic is the addressable name (=dbt=,
+=now-dashboard=, =proxy-interceptors=, …). Agents read the file
+and deliver it step-by-step in conversation.
+
+* Why this is its own concept
+
+The wiki has long-form reference pages. The CLI has =tutor=
+(stateless, named-step onboarding). Walkthroughs sit between:
+
+| Surface         | Audience           | Length    | Driver         |
+|-----------------+--------------------+-----------+----------------|
+| Wiki page       | self-serve reader  | full doc  | user reads     |
+| =tutor= step    | first-time user    | 1 panel   | CLI prints     |
+| *Walkthrough*   | mid-task user      | N steps   | agent paces    |
+
+The walkthrough is the only one where an *agent* paces the
+delivery — pausing for questions, branching when the user pulls
+on a thread, resuming when they say "next."
+
+* The shape of a walkthrough file
+
+#+begin_example
+* Step 1 — <one-line headline>
+<as long as it needs to be — keep to one screen ideally>
+
+* Step 2 — <…>
+…
+
+* Branches
+- "what about X?" → see step 4
+- "I want the proxy version" → see [[id:…][proxy interceptors walkthrough]]
+#+end_example
+
+The headlines matter — agents address steps by name when the
+user branches. Cross-links to other walkthroughs (or wiki
+pages) make branching cheap.
+
+* How agents use them
+
+1. User asks "explain how X works" or "walk me through Y."
+2. Agent looks up =docs/wiki/walkthroughs/<topic>.org= (or
+   proposes scaffolding one if absent — same Rule 2 as the rest
+   of the wiki).
+3. Agent delivers step 1, ends with "ready for step 2?" or an
+   open prompt.
+4. User says "next," asks a question, or branches.
+5. Agent honors the branch — answers the question or jumps to a
+   different step / walkthrough — then offers to resume.
+
+The agent does *not* dump all steps at once. The point of the
+format is that the user controls the pace.
+
+* When to write a walkthrough vs. extend a wiki page
+
+Write a walkthrough when:
+
+- The topic only makes sense unfolded across several beats.
+- A single user has asked the same multi-part question twice.
+- An existing wiki page is reference-shaped (good for lookup,
+  bad for first-time understanding).
+
+Extend the wiki page when:
+
+- The topic is a single idea, not a chain.
+- The reader is looking up a fact, not building a mental model.
+
+A wiki page and a walkthrough on the same topic can coexist —
+the page is the reference, the walkthrough is the guided tour.
+
+* Source files
+
+- =docs/wiki/walkthroughs/= — the directory of walkthrough
+  org files
+- (future) an MCP tool surface =list_walkthroughs= /
+  =get_walkthrough_step= mirroring =tutor='s pattern, so
+  in-opencode agents can drive walkthroughs without re-reading
+  the file each turn.
+
+* Related
+
+- [[id:39c17d6a-b502-4d9a-adc9-3cf71f776ad2][Tutor]] — sibling
+  concept; stateless named-step onboarding curriculum
+- [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][Wiki conventions]] —
+  walkthroughs follow the same self-updating + always-notified
+  rules as the rest of the wiki
+- [[id:e0000000-1111-2222-3333-eeeeeeeeeeee][Wiki index]]

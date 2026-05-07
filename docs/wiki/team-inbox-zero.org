@@ -1,0 +1,131 @@
+:PROPERTIES:
+:ID:       18889c5e-3a0c-49fd-8610-25569798aad7
+:CREATED:  [2026-05-07]
+:END:
+#+TITLE: Team — inbox-zero (SMS / email / voice triage)
+#+FILETAGS: :wiki:concept:multi-agent:teams:long-lived:inbox:remote-control:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* The /inbox-zero team/ is a long-lived team under [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]]:
+=@data= classifies inbound messages (action / context / file-and-forget),
+=@riker= queues TODOs or follow-ups into the agenda, =@atoz= routes
+file-and-forget items to the right vault file. Outbound digest is a
+short SMS reply summarising what landed where, run through PII
+redaction per [[id:25ae60fa-ca6c-4e6d-94d3-84f16b352d14][pii-redaction-pre-sms]] before send.
+
+*Expanded.* This team is the natural fit for the "remote control"
+framing per [[id:10b267cb-79a6-41af-bef1-5577e23e7559][remote-control]]: every external channel adapter (Twilio
+SMS, Whisper voice, Tasker tap, mailbox poll) collapses into one
+HTTP POST that fires this team. The /unit of work/ is one inbound
+message; the team's job is to make sure nothing falls through and
+the user gets a one-sentence ack that closes the loop. Event-fired,
+not heartbeat-fired — a heartbeat-shaped sweep would let urgent
+items sit too long.
+
+* Roster
+
+| Persona  | Role-in-team           | Agor primitive used                          |
+|----------+------------------------+----------------------------------------------|
+| =@data=  | Classifier             | Scout-pattern dispatch (one focused turn)    |
+| =@riker= | Agenda queuer          | Sibling-session by boardId (shares classifier output) |
+| =@atoz=  | Filer (file-and-forget)| Sibling-session by boardId (parallel to @riker) |
+| =@picard= (latent) | Captain on ambiguity | Async peer query (=btw=) when classification uncertain |
+
+Captain is implicit — =@data= leads the tick; =@picard= only wakes
+on a =btw= escalation when the classifier's confidence dips.
+
+* Triggers
+
+| Source          | Adapter                         | Inbound shape          |
+|-----------------+---------------------------------+------------------------|
+| SMS             | Twilio webhook → proxy POST     | Text body + sender     |
+| Email           | Mailbox poll (IMAP IDLE)        | Header + body          |
+| Voice memo      | Whisper transcription           | Plaintext + duration   |
+| Tasker tap      | Termux HTTP POST                | Pre-tagged payload     |
+| Watch glance    | Voice → Whisper                 | Plaintext, ≤30 chars   |
+
+Each adapter normalises to one =POST /inbox= on the proxy; the team
+fires once per message.
+
+* Tick-by-tick walkthrough
+
+Sample run: SMS arrives 14:32 EST — /"reminder pick up daniel's
+prescription thursday after 3"/.
+
+| Step | t (EST)  | Action                                                 | Outcome                                                  |
+|------+----------+--------------------------------------------------------+----------------------------------------------------------|
+|    1 | 14:32:00 | Twilio webhook → =POST /inbox= → channel adapter       | Normalised payload + =:CHANNEL: sms= tag                 |
+|    2 | 14:32:01 | =@data= classifier turn (haiku, 1 turn)                | Class = =action=; entities = {prescription, Thursday 15:00}; confidence 0.94 |
+|    3 | 14:32:03 | Sibling spawn: =@riker= picks up =class:action=        | Drops =TODO Pick up prescription= into agenda, =SCHEDULED: <2026-05-08 Thu 15:00>= |
+|    4 | 14:32:03 | Sibling spawn: =@atoz= idles (no file-and-forget body) | No-op; logs skip reason                                  |
+|    5 | 14:32:04 | Captain's-log =kind=team-session= record               | =boardId=, sessions, class, confidence appended          |
+|    6 | 14:32:04 | Outbound digest builder                                | "Queued: prescription Thu 3pm. (action)"                 |
+|    7 | 14:32:05 | PII redaction pass per [[id:25ae60fa-ca6c-4e6d-94d3-84f16b352d14][pii-redaction-pre-sms]]              | Pass — no =:PRIVATE:= tokens, no phone numbers in body   |
+|    8 | 14:32:06 | Twilio outbound SMS                                    | Delivered; loop closed in ~6s                            |
+
+Counterfactual classes: =context= → =@riker= schedules a follow-up
+ping instead of a TODO; =file-and-forget= → =@atoz= routes (e.g.
+recipe link → =recipes.org=, weight reading → =health.org=) and the
+digest names the destination file.
+
+* Inputs / Outputs
+
+| Direction | Item                              | Source / sink                              |
+|-----------+-----------------------------------+--------------------------------------------|
+| In        | Normalised inbox payload          | Channel adapter (=POST /inbox=)            |
+| In        | Vault-fact pre-fetch (recent agenda, contact map) | =vault_profile_digest()=, deterministic   |
+| Out       | Agenda TODO / scheduled item      | =~/org/inbox.org= or matching project file |
+| Out       | Filed note                        | Routed vault file (=@atoz= picks)          |
+| Out       | SMS ack digest                    | Twilio outbound (post-redaction)           |
+| Out       | Captain's-log =kind=team-session= | =org_llm/logbook.py=                       |
+
+* Per-tick cost estimate
+
+| Line item                                    | Per-tick                       |
+|----------------------------------------------+--------------------------------|
+| =@data= classifier (haiku, 1 turn, ~400 tok) | $0.0012                        |
+| =@riker= or =@atoz= action (haiku, 1 turn)   | $0.0010                        |
+| Vault pre-fetch                              | $0.00 (deterministic)          |
+| PII redaction                                | $0.00 (regex + allowlist)      |
+| Twilio outbound segment                      | $0.0079 (1 segment)            |
+| /Total/                                      | /~$0.010/                      |
+| Wall clock                                   | 4–8 s (SMS-bound)              |
+
+At 30 messages/day: ~$0.30/day, ~$110/year. Voice adds Whisper at
+~$0.006/min on top.
+
+* Evolution path
+
+| Run count   | Change                                                                                                |
+|-------------+-------------------------------------------------------------------------------------------------------|
+| ~50 ticks   | Classifier confidence histogram drives auto-promotion of high-confidence routes; low-confidence stays LLM |
+| ~200 ticks  | Top filing destinations ("recipes", "health", "shopping") graduate from =@atoz= LLM picks to a Phase 2026-05.20 — sync verb POC dbt model |
+| ~500 ticks  | =@riker= priority cookie heuristic (A/B/C from sender + verb) graduates to deterministic tool          |
+| Roster      | =@picard= =btw= path retires once classifier confidence floor hits 0.85 sustained over a 30-day window |
+
+Phase 2026-05.20 — sync verb POC promotion path is the cost lever — every classification
+that becomes deterministic shaves a haiku call.
+
+* Failure modes
+
+| Mode                              | Symptom                                             | Mitigation                                |
+|-----------------------------------+-----------------------------------------------------+-------------------------------------------|
+| Classifier mis-routes urgent item | =action= mis-classed as =context=                   | Confidence floor → =btw= to =@picard=    |
+| PII leak                          | Redaction misses a token                            | Allowlist-only redactor; fail-closed default per [[id:25ae60fa-ca6c-4e6d-94d3-84f16b352d14][pii-redaction-pre-sms]] |
+| Twilio outage                     | Outbound digest stuck                               | Retry-or-bounce contract per [[id:10b267cb-79a6-41af-bef1-5577e23e7559][remote-control]] § Failure modes |
+| Adapter spam                      | Mailbox poll fires 1000s of messages on backlog     | Per-adapter rate limit; budget cap on team |
+| Daemon offline                    | Inbound silently dropped                            | Channel-side fallback queue; ack-on-recover |
+| Channel auth lapse                | Twilio token expiry → silent muting                 | =@geordi= daily-review surfaces auth health |
+
+* Cross-refs
+
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm]] — § Long-lived team examples; § Coordination patterns
+- [[id:10b267cb-79a6-41af-bef1-5577e23e7559][remote-control]] — channel adapter shape; the team's outbound seam
+- [[id:b537c80a-4451-4d5e-a191-6769e86a93f9][life-as-code]] — outbound flows are first-class
+- [[id:25ae60fa-ca6c-4e6d-94d3-84f16b352d14][pii-redaction-pre-sms]] — outbound redaction contract
+- [[id:3a8b1f72-9c4d-4e21-a5d8-7b2e9f1c3a6d][long-lived-team-vault-hygiene]] — sibling-team shape; same captain's-log bridge pattern
+- [[id:6f1d3a8e-9c2b-4e7f-a5d6-c8b9e0f1a2b3][agent-roster]] — =@data= / =@riker= / =@atoz= handles
+- [[id:190baa35-06d1-4b34-a67d-2926859f47cb][decisions.org]] — DEC-006 (deterministic supervision); DEC-008 (@-prefix seam); DEC-014 — Bridge Crew
