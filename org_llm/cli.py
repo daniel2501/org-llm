@@ -6202,6 +6202,105 @@ def superset_prune_cmd(
     )
 
 
+@superset_app.command("verify")
+def superset_verify_cmd(
+    url: Annotated[
+        str,
+        typer.Option("--url", help="Superset base URL")
+    ] = "http://localhost:8088",
+    user: Annotated[
+        str,
+        typer.Option("--user", "-u", help="Superset username")
+    ] = "admin",
+    password: Annotated[
+        str,
+        typer.Option("--password", "-p", help="Superset password")
+    ] = "admin",
+    dashboard: Annotated[
+        Optional[str],
+        typer.Option("--dashboard",
+                     help="Verify only this dashboard's charts (slug). "
+                          "Omit to verify every chart in the workspace.")
+    ] = None,
+    screenshots: Annotated[
+        Optional[Path],
+        typer.Option("--screenshots",
+                     help="Save per-chart PNGs into this directory.")
+    ] = None,
+    timeout_ms: Annotated[
+        int,
+        typer.Option("--timeout-ms",
+                     help="Per-chart Playwright navigation timeout")
+    ] = 30000,
+):
+    """Headless-render every Superset chart and report any that fail.
+
+    The chart-data API can return HTTP 200 with clean SQL while the
+    React/echarts client still fails to render — wrong form_data
+    shape (e.g. heatmap_v2 needing singular `metric` instead of
+    `metrics: [...]`), missing x_axis on echarts_timeseries_*,
+    control-panel required fields. This verb catches that whole
+    class of bug by actually rendering each chart in headless
+    Chromium and scanning the DOM for known error markers.
+
+    Requires the Superset venv (default
+    ~/.local/share/org-llm/superset-venv) to have Playwright +
+    Chromium installed. Override via ORG_LLM_SUPERSET_VENV.
+
+    Exit codes: 0 if every chart rendered, 1 if any failed, 2 if
+    the runner couldn't reach Superset.
+    """
+    from .superset_verify import superset_venv_present, verify
+
+    if not superset_venv_present():
+        on_screen(
+            "[red]Superset venv not found.[/red] Install per "
+            "[bold]docs/wiki/superset.org § Hosting & install[/bold] "
+            "or set ORG_LLM_SUPERSET_VENV to override the path."
+        )
+        raise typer.Exit(2)
+
+    try:
+        results = verify(
+            url=url,
+            user=user,
+            password=password,
+            dashboard_slug=dashboard,
+            screenshot_dir=screenshots,
+            timeout_ms=timeout_ms,
+        )
+    except Exception as e:
+        on_screen(f"[red]verify runner failed:[/red] {e}")
+        raise typer.Exit(2)
+
+    if not results:
+        on_screen("[dim](no charts found to verify)[/dim]")
+        return
+
+    tbl = Table(box=None, pad_edge=False, show_header=True)
+    tbl.add_column("id", justify="right", style="dim")
+    tbl.add_column("chart")
+    tbl.add_column("status", justify="center")
+    tbl.add_column("error", style="red")
+    fails = 0
+    for r in results:
+        status = "[green]✓[/green]" if r.ok else "[red]✗[/red]"
+        if not r.ok:
+            fails += 1
+        tbl.add_row(str(r.chart_id), r.name, status, r.error or "")
+    console.print(tbl)
+
+    if fails:
+        on_screen(
+            f"[red]{fails}/{len(results)} chart(s) failed[/red] — "
+            f"see error column above"
+        )
+        raise typer.Exit(1)
+    on_screen(
+        f"[lcars2]all {len(results)} chart(s) rendered[/lcars2]"
+    )
+
+
 agent_app = typer.Typer(
     help=("Per-row CRUD on the `agent` DB table — Layer 2 of "
           "the agent resolution stack (Python builtins → DB → "
@@ -23854,113 +23953,6 @@ def completion(
         elif shell == "fish":
             on_screen("Reload:  source ~/.config/fish/completions/org-llm.fish")
     make_it_so()
-
-
-@app.command(rich_help_panel="Maintenance")
-def extract(
-    target: Annotated[str, typer.Argument(
-        help="Target component (e.g. =org_llm/walk.py= or just =walk.py=).")],
-    verdict_file: Annotated[Path, typer.Option(
-        "--verdict-file",
-        help="Cull verdict file. Default: docs/wiki/cull.org.")] = Path("docs/wiki/cull.org"),
-    dry_run: Annotated[bool, typer.Option(
-        "--dry-run",
-        help="Print prompt + would-be model; don't invoke the LLM.")] = False,
-):
-    """Phase 2026-05.01 — extract retire-verdicted code per cull verdict.
-
-    Reads a cull verdict for =target=, asks an org-llm @data agent
-    (cloud FOSS-floor: qwen2.5-72b) to produce a unified diff.
-    Default prints diff for review; =--dry-run= shows the prompt only.
-
-    Routing: bypasses =_ROUTING_RULES= local-7B-coder fallback by
-    calling =_cloud_chat_with_local_fallback= directly with the
-    @data persona injected as the system prompt.
-    """
-    from .extract import ExtractError, prepare_extraction
-
-    repo_root = Path(__file__).resolve().parent.parent
-    if not verdict_file.exists():
-        red_alert(f"Verdict file not found: {verdict_file}")
-        raise typer.Exit(1)
-
-    try:
-        ctx = prepare_extraction(target, verdict_file, repo_root)
-    except ExtractError as e:
-        red_alert(str(e))
-        raise typer.Exit(1)
-
-    rel = ctx.target_path.relative_to(repo_root)
-    on_screen(
-        f"[lcars2]Extract[/lcars2] "
-        f"[dim]{ctx.verdict.decision_keyword}[/dim] {rel}"
-    )
-
-    if dry_run:
-        console.rule("[lcars2]extract --dry-run[/lcars2]")
-        on_screen(f"[dim]Component: {ctx.verdict.component_heading}[/dim]")
-        on_screen(
-            f"[dim]Prompt: {len(ctx.prompt)} chars · "
-            f"{len(ctx.prompt.splitlines())} lines[/dim]"
-        )
-        console.rule("[lcars2]prompt (head — 50 lines)[/lcars2]")
-        console.print("\n".join(ctx.prompt.splitlines()[:50]))
-        console.rule("[dim]… (truncated for dry-run)[/dim]")
-        return
-
-    # Resolve cloud creds + persona
-    engine = _engine()
-    with get_session(engine) as session:
-        cloud_provider = _cfg(session, "cloud_provider")
-        cloud_endpoint = _cfg(session, "cloud_endpoint_url")
-        cloud_model    = (_cfg(session, "cloud_model")
-                          or "qwen/qwen-2.5-72b-instruct")
-        local_fallback = (_cfg(session, "chat_model")
-                          or MODEL_DEFAULTS["chat_model"])
-        url            = _ollama_url(session)
-        org_dir        = _org_dir(session)
-        db_api_key     = (_cfg(session, "cloud_api_key")
-                          or _cfg(session, "runpod_api_key"))
-
-    if not cloud_endpoint:
-        red_alert("No cloud_endpoint_url configured; extract needs cloud chat.")
-        on_screen("[dim]Run: org-llm cloud --quick-start openrouter[/dim]")
-        raise typer.Exit(1)
-
-    # @data persona for the system prompt
-    persona = ""
-    try:
-        for ag in _resolve_active_agents(org_dir):
-            if getattr(ag, "birth_name", "") == "data":
-                persona = (getattr(ag, "persona", "")
-                           or getattr(ag, "system_prompt", "")
-                           or getattr(ag, "prompt", ""))
-                break
-    except Exception:
-        pass
-
-    from . import creds as _creds
-    api_key = (_creds.read_secret(_creds.cloud_slug(cloud_provider))
-               if cloud_provider else None) or db_api_key
-
-    on_screen(
-        f"[dim]model: {cloud_model}  ·  fallback: {local_fallback}[/dim]"
-    )
-
-    diff = _cloud_chat_with_local_fallback(
-        ctx.prompt,
-        cloud_model=cloud_model,
-        cloud_endpoint=cloud_endpoint,
-        cloud_api_key=api_key,
-        local_model=local_fallback,
-        local_url=url,
-        system=persona,
-    )
-
-    console.rule(f"[lcars2]diff  ·  {cloud_model}[/lcars2]")
-    console.print(diff)
-    console.rule()
-    on_screen("[dim]Review the diff above. Apply manually if good.[/dim]")
 
 
 # Register skill commands at import time so they appear in --help
