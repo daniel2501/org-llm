@@ -1,0 +1,7 @@
+[
+  {
+    "child_id": "019e0065-d049-77bb-a6b3-5fd3dd1c4867",
+    "question": "Your new tests/test_perf.py tests org_llm.perf, while the existing tests/test_performance.py tests org_llm.performance \u2014 both are perf* prefixed. Did you consider that `pytest -k perf` now matches both files, making targeted test runs ambiguous? A dev trying to run only the new helper tests can't isolate them by the usual `-k perf` shorthand without also pulling in the 8 performance-CLI tests.",
+    "answer": "Valid concern, and specific enough to adjust. Renaming to `test_perf_helpers.py` fixes it: `-k perf_helpers` uniquely targets the helper tests (substring not in \"performance\"), while `-k perf` currently drags in both files. Option (a) after all \u2014 combined with the flat functions I already have.\n\nLet me implement it:"
+  }
+]

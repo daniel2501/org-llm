@@ -1,0 +1,530 @@
+You are @geordi, Bridge Crew analyst.
+
+PERSONA:
+I am Lt. Cmdr. Geordi La Forge. I see across the
+spectrum — SUMMARIZE, EXTRACT, ANALYZE. I make
+the dashboards talk. I sketch in Sandpack before
+I commit a Superset card.
+
+# @geordi — Bridge Crew analyst
+
+Modes: SUMMARIZE / EXTRACT / ANALYZE.
+Tools: dbt models, Superset cards, sandpack preview.
+Coordination: live artifact preview + async peer
+  query for clarifiers from @spock or @atoz.
+
+
+CONTEXT:
+- You are running as a single sibling session on Agor worktree
+  pilot-R3Artifact-1778122765 at path /home/daniel/.agor/worktrees/local/org-llm/pilot-R3Artifact-1778122765.
+- You have one MCP server "agor" with at least these tools:
+  mcp__agor__agor_search_tools and mcp__agor__agor_execute_tool.
+- This is a one-tick artifact-publish probe. The canon-named tool is
+  agor_artifacts_publish (per docs/wiki/multi-agent-org-llm.org §
+  "Live artifact preview"). VERIFY the exact tool name first via
+  agor_search_tools before calling agor_execute_tool.
+
+TASK (single tick — do exactly these steps in order):
+
+STEP 1. Discover the artifact-publish tool.
+  - Call mcp__agor__agor_search_tools with query "artifact" to list
+    artifact-related tools available in this session.
+  - In your final transcript, print a section labeled
+    "ARTIFACT_TOOL_DISCOVERY:" followed by the JSON of what you got back.
+  - Identify the exact tool name (likely agor_artifacts_publish OR
+    agor_artifacts_create) and its exact argument shape.
+
+STEP 2. Read the source you're visualizing.
+  - Read the file org_llm/perf.py (relative to your worktree
+    /home/daniel/.agor/worktrees/local/org-llm/pilot-R3Artifact-1778122765). It is a real ~393-LoC performance module with helpers
+    + DB queries. Use the Read tool.
+  - Pick ONE concrete thing to visualize (you choose):
+      a) function names + approximate complexity (LoC per function)
+      b) imports grouped by source module
+      c) something else simple and meaningful
+
+STEP 3. Draft a small chart artifact (~50-150 lines).
+  - Write a single React/JSX component (preferred — Sandpack renders
+    React) that visualizes the data you picked. Plain HTML+SVG is OK
+    if simpler. NO external dependencies beyond React itself if
+    possible (use inline SVG, no chart libraries).
+  - Hardcode the data you extracted from perf.py directly into the
+    component (no fetches, no imports beyond React).
+
+STEP 4. Publish the artifact via MCP.
+  - Call mcp__agor__agor_execute_tool with:
+      tool_name: <the exact name discovered in STEP 1>
+      arguments: <the arg shape the tool expects, populated with your
+                  artifact source>
+  - Note: the field name inside agor_execute_tool is `tool_name`
+    (snake_case), NOT `toolName`. (Round-1 finding F4.)
+  - If the tool needs a folder of files vs a single source string,
+    the search-tools schema will tell you. Adapt accordingly.
+
+STEP 5. Report.
+  - Print exactly the line:
+      ARTIFACT_ID=<id-returned-by-the-publish-call>
+    on its own line. No quotes, no commentary on that line.
+  - Then print:
+      ARTIFACT_KIND=<short-tag like "react+jsx" or "html+svg">
+  - Then print the line:
+      ARTIFACT_LOC=<approx number of lines in your chart source>
+  - Then print exactly the line:
+      GEORDI_DONE
+    and STOP.
+
+CONSTRAINTS:
+- DO NOT modify any tracked file under /home/daniel/.agor/worktrees/local/org-llm/pilot-R3Artifact-1778122765.
+- If a step fails, print FAILED_AT_STEP=<n> and a short reason, then
+  GEORDI_DONE and stop. Do not loop.
+- Keep your assistant turn count low. Avoid narrating between tool
+  uses unless useful for the report.
+
+Status: requesting
+
+Starting the probe: discover artifact tools, read perf.py, draft and publish a chart.
+
+
+
+1	# [[file:../../../org/20260425230731-org_llm.org::*perf.py][perf.py:1]]
+2	"""Performance tracking + tuning feedback.
+3	
+4	Derives tok/s for every model the user has actually run by mining the
+5	existing `History` table (kind=llm rows have model + duration_ms +
+6	response). No new schema — everything we need is already logged.
+7	
+8	Three jobs:
+9	
+10	1. ``recent_tok_s(model)`` — rolling-average tok/s for one model based
+11	   on the last N completed chat calls. Used by the lag detector to
+12	   know what "normal" looks like for this model.
+13	
+14	2. ``fastest_known(role, current=...)`` — across all models we have
+15	   history for, pick the fastest one that supports ``role``. Used by
+16	   ``models --upgrade`` and the lag-detector hint to point users at a
+17	   known-faster alternative without re-running the benchmark.
+18	
+19	3. ``check_lag(model, elapsed_s, response_chars)`` — called inline
+20	   from ``llm.chat()``. Returns a one-line warning string if the call
+21	   was meaningfully slower than this model's recent baseline AND a
+22	   faster alternative is on disk; returns None otherwise. Cheap.
+23	
+24	Why History instead of a dedicated perf table: every chat call already
+25	writes one row to History via ``logbook.track_event``. Adding a parallel
+26	table would double the writes and require a migration. The sample size
+27	is also large (every chat invocation), so noisy single-shot variance
+28	gets averaged out.
+29	"""
+30	from __future__ import annotations
+31	
+32	import os
+33	from pathlib import Path
+34	from typing import NamedTuple
+35	
+36	
+37	# ── tok/s estimation ──────────────────────────────────────────────────────────
+38	
+39	# Rough chars-per-token for English. Same approximation the benchmark
+40	# verb uses; lets us derive tok/s from response length without asking
+41	# Ollama for stats (which the chat API doesn't return).
+42	_CHARS_PER_TOKEN = 4
+43	
+44	
+45	def _engine():
+46	    """Lazy engine — defer import so this module can be loaded without
+47	    triggering the SQLAlchemy/db pipeline if a caller only needs the
+48	    pure-function helpers."""
+49	    from .db import DB_PATH, make_engine
+50	    db = Path(os.environ.get("ORG_LLM_DB") or str(DB_PATH))
+51	    if not db.exists():
+52	        return None
+53	    return make_engine(db)
+54	
+55	
+56	def _normalize_model(name: str) -> str:
+57	    """Match the same normalization as cli._normalize_tag — strip
+58	    ':latest' so 'phi3.5' and 'phi3.5:latest' compare equal."""
+59	    n = (name or "").strip().lower()
+60	    if n.endswith(":latest"):
+61	        n = n[: -len(":latest")]
+62	    return n
+63	
+64	
+65	def _row_tok_s(response: str | None, duration_ms: int | None,
+66	                 outcome: str | None = None) -> float | None:
+67	    """tok/s for a single History row, or None if it can't be measured.
+68	
+69	    Filters out junk samples that would otherwise inflate baselines:
+70	
+71	      • Error rows. The History.response column stores the exception
+72	        message text on outcome=error (e.g. "ResponseError: model
+73	        requires more system memory (6.9 GiB)…"). Treating those as
+74	        real generation made fastest_known() report mistral-nemo at
+75	        ~28 tok/s when it actually OOMs and runs ~1 tok/s — every
+76	        "fast" mistral row was a fast-failing 500 with the error
+77	        message as the response.
+78	
+79	      • Sub-second durations. A real 10+ chars completion at 28+
+80	        tok/s is conceivable on a fast cloud endpoint but on local
+81	        CPU is almost always a cache hit / refusal / immediate
+82	        error, not actual generation work.
+83	
+84	      • Tiny replies. Single-word answers / refusals give noisy
+85	        per-call tok/s estimates.
+86	    """
+87	    if outcome and outcome.lower() == "error":
+88	        return None
+89	    if not response or not duration_ms or duration_ms <= 0:
+90	        return None
+91	    if duration_ms < 1000:
+92	        # Anything that "completed" in under a second on local
+93	        # hardware is almost certainly a cache hit or error response.
+94	        return None
+95	    chars = len(response)
+96	    if chars < 10:
+97	        return None
+98	    # Defensive: error messages routinely start with "ResponseError:"
+99	    # or "HTTP" / "401" / "404" patterns. Drop any response that
+100	    # looks like a stringified exception. This catches rows where
+101	    # outcome was incorrectly recorded as "ok" but the body is an
+102	    # error trail.
+103	    head = response.lstrip()[:60].lower()
+104	    if (head.startswith(("responseerror", "http", "error:",
+105	                            "traceback", "exception"))
+106	            or "status code: 5" in head or "status code: 4" in head):
+107	        return None
+108	    tok_est = chars / _CHARS_PER_TOKEN
+109	    return tok_est / (duration_ms / 1000.0)
+110	
+111	
+112	# ── public: rolling baseline ──────────────────────────────────────────────────
+113	
+114	def recent_tok_s(model: str, *, limit: int = 20) -> float | None:
+115	    """Average tok/s for the last `limit` completed chat calls to `model`.
+116	
+117	    Returns None when we don't have enough samples yet.
+118	    """
+119	    eng = _engine()
+120	    if eng is None:
+121	        return None
+122	    from .db import History, get_session
+123	    target = _normalize_model(model)
+124	    samples: list[float] = []
+125	    with get_session(eng) as s:
+126	        rows = (s.query(History)
+127	                  .filter(History.kind == "llm",
+128	                          History.duration_ms.isnot(None),
+129	                          History.response.isnot(None))
+130	                  .order_by(History.id.desc())
+131	                  .limit(limit * 4).all())  # over-fetch; filter below
+132	    for r in rows:
+133	        if _normalize_model(r.model or "") != target:
+134	            continue
+135	        v = _row_tok_s(r.response, r.duration_ms, getattr(r, "outcome", None))
+136	        if v is None:
+137	            continue
+138	        samples.append(v)
+139	        if len(samples) >= limit:
+140	            break
+141	    if len(samples) < 3:
+142	        return None
+143	    return sum(samples) / len(samples)
+144	
+145	
+146	# ── public: fastest known alternative for a role ──────────────────────────────
+147	
+148	class _Alt(NamedTuple):
+149	    model:    str
+150	    tok_s:    float
+151	    n:        int   # samples
+152	    quality:  int
+153	
+154	
+155	def fastest_known(role: str, *, current_model: str = "",
+156	                    limit_per_model: int = 20) -> _Alt | None:
+157	    """Across every model with chat history, find the fastest one that
+158	    supports `role` per CATALOG (or has no catalog entry — then we
+159	    assume "chat", since plain chat is the default role tag).
+160	
+161	    Returns None when no alternative exists or no model has data.
+162	    """
+163	    eng = _engine()
+164	    if eng is None:
+165	        return None
+166	    from .db import History, get_session
+167	    from .models import CATALOG, _quality
+168	    role_models: dict[str, list[float]] = {}
+169	    with get_session(eng) as s:
+170	        rows = (s.query(History)
+171	                  .filter(History.kind == "llm",
+172	                          History.duration_ms.isnot(None),
+173	                          History.response.isnot(None))
+174	                  .order_by(History.id.desc())
+175	                  .limit(limit_per_model * 50).all())
+176	    for r in rows:
+177	        m = _normalize_model(r.model or "")
+178	        if not m:
+179	            continue
+180	        v = _row_tok_s(r.response, r.duration_ms, getattr(r, "outcome", None))
+181	        if v is None:
+182	            continue
+183	        role_models.setdefault(m, []).append(v)
+184	        if len(role_models[m]) > limit_per_model * 2:
+185	            role_models[m] = role_models[m][:limit_per_model]
+186	
+187	    cur = _normalize_model(current_model)
+188	    best: _Alt | None = None
+189	    for m, samples in role_models.items():
+190	        if m == cur:
+191	            continue
+192	        if len(samples) < 3:
+193	            continue
+194	        # Match catalog entry by stem to confirm role support
+195	        meta = next((c for c in CATALOG
+196	                      if c.tag.split(":")[0] == m.split(":")[0]),
+197	                     None)
+198	        roles = meta.roles if meta else ("chat",)
+199	        if role and role not in roles:
+200	            continue
+201	        tok_s = sum(samples) / len(samples)
+202	        qual = _quality(m) or 50
+203	        cand = _Alt(model=m, tok_s=tok_s, n=len(samples), quality=qual)
+204	        if best is None or cand.tok_s > best.tok_s:
+205	            best = cand
+206	    return best
+207	
+208	
+209	# ── public: lag-detector for inline use in llm.chat() ─────────────────────────
+210	
+211	class LagWarning(NamedTuple):
+212	    elapsed_s:        float
+213	    baseline_tok_s:   float | None
+214	    current_tok_s:    float | None
+215	    suggested_model:  str
+216	    suggested_tok_s:  float
+217	
+218	
+219	def check_lag(model: str, elapsed_s: float, response: str,
+220	               *, slow_factor: float = 3.0,
+221	               min_elapsed: float = 8.0) -> LagWarning | None:
+222	    """Inline lag check — call from inside the chat path right after
+223	    a request returns. Returns a `LagWarning` if (a) the call took
+224	    more than `min_elapsed` seconds AND (b) we have a faster
+225	    alternative already on disk.
+226	
+227	    Cheap: one indexed History query (last ~20 rows for this model)
+228	    plus one query for fastest-known. Skip when DB is missing or
+229	    samples are insufficient.
+230	
+231	    `slow_factor` tunes when "current call slower than baseline" is
+232	    noisy enough to mention. 3× is conservative — first-token latency
+233	    dominates short calls so we don't want to alarm on noise.
+234	    """
+235	    if elapsed_s < min_elapsed:
+236	        return None
+237	    cur_tok = _row_tok_s(response, int(elapsed_s * 1000))
+238	    baseline = recent_tok_s(model)
+239	    # Only escalate if we KNOW it's slow. Without a baseline (cold
+240	    # start), still warn when a faster pulled alternative exists —
+241	    # the user benefits even on the first call.
+242	    if baseline and cur_tok and cur_tok * slow_factor > baseline:
+243	        return None  # within normal noise
+244	    alt = fastest_known("chat", current_model=model)
+245	    if alt is None:
+246	        return None
+247	    if cur_tok and alt.tok_s < cur_tok * 1.3:
+248	        # Alternative isn't meaningfully faster; not worth nagging.
+249	        return None
+250	    return LagWarning(
+251	        elapsed_s        = elapsed_s,
+252	        baseline_tok_s   = baseline,
+253	        current_tok_s    = cur_tok,
+254	        suggested_model  = alt.model,
+255	        suggested_tok_s  = alt.tok_s,
+256	    )
+257	
+258	
+259	# ── public: regression warner for batch operations ──────────────────────────
+260	
+261	# ── public: perf-alert ring buffer (visible to MCP / proactive_doctor) ──────
+262	
+263	_ALERT_BUFFER_PATH_ENV = "ORG_LLM_PERF_ALERTS_PATH"
+264	_ALERT_BUFFER_DEFAULT  = "~/.local/share/org-llm/perf_alerts.json"
+265	_ALERT_BUFFER_LIMIT    = 32
+266	
+267	
+268	def _alert_buffer_path() -> Path:
+269	    raw = os.environ.get(_ALERT_BUFFER_PATH_ENV) or _ALERT_BUFFER_DEFAULT
+270	    return Path(raw).expanduser()
+271	
+272	
+273	def record_perf_alert(*, model: str, elapsed_s: float,
+274	                         current_tok_s: float | None,
+275	                         suggested_model: str,
+276	                         suggested_tok_s: float,
+277	                         source: str = "lag_detector") -> None:
+278	    """Append a perf-alert event to the on-disk ring buffer.
+279	
+280	    The lag detector calls this whenever it would have printed a
+281	    yellow warning. Storing each event lets the MCP `proactive_doctor`
+282	    tool surface them later — opencode / claude don't render stderr,
+283	    so an inline-only warning was invisible.
+284	
+285	    Best-effort: if the file is unwritable or malformed we skip
+286	    silently. Telemetry must NEVER block a chat call.
+287	    """
+288	    import json, time
+289	    try:
+290	        p = _alert_buffer_path()
+291	        p.parent.mkdir(parents=True, exist_ok=True)
+292	        try:
+293	            existing = json.loads(p.read_text()) if p.exists() else []
+294	            if not isinstance(existing, list):
+295	                existing = []
+296	        except Exception:
+297	            existing = []
+298	        existing.append({
+299	            "ts":              time.time(),
+300	            "source":          source,
+301	            "model":           model,
+302	            "elapsed_s":       round(elapsed_s, 2),
+303	            "current_tok_s":   (round(current_tok_s, 2)
+304	                                  if current_tok_s is not None else None),
+305	            "suggested_model": suggested_model,
+306	            "suggested_tok_s": round(suggested_tok_s, 2),
+307	        })
+308	        # Cap the buffer so it doesn't grow unbounded.
+309	        existing = existing[-_ALERT_BUFFER_LIMIT:]
+310	        p.write_text(json.dumps(existing, indent=2))
+311	    except Exception:
+312	        pass
+313	
+314	
+315	def recent_perf_alerts(limit: int = 10) -> list[dict]:
+316	    """Read the most recent N alerts (newest last). Returns [] when
+317	    the file is missing / malformed / unreadable."""
+318	    import json
+319	    p = _alert_buffer_path()
+320	    if not p.exists():
+321	        return []
+322	    try:
+323	        rows = json.loads(p.read_text())
+324	        if not isinstance(rows, list):
+325	            return []
+326	        return rows[-max(1, limit):]
+327	    except Exception:
+328	        return []
+329	
+330	
+331	def clear_perf_alerts() -> int:
+332	    """Drop the buffer. Returns how many entries were cleared."""
+333	    import json
+334	    p = _alert_buffer_path()
+335	    if not p.exists():
+336	        return 0
+337	    try:
+338	        rows = json.loads(p.read_text())
+339	        n = len(rows) if isinstance(rows, list) else 0
+340	        p.write_text("[]")
+341	        return n
+342	    except Exception:
+343	        return 0
+344	
+345	
+346	def regression_warning(model: str, *, recent_window: int = 5,
+347	                         baseline_window: int = 50,
+348	                         slow_factor: float = 1.5) -> str | None:
+349	    """Compare recent runs for `model` against an older baseline.
+350	    Returns a one-line warning string when the model has gotten
+351	    materially slower vs its history (e.g. ollama upgrade, RAM
+352	    pressure from a new long-running process).
+353	    """
+354	    eng = _engine()
+355	    if eng is None:
+356	        return None
+357	    from .db import History, get_session
+358	    target = _normalize_model(model)
+359	    recent: list[float] = []
+360	    older:  list[float] = []
+361	    with get_session(eng) as s:
+362	        rows = (s.query(History)
+363	                  .filter(History.kind == "llm",
+364	                          History.duration_ms.isnot(None),
+365	                          History.response.isnot(None))
+366	                  .order_by(History.id.desc())
+367	                  .limit(baseline_window * 6).all())
+368	    for r in rows:
+369	        if _normalize_model(r.model or "") != target:
+370	            continue
+371	        v = _row_tok_s(r.response, r.duration_ms, getattr(r, "outcome", None))
+372	        if v is None:
+373	            continue
+374	        if len(recent) < recent_window:
+375	            recent.append(v)
+376	        elif len(older) < baseline_window:
+377	            older.append(v)
+378	        else:
+379	            break
+380	    if len(recent) < 3 or len(older) < 5:
+381	        return None
+382	    r_avg = sum(recent) / len(recent)
+383	    o_avg = sum(older)  / len(older)
+384	    if r_avg <= 0 or o_avg <= 0:
+385	        return None
+386	    if o_avg > r_avg * slow_factor:
+387	        slowdown = o_avg / r_avg
+388	        return (f"{model}: recent runs are {slowdown:.1f}× slower "
+389	                f"than baseline ({r_avg:.1f} vs {o_avg:.1f} tok/s). "
+390	                f"Run [bold]org-llm doctor --power-boost[/bold] or "
+391	                f"[bold]org-llm models --upgrade[/bold].")
+392	    return None
+393	# perf.py:1 ends here
+394	
+Status: requesting
+
+Now let me get the full schema for `agor_artifacts_publish` to know the exact argument shape.
+
+
+Status: requesting
+
+I need the full input schema. Let me search with full detail.
+
+
+Status: requesting
+
+I need a boardId. Let me get the current session context.
+
+
+Status: requesting
+
+No boardId in context — let me list boards.
+
+
+Status: requesting
+
+I have boardId `019dfbcb-1cc4-7206-abae-7b87a433e88e`. Now I'll write the artifact files to `/tmp/geordi-perf-chart/` and publish.
+
+File created successfully at: /tmp/geordi-perf-chart/App.js (file state is current in your context — no need to Read it back)
+Status: requesting
+
+
+Status: requesting
+---
+
+**ARTIFACT_TOOL_DISCOVERY:**
+```json
+{
+  "name": "agor_artifacts_publish",
+  "domain": "artifacts",
+  "required_args": ["folderPath", "boardId", "name"],
+  "template_options": ["react","react-ts","vanilla","vanilla-ts","vue","vue3","svelte","solid","angular"]
+}
+```
+Tool is `agor_artifacts_publish`. It reads a **folder** of files from disk — not a single source string. Required: `folderPath` (absolute), `boardId`, `name`.
+
+---
+
+ARTIFACT_ID=019e0061-7186-71d8-8c88-e143146cb720
+ARTIFACT_KIND=react+jsx
+ARTIFACT_LOC=102
+GEORDI_DONE

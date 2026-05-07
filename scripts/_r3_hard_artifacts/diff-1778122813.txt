@@ -1,0 +1,163 @@
+diff --git a/.agor-assistants/data/memory/2026-05-06.md b/.agor-assistants/data/memory/2026-05-06.md
+new file mode 100644
+index 0000000..8c5f9b9
+--- /dev/null
++++ b/.agor-assistants/data/memory/2026-05-06.md
+@@ -0,0 +1,41 @@
++# @data — option choice + plan 2026-05-06
++
++## Option chosen: (b) TEST CLASS → FUNCTION
++
++### Justification
++
++Surveyed 3 test files:
++- `test_models.py`: ALL flat module-level functions — tests pure helpers from `models.py`
++- `test_report.py`: ALL classes — tests stateful renderer with shared `populated` fixture
++- `test_performance.py`: ALL classes — tests CLI integration + heavy fixtures
++
++`test_perf.py` tests `_normalize_model` and `_row_tok_s`, both pure functions with no shared
++state between test cases. The closest analogue is `test_models.py` (also pure module helpers),
++which uses flat functions throughout. Classes here add ceremony with zero benefit — no shared
++fixtures, no setup/teardown, no logical grouping that flat names can't express.
++
++### Plan
++
++1. Create `tests/test_perf.py` with flat module-level functions covering:
++   - `_normalize_model`: strips `:latest`, lowercases, handles None/empty, idempotent
++   - `_row_tok_s`: None on error outcome, None on short/fast/error-patterned responses,
++     correct tok/s calculation for a valid row
++2. Run pytest to verify
++3. Commit
++
++Files to touch: `tests/test_perf.py` only (no pyproject.toml changes needed).
++
++## Revision (from @spock btw)
++
++`-k perf` matched both `test_perf.py` and `test_performance.py` (substring collision).
++Renamed to `test_perf_helpers.py` so `-k perf_helpers` unambiguously targets the 21
++helper tests. This merges option (a) + option (b): flat functions in a precisely named file.
++
++## Result
++
++- Option finally chosen: **(b) flat functions + (a) rename → `test_perf_helpers.py`**
++- Files touched: `tests/test_perf_helpers.py` (renamed from `test_perf.py`), memory file
++- Pytest result: **21 passed in 0.04s**
++- `-k perf_helpers` collects exactly 21/830 tests; no `test_performance.py` spillover
++- Commit SHA: `9534c1b` (initial), amended by rename commit
++- @spock clarifier: received post-commit; valid concern — adjusted
+diff --git a/tests/test_perf_helpers.py b/tests/test_perf_helpers.py
+new file mode 100644
+index 0000000..5ec6eb2
+--- /dev/null
++++ b/tests/test_perf_helpers.py
+@@ -0,0 +1,110 @@
++# [[file:../../../org/20260425230731-org_llm.org::*tests/test_perf.py][test_perf.py:1]]
++"""Tests for pure helpers in org_llm.perf — _normalize_model + _row_tok_s."""
++from __future__ import annotations
++
++from org_llm.perf import _normalize_model, _row_tok_s
++
++
++# ── _normalize_model ───────────────────────────────────────────────────────────
++
++def test_normalize_strips_latest_suffix():
++    assert _normalize_model("phi3.5:latest") == "phi3.5"
++
++
++def test_normalize_strips_latest_case_insensitive():
++    assert _normalize_model("PHI3.5:LATEST") == "phi3.5"
++
++
++def test_normalize_lowercases():
++    assert _normalize_model("Llama3.3") == "llama3.3"
++
++
++def test_normalize_preserves_non_latest_variant():
++    assert _normalize_model("deepseek-r1:7b") == "deepseek-r1:7b"
++
++
++def test_normalize_empty_string():
++    assert _normalize_model("") == ""
++
++
++def test_normalize_none():
++    assert _normalize_model(None) == ""
++
++
++def test_normalize_strips_surrounding_whitespace():
++    assert _normalize_model("  phi3.5:latest  ") == "phi3.5"
++
++
++def test_normalize_idempotent():
++    name = "nomic-embed-text:latest"
++    once = _normalize_model(name)
++    twice = _normalize_model(once)
++    assert once == twice
++
++
++# ── _row_tok_s ─────────────────────────────────────────────────────────────────
++
++# Helper: a response long enough and a duration slow enough to produce a reading
++_VALID_RESPONSE = "a" * 40   # 40 chars → 10 tok at 4 chars/tok
++_VALID_DURATION = 4000       # 4 s → 2.5 tok/s expected
++
++
++def test_row_tok_s_happy_path():
++    result = _row_tok_s(_VALID_RESPONSE, _VALID_DURATION)
++    assert result is not None
++    assert abs(result - 2.5) < 0.01
++
++
++def test_row_tok_s_none_on_error_outcome():
++    assert _row_tok_s(_VALID_RESPONSE, _VALID_DURATION, outcome="error") is None
++
++
++def test_row_tok_s_none_on_error_outcome_case_insensitive():
++    assert _row_tok_s(_VALID_RESPONSE, _VALID_DURATION, outcome="ERROR") is None
++
++
++def test_row_tok_s_none_on_none_response():
++    assert _row_tok_s(None, _VALID_DURATION) is None
++
++
++def test_row_tok_s_none_on_empty_response():
++    assert _row_tok_s("", _VALID_DURATION) is None
++
++
++def test_row_tok_s_none_on_none_duration():
++    assert _row_tok_s(_VALID_RESPONSE, None) is None
++
++
++def test_row_tok_s_none_on_zero_duration():
++    assert _row_tok_s(_VALID_RESPONSE, 0) is None
++
++
++def test_row_tok_s_none_on_sub_second_duration():
++    # Anything under 1000 ms is treated as cache-hit / error, not real generation
++    assert _row_tok_s(_VALID_RESPONSE, 999) is None
++
++
++def test_row_tok_s_none_on_short_response():
++    # Fewer than 10 chars → too noisy to estimate
++    assert _row_tok_s("a" * 9, _VALID_DURATION) is None
++
++
++def test_row_tok_s_none_on_responseerror_prefix():
++    msg = "ResponseError: model requires more system memory (6.9 GiB) blah blah"
++    assert _row_tok_s(msg, _VALID_DURATION) is None
++
++
++def test_row_tok_s_none_on_http_prefix():
++    msg = "HTTP 500 Internal Server Error — something went wrong on the server side"
++    assert _row_tok_s(msg, _VALID_DURATION) is None
++
++
++def test_row_tok_s_none_on_traceback_prefix():
++    msg = "Traceback (most recent call last):\n  File ...\nValueError: oops"
++    assert _row_tok_s(msg, _VALID_DURATION) is None
++
++
++def test_row_tok_s_none_on_status_code_5xx():
++    msg = "status code: 500 server error occurred here"
++    assert _row_tok_s(msg, _VALID_DURATION) is None
++# test_perf.py:1 ends here

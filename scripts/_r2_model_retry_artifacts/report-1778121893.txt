@@ -1,0 +1,50 @@
+
+PILOT: R2-Model-RETRY
+TEAM_SHAPE: focused modelConfig override probe — one-spawn-per-claude-p (3 captain subprocesses)
+HARNESS_SCRIPT: scripts/_r2_model_retry.py
+AGOR_PRIMITIVES_USED:
+  - POST /repos/{id}/worktrees
+  - POST /sessions (claude-code)
+  - PATCH /sessions/{id} permission_config bypassPermissions (BUG-8)
+  - MCP http transport (Bearer mcp_token)
+  - agor_search_tools / agor_execute_tool (tool_name snake_case, F4)
+  - agor_sessions_spawn (sibling-by-worktree, no worktree_id)
+  - PER-SPAWN modelConfig.model OVERRIDE (object form) — F5 focus
+  - mcp_token after-get refresh (R2-D2 pattern, F9 fix)
+  - one-spawn-per-claude-p invocation (F9 amendment)
+  - GET /sessions/{id} poll until terminal incl. idle (F1)
+  - GET /sessions/{id} model_config readback
+  - GET /messages?session_id={id} content readback (R4 endpoint)
+TASK_OUTCOME: PARTIAL — spawned_ok=3/3 matches=3/3 probe_done=2/3
+WORKTREE_NAME: pilot-R2ModelRetry-1778121893
+WORKTREE_ID: 019e0052-ebec-7218-88d6-726b7c26b035
+WORKTREE_PATH: /home/daniel/.agor/worktrees/local/org-llm/pilot-R2ModelRetry-1778121893
+CAPTAIN_SESSION_ID: 019e0052-ec1d-70a8-ae28-c6c945759f42
+SPAWN_TABLE:
+  | child_id                             | requested_model                | session_field_observed   | assigned_model                | match   |
+  | 019e0052-fe4a-73d1-b8e6-957ba94a34db | claude-sonnet-4-6              | model_config.model       | claude-sonnet-4-6            | yes     |
+  | 019e0053-3a08-7346-a8fc-e0b3413e7c44 | claude-haiku-4-5-20251001      | model_config.model       | claude-haiku-4-5-20251001    | yes     |
+  | 019e0053-82e5-742c-901b-2a2fcb76cf3f | qwen/qwen-2.5-72b-instruct     | model_config.model       | qwen/qwen-2.5-72b-instruct   | yes     |
+RESPONSE_TABLE:
+  | child_id                             | got | first 120 chars of actual response (assistant-only)
+  | 019e0052-fe4a-73d1-b8e6-957ba94a34db | yes | MODEL_PROBE_DONE
+  | 019e0053-3a08-7346-a8fc-e0b3413e7c44 | yes | MODEL_PROBE_DONE
+  | 019e0053-82e5-742c-901b-2a2fcb76cf3f | no  | There's an issue with the selected model (qwen/qwen-2.5-72b-instruct). It may not exist or you may not have access to it
+SIBLING_STATES: {'019e0052-fe4a-73d1-b8e6-957ba94a34db': 'idle', '019e0053-3a08-7346-a8fc-e0b3413e7c44': 'idle', '019e0053-82e5-742c-901b-2a2fcb76cf3f': 'idle'}
+COST_USD: 0.1730 (aggregated from per-spawn captain stream-json result events)
+DURATION_SECONDS: 51
+RATE_LIMIT_EVENTS_OBSERVED: 3 (status=allowed, treated as informational per F9 amendment — no retries triggered)
+F5_VERDICT: PARTIAL — CONFIG layer YES (Agor persists every requested modelConfig.model verbatim, 3/3); RUNTIME layer NO for 1/3 child(ren) (model rejected by the agentic tool — non-Anthropic IDs are not resolvable through the claude-code adapter). The override knob is plumbed through Agor cleanly; the runtime floor is the agentic tool's model registry, NOT Agor.
+F9_FIX_VERDICT: YES — one-spawn-per-claude-p eliminated the round-2 stall. All 3/3 captain subprocesses issued their tool_use and returned a session_id. Total wall 51s, $0.17 — well under budget.
+NEW BUGS FOUND:
+  - claude-code adapter rejects non-Anthropic model IDs at runtime (qwen/qwen-2.5-72b-instruct) with message 'model may not exist or you may not have access' — even though Agor accepts and persists the modelConfig.model verbatim. To use FOSS / OpenRouter routes per DEC-017 § 6, spawn with a different agentic_tool (likely opencode + provider config), NOT claude-code with the OR model id in modelConfig.model.
+WHAT_WORKED:
+  - all 3 sequential one-spawn-per-claude-p subprocesses returned session_ids (F9 fix held: 0 stalls, 3 captain processes, 51s wall)
+  - every requested modelConfig.model was persisted verbatim in the child session row at session.model_config.model
+  - claude-sonnet-4-6 + claude-haiku-4-5-20251001 actually ran (both emitted MODEL_PROBE_DONE assistant-side)
+  - observed 3 rate_limit_event(s) (status=allowed) without stalling (F9 amendment held: status=allowed is informational)
+  - GET /sessions/{id} cleanly surfaces model_config.model on spawned children — no projection gap (clean reconfirmation)
+WHAT_DIDNT:
+  - qwen/qwen-2.5-72b-instruct child rejected at RUNTIME by claude-code adapter ('model may not exist or you may not have access') even though Agor persisted the override correctly — agentic_tool is the floor, not Agor
+  - harness initially had a buggy probe-done detector that scanned ALL message content (incl. user prompt which contains the literal MODEL_PROBE_DONE string) — fixed in this re-readback to assistant-only; original report falsely showed qwen probe_done=yes
+RECOMMENDATION: KEEP — modelConfig.model override is verified at the CONFIG layer (Agor faithfully plumbs and persists). Canonize the primitive in multi-agent-org-llm.org. *Add a caveat*: the FOSS/OpenRouter floor (DEC-017 § 6) requires a different agenticTool than claude-code (likely opencode w/ provider config) — claude-code's model registry is the runtime floor. File a follow-up to test qwen via opencode in a future round.

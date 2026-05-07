@@ -1,0 +1,301 @@
+:PROPERTIES:
+:ID:       2b9d8e4a-6c1f-4a3b-8e7d-9f2c5d6a7b8c
+:CREATED:  [2026-05-06]
+:END:
+#+TITLE: Agor pilot round-3 findings — primitive coverage closure + first team-layer ROI
+#+FILETAGS: :wiki:agor:findings:multi-agent:pilot:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Round 3 pushed Agor + Bridge Crew through four new pilot
+shapes targeting previously-unvalidated primitives. *All four passed
+end-to-end* at total spend ~$0.46 (under 2.5% of the $20 cap). The
+round closed five gaps in coverage: cross-tool execution
+(=agentic_tool="opencode"=), live artifact preview
+(=agor_artifacts_publish=), cross-run persistent memory (Layer 2a
+journal), and the long-open question of when the team layer earns
+its keep on a real coding task.
+
+*Expanded.* Round 1 was "does any of this work end-to-end." Round 2
+was "does the corrected pattern survive a more diverse matrix."
+Round 3 was "do the remaining canon-named primitives actually exist
+at the API level, and does the team layer ever produce measurable
+redirect on real work." The answer to both: yes. R3-Hard in
+particular is the first pilot where a reviewer's =mode:"btw"=
+clarifier produced a NEW commit that the brief alone wouldn't have
+caused — a clean refutation of round-2's preliminary "team layer
+doesn't earn its keep" verdict (R2-B's verdict still stands for
+trivial tasks; the rule is task-shape-dependent).
+
+* Pilot outcomes
+
+| #            | Team shape                                          | Outcome | Cost     | Wall    | Headline                                                  |
+|--------------+-----------------------------------------------------+---------+----------+---------+-----------------------------------------------------------|
+| R3-CrossTool | 1 captain → claude-code child + opencode child      | *PASS*  | $0.1133  | 38 s    | First end-to-end opencode spawn; agentic_tool plumbed     |
+| R3-Hard      | Sibling pair @data + @spock on multi-file refactor  | *PASS*  | $0.1920  | 11m 17s | *First measurable team-layer ROI* — btw caused real diff  |
+| R3-Artifact  | Solo @geordi emitting a React chart artifact         | *PASS*  | $0.0885  | 103 s   | =agor_artifacts_publish= validated; build_status=success  |
+| R3-Memory    | Two-tick @atoz on shared FS (cross-run memory)      | *PASS*  | $0.0666  | 90 s    | Layer 2a journal persists across separate spawns          |
+
+Total round-3 spend: ~$0.46. Combined rounds 1+2+3: ~$1.67.
+
+R3-Memory was completed via the (b') workaround after the daemon's
+worktree-state appeared to be reset between tick 1 and tick 2 (the
+worktree FS persisted; the daemon-side worktree record was gone).
+The (b') workaround created a fresh worktree, copied the tick-1
+memory file in, and ran tick 2 there — preserving the
+"cross-run-not-cross-turn" semantic.
+
+* New findings (R-series, continuing from round 2)
+
+** R8 — =agentic_tool="opencode"= works end-to-end (R3-CrossTool)
+
+*Severity.* High positive — closes the cross-tool primitive at the
+runtime layer.
+
+*Evidence.* R3-CrossTool spawned two children sequentially:
+=agentic_tool="claude-code"= (printed CLAUDE_PROBE_DONE) and
+=agentic_tool="opencode"= (printed OPENCODE_PROBE_DONE). Both
+reached =idle=. The opencode child's session row showed
+=session.agentic_tool="opencode"=. The opencode handler created an
+opencode-side session (=sdk_session_id=ses_1ff9c2bf...=) and ran
+the task.
+
+*Action.* Update =multi-agent-org-llm.org= § "Cross-tool escalation"
+to mark this primitive as *VERIFIED end-to-end 2026-05-06 EDT* (was:
+schema-validated only per round-1 F2).
+
+** R9 — opencode auto-routes to its own free-tier (=big-pickle=); FOSS routing needs =modelConfig= alongside =agentic_tool=
+
+*Severity.* Important — refines DEC-017 § 6 implementation.
+
+*Evidence.* R3-CrossTool's opencode child ran on
+=providerID=opencode modelID=big-pickle= (opencode's free-tier
+default, Anthropic-backed). To actually exercise a FOSS provider
+per DEC-017 § 6, the spawn must additionally pass
+=modelConfig={provider:"openrouter", model:"qwen/..."}= or similar.
+Inspection of opencode's session-handler code shows it reads
+=session.model_config?.provider= — the wiring is there, just not
+exercised in this pilot.
+
+*Action.* Round-4 follow-up: pass =modelConfig= alongside
+=agentic_tool="opencode"= and verify Agor threads provider through
+to the opencode handler.
+
+** R10 — =~/.agor/config.yaml= ships without =opencode:= block by default
+
+*Severity.* Low — diagnostic surface dark by default; spawn still
+works because executor handler falls back to =localhost:4096=.
+
+*Evidence.* R3-CrossTool found =/opencode/health= +
+=/opencode/models= REST endpoints return "OpenCode is not enabled
+in configuration" until a user manually adds an =opencode:= block to
+=~/.agor/config.yaml=. The harness patched the file in place; the
+patch persisted post-run.
+
+*Action.* File upstream: bake =opencode: {enabled: false, serverUrl:
+http://localhost:4096}= into the agor init template so users only
+have to flip one bool.
+
+** R11 — Agor does not persist or surface the model opencode actually used
+
+*Severity.* Medium — observability gap for cross-tool routing +
+DEC-017 enforcement.
+
+*Evidence.* R3-CrossTool checked the =/messages= row for the
+opencode assistant turn and found =model=null=, =model_id=null=,
+=provider_id=null=. None of the message metadata keys carry the
+runtime model/provider info.
+
+*Action.* File upstream: surface the opencode-side =modelID= +
+=providerID= on the message row (or on the session row's
+=last_run_model= field) so cross-tool routing decisions are
+auditable post-hoc.
+
+** R12 — =agor_artifacts_publish= validated end-to-end (R3-Artifact)
+
+*Severity.* High positive — closes the live-preview primitive.
+
+*Evidence.* R3-Artifact's @geordi child:
+
+- Discovered the canonical tool name via =agor_search_tools=
+  (=agor_artifacts_publish=, NOT renamed back to =_create=).
+- Drafted a 125-line React bar chart of =org_llm/perf.py= functions.
+- Wrote source files to =/tmp/geordi-perf-chart/= and called
+  =publish= with =folderPath=, =template="react"=, =boardId=.
+- Got back artifact ID =019e0061-7186-71d8-8c88-e143146cb720=.
+- =GET /artifacts/{id}= returns the full =files["/App.js"]= inline
+  with =build_status=success=.
+
+*Schema (verified).* =agor_artifacts_publish= required args:
+=folderPath= (file-on-disk, NOT inline source), =boardId=, =name=.
+Template options: ={react, react-ts, vanilla, vanilla-ts, vue, vue3,
+svelte, solid, angular}=.
+
+*Action.* Update =multi-agent-org-llm.org= § "Live artifact preview"
+to mark this primitive as *VERIFIED 2026-05-06 EDT* with the schema
+specifics + the folder-not-string arg shape.
+
+** R13 — Artifacts scope to =boardId=, NOT =worktree_id= (undocumented)
+
+*Severity.* Medium — semantic gap in canon.
+
+*Evidence.* R3-Artifact's published artifact has =worktree_id=null=
+on its row even though the spawn captain inherited a fresh
+worktree. The artifact is scoped to =boardId=, making artifacts
+produced on different worktrees of the same board indistinguishable
+by REST scope.
+
+*Implication.* Probably intentional (board = team-wide preview
+gallery). But it means: (a) artifacts cross worktree boundaries; (b)
+"per-team artifact gallery" is the natural surface, not "per-worktree
+artifact gallery."
+
+*Action.* Document board-scoped artifact semantics in
+=multi-agent-org-llm.org= § "Live artifact preview".
+
+** R14 — Layer 2a per-agent journal persists across separate session spawns (R3-Memory + b')
+
+*Severity.* High positive — closes the persistent-memory primitive
+for cross-run scenarios.
+
+*Evidence.* R3-Memory tick 1 wrote a 70-line audit to
+=.agor-assistants/atoz/memory/2026-05-06.md=. Tick 2 (separate
+session spawn, ran via the (b') workaround on a fresh worktree
+with the tick-1 file pre-copied in) read that file, audited a
+different wiki page (=auto-embedder.org=), APPENDED a 64-line
+=## Tick 2= section under it, and explicitly cross-referenced tick
+1 ("Tick 1 found that =multi-agent-org-llm.org= was absent... Tick
+2 finds the inverse situation"). Final memory file: 134 lines
+spanning both ticks; both =## Tick 1= and =## Tick 2= headings
+present; tick-1 content preserved unmodified.
+
+*Action.* Update =multi-agent-org-llm.org= § "Persistent agent
+memory substrate" to mark cross-run reads as *VERIFIED 2026-05-06
+EDT*. Note that the persistence is FS-side (the worktree directory),
+not daemon-side — the daemon's worktree record can be lost/reset
+without affecting the FS-side memory file (see R15).
+
+** R15 — Daemon-side worktree state can be lost while FS state persists
+
+*Severity.* Important — operational hazard for long-running pilots.
+
+*Evidence.* Between R3-Memory tick 1 (22:58 EDT) and the (b')
+workaround (~30 min later), Agor's =/repos/{id}/worktrees= endpoint
+went from returning the R3-Memory worktree to returning 0 worktrees
+total — and =/sessions= dropped from 70+ to 2. The user noted
+"parallel git activity happening" during this window; whatever ran
+appears to have triggered an Agor daemon restart or DB reset that
+wiped session/worktree records. The on-disk worktree directories +
+git branches + memory files all persisted intact.
+
+*Implication.* "Worktree exists" is two separate claims:
+- *FS-side*: =~/.agor/worktrees/local/<repo>/<wt-name>/= directory + git branch
+- *Daemon-side*: row in Agor's DB with =worktree_id= UUID
+
+Long-running pilots and long-lived teams must not assume daemon-side
+state survives parallel-agent activity. The FS state is the durable
+substrate.
+
+*Action.* Document in =multi-agent-org-llm.org= § "Worktree-per-
+session as hygiene" — note the two-layer persistence model. For
+recovery: a captain can re-register a worktree by name via =POST
+/repos/{id}/worktrees= with =refType:"branch"= against the existing
+branch (this re-attaches the daemon-side row to the existing FS
+state without re-cloning).
+
+** R16 — Sub-agent early-exit anti-pattern (third occurrence)
+
+*Severity.* Important — affects pilot reliability.
+
+*Evidence.* Three pilots so far have suffered the same anti-pattern:
+the driving sub-agent uses =Bash run_in_background:true= or
+=subprocess.Popen= to launch its harness, then exits before the
+harness completes. Originally hit by R2-Model (round 2; sub-agent
+narrated "waiting for events from the pilot harness" and exited).
+Initially appeared to bite R3-Hard + R3-Memory in round 3 (both
+reported "completed" without producing a structured REPORT) — but
+R3-Hard's sub-agent later resurrected and produced its full report
+17 minutes after launch (it was just slow, not dead). R3-Memory was
+genuinely abandoned mid-tick-2.
+
+*Pattern correlation.* Sub-agents that use =subprocess.run([…])=
+(blocking) consistently produce reports. Sub-agents that try to
+"background the harness and exit" leave reports unwritten.
+
+*Action.* Round-4 pilot prompts must explicitly require the
+sub-agent's harness invocation to be BLOCKING (=subprocess.run= or
+inline-execution), not backgrounded. Add to canon harness template
+in =agor-smoke-recipe.org=: "the driving Python script must call
+=subprocess.run= and wait for the captain's return before exiting."
+
+* Cross-pilot reconfirmations from round 3
+
+| Round-1/2 finding                  | R3 reconfirmation count                      |
+|------------------------------------+----------------------------------------------|
+| F1 (=idle= terminal)               | 4× (all R3 pilots)                           |
+| F4 (=tool_name= snake_case)        | 4×                                           |
+| F7 (null child REST cost)          | 4×                                           |
+| F8 (JWT 15-min TTL)                | 1× (hit during b' top-level execution)      |
+| F9 amendment (one-spawn-per-claude-p) | 4× (all R3 captains)                       |
+| F10 (Python+subprocess)            | 4×                                           |
+| R2 (btw on TARGET's genealogy)     | 1× (R3-Hard's btw on @data's genealogy.children) |
+| R5 (no parallel tool_use under MCP) | 1× (R3-Hard captain serialized 2 spawns)    |
+
+* Team-vs-solo verdict refinement (R2-B + R3-Hard combined)
+
+R2-B (round 2): on a 61-LoC type-hint task, the team layer (@data +
+@spock with =mode:"btw"=) did NOT earn its keep. The reviewer's
+clarifier was sensible but its answer was already in the brief.
+
+R3-Hard (round 3): on a multi-file refactor with real degrees of
+freedom (option choice + naming + scope), the team layer DID earn
+its keep — measurably. @spock's btw caught a real =-k perf=
+shorthand collision that solo @data missed; @data acknowledged,
+combined option (a) rename with option (b) flat functions, and
+landed a SECOND commit (=08fef44=) caused entirely by the review.
+
+*The rule (combined verdict):* the team layer earns its keep when
+the task has *real degrees of freedom* — naming, architecture,
+scope, ambiguous spec, multi-file impact. It does NOT earn its keep
+on tasks with only one reasonable path (mechanical refactors, formula-
+follow type tasks). Round-4+ pilots should select target tasks with
+this lens; round-4's R3-Hard-style tasks are the natural site for
+team-layer cost/value measurement.
+
+* Real artifacts on disk
+
+- =scripts/_r3_crosstool.py= (40 KB) — opencode + claude-code spawn template
+- =scripts/_r3_hard.py= (39 KB) — sibling pair on multi-file refactor template
+- =scripts/_r3_artifact.py= (21 KB) — single-agent artifact-publish template
+- =scripts/_r3_memory.py= (24 KB) — two-tick memory persistence template
+- =scripts/_b_prime_tick2.py= (top-level driver for R3-Memory tick-2 — pattern: "skip the sub-agent layer for short focused tasks")
+- =scripts/_r3_*_artifacts/= — captain transcripts + reports for all 4 pilots
+- =scripts/_b_prime_tick2_artifacts/= — (b') driver transcript + report
+- =~/.agor/worktrees/local/org-llm/pilot-R3*= — 4 KEPT_DIRTY worktrees with branches + commits + memory files
+- Worktree branch =pilot-R3Hard-1778122813=: commits =9534c1b= + =08fef44= (the team-redirected refactor)
+- Worktree branch =pilot-R3MemoryT2-1778124178=: 134-line two-tick memory file at =.agor-assistants/atoz/memory/2026-05-06.md=
+- Artifact =019e0061-7186-71d8-8c88-e143146cb720= in Agor's "Main Board" — fetchable via =GET /artifacts/{id}=, viewable in Agor UI
+
+* Round-4 design implications
+
+| Round-3 finding | Round-4 implication                                                                                  |
+|-----------------+------------------------------------------------------------------------------------------------------|
+| R8              | Cross-tool primitive is canonical; future pilots can use opencode children freely                    |
+| R9              | Add a focused FOSS-routing pilot: =agentic_tool="opencode"= + =modelConfig={provider, model}=        |
+| R10             | Add =opencode:= block to =~/.agor/config.yaml= as part of pilot pre-req setup                       |
+| R12             | Live artifact preview is canonical; future "drafts before commit" workflows can rely on it           |
+| R13             | When designing artifact-emission workflows, scope decisions to boards (teams), not worktrees         |
+| R14             | Persistent memory pattern is canonical; future long-lived teams can rely on cross-run reads          |
+| R15             | Long-running pilots must include a daemon-state-recovery leg (re-attach worktree by branch name)     |
+| R16             | All round-4 sub-agent prompts MANDATE blocking =subprocess.run=; no =run_in_background= for harness  |
+| Team verdict    | Round-4 sibling-pair pilots pick tasks with explicit degrees-of-freedom (architecture, naming, scope) |
+
+* See also
+
+- [[file:2026-05-06-agor-pilot-round-1-findings.org][2026-05-06-agor-pilot-round-1-findings.org]] — round-1 findings (F-series; F5/F9 amended in-place)
+- [[file:2026-05-06-agor-pilot-round-2-findings.org][2026-05-06-agor-pilot-round-2-findings.org]] — round-2 findings (R1-R7; team-vs-solo first verdict)
+- [[id:1e75cdba-f743-456d-9d0f-07b9e0da33ac][multi-agent-org-llm.org]] — canon to update per R8, R12, R13, R14, R15
+- [[file:agor-smoke-recipe.org][agor-smoke-recipe.org]] — needs R10 + R16 updates (config block + blocking-subprocess rule)
+- [[file:bridge-crew-agor-assistants.org][bridge-crew-agor-assistants.org]] — memory convention RECONFIRMED via R14 cross-run validation

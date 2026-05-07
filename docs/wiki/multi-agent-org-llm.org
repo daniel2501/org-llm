@@ -258,6 +258,76 @@ overlap is left ambiguous.
 | Cards (non-code workflow)               | (out of scope today — vault entries are the workflow primitive)                    | =cards= primitive (beta) — generic entities placed in zones                             |
 | Audit + provenance reconciliation       | =manager-log.jsonl= + captain's log + git history                                  | Session genealogy tree + per-session prompts retained on disk; reconciled to captain's log |
 
+* Crew runtime — FOSS-only (with optional Claude sanity baseline)
+
+*Summary.* All *production* Agor-spawned crew sessions run on FOSS:
+=agentic_tool="opencode"= + =modelConfig={provider, model}=
+pointing at a FOSS model (OpenRouter qwen, local Ollama, etc.).
+Claude is allowed only as the *human pilot* (top-level Claude Code
+session, or sub-agents driving Agor from outside) and as a
+*sanity-baseline / A-B comparison* arm. =agentic_tool="claude-code"=
+on a production crew spawn is a violation; on a labeled baseline
+arm it is encouraged.
+
+*Expanded.* This rule extends DEC-010 (anti-capitalist FOSS) and
+DEC-017 § 6 (FOSS Defaults rule) to the team layer. When teams
+scale, the FOSS dependency multiplies — a 7-member team running
+4 hours of internal coordination on Claude routes ~30× the LLM
+volume of a single user-facing chat. Allowing Claude as the
+default crew runtime would break the FOSS-distribution-readiness
+of the whole =multi-agent-org-llm= feature for downstream FOSS
+users. Pilot/crew asymmetry is also conceptually clean: the
+user-facing tool (Claude) calls FOSS infrastructure, never the
+reverse.
+
+*The aspiration.* The central question this rule embeds: /can FOSS
+LLMs + multi-agent orchestration beat solo Claude on real coding
+work?/ The only way to know is to run both shapes and compare.
+Claude sanity-baseline arms are encouraged for exactly that reason
+— without them, "FOSS + orchestration" claims have no comparison
+ground truth.
+
+*The two spawn shapes.*
+
+#+begin_src python
+# Production shape (FOSS-only crew):
+agor_sessions_spawn(
+    agentic_tool="opencode",
+    modelConfig={"provider": "openrouter",
+                 "model": "qwen/qwen-2.5-72b-instruct"},
+    prompt="…", title="…",
+)
+
+# Sanity-baseline shape (Claude — for A-B comparison only):
+agor_sessions_spawn(
+    agentic_tool="opencode",  # still opencode-as-router
+    modelConfig={"provider": "anthropic",
+                 "model": "claude-sonnet-4-6"},
+    prompt="…", title="…-baseline",  # label as baseline
+)
+#+end_src
+
+Both shapes route through the *opencode* agentic_tool (so the
+runtime adapter is consistent). The =modelConfig= override is
+what selects FOSS vs. Claude. =agentic_tool="claude-code"= is
+*not used at all* on the crew side — Claude's claude-code adapter
+has its own model registry that rejects non-Anthropic IDs at
+runtime (round-2 R7), making it unsuitable as a FOSS-routing
+substrate.
+
+*Pilot validation status.*
+
+- Round 1-3 pilots used =agentic_tool="claude-code"= on the crew
+  side as validation-of-wiring (preceded the rule); their results
+  validate the *coordination primitives* but their *runtime
+  placement* is not the canonical pattern.
+- Round-3 R3-CrossTool validated =agentic_tool="opencode"= end-
+  to-end (the crew-runtime substrate works).
+- Round-2 R2-Model-RETRY + round-3 R9 validated that =modelConfig=
+  is plumbed at the schema layer and persisted on the session row.
+- Round-4 R4-FOSS (in flight) closes the FOSS-route end-to-end
+  question: opencode + modelConfig + qwen actually emitting tokens.
+
 * Coordination patterns
 
 How *teams* of agents use Agor to coordinate. Each pattern names
@@ -371,13 +441,38 @@ there is no such tool in v0.17.3; the dispatch surface is
 
 *Summary.* When an agent's work needs a different *tool* (not
 just a different model), the spawn carries a per-call assistant
-override (Claude vs. Codex vs. Gemini vs. OpenCode).
+override (Claude vs. Codex vs. Gemini vs. OpenCode). *(opencode
+spawn end-to-end VERIFIED 2026-05-06 EDT via Pilot R3-CrossTool;
+=session.agentic_tool="opencode"= persisted from spawn override
+through DB to executor dispatch, child reached idle, emitted
+expected token.)*
 
 *Expanded.* Today =delegate(model_override=…)= overrides only
 the model. Agor's spawn-override goes higher: the child runs
 under a *different cloud-coding tool* with that tool's full
 toolbelt. Must respect [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-017 § 6 — Defaults rule]] —
-proprietary backends are user-selectable, never default.
+proprietary backends are user-selectable, never default. *Per
+the org-llm-Agor crew rule (see § "Crew runtime" below), all
+production spawns use =agentic_tool="opencode"= + a FOSS
+=modelConfig=; =agentic_tool="claude-code"= is reserved for
+sanity-baseline / A-B comparison runs only.*
+
+*FOSS routing caveat (verified 2026-05-06 EDT — round-3 R9).*
+=agentic_tool="opencode"= alone gives you the tool; opencode
+auto-routes to its own free-tier (=big-pickle=, Anthropic-backed)
+if no =modelConfig= is passed. To actually exercise a FOSS
+provider, pass =modelConfig={provider:"openrouter",
+model:"qwen/qwen-2.5-72b-instruct"}= (or another FOSS combo from
+=org_llm/cloud.py='s catalog) alongside the agentic_tool override.
+opencode's session handler reads =session.model_config?.provider=
+to dispatch.
+
+*Observability gap (round-3 R11, filed upstream).* Agor does NOT
+surface the runtime model+provider opencode actually used in
+=GET /messages?session_id={id}= row metadata. To audit cross-tool
+routing decisions post-hoc, tail the opencode-serve log
+(=scripts/_r3_crosstool_artifacts/opencode-serve-*.log= for
+example output).
 
 ** Shared multiplayer terminal
 
@@ -411,15 +506,36 @@ org-llm's runtime functioning.
 
 ** Live artifact preview
 
-*Summary.* Agents emit React/JSX/TS into a worktree and call
-=agor_artifacts_create=; Sandpack renders it live in-browser.
+*Summary.* Agents emit React/JSX/TS into a worktree folder and
+call =agor_artifacts_publish=; Sandpack renders it live in-browser.
+*(End-to-end VERIFIED 2026-05-06 EDT via Pilot R3-Artifact —
+@geordi published a 125-line React bar chart of =org_llm/perf.py=,
+artifact landed with =build_status=success=, REST-fetchable via
+=GET /artifacts/{id}=. Concrete artifact ID:
+=019e0061-7186-71d8-8c88-e143146cb720=.)*
 
 *Expanded.* Use cases: =@geordi= drafts a chart before
 committing to a Superset card; =@atoz= previews a wiki
 layout; an agent emits an interactive form to capture a
-multi-option decision. Artifact source lives at
-=.agor/artifacts/<id>/= — file-based per [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011]]; render is
-ephemeral.
+multi-option decision. Artifact source lives in a worktree
+folder (e.g. =/tmp/geordi-perf-chart/=) — file-based per
+[[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-011]]; render is ephemeral / browser-side.
+
+*Schema (verified 2026-05-06 EDT).* Tool name is
+=agor_artifacts_publish= (NOT =_create=). Required args:
+=folderPath= (filesystem path to the artifact source folder; NOT
+inline source string), =boardId=, =name=. Template options:
+={react, react-ts, vanilla, vanilla-ts, vue, vue3, svelte, solid,
+angular}=. Discover schema at runtime via =agor_search_tools= for
+"artifact" / "publish".
+
+*Board-scoping caveat (round-3 R13).* Published artifacts scope to
+=boardId=, NOT =worktree_id= — the artifact row's =worktree_id=
+field stays null even when the spawn captain inherited a fresh
+worktree. Implication: artifacts published from different worktrees
+of the same board are indistinguishable by REST scope. The natural
+surface is "per-team artifact gallery", not "per-worktree". Design
+artifact-emission workflows accordingly.
 
 ** Message Gateway (Slack / GitHub)
 
@@ -437,7 +553,12 @@ Mode / GitHub polling) keeps webhooks off the user's network.
 
 *Summary.* Per-assistant =SOUL.md= / =IDENTITY.md= / =USER.md= /
 =memory/{date}.md= fills the filed-not-built Layer 2a per-agent
-journal slot in [[id:739868a9-f62c-43de-ac1d-1671d483a2c1][standing-orders.org]].
+journal slot in [[id:739868a9-f62c-43de-ac1d-1671d483a2c1][standing-orders.org]]. *(Cross-run
+read end-to-end VERIFIED 2026-05-06 EDT via Pilot R3-Memory + (b')
+workaround — tick 1 wrote a 70-line audit; tick 2 in a separate
+spawn read it, audited a different page, APPENDED a tick-2
+section, explicitly cross-referenced tick 1; final memory file
+134 lines spanning both ticks.)*
 
 *Expanded.* The standing-orders memory model names three layers;
 Layer 2a (per-agent observations) is partially served today by
@@ -446,16 +567,45 @@ Agor's =memory/{YYYY-MM-DD}.md= is exactly that shape. Layer 2b
 (cross-agent standing orders) stays in =AgentBaseline= because
 the broadcast semantics need DB indexing the files don't.
 
+*Persistence is FS-side, not daemon-side (round-3 R15).* The
+memory files live in the worktree directory
+(=~/.agor/worktrees/local/<repo>/<wt-name>/.agor-assistants/<handle>/memory/{date}.md=)
+and survive Agor daemon restarts / DB resets. The daemon-side
+worktree record CAN be lost (observed during round 3 when
+parallel-agent activity triggered an Agor state reset between
+tick 1 and tick 2); the FS-side memory file persisted intact and
+the (b') recovery procedure (re-attach worktree by branch name +
+re-spawn) preserved cross-tick semantics.
+
 ** Worktree-per-session as hygiene
 
 *Summary.* Every Agor session is pinned to its own git worktree;
-no two sessions touch the same working directory.
+no two sessions touch the same working directory. *Worktree state
+has TWO layers: FS-side (the directory + git branch) and
+daemon-side (the row in Agor's DB). They CAN drift; recovery is
+re-attach-by-branch-name (round-3 R15).*
 
 *Expanded.* Generalises [[id:190baa35-06d1-4b34-a67d-2926859f47cb][DEC-005]]'s worktree escape hatch from
 "reach for it when scopes overlap" to "always-on by default."
-Long-running risky work (Phase 2026-05.01 — physical extraction extraction, mass-cull walks)
-runs with zero contention against the maintainer's primary
-stream. Cleanup: =git worktree remove= + session archive.
+Long-running risky work (Phase 2026-05.01 — physical extraction,
+mass-cull walks) runs with zero contention against the maintainer's
+primary stream. Cleanup: =git worktree remove= + session archive.
+
+*Two-layer persistence model (round-3 R15).* "Worktree exists" is
+two separate claims: *FS-side* =~/.agor/worktrees/local/<repo>/<wt-name>/=
+directory + git branch (durable; survives daemon restarts), and
+*daemon-side* row in Agor's DB with a =worktree_id= UUID
+(can be lost during parallel-agent activity / Agor restarts /
+state resets). Long-running pilots and long-lived teams must not
+assume daemon-side state survives.
+
+*Recovery procedure.* When daemon-side worktree row is missing
+but FS-side state persists: =POST /repos/{repo_id}/worktrees=
+with =refType:"branch"=, =sourceBranch:"trunk"=, and the same
+=name=/=ref= as the existing branch. This re-attaches the
+daemon-side row to the existing FS state without re-cloning. The
+captain can then spawn fresh sessions against the recovered
+worktree_id. (Pattern in =scripts/_b_prime_tick2.py=.)
 
 ** Per-assistant =.agor.yml= env templating
 

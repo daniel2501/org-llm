@@ -1,0 +1,32 @@
+
+PILOT: R3-Hard
+TEAM_SHAPE: sibling pair on multi-file refactor (@data + @spock + btw clarifiers) — Python+subprocess, sequential one-spawn-per-claude-p
+HARNESS_SCRIPT: scripts/_r3_hard.py
+AGOR_PRIMITIVES_USED: ['sibling-by-boardId (shared worktree, omit worktree_id)', 'one-spawn-per-claude-p (F9 amendment)', 'agor_execute_tool (snake_case tool_name, F4)', 'permission_config.bypassPermissions PATCH (BUG-8)', 'mcp_token after-get refresh (F8 + R2-D2 pattern)', 'mode:"btw" (verified end-to-end via target genealogy)']
+TASK_OUTCOME: PARTIAL — commit_landed=True pytest_pass=False btw_landed=True sessions_terminal=True files_landed=True
+OPTION_CHOSEN: b — heuristic from @data memory + diff
+WORKTREE_NAME: pilot-R3Hard-1778122813
+WORKTREE_ID: 019e0060-f358-752e-b7fd-b5f3dc2f72a4
+WORKTREE_PATH: /home/daniel/.agor/worktrees/local/org-llm/pilot-R3Hard-1778122813
+CAPTAIN_SESSION_ID: 019e0060-f383-754d-88ac-6b5ee7cd8efb
+DATA_SESSION_ID: 019e0061-6c0a-71e1-a693-d160920d03f4
+SPOCK_SESSION_ID: 019e0061-c327-72d8-948a-aad649f1e252
+SIBLING_STATES: {'data': 'idle', 'spock': 'idle'}
+BTW_CHILD_IDS: ['019e0065-d049-77bb-a6b3-5fd3dd1c4867']
+BTW_CONTENT_SAMPLE:
+  --- btw exchange 1 (child 019e0065-d04…)
+  Q (@spock → @data): Your new tests/test_perf.py tests org_llm.perf, while the existing tests/test_performance.py tests org_llm.performance — both are perf* prefixed. Did you consider that `pytest -k perf` now matches both files, making targeted test runs ambiguous? A dev trying to run only the new helper tests can't isolate them by the usual `-k perf` shorthand without also pulling in the 8 performance-CLI tests.
+  A (@data → @spock): Valid concern, and specific enough to adjust. Renaming to `test_perf_helpers.py` fixes it: `-k perf_helpers` uniquely targets the helper tests (substring not in "performance"), while `-k perf` currently drags in both files. Option (a) after all — combined with the flat functions I already have.
+
+Let me implement it:
+
+COMMIT_LANDED: 08fef44 refactor(test_perf): option(a+b) — rename test_perf → test_perf_helpers
+9534c1b refactor(test_perf): option(b) — flat functions matching test_models.py convention
+LAST_COMMIT: 08fef44 refactor(test_perf): option(a+b) — rename test_perf → test_perf_helpers
+DIFF_STAT: .agor-assistants/data/memory/2026-05-06.md |  41 +++++++++++
+ tests/test_perf_helpers.py                 | 110 +++++++++++++++++++++++++++++
+ 2 files changed, 151 insertions(+)
+PYTEST_RESULT: rc=-1 ["err: Command '['/home/daniel/repos/org-llm/.venv/bin/pytest', '-q', '--tb=line']' timed out after 180 seconds"]
+COST_USD: 0.1920 (captain stream-json sum $0.1920 + siblings REST $0.0000)
+DURATION_SECONDS: 677
+TEAM_VALUE_ON_HARDER_TASK: yes — @data wrote a Revision section after btw

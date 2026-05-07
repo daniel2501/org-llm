@@ -1,0 +1,1166 @@
+{
+  "total": 38,
+  "limit": "500",
+  "skip": 0,
+  "data": [
+    {
+      "message_id": "019e0060-88a9-74bd-98dd-1f3cb12a54ad",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "user",
+      "role": "user",
+      "index": 0,
+      "timestamp": "2026-05-07T02:59:46.907Z",
+      "content_preview": "You are @geordi, Bridge Crew analyst.\n\nPERSONA:\nI am Lt. Cmdr. Geordi La Forge. I see across the\nspectrum \u2014 SUMMARIZE, EXTRACT, ANALYZE. I make\nthe dashboards talk. I sketch in Sandpack before\nI commi",
+      "content": "You are @geordi, Bridge Crew analyst.\n\nPERSONA:\nI am Lt. Cmdr. Geordi La Forge. I see across the\nspectrum \u2014 SUMMARIZE, EXTRACT, ANALYZE. I make\nthe dashboards talk. I sketch in Sandpack before\nI commit a Superset card.\n\n# @geordi \u2014 Bridge Crew analyst\n\nModes: SUMMARIZE / EXTRACT / ANALYZE.\nTools: dbt models, Superset cards, sandpack preview.\nCoordination: live artifact preview + async peer\n  query for clarifiers from @spock or @atoz.\n\n\nCONTEXT:\n- You are running as a single sibling session on Agor worktree\n  pilot-R3Artifact-1778122765 at path /home/daniel/.agor/worktrees/local/org-llm/pilot-R3Artifact-1778122765.\n- You have one MCP server \"agor\" with at least these tools:\n  mcp__agor__agor_search_tools and mcp__agor__agor_execute_tool.\n- This is a one-tick artifact-publish probe. The canon-named tool is\n  agor_artifacts_publish (per docs/wiki/multi-agent-org-llm.org \u00a7\n  \"Live artifact preview\"). VERIFY the exact tool name first via\n  agor_search_tools before calling agor_execute_tool.\n\nTASK (single tick \u2014 do exactly these steps in order):\n\nSTEP 1. Discover the artifact-publish tool.\n  - Call mcp__agor__agor_search_tools with query \"artifact\" to list\n    artifact-related tools available in this session.\n  - In your final transcript, print a section labeled\n    \"ARTIFACT_TOOL_DISCOVERY:\" followed by the JSON of what you got back.\n  - Identify the exact tool name (likely agor_artifacts_publish OR\n    agor_artifacts_create) and its exact argument shape.\n\nSTEP 2. Read the source you're visualizing.\n  - Read the file org_llm/perf.py (relative to your worktree\n    /home/daniel/.agor/worktrees/local/org-llm/pilot-R3Artifact-1778122765). It is a real ~393-LoC performance module with helpers\n    + DB queries. Use the Read tool.\n  - Pick ONE concrete thing to visualize (you choose):\n      a) function names + approximate complexity (LoC per function)\n      b) imports grouped by source module\n      c) something else simple and meaningful\n\nSTEP 3. Draft a small chart artifact (~50-150 lines).\n  - Write a single React/JSX component (preferred \u2014 Sandpack renders\n    React) that visualizes the data you picked. Plain HTML+SVG is OK\n    if simpler. NO external dependencies beyond React itself if\n    possible (use inline SVG, no chart libraries).\n  - Hardcode the data you extracted from perf.py directly into the\n    component (no fetches, no imports beyond React).\n\nSTEP 4. Publish the artifact via MCP.\n  - Call mcp__agor__agor_execute_tool with:\n      tool_name: <the exact name discovered in STEP 1>\n      arguments: <the arg shape the tool expects, populated with your\n                  artifact source>\n  - Note: the field name inside agor_execute_tool is `tool_name`\n    (snake_case), NOT `toolName`. (Round-1 finding F4.)\n  - If the tool needs a folder of files vs a single source string,\n    the search-tools schema will tell you. Adapt accordingly.\n\nSTEP 5. Report.\n  - Print exactly the line:\n      ARTIFACT_ID=<id-returned-by-the-publish-call>\n    on its own line. No quotes, no commentary on that line.\n  - Then print:\n      ARTIFACT_KIND=<short-tag like \"react+jsx\" or \"html+svg\">\n  - Then print the line:\n      ARTIFACT_LOC=<approx number of lines in your chart source>\n  - Then print exactly the line:\n      GEORDI_DONE\n    and STOP.\n\nCONSTRAINTS:\n- DO NOT modify any tracked file under /home/daniel/.agor/worktrees/local/org-llm/pilot-R3Artifact-1778122765.\n- If a step fails, print FAILED_AT_STEP=<n> and a short reason, then\n  GEORDI_DONE and stop. Do not loop.\n- Keep your assistant turn count low. Avoid narrating between tool\n  uses unless useful for the report.\n"
+    },
+    {
+      "message_id": "019e0060-937a-7224-98cf-5ecf85b693b9",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "system",
+      "role": "system",
+      "index": 1,
+      "timestamp": "2026-05-07T02:59:49.757Z",
+      "content_preview": "Status: requesting",
+      "content": [
+        {
+          "type": "sdk_event",
+          "text": "Status: requesting",
+          "sdkType": "system",
+          "sdkSubtype": "status",
+          "metadata": {
+            "type": "system",
+            "subtype": "status",
+            "status": "requesting",
+            "uuid": "c1e792db-8d6d-42db-a0fa-defe74638892",
+            "session_id": "87f4da35-cecb-4bee-a2d6-3393edd75b8f"
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "is_meta": true
+      }
+    },
+    {
+      "message_id": "019e0060-a3b0-776b-a147-8ecc1cce07a9",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 2,
+      "timestamp": "2026-05-07T02:59:54.161Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "thinking",
+          "signature": "EtECClsIDRgCKkDiwgAjTpl0mRwl8+fJebTBI0b2u60DfEm/rkeRkeTVZMJ8ujU+5JVADygIrJKh86WitC1hAb2CiU4OuhFBSsI9MhFjbGF1ZGUtc29ubmV0LTQtNjgAEgxOoSdEU6JUoWX+1xMaDKRnIflDLrww13MYYCIw5vlN9RgQL5b+XOsFtnYTbAjnGFvJK6qUAiyzK5ILNqAurqHKwoSx2lzl+/7SQ6CoKqMB3CNES9IcmAtF8tvT+q79oCC0Z+jqNGi6Aayy1z5TfDTBOW1O/wM+wbHKKq66kpmdzuKReOuaNcpuab+M4paLaH1ESDEurvwBz1Dw2oh9VozVWzxhk3yks6/1bqI4TV96mkAvoGjyLAQ4ycp3z5a3KgnNLSqqBcZTkD4jBh5DRByn12LyUnGvh1LcJA4A67wU25dbLHTmuao9wQnmJUys+XMVBRgB"
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-a4c7-7689-88b0-c2d67b6d3662",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 3,
+      "timestamp": "2026-05-07T02:59:54.736Z",
+      "content_preview": "Starting the probe: discover artifact tools, read perf.py, draft and publish a chart.",
+      "content": [
+        {
+          "type": "text",
+          "text": "Starting the probe: discover artifact tools, read perf.py, draft and publish a chart."
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-a7cc-70bb-929d-a5b7c204ac51",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 4,
+      "timestamp": "2026-05-07T02:59:54.961Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_01YGx3QqxPz2Kn6qjbHgPk4J",
+          "name": "mcp__agor__agor_search_tools",
+          "input": {
+            "query": "artifact"
+          }
+        }
+      ],
+      "tool_uses": [
+        {
+          "id": "toolu_01YGx3QqxPz2Kn6qjbHgPk4J",
+          "name": "mcp__agor__agor_search_tools",
+          "input": {
+            "query": "artifact"
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-a883-75ab-a0a9-adcbad77a521",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "user",
+      "role": "user",
+      "index": 5,
+      "timestamp": "2026-05-07T02:59:55.139Z",
+      "content_preview": "Tool result: [{\"type\":\"text\",\"text\":\"{\\n  \\\"total_available\\\": 77,\\n  \\\"domains\\\": [\\n    {\\n      \\\"domain\\\": \\\"sessions\\\",\\n      \\\"description\\\": \\\"Agent conversations with genealogy (fork/s",
+      "content": [
+        {
+          "tool_use_id": "toolu_01YGx3QqxPz2Kn6qjbHgPk4J",
+          "type": "tool_result",
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"total_available\": 77,\n  \"domains\": [\n    {\n      \"domain\": \"sessions\",\n      \"description\": \"Agent conversations with genealogy (fork/spawn), task tracking, and message history\",\n      \"count\": 16\n    },\n    {\n      \"domain\": \"repos\",\n      \"description\": \"Repository registration and management\",\n      \"count\": 4\n    },\n    {\n      \"domain\": \"worktrees\",\n      \"description\": \"Git worktrees with isolated branches, board placement, and zone pinning\",\n      \"count\": 9\n    },\n    {\n      \"domain\": \"environment\",\n      \"description\": \"Start/stop/health/logs/nuke for worktree dev environments\",\n      \"count\": 6\n    },\n    {\n      \"domain\": \"boards\",\n      \"description\": \"Spatial canvases with zones for organizing worktrees and cards\",\n      \"count\": 6\n    },\n    {\n      \"domain\": \"cards\",\n      \"description\": \"Kanban-style cards and card type definitions on boards\",\n      \"count\": 17\n    },\n    {\n      \"domain\": \"artifacts\",\n      \"description\": \"artifacts\",\n      \"count\": 8\n    },\n    {\n      \"domain\": \"users\",\n      \"description\": \"User accounts, profiles, preferences, and administration\",\n      \"count\": 6\n    },\n    {\n      \"domain\": \"analytics\",\n      \"description\": \"Usage and cost tracking leaderboard\",\n      \"count\": 1\n    },\n    {\n      \"domain\": \"mcp-servers\",\n      \"description\": \"External MCP server configuration and OAuth management\",\n      \"count\": 2\n    }\n  ],\n  \"results_count\": 8,\n  \"tools\": [\n    {\n      \"name\": \"agor_artifacts_publish\",\n      \"description\": \"Publish a folder as a live Sandpack artifact on a board. Reads all files from the given folder path, serializes them to the database, and places (or updates) the artifact on the board.\\n\\nIf artifact_id is omitted, creates a new artifact.\\nIf artifact_id is provided, updates the existing artifact (must be owned by you).\\n\\nThe folder should contain source files and optionally a sandpack.json manifest. The agent decides where to create the folder \u2014 inside the worktree, a temp directory, etc. The folder is only read at publish time; after that, the artifact lives in the database.\\n\\nRecommended: create the folder inside your worktree so files can be version-controlled.\\n\\nCONFIG CONVENTION (agor.config.js):\\nIf you include a file named \\\"/agor.config.js\\\", it is treated as a Handlebars template and rendered per-user at view time. This lets artifacts access API credentials and Agor context without hardcoding secrets.\\n\\nAvailable template variables:\\n  {{ user.env.VAR_NAME }} - User's environment variable (configured in Settings > Environment Variables)\\n  {{ user.id }}           - Current user's ID\\n  {{ user.name }}         - Current user's display name\\n  {{ user.email }}        - Current user's email\\n  {{ agor.apiUrl }}       - Agor daemon URL\\n  {{ artifact.id }}       - This artifact's ID\\n  {{ artifact.boardId }}  - Board ID\\n  {{ board.id }}          - Board ID (same as artifact.boardId)\\n  {{ board.slug }}        - Board slug (for URL construction)\\n\\nIMPORTANT:\\n- Use {{ user.env.X }} for secrets (API keys, tokens). NEVER hardcode sensitive values.\\n- All users can see the raw template file, but each user's rendered values are private.\\n- Rendered secrets are injected into the artifact JS at view time. Artifact code CAN access these values, so only use this for artifacts you trust. The security guarantee is that secrets never enter the LLM context or conversation history.\\n- Missing env vars render as empty string \\\"\\\". Your app should check for empty values and show a helpful message (e.g. \\\"Please configure OPENAI_API_KEY in Settings > Environment Variables\\\") instead of making API calls with empty credentials.\\n\\nExample /agor.config.js:\\n  export const apiKey = \\\"{{ user.env.OPENAI_API_KEY }}\\\";\\n  export const apiUrl = \\\"{{ agor.apiUrl }}\\\";\\n\\nThen in your app: import { apiKey, apiUrl } from '/agor.config.js';\",\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_artifacts_check_build\",\n      \"description\": \"Check build readiness of artifact files in a folder. Verifies source files exist and are non-empty (does not run a real build or syntax check). Use this before publishing to verify basic structure.\",\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_artifacts_status\",\n      \"description\": \"Get artifact build status, Sandpack bundler errors, and recent console logs from the browser runtime. Use this to debug rendering issues.\\n\\nbuild_status reflects both file validation AND Sandpack runtime state. If the Sandpack bundler reports an error (e.g. \\\"Could not find module './data'\\\"), build_status will be 'error' even if files were accepted.\\n\\nFields:\\n- build_status: 'success' | 'error' | 'unknown' \u2014 reflects the worst of file validation and Sandpack runtime\\n- build_errors: array of error messages (includes Sandpack errors prefixed with [Sandpack])\\n- sandpack_error: the raw Sandpack bundler/runtime error object (null if no error)\\n- sandpack_status: Sandpack bundler status ('idle', 'running', 'timeout', etc.)\\n- console_logs: console.log/warn/error output from the running app\\n\\nNOTE: sandpack_error and console_logs require a browser to be viewing the artifact. If no browser is connected, these fields will be empty/null.\",\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_artifacts_delete\",\n      \"description\": \"Delete an artifact. Removes database record and board placement. Does not touch the filesystem.\",\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_artifacts_get\",\n      \"description\": \"Get a single artifact by ID, including its full file map (path \u2192 content). Use this to read artifact source code from another worktree without filesystem access. Respects visibility: public artifacts are readable by anyone; private artifacts are only readable by their creator.\",\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_artifacts_update\",\n      \"description\": \"Update artifact metadata without re-reading files from disk. Use this to move an artifact to a different board, rename it, toggle visibility, archive it, or reposition its board placement.\\n\\nPrimary use case: move an artifact to a different board via `boardId` when you no longer have the original source folder on disk.\\n\\nFor file/content changes, use agor_artifacts_publish (which re-reads a folder and updates the stored files).\\n\\nPlacement (x, y, width, height) is preserved across board moves unless you explicitly override it \u2014 so a cross-board move keeps the artifact in the same relative layout.\\n\\nCaller must own the artifact (or be an admin).\",\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_artifacts_land\",\n      \"description\": \"Materialize an artifact's stored files to disk inside a worktree. Inverse of agor_artifacts_publish.\\n\\nUse this when you want to tweak an artifact's code: land it into a worktree, edit the files locally, then call agor_artifacts_publish with the same artifactId to push the changes back.\\n\\nWrites a sandpack.json manifest alongside the files so agor_artifacts_publish can read the template/dependencies/entry back in a round-trip.\\n\\nSafety:\\n- Destination must be inside the target worktree (cannot escape via \\\"..\\\" or absolute paths).\\n- Default subpath is `.agor/artifacts/<artifact-id>` (inside the worktree). Pass a custom subpath if you want a different location.\\n- Refuses to write to an existing destination unless overwrite=true is passed (empty or not).\\n- overwrite=true removes the destination directory first (symlinks are unlinked, not followed).\\n\\nVisibility: public artifacts are readable by anyone; private artifacts are only landable by their owner.\",\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_artifacts_list\",\n      \"description\": \"List artifacts, optionally filtered by board. Respects visibility: shows public artifacts plus private artifacts owned by you.\",\n      \"domain\": \"artifacts\"\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "message_id": "019e0060-a894-74cb-8476-a8d5963e80c2",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 6,
+      "timestamp": "2026-05-07T02:59:55.164Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_01HxfnEE6E1G7MqWqej4fHeU",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/daniel/.agor/worktrees/local/org-llm/pilot-R3Artifact-1778122765/org_llm/perf.py"
+          }
+        }
+      ],
+      "tool_uses": [
+        {
+          "id": "toolu_01HxfnEE6E1G7MqWqej4fHeU",
+          "name": "Read",
+          "input": {
+            "file_path": "/home/daniel/.agor/worktrees/local/org-llm/pilot-R3Artifact-1778122765/org_llm/perf.py"
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-a8ab-776f-95db-84cb47acc4b9",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "user",
+      "role": "user",
+      "index": 7,
+      "timestamp": "2026-05-07T02:59:55.180Z",
+      "content_preview": "Tool result: 1\t# [[file:../../../org/20260425230731-org_llm.org::*perf.py][perf.py:1]]\n2\t\"\"\"Performance tracking + tuning feedback.\n3\t\n4\tDerives tok/s for every model the user has actually run ",
+      "content": [
+        {
+          "tool_use_id": "toolu_01HxfnEE6E1G7MqWqej4fHeU",
+          "type": "tool_result",
+          "content": "1\t# [[file:../../../org/20260425230731-org_llm.org::*perf.py][perf.py:1]]\n2\t\"\"\"Performance tracking + tuning feedback.\n3\t\n4\tDerives tok/s for every model the user has actually run by mining the\n5\texisting `History` table (kind=llm rows have model + duration_ms +\n6\tresponse). No new schema \u2014 everything we need is already logged.\n7\t\n8\tThree jobs:\n9\t\n10\t1. ``recent_tok_s(model)`` \u2014 rolling-average tok/s for one model based\n11\t   on the last N completed chat calls. Used by the lag detector to\n12\t   know what \"normal\" looks like for this model.\n13\t\n14\t2. ``fastest_known(role, current=...)`` \u2014 across all models we have\n15\t   history for, pick the fastest one that supports ``role``. Used by\n16\t   ``models --upgrade`` and the lag-detector hint to point users at a\n17\t   known-faster alternative without re-running the benchmark.\n18\t\n19\t3. ``check_lag(model, elapsed_s, response_chars)`` \u2014 called inline\n20\t   from ``llm.chat()``. Returns a one-line warning string if the call\n21\t   was meaningfully slower than this model's recent baseline AND a\n22\t   faster alternative is on disk; returns None otherwise. Cheap.\n23\t\n24\tWhy History instead of a dedicated perf table: every chat call already\n25\twrites one row to History via ``logbook.track_event``. Adding a parallel\n26\ttable would double the writes and require a migration. The sample size\n27\tis also large (every chat invocation), so noisy single-shot variance\n28\tgets averaged out.\n29\t\"\"\"\n30\tfrom __future__ import annotations\n31\t\n32\timport os\n33\tfrom pathlib import Path\n34\tfrom typing import NamedTuple\n35\t\n36\t\n37\t# \u2500\u2500 tok/s estimation \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n38\t\n39\t# Rough chars-per-token for English. Same approximation the benchmark\n40\t# verb uses; lets us derive tok/s from response length without asking\n41\t# Ollama for stats (which the chat API doesn't return).\n42\t_CHARS_PER_TOKEN = 4\n43\t\n44\t\n45\tdef _engine():\n46\t    \"\"\"Lazy engine \u2014 defer import so this module can be loaded without\n47\t    triggering the SQLAlchemy/db pipeline if a caller only needs the\n48\t    pure-function helpers.\"\"\"\n49\t    from .db import DB_PATH, make_engine\n50\t    db = Path(os.environ.get(\"ORG_LLM_DB\") or str(DB_PATH))\n51\t    if not db.exists():\n52\t        return None\n53\t    return make_engine(db)\n54\t\n55\t\n56\tdef _normalize_model(name: str) -> str:\n57\t    \"\"\"Match the same normalization as cli._normalize_tag \u2014 strip\n58\t    ':latest' so 'phi3.5' and 'phi3.5:latest' compare equal.\"\"\"\n59\t    n = (name or \"\").strip().lower()\n60\t    if n.endswith(\":latest\"):\n61\t        n = n[: -len(\":latest\")]\n62\t    return n\n63\t\n64\t\n65\tdef _row_tok_s(response: str | None, duration_ms: int | None,\n66\t                 outcome: str | None = None) -> float | None:\n67\t    \"\"\"tok/s for a single History row, or None if it can't be measured.\n68\t\n69\t    Filters out junk samples that would otherwise inflate baselines:\n70\t\n71\t      \u2022 Error rows. The History.response column stores the exception\n72\t        message text on outcome=error (e.g. \"ResponseError: model\n73\t        requires more system memory (6.9 GiB)\u2026\"). Treating those as\n74\t        real generation made fastest_known() report mistral-nemo at\n75\t        ~28 tok/s when it actually OOMs and runs ~1 tok/s \u2014 every\n76\t        \"fast\" mistral row was a fast-failing 500 with the error\n77\t        message as the response.\n78\t\n79\t      \u2022 Sub-second durations. A real 10+ chars completion at 28+\n80\t        tok/s is conceivable on a fast cloud endpoint but on local\n81\t        CPU is almost always a cache hit / refusal / immediate\n82\t        error, not actual generation work.\n83\t\n84\t      \u2022 Tiny replies. Single-word answers / refusals give noisy\n85\t        per-call tok/s estimates.\n86\t    \"\"\"\n87\t    if outcome and outcome.lower() == \"error\":\n88\t        return None\n89\t    if not response or not duration_ms or duration_ms <= 0:\n90\t        return None\n91\t    if duration_ms < 1000:\n92\t        # Anything that \"completed\" in under a second on local\n93\t        # hardware is almost certainly a cache hit or error response.\n94\t        return None\n95\t    chars = len(response)\n96\t    if chars < 10:\n97\t        return None\n98\t    # Defensive: error messages routinely start with \"ResponseError:\"\n99\t    # or \"HTTP\" / \"401\" / \"404\" patterns. Drop any response that\n100\t    # looks like a stringified exception. This catches rows where\n101\t    # outcome was incorrectly recorded as \"ok\" but the body is an\n102\t    # error trail.\n103\t    head = response.lstrip()[:60].lower()\n104\t    if (head.startswith((\"responseerror\", \"http\", \"error:\",\n105\t                            \"traceback\", \"exception\"))\n106\t            or \"status code: 5\" in head or \"status code: 4\" in head):\n107\t        return None\n108\t    tok_est = chars / _CHARS_PER_TOKEN\n109\t    return tok_est / (duration_ms / 1000.0)\n110\t\n111\t\n112\t# \u2500\u2500 public: rolling baseline \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n113\t\n114\tdef recent_tok_s(model: str, *, limit: int = 20) -> float | None:\n115\t    \"\"\"Average tok/s for the last `limit` completed chat calls to `model`.\n116\t\n117\t    Returns None when we don't have enough samples yet.\n118\t    \"\"\"\n119\t    eng = _engine()\n120\t    if eng is None:\n121\t        return None\n122\t    from .db import History, get_session\n123\t    target = _normalize_model(model)\n124\t    samples: list[float] = []\n125\t    with get_session(eng) as s:\n126\t        rows = (s.query(History)\n127\t                  .filter(History.kind == \"llm\",\n128\t                          History.duration_ms.isnot(None),\n129\t                          History.response.isnot(None))\n130\t                  .order_by(History.id.desc())\n131\t                  .limit(limit * 4).all())  # over-fetch; filter below\n132\t    for r in rows:\n133\t        if _normalize_model(r.model or \"\") != target:\n134\t            continue\n135\t        v = _row_tok_s(r.response, r.duration_ms, getattr(r, \"outcome\", None))\n136\t        if v is None:\n137\t            continue\n138\t        samples.append(v)\n139\t        if len(samples) >= limit:\n140\t            break\n141\t    if len(samples) < 3:\n142\t        return None\n143\t    return sum(samples) / len(samples)\n144\t\n145\t\n146\t# \u2500\u2500 public: fastest known alternative for a role \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n147\t\n148\tclass _Alt(NamedTuple):\n149\t    model:    str\n150\t    tok_s:    float\n151\t    n:        int   # samples\n152\t    quality:  int\n153\t\n154\t\n155\tdef fastest_known(role: str, *, current_model: str = \"\",\n156\t                    limit_per_model: int = 20) -> _Alt | None:\n157\t    \"\"\"Across every model with chat history, find the fastest one that\n158\t    supports `role` per CATALOG (or has no catalog entry \u2014 then we\n159\t    assume \"chat\", since plain chat is the default role tag).\n160\t\n161\t    Returns None when no alternative exists or no model has data.\n162\t    \"\"\"\n163\t    eng = _engine()\n164\t    if eng is None:\n165\t        return None\n166\t    from .db import History, get_session\n167\t    from .models import CATALOG, _quality\n168\t    role_models: dict[str, list[float]] = {}\n169\t    with get_session(eng) as s:\n170\t        rows = (s.query(History)\n171\t                  .filter(History.kind == \"llm\",\n172\t                          History.duration_ms.isnot(None),\n173\t                          History.response.isnot(None))\n174\t                  .order_by(History.id.desc())\n175\t                  .limit(limit_per_model * 50).all())\n176\t    for r in rows:\n177\t        m = _normalize_model(r.model or \"\")\n178\t        if not m:\n179\t            continue\n180\t        v = _row_tok_s(r.response, r.duration_ms, getattr(r, \"outcome\", None))\n181\t        if v is None:\n182\t            continue\n183\t        role_models.setdefault(m, []).append(v)\n184\t        if len(role_models[m]) > limit_per_model * 2:\n185\t            role_models[m] = role_models[m][:limit_per_model]\n186\t\n187\t    cur = _normalize_model(current_model)\n188\t    best: _Alt | None = None\n189\t    for m, samples in role_models.items():\n190\t        if m == cur:\n191\t            continue\n192\t        if len(samples) < 3:\n193\t            continue\n194\t        # Match catalog entry by stem to confirm role support\n195\t        meta = next((c for c in CATALOG\n196\t                      if c.tag.split(\":\")[0] == m.split(\":\")[0]),\n197\t                     None)\n198\t        roles = meta.roles if meta else (\"chat\",)\n199\t        if role and role not in roles:\n200\t            continue\n201\t        tok_s = sum(samples) / len(samples)\n202\t        qual = _quality(m) or 50\n203\t        cand = _Alt(model=m, tok_s=tok_s, n=len(samples), quality=qual)\n204\t        if best is None or cand.tok_s > best.tok_s:\n205\t            best = cand\n206\t    return best\n207\t\n208\t\n209\t# \u2500\u2500 public: lag-detector for inline use in llm.chat() \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n210\t\n211\tclass LagWarning(NamedTuple):\n212\t    elapsed_s:        float\n213\t    baseline_tok_s:   float | None\n214\t    current_tok_s:    float | None\n215\t    suggested_model:  str\n216\t    suggested_tok_s:  float\n217\t\n218\t\n219\tdef check_lag(model: str, elapsed_s: float, response: str,\n220\t               *, slow_factor: float = 3.0,\n221\t               min_elapsed: float = 8.0) -> LagWarning | None:\n222\t    \"\"\"Inline lag check \u2014 call from inside the chat path right after\n223\t    a request returns. Returns a `LagWarning` if (a) the call took\n224\t    more than `min_elapsed` seconds AND (b) we have a faster\n225\t    alternative already on disk.\n226\t\n227\t    Cheap: one indexed History query (last ~20 rows for this model)\n228\t    plus one query for fastest-known. Skip when DB is missing or\n229\t    samples are insufficient.\n230\t\n231\t    `slow_factor` tunes when \"current call slower than baseline\" is\n232\t    noisy enough to mention. 3\u00d7 is conservative \u2014 first-token latency\n233\t    dominates short calls so we don't want to alarm on noise.\n234\t    \"\"\"\n235\t    if elapsed_s < min_elapsed:\n236\t        return None\n237\t    cur_tok = _row_tok_s(response, int(elapsed_s * 1000))\n238\t    baseline = recent_tok_s(model)\n239\t    # Only escalate if we KNOW it's slow. Without a baseline (cold\n240\t    # start), still warn when a faster pulled alternative exists \u2014\n241\t    # the user benefits even on the first call.\n242\t    if baseline and cur_tok and cur_tok * slow_factor > baseline:\n243\t        return None  # within normal noise\n244\t    alt = fastest_known(\"chat\", current_model=model)\n245\t    if alt is None:\n246\t        return None\n247\t    if cur_tok and alt.tok_s < cur_tok * 1.3:\n248\t        # Alternative isn't meaningfully faster; not worth nagging.\n249\t        return None\n250\t    return LagWarning(\n251\t        elapsed_s        = elapsed_s,\n252\t        baseline_tok_s   = baseline,\n253\t        current_tok_s    = cur_tok,\n254\t        suggested_model  = alt.model,\n255\t        suggested_tok_s  = alt.tok_s,\n256\t    )\n257\t\n258\t\n259\t# \u2500\u2500 public: regression warner for batch operations \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n260\t\n261\t# \u2500\u2500 public: perf-alert ring buffer (visible to MCP / proactive_doctor) \u2500\u2500\u2500\u2500\u2500\u2500\n262\t\n263\t_ALERT_BUFFER_PATH_ENV = \"ORG_LLM_PERF_ALERTS_PATH\"\n264\t_ALERT_BUFFER_DEFAULT  = \"~/.local/share/org-llm/perf_alerts.json\"\n265\t_ALERT_BUFFER_LIMIT    = 32\n266\t\n267\t\n268\tdef _alert_buffer_path() -> Path:\n269\t    raw = os.environ.get(_ALERT_BUFFER_PATH_ENV) or _ALERT_BUFFER_DEFAULT\n270\t    return Path(raw).expanduser()\n271\t\n272\t\n273\tdef record_perf_alert(*, model: str, elapsed_s: float,\n274\t                         current_tok_s: float | None,\n275\t                         suggested_model: str,\n276\t                         suggested_tok_s: float,\n277\t                         source: str = \"lag_detector\") -> None:\n278\t    \"\"\"Append a perf-alert event to the on-disk ring buffer.\n279\t\n280\t    The lag detector calls this whenever it would have printed a\n281\t    yellow warning. Storing each event lets the MCP `proactive_doctor`\n282\t    tool surface them later \u2014 opencode / claude don't render stderr,\n283\t    so an inline-only warning was invisible.\n284\t\n285\t    Best-effort: if the file is unwritable or malformed we skip\n286\t    silently. Telemetry must NEVER block a chat call.\n287\t    \"\"\"\n288\t    import json, time\n289\t    try:\n290\t        p = _alert_buffer_path()\n291\t        p.parent.mkdir(parents=True, exist_ok=True)\n292\t        try:\n293\t            existing = json.loads(p.read_text()) if p.exists() else []\n294\t            if not isinstance(existing, list):\n295\t                existing = []\n296\t        except Exception:\n297\t            existing = []\n298\t        existing.append({\n299\t            \"ts\":              time.time(),\n300\t            \"source\":          source,\n301\t            \"model\":           model,\n302\t            \"elapsed_s\":       round(elapsed_s, 2),\n303\t            \"current_tok_s\":   (round(current_tok_s, 2)\n304\t                                  if current_tok_s is not None else None),\n305\t            \"suggested_model\": suggested_model,\n306\t            \"suggested_tok_s\": round(suggested_tok_s, 2),\n307\t        })\n308\t        # Cap the buffer so it doesn't grow unbounded.\n309\t        existing = existing[-_ALERT_BUFFER_LIMIT:]\n310\t        p.write_text(json.dumps(existing, indent=2))\n311\t    except Exception:\n312\t        pass\n313\t\n314\t\n315\tdef recent_perf_alerts(limit: int = 10) -> list[dict]:\n316\t    \"\"\"Read the most recent N alerts (newest last). Returns [] when\n317\t    the file is missing / malformed / unreadable.\"\"\"\n318\t    import json\n319\t    p = _alert_buffer_path()\n320\t    if not p.exists():\n321\t        return []\n322\t    try:\n323\t        rows = json.loads(p.read_text())\n324\t        if not isinstance(rows, list):\n325\t            return []\n326\t        return rows[-max(1, limit):]\n327\t    except Exception:\n328\t        return []\n329\t\n330\t\n331\tdef clear_perf_alerts() -> int:\n332\t    \"\"\"Drop the buffer. Returns how many entries were cleared.\"\"\"\n333\t    import json\n334\t    p = _alert_buffer_path()\n335\t    if not p.exists():\n336\t        return 0\n337\t    try:\n338\t        rows = json.loads(p.read_text())\n339\t        n = len(rows) if isinstance(rows, list) else 0\n340\t        p.write_text(\"[]\")\n341\t        return n\n342\t    except Exception:\n343\t        return 0\n344\t\n345\t\n346\tdef regression_warning(model: str, *, recent_window: int = 5,\n347\t                         baseline_window: int = 50,\n348\t                         slow_factor: float = 1.5) -> str | None:\n349\t    \"\"\"Compare recent runs for `model` against an older baseline.\n350\t    Returns a one-line warning string when the model has gotten\n351\t    materially slower vs its history (e.g. ollama upgrade, RAM\n352\t    pressure from a new long-running process).\n353\t    \"\"\"\n354\t    eng = _engine()\n355\t    if eng is None:\n356\t        return None\n357\t    from .db import History, get_session\n358\t    target = _normalize_model(model)\n359\t    recent: list[float] = []\n360\t    older:  list[float] = []\n361\t    with get_session(eng) as s:\n362\t        rows = (s.query(History)\n363\t                  .filter(History.kind == \"llm\",\n364\t                          History.duration_ms.isnot(None),\n365\t                          History.response.isnot(None))\n366\t                  .order_by(History.id.desc())\n367\t                  .limit(baseline_window * 6).all())\n368\t    for r in rows:\n369\t        if _normalize_model(r.model or \"\") != target:\n370\t            continue\n371\t        v = _row_tok_s(r.response, r.duration_ms, getattr(r, \"outcome\", None))\n372\t        if v is None:\n373\t            continue\n374\t        if len(recent) < recent_window:\n375\t            recent.append(v)\n376\t        elif len(older) < baseline_window:\n377\t            older.append(v)\n378\t        else:\n379\t            break\n380\t    if len(recent) < 3 or len(older) < 5:\n381\t        return None\n382\t    r_avg = sum(recent) / len(recent)\n383\t    o_avg = sum(older)  / len(older)\n384\t    if r_avg <= 0 or o_avg <= 0:\n385\t        return None\n386\t    if o_avg > r_avg * slow_factor:\n387\t        slowdown = o_avg / r_avg\n388\t        return (f\"{model}: recent runs are {slowdown:.1f}\u00d7 slower \"\n389\t                f\"than baseline ({r_avg:.1f} vs {o_avg:.1f} tok/s). \"\n390\t                f\"Run [bold]org-llm doctor --power-boost[/bold] or \"\n391\t                f\"[bold]org-llm models --upgrade[/bold].\")\n392\t    return None\n393\t# perf.py:1 ends here\n394\t"
+        }
+      ]
+    },
+    {
+      "message_id": "019e0060-a8b5-775a-b56e-d32ff5b52d10",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "system",
+      "role": "system",
+      "index": 8,
+      "timestamp": "2026-05-07T02:59:55.190Z",
+      "content_preview": "Status: requesting",
+      "content": [
+        {
+          "type": "sdk_event",
+          "text": "Status: requesting",
+          "sdkType": "system",
+          "sdkSubtype": "status",
+          "metadata": {
+            "type": "system",
+            "subtype": "status",
+            "status": "requesting",
+            "uuid": "4a477904-8a3b-470e-8978-21105d018315",
+            "session_id": "87f4da35-cecb-4bee-a2d6-3393edd75b8f"
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "is_meta": true
+      }
+    },
+    {
+      "message_id": "019e0060-b672-71b5-abba-e4aa83aae1a3",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 9,
+      "timestamp": "2026-05-07T03:00:05.539Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "thinking",
+          "signature": "EtsJClsIDRgCKkC9I6RGjwaCIWsWUshFRUiAdPmZyDHTODHuIELIgqogEVyxz82LZrYsaH2VFbg1jR7iNjPcsv01vZzeaWHeQ4+4MhFjbGF1ZGUtc29ubmV0LTQtNjgAEgwSFQ55cjLCMK1tzuYaDBgJ0dzjUGkQcZG+rSIwFUvqESbGhZiI5jS5e42DmeWtJQvAgh7PH7AybBAbbamnKHOBCeY9kTLmHk7VxgI4Kq0IzaR1qQcmjTt8yZIq+1Vs95A97Xv/uMRJEdbphyzMj5L4tmgz9iXnzA4/ADVCxW3oA3jpT115WFD15p0Ev2N7Cd4irKGFdtDmkT6t3269tkUUDxV8rKlxuHXUzH1MV/kkBjy2EP+pKfi4p+8W4SQVoibSoaIG+5x9NCrQCNEJMAUvC98cMK5qT33T+XE79unYz/kS2mMszBlh/eEZ9DA6Y/+gNMJVBZiR1a6G0uMjIB++IapqvQuAGypgRgs/uIVlrUZGuxAx86XsHVnKY+iK8fJ510gnVH/A1u7Fq4M7+bj2aUf6dcznfIO13l6qZqFLpB/c6xQX+IoCX6J5ka/gIAbgGj0F4SegW0fbrEIIcjASQFszTNLPsy5J/5jxU/5sOQdT6FlenN1QvdRAiM8HuTBMI7SdYFVh8HIJlSPoM5kduhCeOzz1ndeummUP4+Wt4KwfRJRSlgbhconc+AYlN5wtKzS2bNXPvfZPfnHIXuQnzYiFEWUWKf9GEhgG8FiTv2WxcDBVIN3TluMljiJ1qY02vdYVoYi36un24Npqchxe2u6tQrWAlSrI3Tda9JmmtAczrpD1zsSZkon1WQMJAi8581hj23h1kAchKnX+VPJJ5fQcYwg/iTCHZ4nhql3o7o78iEpOyyEAGCOsNABktTe8bbLka2+ucyYK819pmjKnfTbVzLx6BsUcC6H7c7CRSnwFseHbw3x7wXQYVIOhIPaWS5Qz7IInvq7TAKABh80amrBV0lutQXkQyNS+PahkZm8clGQtwbpqm5cFKAiu/cBqzVHc5W+d0ofdZy01fWjzRs7pjdkUeURa/dahlzund4yPIip0kBr/eNgv4YY5h5HW6OEYkrTL0Olh13ZIo5TrpJqnOrqIKFyt8dArCyS9Z2iQ81vylKBGtYCesdTrVY7rc1rF9+0iz8eiXj6O8w0++lGCDS2w4auY23kI1Ll+UmlH469hwLjvD4P7dsGhO3EYNhRdjFkfCmGANNWaZ1daaRpIUPGMOqF6G1TN9SeBJ7DAnnx1of9a205XRlIE173lL7eelGI6sGQEFZUMdyH7Umykw4HIVM8wz0PqWEo80AuWsbXaMTvbIzxHC+Hy3fdL7Z1rpzh4rHqgTmo8J+nzcI89jIGjsB9ic88sZheKaRGi+LgTIXhy+0ctMNHhcFv5U9wx5NTnibHqZ41E33sNP97VpUvQt/w+Ldy5XLBZ7IbDzBDCAEgpuIdi7BOVozSeJ/qr5RRIo2L2hAdHYIyOYgIB7ZQhSSKzpaKoigonR8wnoHTvS9jmReU1kuGU0P8dpO88CN9YAliNnRDhaHDPmcUFF/JSaPUKLuvcqA0hZaDVaaTQpfTQ+EPWuOI7rJ3t8q1z4F/peqMGiTdfnCYa8EGKLW90OBkDTatJaXrYq/Q5Qq6u7G4tM1LHIhgB"
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-d14d-7615-bfd7-fb269e30dfb9",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 10,
+      "timestamp": "2026-05-07T03:00:05.603Z",
+      "content_preview": "Now let me get the full schema for `agor_artifacts_publish` to know the exact argument shape.",
+      "content": [
+        {
+          "type": "text",
+          "text": "Now let me get the full schema for `agor_artifacts_publish` to know the exact argument shape."
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-d171-762c-94da-4035496207bd",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 11,
+      "timestamp": "2026-05-07T03:00:05.623Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_01PhaDoVMihu2iSM1nyP13tx",
+          "name": "mcp__agor__agor_search_tools",
+          "input": {
+            "query": "agor_artifacts_publish full schema folder"
+          }
+        }
+      ],
+      "tool_uses": [
+        {
+          "id": "toolu_01PhaDoVMihu2iSM1nyP13tx",
+          "name": "mcp__agor__agor_search_tools",
+          "input": {
+            "query": "agor_artifacts_publish full schema folder"
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-d187-729c-94b5-d039ee3668ec",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "user",
+      "role": "user",
+      "index": 12,
+      "timestamp": "2026-05-07T03:00:05.639Z",
+      "content_preview": "Tool result: [{\"type\":\"text\",\"text\":\"{\\n  \\\"total_available\\\": 77,\\n  \\\"domains\\\": [\\n    {\\n      \\\"domain\\\": \\\"sessions\\\",\\n      \\\"description\\\": \\\"Agent conversations with genealogy (fork/s",
+      "content": [
+        {
+          "tool_use_id": "toolu_01PhaDoVMihu2iSM1nyP13tx",
+          "type": "tool_result",
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"total_available\": 77,\n  \"domains\": [\n    {\n      \"domain\": \"sessions\",\n      \"description\": \"Agent conversations with genealogy (fork/spawn), task tracking, and message history\",\n      \"count\": 16\n    },\n    {\n      \"domain\": \"repos\",\n      \"description\": \"Repository registration and management\",\n      \"count\": 4\n    },\n    {\n      \"domain\": \"worktrees\",\n      \"description\": \"Git worktrees with isolated branches, board placement, and zone pinning\",\n      \"count\": 9\n    },\n    {\n      \"domain\": \"environment\",\n      \"description\": \"Start/stop/health/logs/nuke for worktree dev environments\",\n      \"count\": 6\n    },\n    {\n      \"domain\": \"boards\",\n      \"description\": \"Spatial canvases with zones for organizing worktrees and cards\",\n      \"count\": 6\n    },\n    {\n      \"domain\": \"cards\",\n      \"description\": \"Kanban-style cards and card type definitions on boards\",\n      \"count\": 17\n    },\n    {\n      \"domain\": \"artifacts\",\n      \"description\": \"artifacts\",\n      \"count\": 8\n    },\n    {\n      \"domain\": \"users\",\n      \"description\": \"User accounts, profiles, preferences, and administration\",\n      \"count\": 6\n    },\n    {\n      \"domain\": \"analytics\",\n      \"description\": \"Usage and cost tracking leaderboard\",\n      \"count\": 1\n    },\n    {\n      \"domain\": \"mcp-servers\",\n      \"description\": \"External MCP server configuration and OAuth management\",\n      \"count\": 2\n    }\n  ],\n  \"results_count\": 10,\n  \"tools\": [\n    {\n      \"name\": \"agor_artifacts_publish\",\n      \"description\": \"Publish a folder as a live Sandpack artifact on a board. Reads all files from the given folder path, serializes them to the database, and places (or updates) the artifact on the board.\\n\\nIf artifact_id is omitted, creates a new artifact.\\nIf artifact_id is provided, updates the existing artifact (must be owned by you).\\n\\nThe folder should contain source files and optionally a sandpack.json manifest. The agent decides where to create the folder \u2014 inside the worktree, a temp directory, etc. The folder is only read at publish time; after that, the artifact lives in the database.\\n\\nRecommended: create the folder inside your worktree so files can be version-controlled.\\n\\nCONFIG CONVENTION (agor.config.js):\\nIf you include a file named \\\"/agor.config.js\\\", it is treated as a Handlebars template and rendered per-user at view time. This lets artifacts access API credentials and Agor context without hardcoding secrets.\\n\\nAvailable template variables:\\n  {{ user.env.VAR_NAME }} - User's environment variable (configured in Settings > Environment Variables)\\n  {{ user.id }}           - Current user's ID\\n  {{ user.name }}         - Current user's display name\\n  {{ user.email }}        - Current user's email\\n  {{ agor.apiUrl }}       - Agor daemon URL\\n  {{ artifact.id }}       - This artifact's ID\\n  {{ artifact.boardId }}  - Board ID\\n  {{ board.id }}          - Board ID (same as artifact.boardId)\\n  {{ board.slug }}        - Board slug (for URL construction)\\n\\nIMPORTANT:\\n- Use {{ user.env.X }} for secrets (API keys, tokens). NEVER hardcode sensitive values.\\n- All users can see the raw template file, but each user's rendered values are private.\\n- Rendered secrets are injected into the artifact JS at view time. Artifact code CAN access these values, so only use this for artifacts you trust. The security guarantee is that secrets never enter the LLM context or conversation history.\\n- Missing env vars render as empty string \\\"\\\". Your app should check for empty values and show a helpful message (e.g. \\\"Please configure OPENAI_API_KEY in Settings > Environment Variables\\\") instead of making API calls with empty credentials.\\n\\nExample /agor.config.js:\\n  export const apiKey = \\\"{{ user.env.OPENAI_API_KEY }}\\\";\\n  export const apiUrl = \\\"{{ agor.apiUrl }}\\\";\\n\\nThen in your app: import { apiKey, apiUrl } from '/agor.config.js';\",\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_artifacts_update\",\n      \"description\": \"Update artifact metadata without re-reading files from disk. Use this to move an artifact to a different board, rename it, toggle visibility, archive it, or reposition its board placement.\\n\\nPrimary use case: move an artifact to a different board via `boardId` when you no longer have the original source folder on disk.\\n\\nFor file/content changes, use agor_artifacts_publish (which re-reads a folder and updates the stored files).\\n\\nPlacement (x, y, width, height) is preserved across board moves unless you explicitly override it \u2014 so a cross-board move keeps the artifact in the same relative layout.\\n\\nCaller must own the artifact (or be an admin).\",\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_search_tools\",\n      \"description\": \"Search and browse available Agor MCP tools. Call with no args to see domains overview. Filter by domain, keyword, or annotation. Use detail=\\\"full\\\" to get input schemas before calling agor_execute_tool.\",\n      \"domain\": \"discovery\"\n    },\n    {\n      \"name\": \"agor_sessions_get_current_context\",\n      \"description\": \"Get a lean orientation snapshot for the current session in ONE call. Returns deduplicated context: session identity, user, git state, worktree (zone, issue/PR, notes, environment), board (with zones), repo (slug, default branch), genealogy, and sibling sessions. Every field appears exactly once. Use get_current or entity-specific tools for full details.\",\n      \"domain\": \"sessions\"\n    },\n    {\n      \"name\": \"agor_sessions_create\",\n      \"description\": \"Create a new session in an existing worktree. Use for starting fresh work on a new task in the same codebase (e.g., new feature branch, separate investigation). Unlike spawn, this creates an independent session with no parent-child relationship. MCP servers are inherited from the worktree (if configured) or user defaults, or can be overridden via `mcpServerIds`. Model selection falls back to user defaults and can be overridden via `modelConfig` (accepts either a model ID string like \\\"claude-opus-4-6\\\" or a full {mode, model, effort, provider} object \u2014 call `agor_models_list` to discover valid model IDs per agenticTool). Supports optional callbacks to notify the creating session when the new session completes.\",\n      \"domain\": \"sessions\"\n    },\n    {\n      \"name\": \"agor_card_types_create\",\n      \"description\": \"Create a new card type (global, usable on any board). Card types define default emoji, color, and optional JSON Schema for data validation.\",\n      \"domain\": \"cards\"\n    },\n    {\n      \"name\": \"agor_artifacts_check_build\",\n      \"description\": \"Check build readiness of artifact files in a folder. Verifies source files exist and are non-empty (does not run a real build or syntax check). Use this before publishing to verify basic structure.\",\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_artifacts_get\",\n      \"description\": \"Get a single artifact by ID, including its full file map (path \u2192 content). Use this to read artifact source code from another worktree without filesystem access. Respects visibility: public artifacts are readable by anyone; private artifacts are only readable by their creator.\",\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_artifacts_land\",\n      \"description\": \"Materialize an artifact's stored files to disk inside a worktree. Inverse of agor_artifacts_publish.\\n\\nUse this when you want to tweak an artifact's code: land it into a worktree, edit the files locally, then call agor_artifacts_publish with the same artifactId to push the changes back.\\n\\nWrites a sandpack.json manifest alongside the files so agor_artifacts_publish can read the template/dependencies/entry back in a round-trip.\\n\\nSafety:\\n- Destination must be inside the target worktree (cannot escape via \\\"..\\\" or absolute paths).\\n- Default subpath is `.agor/artifacts/<artifact-id>` (inside the worktree). Pass a custom subpath if you want a different location.\\n- Refuses to write to an existing destination unless overwrite=true is passed (empty or not).\\n- overwrite=true removes the destination directory first (symlinks are unlinked, not followed).\\n\\nVisibility: public artifacts are readable by anyone; private artifacts are only landable by their owner.\",\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_execute_tool\",\n      \"description\": \"Execute an Agor MCP tool by name. Use agor_search_tools first to discover available tools and their input schemas, then call this to invoke them.\",\n      \"domain\": \"discovery\"\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "message_id": "019e0060-d191-7745-974e-7992b0434f75",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "system",
+      "role": "system",
+      "index": 13,
+      "timestamp": "2026-05-07T03:00:05.653Z",
+      "content_preview": "Status: requesting",
+      "content": [
+        {
+          "type": "sdk_event",
+          "text": "Status: requesting",
+          "sdkType": "system",
+          "sdkSubtype": "status",
+          "metadata": {
+            "type": "system",
+            "subtype": "status",
+            "status": "requesting",
+            "uuid": "e37578a0-9f4a-4da7-ac39-0f71f7ce4f80",
+            "session_id": "87f4da35-cecb-4bee-a2d6-3393edd75b8f"
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "is_meta": true
+      }
+    },
+    {
+      "message_id": "019e0060-d9f1-758c-a8b0-d0ef1c021b44",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 14,
+      "timestamp": "2026-05-07T03:00:08.159Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "thinking",
+          "signature": "EsQCClsIDRgCKkAZXjDKTN29kiFPGywRJmAxlnQe3PWBkgbIofdoeVDGvCygAHj+HUOZ03je3dCu+v/VMz7ju+Q57/LTsPHsHMR+MhFjbGF1ZGUtc29ubmV0LTQtNjgAEgyM0mP+eenWV1G8xRoaDMs3+n/hQnP3Op3EpyIw3lYEDZJy/C3aUT20/4jJbaAVyDx8nHPs1kmcNSUHhyj4GkDScqmo0bvWNrjUanE0KpYBEJrGVNnW2EHvhRwwz9sy7z2USiYRc6LpeTBJ9rclqh/C0yZpDJr18gRiNxquU8jcb8t1an+/Naa78DGye7MYdiWKhKP9BVkNlBitzpqkPOZyksC9kHl877q9CEsdR1sbXSEgHoyfuV74Cb0Lqsl6J1tB8jYzvB94YSZeDY82HjWyTs2tavDbS30YzZHc+gAo0eIJtqxzGAE="
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-dcd1-709a-aec7-7dce60dd91de",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 15,
+      "timestamp": "2026-05-07T03:00:08.545Z",
+      "content_preview": "I need the full input schema. Let me search with full detail.",
+      "content": [
+        {
+          "type": "text",
+          "text": "I need the full input schema. Let me search with full detail."
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-de6c-7219-9b08-3cc9c508db65",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 16,
+      "timestamp": "2026-05-07T03:00:08.955Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_01M76cFebKDFzY8G7PQPxXFA",
+          "name": "mcp__agor__agor_search_tools",
+          "input": {
+            "query": "agor_artifacts_publish",
+            "detail": "full"
+          }
+        }
+      ],
+      "tool_uses": [
+        {
+          "id": "toolu_01M76cFebKDFzY8G7PQPxXFA",
+          "name": "mcp__agor__agor_search_tools",
+          "input": {
+            "query": "agor_artifacts_publish",
+            "detail": "full"
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-dea9-77ca-9a94-14ea09d6bde0",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "user",
+      "role": "user",
+      "index": 17,
+      "timestamp": "2026-05-07T03:00:09.001Z",
+      "content_preview": "Tool result: [{\"type\":\"text\",\"text\":\"{\\n  \\\"total_available\\\": 77,\\n  \\\"domains\\\": [\\n    {\\n      \\\"domain\\\": \\\"sessions\\\",\\n      \\\"description\\\": \\\"Agent conversations with genealogy (fork/s",
+      "content": [
+        {
+          "tool_use_id": "toolu_01M76cFebKDFzY8G7PQPxXFA",
+          "type": "tool_result",
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"total_available\": 77,\n  \"domains\": [\n    {\n      \"domain\": \"sessions\",\n      \"description\": \"Agent conversations with genealogy (fork/spawn), task tracking, and message history\",\n      \"count\": 16\n    },\n    {\n      \"domain\": \"repos\",\n      \"description\": \"Repository registration and management\",\n      \"count\": 4\n    },\n    {\n      \"domain\": \"worktrees\",\n      \"description\": \"Git worktrees with isolated branches, board placement, and zone pinning\",\n      \"count\": 9\n    },\n    {\n      \"domain\": \"environment\",\n      \"description\": \"Start/stop/health/logs/nuke for worktree dev environments\",\n      \"count\": 6\n    },\n    {\n      \"domain\": \"boards\",\n      \"description\": \"Spatial canvases with zones for organizing worktrees and cards\",\n      \"count\": 6\n    },\n    {\n      \"domain\": \"cards\",\n      \"description\": \"Kanban-style cards and card type definitions on boards\",\n      \"count\": 17\n    },\n    {\n      \"domain\": \"artifacts\",\n      \"description\": \"artifacts\",\n      \"count\": 8\n    },\n    {\n      \"domain\": \"users\",\n      \"description\": \"User accounts, profiles, preferences, and administration\",\n      \"count\": 6\n    },\n    {\n      \"domain\": \"analytics\",\n      \"description\": \"Usage and cost tracking leaderboard\",\n      \"count\": 1\n    },\n    {\n      \"domain\": \"mcp-servers\",\n      \"description\": \"External MCP server configuration and OAuth management\",\n      \"count\": 2\n    }\n  ],\n  \"results_count\": 3,\n  \"tools\": [\n    {\n      \"name\": \"agor_artifacts_publish\",\n      \"description\": \"Publish a folder as a live Sandpack artifact on a board. Reads all files from the given folder path, serializes them to the database, and places (or updates) the artifact on the board.\\n\\nIf artifact_id is omitted, creates a new artifact.\\nIf artifact_id is provided, updates the existing artifact (must be owned by you).\\n\\nThe folder should contain source files and optionally a sandpack.json manifest. The agent decides where to create the folder \u2014 inside the worktree, a temp directory, etc. The folder is only read at publish time; after that, the artifact lives in the database.\\n\\nRecommended: create the folder inside your worktree so files can be version-controlled.\\n\\nCONFIG CONVENTION (agor.config.js):\\nIf you include a file named \\\"/agor.config.js\\\", it is treated as a Handlebars template and rendered per-user at view time. This lets artifacts access API credentials and Agor context without hardcoding secrets.\\n\\nAvailable template variables:\\n  {{ user.env.VAR_NAME }} - User's environment variable (configured in Settings > Environment Variables)\\n  {{ user.id }}           - Current user's ID\\n  {{ user.name }}         - Current user's display name\\n  {{ user.email }}        - Current user's email\\n  {{ agor.apiUrl }}       - Agor daemon URL\\n  {{ artifact.id }}       - This artifact's ID\\n  {{ artifact.boardId }}  - Board ID\\n  {{ board.id }}          - Board ID (same as artifact.boardId)\\n  {{ board.slug }}        - Board slug (for URL construction)\\n\\nIMPORTANT:\\n- Use {{ user.env.X }} for secrets (API keys, tokens). NEVER hardcode sensitive values.\\n- All users can see the raw template file, but each user's rendered values are private.\\n- Rendered secrets are injected into the artifact JS at view time. Artifact code CAN access these values, so only use this for artifacts you trust. The security guarantee is that secrets never enter the LLM context or conversation history.\\n- Missing env vars render as empty string \\\"\\\". Your app should check for empty values and show a helpful message (e.g. \\\"Please configure OPENAI_API_KEY in Settings > Environment Variables\\\") instead of making API calls with empty credentials.\\n\\nExample /agor.config.js:\\n  export const apiKey = \\\"{{ user.env.OPENAI_API_KEY }}\\\";\\n  export const apiUrl = \\\"{{ agor.apiUrl }}\\\";\\n\\nThen in your app: import { apiKey, apiUrl } from '/agor.config.js';\",\n      \"inputSchema\": {\n        \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n        \"type\": \"object\",\n        \"properties\": {\n          \"folderPath\": {\n            \"type\": \"string\",\n            \"description\": \"Absolute path to folder containing artifact files\"\n          },\n          \"boardId\": {\n            \"type\": \"string\",\n            \"description\": \"Board to place the artifact on\"\n          },\n          \"name\": {\n            \"type\": \"string\",\n            \"description\": \"Artifact display name\"\n          },\n          \"artifactId\": {\n            \"description\": \"If provided, update existing artifact (must be owned by you)\",\n            \"type\": \"string\"\n          },\n          \"template\": {\n            \"description\": \"Sandpack template (default: react)\",\n            \"type\": \"string\",\n            \"enum\": [\n              \"react\",\n              \"react-ts\",\n              \"vanilla\",\n              \"vanilla-ts\",\n              \"vue\",\n              \"vue3\",\n              \"svelte\",\n              \"solid\",\n              \"angular\"\n            ]\n          },\n          \"public\": {\n            \"description\": \"Whether the artifact is visible to all board viewers (default: true)\",\n            \"type\": \"boolean\"\n          },\n          \"x\": {\n            \"description\": \"X position on board (default: 0, only used on create)\",\n            \"type\": \"number\"\n          },\n          \"y\": {\n            \"description\": \"Y position on board (default: 0, only used on create)\",\n            \"type\": \"number\"\n          },\n          \"width\": {\n            \"description\": \"Width in pixels (default: 600, only used on create)\",\n            \"type\": \"number\"\n          },\n          \"height\": {\n            \"description\": \"Height in pixels (default: 400, only used on create)\",\n            \"type\": \"number\"\n          },\n          \"useLocalBundler\": {\n            \"description\": \"Use the daemon's self-hosted Sandpack bundler at /static/sandpack/ instead of the default CodeSandbox hosted bundler. Default: false.\\n\\nWhen to set true:\\n- Daemon is on a private network / VPN with no egress to codesandbox.io\\n- Air-gapped deployments, compliance constraints, or fully offline demos\\n\\nREQUIRES the daemon to have been built with `./build.sh --with-sandpack`. If the local bundler is not available, artifact creation fails with a clear error.\\n\\nKNOWN LIMITATIONS of the local bundler (upstream sandpack-bundler v2):\\n- CommonJS npm packages fail to resolve. Popular examples that break: recharts, lodash (use lodash-es instead), moment. Stick to ESM-only packages when this flag is true.\\n- Fewer features and slower updates than the hosted bundler. Upstream issues: https://github.com/codesandbox/sandpack-bundler\\n\\nWhen in doubt, leave unset \u2014 the hosted bundler supports the widest range of packages and is the recommended default.\",\n            \"type\": \"boolean\"\n          }\n        },\n        \"required\": [\n          \"folderPath\",\n          \"boardId\",\n          \"name\"\n        ],\n        \"additionalProperties\": false\n      },\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_artifacts_update\",\n      \"description\": \"Update artifact metadata without re-reading files from disk. Use this to move an artifact to a different board, rename it, toggle visibility, archive it, or reposition its board placement.\\n\\nPrimary use case: move an artifact to a different board via `boardId` when you no longer have the original source folder on disk.\\n\\nFor file/content changes, use agor_artifacts_publish (which re-reads a folder and updates the stored files).\\n\\nPlacement (x, y, width, height) is preserved across board moves unless you explicitly override it \u2014 so a cross-board move keeps the artifact in the same relative layout.\\n\\nCaller must own the artifact (or be an admin).\",\n      \"inputSchema\": {\n        \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n        \"type\": \"object\",\n        \"properties\": {\n          \"artifactId\": {\n            \"type\": \"string\",\n            \"description\": \"Artifact ID to update (full UUID or short prefix)\"\n          },\n          \"boardId\": {\n            \"description\": \"Move the artifact to a different board\",\n            \"type\": \"string\"\n          },\n          \"name\": {\n            \"description\": \"Rename the artifact\",\n            \"type\": \"string\"\n          },\n          \"description\": {\n            \"description\": \"Update the description\",\n            \"type\": \"string\"\n          },\n          \"public\": {\n            \"description\": \"Change visibility (true = visible to all board viewers, false = owner only)\",\n            \"type\": \"boolean\"\n          },\n          \"archived\": {\n            \"description\": \"Archive or unarchive the artifact\",\n            \"type\": \"boolean\"\n          },\n          \"x\": {\n            \"description\": \"New X position on board\",\n            \"type\": \"number\"\n          },\n          \"y\": {\n            \"description\": \"New Y position on board\",\n            \"type\": \"number\"\n          },\n          \"width\": {\n            \"description\": \"New width in pixels\",\n            \"type\": \"number\"\n          },\n          \"height\": {\n            \"description\": \"New height in pixels\",\n            \"type\": \"number\"\n          }\n        },\n        \"required\": [\n          \"artifactId\"\n        ],\n        \"additionalProperties\": false\n      },\n      \"domain\": \"artifacts\"\n    },\n    {\n      \"name\": \"agor_artifacts_land\",\n      \"description\": \"Materialize an artifact's stored files to disk inside a worktree. Inverse of agor_artifacts_publish.\\n\\nUse this when you want to tweak an artifact's code: land it into a worktree, edit the files locally, then call agor_artifacts_publish with the same artifactId to push the changes back.\\n\\nWrites a sandpack.json manifest alongside the files so agor_artifacts_publish can read the template/dependencies/entry back in a round-trip.\\n\\nSafety:\\n- Destination must be inside the target worktree (cannot escape via \\\"..\\\" or absolute paths).\\n- Default subpath is `.agor/artifacts/<artifact-id>` (inside the worktree). Pass a custom subpath if you want a different location.\\n- Refuses to write to an existing destination unless overwrite=true is passed (empty or not).\\n- overwrite=true removes the destination directory first (symlinks are unlinked, not followed).\\n\\nVisibility: public artifacts are readable by anyone; private artifacts are only landable by their owner.\",\n      \"inputSchema\": {\n        \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n        \"type\": \"object\",\n        \"properties\": {\n          \"artifactId\": {\n            \"type\": \"string\",\n            \"description\": \"Artifact ID to materialize (full UUID or short prefix)\"\n          },\n          \"worktreeId\": {\n            \"type\": \"string\",\n            \"description\": \"Destination worktree ID (full UUID or short prefix)\"\n          },\n          \"subpath\": {\n            \"description\": \"Worktree-relative path for the destination folder. Default: .agor/artifacts/<artifact-id>. Must not be absolute or escape the worktree.\",\n            \"type\": \"string\"\n          },\n          \"overwrite\": {\n            \"description\": \"Remove the destination folder first if it exists. Default: false.\",\n            \"type\": \"boolean\"\n          }\n        },\n        \"required\": [\n          \"artifactId\",\n          \"worktreeId\"\n        ],\n        \"additionalProperties\": false\n      },\n      \"domain\": \"artifacts\"\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "message_id": "019e0060-deb3-73d9-ae05-8266a84f22a4",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "system",
+      "role": "system",
+      "index": 18,
+      "timestamp": "2026-05-07T03:00:09.018Z",
+      "content_preview": "Status: requesting",
+      "content": [
+        {
+          "type": "sdk_event",
+          "text": "Status: requesting",
+          "sdkType": "system",
+          "sdkSubtype": "status",
+          "metadata": {
+            "type": "system",
+            "subtype": "status",
+            "status": "requesting",
+            "uuid": "1ddfe977-11d2-4d6a-89d5-e15ce866f813",
+            "session_id": "87f4da35-cecb-4bee-a2d6-3393edd75b8f"
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "is_meta": true
+      }
+    },
+    {
+      "message_id": "019e0060-e6d8-74fd-b405-1a740bb2f74c",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 19,
+      "timestamp": "2026-05-07T03:00:13.451Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "thinking",
+          "signature": "ErcFClsIDRgCKkBB71colIReGvCqMCtbROy2/23FQ1K5qPTtoswplsUUD70au/9ac5Uh1LxMQaa2J25bZkR23rzYCLC40hX5tqvzMhFjbGF1ZGUtc29ubmV0LTQtNjgAEgyRPWEaZ4eVDfUM7BwaDL444oZsXGuYkjb70CIwc6S4AgBREtMAsp0/2U67XNozD3wWQ6b+Z/HBet0Sz+8Cz3jLO6r52+zrp6ErmYIPKokEAhCZEHtDbsuzukm1wAGdrnSrDE+PuHJqTm+OpEXeP1B36S8EXLYPTta3xEmE1Ol5LweZ5mHy0CLnrMJfJQEjGTHxknNMKkUjw+N1gOka/9xrZ5X6oPZ2mBvtDEaN1g9l8jwfnMEafDcLOdqqWY/tAI8FdPnwtZUSdk8QZOQ8Dy7rRzBBuL3cYQ6O89O1glPROBLpuzFYxb3XV9E77PIDeDTeZhHNJRgnY8TlucxHLqhBpxBjOvLkZXtXUXwTOykMk8zm3nlIyXSgtHtWgMST0r60byBmcdRRICAvhsrbxdKQbXiyYy6RgLt32cabEpE5m0yYrrHi97XPRalFIuOg7uwv7YSQzH1Pb+fYOsaW/I6CEajlymmiLctQo7TLuRWbCwJPgdtZMcfwZIGe7RIDSpJgNa1tdZALBXyG1Mq/OCZvLtUiLKMvVu6iwgAqEdY62xvqryqkSk1z8hENQ4d41DDMSck4a7pzrqOzulZvWIsBdB+/mB43wLWaDuBltDBQvjXHFkNsgwO3M7XP3EfuFy89kjXznehcQkp9Qsx6KSy0kclfZaJGQksAfCyVa0wa/5+S6bT4toqG8RqZWd0ByS/9H5PVf5/reVUvH1zKTqnVP3yMkP4Ij6mZn9Y3IVa0riMou51ZKzueuqwx21jwNt1dCDeWBBaWh0W/+kICAF1oc2qsqFYvkIgYAQ=="
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-f012-73d8-b6a4-32f52c08f55f",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 20,
+      "timestamp": "2026-05-07T03:00:13.864Z",
+      "content_preview": "I need a boardId. Let me get the current session context.",
+      "content": [
+        {
+          "type": "text",
+          "text": "I need a boardId. Let me get the current session context."
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-f32e-74eb-9935-697a0857b1da",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 21,
+      "timestamp": "2026-05-07T03:00:14.279Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_01JpfQn1KFwJXu4kwenuJqQP",
+          "name": "mcp__agor__agor_execute_tool",
+          "input": {
+            "tool_name": "agor_sessions_get_current_context",
+            "arguments": {}
+          }
+        }
+      ],
+      "tool_uses": [
+        {
+          "id": "toolu_01JpfQn1KFwJXu4kwenuJqQP",
+          "name": "mcp__agor__agor_execute_tool",
+          "input": {
+            "tool_name": "agor_sessions_get_current_context",
+            "arguments": {}
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-f3a1-7321-a919-b2419cb57656",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "user",
+      "role": "user",
+      "index": 22,
+      "timestamp": "2026-05-07T03:00:14.369Z",
+      "content_preview": "Tool result: [{\"type\":\"text\",\"text\":\"{\\n  \\\"session_id\\\": \\\"019e0060-8841-76be-8223-886596595558\\\",\\n  \\\"url\\\": null,\\n  \\\"status\\\": \\\"running\\\",\\n  \\\"agentic_tool\\\": \\\"claude-code\\\",\\n  \\\"titl",
+      "content": [
+        {
+          "tool_use_id": "toolu_01JpfQn1KFwJXu4kwenuJqQP",
+          "type": "tool_result",
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"session_id\": \"019e0060-8841-76be-8223-886596595558\",\n  \"url\": null,\n  \"status\": \"running\",\n  \"agentic_tool\": \"claude-code\",\n  \"title\": \"live-artifact-preview-geordi\",\n  \"model\": null,\n  \"effort\": null,\n  \"user_name\": \"Admin\",\n  \"user_email\": \"admin@agor.live\",\n  \"user_role\": \"admin\",\n  \"genealogy\": \"spawned\",\n  \"parent_session_id\": \"019e0060-3a2e-7374-a393-b24e62fde102\",\n  \"children_count\": 0,\n  \"branch\": \"unknown\",\n  \"base_sha\": \"unknown\",\n  \"current_sha\": \"unknown\",\n  \"worktree_id\": \"019e0060-39ff-770b-9274-dc696240e89a\",\n  \"worktree_name\": \"pilot-R3Artifact-1778122765\",\n  \"worktree_path\": \"/home/daniel/.agor/worktrees/local/org-llm/pilot-R3Artifact-1778122765\",\n  \"base_ref\": \"trunk\",\n  \"issue_url\": null,\n  \"pull_request_url\": null,\n  \"notes\": null,\n  \"zone_label\": null,\n  \"environment_status\": null,\n  \"app_url\": null,\n  \"repo_slug\": \"local/org-llm\",\n  \"repo_name\": \"org-llm\",\n  \"repo_path\": \"/home/daniel/repos/org-llm\",\n  \"default_branch\": \"trunk\",\n  \"sibling_sessions\": [\n    {\n      \"session_id\": \"019e0060-3a2e-7374-a393-b24e62fde102\",\n      \"status\": \"idle\",\n      \"agentic_tool\": \"claude-code\"\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "message_id": "019e0060-f3be-75ea-b789-881292758f18",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "system",
+      "role": "system",
+      "index": 23,
+      "timestamp": "2026-05-07T03:00:14.413Z",
+      "content_preview": "Status: requesting",
+      "content": [
+        {
+          "type": "sdk_event",
+          "text": "Status: requesting",
+          "sdkType": "system",
+          "sdkSubtype": "status",
+          "metadata": {
+            "type": "system",
+            "subtype": "status",
+            "status": "requesting",
+            "uuid": "f40d2b88-f66d-4771-a343-2f27622858c6",
+            "session_id": "87f4da35-cecb-4bee-a2d6-3393edd75b8f"
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "is_meta": true
+      }
+    },
+    {
+      "message_id": "019e0060-fc0c-7293-b038-e12b49e0bc36",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 24,
+      "timestamp": "2026-05-07T03:00:16.542Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "thinking",
+          "signature": "EooCClsIDRgCKkCwqTArROYxKbBISeGjyTZUiXFNCUfWYJR3kSfAzJGRBRGx5myi1HJlvZxtmQ+FHLrW4Idr9epJPijp/WEJocARMhFjbGF1ZGUtc29ubmV0LTQtNjgAEgy0jwIKR6rOLWp3iY8aDCyT5nbi1EDxbeB21yIwUdYSYVVvca0y2NUDKJF2m1+88AlAdyY89RZ+nb0jcTgQg1YWZLx0iLY9HIbMIzlKKl3NLLqpdGHC8Y6AfSxdErcrPGKS4Z0PfVF5OyKhzIm04skKAMdPmnftwQ/H3FOoCKFfbtPZORhMCOSsFq0O5FAVvX2ePWKOwtkYdz2SCpO5loTNS3ebSQpgPYrYUTIYAQ=="
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-fd9e-72cd-b18b-1255167a5cf8",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 25,
+      "timestamp": "2026-05-07T03:00:17.254Z",
+      "content_preview": "No boardId in context \u2014 let me list boards.",
+      "content": [
+        {
+          "type": "text",
+          "text": "No boardId in context \u2014 let me list boards."
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-ff0f-775f-848b-96a34a7a8988",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 26,
+      "timestamp": "2026-05-07T03:00:17.300Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_01BER41kQaeH538ipegtTEdR",
+          "name": "mcp__agor__agor_execute_tool",
+          "input": {
+            "tool_name": "agor_boards_list",
+            "arguments": {}
+          }
+        }
+      ],
+      "tool_uses": [
+        {
+          "id": "toolu_01BER41kQaeH538ipegtTEdR",
+          "name": "mcp__agor__agor_execute_tool",
+          "input": {
+            "tool_name": "agor_boards_list",
+            "arguments": {}
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0060-ff29-760d-8f26-57af9879c89b",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "user",
+      "role": "user",
+      "index": 27,
+      "timestamp": "2026-05-07T03:00:17.321Z",
+      "content_preview": "Tool result: [{\"type\":\"text\",\"text\":\"{\\n  \\\"total\\\": 1,\\n  \\\"limit\\\": 10000,\\n  \\\"skip\\\": 0,\\n  \\\"data\\\": [\\n    {\\n      \\\"board_id\\\": \\\"019dfbcb-1cc4-7206-abae-7b87a433e88e\\\",\\n      \\\"name\\\"",
+      "content": [
+        {
+          "tool_use_id": "toolu_01BER41kQaeH538ipegtTEdR",
+          "type": "tool_result",
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"total\": 1,\n  \"limit\": 10000,\n  \"skip\": 0,\n  \"data\": [\n    {\n      \"board_id\": \"019dfbcb-1cc4-7206-abae-7b87a433e88e\",\n      \"name\": \"Main Board\",\n      \"slug\": \"default\",\n      \"created_at\": \"2026-05-06T05:38:05.635Z\",\n      \"last_updated\": \"2026-05-06T06:19:47.300Z\",\n      \"created_by\": \"anonymous\",\n      \"url\": \"http://localhost:3030/b/default\",\n      \"archived\": false,\n      \"description\": \"Main board for all sessions\",\n      \"color\": \"#1677ff\",\n      \"icon\": \"\u2b50\",\n      \"objects\": {}\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "message_id": "019e0060-ff31-732c-bcbc-c453f5cbd719",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "system",
+      "role": "system",
+      "index": 28,
+      "timestamp": "2026-05-07T03:00:17.332Z",
+      "content_preview": "Status: requesting",
+      "content": [
+        {
+          "type": "sdk_event",
+          "text": "Status: requesting",
+          "sdkType": "system",
+          "sdkSubtype": "status",
+          "metadata": {
+            "type": "system",
+            "subtype": "status",
+            "status": "requesting",
+            "uuid": "7597cb9f-802e-4944-a009-8d5bcb9c6163",
+            "session_id": "87f4da35-cecb-4bee-a2d6-3393edd75b8f"
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "is_meta": true
+      }
+    },
+    {
+      "message_id": "019e0061-0672-7298-ad11-283d40671967",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 29,
+      "timestamp": "2026-05-07T03:00:27.940Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "thinking",
+          "signature": "EtsLClsIDRgCKkBN10yfJG7fX5I/ZmBiSEnm5na8Bzbh3NguS5F0VKqOEZfU2ltOWjorBu9jYP+z5YdQST7YTLPiMbSi6w3seUv4MhFjbGF1ZGUtc29ubmV0LTQtNjgAEgw7mwFVe+edNJg8qr4aDLVw7PdjWg7rfYAvPCIw9S+GSvbmaWnNRHm6wez/MaHpJsgnyuo+pGioqq+sTWwVYeR3wDTWSUC73yk8u+CwKq0KQSJ+rVajZ/ABnhAppH6SOyKhf8btUDybiUP+C4d5N03yecfdnF0CyMsNqr+ZkY6403AJ74jcR98tQjJdYYCsvTp8BsUjV8LVaflhUY7WIHOGs/BUrAmeCZq4RkVQ6sf18Neztu7zdCBP2mf6G2S6ASpY2G3kki4XjqQmtk+I7DtL6/gKzI25B5xxjjZ6AciYjvmilDyNwybu03FwXx25Gdzx0VVCyOLrppf6jOVxuT4j2hq0HrxMqgtUKsVsy6jCaCBLW9D5KatpHItcoImFAgEJzZpI46tjWrTD4IUvBiLYSf0MADGxovk4Ns4NXRWocJuqLS+z41Sa46SAwXrD5tMu8mwvO0C+6oB2Gg/JQrxs0YXa87PtZl/xY7tuHW3ESJg0zd//v7fA86IJXl5mdY4OpCRynRf1hLyeYdhMI/+aGBEs1PR+kPY9/03vrpNLNuf8Da0Thj74FPbeumm+5nhesA67UnVK7Rdkt1YtWF0Kvvaa4HBOlRzf5VAjVsm9DQI7IAcGokDFrOvoTjB929s23jHL/+n1UYNeKgzxUY5DxoUyyIFHkXGF367gi5akoGNujgrhqe+/jyhSPpqB+t/m1XwBL7yNC9Qm1mWNUnG5Z3+23isvzPQ6RxZqRf3TK4L+YsoGkht5VhpBKF6I10iE6omKuRbThTmetTGVfW7520VMNWtrTZibk4ZyfHJVVCLkeXvIPYzbCPiQp3SLZkef05qqw0stE4Wt4QjcAiqiQGLBW9ud4ypSStBz40QUkn/B9lUvzNsHVXgWHuxTW2wvamFMT3pSZ5ogGZP+oGee/7AG8qQHD9T0py1IxYk8+egojiI6tRqGWg96nOQJGtds1nDzFLQvtuAtqcBYGntNRrWj6PIKdonkGhTXX6dCIzd9Nu2fXaCXnmSYCm83p5Pz27V/8+E680XZnxYfVw0QuDDcLXNa5dlsylBj1g4kwo6XoQasFWwWkYQhmycARbR9T08OpPeJjHLIxB72bL/6Fo0X3Z+7tY/mD9Er5vW1ZsRskwY31VXSuJk2b+cT/upTY1rZmNaQed3L/lXrzPdJyK+r9h9Hxdu68udy8HPjVqFU2XtqVGz6ynuh1HItmf0lay/qi76DnkA04iXGOx0KFgEqwhrZn1Y/f2YJIOksa/ls7quT95hSLTpJMFn3TxxPUcTr/tQm5EgbnzpokQzwqVx4IOhVVOm/Uyeqq4BwJIipUxh3B4ElyQtI4L9VdboBK3UeR5liCT/7dAN3qWSHtZo/DnUe/NUFJCbU0SUotgJPb41/LvxmbyV6WxnnGq5/zCRrqHqDxrDjT7oKaYNG5ni4yBkgmdZiVJEEl1OiyQIlSjL91YPY+Fq4GBJZFfi5u1GHAg2+ixK9aLJ3jAMu4WEr8Dix1aIidaLeduVoeNXe+Dd7ic68gflevqNNxbUwit29FjaiLYVU73Vx4qCiZ8vKrPF7zUhWRp4N+hnjoHwqWFirQVsnD1+b5YJTGE82dWNscjUfKKfGYpdTdbRcyLbCFpu5OJiHnuPWMtDfuI+VVkbZ4wpUtfrTTalBjhbjg99Bho6Ipus4xitFBRoqU7+wP/KTGxeMw0TxKkd0cOt9mOmTroAfutg5lfvT1GYc80ss8j4UR5RxJ+KneRf8SVDY4maoAXPJBkDqCpQG6UU2qXhCevecZeNOL2evMbheD6Uwat9QMuNhcSyUSsMKFYQXCReD8Dyr8v1NKsaK71Zv12yQM42b6aL6iEGzTJNpXdp0YrkiQRfqX8cYAQ=="
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0061-28af-7650-835b-9cf5260e21b0",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 30,
+      "timestamp": "2026-05-07T03:00:27.963Z",
+      "content_preview": "I have boardId `019dfbcb-1cc4-7206-abae-7b87a433e88e`. Now I'll write the artifact files to `/tmp/geordi-perf-chart/` and publish.",
+      "content": [
+        {
+          "type": "text",
+          "text": "I have boardId `019dfbcb-1cc4-7206-abae-7b87a433e88e`. Now I'll write the artifact files to `/tmp/geordi-perf-chart/` and publish."
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0061-6559-7169-978b-4c0926b1661f",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 31,
+      "timestamp": "2026-05-07T03:00:43.492Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_01GGrkqJXUY2qppHHVx15LS1",
+          "name": "Write",
+          "input": {
+            "file_path": "/tmp/geordi-perf-chart/App.js",
+            "content": "import React from \"react\";\n\nconst FUNCTIONS = [\n  { name: \"_engine\",             loc: 9,  kind: \"private\", section: \"helpers\" },\n  { name: \"_normalize_model\",    loc: 7,  kind: \"private\", section: \"helpers\" },\n  { name: \"_row_tok_s\",          loc: 45, kind: \"private\", section: \"helpers\" },\n  { name: \"_alert_buffer_path\",  loc: 3,  kind: \"private\", section: \"alerts\" },\n  { name: \"recent_tok_s\",        loc: 30, kind: \"public\",  section: \"baseline\" },\n  { name: \"fastest_known\",       loc: 52, kind: \"public\",  section: \"catalog\" },\n  { name: \"check_lag\",           loc: 38, kind: \"public\",  section: \"lag\" },\n  { name: \"record_perf_alert\",   loc: 40, kind: \"public\",  section: \"alerts\" },\n  { name: \"recent_perf_alerts\",  loc: 14, kind: \"public\",  section: \"alerts\" },\n  { name: \"clear_perf_alerts\",   loc: 13, kind: \"public\",  section: \"alerts\" },\n  { name: \"regression_warning\",  loc: 47, kind: \"public\",  section: \"regression\" },\n];\n\nconst SECTION_COLOR = {\n  helpers:    \"#6366f1\",\n  baseline:   \"#0ea5e9\",\n  catalog:    \"#f59e0b\",\n  lag:        \"#ef4444\",\n  alerts:     \"#10b981\",\n  regression: \"#8b5cf6\",\n};\n\nconst SECTION_LABEL = {\n  helpers:    \"private helpers\",\n  baseline:   \"rolling baseline\",\n  catalog:    \"fastest-known\",\n  lag:        \"lag detector\",\n  alerts:     \"alert buffer\",\n  regression: \"regression warner\",\n};\n\nconst MAX_LOC = Math.max(...FUNCTIONS.map(f => f.loc));\nconst BAR_MAX_W = 380;\nconst ROW_H = 36;\nconst LABEL_W = 170;\nconst PAD = 20;\nconst CHART_H = FUNCTIONS.length * ROW_H + PAD * 2 + 60;\n\nexport default function App() {\n  const [hovered, setHovered] = React.useState(null);\n\n  return (\n    <div style={{\n      fontFamily: \"monospace\",\n      background: \"#0f172a\",\n      minHeight: \"100vh\",\n      color: \"#e2e8f0\",\n      padding: \"24px\",\n    }}>\n      <h2 style={{ margin: \"0 0 4px\", fontSize: 18, color: \"#f1f5f9\" }}>\n        perf.py \u2014 function complexity (LoC)\n      </h2>\n      <p style={{ margin: \"0 0 20px\", fontSize: 12, color: \"#64748b\" }}>\n        org_llm/perf.py \u00b7 {FUNCTIONS.reduce((s, f) => s + f.loc, 0)} lines across {FUNCTIONS.length} functions\n      </p>\n\n      <svg width={LABEL_W + BAR_MAX_W + PAD * 2 + 50} height={CHART_H}>\n        {/* Section legend */}\n        {Object.entries(SECTION_LABEL).map(([key, label], i) => (\n          <g key={key} transform={`translate(${i * 0}, 0)`}>\n          </g>\n        ))}\n\n        {/* Bars */}\n        {FUNCTIONS.map((fn, i) => {\n          const y = PAD + 40 + i * ROW_H;\n          const barW = (fn.loc / MAX_LOC) * BAR_MAX_W;\n          const color = SECTION_COLOR[fn.section];\n          const isHov = hovered === fn.name;\n          return (\n            <g key={fn.name}\n               onMouseEnter={() => setHovered(fn.name)}\n               onMouseLeave={() => setHovered(null)}\n               style={{ cursor: \"default\" }}>\n              {/* Row bg on hover */}\n              {isHov && (\n                <rect x={0} y={y - 2} width={LABEL_W + BAR_MAX_W + 60}\n                      height={ROW_H - 4} rx={4}\n                      fill=\"rgba(255,255,255,0.05)\" />\n              )}\n              {/* Function label */}\n              <text x={LABEL_W - 8} y={y + ROW_H / 2 - 4}\n                    textAnchor=\"end\" fontSize={11}\n                    fill={fn.kind === \"private\" ? \"#94a3b8\" : \"#e2e8f0\"}\n                    fontStyle={fn.kind === \"private\" ? \"italic\" : \"normal\"}>\n                {fn.name}\n              </text>\n              {/* Section dot */}\n              <circle cx={LABEL_W + 8} cy={y + ROW_H / 2 - 4} r={4} fill={color} />\n              {/* Bar */}\n              <rect x={LABEL_W + 18} y={y + 4}\n                    width={barW} height={ROW_H - 14}\n                    rx={3} fill={color}\n                    opacity={isHov ? 1 : 0.75} />\n              {/* LoC label */}\n              <text x={LABEL_W + 18 + barW + 6}\n                    y={y + ROW_H / 2 - 4}\n                    fontSize={11} fill={color} fontWeight=\"bold\">\n                {fn.loc}\n              </text>\n            </g>\n          );\n        })}\n\n        {/* Legend row at top */}\n        {Object.entries(SECTION_LABEL).map(([key, label], i) => {\n          const cols = 3;\n          const col = i % cols;\n          const row = Math.floor(i / cols);\n          const x = col * 190 + PAD;\n          const y = row * 18 + 6;\n          return (\n            <g key={key}>\n              <circle cx={x + 6} cy={y + 6} r={5} fill={SECTION_COLOR[key]} />\n              <text x={x + 16} y={y + 11} fontSize={10} fill=\"#94a3b8\">{label}</text>\n            </g>\n          );\n        })}\n      </svg>\n    </div>\n  );\n}\n"
+          }
+        }
+      ],
+      "tool_uses": [
+        {
+          "id": "toolu_01GGrkqJXUY2qppHHVx15LS1",
+          "name": "Write",
+          "input": {
+            "file_path": "/tmp/geordi-perf-chart/App.js",
+            "content": "import React from \"react\";\n\nconst FUNCTIONS = [\n  { name: \"_engine\",             loc: 9,  kind: \"private\", section: \"helpers\" },\n  { name: \"_normalize_model\",    loc: 7,  kind: \"private\", section: \"helpers\" },\n  { name: \"_row_tok_s\",          loc: 45, kind: \"private\", section: \"helpers\" },\n  { name: \"_alert_buffer_path\",  loc: 3,  kind: \"private\", section: \"alerts\" },\n  { name: \"recent_tok_s\",        loc: 30, kind: \"public\",  section: \"baseline\" },\n  { name: \"fastest_known\",       loc: 52, kind: \"public\",  section: \"catalog\" },\n  { name: \"check_lag\",           loc: 38, kind: \"public\",  section: \"lag\" },\n  { name: \"record_perf_alert\",   loc: 40, kind: \"public\",  section: \"alerts\" },\n  { name: \"recent_perf_alerts\",  loc: 14, kind: \"public\",  section: \"alerts\" },\n  { name: \"clear_perf_alerts\",   loc: 13, kind: \"public\",  section: \"alerts\" },\n  { name: \"regression_warning\",  loc: 47, kind: \"public\",  section: \"regression\" },\n];\n\nconst SECTION_COLOR = {\n  helpers:    \"#6366f1\",\n  baseline:   \"#0ea5e9\",\n  catalog:    \"#f59e0b\",\n  lag:        \"#ef4444\",\n  alerts:     \"#10b981\",\n  regression: \"#8b5cf6\",\n};\n\nconst SECTION_LABEL = {\n  helpers:    \"private helpers\",\n  baseline:   \"rolling baseline\",\n  catalog:    \"fastest-known\",\n  lag:        \"lag detector\",\n  alerts:     \"alert buffer\",\n  regression: \"regression warner\",\n};\n\nconst MAX_LOC = Math.max(...FUNCTIONS.map(f => f.loc));\nconst BAR_MAX_W = 380;\nconst ROW_H = 36;\nconst LABEL_W = 170;\nconst PAD = 20;\nconst CHART_H = FUNCTIONS.length * ROW_H + PAD * 2 + 60;\n\nexport default function App() {\n  const [hovered, setHovered] = React.useState(null);\n\n  return (\n    <div style={{\n      fontFamily: \"monospace\",\n      background: \"#0f172a\",\n      minHeight: \"100vh\",\n      color: \"#e2e8f0\",\n      padding: \"24px\",\n    }}>\n      <h2 style={{ margin: \"0 0 4px\", fontSize: 18, color: \"#f1f5f9\" }}>\n        perf.py \u2014 function complexity (LoC)\n      </h2>\n      <p style={{ margin: \"0 0 20px\", fontSize: 12, color: \"#64748b\" }}>\n        org_llm/perf.py \u00b7 {FUNCTIONS.reduce((s, f) => s + f.loc, 0)} lines across {FUNCTIONS.length} functions\n      </p>\n\n      <svg width={LABEL_W + BAR_MAX_W + PAD * 2 + 50} height={CHART_H}>\n        {/* Section legend */}\n        {Object.entries(SECTION_LABEL).map(([key, label], i) => (\n          <g key={key} transform={`translate(${i * 0}, 0)`}>\n          </g>\n        ))}\n\n        {/* Bars */}\n        {FUNCTIONS.map((fn, i) => {\n          const y = PAD + 40 + i * ROW_H;\n          const barW = (fn.loc / MAX_LOC) * BAR_MAX_W;\n          const color = SECTION_COLOR[fn.section];\n          const isHov = hovered === fn.name;\n          return (\n            <g key={fn.name}\n               onMouseEnter={() => setHovered(fn.name)}\n               onMouseLeave={() => setHovered(null)}\n               style={{ cursor: \"default\" }}>\n              {/* Row bg on hover */}\n              {isHov && (\n                <rect x={0} y={y - 2} width={LABEL_W + BAR_MAX_W + 60}\n                      height={ROW_H - 4} rx={4}\n                      fill=\"rgba(255,255,255,0.05)\" />\n              )}\n              {/* Function label */}\n              <text x={LABEL_W - 8} y={y + ROW_H / 2 - 4}\n                    textAnchor=\"end\" fontSize={11}\n                    fill={fn.kind === \"private\" ? \"#94a3b8\" : \"#e2e8f0\"}\n                    fontStyle={fn.kind === \"private\" ? \"italic\" : \"normal\"}>\n                {fn.name}\n              </text>\n              {/* Section dot */}\n              <circle cx={LABEL_W + 8} cy={y + ROW_H / 2 - 4} r={4} fill={color} />\n              {/* Bar */}\n              <rect x={LABEL_W + 18} y={y + 4}\n                    width={barW} height={ROW_H - 14}\n                    rx={3} fill={color}\n                    opacity={isHov ? 1 : 0.75} />\n              {/* LoC label */}\n              <text x={LABEL_W + 18 + barW + 6}\n                    y={y + ROW_H / 2 - 4}\n                    fontSize={11} fill={color} fontWeight=\"bold\">\n                {fn.loc}\n              </text>\n            </g>\n          );\n        })}\n\n        {/* Legend row at top */}\n        {Object.entries(SECTION_LABEL).map(([key, label], i) => {\n          const cols = 3;\n          const col = i % cols;\n          const row = Math.floor(i / cols);\n          const x = col * 190 + PAD;\n          const y = row * 18 + 6;\n          return (\n            <g key={key}>\n              <circle cx={x + 6} cy={y + 6} r={5} fill={SECTION_COLOR[key]} />\n              <text x={x + 16} y={y + 11} fontSize={10} fill=\"#94a3b8\">{label}</text>\n            </g>\n          );\n        })}\n      </svg>\n    </div>\n  );\n}\n"
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0061-6580-776a-b930-04d48c3f51e1",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "user",
+      "role": "user",
+      "index": 32,
+      "timestamp": "2026-05-07T03:00:43.520Z",
+      "content_preview": "Tool result: File created successfully at: /tmp/geordi-perf-chart/App.js (file state is current in your context \u2014 no need to Read it back)",
+      "content": [
+        {
+          "tool_use_id": "toolu_01GGrkqJXUY2qppHHVx15LS1",
+          "type": "tool_result",
+          "content": "File created successfully at: /tmp/geordi-perf-chart/App.js (file state is current in your context \u2014 no need to Read it back)",
+          "diff": {
+            "structuredPatch": [
+              {
+                "oldStart": 1,
+                "oldLines": 0,
+                "newStart": 1,
+                "newLines": 125,
+                "lines": [
+                  "+import React from \"react\";",
+                  "+",
+                  "+const FUNCTIONS = [",
+                  "+  { name: \"_engine\",             loc: 9,  kind: \"private\", section: \"helpers\" },",
+                  "+  { name: \"_normalize_model\",    loc: 7,  kind: \"private\", section: \"helpers\" },",
+                  "+  { name: \"_row_tok_s\",          loc: 45, kind: \"private\", section: \"helpers\" },",
+                  "+  { name: \"_alert_buffer_path\",  loc: 3,  kind: \"private\", section: \"alerts\" },",
+                  "+  { name: \"recent_tok_s\",        loc: 30, kind: \"public\",  section: \"baseline\" },",
+                  "+  { name: \"fastest_known\",       loc: 52, kind: \"public\",  section: \"catalog\" },",
+                  "+  { name: \"check_lag\",           loc: 38, kind: \"public\",  section: \"lag\" },",
+                  "+  { name: \"record_perf_alert\",   loc: 40, kind: \"public\",  section: \"alerts\" },",
+                  "+  { name: \"recent_perf_alerts\",  loc: 14, kind: \"public\",  section: \"alerts\" },",
+                  "+  { name: \"clear_perf_alerts\",   loc: 13, kind: \"public\",  section: \"alerts\" },",
+                  "+  { name: \"regression_warning\",  loc: 47, kind: \"public\",  section: \"regression\" },",
+                  "+];",
+                  "+",
+                  "+const SECTION_COLOR = {",
+                  "+  helpers:    \"#6366f1\",",
+                  "+  baseline:   \"#0ea5e9\",",
+                  "+  catalog:    \"#f59e0b\",",
+                  "+  lag:        \"#ef4444\",",
+                  "+  alerts:     \"#10b981\",",
+                  "+  regression: \"#8b5cf6\",",
+                  "+};",
+                  "+",
+                  "+const SECTION_LABEL = {",
+                  "+  helpers:    \"private helpers\",",
+                  "+  baseline:   \"rolling baseline\",",
+                  "+  catalog:    \"fastest-known\",",
+                  "+  lag:        \"lag detector\",",
+                  "+  alerts:     \"alert buffer\",",
+                  "+  regression: \"regression warner\",",
+                  "+};",
+                  "+",
+                  "+const MAX_LOC = Math.max(...FUNCTIONS.map(f => f.loc));",
+                  "+const BAR_MAX_W = 380;",
+                  "+const ROW_H = 36;",
+                  "+const LABEL_W = 170;",
+                  "+const PAD = 20;",
+                  "+const CHART_H = FUNCTIONS.length * ROW_H + PAD * 2 + 60;",
+                  "+",
+                  "+export default function App() {",
+                  "+  const [hovered, setHovered] = React.useState(null);",
+                  "+",
+                  "+  return (",
+                  "+    <div style={{",
+                  "+      fontFamily: \"monospace\",",
+                  "+      background: \"#0f172a\",",
+                  "+      minHeight: \"100vh\",",
+                  "+      color: \"#e2e8f0\",",
+                  "+      padding: \"24px\",",
+                  "+    }}>",
+                  "+      <h2 style={{ margin: \"0 0 4px\", fontSize: 18, color: \"#f1f5f9\" }}>",
+                  "+        perf.py \u2014 function complexity (LoC)",
+                  "+      </h2>",
+                  "+      <p style={{ margin: \"0 0 20px\", fontSize: 12, color: \"#64748b\" }}>",
+                  "+        org_llm/perf.py \u00b7 {FUNCTIONS.reduce((s, f) => s + f.loc, 0)} lines across {FUNCTIONS.length} functions",
+                  "+      </p>",
+                  "+",
+                  "+      <svg width={LABEL_W + BAR_MAX_W + PAD * 2 + 50} height={CHART_H}>",
+                  "+        {/* Section legend */}",
+                  "+        {Object.entries(SECTION_LABEL).map(([key, label], i) => (",
+                  "+          <g key={key} transform={`translate(${i * 0}, 0)`}>",
+                  "+          </g>",
+                  "+        ))}",
+                  "+",
+                  "+        {/* Bars */}",
+                  "+        {FUNCTIONS.map((fn, i) => {",
+                  "+          const y = PAD + 40 + i * ROW_H;",
+                  "+          const barW = (fn.loc / MAX_LOC) * BAR_MAX_W;",
+                  "+          const color = SECTION_COLOR[fn.section];",
+                  "+          const isHov = hovered === fn.name;",
+                  "+          return (",
+                  "+            <g key={fn.name}",
+                  "+               onMouseEnter={() => setHovered(fn.name)}",
+                  "+               onMouseLeave={() => setHovered(null)}",
+                  "+               style={{ cursor: \"default\" }}>",
+                  "+              {/* Row bg on hover */}",
+                  "+              {isHov && (",
+                  "+                <rect x={0} y={y - 2} width={LABEL_W + BAR_MAX_W + 60}",
+                  "+                      height={ROW_H - 4} rx={4}",
+                  "+                      fill=\"rgba(255,255,255,0.05)\" />",
+                  "+              )}",
+                  "+              {/* Function label */}",
+                  "+              <text x={LABEL_W - 8} y={y + ROW_H / 2 - 4}",
+                  "+                    textAnchor=\"end\" fontSize={11}",
+                  "+                    fill={fn.kind === \"private\" ? \"#94a3b8\" : \"#e2e8f0\"}",
+                  "+                    fontStyle={fn.kind === \"private\" ? \"italic\" : \"normal\"}>",
+                  "+                {fn.name}",
+                  "+              </text>",
+                  "+              {/* Section dot */}",
+                  "+              <circle cx={LABEL_W + 8} cy={y + ROW_H / 2 - 4} r={4} fill={color} />",
+                  "+              {/* Bar */}",
+                  "+              <rect x={LABEL_W + 18} y={y + 4}",
+                  "+                    width={barW} height={ROW_H - 14}",
+                  "+                    rx={3} fill={color}",
+                  "+                    opacity={isHov ? 1 : 0.75} />",
+                  "+              {/* LoC label */}",
+                  "+              <text x={LABEL_W + 18 + barW + 6}",
+                  "+                    y={y + ROW_H / 2 - 4}",
+                  "+                    fontSize={11} fill={color} fontWeight=\"bold\">",
+                  "+                {fn.loc}",
+                  "+              </text>",
+                  "+            </g>",
+                  "+          );",
+                  "+        })}",
+                  "+",
+                  "+        {/* Legend row at top */}",
+                  "+        {Object.entries(SECTION_LABEL).map(([key, label], i) => {",
+                  "+          const cols = 3;",
+                  "+          const col = i % cols;",
+                  "+          const row = Math.floor(i / cols);",
+                  "+          const x = col * 190 + PAD;",
+                  "+          const y = row * 18 + 6;",
+                  "+          return (",
+                  "+            <g key={key}>",
+                  "+              <circle cx={x + 6} cy={y + 6} r={5} fill={SECTION_COLOR[key]} />",
+                  "+              <text x={x + 16} y={y + 11} fontSize={10} fill=\"#94a3b8\">{label}</text>",
+                  "+            </g>",
+                  "+          );",
+                  "+        })}",
+                  "+      </svg>",
+                  "+    </div>",
+                  "+  );",
+                  "+}"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "message_id": "019e0061-658d-7748-8d05-e60a592cfa2d",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "system",
+      "role": "system",
+      "index": 33,
+      "timestamp": "2026-05-07T03:00:43.535Z",
+      "content_preview": "Status: requesting",
+      "content": [
+        {
+          "type": "sdk_event",
+          "text": "Status: requesting",
+          "sdkType": "system",
+          "sdkSubtype": "status",
+          "metadata": {
+            "type": "system",
+            "subtype": "status",
+            "status": "requesting",
+            "uuid": "9bd44f1d-9cb8-42b1-8a2b-b6c098e79fbe",
+            "session_id": "87f4da35-cecb-4bee-a2d6-3393edd75b8f"
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "is_meta": true
+      }
+    },
+    {
+      "message_id": "019e0061-7159-70ef-85c3-7115af44521a",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 34,
+      "timestamp": "2026-05-07T03:00:46.580Z",
+      "content_preview": "",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_01SpzeL3WAKrqzDAqvXYJ6ih",
+          "name": "mcp__agor__agor_execute_tool",
+          "input": {
+            "tool_name": "agor_artifacts_publish",
+            "arguments": {
+              "folderPath": "/tmp/geordi-perf-chart",
+              "boardId": "019dfbcb-1cc4-7206-abae-7b87a433e88e",
+              "name": "perf.py \u2014 function complexity (LoC)",
+              "template": "react",
+              "public": true,
+              "width": 700,
+              "height": 520
+            }
+          }
+        }
+      ],
+      "tool_uses": [
+        {
+          "id": "toolu_01SpzeL3WAKrqzDAqvXYJ6ih",
+          "name": "mcp__agor__agor_execute_tool",
+          "input": {
+            "tool_name": "agor_artifacts_publish",
+            "arguments": {
+              "folderPath": "/tmp/geordi-perf-chart",
+              "boardId": "019dfbcb-1cc4-7206-abae-7b87a433e88e",
+              "name": "perf.py \u2014 function complexity (LoC)",
+              "template": "react",
+              "public": true,
+              "width": 700,
+              "height": 520
+            }
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    },
+    {
+      "message_id": "019e0061-719d-725d-a192-84e3bada830f",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "user",
+      "role": "user",
+      "index": 35,
+      "timestamp": "2026-05-07T03:00:46.621Z",
+      "content_preview": "Tool result: [{\"type\":\"text\",\"text\":\"{\\n  \\\"artifact\\\": {\\n    \\\"artifact_id\\\": \\\"019e0061-7186-71d8-8c88-e143146cb720\\\",\\n    \\\"worktree_id\\\": null,\\n    \\\"board_id\\\": \\\"019dfbcb-1cc4-7206-aba",
+      "content": [
+        {
+          "tool_use_id": "toolu_01SpzeL3WAKrqzDAqvXYJ6ih",
+          "type": "tool_result",
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"artifact\": {\n    \"artifact_id\": \"019e0061-7186-71d8-8c88-e143146cb720\",\n    \"worktree_id\": null,\n    \"board_id\": \"019dfbcb-1cc4-7206-abae-7b87a433e88e\",\n    \"name\": \"perf.py \u2014 function complexity (LoC)\",\n    \"path\": \"/tmp/geordi-perf-chart\",\n    \"template\": \"react\",\n    \"build_status\": \"success\",\n    \"content_hash\": \"22d86e7a1a19aca6829e85cb1afa7008\",\n    \"use_local_bundler\": false,\n    \"public\": true,\n    \"created_by\": \"019dfbcb-1de6-76ea-af74-768fe994d536\",\n    \"created_at\": \"2026-05-07T03:00:46.598Z\",\n    \"updated_at\": \"2026-05-07T03:00:46.598Z\",\n    \"archived\": false\n  },\n  \"instructions\": \"Artifact created and placed on the board. To update it later, call agor_artifacts_publish again with the artifact_id.\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "message_id": "019e0061-71a5-71ab-b7d9-4b202e1e54fa",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "system",
+      "role": "system",
+      "index": 36,
+      "timestamp": "2026-05-07T03:00:46.632Z",
+      "content_preview": "Status: requesting",
+      "content": [
+        {
+          "type": "sdk_event",
+          "text": "Status: requesting",
+          "sdkType": "system",
+          "sdkSubtype": "status",
+          "metadata": {
+            "type": "system",
+            "subtype": "status",
+            "status": "requesting",
+            "uuid": "7fe32284-294b-4df6-9609-c52fcf7c0b10",
+            "session_id": "87f4da35-cecb-4bee-a2d6-3393edd75b8f"
+          }
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "is_meta": true
+      }
+    },
+    {
+      "message_id": "019e0061-7999-77df-8790-33832bffee65",
+      "session_id": "019e0060-8841-76be-8223-886596595558",
+      "task_id": "019e0060-8859-7402-92a2-58123cf6d916",
+      "type": "assistant",
+      "role": "assistant",
+      "index": 37,
+      "timestamp": "2026-05-07T03:00:51.709Z",
+      "content_preview": "---\n\n**ARTIFACT_TOOL_DISCOVERY:**\n```json\n{\n  \"name\": \"agor_artifacts_publish\",\n  \"domain\": \"artifacts\",\n  \"required_args\": [\"folderPath\", \"boardId\", \"name\"],\n  \"template_options\": [\"react\",\"react-ts\"",
+      "content": [
+        {
+          "type": "text",
+          "text": "---\n\n**ARTIFACT_TOOL_DISCOVERY:**\n```json\n{\n  \"name\": \"agor_artifacts_publish\",\n  \"domain\": \"artifacts\",\n  \"required_args\": [\"folderPath\", \"boardId\", \"name\"],\n  \"template_options\": [\"react\",\"react-ts\",\"vanilla\",\"vanilla-ts\",\"vue\",\"vue3\",\"svelte\",\"solid\",\"angular\"]\n}\n```\nTool is `agor_artifacts_publish`. It reads a **folder** of files from disk \u2014 not a single source string. Required: `folderPath` (absolute), `boardId`, `name`.\n\n---\n\nARTIFACT_ID=019e0061-7186-71d8-8c88-e143146cb720\nARTIFACT_KIND=react+jsx\nARTIFACT_LOC=102\nGEORDI_DONE"
+        }
+      ],
+      "metadata": {
+        "model": "claude-sonnet-4-6",
+        "tokens": {
+          "input": 0,
+          "output": 0
+        }
+      }
+    }
+  ]
+}

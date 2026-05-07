@@ -1,0 +1,62 @@
+{
+  "spawn_table": [
+    {
+      "child_id": "019e0052-fe4a-73d1-b8e6-957ba94a34db",
+      "requested_model": "claude-sonnet-4-6",
+      "session_field_observed": "model_config.model",
+      "assigned_model": "claude-sonnet-4-6",
+      "match": "yes",
+      "status": "idle",
+      "agentic_tool": "claude-code"
+    },
+    {
+      "child_id": "019e0053-3a08-7346-a8fc-e0b3413e7c44",
+      "requested_model": "claude-haiku-4-5-20251001",
+      "session_field_observed": "model_config.model",
+      "assigned_model": "claude-haiku-4-5-20251001",
+      "match": "yes",
+      "status": "idle",
+      "agentic_tool": "claude-code"
+    },
+    {
+      "child_id": "019e0053-82e5-742c-901b-2a2fcb76cf3f",
+      "requested_model": "qwen/qwen-2.5-72b-instruct",
+      "session_field_observed": "model_config.model",
+      "assigned_model": "qwen/qwen-2.5-72b-instruct",
+      "match": "yes",
+      "status": "idle",
+      "agentic_tool": "claude-code"
+    }
+  ],
+  "response_table": [
+    {
+      "child_id": "019e0052-fe4a-73d1-b8e6-957ba94a34db",
+      "got_probe_done": true,
+      "excerpt": "MODEL_PROBE_DONE"
+    },
+    {
+      "child_id": "019e0053-3a08-7346-a8fc-e0b3413e7c44",
+      "got_probe_done": true,
+      "excerpt": "MODEL_PROBE_DONE"
+    },
+    {
+      "child_id": "019e0053-82e5-742c-901b-2a2fcb76cf3f",
+      "got_probe_done": false,
+      "excerpt": "There's an issue with the selected model (qwen/qwen-2.5-72b-instruct). It may not exist or you may not have access to it"
+    }
+  ],
+  "states": {
+    "019e0052-fe4a-73d1-b8e6-957ba94a34db": "idle",
+    "019e0053-3a08-7346-a8fc-e0b3413e7c44": "idle",
+    "019e0053-82e5-742c-901b-2a2fcb76cf3f": "idle"
+  },
+  "cost_usd": 0.173,
+  "duration_s": 51,
+  "rate_limit_events": 3,
+  "verdict": "PARTIAL",
+  "f5_verdict": "PARTIAL \u2014 CONFIG layer YES (Agor persists every requested modelConfig.model verbatim, 3/3); RUNTIME layer NO for 1/3 child(ren) (model rejected by the agentic tool \u2014 non-Anthropic IDs are not resolvable through the claude-code adapter). The override knob is plumbed through Agor cleanly; the runtime floor is the agentic tool's model registry, NOT Agor.",
+  "f9_fix_verdict": "YES \u2014 one-spawn-per-claude-p eliminated the round-2 stall. All 3/3 captain subprocesses issued their tool_use and returned a session_id. Total wall 51s, $0.17 \u2014 well under budget.",
+  "new_bugs": [
+    "claude-code adapter rejects non-Anthropic model IDs at runtime (qwen/qwen-2.5-72b-instruct) with message 'model may not exist or you may not have access' \u2014 even though Agor accepts and persists the modelConfig.model verbatim. To use FOSS / OpenRouter routes per DEC-017 \u00a7 6, spawn with a different agentic_tool (likely opencode + provider config), NOT claude-code with the OR model id in modelConfig.model."
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "spawn_table": [
+    {
+      "label": "A",
+      "requested_tool": "claude-code",
+      "session_field_observed": "session.agentic_tool",
+      "assigned_tool": "claude-code",
+      "child_id": "019e0063-823b-72fe-a15e-10d7cc735370",
+      "got_token": true,
+      "excerpt": "CLAUDE_PROBE_DONE",
+      "match": "yes",
+      "status": "idle"
+    },
+    {
+      "label": "B",
+      "requested_tool": "opencode",
+      "session_field_observed": "session.agentic_tool",
+      "assigned_tool": "opencode",
+      "child_id": "019e0063-cc23-7409-85f7-a7743e63fd12",
+      "got_token": true,
+      "excerpt": "The user wants me to print exactly the literal text \"OPENCODE_PROBE_DONE\" on its own line, then stop. They explicitly sa",
+      "match": "yes",
+      "status": "idle"
+    }
+  ],
+  "states": {
+    "019e0063-823b-72fe-a15e-10d7cc735370": "idle",
+    "019e0063-cc23-7409-85f7-a7743e63fd12": "idle"
+  },
+  "cost_usd": 0.11330065,
+  "duration_s": 38,
+  "rate_limit_events": 2,
+  "verdict": "PASS",
+  "dec_verdict": "YES \u2014 opencode child spawned, agentic_tool field persisted as 'opencode', child reached idle, and emitted OPENCODE_PROBE_DONE. Cross-tool execution works end-to-end at the runtime layer (not just the config layer). FOSS-defaults rule is achievable via agenticTool='opencode' as predicted by R7.",
+  "pre_flight": {
+    "agor_config_patch": {
+      "patched": false,
+      "before": "(opencode block already present, not parsed)",
+      "after": "(opencode block already present, not parsed)",
+      "needed_restart": false,
+      "method": "string-noop"
+    },
+    "opencode_serve": {
+      "pid": 172500,
+      "log_path": "/home/daniel/repos/org-llm/scripts/_r3_crosstool_artifacts/opencode-serve-1778122973.log",
+      "started": true,
+      "was_already_up": false
+    }
+  }
+}

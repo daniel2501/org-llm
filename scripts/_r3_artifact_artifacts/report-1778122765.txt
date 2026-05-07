@@ -1,0 +1,44 @@
+
+PILOT: R3-Artifact
+TEAM_SHAPE: solo @geordi emitting one live preview artifact
+HARNESS_SCRIPT: scripts/_r3_artifact.py
+AGOR_PRIMITIVES_USED: agor_sessions_spawn (sibling-by-boardId), agor_search_tools (artifact discovery), agor_execute_tool (publish), agor_artifacts_publish (canon name; verify via discovery), permission_config bypass, mcp_token after-get refresh, /messages?session_id={id} (R4), /artifacts/{id} REST
+TASK_OUTCOME: PASS — have_id=True fetchable=True
+WORKTREE_NAME: pilot-R3Artifact-1778122765
+WORKTREE_ID: 019e0060-39ff-770b-9274-dc696240e89a
+WORKTREE_PATH: /home/daniel/.agor/worktrees/local/org-llm/pilot-R3Artifact-1778122765
+CAPTAIN_SESSION_ID: 019e0060-3a2e-7374-a393-b24e62fde102
+GEORDI_SESSION_ID: 019e0060-8841-76be-8223-886596595558
+GEORDI_TERMINAL_STATE: idle
+ARTIFACT_TOOL_NAME_DISCOVERED: see ARTIFACT_TOOL_SCHEMA_SUMMARY below
+ARTIFACT_TOOL_SCHEMA_SUMMARY: " followed by the JSON of what you got back.
+  - Identify the exact tool name (likely agor_artifacts_publish OR
+    agor_artifacts_create) and its exact argument shape.
+
+STEP 2. Read the source you're visualizing.
+  - Read the file org_llm/perf.py (relative to your worktree
+    /home/daniel/.agor/worktrees/local/org-llm/pilot-R3Artifact-1778122765). It is a real ~393-LoC performance module with helpers
+    + DB queries. Use the Read tool.
+  - Pick ONE concrete thing to visualize (you choose):
+      a) function names + approximate complexity (LoC per function)
+      b) imports grouped by source module
+      c) something else simple and meaningful
+
+STEP 3. Draft a small chart artifact (~50-150 lines).
+  - Write a single React/JSX component (preferred — Sandpack renders
+    React) that visualizes the data you picked. Plain HTML+SVG is OK
+    if simpler. NO external dependencies beyond React itself if
+    possible (use inline SVG, no chart libraries).
+  - Hardcode the data you extracted from perf.py directly into the
+    component (no fetches, no imports beyond React).
+
+STEP 4. Publish the artifact via MCP.
+  - Call mcp__agor__agor_execute_tool with:
+      tool_name: <the exact name di
+ARTIFACT_ID: 019e0061-7186-71d8-8c88-e143146cb720
+ARTIFACT_FETCHABLE: yes via /artifacts/019e0061-7186-71d8-8c88-e143146cb720
+ARTIFACT_KIND: <short-tag
+ARTIFACT_SIZE: 102 LoC
+COST_USD: 0.0885 (captain stream-json sum; sibling REST cost reported 0.0000 — likely null per F7)
+DURATION_SECONDS: 103
+LIVE_PREVIEW_VERDICT: yes — artifact landed in DB and is fetchable via REST

@@ -1,0 +1,45 @@
+
+PILOT: R3-CrossTool
+TEAM_SHAPE: 1 captain → 2 sequential children with distinct agentic_tools (claude-code + opencode)
+HARNESS_SCRIPT: scripts/_r3_crosstool.py
+AGOR_PRIMITIVES_USED:
+  - opencode serve --port 4096 (started by harness)
+  - POST /repos/{id}/worktrees
+  - POST /sessions (captain claude-code)
+  - PATCH /sessions/{id} permission_config bypassPermissions (BUG-8)
+  - MCP http transport (Bearer mcp_token)
+  - agor_search_tools / agor_execute_tool (tool_name snake_case, F4)
+  - agor_sessions_spawn (sibling-by-worktree, no worktree_id)
+  - PER-SPAWN agenticTool OVERRIDE (camelCase, claude-code|opencode) — R3 focus
+  - mcp_token after-get refresh (R2-D2 pattern, F9)
+  - one-spawn-per-claude-p (F9 amendment)
+  - GET /sessions/{id} poll until terminal incl. idle (F1)
+  - GET /sessions/{id} agentic_tool readback
+  - GET /messages?session_id={id} content readback (R4 endpoint)
+TASK_OUTCOME: PASS — spawned_ok=2/2 matches=2/2 got_token=2/2
+WORKTREE_NAME: pilot-R3CrossTool-1778122973
+WORKTREE_ID: 019e0063-68a1-758e-a1aa-9ef9836058d8
+WORKTREE_PATH: /home/daniel/.agor/worktrees/local/org-llm/pilot-R3CrossTool-1778122973
+CAPTAIN_SESSION_ID: 019e0063-68d0-74bc-9661-b80a7d193e5c
+SPAWN_TABLE:
+  | child  | requested_tool | session_field_observed | assigned_tool  | got | first 80 chars of response
+  | A      | claude-code    | session.agentic_tool   | claude-code    | yes | CLAUDE_PROBE_DONE
+  | B      | opencode       | session.agentic_tool   | opencode       | yes | The user wants me to print exactly the literal text "OPENCODE_PROBE_DONE" on its
+SIBLING_STATES: {'019e0063-823b-72fe-a15e-10d7cc735370': 'idle', '019e0063-cc23-7409-85f7-a7743e63fd12': 'idle'}
+COST_USD: 0.1133 (aggregated from per-spawn captain stream-json result events)
+DURATION_SECONDS: 38
+RATE_LIMIT_EVENTS_OBSERVED: 2 (status=allowed treated as informational per F9 amendment)
+DEC-017_§6_VERDICT: YES — opencode child spawned, agentic_tool field persisted as 'opencode', child reached idle, and emitted OPENCODE_PROBE_DONE. Cross-tool execution works end-to-end at the runtime layer (not just the config layer). FOSS-defaults rule is achievable via agenticTool='opencode' as predicted by R7.
+NEW BUGS FOUND: none
+WHAT_WORKED:
+  - all 2 sequential one-spawn-per-claude-p subprocesses returned session_ids (F9 fix held)
+  - every requested agenticTool was persisted verbatim on the session row
+  - 2/2 children actually emitted their DONE token (assigned tool was called and ran)
+  - opencode serve was off — harness brought it up on :4096 (PID 172500)
+  - observed 2 rate_limit_event(s) without stalling (F9 amendment held)
+WHAT_DIDNT:
+  - no notable failures to report
+RECOMMENDATION: keep — agenticTool='opencode' override verified end-to-end at runtime; canonize as the FOSS path per DEC-017 § 6
+PRE_FLIGHT:
+  agor_config_patch: {'patched': False, 'before': '(opencode block already present, not parsed)', 'after': '(opencode block already present, not parsed)', 'needed_restart': False, 'method': 'string-noop'}
+  opencode_serve:    {'pid': 172500, 'log_path': '/home/daniel/repos/org-llm/scripts/_r3_crosstool_artifacts/opencode-serve-1778122973.log', 'started': True, 'was_already_up': False}
