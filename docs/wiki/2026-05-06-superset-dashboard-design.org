@@ -1,0 +1,262 @@
+:PROPERTIES:
+:ID:       422cabb4-ff76-4408-a5e8-42b37dac20e3
+:CREATED:  [2026-05-06]
+:UPDATED:  [2026-05-06]
+:END:
+#+TITLE: Superset dashboards in org-llm — three-layer design + crew authorship
+#+FILETAGS: :wiki:superset:phase-27:dashboards:design:
+#+OPTIONS: toc:nil num:nil
+
+* Summary
+
+Superset dashboards in org-llm split into three layers: the *Captain's
+Bridge* (admin, owned by =@picard=), *one-off + persistent dashboards
+any agent can spin up* via the just-shipped Org-as-source
+preprocessor, and *interactive surfaces* (filter-as-prompt +
+capture-template embeds) that make dashboards-as-output cheaper than
+prose-as-output. Layer 2's default is "one-off dashboards by any
+agent for any reason" — persistent specialist consoles are a special
+case, not the whole story. Layer 3 is what justifies opting in to
+Superset over "tables in chat."
+
+* Expanded
+
+This page is the design companion to roadmap §Phase 2026-07.01 —
+Apache Superset dashboards. The parent ladder at
+[[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]] covers
+the *integration tiers* (point-and-click → fork). This page covers
+the *user-facing surface* on top of those tiers: which dashboards
+exist, who authors them, how the user interacts.
+
+Three findings from the [[id:5f59c6a3-db42-4410-81e4-5ea9daa33d9b][2026-05-06 tier-1 dogfood probe]]
+shape the design:
+- The semantic registry already pays rent without any dashboard.
+- Cross-source questions (timestamp drift, chat-burst × memory) are
+  the surface only Superset can ask.
+- Native =uv venv= install works end-to-end; Docker is not required.
+
+** Layer 1 — Captain's Bridge (admin)
+
+Single dashboard owned by =@picard= / =@crew= (the Trek-mapping
+captain). Opened once a day for a 30-second pulse-check.
+
+| # | Chart                       | Registry metric × dimensions                       | Why captain-level                              |
+|---+-----------------------------+----------------------------------------------------+------------------------------------------------|
+| 1 | Agent fan-out heatmap       | =agent_fan_out × agent_from × agent_to=            | Surfaces proxy-vs-manager dominance            |
+| 2 | Model cost & latency        | =llm_avg_ms × call_kind × model=                   | The 87× chat/embed gap; budget signal          |
+| 3 | Error rate by model         | =llm_error_rate × model=                           | Catches phi3.5-50/50 silent breakage           |
+| 4 | Captain's-log heatmap       | =hist_events × hist_kind × hist_day=               | When activity happens, by category             |
+| 5 | Memory-pressure timeline    | =probe_alert_rate × probe_status × sensor_day=     | System-health pulse                            |
+| 6 | History kind drift          | =hist_kind_count × hist_day=                       | New event-kind detector                        |
+
+*Why this dashboard ships first.* Every metric exists in
+[[file:../../org_llm/metrics/registry.yaml][=registry.yaml=]] today.
+Every dimension is single-source — v0 registry compiles all six
+charts; no dependency on cross-source v1.
+
+*Captain-level filter.* The role of =@picard= here is *triage* —
+see anomaly, decide whether to drill into a specialist, hand off,
+or ignore. The dashboard is a routing surface, not an analysis
+surface.
+
+** Layer 2 — Any agent, any reason
+
+The shift from "10 persistent specialist consoles" to
+*"dashboards are an output format the crew picks alongside prose
+and tables."* Persistent specialist consoles still exist; one-offs
+are the default mode.
+
+*The pattern:*
+
+1. Agent decides a dashboard is the right artifact (better than
+   table-in-chat or prose).
+2. Agent drafts a =.org= file with named SQL Babel blocks
+   (=#+BEGIN_SRC sql :name foo :metric bar :group_by [a, b]=).
+3. Preprocessor → bundle → POST to local Superset.
+4. Agent posts the dashboard URL back in chat.
+5. User interacts. Dashboard either auto-expires or gets pinned.
+
+*Concrete one-off triggers:*
+
+| Trigger                                          | One-off dashboard                                                    |
+|--------------------------------------------------+----------------------------------------------------------------------|
+| User: "did 04-28 chat-burst correlate with mem?" | =@spock= overlay of =llm_calls.duration_ms × sensor_log.status=      |
+| =@boothby= sweep finds 47 new orphan nodes       | "this week's orphans" dashboard, pings user with URL                 |
+| User: "show me my LLM spend by command"          | =@picard= 3-chart cost breakdown                                     |
+| User: "how often am I asking @journalist?"       | =@crew= filtered fan-out chart                                       |
+| =@reviewer= after a big PR                       | Single-PR dashboard: lines, files, test pass-rate, review latency    |
+
+*Persistent specialist consoles* (still useful, just a special case):
+
+| Agent       | Console focus              | First chart                                                  |
+|-------------+----------------------------+--------------------------------------------------------------|
+| =@geordi=   | DB / dbt / registry health | dbt mart freshness; registry coverage; query latency p50/p95 |
+| =@boothby=  | Vault hygiene              | orphans; stale TODOs; broken =[[id:]]=; embedding staleness  |
+| =@atoz=     | Wiki concept graph         | cross-link density; pages with no inbound links              |
+| =@riker=    | Project tracking           | EFFORT drift per phase; what-shipped this week               |
+| =@scribe=   | Capture pipeline           | captures by template; drafts in flight                       |
+| =@agenda=   | Scheduling                 | upcoming + overdue; today's focus                            |
+| =@journalist= | Mood / sentiment         | weekly mood arc                                              |
+| =@almanac=  | Calendar / seasonal        | daylight curve; weather × productivity                       |
+| =@engineer= | Code health                | dbt build freshness; test coverage trend                     |
+| =@reviewer= | Review queue               | PRs awaiting; severity distribution                          |
+
+The full roster lives at [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]].
+
+*Three operational shapes worth deciding:*
+
+- *Storage.* =~/org/dashboards/oneoff/<YYYY-MM-DD>-<slug>.org=
+  for one-offs; =~/org/dashboards/@<agent>.org= for pinned
+  consoles. Date-scoped one-offs make pruning trivial.
+- *Lifecycle.* Auto-expire one-offs after 30 days unless pinned.
+  Needs an =org-llm superset prune --older-than 30d= verb (see
+  Sharp edges).
+- *Discoverability.* =/dashboards= chat verb plus an index file
+  at =~/org/dashboards/index.org= the preprocessor maintains.
+
+** Layer 3 — Interactive surfaces
+
+The two patterns that justify opting in to Superset over "tables
+in chat." The earlier "agent-drafted on-demand" pattern collapsed
+into Layer 2's default.
+
+*** Pattern A — Filter-as-prompt
+
+The user filters a dashboard (date range, model, =agent_to=X=).
+Filter state lives in the URL.
+
+- Agent reads URL params (or queries Superset's
+  =/api/v1/dashboard/<id>= for live filter state).
+- Agent reconstructs the filter, queries the registry with that
+  slice, answers chat questions *in that filtered context*.
+
+*Example.* User opens =@journalist= mood dashboard, filters to
+"last 30 days, only weekends." Asks chat: "why's the dip on
+Saturdays?" Agent reads filter, queries =metric:mood_score
+group_by:[dow] since=last-30d=, answers with that scope baked
+in.
+
+The chat↔URL shim is ~200 LOC of querystring parsing + registry
+lookup.
+
+*** Pattern B — Capture-template embeds
+
+Click a chart row → opens an Org capture template pre-filled
+with that row's metadata.
+
+*Example.* =@boothby= orphan-nodes chart. User clicks a row →
+Doom opens a capture template:
+
+#+begin_src org
+,* TODO Resolve orphan: %(node_title)
+  :PROPERTIES:
+  :NODE_ID: %(node_id)
+  :ORPHAN_DETECTED: 2026-05-06
+  :END:
+  Why was this orphaned? Should we link it to %?
+#+end_src
+
+The dashboard becomes a *front door into vault writes*, not just
+a viewing surface. Superset gives us the click event (chart URL
+template); the rest is =org-protocol://capture?...= which Doom
+already handles.
+
+This is the pattern that justifies opting in to Superset. A table
+can't be a write-launcher.
+
+*** Bonus — Embed-in-Org (formerly tier 5)
+
+A dashboard *thumbnail* embedded in an Org file via Superset's
+chart-screenshot endpoint, with click-through to the live chart.
+Already a slot in the integration ladder
+([[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]] § Tier 5);
+falls out almost free once Layer 2 + Pattern A + B exist.
+
+** Worked example — one-off dashboard end-to-end
+
+User: "@picard where's my LLM time going by command this month."
+
+| Turn | Action                                                                                                  |
+|------+---------------------------------------------------------------------------------------------------------|
+|    1 | User asks =@picard= in chat                                                                             |
+|    2 | =@picard= heuristic: 2+ dimensions × time-range × user said "going" → drafts 3-chart =.org=             |
+|    3 | =@picard= shells: =org-llm superset import-org --post http://localhost:8088 ~/org/dashboards/oneoff/…=  |
+|    4 | Preprocessor parses, bundles, POSTs; returns dashboard URL                                              |
+|    5 | =@picard= responds with URL + first read ("`chat` dominates by 12×; embed is high-volume but cheap")    |
+|    6 | User filters to "Last week" in browser; URL updates                                                     |
+|    7 | User: "why is chat so high last week"                                                                   |
+|    8 | =@picard= reads URL params, queries =reg.query(metric=llm_avg_ms, …, since=2026-04-30, until=…)=         |
+|    9 | =@picard= answers in scope: "chat mean is 41s vs 33s monthly; concentrated in =gemma3="                 |
+
+*Two cloud calls* total for an interactive analytical
+conversation that would take 4-5 cloud calls + a lot of "what
+time range" ping-pong without the dashboard.
+
+** Sharp edges
+
+- *Stable UUID for one-offs.* =_stable_uuid("dashboard",
+  "oneoff-2026-05-06-llm-time")= works, but if =@picard= re-runs
+  the same prompt next month it'll collide. Need =(date, slug,
+  prompt_hash)= namespacing.
+- *Filter parsing.* Superset's =native_filters= JSON-in-querystring
+  is gnarlier than the Pattern-A sketch suggests; the chat↔URL
+  shim is ~200 LOC, not ~50.
+- *Re-import pruning.* Each one-off creates a database link,
+  datasets, charts, dashboard. Without =org-llm superset prune
+  --older-than 30d= Superset's metadata DB grows unboundedly. Must
+  ship before any of this goes from demo to daily-driver.
+- *Auth model.* Solo-user default is no-login (per the
+  [[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org § Hosting & install]]
+  proposal); =@boothby= writing dashboards as the same user as
+  =@picard= is fine. Multi-user defers to the
+  =CUSTOM_SECURITY_MANAGER= path identified by the
+  [[id:93b87da8-bca5-409a-8fdf-8ed20ca739ef][fork survey]].
+
+** What ships when
+
+| Layer / pattern             | Blocking work                                       | Status              |
+|-----------------------------+-----------------------------------------------------+---------------------|
+| Layer 1 — Captain's Bridge  | =.org= template + round-trip test against preproc   | shipped (worktree)  |
+| Layer 2 — one-offs          | Org-as-source preprocessor                          | shipped (worktree)  |
+| Layer 2 — persistent consoles | per-agent =.org= templates                        | not started         |
+| Layer 3 — Pattern A         | chat↔URL shim (~200 LOC)                            | not started         |
+| Layer 3 — Pattern B         | =org-protocol://= chart link template               | not started         |
+| Pruning verb                | =org-llm superset prune --older-than=               | not started         |
+
+The preprocessor is the keystone — it landed via the 2026-05-06
+multi-agent run on branch =worktree-agent-a5af204f898d78db3=
+(=org_llm/superset_import.py=, +1038 LOC, 17/18 tests passing).
+
+The Captain's Bridge =.org= template landed alongside on
+=worktree-agent-a5ea0c70674b5815a= as
+[[file:../../docs/templates/org-llm-captains-bridge.org.example][=docs/templates/org-llm-captains-bridge.org.example=]] —
+six charts, one dashboard, all metric expressions verbatim from
+=registry.yaml=. Round-trip coverage at
+=tests/test_captains_bridge_round_trip.py= (12/12 green) asserts
+the bridge's =llm_calls= dataset UUID is byte-identical to
+=Registry.emit_superset()='s emission, so it imports cleanly
+alongside the registry bundle.
+
+* Source files
+
+- [[file:../../org_llm/superset_import.py][=org_llm/superset_import.py=]] —
+  the Org-as-source preprocessor (parse → bundle → POST)
+- [[file:../../org_llm/metrics.py][=org_llm/metrics.py=]] —
+  =Registry= + =emit_superset()= for datasets/database YAML
+- [[file:../../org_llm/metrics/registry.yaml][=registry.yaml=]] —
+  the metric/dimension definitions every chart compiles against
+- [[file:../../docs/templates/org-llm-superset-dashboard.org.example][=docs/templates/org-llm-superset-dashboard.org.example=]] —
+  reference =.org= dashboard for the preprocessor
+
+* Related
+
+- [[id:a2af071e-8244-444d-8954-61317cc1ec4d][Superset integration ladder]]
+  (parent — tiers 1–7)
+- [[id:5f59c6a3-db42-4410-81e4-5ea9daa33d9b][2026-05-06 tier-1 dogfood probe]]
+  (anomalies and friction this design responds to)
+- [[id:93b87da8-bca5-409a-8fdf-8ed20ca739ef][2026-05-06 fork survey]]
+  (Org-as-source importer is the unblock for this design)
+- [[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]] —
+  the crew this design assigns dashboards to
+- [[id:d30c177e-5b09-4f52-95bf-bb2d36f663e8][wiki-conventions.org]] —
+  Rule 2b (Summary + Expanded) followed here

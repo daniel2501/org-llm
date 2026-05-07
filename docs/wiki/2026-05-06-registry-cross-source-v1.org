@@ -1,0 +1,257 @@
+:PROPERTIES:
+:ID:       e9636dda-dc2a-4d1a-978f-fb8e5f00f184
+:CREATED:  [2026-05-06]
+:UPDATED:  [2026-05-06]
+:END:
+#+TITLE: Semantic registry — cross-source v1 design (named joins)
+#+FILETAGS: :wiki:superset:phase-27:registry:design:
+#+OPTIONS: toc:nil num:nil
+
+* Summary
+
+The v0 metrics registry rejects cross-source group-by with
+=RegistryError= ([[file:../../org_llm/metrics.py][=metrics.py= compile,
+lines 139–153]]). v1 unblocks the three dashboard charts that need
+joins (=llm_calls × history=, =llm_calls × sensor_log=, =crew_log ×
+llm_calls=) by adding a top-level =joins:= block to
+[[file:../../org_llm/metrics/registry.yaml][=registry.yaml=]] declaring
+each cross-source relationship by name, plus a =join: str | None=
+kwarg on =Registry.compile()= that resolves the named join and emits
+an explicit =JOIN ... ON ...=. *Unnamed cross-source queries continue
+to raise =RegistryError=*, so v0 callers and the existing rejection
+tests are unaffected. The fail-loud contract is preserved; what
+changes is that there's now a sanctioned opt-in path.
+
+* Expanded
+
+This is the v1 design that follows from the
+[[id:5f59c6a3-db42-4410-81e4-5ea9daa33d9b][2026-05-06 tier-1 dogfood
+probe]]'s finding that three of the eight bridge dashboard charts
+need cross-source joins, which v0 forbids by design. It is a
+companion to
+[[id:a2af071e-8244-444d-8954-61317cc1ec4d][superset.org]] § Tier 6
+("Semantic layer — canonical metrics") and unblocks the cross-source
+charts called out in
+[[id:422cabb4-ff76-4408-a5e8-42b37dac20e3][2026-05-06-superset-dashboard-design.org]].
+
+** Problem statement
+
+The v0 compiler enforces single-source queries:
+
+#+begin_src python
+# org_llm/metrics.py:139–153
+for dim in group_by:
+    if self.dimensions[dim].source != m.source:
+        raise RegistryError(
+            f"dimension {dim!r} from source {self.dimensions[dim].source!r} "
+            f"can't be used with metric {metric!r} from source {m.source!r}"
+        )
+#+end_src
+
+This is the right v0 contract — silent wrong-joins are worse than
+loud rejections. But three real questions can't be expressed:
+
+| Question                                                                  | Sources needed         |
+|---------------------------------------------------------------------------+------------------------|
+| =llm_calls= vs =history kind='llm'= overlay (timestamp-drift detector)    | =llm= + =history=      |
+| Chat-burst memory-pressure correlation                                    | =llm= + =sensors=      |
+| Agent fan-out × LLM cost (=crew_log.agent_to= joined to =llm_calls.command=) | =crew= + =llm=      |
+
+All three appear in the bridge dashboard's tier-2 chart catalog
+([[id:5f59c6a3-db42-4410-81e4-5ea9daa33d9b][tier-1 probe]] §
+"What tier-2 dashboards-as-code would look like").
+
+** Three approaches considered
+
+| Option | Shape                                                      | Verdict                |
+|--------+------------------------------------------------------------+------------------------|
+| A      | Named YAML joins + =compile(join=)= kwarg                  | *Recommended*          |
+| B      | Superset-only virtual SQL datasets (JOIN at Superset side) | Rejected — splits seam |
+| C      | Named "recipes" bundling join + metric + group_by together | Defer to v2            |
+
+*** A — Named YAML joins (recommended)
+
+Declare every legal cross-source relationship in =registry.yaml=:
+
+#+begin_src yaml
+joins:
+  llm_x_history_event:
+    sources: [llm, history]
+    kind: inner
+    on:
+      left: id
+      right: id
+      filter: "right.kind = 'llm'"
+
+  llm_x_sensors_temporal:
+    sources: [llm, sensors]
+    kind: time_bucket
+    on:
+      left: substr(timestamp, 1, 10)
+      right: date(ts, 'unixepoch')
+
+  crew_x_llm_command:
+    sources: [crew, llm]
+    kind: left
+    on:
+      left: agent_to
+      right: command
+#+end_src
+
+The compiler grows one kwarg:
+
+#+begin_src python
+reg.query(
+    metric="llm_avg_ms",
+    group_by=["model", "probe_status"],
+    join="llm_x_sensors_temporal",
+    since="2026-04-30",
+)
+#+end_src
+
+Resolves to:
+
+#+begin_src sql
+SELECT llm.model        AS model,
+       sensors.status   AS probe_status,
+       AVG(llm.duration_ms) AS llm_avg_ms
+FROM llm_calls AS llm
+INNER JOIN sensor_log AS sensors
+  ON substr(llm.timestamp, 1, 10) = date(sensors.ts, 'unixepoch')
+WHERE llm.timestamp >= ?
+GROUP BY model, probe_status
+ORDER BY llm_avg_ms DESC
+#+end_src
+
+*** B — Superset-only virtual SQL datasets (rejected)
+
+Push joins into Superset as virtual SQL datasets emitted by
+=Registry.emit_superset()=. *Splits the contract*: agents calling
+the registry directly (Python, MCP, CLI) still hit =RegistryError=,
+but Superset charts work. Same metric name now means two different
+things depending on which surface answers it — exactly the drift
+the registry exists to prevent.
+
+*** C — Named "recipes" bundling join + metric + group_by (defer)
+
+A "recipe" pre-declares =metric:llm_avg_ms_by_probe_status= as a
+fixed combination. Reduces caller surface but front-loads the
+naming decision before we know which joins prove useful. *Premature*
+— pick this up in v2 if recipes graduate naturally from frequently
+co-occurring =(metric, group_by, join)= triples.
+
+** Recommendation rationale (against the three quality gates)
+
+- *Really good at the job.* Option A directly answers the three
+  motivating questions; B answers them only on the Superset surface;
+  C answers them but pre-locks the naming.
+- *Not too complex.* A is ~150 LOC for the recommended slice (see
+  Prototype gate below). B requires emitter changes plus a parallel
+  rejection-vs-acceptance branch in =compile()=. C requires both A
+  *and* a recipe registry.
+- *Manages required complexity.* A scales to v2 deferrals (asof,
+  3+ way) by adding fields to the existing =joins:= entries. B
+  doesn't scale — pushes the complexity into Superset YAML
+  templates that have to keep up.
+
+** Surface impact
+
+| Surface                                       | v1 change                                                                       |
+|-----------------------------------------------+---------------------------------------------------------------------------------|
+| =Registry.load=                               | Parse new =joins:= top-level block; cross-validate sources + dimensions exist   |
+| =Registry.compile=                            | New kwarg =join: str | None=; resolve to =JOIN ... ON ...=                       |
+| =Registry.query=                              | No change (kwarg passthrough)                                                   |
+| =Registry.emit_superset=                      | Optionally emit virtual datasets for each declared join (deferrable to v1.1)    |
+| MCP =metrics_query=                           | Accept =join= field in JSON                                                     |
+| MCP =metrics_describe=                        | List declared joins under each source                                           |
+| CLI =org-llm metrics query=                   | New =--join NAME= flag                                                          |
+| Org-as-source preprocessor                    | Babel arg =:join NAME= maps to =compile(join=NAME)=                              |
+| Tests                                         | Existing rejection tests unchanged; add positive tests per join                  |
+
+** v1 scope
+
+- 2-source joins only.
+- =kind=: =inner= / =left= / =time_bucket= (=time_bucket= is sugar
+  for matching pre-bucketed dimensions across two time columns of
+  different shapes — ISO string vs unix epoch).
+- Composite equality keys (=on.left= / =on.right= can each be a
+  list of expressions joined with =AND=).
+- Optional literal =filter:= predicate inside =on:= (e.g. =right.kind
+  = 'llm'=).
+- Either source can carry the metric; group-by may pull dimensions
+  from either source.
+
+** v2 deferrals
+
+- 3+ way joins.
+- =FULL OUTER= / =RIGHT= joins.
+- Asof-joins (nearest-time match within a window) — would unblock
+  "memory pressure within 60s of a slow chat call."
+- Named recipes (option C above).
+- Cross-database joins (registry assumes one =db_path=).
+
+** Compat / deprecation
+
+- =join= kwarg defaults to =None= → compiled SQL is byte-identical
+  to v0. No emit-side change for v0 callers.
+- New =RegistryError= modes:
+  - =unknown join 'X'=
+  - =metric Y requires source 'llm' but join 'crew_x_history' covers [crew, history]=
+  - =dimension Z from source 'sensors' not covered by join 'llm_x_history'=
+- Existing rejection tests
+  ([[file:../../tests/test_metrics_registry.py][=test_metrics_registry.py=]])
+  continue to fire when =join= is omitted; new positive tests gate
+  each declared join.
+
+** Prototype gate
+
+Full v1 (load + compile + query + describe + emit + MCP + CLI +
+preprocessor) exceeds the 200-LOC bar once the time_bucket sugar
+and emitter changes are included. *Recommended slice for the first
+landing*: compile-only, =inner= + =left= only, behind a
+=ORG_LLM_REGISTRY_V1_JOINS=1= environment flag, ~150 LOC + one
+=llm_x_history_event= positive test. Ship the rest in 1.1
+(=time_bucket= + describe + CLI) and 1.2 (emit-side virtual
+datasets + MCP + preprocessor).
+
+** Sharp edges
+
+- *Column qualification.* SQLite tolerates unqualified column
+  names in single-source queries; cross-source breaks the moment
+  two sources share a column name (=timestamp= appears on three
+  of four sources). v1 must qualify *every* select / where / group
+  expression with the source alias. Probably the heaviest LOC item.
+- =time_bucket= *day-grain only in v1.* Hour-grain bucketing across
+  =llm.timestamp= (ISO string) and =sensors.ts= (unix epoch) needs
+  more SQLite acrobatics; defer.
+- *Order of operations with metric =where:=* . v0's metric-level
+  =where:= clauses (e.g. =crew_delegations= filters to
+  =action='delegate'=) need source qualification on join. Compiler
+  must rewrite =action = 'delegate'= → =crew.action = 'delegate'=
+  using the join's source-alias map.
+- *Stale =llm_calls= timestamp.* Already fixed (today's dbt-mart
+  materialization flip from =table= → =view=) but worth noting that
+  any =time_bucket= join across =llm= + something time-shaped is
+  load-bearing on that fix staying landed. The mart-freshness
+  regression test ([[file:../../tests/test_dbt_mart_freshness.py][=test_dbt_mart_freshness.py=]])
+  exists for exactly this reason.
+
+* Source files
+
+- [[file:../../org_llm/metrics.py][=org_llm/metrics.py=]] —
+  =Registry.compile= grows the =join= kwarg
+- [[file:../../org_llm/metrics/registry.yaml][=registry.yaml=]] —
+  gains the top-level =joins:= block
+- [[file:../../tests/test_metrics_registry.py][=tests/test_metrics_registry.py=]] —
+  existing rejection tests stay; add positive tests per join
+
+* Related
+
+- [[id:a2af071e-8244-444d-8954-61317cc1ec4d][Superset integration ladder]]
+  § Tier 6 — "registry is the seam" framing carried into v1
+- [[id:5f59c6a3-db42-4410-81e4-5ea9daa33d9b][2026-05-06 tier-1 probe]] —
+  the cross-source charts that motivate this design
+- [[id:422cabb4-ff76-4408-a5e8-42b37dac20e3][2026-05-06 dashboard design]] —
+  three-layer Superset surface this v1 unblocks
+- [[id:93b87da8-bca5-409a-8fdf-8ed20ca739ef][2026-05-06 fork survey]] —
+  parallel work, no direct dependency
