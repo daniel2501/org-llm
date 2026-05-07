@@ -577,32 +577,48 @@ def _emit_chart_yaml(
     # see comment on _VIZ_TYPE_MIGRATION above).
     viz_type = _VIZ_TYPE_MIGRATION.get(chart.viz_type, chart.viz_type)
 
-    # echarts_timeseries_* + echarts_area + mixed_timeseries all
-    # require an explicit x_axis or they render as "Datetime column
-    # not provided". Templates put the x-axis dimension last in
-    # :group_by, so promoting the last column to x_axis works for
-    # both time-axis charts (llm_day → x_axis) and categorical ones
-    # ([outcome, model] → x_axis=model, groupby=[outcome] → bars per
-    # model stacked by outcome).
+    # `params` shape varies per viz_type because each viz's
+    # controlPanel reads different fields. Three families today:
+    #
+    #   echarts_timeseries_* / echarts_area / mixed_timeseries —
+    #     `metrics: [name]` (plural), `groupby: [...]`, explicit
+    #     `x_axis` (or browser shows "Datetime column not provided").
+    #     Convention: templates put x_axis col last in :group_by, so
+    #     we pop the last → x_axis (works for both time and
+    #     categorical x).
+    #
+    #   heatmap_v2 — `metric: name` (singular, not array), `x_axis`
+    #     (categorical x dim), `groupby: [y_dim]` (one column),
+    #     `legend_type: "continuous"`. Templates put [x_dim, y_dim]
+    #     in :group_by. Without these, echarts shows "Add required
+    #     control values to preview chart".
+    #
+    #   default (table, pie, etc.) — plural metrics, groupby
+    #     unchanged, no x_axis.
     chart_groupby = list(chart.group_by)
     x_axis: str | None = None
-    if viz_type in _X_AXIS_REQUIRED_VIZ_TYPES and chart_groupby:
-        x_axis = chart_groupby.pop()
-
-    # `params` is a free-form JSON-blob dict matching whatever the
-    # viz_type's controlPanel expects. For agent-shaped use the table
-    # viz is the safe default; the Babel block's :metric arg lands in
-    # the metrics array, and :group_by populates groupby.
     params: dict[str, Any] = {
         "datasource": f"{dataset_uuid}__table",
         "viz_type": viz_type,
-        "groupby": chart_groupby,
-        "metrics": [chart.metric_name],
         "adhoc_filters": [],
         "row_limit": 1000,
     }
-    if x_axis is not None:
+    if viz_type == "heatmap_v2":
+        # First :group_by col → x_axis, second → groupby[0].
+        x_axis = chart_groupby[0] if chart_groupby else None
+        y_groupby = chart_groupby[1:] if len(chart_groupby) > 1 else []
         params["x_axis"] = x_axis
+        params["groupby"] = y_groupby
+        params["metric"] = chart.metric_name
+        params["legend_type"] = "continuous"
+    elif viz_type in _X_AXIS_REQUIRED_VIZ_TYPES and chart_groupby:
+        x_axis = chart_groupby.pop()
+        params["groupby"] = chart_groupby
+        params["metrics"] = [chart.metric_name]
+        params["x_axis"] = x_axis
+    else:
+        params["groupby"] = chart_groupby
+        params["metrics"] = [chart.metric_name]
 
     # Without a populated query_context, GET /api/v1/chart/<id>/data
     # fails with "Chart has no query context saved" until the user
