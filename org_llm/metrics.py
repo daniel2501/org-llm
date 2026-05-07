@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -42,6 +43,77 @@ DEFAULT_DB = Path("~/.local/share/org-llm/org-llm.db").expanduser()
 SUPERSET_IMPORT_VERSION = "1.0.0"
 SUPERSET_DATABASE_NAME = "org-llm"
 ORG_LLM_NAMESPACE_UUID = uuid.uuid5(uuid.NAMESPACE_DNS, "org-llm.metrics.superset")
+
+# Feature flag for the v1 named-joins prototype. When unset, cross-source
+# queries still raise RegistryError exactly as in v0; setting this to "1"
+# (or any truthy value) only changes the *hint* in the rejection message —
+# join: NAME must still be passed explicitly to opt in.
+JOINS_FLAG_ENV = "ORG_LLM_REGISTRY_V1_JOINS"
+
+# SQL identifiers that must NOT be prefixed with a source alias when we
+# qualify column references inside metric/dimension expressions. Conservative
+# — better to leave a real column unqualified (and let SQLite raise
+# "ambiguous column") than to mangle a keyword and emit invalid SQL.
+_SQL_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "SELECT", "FROM", "WHERE", "AND", "OR", "NOT", "NULL", "AS",
+        "CASE", "WHEN", "THEN", "ELSE", "END", "IN", "ON", "JOIN",
+        "INNER", "LEFT", "RIGHT", "OUTER", "FULL", "GROUP", "BY",
+        "ORDER", "DESC", "ASC", "LIMIT", "DISTINCT", "TRUE", "FALSE",
+        "IS", "BETWEEN", "LIKE", "EXISTS", "ALL", "ANY", "SOME",
+    }
+)
+
+_IDENT_RE = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
+
+
+def _qualify_columns(expr: str, alias: str) -> str:
+    """Rewrite bare column identifiers in `expr` by prepending `alias.`.
+
+    Heuristic: walk the string; skip single-quoted string literals; for each
+    bare identifier token, prepend `<alias>.` UNLESS it's a SQL keyword,
+    already qualified (preceded by `.`), or a function call (followed by `(`
+    after optional whitespace). Numbers don't match `_IDENT_RE` so they pass
+    through unchanged.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(expr)
+    while i < n:
+        c = expr[i]
+        if c == "'":
+            j = i + 1
+            while j < n:
+                if expr[j] == "'" and j + 1 < n and expr[j + 1] == "'":
+                    j += 2  # SQL doubled-quote escape
+                    continue
+                if expr[j] == "'":
+                    j += 1
+                    break
+                j += 1
+            out.append(expr[i:j])
+            i = j
+            continue
+        m = _IDENT_RE.match(expr, i)
+        if m:
+            tok = m.group(0)
+            start, end = m.span()
+            prev = expr[start - 1] if start > 0 else ""
+            after = expr[end:].lstrip()
+            is_func_call = after.startswith("(")
+            if (
+                tok.upper() not in _SQL_KEYWORDS
+                and prev != "."
+                and not is_func_call
+            ):
+                out.append(f"{alias}.{tok}")
+            else:
+                out.append(tok)
+            i = end
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
 
 
 @dataclass(frozen=True)
@@ -67,6 +139,26 @@ class Metric:
     where: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class Join:
+    """A sanctioned cross-source relationship.
+
+    `sources` is exactly 2 source names (v1 limits to 2-source joins).
+    `kind` is one of {"inner", "left"}; the design doc reserves "time_bucket"
+    for v1.1 and the compiler raises RegistryError if anyone tries it now.
+    `on_left` / `on_right` are SQL fragments evaluated in their respective
+    source's table alias (the alias is the source name itself). `filter` is
+    optional and may use `left.<col>` / `right.<col>` tokens that get
+    rewritten to the qualified source aliases.
+    """
+    name: str
+    sources: tuple[str, str]
+    kind: str
+    on_left: str
+    on_right: str
+    filter: str | None = None
+
+
 class RegistryError(Exception):
     pass
 
@@ -78,11 +170,13 @@ class Registry:
         dimensions: dict[str, Dimension],
         metrics: dict[str, Metric],
         db_path: Path = DEFAULT_DB,
+        joins: dict[str, Join] | None = None,
     ) -> None:
         self.sources = sources
         self.dimensions = dimensions
         self.metrics = metrics
         self.db_path = db_path
+        self.joins: dict[str, Join] = joins or {}
 
     # ---- loading -----------------------------------------------------------
 
@@ -111,8 +205,29 @@ class Registry:
         for m in metrics.values():
             if m.source not in sources:
                 raise RegistryError(f"metric {m.name!r} references unknown source {m.source!r}")
+        joins: dict[str, Join] = {}
+        for n, j in (raw.get("joins") or {}).items():
+            j_sources = j.get("sources") or []
+            if len(j_sources) != 2:
+                raise RegistryError(
+                    f"join {n!r} must declare exactly 2 sources (v1 supports 2-source joins only)"
+                )
+            for s in j_sources:
+                if s not in sources:
+                    raise RegistryError(f"join {n!r} references unknown source {s!r}")
+            on = j.get("on") or {}
+            if "left" not in on or "right" not in on:
+                raise RegistryError(f"join {n!r} missing on.left / on.right")
+            joins[n] = Join(
+                name=n,
+                sources=(j_sources[0], j_sources[1]),
+                kind=str(j.get("kind", "inner")),
+                on_left=str(on["left"]),
+                on_right=str(on["right"]),
+                filter=on.get("filter"),
+            )
         db = db_path or Path(os.environ.get("ORG_LLM_DB", str(DEFAULT_DB)))
-        return cls(sources, dimensions, metrics, db)
+        return cls(sources, dimensions, metrics, db, joins=joins)
 
     # ---- compilation -------------------------------------------------------
 
@@ -124,32 +239,52 @@ class Registry:
         since: str | int | None = None,
         until: str | int | None = None,
         limit: int | None = None,
+        join: str | None = None,
     ) -> tuple[str, list[Any]]:
-        """Compile a metric query to (sql, params). Validation is strict:
-        every dimension referenced (group_by or where keys) must live in the
-        same source as the metric. v0 deliberately rejects cross-source joins
-        — keeps the contract small and makes it easy to fail loud."""
+        """Compile a metric query to (sql, params).
+
+        Default (v0) behavior: every dimension referenced (group_by or where
+        keys) must live in the same source as the metric; cross-source
+        queries raise RegistryError. Pass ``join="<name>"`` to opt into a
+        sanctioned cross-source path declared in registry.yaml's ``joins:``
+        block (v1, behind ORG_LLM_REGISTRY_V1_JOINS=1).
+        """
         if metric not in self.metrics:
             raise RegistryError(f"unknown metric {metric!r}")
         m = self.metrics[metric]
-        src = self.sources[m.source]
         group_by = group_by or []
         where = where or {}
+
+        if join is not None:
+            return self._compile_join(
+                m=m,
+                group_by=group_by,
+                where=where,
+                since=since,
+                until=until,
+                limit=limit,
+                join_name=join,
+            )
+
+        src = self.sources[m.source]
 
         for dim in group_by:
             if dim not in self.dimensions:
                 raise RegistryError(f"unknown dimension {dim!r}")
             if self.dimensions[dim].source != m.source:
+                hint = self._cross_source_hint(m.source, self.dimensions[dim].source)
                 raise RegistryError(
                     f"dimension {dim!r} from source {self.dimensions[dim].source!r} "
                     f"can't be used with metric {metric!r} from source {m.source!r}"
+                    + hint
                 )
         for dim in where:
             if dim not in self.dimensions:
                 raise RegistryError(f"unknown filter dimension {dim!r}")
             if self.dimensions[dim].source != m.source:
+                hint = self._cross_source_hint(m.source, self.dimensions[dim].source)
                 raise RegistryError(
-                    f"filter dimension {dim!r} not in source {m.source!r}"
+                    f"filter dimension {dim!r} not in source {m.source!r}" + hint
                 )
 
         select_cols: list[str] = []
@@ -180,6 +315,142 @@ class Registry:
         if limit is not None:
             sql += f" LIMIT {int(limit)}"
         return sql, params
+
+    # ---- cross-source v1 (named joins) -------------------------------------
+
+    def _cross_source_hint(self, want_a: str, want_b: str) -> str:
+        """Append a hint pointing at any declared join covering this pair —
+        only when the v1 flag is set. Keeps the v0 message byte-identical
+        for callers that haven't opted in."""
+        if not os.environ.get(JOINS_FLAG_ENV):
+            return ""
+        pair = {want_a, want_b}
+        candidates = [n for n, j in self.joins.items() if set(j.sources) == pair]
+        if not candidates:
+            return ""
+        return f" (hint: pass join={candidates[0]!r} to opt into the v1 cross-source path)"
+
+    def _compile_join(
+        self,
+        *,
+        m: Metric,
+        group_by: list[str],
+        where: dict[str, Any],
+        since: str | int | None,
+        until: str | int | None,
+        limit: int | None,
+        join_name: str,
+    ) -> tuple[str, list[Any]]:
+        if join_name not in self.joins:
+            raise RegistryError(f"unknown join {join_name!r}")
+        j = self.joins[join_name]
+
+        if j.kind == "time_bucket":
+            raise RegistryError("kind 'time_bucket' deferred to v1.1")
+        if j.kind not in ("inner", "left"):
+            raise RegistryError(
+                f"join {join_name!r} kind {j.kind!r} not supported in v1 "
+                f"(supported: inner, left)"
+            )
+        if m.source not in j.sources:
+            raise RegistryError(
+                f"metric {m.name!r} requires source {m.source!r} but "
+                f"join {join_name!r} covers {list(j.sources)!r}"
+            )
+
+        # Aliases are the source names themselves — unambiguous, matches the
+        # design doc's example SQL, and means dimension expressions get
+        # rewritten with `<source>.<col>` tokens that read cleanly.
+        a, b = j.sources  # a = "left" side, b = "right" side
+        alias_a = a
+        alias_b = b
+        src_a = self.sources[a]
+        src_b = self.sources[b]
+
+        def alias_for(source: str) -> str:
+            return source  # 1:1 today; isolated for future renaming
+
+        # Validate dimensions against the join's source pair.
+        for dim in group_by:
+            if dim not in self.dimensions:
+                raise RegistryError(f"unknown dimension {dim!r}")
+            if self.dimensions[dim].source not in j.sources:
+                raise RegistryError(
+                    f"dimension {dim!r} from source "
+                    f"{self.dimensions[dim].source!r} not covered by "
+                    f"join {join_name!r} (covers {list(j.sources)!r})"
+                )
+        for dim in where:
+            if dim not in self.dimensions:
+                raise RegistryError(f"unknown filter dimension {dim!r}")
+            if self.dimensions[dim].source not in j.sources:
+                raise RegistryError(
+                    f"filter dimension {dim!r} from source "
+                    f"{self.dimensions[dim].source!r} not covered by "
+                    f"join {join_name!r} (covers {list(j.sources)!r})"
+                )
+
+        # SELECT list — qualify dim exprs by their source; metric expr by
+        # the metric's source.
+        select_cols: list[str] = []
+        for dim in group_by:
+            d = self.dimensions[dim]
+            qualified = _qualify_columns(d.expr, alias_for(d.source))
+            select_cols.append(f"{qualified} AS {dim}")
+        metric_alias = alias_for(m.source)
+        select_cols.append(
+            f"({_qualify_columns(m.expr, metric_alias)}) AS {m.name}"
+        )
+
+        # Metric where-clauses qualify against the metric's source.
+        sql_where: list[str] = [
+            _qualify_columns(w, metric_alias) for w in m.where
+        ]
+        params: list[Any] = []
+        for dim, val in where.items():
+            d = self.dimensions[dim]
+            qualified = _qualify_columns(d.expr, alias_for(d.source))
+            sql_where.append(f"{qualified} = ?")
+            params.append(val)
+        if since is not None:
+            sql_where.append(f"{metric_alias}.{self.sources[m.source].time_col} >= ?")
+            params.append(since)
+        if until is not None:
+            sql_where.append(f"{metric_alias}.{self.sources[m.source].time_col} < ?")
+            params.append(until)
+
+        # Build ON clause. on.left lives on alias_a, on.right on alias_b.
+        on_left_q = _qualify_columns(j.on_left, alias_a)
+        on_right_q = _qualify_columns(j.on_right, alias_b)
+        on_parts = [f"{on_left_q} = {on_right_q}"]
+        if j.filter:
+            on_parts.append(self._rewrite_filter(j.filter, alias_a, alias_b))
+
+        join_kw = "INNER JOIN" if j.kind == "inner" else "LEFT JOIN"
+
+        sql = (
+            f"SELECT {', '.join(select_cols)} "
+            f"FROM {src_a.table} AS {alias_a} "
+            f"{join_kw} {src_b.table} AS {alias_b} "
+            f"ON {' AND '.join(on_parts)}"
+        )
+        if sql_where:
+            sql += " WHERE " + " AND ".join(sql_where)
+        if group_by:
+            sql += " GROUP BY " + ", ".join(group_by)
+            sql += f" ORDER BY {m.name} DESC"
+        if limit is not None:
+            sql += f" LIMIT {int(limit)}"
+        return sql, params
+
+    @staticmethod
+    def _rewrite_filter(filter_expr: str, alias_a: str, alias_b: str) -> str:
+        """Rewrite ``left.<col>`` / ``right.<col>`` placeholders in a join's
+        on.filter predicate to the actual source aliases."""
+        out = filter_expr
+        out = re.sub(r"\bleft\.", f"{alias_a}.", out)
+        out = re.sub(r"\bright\.", f"{alias_b}.", out)
+        return out
 
     # ---- execution ---------------------------------------------------------
 

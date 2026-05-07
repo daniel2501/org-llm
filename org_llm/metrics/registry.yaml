@@ -136,3 +136,26 @@ metrics:
     description: Fraction of readings at watch/alert/critical (0..1) — memory pressure detector
     source: sensors
     expr: "AVG(CASE WHEN status IN ('watch','alert','critical') THEN 1.0 ELSE 0.0 END)"
+
+# Cross-source joins — opt-in via Registry.compile(join=NAME) and the
+# ORG_LLM_REGISTRY_V1_JOINS=1 env flag. Unnamed cross-source queries still
+# raise RegistryError (see metrics.py compile()). Each join names exactly two
+# sources; on.left/on.right are SQL fragments evaluated in the source's table
+# alias; on.filter (optional) is a literal predicate where 'left.' / 'right.'
+# tokens get rewritten to the source aliases. Keep this list short — every
+# entry is a sanctioned cross-source path that future agents will lean on.
+joins:
+  llm_x_history_event:
+    sources: [llm, history]
+    kind: inner
+    "on":
+      left: id
+      right: id
+      filter: "right.kind = 'llm'"
+
+  crew_x_llm_command:
+    sources: [crew, llm]
+    kind: left
+    "on":
+      left: agent_to
+      right: command

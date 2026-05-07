@@ -1,7 +1,7 @@
 :PROPERTIES:
 :ID:       e9636dda-dc2a-4d1a-978f-fb8e5f00f184
 :CREATED:  [2026-05-06]
-:UPDATED:  [2026-05-06]
+:UPDATED:  [2026-05-06 prototype landed]
 :END:
 #+TITLE: Semantic registry — cross-source v1 design (named joins)
 #+FILETAGS: :wiki:superset:phase-27:registry:design:
@@ -244,6 +244,66 @@ datasets + MCP + preprocessor).
   gains the top-level =joins:= block
 - [[file:../../tests/test_metrics_registry.py][=tests/test_metrics_registry.py=]] —
   existing rejection tests stay; add positive tests per join
+
+* Prototype landed (2026-05-06)
+
+*Summary.* The compile-only slice from § "Prototype gate" shipped behind
+=ORG_LLM_REGISTRY_V1_JOINS=1=. =Registry.load()= now parses the new
+top-level =joins:= block and freezes each entry into a =Join= dataclass;
+=Registry.compile(join="<name>")= resolves the named join, qualifies
+every dimension / metric / where expression with the source alias, and
+emits an explicit =JOIN ... ON ...= clause. Two joins ship today —
+=llm_x_history_event= (=inner=, with =on.filter: right.kind = 'llm'=)
+and =crew_x_llm_command= (=left=). Unnamed cross-source queries still
+raise =RegistryError= byte-identically to v0; the only behavioral change
+when the flag is set without a =join== kwarg is an appended hint
+pointing at the matching declared join (if any).
+
+*Expanded.* 11 new tests in =tests/test_metrics_registry.py= gate the
+slice (positive on both joins, negative on unknown name, source
+mismatch, dim-not-covered, =time_bucket= rejection, end-to-end query
+against the fixture DB, plus byte-identical v0 rejection without the
+flag and the new hint surface with it). All 21 pre-existing tests
+still pass without modification — the v0 codepath isn't touched when
+=join is None= and the flag is unset.
+
+Code example:
+
+#+begin_src python
+from org_llm.metrics import Registry
+import os
+
+os.environ["ORG_LLM_REGISTRY_V1_JOINS"] = "1"
+reg = Registry.load()
+rows = reg.query(
+    metric="llm_avg_ms",
+    group_by=["hist_kind"],
+    join="llm_x_history_event",
+    since="2026-04-30",
+)
+#+end_src
+
+Still on the v1.1 list:
+
+- =kind: time_bucket= (deferred — currently raises with a clear v1.1
+  message)
+- =Registry.describe()= listing declared joins under each source
+- CLI exposure (=org-llm metrics query --join NAME=)
+- MCP =metrics_query= accepting a =join= field
+- =emit_superset()= emitting virtual SQL datasets per join
+
+Sharp edges hit during the build:
+
+- *YAML =on:= is a boolean.* PyYAML parses the bare key =on= as
+  =True= (YAML 1.1 legacy). Worked around by quoting the key in
+  =registry.yaml= (="on":=). Worth noting for any future =joins:=
+  authors — the key has to stay quoted.
+- *Column qualification picks vs. function names.* The qualifier walks
+  string literals + skips identifiers followed by =(= so =substr(...)=
+  / =date(...)= aren't mangled, but the heuristic isn't a parser. If
+  a future metric expression names a column the same as a SQL keyword
+  (in =_SQL_KEYWORDS=) we'd silently leave it unqualified — fine for
+  current YAML, watch on next round of metric additions.
 
 * Related
 
