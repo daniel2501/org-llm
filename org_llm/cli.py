@@ -5840,6 +5840,98 @@ def metrics_emit_cmd(
         raise typer.Exit(1)
 
 
+superset_app = typer.Typer(
+    help=("Org-as-source Superset preprocessor — parse a `.org` "
+          "file with literate SQL Babel blocks into Superset's "
+          "v1 import-bundle zip and either write it to disk or "
+          "POST it to a running Superset. Recommended by the "
+          "2026-05-06 fork-spike survey as the only fork-shaped "
+          "tier-7 candidate worth pursuing, and the cheapest "
+          "shape is zero-fork (this preprocessor)."),
+    rich_markup_mode="rich",
+)
+app.add_typer(superset_app, name="superset",
+              rich_help_panel="Querying")
+
+
+@superset_app.command("import-org")
+def superset_import_org_cmd(
+    path: Annotated[
+        Path, typer.Argument(help="Path to a .org dashboard source file")
+    ],
+    emit_only: Annotated[
+        Optional[Path],
+        typer.Option("--emit-only",
+                     help="Write the bundle zip to PATH and exit "
+                          "(default: ./out.zip if --post not given)")
+    ] = None,
+    post: Annotated[
+        Optional[str],
+        typer.Option("--post",
+                     help="POST the bundle to Superset at URL "
+                          "(e.g. http://localhost:8088)")
+    ] = None,
+    user: Annotated[
+        Optional[str],
+        typer.Option("--user", "-u",
+                     help="Superset username (defaults to admin)")
+    ] = None,
+    password: Annotated[
+        Optional[str],
+        typer.Option("--password", "-p",
+                     help="Superset password (defaults to admin)")
+    ] = None,
+):
+    """Import an .org dashboard source into Superset.
+
+    Parses #+TITLE / #+SUPERSET_DASHBOARD / #+SUPERSET_DATABASE
+    headers + named #+BEGIN_SRC sql blocks, projects them onto
+    Superset's v1 import-bundle shape (metadata.yaml + databases/
+    + datasets/ + charts/ + dashboards/), and either writes the
+    zip or POSTs it to /api/v1/dashboard/import/.
+
+    Reuses dataset/database UUIDs from the semantic-layer registry
+    so a chart imported here and a `metric:llm_avg_ms` query from
+    `@analyst` answer with identical numbers.
+    """
+    from .superset_import import OrgDashboard
+
+    if not path.exists():
+        on_screen(f"[red]not found:[/red] {path}")
+        raise typer.Exit(1)
+
+    od = OrgDashboard.from_org(path)
+    on_screen(
+        f"[lcars2]parsed[/lcars2] {path.name} → "
+        f"dashboard={od.slug!r}, charts={len(od.charts)}"
+    )
+    for chart in od.charts:
+        on_screen(
+            f"  [bold]{chart.name}[/bold]  "
+            f"metric={chart.metric_name}  "
+            f"viz={chart.viz_type}  "
+            f"group_by={chart.group_by or '-'}"
+        )
+
+    if post is None and emit_only is None:
+        # Default: emit to ./out.zip in the current directory.
+        emit_only = Path("./out.zip")
+
+    if emit_only is not None:
+        out = od.write_zip(emit_only)
+        on_screen(f"[lcars2]wrote bundle[/lcars2] {out}")
+
+    if post is not None:
+        auth = (user or "admin", password or "admin")
+        try:
+            resp = od.post(post, auth=auth)
+        except Exception as e:
+            on_screen(f"[red]POST failed:[/red] {e}")
+            raise typer.Exit(2)
+        on_screen(f"[lcars2]posted to[/lcars2] {post}")
+        on_screen(f"  response: {resp}")
+
+
 agent_app = typer.Typer(
     help=("Per-row CRUD on the `agent` DB table — Layer 2 of "
           "the agent resolution stack (Python builtins → DB → "
