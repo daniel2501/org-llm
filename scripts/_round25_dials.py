@@ -1973,12 +1973,24 @@ def main():
     # ── Final summary ────────────────────────────────────────────────────
     log("")
 
-    # R24_SYNTHESIS: Layer-BK selector
+    # R26 P1-8: Layer-BK on FULL advancing pool, not just top-3.
+    # R25 ran 10 BK cells (5 BK tasks × top-3 FOSS=K1+K5). With selector
+    # dedupe (P0-1) + force-list (P1-3) ALL surviving FOSS variants
+    # plus Claude get to attempt long-horizon tasks. Adds ~$2-4/round
+    # (per r25-quality-judge §R-4) but produces K8/K11 long-horizon data
+    # for the first time.
     bk_tasks = [t for t in TASKS if t.get("id", "").startswith("BK")]
     if bk_tasks and top3_foss:
         log(f"\nLayer BK — long-horizon tasks: {[t['id'] for t in bk_tasks]}")
-        bk_advancing = [v for v in VARIANTS if v[0] in top3_foss
+        # Full advancing pool: every active VARIANT that scored > 0 in L1
+        # OR is on the force-list (K1, K8, K11) OR is Claude.
+        scored_variants = {v for v, scores in _by_variant.items()
+                            if (sum(scores) / max(len(scores), 1)) > 0}
+        bk_advancing = [v for v in VARIANTS
+                          if v[0] in scored_variants
+                          or v[0] in _R25_FORCE_LAYER2
                           or v[2] == "claude-solo"]
+        log(f"Layer BK pool: {[v[0] for v in bk_advancing]}")
         bk_specs = [(task, variant, BEST_CONFIG, "layer_bk")
                        for task in bk_tasks
                        for variant in bk_advancing]
