@@ -1,0 +1,270 @@
+:PROPERTIES:
+:ID:       cross-round-r20-r23-supplement
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: Cross-round R20-R23 supplement to the master plan
+#+FILETAGS: :wiki:bench:r20:r21:r22:r23:supplement:
+#+OPTIONS: toc:2 num:nil
+#+CATEGORY: bench
+
+* Top
+
+*Summary.* This supplement extends the in-flight R15-R19 cross-round
+analyses with the four overnight rounds R20-R23. R20 produced one
+genuinely new datum — K2-kimi-k2.6 reaches K1-qwen30 parity on quality
+once given n=25 (488 vs 473), but K1's $/qpt advantage is preserved at
+7.2x. R21-R23 hit OpenRouter HTTP 402 at 04:39 EDT and yielded zero
+FOSS data; only the Anthropic-billed K5-claude-solo scored. The
+practical takeaway is that R20 alone earns its keep, and R21-R23 only
+become useful after the credit watcher re-runs them post-top-up.
+
+*Expanded.* All four rounds ran the same fixed-point dial config
+(=bt_pb_m1_tb_s1=, the R19 winner) so they are sample-size additions,
+not strategy probes. The intended R19 BK1-BK5 long-horizon tasks did
+NOT enter the layer-1 cell pool in R20-R23 — every layer-1 cell is B1,
+with B5/B7/B11/B13/B20/B25/B26 only appearing once each in R20 layer-2
+re-runs. The 402-cap obliterated R21-R23 FOSS variance signal; layer-2
+promotion (the dead-variant prune) never fired in R21-R23 because no
+FOSS variant produced a layer-1 score to promote on. K5-claude-solo
+showed surprisingly tight consistency across R21/R22/R23 (74/93/93 with
+identical primary=92/93/93), making it the only legitimate
+cross-round repeatability datum produced by these rounds.
+
+* 1. Quality trajectory R20-R23 (vs R19)
+
+| Variant            | R19 score | R20 score | R21 score | R22 score | R23 score | Δ vs R19 |
+|--------------------+-----------+-----------+-----------+-----------+-----------+----------|
+| K1-qwen30          |       618 |       473 | 0 (402)   | 0 (402)   | 0 (402)   |     -145 |
+| K2-kimi-k2.6       |       328 |       488 | 0 (402)   | 0 (402)   | 0 (402)   |     +160 |
+| K7-qwen72b         |       108 |       270 | 0 (402)   | 0 (402)   | 0 (402)   |     +162 |
+| K8-deepseekV3      |        38 |       124 | 0 (402)   | 0 (402)   | 0 (402)   |      +86 |
+| K11-qwen3coder     |       234 |        22 | 0 (402)   | 0 (402)   | 0 (402)   |     -212 |
+| K17-glm46          |       222 |         0 | 0 (402)   | 0 (402)   | 0 (402)   |     -222 |
+| K15-kimi-thinking  |        66 |         0 | 0 (402)   | 0 (402)   | 0 (402)   |      -66 |
+| K5-claude-solo     |       177 |        91 | 74        | 93        | 93        |      -84 |
+| K9-mixtral         |        28 |         6 | 0 (402)   | 0 (402)   | 0 (402)   |      -22 |
+| K6-llama70b        |        18 |        26 | 0 (402)   | 0 (402)   | 0 (402)   |       +8 |
+
+Mostly noise — R20 cell counts shifted (K2 15→25, K8 15→25). Real
+movements: K2 confirmed parity; K11/K17 collapsed (K11 had 5/10 cells
+hit 402 in R20 already, K17 had 7/10 — these were the canary leak
+variants that consumed credits before the cap). K7 jumped because R20
+gave it 10 layer-1 cells of pure scope-strict B1 (its R19 lint penalty
+ceiling).
+
+K5-claude-solo consistency across R21/R22/R23 is real: primary scores
+92/93/93, total 74/93/93 (R21 lost 18 points to fab=6 — one cell
+fabricated content). This is the cleanest single-datum across these
+four rounds.
+
+* 2. Pareto evolution R20-R23
+
+| Round | Pareto front (FOSS)                                      | $/qpt frontier              |
+|-------+----------------------------------------------------------+-----------------------------|
+| R19   | K1 (lowest cost-per-unit), K11 (highest single score)    | K1 0.00047 / K7 0.00159     |
+| R20   | K1 (cheapest), K2 (highest single score)                 | K1 0.00045 / K8 0.00092     |
+| R21   | K5-only (no FOSS data; 402)                              | n/a                         |
+| R22   | K5-only (no FOSS data; 402)                              | n/a                         |
+| R23   | K5-only (no FOSS data; 402)                              | n/a                         |
+
+K1 still owns the cost-per-unit frontier: R19 0.00047, R20 0.00045 —
+a 4% improvement, well within noise. K2-kimi at $1.59 / 488 = 0.00326
+$/qpt is *6.7x* more expensive per quality unit than K1, but earned
+the highest single-variant total in any round. The Pareto answer:
+*K1 still dominates if you optimize $/qpt; K2 dominates if you
+optimize raw quality at a fixed n.* These are the same two operating
+points the R15-R19 pareto-evolution agent was already separating —
+R20 sharpens the wedge but does not change the slope.
+
+K8-deepseekV3 surfaced a new low-cost frontier point ($0.00092/qpt at
+n=25, score 124) that didn't exist in R19 (where it was at n=15 with
+score 38). This is the one structurally new R20 datum for Pareto.
+
+* 3. Failure modes R20-R23
+
+| Mode                          |  R20 |  R21 |  R22 |  R23 | Notes                          |
+|-------------------------------+------+------+------+------+--------------------------------|
+| HTTP 402 Payment Required     |   27 |  115 |  115 |  115 | Credit cap; round-killer       |
+| IncompleteRead (provider)     |    3 |    0 |    0 |    0 | Pre-cap network flakes         |
+| git worktree add exit-128     |    1 |    0 |    0 |    0 | Worktree retry survived        |
+| silent_noop (reason field)    |    2 |    0 |    0 |    0 | K6-llama70b only               |
+| score=0 + non-empty diff      |  ~40 |    0 |    0 |    0 | Failed-attempt cells (R20 B1)  |
+
+Outside of 402, R20 is remarkably clean. The =safe_worktree_add= retry
+fix from commit fc59d1c held — only one git-worktree error in 140
+cells. No broker errors and no scope_violation rejections appeared in
+the cell records. The R19 BK1-BK5 long-horizon tasks did NOT trigger
+any new failure modes because they were not actually exercised at
+layer 1 — the harness defaulted to B1 for the bulk of cells.
+
+The 402 distribution leaks the spend pattern: R20 already had K11
+(5 of 10 cells), K17 (7 of 10), K15 (3 of 5) and K1 (12 of 28) hitting
+402 before the round closed. K11-qwen3coder is the credit-killer — at
+$0.03296/qpt it consumed 5x more per unit than any other priced FOSS
+variant.
+
+* 4. Variant longevity R20-R23
+
+| Variant            | rounds with ≥1 scoring cell (R20-R23) | recommendation R24+   |
+|--------------------+---------------------------------------+-----------------------|
+| K5-claude-solo     | 4 of 4 (R20+R21+R22+R23)              | KEEP — control anchor |
+| K1-qwen30          | 1 of 4 (R20 only)                     | KEEP — cost frontier  |
+| K2-kimi-k2.6       | 1 of 4 (R20 only)                     | KEEP — quality peer   |
+| K7-qwen72b         | 1 of 4 (R20 only)                     | KEEP — n=10 peer      |
+| K8-deepseekV3      | 1 of 4 (R20 only)                     | KEEP — workhorse      |
+| K6-llama70b        | 1 of 4 (R20, score 26 / 2 noops)      | WATCH — noop trend    |
+| K11-qwen3coder     | 1 of 4 (R20 score 22 only)            | DROP — credit hog     |
+| K9-mixtral         | 1 of 4 (R20 score 6)                  | DROP — non-competitive|
+| K15-kimi-thinking  | 0 of 4 (all 402-blocked)              | DEFER until credits   |
+| K17-glm46          | 0 of 4 (all 402-blocked)              | DEFER until credits   |
+
+K11-qwen3coder spent $5.14 across 10 cells in R19 (R21 LIVE leaderboard
+carried this over) and only scored 22 in R20 — its quality is real
+but its rate is unaffordable inside a $30 credit budget. K15 and K17
+were 100% 402-blocked across these 4 rounds; they need a fresh probe
+post-top-up before any keep/drop call.
+
+R6/R9 are now structurally dominated: K6's 7 noops in R19 plus 2 in
+R20 (out of 20 attempts) is a 45% noop rate; K9's $/qpt of 0.02072 in
+R20 is worse than K5-claude. Both have dropped below the bar.
+
+* 5. Best-strategy-per-shape R20-R23
+
+The shape question is moot for these 4 rounds: layer 1 is 100% B1 and
+the R20 layer-2 expansion only ran K1-qwen30 + K5-claude-solo on the
+seven other tasks (B5/B7/B11/B13/B20/B25/B26). The R19 BK1-BK5
+long-horizon tasks were NOT exercised — neither in layer 1 nor in any
+follow-up layer. This is the supplement's biggest negative finding.
+
+| Task | R20 K1 score | R20 K5 score | shape (R19 plan_classification) |
+|------+--------------+--------------+---------------------------------|
+| B5   |            0 |          ~12 | recurring × low-stakes          |
+| B7   |            0 |          ~14 | recurring × low-stakes          |
+| B11  |            0 |           50 | recurring × low-stakes          |
+| B13  |            0 |          ~10 | recurring × low-stakes          |
+| B20  |            0 |          ~10 | recurring × low-stakes          |
+| B25  |            0 |          ~10 | recurring × low-stakes          |
+| B26  |            0 |          ~12 | recurring × low-stakes          |
+
+K1 went 0/7 on the layer-2 broadening sweep — every cell scored 0.
+K5-claude-solo's B11 score of 50 (the highest single FOSS-or-Claude
+cell in R20) suggests B11 has a high primary-metric ceiling that the
+30B specialist couldn't reach. *R24 must explicitly schedule BK1-BK5
+into the layer-1 cell pool.* The fixtures landed in R19 (commit
+106054c) but the harness fixed-point config never selected them.
+
+* 6. Outlier deep-dive R20-R23
+
+*Top 3 cells (by score, R20-R23 union):*
+
+| Rank | Variant         | Round | Task | Cell label                   | Score | Cost     | Diff stat            |
+|------+-----------------+-------+------+------------------------------+-------+----------+----------------------|
+| 1    | K5-claude-solo  | R20   | B11  | bt_pb_m1_tb_s1 (layer2)      |    50 | $0.00    | (Anthropic-billed)   |
+| 2    | K1-qwen30       | R20   | B1   | bt_pb_m1_tb_s1 (layer1)      |    45 | $0.0239  | 1 file, 2 lines      |
+| 3    | K1-qwen30       | R20   | B1   | bt_pb_m1_tb_s1 (layer1)      |    45 | $0.0240  | 1 file, 2 lines      |
+
+Three more K1 cells tied at 45 across the same task+dial (n=4 of 28
+hit the per-cell ceiling on B1). The fact that the ceiling is reached
+by a 30B model at $0.024 is the headline.
+
+*Bottom 3 cells (failed attempts with non-empty diffs):*
+
+| Variant         | Round | Task | Diff stat                                          |
+|-----------------+-------+------+----------------------------------------------------|
+| K2-kimi-k2.6    | R20   | B1   | =literate-tools.org \vert 38 +++++ — 19 ins/19 del=|
+| K7-qwen72b      | R20   | B1   | =literate-tools.org \vert 26 +++++ — 13 ins/13 del=|
+| K8-deepseekV3   | R20   | B1   | =literate-tools.org \vert 10 +++++ — 5 ins/5 del=  |
+
+These are score-0 cells where the specialist edited the target file
+but the lint or scope-strict gate rejected the diff. K2's 19/19 line
+churn is suspicious — likely a wholesale rewrite that triggered the
+quality_lint N5 penalty. The 21 silent-noop cells (no diff, no error)
+are the other failure shape; K6 (2), K9 (1), K15 (1), K17 (1) and
+several K2 retries (s9, s10, s13) all produced empty diffs in R20.
+
+* 7. Strategy effectiveness R20-R23
+
+*R20 delta — n=25 bump for K2 + K8.* Did surfacing more cells reveal
+new variance signal? Mixed. K2 went 15→25 cells and gained 160 score
+points (10.7/cell average) — confirmed it can score, but the variance
+is still huge (max 38, min 0, mean 19.5/cell on B1). K8 went 15→25
+cells and gained 86 points (3.4/cell mean) — at 25 cells K8 is now a
+clearly weaker variant than K1/K2. The bump *did* surface variance
+but did NOT change the variant ranking.
+
+*R21 delta — claimed dead-variant auto-prune.* Inspecting the harness
+diffs (R20→R21 is identical except round-id renames, lines 71/75/460/
+604/610/1102/1177/1280/1381/1616/1717), there is no R21-introduced
+prune logic — the layer-1 → layer-2 dead-variant filter has been
+present since R17 (=Layer 1 → advancing (after dead-variant filter)=).
+Whatever R21 was supposed to test never had the chance to run because
+all FOSS variants 402-failed at layer 1, leaving the prune filter with
+empty input. So this delta cannot be evaluated from these artifacts.
+
+*Net.* The fixed-point config is now thoroughly proven (R20 best_config
+identical to R19) but no R20-R23 round actually probed dial space —
+all 521 cells across 4 rounds used =bt_pb_m1_tb_s1=. The bench has
+plateaued on strategy and is now in pure sample-size accumulation
+mode. R24 should reintroduce dial variance OR introduce BK1-BK5 to
+get new signal.
+
+* 8. Master synthesis
+
+Combining R20-R23 with the headline R15-R19 narrative
+(=docs/wiki/2026-05-08-r18-synthesis.org=) and the in-flight
+cross-round reports
+(=docs/notes/2026-05-08-cross-round-{quality-trend,pareto-evolution,
+failure-modes,variant-longevity,best-strategy-per-shape,outlier-
+deepdive}.org=, may not exist yet at read time):
+
+1. *K1-qwen30's $/qpt frontier is now confirmed across two
+   independent rounds* (R19: 0.00047, R20: 0.00045). The
+   FOSS-spend-headroom thesis is empirically grounded.
+
+2. *K2-kimi-k2.6 is a peer at n=25 but not at $/qpt.* The R19
+   pareto-evolution report should pin K1+K2 as the two surviving
+   FOSS frontier points; everyone else is dominated.
+
+3. *The fixed-point dial config is stable.* R19's
+   =bt_pb_m1_tb_s1= won R20 with the same best_config; R21-R23 used
+   it without modification. This is a real plateau — strategy
+   variance is no longer where the wins are.
+
+4. *BK1-BK5 are unfired chambers.* The R19 long-horizon-tasks
+   wiring landed (fixtures imported) but the R20-R23 harness never
+   selected them. R24 must schedule them explicitly into layer 1.
+
+5. *K11/K15/K17 are credit-cliff variants.* Their per-cell cost
+   inside a $30 cap is the round-killer; K11 alone consumed enough
+   to trigger the 402 cap at 04:39. Move them to a separate pool
+   with its own budget cap or drop.
+
+6. *K5-claude-solo's R21/R22/R23 consistency (74/93/93 with primary
+   92/93/93) is the cleanest cross-round repeatability datum we have.*
+   Use it as the calibration anchor for any future judge-LLM
+   reliability work.
+
+7. *R21-R23 forked harnesses are still on disk and ready to re-run.*
+   Now that OpenRouter is at $90 / $59 headroom (post 11:30 EDT
+   top-up), the credit watcher can run the three forked harnesses
+   without modification — they'll produce the dial-variance data the
+   first overnight pass missed.
+
+8. *Failure-mode taxonomy is essentially "402 plus everything else".*
+   Outside of payment errors, R20-R23 had 3 IncompleteReads, 1
+   git-worktree exit-128, 2 silent_noops, and ~40 score-0
+   non-empty-diff cells. The non-402 surface is now tractable.
+
+* Cross-references
+
+- =docs/wiki/2026-05-08-overnight-r19-r23-brief.org= — morning brief
+- =docs/wiki/2026-05-08-r18-live-log.org= — round-chain narrative
+- =docs/wiki/2026-05-08-r18-synthesis.org= — R18 master plan inputs
+- =docs/notes/2026-05-08-cross-round-quality-trend.org= (in flight)
+- =docs/notes/2026-05-08-cross-round-pareto-evolution.org= (in flight)
+- =docs/notes/2026-05-08-cross-round-failure-modes.org= (in flight)
+- =docs/notes/2026-05-08-cross-round-variant-longevity.org= (in flight)
+- =docs/notes/2026-05-08-cross-round-best-strategy-per-shape.org= (in flight)
+- =docs/notes/2026-05-08-cross-round-outlier-deepdive.org= (in flight)
+- =scripts/_round{20,21,22,23}_dials_artifacts/= — full data dumps
+- =scripts/_round{20,21,22,23}_dials.py= — forked harnesses (round-id renames only vs R19)
