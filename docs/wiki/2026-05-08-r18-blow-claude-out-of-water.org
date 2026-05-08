@@ -1,0 +1,211 @@
+:PROPERTIES:
+:ID:       8e5bd78d-ec65-450f-b194-746e2c6c420b
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R18 — blow Claude out of water (maximalist scope)
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:r18:strategy:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Per user 2026-05-08: do BOTH Tier-A and Tier-B from
+prior doc + think bigger. R18 absorbs everything previously gated
+(20 strategies + 10 tests) AND adds 18 new "ambitious" tests + 12
+new "ambitious" strategies. Top 5 "blow Claude out of water"
+ideas: (1) Claude-distillation LoRA — capture Claude's R17 cells
+as teacher signal; (2) tool-use trajectory cloning — replay
+Claude's exact tool sequence with FOSS executing; (3) learned
+router for mixture-of-specialists; (4) multi-LLM debate for
+reasoning-heavy tasks; (5) self-play evolution where best
+variant from round N judges round N+1. Realistic R18 scope: $200-
+350 spend, 6-12h overnight wall, ~1500-2500 cells.
+
+*Expanded.* The 1pt gap (Claude 20.1 vs Kimi 23.63... wait, kimi
+ALREADY beats Claude on R16 quality judge) — actually re-reading
+R17 quality judge, the gap is now Claude 20.1 vs K1 19.0 (just 1.1pt),
+and FOSS dominates cost-per-quality. R18's job is to crush this
+last gap on QUALITY while maintaining the cost dominance. The
+high-leverage levers are now orchestration + distillation + judged
+ensembles, not raw model power.
+
+* All 20 prior strategies (S1-S20) — promoted to R18 v1
+
+Per user request: Tier-A (S7-S13) + Tier-B (S14-S20) join Tier-S
+(S1-S6) in R18 v1 launch. Full list at
+=docs/wiki/2026-05-08-r18-tests-and-strategies.org=.
+
+* All 10 prior tests (T1-T10) — promoted to R18 v1
+
+Per user request: T5-T10 join T1-T4 in R18 v1 launch.
+
+* New "ambitious" tests (T11-T28) — think-big additions
+
+** Tier-S (highest leverage to close Claude gap)
+
+| ID | Test | What |
+|----+------+------|
+| *T11* | *Claude tool-use trajectory cloning* | For 5 R17 Claude-winning cells, log Claude's exact tool sequence (tail/grep/sed/uuid). Replay with FOSS executing each step. Does FOSS-with-Claude-trajectory beat FOSS-alone? |
+| *T12* | *Multi-LLM debate* | Two FOSS models argue opposing positions on a DEC tradeoff; judge picks. Tests reasoning depth. |
+| *T13* | *Self-play evolution* | R18's top-3 variants become judges for R18.5. Quality bootstraps via tournament. |
+| *T14* | *Confidence calibration* | Each variant rates its confidence per cell; we measure correlation with actual quality. Tells us when a variant "knows it's uncertain." |
+| *T15* | *Output validity gating cascade* | Every cell's output must pass: (1) AST parses, (2) semantic schema check, (3) project conventions (Rule 2b, etc.), (4) pytest if code, (5) full org-element validate. Cells pass increasingly strict gates. |
+
+** Tier-A (high value)
+
+| ID | Test |
+|----+------|
+| T16 | Auto-prompt-search — algorithmic exploration of prompt variants (10 candidates) per task; per-task best prompt discovered |
+| T17 | Distillation from Claude — capture Claude's R15+R16+R17 outputs as teacher signal for LoRA (already in R18 design as Track G but specifically targeted at Claude's behavior patterns) |
+| T18 | Differential tracing — when 2 variants disagree, run 3rd as tiebreaker; if all 3 disagree, escalate to judge ensemble |
+| T19 | Iteration-budget elasticity — give models 2/8/16/32 iters; find quality plateau per variant |
+| T20 | Cross-task transfer — does specialty-routing LoRA generalize across same-family tasks? Train on B11 DEC, test on B45 captain's-log |
+
+** Tier-B (R18.5 if time)
+
+| ID | Test |
+|----+------|
+| T21 | Adversarial jailbreak resilience (target file contains malicious instructions) |
+| T22 | Vault drift simulation (modify files between cells; does prefetch tolerate?) |
+| T23 | Resource-constrained FOSS — max_tokens=500 stress; which model still useful? |
+| T24 | Multi-language tests (non-English org content) |
+| T25 | Pre-edit verification calls — model must explain WHY before editing (stricter version of survey-before-edit) |
+| T26 | Counter-example training (in-context) — show 5 BAD outputs as anti-examples; test if FOSS rejects the patterns |
+| T27 | Cross-format conversion — org → markdown → org; verify format preservation |
+| T28 | 1000-cell stress test — does any pipeline break under load? |
+
+* New "ambitious" strategies (S21-S32) — think-big additions
+
+** Tier-S (highest leverage)
+
+| ID | Strategy | Mechanism |
+|----+----------+-----------|
+| *S21* | *Claude-distillation LoRA* | Capture Claude's R15+R16+R17 outputs as teacher signal. Train K1-qwen30 LoRA via knowledge distillation (KL loss vs Claude logits if accessible, else SFT on Claude completions). One-shot LoRA $13-22; could close Claude gap entirely. |
+| *S22* | *Tool-use trajectory cloning* | For each task type, capture Claude's optimal tool sequence (per claude-shape Pattern A). Replay deterministically with FOSS executing each step. Removes "knowing the right sequence" from the model's job. |
+| *S23* | *Learned router for mixture-of-specialists* | Small router LLM (qwen30) picks specialist per task. Trained on R15+R16+R17 (task, variant, score) tuples. Better than fixed routing in S4. |
+| *S24* | *Iterative refinement chain* | Model 1 (factual draft) → Model 2 (structural critique + revise) → Model 3 (stylistic polish). Each adds a quality dimension. |
+| *S25* | *Constitutional AI for FOSS* | Self-critique loop with explicit principles: "Did you follow Rule 2b? Did you preserve all existing content? Did you generate a real UUID?" Model self-corrects based on principles. |
+
+** Tier-A (high value)
+
+| ID | Strategy | Mechanism |
+|----+----------+-----------|
+| S26 | Speculative decoding for slow variants — Eagle3 / Medusa heads on K11/K15. ~19% cost cut + 2× decode latency |
+| S27 | Confidence-weighted voting — N variants give (output, confidence); weighted vote. If all unconfident, escalate to premium |
+| S28 | Symbolic-LLM hybrid — for B40 inbox triage, apply deterministic rules first (file → project mapping), LLM only for fuzzy edge cases |
+| S29 | Memory-augmented reasoning — explicit scratchpad model edits across iters. Persistence across cell |
+| S30 | Pre-edit verification — model emits "I will do X because Y" before any tool call. Validation gate verifies the explanation is consistent with the action |
+
+** Tier-B (R18.5 / R19)
+
+| ID | Strategy |
+|----+----------|
+| S31 | Distillation cascade — train series of LoRAs, each from previous + Claude teacher. Compounding refinement |
+| S32 | Cross-vault federation — RAG over MULTIPLE users' vaults (with permissions) for true multi-user signal |
+
+* Top 5 "blow Claude out of water" picks
+
+Ranked by expected impact × tractability:
+
+| Rank | Pick | Impact | Tractability | Cost |
+|------+------+--------+--------------+------|
+| 1 | *S21 Claude-distillation LoRA* | HIGH — could close Claude gap entirely on prose tasks | MEDIUM — pipeline ready, dataset trivial | $20 |
+| 2 | *S22 Tool-use trajectory cloning* | HIGH — replicates Claude's "5 small habits stacked" mechanically | LOW — needs careful capture + replay logic | $10 |
+| 3 | *S23 Learned router* | MEDIUM-HIGH — better than fixed routing, scales | MEDIUM — needs training data formatting | $5 |
+| 4 | *S5 Constrained decoding (already Tier-S)* | MEDIUM-HIGH — closes K2's missing-Expanded structurally | LOW — XGrammar / response_format wires | $0 |
+| 5 | *T11 Trajectory cloning A/B* (paired with S22) | MEDIUM — proves S22 works | LOW — wraps existing harness | $5 |
+
+* The maximalist R18 v1 — what gets in
+
+| Bucket | Items |
+|--------+-------|
+| Tier-S strategies (must-have) | S1-S6 + S21-S25 = 11 strategies |
+| Tier-A strategies | S7-S13 + S26-S30 = 12 strategies |
+| Tier-B strategies | S14-S20 + S31-S32 = 9 strategies |
+| Tier-S tests | T1-T4 + T11-T15 = 9 tests |
+| Tier-A tests | T5-T8 + T16-T20 = 9 tests |
+| Tier-B tests | T9-T10 + T21-T28 = 10 tests |
+
+*Total for R18 v1*: 32 strategies + 28 tests across all tiers.
+
+* Cell math (maximalist R18)
+
+| Layer | What | Cells |
+|-------+------+-------|
+| L1 standard | top-5 × 8 tasks × n=15 | 600 |
+| L2 ablation | dial sweep × top-3 × multi-task | 180 |
+| L3 composition | C1-C10 + S3 + S24 | 200 |
+| L4 LoRA A/B | K1 vs K1-LoRA + K2 vs K2-LoRA + K8 vs K8-LoRA | 80 |
+| L5 distillation A/B (S21) | K1 vs K1-claude-distill | 50 |
+| L6 trajectory cloning (S22) | 5 task types × n=10 | 50 |
+| L7 multi-LLM debate (T12) | 4 prose tasks × 3 debates × n=5 | 60 |
+| L8 self-play eval (T13) | top-3 judge × all cells | overhead, ~0 cells |
+| L9 confidence calibration (T14) | sample 200 cells; ask for confidence | 200 |
+| L10 validity gating cascade (T15) | every layer-1 cell tested against 5 gates | overhead |
+| L11 failure injection (T1) | 30 fault-injected cells | 30 |
+| L12 long-horizon (T2 + BK1-BK5) | 5 multi-file tasks × n=10 × 3 variants | 150 |
+| L13 stress test (T28) | 1000-cell single-prompt stress | 1000 |
+|-------+------+-------|
+| Subtotal | | ~2600 cells |
+
+With 16-way parallelism: ~3-6 hours wall.
+Cost: ~$180-280 (under $375 cap with 30%+ headroom).
+
+** Trim to "blow-Claude tier" (~1500 cells, ~$150-200, 4h)
+
+Drop the stress test (L13) and confidence-calibration noise; keep
+distillation + trajectory cloning + composition + LoRA + ablation.
+Best signal-to-cost for the goal.
+
+* Realistic R18 sequencing
+
+** Stage 1 — infrastructure (must-fix gotchas)
+
+Worktree mutex, provider failover, fail-edit-streak abort, allow_fallbacks=False,
+correct broker remap. ~1h build. (Already in R18 design.)
+
+** Stage 2 — measurement layer
+
+LoRA pipeline + Modal-Kimi continuous warm + Qdrant index + weaver
+judge ensemble + observability monitors O7-O20. ~2h build.
+
+** Stage 3 — strategy layer
+
+Implement S1-S6 (Tier-S) first; S7-S13 (Tier-A); S14-S20 (Tier-B);
+S21-S32 (ambitious). Each strategy is a small wrapper over existing
+runtime — most are ~30-50 lines.
+
+** Stage 4 — test layer
+
+Run cells! T1-T15 (Tier-S + ambitious-Tier-S) gets us the bulk of
+Claude-comparison signal.
+
+** Stage 5 — analysis + R19 design
+
+Synthesize R18 results; identify what worked; design R19 around
+proven winners.
+
+* What "blowing Claude out of water" actually requires
+
+| Dimension | Status post-R17 | R18 target |
+|-----------+------------------+------------|
+| Mech score | FOSS (K11) > Claude | maintain |
+| Quality (1-25) | Claude 20.1 vs K1 19.0 (-1.1pt) | *FOSS ≥ Claude* |
+| Cost | FOSS $0.0003/u vs Claude $0.007/u (23-33×) | maintain |
+| Wall | FOSS parity post-Modal-Kimi | maintain |
+| Stability | K8 6/6 across rounds | extend to top-5 |
+| Coverage | 8 tasks | extend with T2 long-horizon |
+| Variety | flat sampling | composition + distillation lifts |
+
+R18's quality target: *K8-with-distillation ≥ 21/25* (matching/beating
+Claude). Baseline: K8 R17 was 18.6. Distillation lift expected: +2-3pt.
+
+* Cross-references
+
+- =docs/wiki/2026-05-08-r18-tests-and-strategies.org= — prior test/strategy doc
+- =docs/wiki/2026-05-08-foss-spend-headroom.org= — spend headroom (enables maximalist scope)
+- =docs/wiki/2026-05-08-r17-synthesis.org= — 4-agent synthesis
+- =docs/wiki/2026-05-07-r18-design.org= — R18 design (gets these adjustments)
+- =docs/notes/2026-05-08-r17-quality-judge.org= — Claude-vs-FOSS gap evidence
