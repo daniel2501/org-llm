@@ -86,12 +86,11 @@ run_round() {
     # Apply round-specific delta
     case $round_n in
         19)
-            log_line "R19 delta: LoRA K20 (if endpoint up) + RAG vault_search + long-horizon tasks"
+            log_line "R19 delta: BK1-BK5 + provider.ignore + quality_lint penalty"
             # Check LoRA endpoint
             if pass org-llm/cloud/modal-foss-lora/url 2>/dev/null | head -c 1 >/dev/null; then
                 local LORA_URL=$(pass org-llm/cloud/modal-foss-lora/url 2>/dev/null | head -1)
                 log_line "  LoRA endpoint live: $LORA_URL — adding K20 to variants"
-                # Add K20 variant (simple sed insert)
                 python3 <<PYADD
 import re
 p = "$dst"
@@ -106,12 +105,9 @@ PYADD
             else
                 log_line "  LoRA endpoint NOT up — skipping K20 variant for R19"
             fi
-            # Long-horizon tasks
-            if [ -f "$REPO/scripts/_round19_long_horizon_tasks.py" ]; then
-                log_line "  long-horizon tasks module ready — TODO wire into harness (R19 v2)"
-            else
-                log_line "  long-horizon tasks NOT ready — proceeding without"
-            fi
+            # Apply R19 wiring patch (BK1-BK5 + deny-lists + quality_lint)
+            log_line "  applying R19 wiring patch"
+            python3 "$REPO/scripts/_r19_wiring_patch.py" 2>&1 | tee -a "$LOG"
             ;;
         20)
             log_line "R20 delta: S2 best-of-N voting + S3 critique-revise on prose tasks"
