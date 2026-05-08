@@ -413,8 +413,32 @@ except ImportError:
 RAG_TOOLS = [VAULT_SEARCH_TOOL] if VAULT_SEARCH_TOOL else []
 
 
-# Composite surface — Claude-Code parity for R16
-BROAD_TOOLS_FULL = (BROAD_TOOLS_PLUS_ELISP + OS_TOOLS + ORG_TOOLS)
+# ── org-roam-mcp tools (R26 P1-17) ──────────────────────────────────────
+# Sister to vault_search above. Tools: mcp_roam_search_nodes,
+# mcp_roam_get_node, mcp_roam_get_backlinks. Backed by org-roam's
+# SQLite database (zero new deps; org-roam-mcp upstream wraps the same
+# DB). Use for structural / exact-title queries; vault_search handles
+# semantic prose queries.
+try:
+    from org_llm.mcp_org_roam import MCP_ROAM_TOOLS  # noqa: F401
+except ImportError:
+    MCP_ROAM_TOOLS = []  # type: ignore[assignment]
+
+
+# ── org-mcp tools (R26 P1-16) ───────────────────────────────────────────
+# Wraps laurynas-biveinis/org-mcp v0.9 (MELPA). Tools: mcp_org_list_todos,
+# mcp_org_refile_node, mcp_org_create_node, mcp_org_query_agenda,
+# mcp_org_search_by_tag. Each shells to `emacs --batch`; falls back to
+# upstream org-mode primitives when mcp-server-lib isn't yet installed.
+# See org_llm/mcp_org.py for status notes + tool-spec definitions.
+try:
+    from org_llm.mcp_org import MCP_TOOLS  # noqa: F401
+except ImportError:
+    MCP_TOOLS = []  # type: ignore[assignment]
+
+
+# Composite surface — Claude-Code parity for R16; MCP tools added in R26
+BROAD_TOOLS_FULL = (BROAD_TOOLS_PLUS_ELISP + OS_TOOLS + ORG_TOOLS + MCP_TOOLS)
 
 
 # ── Task / result dataclasses ────────────────────────────────────────────
@@ -1181,6 +1205,49 @@ def _dispatch_tool_call(name: str, args: dict, workdir: Path,
         except Exception as exc:
             return False, f"vault_search failed: {exc.__class__.__name__}: {exc}"
         return True, json.dumps(hits, ensure_ascii=False)
+
+    if name == "mcp_roam_search_nodes":
+        # R26 P1-17 — org-roam-mcp: title/alias/tag substring search.
+        query = (args.get("query") or "").strip()
+        if not query:
+            return False, "missing query"
+        try:
+            limit = int(args.get("limit") or 10)
+        except (TypeError, ValueError):
+            limit = 10
+        limit = max(1, min(100, limit))
+        try:
+            from org_llm.mcp_org_roam import search_nodes as _sn
+            hits = _sn(query, limit=limit)
+        except Exception as exc:
+            return False, f"mcp_roam_search_nodes failed: {exc.__class__.__name__}: {exc}"
+        return True, json.dumps(hits, ensure_ascii=False)
+
+    if name == "mcp_roam_get_node":
+        # R26 P1-17 — org-roam-mcp: fetch single node by :ID:.
+        node_id = (args.get("node_id") or "").strip()
+        if not node_id:
+            return False, "missing node_id"
+        try:
+            from org_llm.mcp_org_roam import get_node as _gn
+            node = _gn(node_id)
+        except Exception as exc:
+            return False, f"mcp_roam_get_node failed: {exc.__class__.__name__}: {exc}"
+        if not node:
+            return True, json.dumps({"found": False, "node_id": node_id})
+        return True, json.dumps(node, ensure_ascii=False)
+
+    if name == "mcp_roam_get_backlinks":
+        # R26 P1-17 — org-roam-mcp: nodes that link TO node_id.
+        node_id = (args.get("node_id") or "").strip()
+        if not node_id:
+            return False, "missing node_id"
+        try:
+            from org_llm.mcp_org_roam import get_backlinks as _gb
+            links = _gb(node_id)
+        except Exception as exc:
+            return False, f"mcp_roam_get_backlinks failed: {exc.__class__.__name__}: {exc}"
+        return True, json.dumps(links, ensure_ascii=False)
 
     return False, f"unknown tool: {name}"
 
