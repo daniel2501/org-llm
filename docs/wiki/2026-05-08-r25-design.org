@@ -388,6 +388,288 @@ Better at catching cells where the right answer needs creativity.
 | S39 | Reasoning-vs-tool split           | +2-4pt       | 1.3×        | 1.5×       | long-horizon BK                |
 | S40 | Cell-level beam search            | +2-4pt       | 0           | 5×         | hard prose cells               |
 
+* Speed budget — make R25 fast
+
+R24 will land at ~45-60 min total wall (Layer 1 + Layer 2 + Layer-BK
++ K11-B25 + Layer 3 = ~242 cells at PARALLELISM=32). R25 has more
+cells (~470) but we can finish faster than R24 by stacking the
+following:
+
+** Sp1 — Skip Layer 3 dial ablation entirely
+
+R24 has 14 dial-ablation cells on B1 (top-2 FOSS × 7 dials). After
+6 rounds of dial ablation we know:
+- =bt_pi_m1_tb_s1= (inline prefetch) wins on B1 by +2.4 mean
+- =bl_pb_m1_tb_s1= (loose brief) wins by +1.6
+- Other dials are noise
+
+R25 saving: ~5-10 min (14 cells, often slow K11/K7 ones) + ~$2.
+
+** Sp2 — Pipeline L1 → L2 (start L2 as soon as L1 has n=3 per variant)
+
+Currently the harness blocks until /every/ Layer 1 cell finishes
+before Layer 2 starts. R25: start L2 cells for the running top-3
+FOSS as soon as those variants have n=3 L1 cells (enough to
+estimate score). Drops barrier overhead from ~60s × 3 layers to
+~10s. Walltime agent's recommendation from R18 retro.
+
+R25 saving: ~5 min, no quality cost.
+
+** Sp3 — Self-host K1 + K2 endpoints (P1)
+
+OpenRouter TTFT on K1-Novita is 800ms-2s; vLLM with prefix cache
+on local A100 is ~50-200ms TTFT. K1 + K2 between them account for
+~60% of all R24 cells, so this multiplies.
+
+R25 saving: ~5-10 min on K1+K2 cells alone. Also kills broker
+flake (G2 + G5 risk drops to near-zero).
+
+** Sp4 — Drop K7-qwen72b entirely
+
+R24 K7 score = -270 across 6 cells with quality_lint penalty on.
+The signal is clear: K7 cannot generate clean brackets at scale.
+R25 keeps K7 ONLY in S38 adversarial-critic role (where its
+output is text, not edits). Drops 10-15 K7 generative cells.
+
+R25 saving: ~3 min (K7 cells often run to wall-cap on bracket-
+broken loops).
+
+** Sp5 — Stack S33 (speculative decode) on long-output cells
+
+B11 + BK1 + BK3 cells run 5-15 min each. S33 cuts forward-pass
+wall by 40-50% on these. Net: long-pole cells stop dominating.
+
+R25 saving: ~10-15 min on long-horizon layer.
+
+** Sp6 — Stack S34 (async pipeline) on S3 cells
+
+S3 critique-revise is 3× wall sequentially. Async makes it 1.2×
+wall via overlap. Critique-revise cells will be ~12 of R25's
+total; saving wall here matters.
+
+R25 saving: ~3-5 min.
+
+** Sp7 — Drop B7/B25 from Layer 1 sample-up (already in design)
+
+R25's K1 n=20 on B1 is intentional. K7 n=20 on B7 is /not/ — B7
+is its only legit task per best-strategy agent, but K7 is
+quality_lint dead. R25: B7 layer 1 = K1 + K11 only (n=10 each).
+
+R25 saving: ~2 min.
+
+** Combined R25 wall estimate
+
+| Layer / phase                   | R25 wall (min) | Notes                          |
+|---------------------------------+----------------+--------------------------------|
+| Pre-flight (G1-G10)             |             1  |                                |
+| Layer 1 (B1, ~120 cells)        |          5-7   | self-host K1/K2 + parallelism 32 |
+| Layer 2 (~120 cells, pipelined) |          7-10  | Sp2 starts mid-L1              |
+| Layer BK (~30 cells)            |        10-15   | S33 stack saves wall here      |
+| Composition C1-C5 (~40 cells)   |          5-7   | S34 async                      |
+| K20 A/B (~50 cells)             |          3-5   | self-host endpoint             |
+| Large-FOSS K33/K34/K35 (~80)    |          5-8   | OpenRouter, slower             |
+| Post-round cleanup              |             1  |                                |
+| /Total/                         |       *37-54*  | vs R24's projected 45-60       |
+
+Even with /more/ cells than R24 (470 vs 242), R25 finishes
+faster because of pipelining + self-host + S33 + S34. The
+goal is "blazing fast accuracy" — 470 cells in ~40 min is
+~12 cells/min vs R24's ~5 cells/min.
+
+* Guardrails + safeguards (lessons from R15-R24)
+
+R15-R24 surfaced patterns that need hard guardrails to keep
+unattended R25 runs safe + recoverable:
+
+** G1 — Cell-level quality floor (drop K7 from leaderboard if penalty > threshold)
+
+R24 K7-qwen72b hit *score = -270 across 6 cells* because
+quality_lint nested-bracket + table-pipe-loss penalties stack
+fast on its bracket disasters. R24 keeps K7 in the leaderboard
+because score is just /negative/, not removed. R25 guard: if a
+cell's lint_penalty > 8 OR primary < 0, mark it =floor_dropped=
+and exclude from leaderboard mean computation (still log).
+
+** G2 — Per-(variant, broker) live deny-list
+
+R18 v1 K8-DeepInfra silent-noop'd 5 cells before pin revert. R19
+K8 collapsed silently. R25 guard: after the first 3 cells per
+(variant, broker) combo, if score=0 and tool_calls=0 in all 3,
+deny-list the combo for the rest of the round.
+
+** G3 — Cell wall-cap hard kill (runtime enforcement)
+
+R18 K5/B5 took 648s blocking layer 2 for 9 min. WALL_CAP_PER_CELL_S
+=400 was added in R24 as a constant, but no runtime check enforces
+it. R25 guard: =threading.Timer(WALL_CAP, kill_cell)= wraps each
+cell call; on fire, mark cell =wall_cap_killed= and continue.
+
+** G4 — Round cost-cap circuit breaker
+
+R19 spent $9.75 vs ~$3 projection (3.25× over). R25 guard: if
+spent > 1.5× round projection, pause + emit alert; if > 2×,
+hard-stop. Circuit-breaker file at
+=$ARTIFACTS/COST_CIRCUIT_BREAKER= pauses /run_layer_parallel/.
+
+** G5 — Endpoint pre-flight health probe
+
+R18 v1 launched with =allow_fallbacks=False= and DeepInfra K8
+silent-noop'd 5 cells before we noticed. R25 guard: before any
+round, ping each variant via =warmup_providers= AND require
+that the warmup return contains a valid =tool_calls= field.
+Variants that fail warmup get held out of the round.
+
+** G6 — Worktree leak detector + prune
+
+R18 wiped 90/140 cells via worktree races; safe_worktree_add
+retry-on-collision fixed it but =org-llm-worktrees/= still
+accumulates per-cell directories. R25 guard: pre-round
+=git worktree list | grep r25- | wc -l= must be 0, OR prune
+all stale =r{15-24}-= worktrees first. Post-round, prune the
+round's worktrees to keep disk usage bounded.
+
+** G7 — Quality regression alarm
+
+If a variant's per-cell rolling mean drops > 50% in a 10-cell
+window, log =QUALITY_REGRESSION= warning. Could surface broker
+re-pin issues mid-round (R19 K8 collapse was this pattern but
+unalarmed).
+
+** G8 — Disk space pre-flight
+
+Each round's worktrees + artifacts use ~200-400MB. R25 guard:
+require ≥5GB free in repo parent dir before launch.
+
+** G9 — OpenRouter credit pre-flight
+
+R19+R20 burned $14, R21-R23 hit 402 cap. R25 guard: pre-launch
+check that headroom > round_projection × 1.5. Auto-pause if not.
+
+** G10 — Self-host endpoint heartbeat
+
+For P1 self-hosted K1+K2: heartbeat ping every 60s during round.
+If endpoint dies, fall back to OpenRouter route (existing pin),
+log =SELFHOST_FAILOVER= event, continue.
+
+* Auto-repair recipes (R25)
+
+The =_lora_progress_logger.sh= pattern (detect known errors →
+apply fix → relaunch) generalized to round-level. Each recipe
+lives in =scripts/_r25_auto_repair.sh= as a named function and
+fires on its specific trigger.
+
+** AR1 — Stuck pod recovery
+
+*Trigger:* =runtime.uptimeInSeconds == null= or 0 for >15 min on
+a billing pod (RunPod runtime field is unreliable, so we cross-
+check with =modal app list= log output OR check for any pod log
+output).
+
+*Action:* Terminate stuck pod via =podTerminate= mutation,
+relaunch with same dockerArgs but a fresh ID.
+
+*Cap:* 3 retries before escalating to user.
+
+** AR2 — Broker re-pin on tool-format silent_noop
+
+*Trigger:* Per-(variant, broker) deny-list (G2) fires.
+
+*Action:* For the denied broker, look up next entry in PROVIDER_PINS
+=order= list. If exists, retry the variant on it for the next
+batch. If no fallback, drop variant from round.
+
+*Cap:* 2 broker hops per variant per round.
+
+** AR3 — Worktree storm cleanup
+
+*Trigger:* >50 worktree-add errors in a 30s window (sign of disk
+or git index corruption).
+
+*Action:* Pause harness, run =git worktree prune --expire=now=,
+=git gc --aggressive=, prune any =r25-*= directories with no
+git ref. Resume.
+
+*Cap:* 1 per round.
+
+** AR4 — Cost circuit-breaker manual override
+
+*Trigger:* G4 fires (>2× projection).
+
+*Action:* Log full cost breakdown, save current state to
+=PAUSED_STATE.json=, exit harness gracefully. Resume requires
+manual rm of =COST_CIRCUIT_BREAKER= file.
+
+** AR5 — Provider failover on IncompleteRead
+
+*Trigger:* =requests.exceptions.ChunkedEncodingError= or
+=http.client.IncompleteRead= in HTTP retry layer.
+
+*Action:* Retry once on next provider in pin's =order= list.
+Counts toward G2 deny-list signal.
+
+*Cap:* Built into existing exponential-backoff retry.
+
+** AR6 — LoRA training auto-heal carryover
+
+The existing =_lora_progress_logger.sh= recipes (transformers/
+torch FP8, qwen3_moe missing, bitsandbytes CUDA, HF token, OOM,
+peft/trl conflict) carry forward. R25 adds:
+
+*AR6a — RunPod pod stuck:* same trigger as AR1; the LoRA logger
+gets the same recovery (kill pod, relaunch).
+
+*AR6b — Adapter upload fail:* if training finishes but
+=hf_api.upload_folder= fails (e.g. token revoked, repo missing),
+retry 3× with 30s backoff, then log + leave adapter on volume
+for manual recovery.
+
+* Status check cadence (R25)
+
+** Pre-round (T-0)
+
+| Check                                | Owner                       |
+|--------------------------------------+-----------------------------|
+| OpenRouter headroom > 1.5× projection| =_credit_preflight=         |
+| RunPod balance > $20                 | =_credit_preflight=         |
+| Disk space > 5 GB                    | =_disk_preflight=           |
+| All variants warmup_providers OK     | existing =warmup_providers= |
+| K20 v2 endpoint reachable (if used)  | =_endpoint_preflight=       |
+| Worktree dir clean of stale r25-*    | =_worktree_preflight=       |
+
+** During round
+
+| Check                            | Cadence       | Owner                 |
+|----------------------------------+---------------+-----------------------|
+| Per-cell score + cost + error    | per-cell      | existing harness      |
+| Per-layer leaderboard snapshot   | post-layer    | existing =log_leaderboard= |
+| Cost burn vs projection          | per 10 cells  | =_cost_monitor= (new) |
+| Quality regression scan (G7)     | per 10 cells  | =_quality_regression_scan= (new) |
+| Endpoint heartbeat (P1 self-host)| 60s timer     | =_selfhost_heartbeat= (new) |
+| Worktree count                   | per layer     | =_worktree_count_check= (new) |
+
+** Post-round (T+0)
+
+| Action                                 | Owner                       |
+|----------------------------------------+-----------------------------|
+| Final summary.json                     | existing                    |
+| R25_LIVE.json freeze                   | existing                    |
+| Worktree prune for r25-*               | =_post_round_cleanup=       |
+| Auto-commit summary + leaderboard      | =_post_round_commit=        |
+| Spawn 4-agent analysis scour           | =_spawn_r25_analysis_agents= |
+| Append to live-log + Telegram-style ping| =_round_complete_alert=    |
+
+* Status-check + auto-repair scripts (new)
+
+| Script                                          | Purpose                                       |
+|-------------------------------------------------+-----------------------------------------------|
+| =scripts/_r25_preflight.sh=                     | Run G5/G6/G8/G9 + summary OK/FAIL output      |
+| =scripts/_r25_cost_monitor.sh=                  | Background daemon; 60s; emits CIRCUIT_BREAKER on G4 |
+| =scripts/_r25_endpoint_heartbeat.sh=            | Background daemon; 60s; pings P1 self-host    |
+| =scripts/_r25_quality_regression_scan.py=       | Inline call from harness every 10 cells       |
+| =scripts/_r25_auto_repair.sh=                   | Library of AR1-AR6 recipes; harness calls on trigger |
+| =scripts/_r25_post_round_cleanup.sh=            | Worktree prune + summary commit + agent spawn |
+| =scripts/_r25_round_complete_alert.sh=          | Live-log + 1-line user-readable summary       |
+
 * R25 implementation order
 
 1. *Power-ups infrastructure (sequential, before R25 launch)*
