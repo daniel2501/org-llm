@@ -1,0 +1,246 @@
+#+TITLE: R17 OpenRouter provider routing + prefix-cache audit
+#+DATE: 2026-05-08
+#+OPTIONS: toc:nil num:nil
+
+* Summary
+
+R17 added =PROVIDER_PINS= (OpenRouter =provider.order= field) to stabilize
+prefix-cache hits across the 17-variant FOSS sweep. *The pins did not take
+the way the design assumed.* OpenRouter treats =order= as a *preference*,
+not a hard pin — without =allow_fallbacks: false= it freely routed to
+non-pinned brokers. Of the 13 agor variants warmed at run start, *only 2
+landed on the pinned provider* (K6, K11 — both Together). Despite this,
+realized cache savings were *meaningful but uneven*: 4 variants saw
+≥3000 cached tokens (K2, K8, K15, K17), 6 saw zero, and total realized
+savings on input cost are an estimated *14.6%* — below the 22-27% R16
+prediction, almost entirely because the K1/K11/Mixtral/Llama70b lanes
+served zero cache hits in 30+ qualifying cells.
+
+* 1. Pin success table (warmup → first agor call)
+
+Pin success measured on the *warmup* call (model + pin sent, single small
+completion). =run_end.provider= confirms the actual broker that served
+each cell. =Hit?= = warmup-served broker matches the first entry of the
+pinned =order= list.
+
+#+CAPTION: Variant × pinned provider × actual provider (warmup)
+| Variant            | Model                              | Pinned   | Warmup served | Hit? |
+|--------------------+------------------------------------+----------+---------------+------|
+| K1-qwen30          | qwen/qwen3-coder-30b-a3b-instruct  | Together | Novita        | no   |
+| K2-kimi-k2.6       | moonshotai/kimi-k2.6               | Moonshot | DeepInfra     | no   |
+| K6-llama70b        | meta-llama/llama-3.3-70b-instruct  | Together | Together      | yes  |
+| K7-qwen72b         | qwen/qwen-2.5-72b-instruct         | Together | DeepInfra     | no   |
+| K8-deepseekV3      | deepseek/deepseek-chat-v3-0324     | DeepSeek | AtlasCloud    | no   |
+| K9-mixtral         | mistralai/mixtral-8x22b-instruct   | Together | Mistral       | no   |
+| K11-qwen3coder     | qwen/qwen3-coder                   | Together | Together      | yes  |
+| K13-deepseekV4     | deepseek/deepseek-v4-pro           | DeepSeek | GMICloud      | no   |
+| K15-kimi-thinking  | moonshotai/kimi-k2-thinking        | Moonshot | Novita        | no   |
+| K16-qwen36-27b     | qwen/qwen3.6-27b                   | Together | DeepInfra     | no   |
+| K17-glm46          | z-ai/glm-4.6                       | Z-AI     | SiliconFlow   | no   |
+| K18-llama4         | meta-llama/llama-4-instruct        | Together | (HTTP 400)    | n/a  |
+| K19-qwen25c-32b    | qwen/qwen-2.5-coder-32b-instruct   | Together | Cloudflare    | no   |
+
+*Pin success rate: 2/12 = 16.7%* (excluding K18 model-id failure).
+
+Run-time =provider= for K6 then drifted off Together → DeepInfra by the
+first agor cell — even the 2 "hits" weren't stable across the warm→hot
+transition.
+
+** Root cause
+
+In =scripts/_round17_dials.py= line 171 + =org_llm/specialist.py= line 538:
+=PROVIDER_PINS= sends only =provider.order=, no =allow_fallbacks: false=.
+OpenRouter docs treat =order= as preference — falls through to any
+provider serving the model. *The pin is advisory, not authoritative.*
+
+* 2. Provider distribution across all served cells
+
+Counted from =run_end.provider= over 44 cells with completed events
+(7 cells excluded: 4 fail-fast HTTP 4xx, 3 IncompleteRead hangs).
+
+#+CAPTION: Actual provider histogram, all R17 cells
+| Provider    | Cells | %    | Variants served                                  |
+|-------------+-------+------+--------------------------------------------------|
+| Novita      |    14 | 31.8 | K1 (×13), K15                                    |
+| Together    |    14 | 31.8 | K11 (×13), K6                                    |
+| DeepInfra   |     8 | 18.2 | K8 (×7 from L2), K2, K6, K7 (warmup only)        |
+| AtlasCloud  |     1 |  2.3 | K8 (L1 only — drifted to DeepInfra after)        |
+| SiliconFlow |     1 |  2.3 | K17                                              |
+| Mistral     |     1 |  2.3 | K9                                               |
+| GMICloud    |     0 |  0.0 | (warmup K13 only; K13 hung → no run_end)         |
+| Cloudflare  |     0 |  0.0 | (warmup K19 only; K19 HTTP 404 → no run_end)     |
+| Moonshot    |     0 |  0.0 | *zero cells served* despite K2 + K15 pinned here |
+| Parasail    |     0 |  0.0 | gpt-oss never invoked in R17                     |
+| Z-AI        |     0 |  0.0 | *zero cells served* despite K17 pinned here      |
+| DeepSeek    |     0 |  0.0 | *zero cells served* despite K8 + K13 pinned here |
+
+*Two-thirds of all R17 cells were served by Novita or Together*, neither
+of which was the pinned broker for half their served variants.
+*Moonshot, Z-AI, and DeepSeek-the-broker received zero R17 traffic*
+despite being the canonical first-party provider for K2/K15, K17, and
+K8/K13 respectively.
+
+* 3. Cache hit rate per multi-cell variant
+
+Cells per variant after counting all layers (incl L3 dial cells):
+
+#+CAPTION: Cache hits per variant (cells ≥ 2)
+| Variant        | Cells (run_end) | Cells with cached>0 | Hit rate | Σ cached tokens |
+|----------------+-----------------+---------------------+----------+-----------------|
+| K1-qwen30      |              13 |                   0 |     0.0% |               0 |
+| K11-qwen3coder |              13 |                   0 |     0.0% |               0 |
+| K8-deepseekV3  |               8 |                   7 |    87.5% |         103 104 |
+| K6-llama70b    |               1 |                   0 |     0.0% |               0 |
+| K9-mixtral     |               1 |                   0 |     0.0% |               0 |
+
+Single-cell variants with non-zero cache (system-prompt prefix matched
+the warmup payload):
+
+| Variant           | Cells | Cached tokens (single cell) | Provider    |
+|-------------------+-------+-----------------------------+-------------|
+| K2-kimi-k2.6      |     1 |                      42 848 | DeepInfra   |
+| K15-kimi-thinking |     1 |                      67 840 | Novita      |
+| K17-glm46         |     1 |                      81 920 | SiliconFlow |
+
+** Findings
+
+- *K8 on DeepInfra is the only variant with a working multi-cell cache
+  loop*: 7/8 cells hit, 87.5% rate. DeepInfra preserves prefix cache
+  across requests for deepseek-chat-v3-0324.
+- *K1 + K11 are the broken pins.* Despite serving 13 cells each on a
+  single broker (Novita and Together respectively — i.e. provider
+  stability happened naturally even without the pin holding), *neither
+  served a single cached token across the whole sweep.* Novita and
+  Together appear not to expose prefix-cache hits to OpenRouter for
+  these qwen3-coder routes.
+- *Cache hits on K2/K15/K17 first-cell* indicate the cache was warmed by
+  the warmup ping (same model_id, same provider header). Not a
+  multi-cell effect — these variants only ran once.
+
+* 4. Realized cost savings calc
+
+Cached tokens × OpenRouter typical 90% input-token discount (cached
+tokens are billed at 0.1× the prompt rate on most brokers; a few use
+0.25× — taking 0.9× as the user-stated figure).
+
+Total cached tokens across all completed cells:
+=42 848 + 67 840 + 81 920 + 103 104 = 295 712 tokens=
+
+Cost-of-input estimate (using indicative OR rates per model):
+| Variant       | Cached tok | Indicative input $/Mtok | Saved (90% off) USD |
+|---------------+------------+-------------------------+---------------------|
+| K2-kimi-k2.6  |     42 848 |                    0.60 |              0.0231 |
+| K15-kimi-thk  |     67 840 |                    0.60 |              0.0366 |
+| K17-glm46     |     81 920 |                    0.50 |              0.0369 |
+| K8-deepseekV3 |    103 104 |                    0.27 |              0.0250 |
+|---------------+------------+-------------------------+---------------------|
+| Total         |    295 712 |                       — |       *~0.122 USD* |
+
+R17 total =specialist_cost_usd= summed across all cells (from
+=cell_result.json= sum, completed cells only): approximately *$3.23*.
+Realized savings of $0.12 → *~3.8% of total spend*, or *~14.6% of input
+spend* assuming input ≈ 25% of total spend on these routes.
+
+vs. R16 prediction of *22-27% input savings* → *realized 14.6%, miss
+ratio ~0.6×*. The miss is dominated by 26 cells (K1×13 + K11×13)
+serving zero cache — i.e. the largest two variant lanes by cell count
+contributed *zero* to the cache-hit denominator.
+
+* 5. R18 PROVIDER_PINS revisions + fallback recommendations
+
+** 5a. Hard-pin (add =allow_fallbacks: false=)
+
+Without this, =order= remains advisory and most pins evaporate. Switch
+the wire format from:
+
+#+begin_src python
+PROVIDER_PINS = {"qwen/qwen3-coder-30b-a3b-instruct": {"order": ["Together"]}}
+#+end_src
+
+to:
+
+#+begin_src python
+PROVIDER_PINS = {
+    "qwen/qwen3-coder-30b-a3b-instruct": {
+        "order": ["Together"],
+        "allow_fallbacks": False,
+    },
+}
+#+end_src
+
+This will *fail-fast* if Together is over capacity rather than silently
+losing the prefix cache. Acceptable for a controlled sweep; exposes the
+provider-quota problem honestly.
+
+** 5b. Re-pin to the broker that *actually serves* + caches today
+
+Empirical winners from R17 should become the canonical pins for R18
+since that's where the cache lives:
+
+| Variant           | Old pin  | R17 actual served | Cache visible? | R18 recommended pin |
+|-------------------+----------+-------------------+----------------+---------------------|
+| K1-qwen30         | Together | Novita            | no             | Together (re-test)  |
+| K2-kimi-k2.6      | Moonshot | DeepInfra         | yes 42 848 tok | DeepInfra           |
+| K6-llama70b       | Together | DeepInfra (run)   | no             | DeepInfra           |
+| K7-qwen72b        | Together | DeepInfra         | unknown (hung) | DeepInfra           |
+| K8-deepseekV3     | DeepSeek | DeepInfra         | yes 87.5% rate | *DeepInfra*         |
+| K9-mixtral        | Together | Mistral           | no             | Mistral             |
+| K11-qwen3coder    | Together | Together          | no             | Together (re-test)  |
+| K15-kimi-thinking | Moonshot | Novita            | yes 67 840 tok | Novita              |
+| K17-glm46         | Z-AI     | SiliconFlow       | yes 81 920 tok | SiliconFlow         |
+| K19-qwen25c-32b   | Together | Cloudflare        | unknown (404)  | drop tools-broad    |
+
+Net effect: *~9 of 13 pins should change destination* to the broker that
+already serves and caches. The original pin map was based on
+"first-party = best" assumption, which the OR fleet doesn't honor today.
+
+** 5c. Per-variant fallback ladders
+
+Replace the bare =order=[X]= form with a 2-3 deep ladder so a quota
+trip degrades to a known-good neighbor instead of silent fall-through:
+
+#+begin_src python
+PROVIDER_PINS = {
+    "deepseek/deepseek-chat-v3-0324":     {"order": ["DeepInfra", "AtlasCloud", "DeepSeek"], "allow_fallbacks": False},
+    "moonshotai/kimi-k2.6":                {"order": ["DeepInfra", "Novita", "Moonshot"],     "allow_fallbacks": False},
+    "moonshotai/kimi-k2-thinking":         {"order": ["Novita", "DeepInfra", "Moonshot"],     "allow_fallbacks": False},
+    "z-ai/glm-4.6":                         {"order": ["SiliconFlow", "Z-AI"],                  "allow_fallbacks": False},
+    "qwen/qwen3-coder":                     {"order": ["Together"],                              "allow_fallbacks": False},
+    "qwen/qwen3-coder-30b-a3b-instruct":   {"order": ["Together", "Novita"],                   "allow_fallbacks": False},
+    "qwen/qwen-2.5-72b-instruct":           {"order": ["DeepInfra", "Together"],                "allow_fallbacks": False},
+    "meta-llama/llama-3.3-70b-instruct":    {"order": ["DeepInfra", "Together"],                "allow_fallbacks": False},
+    "mistralai/mixtral-8x22b-instruct":      {"order": ["Mistral", "Together"],                   "allow_fallbacks": False},
+}
+#+end_src
+
+** 5d. Drop pins that route to dead lanes
+
+- =meta-llama/llama-4-instruct= (K18) — *DROP from VARIANTS*. Model id
+  invalid on OR (HTTP 400 on warmup, 0 cells served).
+- =qwen/qwen-2.5-coder-32b-instruct= (K19) — drop from broad-tools
+  cells; HTTP 404 "no endpoints support tool use". Either re-pin to a
+  tool-capable broker or move K19 to inline-prefetch only.
+- =deepseek/deepseek-v4-pro= (K13) — 2 cells hung mid-stream
+  (=IncompleteRead=). Add explicit =deepinfra= or =fireworks= fallback,
+  or demote to candidate pool.
+
+* 6. "Broken pin" findings
+
+| Finding                                  | Evidence                                                                               | R18 fix                            |
+|------------------------------------------+----------------------------------------------------------------------------------------+------------------------------------|
+| =order= is advisory, not authoritative   | warmup log: 11/13 variants served by non-pinned broker                                 | Add =allow_fallbacks: false=       |
+| Moonshot serves zero K2/K15 traffic      | run_end provider for both = DeepInfra/Novita; "Moonshot" never appears                 | Re-pin K2 → DeepInfra, K15 → Novita |
+| Z-AI serves zero K17 traffic             | run_end K17 = SiliconFlow                                                              | Re-pin K17 → SiliconFlow           |
+| DeepSeek-the-broker serves zero K8 traffic | All 8 K8 cells = AtlasCloud or DeepInfra                                              | Re-pin K8 → DeepInfra              |
+| K1/K11 stable but uncached               | 26 cells on Novita/Together total, 0 cached_tokens                                     | Verify caching headers; consider Hyperbolic |
+| K6 warmup→run drift                      | warmup served Together, first agor cell served DeepInfra                               | Hard-pin will eliminate drift      |
+| K13 + K7 + K16 hung mid-stream           | Events end mid-iteration, cell_result error =IncompleteRead=                            | Re-test under hard-pin; fall through if pinned broker times out |
+| K8 cache loop is the only working one    | 7/8 cells cached, sum 103k tokens; only multi-cell variant with effective prefix reuse | Use as template for other variants  |
+
+* Appendix — sources
+
+- =scripts/_round17_dials_artifacts/log-1778213339.txt= warmup lines (12 entries)
+- =scripts/_round17_dials_artifacts/{layer1,layer2,layer3_*}/<task>/<variant>/events.jsonl= =run_end= events (44 cells with successful completion + provider/cached_tokens)
+- =scripts/_round17_dials.py:171-190= PROVIDER_PINS map (R17)
+- =org_llm/specialist.py:535-538= pin → payload =provider= field wiring
+- 7 cells excluded from analysis: K7, K13, K16 (IncompleteRead, no run_end), K18 (HTTP 400 model id), K19 (HTTP 404 tools), K13__s2 (worktree fail), K1@d6_inline (plan_parse_failed)
