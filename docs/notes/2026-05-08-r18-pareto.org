@@ -1,0 +1,247 @@
+:PROPERTIES:
+:ID:       r18-v2-pareto-frontier
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R18 v2 — cost-quality Pareto frontier + cost-per-quality leaderboard
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:r18:pareto:cost:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R18 v2 ran 140 cells / $2.770 across 10 variants × 8 tasks
+× ≤8 dial labels. *50 ok cells, 90 worktree-collision errors* (64%
+error rate; affects multi-task variants asymmetrically — K8 lost 14/15
+layer-2 attempts, K1 lost 14, K11/K17 lost 9 each). Most cost-per-quality
+numbers below are anchored on either layer-1 (B1, n=1) or the n=7
+paired layer-2 sweep where K1+K5+K6+K7 actually completed.
+
+*Headline.* On the apples-to-apples *layer-2 paired sweep*, the FOSS
+frontier collapses to *K1-qwen30 + K6-llama70b* with K7-qwen72b sitting
+just off-frontier (3.4× more expensive for ~80% of K1's score).
+*K11-qwen3coder is dominated again — 38× the price of K1 for equal
+score on its only B1 cell.* K2-kimi-k2.6 is silent (broker-format bug,
+score=0 on all 15 cells).
+
+*Expanded.* The big R18-vs-R17 frontier shift: K6-llama70b moved
+*onto* the frontier (was n=1 / score=4 in R17, now competitive at
+n=14 / score=66 across 8 tasks). K8-deepseekV3 fell *off* the
+frontier purely because worktree errors blocked its layer-2 cells —
+the one B1 cell it ran lands at $0.00095/qpt (still good). R19 must
+fix the worktree-collision retry before any K8/K11 conclusion is real.
+
+* Section 1 — Per-variant cost-per-quality leaderboard
+
+Costs = =phase1+specialist=. Score = harness mech (in-scope edits −
+fab). =$/qpt= = $total / score (lower=better, sorted ascending).
+
+** All ok cells (multi-layer mix — read with caution)
+
+| variant            | n  | err |  $total | $/cell  | score | q/cell |   $/qpt | verdict                |
+|--------------------+----+-----+---------+---------+-------+--------+---------+------------------------|
+| K5-claude-solo     |  8 |   4 |  0.0000 | 0.00000 |  87.0 |  10.88 |  0.0000 | proprietary — exclude  |
+| K1-qwen30          |  8 |  14 |  0.0412 | 0.00515 |  48.0 |   6.00 |  0.00086 | FOSS frontier          |
+| K6-llama70b        | 14 |   9 |  0.0645 | 0.00461 |  66.0 |   4.71 |  0.00098 | FOSS frontier          |
+| K8-deepseekV3      |  1 |  14 |  0.0095 | 0.00950 |  10.0 |  10.00 |  0.00095 | n=1, blocked by errors |
+| K7-qwen72b         | 14 |   9 |  0.2804 | 0.02003 |  91.0 |   6.50 |  0.00308 | near-frontier (premium) |
+| K15-kimi-thinking  |  1 |   4 |  0.0279 | 0.02790 |  10.0 |  10.00 |  0.00279 | n=1, no signal         |
+| K17-glm46          |  1 |   9 |  0.0337 | 0.03370 |   8.0 |   8.00 |  0.00421 | n=1, no signal         |
+| K9-mixtral         |  1 |   4 |  0.1147 | 0.11470 |  10.0 |  10.00 |  0.01147 | n=1, dominated         |
+| K11-qwen3coder     |  1 |   9 |  0.3835 | 0.38350 |  10.0 |  10.00 |  0.03835 | DOMINATED (40× K1)     |
+| K2-kimi-k2.6       |  1 |  14 |  0.0426 | 0.04260 |   0.0 |   0.00 |   inf   | broker-format broken   |
+
+** Layer-2 paired sweep (n=7 each — apples-to-apples, B5/B7/B11/B13/B20/B25/B26)
+
+| variant            | n |  $total | $/cell  | score | q/cell |   $/qpt | verdict        |
+|--------------------+---+---------+---------+-------+--------+---------+----------------|
+| K5-claude-solo     | 7 |  0.0000 | 0.00000 |  79.0 |  11.29 |  0.0000 | quality ceiling |
+| K1-qwen30          | 7 |  0.0282 | 0.00403 |  36.0 |   5.14 |  0.00078 | FRONTIER       |
+| K6-llama70b        | 7 |  0.0131 | 0.00187 |  14.0 |   2.00 |  0.00094 | FRONTIER       |
+| K7-qwen72b         | 7 |  0.0773 | 0.01104 |  29.0 |   4.14 |  0.00266 | dominated by K1 |
+
+** Layer-1 only (B1, n=1 each — single-cell snapshot)
+
+| variant            |  $cell |   score |   $/qpt | verdict             |
+|--------------------+--------+---------+---------+---------------------|
+| K6-llama70b        | 0.0183 |    24.0 | 0.00076 | B1 winner this round |
+| K8-deepseekV3      | 0.0095 |    10.0 | 0.00095 | mid-pack, on-task   |
+| K1-qwen30          | 0.0131 |    12.0 | 0.00109 | mid-pack            |
+| K7-qwen72b         | 0.0222 |    16.0 | 0.00139 | mid-pack            |
+| K15-kimi-thinking  | 0.0279 |    10.0 | 0.00279 | n=1                 |
+| K17-glm46          | 0.0337 |     8.0 | 0.00421 | n=1                 |
+| K5-claude-solo     | 0.0000 |     8.0 |  0.0000 | proprietary baseline |
+| K9-mixtral         | 0.1147 |    10.0 | 0.01147 | overpriced          |
+| K11-qwen3coder     | 0.3835 |    10.0 | 0.03835 | DOMINATED (40× K6)  |
+| K2-kimi-k2.6       | 0.0426 |     0.0 |   inf   | broker-format gap   |
+
+* Section 2 — Pareto frontier set
+
+Computed on *layer-2 paired n=7* (only fair comparison surface).
+Pareto-dominance = =cost ≤= AND =score ≥=, strictly better on one axis.
+K5-claude-solo informational only (FOSS routing rule).
+
+| variant        | n |  $total | score |  $/qpt | role                       |
+|----------------+---+---------+-------+--------+----------------------------|
+| K1-qwen30      | 7 |  0.0282 |    36 | 0.00078 | FRONTIER — best $/qpt      |
+| K6-llama70b    | 7 |  0.0131 |    14 | 0.00094 | FRONTIER — cheapest cell   |
+| K5-claude-solo | 7 |  0.0000 |    79 | 0.0000  | proprietary ceiling (info) |
+
+K1 dominates on $/qpt; K6 on absolute cost. *Two-variant FOSS frontier.*
+
+** Layer-1 frontier (B1, n=1 each — weaker signal)
+
+| variant        | $cell  | score |  $/qpt | role                      |
+|----------------+--------+-------+--------+---------------------------|
+| K6-llama70b    | 0.0183 |    24 | 0.00076 | FRONTIER — best $/qpt B1  |
+| K8-deepseekV3  | 0.0095 |    10 | 0.00095 | FRONTIER — cheapest B1    |
+| K5-claude-solo | 0.0000 |     8 |   0    | proprietary baseline      |
+
+* Section 3 — Dominated variants + by whom
+
+** Layer-2 paired (n=7) dominators
+
+| variant     |  $total | score | dominated by                                  |
+|-------------+---------+-------+-----------------------------------------------|
+| K7-qwen72b  |  0.0773 |    29 | K1 ($0.0282 / 36 — cheaper AND higher score)  |
+
+K7's premium budget ($/cell 2.7× K1's) bought *less* score — lost
+B5 head-to-head with K1, lost B25 (K1=11 vs K7=5).
+
+** Layer-1 (B1) dominators
+
+| variant            |  $cell | score | dominated by                |
+|--------------------+--------+-------+-----------------------------|
+| K1-qwen30          | 0.0131 |    12 | K6 ($0.0183, 24 — better q) |
+| K7-qwen72b         | 0.0222 |    16 | K6 ($0.0183, 24 — better q) |
+| K15-kimi-thinking  | 0.0279 |    10 | K8 ($0.0095, 10 — cheaper)  |
+| K17-glm46          | 0.0337 |     8 | K5 ($0, 8 — cheaper)        |
+| K9-mixtral         | 0.1147 |    10 | K8 ($0.0095, 10 — 12× cheaper) |
+| K11-qwen3coder     | 0.3835 |    10 | K8 ($0.0095, 10 — 40× cheaper) |
+| K2-kimi-k2.6       | 0.0426 |     0 | K8, K6, everyone (broken)   |
+
+K11 is *strictly dominated by K1, K6, AND K8* on every axis. K9 is
+strictly dominated by K8 (same score, 12× cost). K2 is non-functional
+pending broker fix.
+
+* Section 4 — Frontier movers vs R17
+
+R17 frontier set (FOSS, from =docs/notes/2026-05-08-r17-pareto-routing.org=):
+=K1-qwen30 + K8-deepseekV3=. K11 confirmed dominated. K6/K7/K15/K17
+were n=1 or worktree-errored.
+
+| variant       | R17 status         | R18 v2 status              | move        |
+|---------------+--------------------+----------------------------+-------------|
+| K1-qwen30     | FRONTIER ($0.0008/qpt) | FRONTIER ($0.00078/qpt)  | held        |
+| K8-deepseekV3 | FRONTIER ($0.0005/qpt) | n=1, blocked by worktree errors | fell off (data-loss, not quality) |
+| K6-llama70b   | n=1, mech 4         | FRONTIER ($0.00094/qpt) — 24 q on B1, 14 on layer-2 | CLIMBED ON |
+| K7-qwen72b    | 1/1 worktree error  | near-frontier, dominated by K1 | re-fielded but dominated |
+| K11-qwen3coder | DOMINATED 35× K1   | DOMINATED 40× K1            | unchanged   |
+| K2-kimi-k2.6  | n=1 score=10        | broker-format BROKEN (n=15, all 0) | regression — needs Parasail re-pin |
+| K15-kimi-thinking | n=1 score=10    | n=1 score=10 (no advance)   | unchanged   |
+| K17-glm46     | n=1 score=8         | n=1 score=8 (no advance)    | unchanged   |
+| K9-mixtral    | n=1 score=10        | n=1 score=10                | unchanged   |
+| K5-claude-solo | informational      | informational ($1.77 wall)  | unchanged (ceiling) |
+
+*Net frontier change.* Lost K8 to errors (recoverable); gained K6
+genuinely. Frontier width unchanged (2 FOSS variants); composition
+shifted K8 → K6.
+
+* Section 5 — R19 budget implication
+
+Claude reference: *~$0.007/qpt* (R17 quality-judge basis,
+=2026-05-08-foss-spend-headroom.org=). R18 v2 K5 measured at $1.77/87 =
+*$0.0203/qpt* (3× R17 baseline — longer layer-2 prose sessions).
+Use *$0.007/qpt* as conservative Claude bar.
+
+** "Beat Claude by Nx" budget table (FOSS frontier-driven)
+
+To beat Claude's $0.007/qpt by Nx means landing at =$0.007 / N= per qpt.
+Cells per task held at *n=15* (per R18 spend-headroom Lever 1).
+
+| target gap   | budget $/qpt | variants × n           | task coverage       | est. total $ |
+|--------------+--------------+-------------------------+---------------------+--------------|
+| 1× (parity)  | $0.007       | K11 × 15 (works at $0.038 — too pricey) | 8 tasks      | ~$45        |
+| 3× cheaper   | $0.0023      | K7-qwen72b × 15 ($0.0027/qpt) | 8 tasks       | ~$33        |
+| 7× cheaper   | $0.001       | K6 × 15 + K1 × 15       | 8 tasks each        | ~$13        |
+| *9× cheaper* (R19 target) | $0.00078 | *K1 × 15, K6 × 15* (frontier ensemble) | all 8 tasks | *~$11* |
+| 23× cheaper  | $0.00031     | needs LoRA (K20-foss-distill) on top of K1 | TBD           | training+inf |
+
+** R19 stratification recommendation
+
+| variant            | n  | rationale                                              | est. $ |
+|--------------------+----+--------------------------------------------------------+--------|
+| K1-qwen30          | 15 | layer-2 frontier; cheapest $/qpt at scale              | ~$0.60 |
+| K6-llama70b        | 15 | climbed onto frontier R18; B1 winner                   | ~$0.70 |
+| K8-deepseekV3      | 15 | re-field after worktree fix; was R17 frontier ($0.0005/qpt) | ~$0.20 |
+| K7-qwen72b         | 10 | premium-FOSS sanity probe; expect dominated again      | ~$2.10 |
+| K2-kimi-k2.6       | 10 | re-pin to Parasail; recover R17 score                  | ~$0.50 |
+| K11-qwen3coder     |  5 | confirm-dominated probe only; do NOT default-route     | ~$2.00 |
+| K15/K17/K9         |  3 | n=3 is the "n=1-no-signal" graduation bar              | ~$0.40 |
+| K20-foss-distill   |  5 | new LoRA tier (R19 Track G); $/qpt unknown             | ~$0.20 |
+| *Total layer-1+2*  |    | 78 cells × 8 tasks  = 624 cells                        | *~$7-9* |
+
+Layer-3 dial ablation (top-2 frontier × 8 dials × 3 reps): ~$2-4.
+Track A composition (~200 cells × $0.005-0.05): ~$10-30.
+Track J adversarial + Track K long-horizon: ~$15-25.
+
+*R19 total budget envelope: $35-70.* Versus R18 v2's $2.77 actual
+(under-spent) and the $375 cap, R19 has *5-10× headroom* to beat
+Claude's $/qpt by 9× across the full task surface.
+
+* Section 6 — Cost surprises this round
+
+Projected vs actual per-cell costs (R18 design table) vs measured.
+
+| variant       | R17/R18-design projected $/cell | R18 v2 actual $/cell | delta         | surprise direction |
+|---------------+---------------------------------+----------------------+---------------+--------------------|
+| K1-qwen30     | $0.005                          | $0.00515             | +3%           | as expected        |
+| K6-llama70b   | $0.0024 (R17 n=1)               | $0.0046              | +92%          | UP — more wall on layer-2 |
+| K7-qwen72b    | (n=0 R17)                       | $0.0200              | new data      | mid-pack; not as bad as K11 |
+| K8-deepseekV3 | $0.005                          | $0.0095 (n=1)        | +90%          | UP — single-cell B1 inflated |
+| K11-qwen3coder | $0.21577 (R17)                 | $0.3835              | +78%          | UP — single B1 cost MORE this round |
+| K9-mixtral    | $0.041 (R17)                    | $0.1147              | +180%         | UP — surprise: 3× R17 |
+| K15-kimi-thinking | $0.041 (R17)                | $0.0279              | -32%          | DOWN — caching helped on B1 |
+| K17-glm46     | $0.039 (R17)                    | $0.0337              | -14%          | as expected        |
+| K2-kimi-k2.6  | $0.038 (R17)                    | $0.0426              | +12%          | as expected (but score=0) |
+| K5-claude-solo | $0 (external billing)          | $1.77 wall (12 cells)| n/a           | external — flagged for cost-of-pilot tracking |
+
+** Headline surprises
+
+1. *K9-mixtral 3× projected* — $0.1147 vs R17's $0.041. Re-priced or
+   longer wall. *Drop K9 from R19 default roster unless re-validated.*
+2. *K11 still bizarrely expensive* — $0.3835 single B1 cell, 78% over
+   R17. Coder-style verbose chain-of-tool-calls is the anti-pattern.
+3. *K6 doubled per-cell cost* but score jumped n=1/4 → n=14/66.
+   Net $/qpt improved — cost rise is layer-2 prose burning more tokens.
+4. *K15-kimi-thinking got CHEAPER* (-32%). Caching helping on recurring
+   tail. R19 should *measure caching realized %* per variant.
+5. *K5 now $1.77/round* — first round where Claude pilot spend dwarfs
+   FOSS spend ($0.998 FOSS vs $1.77 Claude). 23× headroom holds
+   per-quality (K1 26× cheaper) but absolute is no longer rounding to 0.
+6. *Total $2.77* vs $80-200 design projection — 30-70× under-spent
+   because worktree errors killed 90/140 cells before they could spend.
+   "Real" R18 cost (had errors not blocked cells) projects ~$8-12.
+
+* Section 7 — R19 single-action items
+
+1. *Fix worktree-collision retry preflight* — R17's open issue, R18
+   v2's actual budget killer. Without this, K8/K11/K17 keep losing data.
+2. *Re-pin K2-kimi-k2.6 to Parasail* (R18 v3 already in flight per live log).
+3. *Adopt K1 + K6 as R19 default frontier* — drop K8's must-include
+   priority *until* the worktree fix re-validates it.
+4. *Confirm K11 dominated one more time at n=5* — then formally retire
+   from default roster (still keep available for content-creation A/Bs).
+5. *Add caching-realized-% measurement* — K15's cost drop hints at
+   exploitable pattern; R17 measured 14.6% realized vs 22-27% predicted.
+6. *Set R19 cost cap at $50* — under-spec from the $375 design cap;
+   forces deliberate variant×n stratification.
+
+* Cross-references
+
+- =scripts/_round18_dials_artifacts/v2/summary-1778220192.json= — raw cells
+- =docs/wiki/2026-05-08-r18-live-log.org= — round-level narration + v3 launch
+- =docs/wiki/2026-05-08-foss-spend-headroom.org= — Claude $/qpt baseline
+- =docs/notes/2026-05-08-r17-pareto-routing.org= — R17 frontier comparison
+- =docs/notes/2026-05-08-r17-quality-judge.org= — R17 quality numbers

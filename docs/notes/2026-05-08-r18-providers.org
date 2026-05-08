@@ -1,0 +1,211 @@
+#+TITLE: R18 v2 broker forensic — what to pin for R19+
+#+AUTHOR: subagent (broker-stability scan)
+#+DATE: 2026-05-08
+
+Read-only forensic on R18 v2 broker stability. Inputs:
+~scripts/_round18_dials_artifacts/v2/**/{events.jsonl,cell_result.json}~,
+the harness ~PROVIDER_PINS~ map, and ~docs/wiki/2026-05-08-r18-live-log.org~.
+
+42 v2 cells produced ~run_end~ events on disk (the rest never reached the
+broker — silent harness skips, mostly K2 noops; see live log). All counts
+below come from those 42 disk-truth cells unless noted.
+
+
+* 1. Per-variant: pinned vs actual broker
+
+| variant            | task scope            | pin (1st) | actual broker | n  | held?    |
+|--------------------+-----------------------+-----------+---------------+----+----------|
+| K1-qwen30          | B1,B5,B7,B11–B26      | Novita    | Novita        |  7 | HELD     |
+| K1-qwen30          |                       | Novita    | SiliconFlow   |  1 | FALLBACK |
+| K2-kimi-k2.6       | B1                    | Moonshot  | DeepInfra     |  1 | FALLBACK |
+| K6-llama70b        | B1,B5–B26,layer3      | DeepInfra | DeepInfra     | 13 | HELD     |
+| K6-llama70b        |                       | DeepInfra | AkashML       |  1 | FALLBACK |
+| K7-qwen72b         | B1,B5–B26,layer3      | DeepInfra | DeepInfra     | 14 | HELD     |
+| K8-deepseekV3      | B1                    | DeepInfra | DeepInfra     |  1 | HELD     |
+| K9-mixtral         | B1                    | Mistral   | Mistral       |  1 | HELD     |
+| K11-qwen3coder     | B1                    | Together  | Together      |  1 | HELD     |
+| K15-kimi-thinking  | B1                    | Moonshot  | Novita        |  1 | FALLBACK |
+| K17-glm46          | B1                    | Z-AI      | SiliconFlow   |  1 | FALLBACK |
+
+*Pin-hold rate.* 38/42 = 90% of run_ends honored the first-choice pin
+(advisory ~allow_fallbacks~ default-True). Fallback set: Novita→SiliconFlow,
+DeepInfra→AkashML, Moonshot→{DeepInfra,Novita}, Z-AI→SiliconFlow.
+
+*Caveat.* Disk only sees cells that reached ~run_end~. Live log shows v2
+ran 140 cells; many K2/K8/K11/K15/K17 cells died upstream (no specialists
+list in cell_result, $0 cost in summary). Those failures are invisible to
+the broker tally but visible to the noop tally.
+
+
+* 2. Confirmed-broken (broker × model × tool-format)
+
+| broker      | model                              | symptom                                   | n  | source            |
+|-------------+------------------------------------+-------------------------------------------+----+-------------------|
+| DeepInfra   | moonshotai/kimi-k2.6               | finish=length, 0 tool_calls; analysis-only|  1 | events + live log |
+| DeepInfra   | meta-llama/llama-3.3-70b-instruct  | iter ends finish=stop, 0 tool_calls (silent text mid-loop) |  8 | events |
+| DeepInfra   | qwen/qwen-2.5-72b-instruct         | iter ends finish=stop, 0 tool_calls (silent text mid-loop) | 12 | events |
+| Novita      | qwen/qwen3-coder-30b-a3b-instruct  | "no choices in response"; max_iterations  |  3 | events |
+| SiliconFlow | qwen/qwen3-coder-30b-a3b-instruct  | silent text on K1 fallback                |  1 | events |
+| DeepInfra   | deepseek/deepseek-chat-v3-0324     | (R18 v1) "Here are the function calls:" then stop, no tool_calls — fixed in v2 by allowing fallbacks |  — | live log |
+| AkashML     | meta-llama/llama-3.3-70b-instruct  | silent_noop: no edits AND no text         |  1 | events |
+
+*Reading.* "broken" here means *broker did not honor the OpenAI tool-call
+contract for this model on at least one cell*. K7-qwen72b on DeepInfra is
+the clearest case (12/14 cells had at least one mid-loop ~stop, 0 tools~
+iter, yet the run still recovered to apply edits eventually — fragile).
+K2-kimi-k2.6 on DeepInfra was a *full* tool-format breakage on v2 (0
+tool_calls in 187s, 27k chars of analysis text), but recovered on v3.
+
+
+* 3. Confirmed-working (broker × model × tool-format)
+
+| broker     | model                              | n  | notes                                  |
+|------------+------------------------------------+----+----------------------------------------|
+| Novita     | qwen/qwen3-coder-30b-a3b-instruct  |  4 | also 5 silent-text iters mixed in      |
+| DeepInfra  | meta-llama/llama-3.3-70b-instruct  |  8 | 8/13 success, 5 silent_noop fails      |
+| DeepInfra  | qwen/qwen-2.5-72b-instruct         | 11 | 11/14 success; high mid-loop silent rate |
+| DeepInfra  | deepseek/deepseek-chat-v3-0324     |  1 | recovered v2 (was broken v1)           |
+| Mistral    | mistralai/mixtral-8x22b-instruct   |  1 | clean, 1 silent-text iter              |
+| Together   | qwen/qwen3-coder                   |  1 | clean, 1 silent-text iter              |
+| Novita     | moonshotai/kimi-k2-thinking        |  1 | clean fallback (Moonshot was pin)      |
+| SiliconFlow| z-ai/glm-4.6                       |  1 | clean fallback (Z-AI was pin)          |
+
+R14–R17 history (live log) adds:
+- *Parasail × moonshotai/kimi-k2.6* — *clean tool-call adapter* across multiple rounds.
+- *Moonshot × kimi-k2.6* — historical first choice, healthy.
+
+
+* 4. Cells with finish_reason=length OR text_with_no_tool_calls
+
+Count: 32 cells with at least one such iter (one ~length~, 31 silent-text).
+
+| layer / task       | variant            | broker      | iter pattern                |
+|--------------------+--------------------+-------------+-----------------------------|
+| layer1/B1          | K2-kimi-k2.6       | DeepInfra   | tool_calls(0e), length      |
+| layer1/B1          | K1-qwen30          | Novita      | mid-loop stop iter          |
+| layer1/B1          | K6-llama70b        | DeepInfra   | mid-loop stop iter          |
+| layer1/B1          | K7-qwen72b         | DeepInfra   | mid-loop stop iter          |
+| layer1/B1          | K8-deepseekV3      | DeepInfra   | mid-loop stop iter          |
+| layer1/B1          | K9-mixtral         | Mistral     | mid-loop stop iter          |
+| layer1/B1          | K11-qwen3coder     | Together    | mid-loop stop iter          |
+| layer1/B1          | K15-kimi-thinking  | Novita      | mid-loop stop iter          |
+| layer1/B1          | K17-glm46          | SiliconFlow | mid-loop stop iter          |
+| layer2/B5          | K7-qwen72b         | DeepInfra   | silent text                 |
+| layer2/B7          | K6-llama70b        | DeepInfra   | silent text                 |
+| layer2/B7          | K7-qwen72b         | DeepInfra   | silent text                 |
+| layer2/B11         | K1-qwen30          | SiliconFlow | silent text (fallback)      |
+| layer2/B11         | K7-qwen72b         | DeepInfra   | silent text                 |
+| layer2/B13         | K1,K6,K7           | mixed       | silent text (3 cells)       |
+| layer2/B20         | K1,K7              | mixed       | silent text (2 cells)       |
+| layer2/B25         | K1,K6,K7           | mixed       | silent text (3 cells)       |
+| layer2/B26         | K1,K6,K7           | mixed       | silent text (3 cells)       |
+| layer3_d5_loose/B1 | K6-llama70b        | DeepInfra   | silent text                 |
+| layer3_d6_inline/B1| K6,K7              | DeepInfra   | silent text (2 cells)       |
+| layer3_d6_tool/B1  | K7-qwen72b         | DeepInfra   | silent text                 |
+| layer3_d8_minimal/B1| K7-qwen72b        | DeepInfra   | silent text                 |
+| layer3_d9_relaxed/B1| K6,K7             | DeepInfra   | silent text (2 cells)       |
+
+*Pattern.* Almost all silent-text cells were a *single* mid-loop iter with
+~finish_reason=stop, tool_calls=0, edits=0~ — the loop subsequently
+recovered (most cells still applied edits). The exception is K2-kimi-k2.6
+on DeepInfra v2/B1: that one was a hard ~length~ with zero recoveries.
+DeepInfra-served Llama-70B and Qwen-72B are the dominant offenders — but
+they recover, so this is *flakiness*, not breakage. K2-kimi-on-DeepInfra
+v2 was breakage.
+
+
+* 5. R18 v3 broker fixes — did they take?
+
+Autopilot logged at 02:33:43: ~harness PROVIDER_PINS updated for K2/K15/K17~.
+Inspecting the current ~scripts/_round18_dials.py~:
+
+| variant            | v2 pin (effective) | v3 pin (current file)         |
+|--------------------+--------------------+-------------------------------|
+| K2-kimi-k2.6       | Moonshot,Parasail  | Moonshot,Parasail (unchanged?)|
+| K15-kimi-thinking  | Moonshot,Novita    | Moonshot,Novita (unchanged?)  |
+| K17-glm46          | Z-AI,SiliconFlow   | Z-AI,SiliconFlow              |
+
+*Harness file shows the ordering autopilot wanted* — so the patch did land
+at the file level. But the *runtime* behavior in the in-flight v3
+artifacts (~_round18_dials_artifacts/layer1/B1/~) tells a different story:
+
+| variant            | v3 pin (1st) | v3 actual    | held?                      |
+|--------------------+--------------+--------------+----------------------------|
+| K1-qwen30          | Novita       | Novita       | HELD                       |
+| K2-kimi-k2.6       | Moonshot     | DeepInfra    | FALLBACK (Moonshot+Parasail saturated or unavailable) |
+| K6-llama70b        | DeepInfra    | DeepInfra    | HELD                       |
+| K8-deepseekV3      | DeepInfra    | DeepInfra    | HELD                       |
+| K9-mixtral         | Mistral      | Mistral      | HELD                       |
+| K17-glm46          | Z-AI         | SiliconFlow  | FALLBACK (Z-AI not picking) |
+
+*Verdict.* Harness pin update *was applied to the file* but OR's runtime
+fallback rolled K2 and K17 off-pin anyway. *Crucially*, K2 on DeepInfra in
+v3 *worked* (~tool_calls~ for 5 iters, 5 edits applied) — meaning either
+(a) DeepInfra's Kimi adapter was fixed between v2 02:00 and v3 02:33, or
+(b) v2's K2/DeepInfra failure was transient. Either way, the v3 fix did
+*not* take in the sense of "K2 routed to Moonshot" — the protective
+re-route never executed. v3 succeeded by accident.
+
+
+* 6. R19+ recommended PROVIDER_PINS
+
+Goals: pick brokers that *demonstrably* honor OpenAI tool-call format for
+the routed model; treat anything below ~1 in 5~ silent-iter rate as
+acceptable; treat ~stop, 0 tool_calls~ on the first iter as fatal.
+
+| model                                  | rec'd order                | rationale                                                                                            |
+|----------------------------------------+----------------------------+------------------------------------------------------------------------------------------------------|
+| moonshotai/kimi-k2.6                   | Parasail, Moonshot         | Parasail confirmed-working in R14–R17; Moonshot historical good. *Block DeepInfra explicitly* — broke in v2 (length/0-tools). v3 success on DeepInfra is one cell, not a trust signal. |
+| moonshotai/kimi-k2-thinking            | Moonshot, Parasail, Novita | Novita worked once (fallback) but order matters for cache stability; prefer Moonshot if available.   |
+| deepseek/deepseek-chat-v3-0324         | DeepInfra                  | v1 broke when DeepInfra-only without fallbacks; v2/v3 with fallbacks-allowed work; keep DeepInfra primary, leave allow_fallbacks=True so OR can rescue. |
+| deepseek/deepseek-r1                   | DeepInfra                  | only data point is historical; keep.                                                                 |
+| qwen/qwen3-coder-30b-a3b-instruct      | Novita                     | 4/7 holds clean; "no choices" + SiliconFlow silent-text mark fallback as worse. Keep Novita primary, no SF in chain. |
+| qwen/qwen-2.5-72b-instruct             | DeepInfra                  | 11/14 success but 12/14 had silent-text mid-loop iters — works because retry rescues. Acceptable for now; cap iterations conservatively. |
+| qwen/qwen3-coder                       | Together                   | 1/1 clean; keep.                                                                                     |
+| meta-llama/llama-3.3-70b-instruct      | DeepInfra                  | 8/13 success; AkashML fallback was the *one* hard fail. Pin DeepInfra; *exclude AkashML* from chain. |
+| mistralai/mixtral-8x22b-instruct       | Mistral                    | 1/1 clean; keep.                                                                                     |
+| z-ai/glm-4.6                           | SiliconFlow, Z-AI          | *Flip order*: Z-AI never actually served a v2/v3 cell in our scan; SiliconFlow served clean. Until Z-AI proves liveness, route SF first. |
+| openai/gpt-oss-120b / gpt-oss-20b      | Parasail                   | dropped from VARIANTS but pin still in file; harmless to keep.                                       |
+| meta-llama/llama-3.1-405b-instruct     | Together                   | dropped variant, pin retained for archival.                                                          |
+
+*Suggested code-shape change.* Add an explicit deny-list to complement the
+allow-order, so OR can fall back but not to a known-broken backend:
+
+#+begin_src python
+PROVIDER_PINS = {
+    "moonshotai/kimi-k2.6": {
+        "order": ["Parasail", "Moonshot"],
+        "ignore": ["DeepInfra"],   # broke tool-format on v2
+        "allow_fallbacks": True,
+    },
+    "qwen/qwen3-coder-30b-a3b-instruct": {
+        "order": ["Novita"],
+        "ignore": ["SiliconFlow"],  # silent-text on v2 K1 fallback
+        "allow_fallbacks": True,
+    },
+    "meta-llama/llama-3.3-70b-instruct": {
+        "order": ["DeepInfra"],
+        "ignore": ["AkashML"],      # silent_noop on v2
+        "allow_fallbacks": True,
+    },
+    "z-ai/glm-4.6": {
+        "order": ["SiliconFlow", "Z-AI"],
+        "allow_fallbacks": True,
+    },
+    # rest unchanged
+}
+#+end_src
+
+OpenRouter ~provider.ignore~ is the supported field for excluding a
+backend even with ~allow_fallbacks=True~.
+
+
+* Appendix: scan provenance
+
+- Disk scan: ~/tmp/lora_prep/r18_scan.py~ (v2), ~/tmp/lora_prep/r18_v3_scan2.py~ (v3 in-flight).
+- 42 ~events.jsonl~ files in v2; 9 in v3 layer1/B1.
+- ~run_end.provider~ is the OpenRouter ~provider~ field returned in the
+  final completion of each specialist run.
+- ~iter_end~ ~finish_reason~ values seen: ~tool_calls~, ~stop~, ~length~.
+- "Silent-text" = at least one iter with ~finish_reason=stop AND
+  tool_calls=0 AND edits=0~. Most cells recovered; only K2 v2 was fatal.

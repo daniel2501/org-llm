@@ -1,0 +1,249 @@
+#+TITLE: R18 v2 Quality Judge Re-Rank
+#+DATE: [2026-05-08]
+#+AUTHOR: Claude (research subagent)
+
+* Summary
+
+R18 v2 mech leaderboard is *severely distorted by destructive edits and
+broken-bracket diffs that the harness doesn't penalize*. After
+quality re-rank: K5-claude-solo is the clear ceiling, K1-qwen30
+remains the cost-quality pareto, K6-llama70b's mech lead is mostly
+hallucinated quality (table-mangling + nested-bracket disasters), and
+K7-qwen72b's "high mech" cells are loaded with mismatched-bracket and
+double-link syntax errors. Of 50 non-error cells, 28 are in layer2
+(B5 / B7 / B11 / B13 / B20 / B25 / B26), 10 layer1 B1 (single-task
+shootout), and 12 layer3 B1 (dial sweep, K6 + K7 only).
+
+Caveat: 90 of 140 cells errored at =git worktree add= concurrency —
+that's a test-harness defect (DEC infra, not model quality). Ranking
+below uses the 50 results we can judge.
+
+* 1. Methodology
+
+** Quality rubric (0-20)
+
+| dim                  | weight | rule                                                       |
+|----------------------+--------+------------------------------------------------------------|
+| edit correctness     |      6 | task accomplished; no broken links / syntax / no-op when expected work |
+| edit minimality      |      4 | only the asked change; no wholesale rewrites or churn      |
+| constraint compliance |     4 | scope_strict respected; append_only honored; no fab UUIDs / authors |
+| tool-use efficiency  |      3 | minimal iterations + tools; no thrashing                    |
+| output presentation  |      3 | no stacked docstrings; no broken brackets; no trailing newline issues |
+
+20 = pristine; 15 = good w/ minor flaw; 10 = task done but real
+defect; 5 = silent_noop on a doable spec OR severe defect; 0 =
+fab-UUIDs / actively destructive / unreachable code.
+
+** How quality differs from mech score
+
+Mech score in v2 rewards link-count + diff-size proxies.  It does NOT
+penalize:
+
+- broken org-mode bracket syntax (=]])= instead of =]]=)
+- nested-bracket disasters (=[[id:...][[[id:...][...]]]]=)
+- wholesale paraphrasing of unrelated table content
+- only-prefix linking (label = "Phase 2026-05.16" not full phrase)
+- fabricated UUIDs (K7 d6_tool seeded =12345678-...= instead of
+  prefetch IDs)
+- unreachable-code edits (K1 B7 added a 2nd =return= block)
+- stacked docstrings (K6/K7 B7 inserted comments duplicating body)
+- broken org headings (K6 d9_relaxed dropped opening paren on heading)
+
+Quality score reads the diff and re-prices these.
+
+* 2. Per-cell mech vs quality
+
+(non-error cells only; q = my 0-20 quality; Δ = q − scaled-mech where
+mech is normalized as min(20, mech) for B1 and min(20, mech*0.4) for
+B11, else min(20, mech))
+
+| variant         | task | dial             | mech |  q | Δ    | note                                          |
+|-----------------+------+------------------+------+----+------+-----------------------------------------------|
+| K1-qwen30       | B1   | bt_pb_m1_tb_s1   |   12 | 14 |   +2 | 5 links, 1 over-link captures "'s auto-disco" |
+| K9-mixtral      | B1   | bt_pb_m1_tb_s1   |   10 |  6 |   -4 | mangled table row; truncated link prefix only |
+| K8-deepseekV3   | B1   | bt_pb_m1_tb_s1   |   10 | 14 |   +4 | 5 clean links; minimal; preserved =verbatim=  |
+| K17-glm46       | B1   | bt_pb_m1_tb_s1   |    8 |  9 |   +1 | only-prefix linking ("Phase 2026-05.16")      |
+| K11-qwen3coder  | B1   | bt_pb_m1_tb_s1   |   10 | 13 |   +3 | 5 links, 1 trailing =])= bracket mismatch     |
+| K7-qwen72b      | B1   | bt_pb_m1_tb_s1   |   16 | 10 |   -6 | 7 links, =])= mismatch, label-eats "'s auto-disco" |
+| K5-claude-solo  | B1   | bt_pb_m1_tb_s1   |    8 | 12 |   +4 | 5 careful links; tiny =])): mismatch          |
+| K2-kimi-k2.6    | B1   | bt_pb_m1_tb_s1   |    0 |  6 |   +6 | over-thought, 0 edits, but plan was correct   |
+| K6-llama70b     | B1   | bt_pb_m1_tb_s1   |   24 |  7 |  -17 | 12 links, table-mangle, nested-bracket disaster |
+| K15-kimi-think  | B1   | bt_pb_m1_tb_s1   |   10 | 11 |   +1 | only-prefix linking, 4 of 5 attempts          |
+| K6-llama70b     | B5   | bt_pb_m1_tb_s1   |    0 |  5 |   +5 | silent_noop                                   |
+| K5-claude-solo  | B5   | bt_pb_m1_tb_s1   |   18 | 14 |   -4 | wholesale table rewrite (paraphrased rows)    |
+| K7-qwen72b      | B5   | bt_pb_m1_tb_s1   |   12 | 10 |   -2 | dropped trailing-pipe spacing on 6 rows; lost =Termux only per ...= |
+| K1-qwen30       | B5   | bt_pb_m1_tb_s1   |    0 |  5 |   +5 | silent_noop                                   |
+| K1-qwen30       | B7   | bt_pb_m1_tb_s1   |   18 |  6 |  -12 | added unreachable 2nd =render()= body — bug   |
+| K5-claude-solo  | B7   | bt_pb_m1_tb_s1   |    0 | 12 |  +12 | abstain on doc-noise spec — clean no-op       |
+| K6-llama70b     | B7   | bt_pb_m1_tb_s1   |    6 |  9 |   +3 | minor type-hint + stacked-comment-docstring   |
+| K7-qwen72b      | B7   | bt_pb_m1_tb_s1   |    5 |  8 |   +3 | inline comments duplicating docstrings        |
+| K1-qwen30       | B11  | bt_pb_m1_tb_s1   |    0 |  5 |   +5 | empty diff — abstain on append-only DEC       |
+| K6-llama70b     | B11  | bt_pb_m1_tb_s1   |    0 |  3 |   +3 | silent_noop after 1 iter                      |
+| K7-qwen72b      | B11  | bt_pb_m1_tb_s1   |    0 |  3 |   +3 | silent_noop                                   |
+| K5-claude-solo  | B11  | bt_pb_m1_tb_s1   |   47 | 22 |   +3 | exemplar DEC-020 append; backlinks DEC-014    |
+| K1-qwen30       | B13  | bt_pb_m1_tb_s1   |    2 | 20 |  +18 | identical 2025→2026 LICENSE bump — perfect    |
+| K5-claude-solo  | B13  | bt_pb_m1_tb_s1   |    2 | 20 |  +18 | identical                                     |
+| K6-llama70b     | B13  | bt_pb_m1_tb_s1   |    2 | 20 |  +18 | identical                                     |
+| K7-qwen72b      | B13  | bt_pb_m1_tb_s1   |    2 | 20 |  +18 | identical                                     |
+| K1-qwen30       | B20  | bt_pb_m1_tb_s1   |    0 | 18 |  +18 | clean abstain on no-op-trap                   |
+| K5-claude-solo  | B20  | bt_pb_m1_tb_s1   |    0 | 18 |  +18 | clean abstain                                 |
+| K6-llama70b     | B20  | bt_pb_m1_tb_s1   |    0 | 18 |  +18 | clean abstain (silent_noop, but spec demands) |
+| K7-qwen72b      | B20  | bt_pb_m1_tb_s1   |    0 | 18 |  +18 | clean abstain                                 |
+| K1-qwen30       | B25  | bt_pb_m1_tb_s1   |   11 | 16 |   +5 | full elisp template w/ ;;; Code:; ends-here   |
+| K5-claude-solo  | B25  | bt_pb_m1_tb_s1   |    7 | 14 |   +7 | minimal, has provide; missing ;;; Code:       |
+| K6-llama70b     | B25  | bt_pb_m1_tb_s1   |    1 |  6 |   +5 | one-liner no-newline file                     |
+| K7-qwen72b      | B25  | bt_pb_m1_tb_s1   |    5 | 13 |   +8 | minimal w/ docstring + lexical-binding header |
+| K1-qwen30       | B26  | bt_pb_m1_tb_s1   |    5 | 18 |  +13 | clean defcustom, correct USD docstring        |
+| K5-claude-solo  | B26  | bt_pb_m1_tb_s1   |    5 | 18 |  +13 | clean defcustom, "specialist spawns" wording  |
+| K6-llama70b     | B26  | bt_pb_m1_tb_s1   |    5 | 16 |  +11 | clean defcustom but says "in credits" not USD |
+| K7-qwen72b      | B26  | bt_pb_m1_tb_s1   |    5 | 18 |  +13 | clean defcustom, "specialist spawns USD"      |
+| K6-llama70b     | B1   | bl_pb_m1_tb_s1   |   14 | 11 |   -3 | =])= bracket mismatch + nested *TODO disaster |
+| K7-qwen72b      | B1   | bl_pb_m1_tb_s1   |   12 |  9 |   -3 | same bracket pattern; over-link auto-disco    |
+| K6-llama70b     | B1   | bt_pi_m1_tb_s1   |    2 |  3 |   +1 | =[[id:...][[[id:...][...]]]]= disaster        |
+| K7-qwen72b      | B1   | bt_pi_m1_tb_s1   |   20 |  6 |  -14 | 7 broken-bracket edits; label-eats sentences  |
+| K6-llama70b     | B1   | bt_pt_m1_tb_s1   |    0 |  3 |   -- | silent_noop (tool surface lacked edit_file)   |
+| K7-qwen72b      | B1   | bt_pt_m1_tb_s1   |  -13 |  0 |  -13 | FABRICATED UUIDs (=12345678-...=) — disaster  |
+| K6-llama70b     | B1   | bt_pb_m0_tb_s1   |    0 |  3 |   -- | silent_noop (no manager)                      |
+| K7-qwen72b      | B1   | bt_pb_m0_tb_s1   |    8 |  6 |   -2 | nested-bracket disaster on TODO link          |
+| K6-llama70b     | B1   | bt_pb_m1_tm_s1   |    0 |  3 |   -- | silent_noop                                   |
+| K7-qwen72b      | B1   | bt_pb_m1_tm_s1   |    9 |  9 |    0 | only-prefix linking but otherwise clean       |
+| K6-llama70b     | B1   | bt_pb_m1_tb_s0   |   12 |  4 |   -8 | broke heading (=** Tier 3a — Shell-wrapped [[id:...][Phase ...]] — shell-wrapped user tools, the MVP=) |
+| K7-qwen72b      | B1   | bt_pb_m1_tb_s0   |   10 |  3 |   -7 | doubled supervision-trinity sentence inside link; =*bold*= inside label |
+
+* 3. Top-10 cells by quality
+
+| rank | variant      | task | dial           | q  | why                                               |
+|------+--------------+------+----------------+----+---------------------------------------------------|
+|    1 | K5-claude    | B11  | bt_pb_m1_tb_s1 | 22 | textbook DEC-020 append; correct backlink to DEC-014 |
+|    2 | K1-qwen30    | B13  | bt_pb_m1_tb_s1 | 20 | 1-line LICENSE 2025→2026 bump — perfect            |
+|    2 | K5-claude    | B13  | bt_pb_m1_tb_s1 | 20 | identical                                          |
+|    2 | K6-llama70b  | B13  | bt_pb_m1_tb_s1 | 20 | identical                                          |
+|    2 | K7-qwen72b   | B13  | bt_pb_m1_tb_s1 | 20 | identical                                          |
+|    6 | K1-qwen30    | B20  | bt_pb_m1_tb_s1 | 18 | clean abstain on no-op-trap (correctly produced 0 diff) |
+|    6 | K5-claude    | B20  | bt_pb_m1_tb_s1 | 18 | clean abstain                                      |
+|    6 | K6-llama70b  | B20  | bt_pb_m1_tb_s1 | 18 | abstain (silent_noop but correct response to spec) |
+|    6 | K7-qwen72b   | B20  | bt_pb_m1_tb_s1 | 18 | clean abstain                                      |
+|   10 | K1-qwen30    | B26  | bt_pb_m1_tb_s1 | 18 | clean defcustom; USD wording matches existing convention |
+|   10 | K5-claude    | B26  | bt_pb_m1_tb_s1 | 18 | clean defcustom; "specialist spawns" tracks existing slot |
+|   10 | K7-qwen72b   | B26  | bt_pb_m1_tb_s1 | 18 | clean defcustom; correct group/type                |
+
+(B13 + B20 are 4-way ties; effective top-3 distinct: K5 B11, B13 sweep, K1+K5+K7 B26.)
+
+* 4. Bottom-10 cells by quality
+
+| rank | variant     | task | dial           | q | failure-mode tag         | diagnosis                                                  |
+|------+-------------+------+----------------+---+--------------------------+------------------------------------------------------------|
+|    1 | K7-qwen72b  | B1   | bt_pt_m1_tb_s1 | 0 | uuid_fabrication          | invented 4 fake UUIDs (=12345678-1234-...=) instead of using prefetch IDs |
+|    2 | K6-llama70b | B1   | bt_pi_m1_tb_s1 | 3 | nested_bracket_disaster   | =[[id:UUID][[[id:UUID][label]]]]= 4-level nesting          |
+|    2 | K6-llama70b | B1   | bt_pt_m1_tb_s1 | 3 | silent_noop_no_tools      | tool surface excluded edit_file; no plan-B abstain         |
+|    2 | K6-llama70b | B1   | bt_pb_m0_tb_s1 | 3 | silent_noop_no_manager    | no-manager dial; specialist had no playbook                |
+|    2 | K6-llama70b | B1   | bt_pb_m1_tm_s1 | 3 | silent_noop_minimal_tools | minimal-tools dial; specialist had no edit path            |
+|    2 | K6-llama70b | B11  | bt_pb_m1_tb_s1 | 3 | silent_noop_long_file     | decisions.org ~50KB; gave up after 1 iter                  |
+|    2 | K7-qwen72b  | B11  | bt_pb_m1_tb_s1 | 3 | silent_noop_long_file     | same                                                       |
+|    2 | K7-qwen72b  | B1   | bt_pb_m1_tb_s0 | 3 | doubled_text + bold_in_label | =[[id:...][trinity ... relaunch]] — supervision trinity ... relaunch.= |
+|    9 | K6-llama70b | B1   | bt_pb_m1_tb_s0 | 4 | broke_heading             | =** Tier 3a — Shell-wrapped [[id:...][Phase 2026-05.16.03]] — shell-wrapped user tools, the MVP= — opening paren dropped |
+|   10 | K9-mixtral  | B1   | bt_pb_m1_tb_s1 | 6 | table_row_replaced        | replaced =org-llm-config.org= row with =agents.org= link, doubling agents row |
+|   10 | K2-kimi-k2.6 | B1  | bt_pb_m1_tb_s1 | 6 | analysis_paralysis        | 8KB of plan text, 0 edits — over-thought a 5-link spec     |
+|   10 | K7-qwen72b  | B1   | bt_pb_m0_tb_s1 | 6 | nested_bracket_disaster   | =[[*TODO ... [[id:...][...]]]= 4-level nest on TODO link   |
+|   10 | K1-qwen30   | B7   | bt_pb_m1_tb_s1 | 6 | unreachable_code          | added a 2nd =return= statement after existing one — pure bug |
+
+* 5. Divergence analysis — quality re-rank
+
+** By variant (n>=4 cells), sorted by mean quality
+
+| variant         | n  | mean mech | mean q | mech rank | quality rank | shift |
+|-----------------+----+-----------+--------+-----------+--------------+-------|
+| K5-claude-solo  |  8 |     10.9  |  17.3  |         3 |            1 |  +2   |
+| K1-qwen30       |  8 |      6.0  |  12.8  |         5 |            2 |  +3   |
+| K7-qwen72b      | 14 |      6.5  |  10.4  |         4 |            3 |  +1   |
+| K6-llama70b     | 14 |      4.7  |   9.0  |         6 |            4 |  +2   |
+| K2-kimi-k2.6    |  1 |      0.0  |   6.0  |         8 |            5 |  +3   |
+| K11-qwen3coder  |  1 |     10.0  |  13.0  |         2 |            6 |  -4   |
+| K8-deepseekV3   |  1 |     10.0  |  14.0  |         2 |            7 |  -5   |
+| K15-kimi-think  |  1 |     10.0  |  11.0  |         2 |            8 |  -6   |
+| K17-glm46       |  1 |      8.0  |   9.0  |         7 |            9 |  -2   |
+| K9-mixtral      |  1 |     10.0  |   6.0  |         2 |           10 |  -8   |
+
+(Mech ranks ignore K5 n-disparity; quality rank uses mean across
+available cells. K11/K8/K15/K17/K9 only have 1 cell — mech rank is
+unstable.)
+
+** What flips on quality
+
+- *K6-llama70b*'s mech-leader status (R18 v2 leaderboard #3 by total
+  score) is heavily inflated by B1's mech 24.  Quality-judged it's
+  worse than K7 because of *table-mangling* (line 17 broke a
+  table-row by replacing the leading `| =verbatim=` cell with a
+  bracketed link, no pipe; new content is not a valid org-table row)
+  and *nested-bracket disasters* on the see-also TODO link.  The
+  count-based mech rewards 12 links; quality penalizes that 12 of
+  them include 2 broken ones.
+- *K7-qwen72b*'s d6_inline mech 20 is the worst-ranked cell relative
+  to mech: 7 separate broken-bracket edits, including =])force; today
+  it's= (sentence inside truncated link), =relaunch.]]= (period
+  swallowed by label), and =])]= chains.
+- *B20 is the cleanest case for the score-vs-quality gap*: all four
+  variants scored mech 0 (silent_noop is taxed as a fail) but the
+  task itself was a no-op trap — clean abstain *should* be max
+  quality. Quality 18 for all four.
+- *B13's identical 1-line LICENSE bump* shows mech severely
+  understates the cleanest possible outcome: 4-way perfect tie at
+  mech 2, quality 20.
+- *K1 B7 (mech 18, quality 6)* is the single biggest false positive:
+  the harness rewarded an edit that is literally unreachable code (a
+  duplicate function body added below an existing =return=
+  statement). This is destructive in spirit even though the existing
+  function continues to work.
+
+* 6. R18 v3 + R19 implications
+
+** R18 v3 priorities (small fixes, before R19)
+
+1. *Fix worktree concurrency* — 90 of 140 cells died at =git
+   worktree add=. This kills all signal density. Add a filesystem
+   mutex or pre-create worktrees serially before the parallel scoring
+   pass. Without this, R18 v2's "leaderboard" is stat-noise.
+2. *Add mech penalty for broken brackets* — regex over inserted
+   lines: =\]\)= without a paired =\[\[=, =\]\]\]\]= or deeper, and
+   =\[\[\[\[= chains. Each occurrence: -3 mech.
+3. *Add mech penalty for fab-UUIDs* — already partially flagged via
+   =id_in_workdir: false= but =wrap_categories.creative= didn't fire
+   for K7 d6_tool's =12345678-...=.  Tighten the predicate.
+4. *Promote silent_noop on 'no-op trap' tasks* — B20's spec is
+   a no-op trap; all four cells abstaining should score mech 12-15,
+   not 0. Add a per-task =expected_diff_size= floor.
+5. *Add mech penalty for unreachable-code AST changes* — for Python
+   diffs, a post-edit Python AST walk that flags duplicate =return=
+   in a function body. K1 B7 would drop from mech 18 to ~5.
+
+** R19 implications
+
+- *K5-claude-solo is the quality ceiling for sentinel/judge roles*
+  (mean 17.3, n=8 across diverse tasks) but stays barred from
+  production scribe (FOSS-only rule). It is the right Opus-judge
+  blind-rater seed.
+- *K1-qwen30 is the cost-quality pareto* (12.8 quality at $0.0008/cell;
+  about 1/180th the cost of K5 for ~74% of the quality). Promote to
+  default scribe in R19 long-horizon fixtures.
+- *K7-qwen72b is FAST + CHEAP but produces broken-bracket diffs at
+  alarming rate*. Consider gating K7 behind a post-edit org-mode
+  link-validator (a small Python pass that re-parses the diff with
+  =org_link.parse= and rejects unbalanced brackets). Without that
+  gate, K7's productivity is illusory.
+- *K6-llama70b is unsafe on long-context wrap tasks*. R19 should
+  exclude K6 from B1-shaped wrap-cross-link tasks until provider /
+  prompt is improved (or use it only with d8_minimal where it
+  degrades to silent_noop, which is at least non-destructive).
+- *Long-horizon BK1-BK5 fixtures (R19)*: choose K1-qwen30 + K5-claude
+  as the dual-track. K7 only with bracket-validator gate.
+- *Quality-judge automation*: this report was hand-graded.  R19
+  should ship a small =scripts/quality_lint.py= that runs the same
+  bracket / fab-UUID / unreachable-code / heading-integrity checks
+  the harness misses, and folds them into the next mech-score
+  iteration so the leaderboard tracks quality more closely.
+
+* Appendix: investigation cost
+
+Hand-graded by direct file inspection (no LLM judge call). 50 cells
+read; 50 quality scores assigned. Estimated spend: $0.00. Cap was
+$0.50.
