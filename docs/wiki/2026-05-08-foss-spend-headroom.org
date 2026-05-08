@@ -1,0 +1,162 @@
+:PROPERTIES:
+:ID:       c6aea842-74f8-4a86-ad37-c1156618481d
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: FOSS spend headroom — we can ramp 23× before reaching Claude's cost-per-quality
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:cost:strategy:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R17 quality judge produced cost-per-quality numbers that
+reveal a *23× spend headroom* on FOSS before reaching Claude's
+per-quality cost. K1-qwen30 at $0.00031/qpt and K8-deepseek-V3 at
+$0.00021/qpt (cheapest by 2×) sit so far below Claude's ~$0.007/qpt
+that we can multiply FOSS cells, samples, models, composition layers,
+and LoRA fine-tunes — all of which compound — without coming close
+to Claude's per-quality cost. *Cost is no longer a meaningful
+constraint on the R18 design.*
+
+*Expanded.* This shifts R18 strategy: stop optimizing for cost,
+start optimizing for breadth + sample depth + composition richness.
+The constraint shifts to wall time (already ~25% efficient with
+parallelism) and observability (signal quality at small n).
+
+* The headroom calculation
+
+** R17 quality judge per-unit costs (1-25 rubric)
+
+| Variant | Cost-per-qpt | Multiplier vs cheapest |
+|---------+--------------+------------------------|
+| K8-deepseekV3 | $0.00021 | 1.0× (cheapest) |
+| K1-qwen30     | $0.00031 | 1.5× |
+| K11-qwen3coder | $0.025   | ~120× |
+| K5-claude-solo | ~$0.007 | *33× more than K8; 23× more than K1* |
+
+** Headroom per-cell
+
+R17 mean quality (top 4): K5 20.1, K1 19.0, K8 18.6, K11 17.3.
+
+To match Claude on cost-per-quality:
+- *K1*: spend up to *23× current* per cell ($0.006 → $0.14) before exceeding Claude's per-qpt
+- *K8*: spend up to *33× current* per cell ($0.004 → $0.13) before exceeding Claude's per-qpt
+- *K11*: ALREADY 3.5× more expensive than Claude per qpt — the only over-priced FOSS variant
+
+* What 23× spend headroom unlocks for R18
+
+** Lever 1 — sample depth (n=5 → n=15)
+
+R17 had n=2 for K2-kimi (too thin per quality judge); n=10 for K8 (validated
+stability). R18 can run *n=15 minimum* for every (variant, task) pair on
+the layer-2 sweep without breaking the cost ceiling.
+
+| n | K1 cost (14 tasks) | K8 cost (14 tasks) |
+|---+--------------------+--------------------|
+|  3 | $0.018 | $0.012 |
+| 10 | $0.060 | $0.040 |
+| 15 | $0.090 | $0.060 |
+| 25 | $0.150 | $0.100 |
+
+n=25 across 14 tasks × top-5 variants = ~1750 cells; ~$10-15. Still
+trivial vs Claude-equivalent.
+
+** Lever 2 — premium model breadth (K11/K12/K13/K15 all in roster)
+
+R17's K11-qwen3coder cost $3.02 across 14 cells. Premium models are
+~30× more expensive than K1/K8 but quality lifts are 0-15%, not 30×.
+*Premium models pay for themselves only on tasks where they actually
+lift quality* (B11 DEC drafting, complex composition).
+
+R18 can run premium variants on *every prose task* (B5, B11, B20, B45)
+at n=10 each ≈ $80-120 — within the new $375 cap.
+
+** Lever 3 — composition layers (3-LLM pipelines)
+
+3× cell cost for plan-execute-verify pipelines. R17 didn't run C1-C10
+sweep; R18's Track N adds it. Cost: ~$0.05-0.20 per composition cell
+× ~200 cells = ~$15-40. *Still 1/10th of Claude-equivalent.*
+
+** Lever 4 — LoRA fine-tune
+
+$13-22 for one full QLoRA on Modal A100. *Trivial vs the headroom.*
+R18 Track G should LAUNCH this, not gate on dataset size.
+
+** Lever 5 — Modal-Kimi continuous-warm
+
+Modal volume idle: ~$26/month. Running container: ~$4/h H100 × ~2h
+overnight = $8. *$8 to eliminate Parasail's 2-200s tail. Free.*
+
+** Lever 6 — hedged retries on slow cells
+
+For p95 cells (>400s), spawn duplicate on fallback provider. Doubles
+cell cost on outliers but cuts wall by 50%. ~$2-5 cost addition for
+R18; saves ~30 min wall.
+
+** Lever 7 — adversarial + long-horizon tasks (R18 Tracks J, K)
+
+Tracks J/K add ~$10-20 to R18 (more tokens per cell than R17 baseline
+tasks). Easily within headroom.
+
+* The new R18 budget envelope
+
+| Component | Cost estimate | Why it fits |
+|-----------+---------------+-------------|
+| Layer 1+2 standard cells (n=15, top-5 variants × 8 tasks) | ~$15 | replaces R17's $4 with 3× depth |
+| Layer 3 dial ablation (cross-task this time) | ~$10 | extends beyond B1 |
+| Track A C1-C10 coordination sweep (~200 cells) | ~$30-40 | 3× cell cost composition |
+| Track J adversarial (~50 cells) | ~$5-10 | UUID-injection, prompt-injection probes |
+| Track K long-horizon multi-file (~30 cells) | ~$10-15 | bigger context per cell |
+| Track G LoRA training (one run) | ~$15-22 | once |
+| Modal-Kimi continuous-warm (overnight) | ~$8 | gateway tax for tail-cut |
+| Track L+M+P perf/optimization metering | ~$5 | mostly free analysis |
+| Hedged-retry overhead | ~$5 | wall-time guarantee |
+|-----------+---------------+-------------|
+| *Total R18 v2 estimate* | *~$110-140* | *under $375 cap with 3× headroom* |
+
+If we double everything: still ~$220-280. Under cap.
+
+* What this DOESN'T mean
+
+- *Doesn't mean we should spend frivolously.* Same FOSS principle:
+  prefer cheap workhorses where they suffice. K8-V3 should still be
+  default, not K11.
+- *Doesn't replace quality discipline.* Cost-per-quality is the
+  metric; cost ALONE without quality is meaningless.
+- *Doesn't mean Claude is "wrong".* Claude wins quality. We're just
+  saying FOSS at 23× the spend would still be cheaper per-quality
+  than Claude — there's headroom to push without breaking the
+  cost-effective-FOSS thesis.
+
+* The single biggest takeaway
+
+*The R18 design's $300 cap (now raised to $375) is enormous overhead.*
+Realistic R18 spend lands $80-200 even with all overnight tracks
+firing. We have *2-4× headroom on the cap* AND ~10-20× headroom
+before reaching Claude's per-quality cost.
+
+R18 should optimize for *signal quality* (n=15+, Weaver judge ensemble,
+n-replicate noise floor) and *experimental breadth* (all Tracks D-P)
+rather than cost minimization.
+
+* Concrete R18 design changes from this analysis
+
+| Was | New |
+|-----+-----|
+| n=3 default | *n=10-15 default* on layer-2 sweep |
+| Top-3 advancing | *Top-5 advancing* (K1, K8, K11 + 2 contenders) |
+| Modal-Kimi optional | *Modal-Kimi continuous-warm overnight* (K2 + K15 routes) |
+| LoRA gated on data | *Launch LoRA unconditionally* (cost is trivial) |
+| Hedged retry: nice-to-have | *Hedged retry: must-have* on every cell > 90s |
+| Track J/K/M as stretch | *All Tracks D-P in scope for v1* |
+| Sequential Track A then B then C | *Pipeline tracks where independent* |
+
+* Cross-references
+
+- =docs/wiki/2026-05-08-r17-synthesis.org= — 4-agent synthesis (this doc updates conclusions)
+- =docs/notes/2026-05-08-r17-quality-judge.org= — quality + cost-per-unit numbers
+- =docs/wiki/2026-05-08-bench-cost-projected-vs-actual.org= — cost retros
+- =docs/wiki/2026-05-08-bench-duration-projected-vs-actual.org= — wall-time retros
+- =docs/wiki/2026-05-07-r18-design.org= — R18 design (gets these adjustments)

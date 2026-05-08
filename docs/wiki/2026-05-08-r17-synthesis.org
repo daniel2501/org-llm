@@ -25,7 +25,35 @@ mostly didn't take (only 2/12 warmups hit pinned broker; missing
 
 *Expanded.* This is the consolidated read across all four agents +
 my own analysis. R18 advancing set + must-fix gotchas + R18 design
-adjustments fall out of the cross-cutting findings.
+adjustments fall out of the cross-cutting findings. *The decisive
+strategic finding is from the cost-per-quality numbers: K8 + K1 are
+~23-33× cheaper than Claude per quality unit, which means R18 has
+enormous spend headroom to ramp depth + breadth + composition
+without breaking the cost-effective-FOSS thesis.*
+
+* The strategic shift — cost is no longer the constraint
+
+R17 quality judge produced cost-per-quality numbers that change the
+R18 design fundamentally:
+
+| Variant | Cost-per-qpt | Multiplier vs cheapest |
+|---------+--------------+------------------------|
+| K8-deepseekV3 | $0.00021 | 1.0× (cheapest) |
+| K1-qwen30     | $0.00031 | 1.5× |
+| K11-qwen3coder | $0.025 | ~120× (premium tier) |
+| K5-claude-solo | ~$0.007 | *33× more than K8; 23× more than K1* |
+
+*Implication.* We can spend 23-33× MORE per FOSS cell and still be
+cheaper per-quality than Claude. For R18:
+- *Sample depth*: n=3 → *n=10-15* default (cost: 3-5× R17 = ~$15-25)
+- *Top-K advancing*: top-3 → *top-5* (K1, K8, K11 + 2 contenders)
+- *Modal-Kimi continuous-warm*: ~$8/night for tail-cut (was optional)
+- *LoRA fine-tune*: unconditional launch ($13-22, was gated on data size)
+- *Hedged retry on >90s cells*: must-have, not nice-to-have
+- *All Tracks D-P in scope* for v1, not stretch
+
+Realistic R18 spend with all upgrades: *~$110-200 — well under $375
+cap*. Full doc at =docs/wiki/2026-05-08-foss-spend-headroom.org=.
 
 * The 4 reports
 
@@ -129,23 +157,25 @@ K2/K6/K7/K8, Novita for K15, SiliconFlow for K17, Mistral for K9).
 K1 + K8 are at near-Claude quality (~95%) at 23× lower cost. *FOSS
 + smart routing is winning the cost-quality Pareto frontier.*
 
-* R18 advancing set (synthesized across all 4 agents)
+* R18 advancing set (synthesized across all 4 agents + spend headroom)
 
-| Variant | Status | Rationale |
-|---------+--------+-----------|
-| K8-deepseekV3 | *DEFAULT* | All 4 agents converge — Pareto winner, stable, cheap, working cache loop |
-| K1-qwen30 | DEFAULT cheap-tier | $0.0006/u, 19/25 quality, 14 cells stable |
-| K11-qwen3coder | A/B only | Premium too steep (34× K1) for general use; reserve for B11+B25 |
-| K2-kimi-k2.6 | Promote n=5 | Underweighted in R17 (n=2); B25 elisp specialty unverified |
-| K5-claude-solo | Sentinel only | Dominated on Pareto; FOSS rule applies |
-| K7-qwen72b | Re-pin to Together, n=3 layer1 | TCP drops on DeepInfra; quality unproven post-fix |
-| K15-kimi-thinking | Side-pool only | Single-cell 12.6 min long pole; don't gate layer-promotion |
-| K6-llama70b | n=3 layer1 | Borderline; 1-cell n=1 score 4 |
-| K13-deepseekV4 | DROP until reliable | 3/3 worktree+provider failures |
-| K16-qwen36-27b | DROP until provider stabilizes | 1/1 IncompleteRead |
-| K17-glm46 | n=3 layer1 | 1-cell n=1 score 8; deserves more shots |
-| K18-llama4 | DROP | Invalid model id; mech 0 |
-| K19-qwen25c-32b | DROP | HTTP 404; mech 0 |
+Per spend headroom: top-3 → *top-5* default; n=3 → *n=10-15* default.
+
+| Variant | Status | Rationale | n=R18 |
+|---------+--------+-----------+-------|
+| K8-deepseekV3 | *DEFAULT* | All 4 agents converge — Pareto winner, stable, cheap, working cache loop | 15 per task |
+| K1-qwen30 | DEFAULT cheap-tier | $0.0006/u, 19/25 quality, 14 cells stable | 15 per task |
+| K11-qwen3coder | Promoted from A/B only | Spend headroom allows: premium-tier reference. Reserve B11+B25; don't default | 10 per task |
+| K2-kimi-k2.6 | *Promote heavily* (n=10+) | Underweighted in R17 (n=2); B25 elisp specialty unverified | 15 per task |
+| K7-qwen72b | Re-pin to Together, n=10 layer1 | TCP drops on DeepInfra; quality unproven post-fix | 10 per task |
+| K15-kimi-thinking | Side-pool only | Single-cell 12.6 min long pole; don't gate layer-promotion | 5 (side-pool) |
+| K17-glm46 | n=10 layer1 | 1-cell n=1 score 8; deserves more shots | 10 |
+| K6-llama70b | n=10 layer1 | Borderline; 1-cell n=1 score 4 | 10 |
+| K5-claude-solo | Sentinel only | Dominated on Pareto; FOSS rule applies; useful as quality ceiling | 5 per task |
+| K13-deepseekV4 | DROP until reliable | 3/3 worktree+provider failures | 0 |
+| K16-qwen36-27b | DROP until provider stabilizes | 1/1 IncompleteRead | 0 |
+| K18-llama4 | DROP | Invalid model id; mech 0 | 0 |
+| K19-qwen25c-32b | DROP | HTTP 404; mech 0 | 0 |
 
 * R18 must-do gotcha-fixes (consolidated)
 
@@ -164,11 +194,24 @@ K1 + K8 are at near-Claude quality (~95%) at 23× lower cost. *FOSS
 
 * R18 design adjustments (deltas from existing R18 design doc)
 
-** Variant pool (drop 4, promote 1, hold 4)
+** Spend headroom unlocks bigger R18 (the cost-finding strategic shift)
+
+| Was | New |
+|-----+-----|
+| n=3 default sampling | *n=10-15 default* on layer-2 sweep |
+| Top-3 advancing | *Top-5 advancing* |
+| Modal-Kimi optional | *Modal-Kimi continuous-warm overnight* (~$8) |
+| LoRA gated on dataset size | *Launch LoRA unconditionally* ($13-22 trivial) |
+| Hedged retry: nice-to-have | *Hedged retry: must-have* on every cell > 90s |
+| Track J/K/M/P as stretch | *All Tracks D-P in scope for v1* |
+| Sequential Track A then B then C | *Pipeline tracks where independent* |
+
+** Variant pool (drop 4, promote 1, expand 4)
 
 - Drop K13-V4-pro, K16-qwen36-27b, K18-llama4, K19-qwen25c-32b
 - Promote K8-deepseek-V3 to DEFAULT (was K1)
-- Hold (n=3 promotion): K2-kimi-k2.6, K7-qwen72b (after re-pin), K15-kimi-thinking (side-pool), K17-glm46
+- Expand n=10+ on K2, K7 (after re-pin), K17, K6 — was n=3
+- Side-pool K15-kimi-thinking
 
 ** Modal-Kimi (DEPLOYED) reframes K2 + K15 routes
 
