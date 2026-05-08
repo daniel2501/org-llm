@@ -20,12 +20,12 @@ Eyeball-judged on 1-25 rubric. Tasks averaged. n is task count
 
 ** Per-cell quality scores (1-25)
 
-| variant     | B1 | B5 |  B7 | B11 | B13 | B20 | B25 | B26 | mean | n |
-|-------------+----+----+-----+-----+-----+-----+-----+-----+------+---|
-| K1-qwen30   | 14 | -- |  -- |  16 |  22 |  20 |  20 |  22 | 19.0 | 6 |
-| K5-claude   | 18 | 14 |  -- |  23 |  22 |  20 |  22 |  22 | 20.1 | 7 |
-| K8-deepseek | 16 | 12 |  -- |  18 |  22 |  20 |  20 |  22 | 18.6 | 7 |
-| K11-qwencod | 14 |  9 |  -- |  18 |  22 |  20 |  16 |  22 | 17.3 | 7 |
+| variant     | B1 | B5 | B7 | B11 | B13 | B20 | B25 | B26 | mean | n |
+|-------------+----+----+----+-----+-----+-----+-----+-----+------+---|
+| K1-qwen30   | 14 | -- | -- |  16 |  22 |  20 |  20 |  22 | 19.0 | 6 |
+| K5-claude   | 18 | 14 | -- |  23 |  22 |  20 |  22 |  22 | 20.1 | 7 |
+| K8-deepseek | 16 | 12 | -- |  18 |  22 |  20 |  20 |  22 | 18.6 | 7 |
+| K11-qwencod | 14 |  9 | -- |  18 |  22 |  20 |  16 |  22 | 17.3 | 7 |
 
 Where: B7 silent across the board (zero diff = abstention, not score);
 B5 K1 was silent; B20 was a "no-op + explain" trap and all four

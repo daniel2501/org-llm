@@ -23,18 +23,18 @@ the original observation.
 
 * R18 v1 launch context
 
-| Property | Value |
-|----------+-------|
-| Process  | PID 1032602 |
-| Launch   | 2026-05-08 01:55 EDT |
-| Variants | 10 (after dropping 4 dead) |
+| Property              | Value                                            |
+|-----------------------+--------------------------------------------------|
+| Process               | PID 1032602                                      |
+| Launch                | 2026-05-08 01:55 EDT                             |
+| Variants              | 10 (after dropping 4 dead)                       |
 | Sample stratification | K8/K1/K2 n=15; K11/K7/K6/K17 n=10; K9/K15/K5 n=5 |
-| Layer 1 cells | 100 (B1 only) |
-| Total expected | ~416 cells |
-| Parallelism | 16-way |
-| Per-cell budget | $5 |
-| Total cap | $375 |
-| Modal-Kimi | DEPLOYED; disabled for v1 (cold-start risk) |
+| Layer 1 cells         | 100 (B1 only)                                    |
+| Total expected        | ~416 cells                                       |
+| Parallelism           | 16-way                                           |
+| Per-cell budget       | $5                                               |
+| Total cap             | $375                                             |
+| Modal-Kimi            | DEPLOYED; disabled for v1 (cold-start risk)      |
 
 * Live status checks
 
@@ -67,3 +67,21 @@ realized vs 22-27% predicted). Gains: tools actually work for K7/K8/K17.
 Net: better data > better caching at this stage.
 
 R18 v2 launching now.
+
+** Status check 02:13:16 (R18 v2)
+
+*Process.* PID 1038443, 10:04 elapsed
+*Cells done.* 117
+
+#+begin_src text
+K6-llama70b  cells=15  score=32.0  cost=$0.0267  cpu=0.00083  noops=3
+K1-qwen30  cells=20  score=30.0  cost=$0.0203  cpu=0.00068  noops=0
+K7-qwen72b  cells=13  score=18.0  cost=$0.0308  cpu=0.00171  noops=0
+K5-claude-solo  cells=9  score=17.0  cost=$0.585  cpu=0.03441  noops=0
+K8-deepseekV3  cells=15  score=10.0  cost=$0.0095  cpu=0.00095  noops=0
+K9-mixtral  cells=5  score=10.0  cost=$0.1147  cpu=0.01147  noops=0
+K11-qwen3coder  cells=10  score=10.0  cost=$0.3835  cpu=0.03835  noops=0
+K15-kimi-thinking  cells=5  score=10.0  cost=$0.0279  cpu=0.00279  noops=0
+K17-glm46  cells=10  score=8.0  cost=$0.0337  cpu=0.00421  noops=0
+K2-kimi-k2.6  cells=15  score=0.0  cost=$0.0426  cpu=null  noops=0
+#+end_src

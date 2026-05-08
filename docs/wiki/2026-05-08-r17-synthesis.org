@@ -36,12 +36,12 @@ without breaking the cost-effective-FOSS thesis.*
 R17 quality judge produced cost-per-quality numbers that change the
 R18 design fundamentally:
 
-| Variant | Cost-per-qpt | Multiplier vs cheapest |
-|---------+--------------+------------------------|
-| K8-deepseekV3 | $0.00021 | 1.0× (cheapest) |
-| K1-qwen30     | $0.00031 | 1.5× |
-| K11-qwen3coder | $0.025 | ~120× (premium tier) |
-| K5-claude-solo | ~$0.007 | *33× more than K8; 23× more than K1* |
+| Variant        | Cost-per-qpt | Multiplier vs cheapest               |
+|----------------+--------------+--------------------------------------|
+| K8-deepseekV3  | $0.00021     | 1.0× (cheapest)                      |
+| K1-qwen30      | $0.00031     | 1.5×                                 |
+| K11-qwen3coder | $0.025       | ~120× (premium tier)                 |
+| K5-claude-solo | ~$0.007      | *33× more than K8; 23× more than K1* |
 
 *Implication.* We can spend 23-33× MORE per FOSS cell and still be
 cheaper per-quality than Claude. For R18:
@@ -57,12 +57,12 @@ cap*. Full doc at =docs/wiki/2026-05-08-foss-spend-headroom.org=.
 
 * The 4 reports
 
-| Agent | Report | Headline |
-|-------+--------+----------|
-| Quality judge | =docs/notes/2026-05-08-r17-quality-judge.org= | K11 119 LEGITIMATE; K7 collapse was TCP drop; K13 silent was worktree race + GMICloud drop |
-| Pareto routing | =docs/notes/2026-05-08-r17-pareto-routing.org= | K11 NOT worth premium (34× cost for +14% quality); K8-V3 is Pareto winner |
+| Agent                | Report                                               | Headline                                                                                    |
+|----------------------+------------------------------------------------------+---------------------------------------------------------------------------------------------|
+| Quality judge        | =docs/notes/2026-05-08-r17-quality-judge.org=        | K11 119 LEGITIMATE; K7 collapse was TCP drop; K13 silent was worktree race + GMICloud drop  |
+| Pareto routing       | =docs/notes/2026-05-08-r17-pareto-routing.org=       | K11 NOT worth premium (34× cost for +14% quality); K8-V3 is Pareto winner                   |
 | Walltime parallelism | =docs/notes/2026-05-08-r17-walltime-parallelism.org= | Real efficiency 25.4% (not 9× as I claimed); K15 alone took 12.6 min — drop and wall halves |
-| Provider cache | =docs/notes/2026-05-08-r17-provider-cache.org= | Pins mostly didn't take (2/12); realized 14.6% savings vs predicted 22-27% |
+| Provider cache       | =docs/notes/2026-05-08-r17-provider-cache.org=       | Pins mostly didn't take (2/12); realized 14.6% savings vs predicted 22-27%                  |
 
 * Cross-cutting themes (across all 4 agents)
 
@@ -70,23 +70,23 @@ cap*. Full doc at =docs/wiki/2026-05-08-foss-spend-headroom.org=.
 
 All 4 agents converge:
 
-| Agent | K8-V3 finding |
-|-------+--------------|
-| Quality | 18.6/25 quality (3rd, near K1's 19.0) |
-| Pareto | $0.0005/u cheapest by 2×; *Pareto-optimal among FOSS* |
-| Walltime | 26.4s median, 102s max — efficient |
+| Agent          | K8-V3 finding                                                                               |
+|----------------+---------------------------------------------------------------------------------------------|
+| Quality        | 18.6/25 quality (3rd, near K1's 19.0)                                                       |
+| Pareto         | $0.0005/u cheapest by 2×; *Pareto-optimal among FOSS*                                       |
+| Walltime       | 26.4s median, 102s max — efficient                                                          |
 | Provider/cache | 103,104 cached tokens across 7 cells; *only working multi-cell cache loop (87.5% hit rate)* |
 
 R18 should make K8-V3 the *default workhorse* (was K1).
 
 ** Theme 2 — K11-qwen3coder is real but wasteful
 
-| Agent | K11 finding |
-|-------+-------------|
-| Quality | 17.3/25 (4th); legitimate (no destructive) but inserted 6 instead of 5 on B1, fabricated GPL-3.0 author header on B25 |
-| Pareto | 34.2× cost ratio buys +14% quality; spent $0.069 on cosmetic 2-line edits where K8 spent $0.005 doing real work |
-| Walltime | bimodal: median 16s, max 171.6s (single B11 thrash) |
-| Provider/cache | Served by Together; zero cached tokens (route doesn't expose) |
+| Agent          | K11 finding                                                                                                           |
+|----------------+-----------------------------------------------------------------------------------------------------------------------|
+| Quality        | 17.3/25 (4th); legitimate (no destructive) but inserted 6 instead of 5 on B1, fabricated GPL-3.0 author header on B25 |
+| Pareto         | 34.2× cost ratio buys +14% quality; spent $0.069 on cosmetic 2-line edits where K8 spent $0.005 doing real work       |
+| Walltime       | bimodal: median 16s, max 171.6s (single B11 thrash)                                                                   |
+| Provider/cache | Served by Together; zero cached tokens (route doesn't expose)                                                         |
 
 R18 verdict: keep K11 for *high-stakes tasks only* (B11 DEC, complex composition); A/B against K8 + K1 before defaulting widely.
 
@@ -95,12 +95,12 @@ R18 verdict: keep K11 for *high-stakes tasks only* (B11 DEC, complex composition
 The "shocking" R17 mechanical movements were all infra failures, not
 model regressions:
 
-| Apparent | Actual cause |
-|----------+--------------|
-| K7-qwen72b 162→0 collapse | TCP-level =IncompleteRead= mid-stream from DeepInfra |
-| K13-V4-pro all silent | 2 cells died at git worktree concurrency race; 1 from GMICloud drop |
-| K16/K17/K18/K19 all silent | Provider routing failures + invalid model IDs |
-| Provider pins didn't take | Missing =allow_fallbacks: false= — OpenRouter treats =order= as advisory |
+| Apparent                   | Actual cause                                                             |
+|----------------------------+--------------------------------------------------------------------------|
+| K7-qwen72b 162→0 collapse | TCP-level =IncompleteRead= mid-stream from DeepInfra                     |
+| K13-V4-pro all silent      | 2 cells died at git worktree concurrency race; 1 from GMICloud drop      |
+| K16/K17/K18/K19 all silent | Provider routing failures + invalid model IDs                            |
+| Provider pins didn't take  | Missing =allow_fallbacks: false= — OpenRouter treats =order= as advisory |
 
 These are FIXABLE. R18 must add:
 - Worktree-add mutex
@@ -122,10 +122,10 @@ it's not co-scheduling thinking models with downstream-blocking layers.*
 
 ** Theme 5 — Adaptive abort under-tuned, not over-tuned
 
-| Datum | Value |
-|-------+-------|
-| Adaptive abort fires | 5 cells |
-| False positives | 0 (all aborted cells scored 0) |
+| Datum                                     | Value                                                                       |
+|-------------------------------------------+-----------------------------------------------------------------------------|
+| Adaptive abort fires                      | 5 cells                                                                     |
+| False positives                           | 0 (all aborted cells scored 0)                                              |
 | Cells that DODGED abort via K11/K7-thrash | 3 (notably K11/B11/layer2: 15 iters, 10 failed edits, 13 nudges, 1 success) |
 
 Abort needs new triggers:
@@ -147,12 +147,12 @@ K2/K6/K7/K8, Novita for K15, SiliconFlow for K17, Mistral for K9).
 
 * Real R17 quality leaderboard (judge re-ranked)
 
-| Rank | Variant | Quality (1-25) | Mech | Cost-per-unit |
-|------+---------+----------------+------+---------------|
-| 1 | K5-claude-solo | 20.1 | 93 | (high) |
-| 2 | K1-qwen30 | 19.0 | 97 | $0.00031/u |
-| 3 | K8-deepseekV3 | *18.6* | 79 | *$0.00021/u* |
-| 4 | K11-qwen3coder | 17.3 | 119 | $0.025/u |
+| Rank | Variant        | Quality (1-25) | Mech | Cost-per-unit |
+|------+----------------+----------------+------+---------------|
+|    1 | K5-claude-solo |           20.1 |   93 | (high)        |
+|    2 | K1-qwen30      |           19.0 |   97 | $0.00031/u    |
+|    3 | K8-deepseekV3  |         *18.6* |   79 | *$0.00021/u*  |
+|    4 | K11-qwen3coder |           17.3 |  119 | $0.025/u      |
 
 K1 + K8 are at near-Claude quality (~95%) at 23× lower cost. *FOSS
 + smart routing is winning the cost-quality Pareto frontier.*
@@ -161,50 +161,50 @@ K1 + K8 are at near-Claude quality (~95%) at 23× lower cost. *FOSS
 
 Per spend headroom: top-3 → *top-5* default; n=3 → *n=10-15* default.
 
-| Variant | Status | Rationale | n=R18 |
-|---------+--------+-----------+-------|
-| K8-deepseekV3 | *DEFAULT* | All 4 agents converge — Pareto winner, stable, cheap, working cache loop | 15 per task |
-| K1-qwen30 | DEFAULT cheap-tier | $0.0006/u, 19/25 quality, 14 cells stable | 15 per task |
-| K11-qwen3coder | Promoted from A/B only | Spend headroom allows: premium-tier reference. Reserve B11+B25; don't default | 10 per task |
-| K2-kimi-k2.6 | *Promote heavily* (n=10+) | Underweighted in R17 (n=2); B25 elisp specialty unverified | 15 per task |
-| K7-qwen72b | Re-pin to Together, n=10 layer1 | TCP drops on DeepInfra; quality unproven post-fix | 10 per task |
-| K15-kimi-thinking | Side-pool only | Single-cell 12.6 min long pole; don't gate layer-promotion | 5 (side-pool) |
-| K17-glm46 | n=10 layer1 | 1-cell n=1 score 8; deserves more shots | 10 |
-| K6-llama70b | n=10 layer1 | Borderline; 1-cell n=1 score 4 | 10 |
-| K5-claude-solo | Sentinel only | Dominated on Pareto; FOSS rule applies; useful as quality ceiling | 5 per task |
-| K13-deepseekV4 | DROP until reliable | 3/3 worktree+provider failures | 0 |
-| K16-qwen36-27b | DROP until provider stabilizes | 1/1 IncompleteRead | 0 |
-| K18-llama4 | DROP | Invalid model id; mech 0 | 0 |
-| K19-qwen25c-32b | DROP | HTTP 404; mech 0 | 0 |
+| Variant           | Status                          | Rationale                                                                     | n=R18         |
+|-------------------+---------------------------------+-------------------------------------------------------------------------------+---------------|
+| K8-deepseekV3     | *DEFAULT*                       | All 4 agents converge — Pareto winner, stable, cheap, working cache loop      | 15 per task   |
+| K1-qwen30         | DEFAULT cheap-tier              | $0.0006/u, 19/25 quality, 14 cells stable                                     | 15 per task   |
+| K11-qwen3coder    | Promoted from A/B only          | Spend headroom allows: premium-tier reference. Reserve B11+B25; don't default | 10 per task   |
+| K2-kimi-k2.6      | *Promote heavily* (n=10+)       | Underweighted in R17 (n=2); B25 elisp specialty unverified                    | 15 per task   |
+| K7-qwen72b        | Re-pin to Together, n=10 layer1 | TCP drops on DeepInfra; quality unproven post-fix                             | 10 per task   |
+| K15-kimi-thinking | Side-pool only                  | Single-cell 12.6 min long pole; don't gate layer-promotion                    | 5 (side-pool) |
+| K17-glm46         | n=10 layer1                     | 1-cell n=1 score 8; deserves more shots                                       | 10            |
+| K6-llama70b       | n=10 layer1                     | Borderline; 1-cell n=1 score 4                                                | 10            |
+| K5-claude-solo    | Sentinel only                   | Dominated on Pareto; FOSS rule applies; useful as quality ceiling             | 5 per task    |
+| K13-deepseekV4    | DROP until reliable             | 3/3 worktree+provider failures                                                | 0             |
+| K16-qwen36-27b    | DROP until provider stabilizes  | 1/1 IncompleteRead                                                            | 0             |
+| K18-llama4        | DROP                            | Invalid model id; mech 0                                                      | 0             |
+| K19-qwen25c-32b   | DROP                            | HTTP 404; mech 0                                                              | 0             |
 
 * R18 must-do gotcha-fixes (consolidated)
 
-| # | Fix | Source agent | Severity |
-|---+-----+--------------+----------|
-| 1 | Worktree-add mutex (parallel git collisions killed K2/K8/K13 cells) | quality | HIGH — direct R17 cell loss |
-| 2 | Provider failover on IncompleteRead / TCP drops | quality + walltime | HIGH — killed K7 + K13 cells |
-| 3 | =PROVIDER_PINS= = add =allow_fallbacks: false= + broker remap to actually-serving providers | provider/cache | HIGH — pins were 80% advisory |
-| 4 | Adaptive abort: add =consec_failed_edit_iters >= 3= trigger | walltime | MEDIUM — caught only by 3 cells in R17 |
-| 5 | Per-cell hard wall cap (thinking 240s, frontier 180s, efficient 90s, absolute 300s) | walltime | MEDIUM |
-| 6 | Brief-counts validator (K11 inserted 6 not 5) | quality | MEDIUM — over/under-count enforcement |
-| 7 | Author-line lint (K11 fabricated =Daniel Mendler / GPL-3.0= header) | quality | MEDIUM — catch fabricated copyright |
-| 8 | Don't co-schedule thinking models with downstream-blocking layers (K15 long pole) | walltime | MEDIUM — pre-warm in side pool |
-| 9 | Hedged retry on 90s API call timeout | walltime | MEDIUM — Modal-Kimi as failover for Kimi |
-| 10 | Capture =api_retry= events explicitly (currently silent) | walltime | LOW — observability |
+|  # | Fix                                                                                         | Source agent       | Severity                                 |
+|----+---------------------------------------------------------------------------------------------+--------------------+------------------------------------------|
+|  1 | Worktree-add mutex (parallel git collisions killed K2/K8/K13 cells)                         | quality            | HIGH — direct R17 cell loss              |
+|  2 | Provider failover on IncompleteRead / TCP drops                                             | quality + walltime | HIGH — killed K7 + K13 cells             |
+|  3 | =PROVIDER_PINS= = add =allow_fallbacks: false= + broker remap to actually-serving providers | provider/cache     | HIGH — pins were 80% advisory            |
+|  4 | Adaptive abort: add =consec_failed_edit_iters >= 3= trigger                                 | walltime           | MEDIUM — caught only by 3 cells in R17   |
+|  5 | Per-cell hard wall cap (thinking 240s, frontier 180s, efficient 90s, absolute 300s)         | walltime           | MEDIUM                                   |
+|  6 | Brief-counts validator (K11 inserted 6 not 5)                                               | quality            | MEDIUM — over/under-count enforcement    |
+|  7 | Author-line lint (K11 fabricated =Daniel Mendler / GPL-3.0= header)                         | quality            | MEDIUM — catch fabricated copyright      |
+|  8 | Don't co-schedule thinking models with downstream-blocking layers (K15 long pole)           | walltime           | MEDIUM — pre-warm in side pool           |
+|  9 | Hedged retry on 90s API call timeout                                                        | walltime           | MEDIUM — Modal-Kimi as failover for Kimi |
+| 10 | Capture =api_retry= events explicitly (currently silent)                                    | walltime           | LOW — observability                      |
 
 * R18 design adjustments (deltas from existing R18 design doc)
 
 ** Spend headroom unlocks bigger R18 (the cost-finding strategic shift)
 
-| Was | New |
-|-----+-----|
-| n=3 default sampling | *n=10-15 default* on layer-2 sweep |
-| Top-3 advancing | *Top-5 advancing* |
-| Modal-Kimi optional | *Modal-Kimi continuous-warm overnight* (~$8) |
-| LoRA gated on dataset size | *Launch LoRA unconditionally* ($13-22 trivial) |
-| Hedged retry: nice-to-have | *Hedged retry: must-have* on every cell > 90s |
-| Track J/K/M/P as stretch | *All Tracks D-P in scope for v1* |
-| Sequential Track A then B then C | *Pipeline tracks where independent* |
+| Was                              | New                                            |
+|----------------------------------+------------------------------------------------|
+| n=3 default sampling             | *n=10-15 default* on layer-2 sweep             |
+| Top-3 advancing                  | *Top-5 advancing*                              |
+| Modal-Kimi optional              | *Modal-Kimi continuous-warm overnight* (~$8)   |
+| LoRA gated on dataset size       | *Launch LoRA unconditionally* ($13-22 trivial) |
+| Hedged retry: nice-to-have       | *Hedged retry: must-have* on every cell > 90s  |
+| Track J/K/M/P as stretch         | *All Tracks D-P in scope for v1*               |
+| Sequential Track A then B then C | *Pipeline tracks where independent*            |
 
 ** Variant pool (drop 4, promote 1, expand 4)
 
