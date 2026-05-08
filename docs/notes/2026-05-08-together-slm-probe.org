@@ -1,0 +1,133 @@
+:PROPERTIES:
+:ID:       2026-05-08-together-slm-probe
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: P2-7 probe — Together Serverless Multi-LoRA support for Qwen3-Coder-30B-A3B-Instruct
+#+FILETAGS: :notes:bench:r26:lora:p2-7:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Verdict: */NOT_SUPPORTED/*. Probe of Together's API confirms
+whether =Qwen/Qwen3-Coder-30B-A3B-Instruct= (the K20 base) is in the
+serverless multi-LoRA roster. Reviewer caveat in the boost plan
+(=docs/wiki/2026-05-08-r26-boost-plan.org= §3) flagged that the
+official blog only names Llama-3.1 and Qwen-2.5 — this probe answers
+the question for our specific base.
+
+*Expanded.* Three checks: (1) base-model metadata via =GET /v1/models=
+(Together's schema exposes =pricing.input/output/hourly= but no
+explicit serverless or multi-LoRA flags, so we read pricing as the
+proxy); (2) K20 output-model presence in the same listing; (3) a real
+inference call to =POST /v1/chat/completions= with =model=daniel2501_9324/Qwen3-Coder-30B-A3B-Instruct-k20-foss-distill-32c0ef6c=
+— Together's reply (success vs. concrete error) is the strongest
+signal. Note: Together is fronted by Cloudflare and 403s the default
+=Python-urllib= UA with "error code: 1010"; the probe sets a
+=User-Agent= header explicitly.
+
+* Verdict
+
+*NOT_SUPPORTED.*
+
+Reasons:
+- chat-completions HTTP 400; error excerpt: 'unable to access non-serverless model daniel2501_9324/qwen3-coder-30b-a3b-instruct-k20-foss-distill-32c0ef6c. please visit https://api.together.ai/models/daniel2501_9324/qwen3-coder-30b-a3b-instruct-k20-foss-distill-32c0ef6c to create and s'
+
+* Recommendation
+
+*KEEP DEDICATED ENDPOINT.* Qwen3-Coder-30B-A3B-Instruct is NOT in Together's serverless multi-LoRA roster. The R25 boost-plan §3 fallback is now load-bearing: stay on the dedicated H100 endpoint for R26. R27 K20 v2 should retrain on a confirmed-supported base — Llama-3.1-8B-Instruct or Qwen-2.5-32B-Instruct. Cross-reference: blog only names Llama 3.1 + Qwen 2.5 families.
+
+* Probe details
+
+** Base model — =Qwen/Qwen3-Coder-30B-A3B-Instruct=
+
+- id: =Qwen/Qwen3-Coder-30B-A3B-Instruct=
+- type: =chat=
+- display_name: =Qwen3 Coder 30B A3b Instruct=
+- context_length: =262144=
+- running: =False=
+- uuid (endpoint id, if any): =None=
+- pricing.input: =0= (>0 = public serverless inference)
+- pricing.output: =0=
+- pricing.hourly: =0= (>0 = dedicated only)
+- pricing.finetune: =0=
+
+** K20 output model — =daniel2501_9324/Qwen3-Coder-30B-A3B-Instruct-k20-foss-distill-32c0ef6c=
+
+- id: =daniel2501_9324/Qwen3-Coder-30B-A3B-Instruct-k20-foss-distill-32c0ef6c=
+- type: =chat=
+- display_name: =Fine-tuned Qwen3 Coder 30B A3b Instruct 05-08-26 (ft-985a8266-3945, final)=
+- uuid (endpoint id, if any): =None=
+- pricing.input: =0=
+- pricing.output: =0=
+- pricing.hourly: =0=
+
+** Inference attempt — POST /v1/chat/completions
+
+- HTTP status: =400=
+- Elapsed: =0.43s=
+- Response (truncated):
+
+#+begin_src json
+{
+  "id": "oiKTZAH-2kFHot-9f8be71f697beb61",
+  "error": {
+    "message": "Unable to access non-serverless model daniel2501_9324/Qwen3-Coder-30B-A3B-Instruct-k20-foss-distill-32c0ef6c. Please visit https://api.together.ai/models/daniel2501_9324/Qwen3-Coder-30B-A3B-Instruct-k20-foss-distill-32c0ef6c to create and start a new dedicated endpoint for the model.",
+    "type": "invalid_request_error",
+    "param": null,
+    "code": "model_not_available"
+  }
+}
+#+end_src
+
+** Other Together chat models on the public serverless tier
+
+(63 found via pricing heuristic — heuristic
+matches =type=chat= AND =pricing.input>0= AND =pricing.output>0=.
+Note: serverless tier does NOT imply multi-LoRA roster membership;
+that's a separate server-side allow-list not exposed in /v1/models.)
+
+- =deepseek-ai/DeepSeek-V4-Pro=
+- =zai-org/GLM-5.1=
+- =moonshotai/Kimi-K2.6=
+- =MiniMaxAI/MiniMax-M2.7=
+- =google/gemma-4-31B-it=
+- =Qwen/Qwen3.5-397B-A17B=
+- =openai/gpt-oss-120b=
+- =openai/gpt-oss-20b=
+- =zai-org/GLM-5=
+- =moonshotai/Kimi-K2.5=
+- =deepseek-ai/DeepSeek-R1=
+- =deepseek-ai/DeepSeek-V3.1=
+- =Qwen/Qwen3.5-9B=
+- =Qwen/Qwen3-Coder-Next-FP8=
+- =Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8=
+- =Qwen/Qwen3-235B-A22B-Instruct-2507-tput=
+- =Qwen/Qwen2.5-7B-Instruct-Turbo=
+- =meta-llama/Llama-3.3-70B-Instruct-Turbo=
+- =meta-llama/Meta-Llama-3-8B-Instruct-Lite=
+- =google/gemma-3n-E4B-it=
+- =arize-ai/qwen-2-1.5b-instruct=
+- =LiquidAI/LFM2-24B-A2B=
+- =essentialai/rnj-1-instruct=
+- =deepcogito/cogito-v2-1-671b=
+- =Qwen/Qwen3.6-Plus=
+- =meta-llama/Llama-3.3-70B-Instruct-Turbo-test=
+- =mistralai/Mistral-Small-24B-Instruct-2501=
+- =Qwen/Qwen3-VL-8B-Instruct=
+- =meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo=
+- =zai-org/GLM-4.7=
+- ... and 33 more
+
+* Cross-references
+
+- =docs/wiki/2026-05-08-r26-boost-plan.org= §3 — Together serverless
+  multi-LoRA pivot (with reviewer caveat naming only Llama-3.1 + Qwen-2.5)
+- =docs/wiki/2026-05-08-r26-launch-checklist.org= §P2-7 — checklist item
+- =scripts/_p2_7_probe_together_slm.py= — this probe
+- =scripts/_k20_endpoint_resume.sh= + =_k20_endpoint_pause.sh= — dedicated
+  endpoint helpers (kept regardless of verdict)
+- K20 fine-tune job: =ft-985a8266-3945= → output model
+  =daniel2501_9324/Qwen3-Coder-30B-A3B-Instruct-k20-foss-distill-32c0ef6c=
