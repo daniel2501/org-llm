@@ -1622,8 +1622,27 @@ def execute_cell(task, variant, dial, layer_label):
         suffix += 1
         cell_dir = base.with_name(f"{base.name}__s{suffix}")
     cell_dir.mkdir(parents=True, exist_ok=True)
+    # R25 fix — enforce WALL_CAP_PER_CELL_S at runtime via a sub-future.
+    # PM3 / R24 walltime agent: one K2 cell ran 1612s (27 min) holding
+    # Layer 1 open for 9 min. The constant existed but no enforcement.
+    # On timeout we abandon the inner thread (Python can't kill it
+    # cleanly) but the outer worker is freed for the next cell, so
+    # parallelism keeps flowing.
+    from concurrent.futures import ThreadPoolExecutor as _TPE, TimeoutError as _FTO
+    _wall_cap = globals().get("WALL_CAP_PER_CELL_S", 600)
     try:
-        cell = run_one_cell(task, name, model_id, mode, dial, cell_dir)
+        with _TPE(max_workers=1) as _inner:
+            _fut = _inner.submit(run_one_cell, task, name, model_id, mode,
+                                  dial, cell_dir)
+            cell = _fut.result(timeout=_wall_cap)
+    except _FTO:
+        log(f"      ! {name} WALL_CAP_KILLED on {task['id']} (>{_wall_cap}s)")
+        cell = {"variant": name, "task_id": task['id'],
+                  "error": f"wall_cap_killed:{_wall_cap}s",
+                  "wall_cap_killed": True,
+                  "dial": asdict(dial),
+                  "dial_label": dial.label()}
+        write_cell_result(cell_dir, cell)
     except Exception as exc:
         log(f"      ! {name} ERROR: {exc}")
         cell = {"variant": name, "task_id": task['id'],
