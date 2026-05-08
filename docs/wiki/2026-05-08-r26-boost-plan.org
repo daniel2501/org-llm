@@ -845,6 +845,237 @@ live-tree truth.*
   matches the case-studies §28 advisory ($8-12 base bench + ~$15
   infra).
 
+* 12. Automated monitoring + auto-fix + auto-relaunch (R26 self-healing layer)
+
+*Summary.* R25 shipped =scripts/_r25_autorepair_daemon.sh= with 12
+recipes (AR1-AR12) but the structural verification gap from §2-B
+also bit the daemon: =COST_CIRCUIT_BREAKER= got written, the
+harness ignored it; =WALL_CAP= got logged, kills never fired; K33
+"ceiling probe" got flagged as uncompetitive, the round kept
+spending. R26 closes the loop by inverting the relationship — the
+self-healing daemon becomes /authoritative/ and the harness reads
+its sidecar files on every cell. Catch happens in ≤60s at
+in-round cadence; fix happens without prompting; relaunch from
+manifest covers the mid-round-crash class that has cost ~3-4 rounds
+of headroom across R18-R25. Cap on auto-actions: ≤$5/round of
+spend, ≤3 relaunches/round.
+
+*Expanded.* The R25 daemon was a passive monitor that wrote advice
+to org docs the harness never read. R26 promotes it to a control
+plane: cell-replay manifest, live deny-list file, =threading.Event=
+WALL_CAP signal, and the long-broken =COST_CIRCUIT_BREAKER= file
+all get a /reading peer/ inside =run_layer_parallel='s pre-cell
+veto hook. PM2 (RunPod runtime=null), PM3 (K7 score plummet only
+caught post-round), PM6 (R20-R23 dead-delta chain spent $3.60
+before tripping 402) all share a root cause: detection without
+authority. R26 fixes that with =_r26_self_healing_daemon.sh= +
+five harness changes + acceptance gates per action. Total LOC is
+modest (~600 daemon + ~250 harness changes); the value is closing
+the verification gap that defined R25.
+
+** Catch — real-time detection per scope
+
+Detection scope ladders from cell up to endpoint. Each row's
+"latency target" is from event-occurrence to daemon-flagged. Cadence
+is daemon poll interval (60s in-round, 5min between rounds).
+
+| Scope    | Signal                                        | Source                                          | Latency target | Existing R25 hook   |
+|----------+-----------------------------------------------+-------------------------------------------------+----------------+---------------------|
+| Cell     | wall_seconds > cell_budget × 1.5              | =cell_audit.json= per-cell mtime               | ≤60s           | none — new in R26   |
+| Cell     | exit_code != 0 AND no recovery_attempted      | harness exit log                                | ≤60s           | partial (AR5 logs)  |
+| Cell     | retry_count ≥ 3 on same (variant, task)       | =retries.json= written by harness               | ≤60s           | none                |
+| Variant  | fail_rate > 50% over last n=5 cells           | live leaderboard scan                           | ≤120s          | AR11 (post-flag)    |
+| Variant  | mean primary < 0 AND lint_penalty > 8         | quality_lint walker (PM3-G)                     | ≤120s          | AR7 (K7-only)       |
+| Variant  | silent_noop streak ≥ 3                        | =cell_audit.json=                               | ≤120s          | none                |
+| Layer    | layer wall > 2× projection                    | layer-aggregate timer in =R26_LIVE.json=        | ≤180s          | none                |
+| Layer    | layer cost > 1.5× projection                  | =R26_LIVE.spend_usd_by_layer=                   | ≤180s          | AR9 (round-aggregate only) |
+| Round    | round cost > $cap × 1.5                       | =R26_LIVE.spend_usd=                            | ≤60s           | AR9 (logs only)     |
+| Round    | OR headroom < projected remaining             | =/v1/credits=                                   | ≤300s          | AR12                |
+| Round    | round wall > 2× projection                    | round timer                                     | ≤180s          | none                |
+| Endpoint | self-host heartbeat fails 3 consecutive checks | =/health= probe per endpoint                   | ≤180s          | none — new for K20/K1+K2 |
+| Endpoint | broker 5xx rate > 20% over last n=20 calls    | OpenRouter response codes in stdout            | ≤120s          | none                |
+| Endpoint | LoRA adapter route 404 / "model not found"   | adapter-probe response                          | ≤120s          | none                |
+
+** Fix — auto-remediation per scope (no user prompts)
+
+Each fix has a *trigger condition*, *action*, *cost ceiling*, and
+*revert criterion*. Fixes that cannot complete autonomously (e.g.
+hardware reprovision) escalate to a sentinel for the next handoff
+agent — they don't block the round.
+
+| Scope    | Trigger                          | Fix action                                        | Cost ceiling | Revert criterion |
+|----------+----------------------------------+---------------------------------------------------+--------------+------------------|
+| Cell     | wall > 1.5× budget               | =threading.Event= WALL_CAP fires; cell killed     | $0           | n/a (terminal)  |
+| Cell     | retry_count ≥ 3                  | mark cell =floor_dropped=; advance pool           | $0           | next round      |
+| Variant  | fail_rate > 50% n=5              | append to =LIVE_DENY_LIST=; harness skips future cells | ≤$2/round | post-round audit |
+| Variant  | quality plummet (PM3-G)          | mark variant =quality_floor_dropped=; remove from L1 | ≤$1/round | post-round       |
+| Layer    | layer cost > 1.5× projection     | apply =LAYER_BUDGET_CAP= file; harness drops remaining low-priority cells | ≤$2/round | next layer reset |
+| Round    | round cost > $cap × 1.5          | write =COST_CIRCUIT_BREAKER=; harness drains in-flight + halts new | ≤$5/round | manual top-up    |
+| Round    | OR headroom < projected          | spawn =_openrouter_credit_watcher.sh=; pre-emptive pause if delta < $5 | $0 | balance > $20 |
+| Endpoint | heartbeat fail 3×                | route adapter back to OR pin; =LIVE_DENY_LIST= the endpoint id | $0 | endpoint heartbeat green for 3 polls |
+| Endpoint | broker 5xx > 20%                 | re-pin via =PROVIDER_PINS= live edit (AR2 generalized) | $0       | rate < 5% for n=20 |
+| Endpoint | LoRA 404                         | fallback chain §3 (Predibase → DigitalOcean → Doubleword → RunPod → Spheron) | up to $5 setup | adapter probe returns shape diff vs base |
+| Mid-round crash | harness PID gone < expected_cells × 0.95 | =cell_replay_manifest= + relaunch from last green checkpoint | $0 | manifest exhausted |
+
+Cost ceiling is /per-fix/, summed against the round's $5 auto-action
+cap. If the cap is exhausted, daemon flips to *advisory-only*:
+detection still fires; fixes log to progress doc instead of acting.
+
+** Relaunch — full or partial round restart
+
+Relaunch is the recovery class R25 had no answer for: the harness
+crashed mid-round 3 times across R18-R23 and each time required
+either manual restart-from-zero (re-spending all completed cells)
+or accepting the partial. R26 ships a *cell-replay manifest* that
+the harness writes after every successful cell + a relaunch
+playbook the daemon picks from based on crash signature.
+
+| Crash signature                          | Playbook                                                              | Cells re-run | Cost recovered  |
+|------------------------------------------+-----------------------------------------------------------------------+--------------+-----------------|
+| OOM / SIGKILL / signal 9                 | resume from manifest; skip last in-flight cell (likely the OOM trigger) | 0 + skip 1 | full minus skip |
+| Worktree storm corrupts =.git=           | =git worktree prune= + restart with manifest                          | 0            | full            |
+| OpenRouter 402 mid-round                 | pause until credit-watcher signals top-up; resume from manifest       | 0            | full            |
+| Harness Python exception                 | parse traceback; if known signature → patch + resume; else escalate   | 0            | full or escalate |
+| Endpoint perma-fail mid-round            | swap variant to OR fallback in =_round26_dials.py=; resume from manifest | 0       | full            |
+| Daemon-induced halt (cost CB)            | wait for top-up; resume from manifest                                 | 0            | full            |
+| User Ctrl-C / shell hangup               | resume from manifest on next launch                                   | 0            | full            |
+| Disk-full                                | =scripts/_clean_old_worktrees.sh= + resume from manifest              | 0            | full            |
+
+Manifest schema (=scripts/_round26_dials_artifacts/cell_replay.jsonl=):
+each line is one completed cell with =(variant, task, layer,
+cell_id, started_at, finished_at, score, cost, artifact_dir)=. On
+relaunch, harness reads manifest, builds the *complete = pending*
+diff against the dials roster, runs only =pending=. Mid-round
+resume is therefore O(1) — no recomputation, no re-cost.
+
+** Concrete daemon design — =scripts/_r26_self_healing_daemon.sh=
+
+State machine (60s cadence in-round, 5min between rounds):
+
+#+begin_src text
+            +--------------+
+            |  MONITORING  |  <- initial state; polls signals
+            +------+-------+
+                   |
+                   | signal trips threshold
+                   v
+            +--------------+
+            |  DETECTING   |  <- validate signal (debounce, 2-of-3)
+            +------+-------+
+                   |
+            +------+-------+
+            v              v
+         (no-op)       (confirmed)
+            |              |
+            |              v
+            |       +--------------+
+            |       |    FIXING    |  <- apply remediation; log to progress doc
+            |       +------+-------+
+            |              |
+            |       +------+-------+
+            |       v              v
+            |    (success)    (fix failed)
+            |       |              |
+            |       |              v
+            |       |       +--------------+
+            |       |       | RELAUNCHING  |  <- invoke playbook
+            |       |       +------+-------+
+            |       |              |
+            v       v              v
+            +--------------+
+            |  MONITORING  |  <- back to top
+            +--------------+
+#+end_src
+
+Trigger thresholds + fix recipes + relaunch playbooks are the three
+tables above. Daemon writes one row per state transition to
+=docs/wiki/2026-05-08-r26-progress.org= so post-round triage is
+log-readable. Cap on auto-actions: ≤$5/round of remediation spend
+(includes endpoint reprovisioning, fallback-chain costs); ≤3
+relaunches/round (4th relaunch escalates to sentinel).
+
+Implementation reuses R25 daemon's structure:
+- =log_line= / =log_doc= helpers (verbatim from
+  =_r25_autorepair_daemon.sh=)
+- =discover_pid= + =ar_check_harness_alive= patterns
+- =ar_get_live_state= + =jq= leaderboard parsers
+- New: =sm_state= file at =/tmp/r26-self-healing-state= holds
+  current state for crash-resilience (PM5 lesson)
+- New: per-fix =cost_ledger.jsonl= sums attempted-action spend
+  against the $5/round cap
+
+** Harness changes required (vs. daemon-only)
+
+The R25 lesson (§2-B) is that daemons-without-harness-cooperation
+can't actually act. R26's harness must read 5 sidecar files /per
+cell/ in =run_layer_parallel='s pre-cell veto hook. Each is named,
+located, and validated by the daemon; harness honors it or fails
+the verification probe.
+
+| # | File                                          | Path                                                  | Honor logic                                              | Verify probe |
+|---+-----------------------------------------------+-------------------------------------------------------+----------------------------------------------------------+--------------|
+| 1 | =COST_CIRCUIT_BREAKER=                        | =scripts/_round26_dials_artifacts/COST_CIRCUIT_BREAKER= | Pre-cell hook: if file exists, drain in-flight + raise =SystemExit(0)= | spawn cell with mock CB file present; assert no new cells start |
+| 2 | =LIVE_DENY_LIST=                              | =scripts/_round26_dials_artifacts/LIVE_DENY_LIST=     | Per-cell pre-flight: if cell.variant in deny-list, mark =skipped=; advance | write "K11" to file mid-round; assert next K11 cell skipped |
+| 3 | =cell_replay.jsonl= manifest                  | =scripts/_round26_dials_artifacts/cell_replay.jsonl=  | On launch: parse manifest, compute pending = roster − completed; only pending runs | crash + relaunch; assert 0 cells re-run for completed entries |
+| 4 | =threading.Event= WALL_CAP                    | in-process =threading.Event=, polled by daemon via SIGUSR1 | Daemon sends SIGUSR1; harness signal-handler sets event; cell loop checks event each iteration | spawn 500s sleep cell; daemon SIGUSR1 at 100s; assert kill within 110s wall |
+| 5 | =LAYER_BUDGET_CAP= sidecar                    | =scripts/_round26_dials_artifacts/LAYER_BUDGET_CAP=   | Per-cell pre-flight: if layer.spend > cap, drop remaining lowest-priority cells in layer | layer at 80% cap → daemon writes cap; assert remaining ≤ priority-1 cells |
+
+These are the *5 things* the harness must read/honor that R25
+defined-and-ignored. Each ships with a =verify_patch_landed()= probe
+per §2-B + §7's gate.
+
+*Critical R25 fix-up.* The broken =ThreadPoolExecutor= shim that
+shipped as "WALL_CAP" in R25 was a labeled timer with no kill
+authority. R26 replaces it with =threading.Event= for in-process
+signaling AND =multiprocessing.Process= per cell so SIGKILL is
+available. Both must be wired — the Event for cooperative
+shutdown, the Process for forced kill if cooperative fails.
+
+** Acceptance criteria
+
+Every action measurable. Each criterion ships its own probe;
+round refuses to launch unless all probes return OK (R25 §2-B
+gate generalized).
+
+| Criterion                                         | Target | Probe                                                              |
+|---------------------------------------------------+--------+--------------------------------------------------------------------|
+| Detection latency (cell-scope)                    | ≤60s   | inject mock failure; measure daemon-flag delta                     |
+| Detection latency (variant-scope)                 | ≤120s  | inject 5 mock fail-rate cells; measure deny-list write delta       |
+| Fix attempt success rate                          | ≥70%   | retro count: AR-fired cells with revert criterion met / total fired |
+| Relaunch coverage of mid-round crashes            | ≥90%   | survey crash signatures table; ≥7-of-8 covered                     |
+| Cost overage (round)                              | ≤$5    | round-end =spend_usd= − $cap; assert ≤5                            |
+| User intervention for known patterns              | 0      | manual-action log; assert no entries for known triggers            |
+| Harness sidecar honor rate                        | 100%   | 5 verify_patch probes (table above) all green                       |
+| Daemon crash-resilience                           | ≥95%   | kill daemon mid-round; relaunch; verify state-file resume          |
+
+** Migration plan — order of build for R26
+
+P0 = blocks R26 launch. P1 = ships in launch. P2 = ships during
+R26 → R27. P3 = ships across R26-R28. Each item carries the
+verification probe required to advance.
+
+| Pri | Item                                                              | Cost | Wall ETA | Verify probe |
+|-----+-------------------------------------------------------------------+------+----------+--------------|
+| P0  | Harness honors =COST_CIRCUIT_BREAKER= (R25 wrote, ignored)        | $0   | 2h       | mock CB file → no new cells start |
+| P0  | Harness honors =threading.Event= WALL_CAP (replace ThreadPool shim) | $0  | 4h       | 500s sleep cell killed in ≤410s |
+| P1  | Variant fail-rate live deny-list                                  | $0   | 3h       | mid-round deny → next-cell skip |
+| P1  | Hedged S1 wiring (composition layer reads deny-list)              | $0   | 2h       | hedge fallback fires when primary deny'd |
+| P1  | Round resumption from =cell_replay.jsonl= manifest                | $0   | 4h       | crash + relaunch → 0 re-runs |
+| P2  | Per-endpoint heartbeat (K20 serverless + K1+K2 self-host)         | $0   | 3h       | endpoint down → variant routes to OR pin |
+| P2  | Patch-validation pre-round probe (general =verify_patch_landed=)  | $0   | 3h       | inject dead patch → round refuses launch |
+| P3  | Full state machine in =scripts/_r26_self_healing_daemon.sh=       | $0   | 6h       | state-transition log readable; ≥95% crash-resilience |
+
+P0 lands /before/ R26 launches; P1 lands with launch as part of
+the R26 wiring patch (=scripts/_r26_design_patch.py=). P2 + P3
+land iteratively once R26 is in flight + early data validates the
+P0/P1 layer.
+
+*Cross-link.* This section operationalizes §2-B (verification gap)
++ §7's R25-patch verification gate + §9's P0 items 1-6. See also
+[[file:docs/notes/2026-05-08-bench-arc-post-mortems.org]] PM2-G,
+PM3-G, PM5-G2, PM6-G2 for the post-mortem-derived guardrails this
+layer enforces.
+
 * Cross-references
 
 ** Wiki (input docs)
