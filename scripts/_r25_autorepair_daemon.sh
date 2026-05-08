@@ -31,7 +31,7 @@ LIVE=$ART/R25_LIVE.json
 COST_CB=$ART/COST_CIRCUIT_BREAKER
 WORKTREE_DIR=/home/daniel/repos/org-llm-worktrees
 POLL_INTERVAL=180   # 3 min
-ROUND_PROJECTION_USD=20   # R25 expected ~$15-25
+ROUND_PROJECTION_USD=100  # R25 cap — bumped from $20 per user 2026-05-08
 COST_PAUSE_RATIO=1.5
 R25_EXPECTED_CELLS=470   # per R25 design § task pool (Layer 1 + 2 + BK + comp + K20 A/B + large-FOSS)
 

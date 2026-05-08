@@ -1,0 +1,436 @@
+:PROPERTIES:
+:ID:       org-llm-go-forward-config
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: org-llm — go-forward configuration recommendations (R1-R25)
+#+FILETAGS: :wiki:bench:config:recommendations:r25:
+#+OPTIONS: toc:2 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Executive summary
+
+*Headline.* After 25 rounds of bench (R1-R25), 1019+ cells, and ~$90
+in cumulative spend, =org-llm= can reliably operate on FOSS models
+at *48-51× lower cost-per-quality-unit than Claude*. The default
+scribe is K1-qwen30 (Qwen3-Coder-30B-A3B-Instruct) at $0.0005/qpt,
+served via OpenRouter (Novita preferred). K2-kimi-k2.6 is the
+high-stakes prose specialist; K11-qwen3coder is the elisp specialist
+with budget cap; K8-deepseekV3 is the recovered all-purpose backup.
+K6-llama70b and K7-qwen72b are dropped from production. K5-claude-
+solo remains as a sentinel-only quality ceiling.
+
+*Top 5 recommendations.*
+
+1. *Default LLM = K1-qwen30 via OpenRouter Novita.* 5 of 5 rounds
+   on the FOSS Pareto frontier; $0.0005/qpt; n=50 stable.
+
+2. *High-stakes prose / DEC drafts = K2-kimi-k2.6 via Moonshot+
+   Parasail.* Raw-quality leader at n=25+, but cap =max_tokens=
+   at 4096 to prevent runaway prose.
+
+3. *Cap K11 spend at $1.50/round.* Premium ($0.02/qpt) but
+   strictly dominated by K1 except on B25-shaped elisp tasks.
+
+4. *Self-host K1 + K2 via vLLM (deferred to R26 if R25 wall is
+   acceptable).* Eliminates broker tool-format gaps (caused R18
+   v1 wipe + R19 K8 collapse) and removes OpenRouter rate caps.
+
+5. *Wire S1-S4 composition strategies in R26.* Hedged-strong, best-
+   of-N, critique-revise, specialty routing — all currently
+   orphaned constants. Strategy-effectiveness agent estimated
+   80-120 LOC for combined wiring; biggest unrealized R20+ lever.
+
+*Ongoing.* K20-foss-distill LoRA training completed on Together
+(~$5, 10 min) but hosted endpoint deployment hit a config error —
+A/B test deferred to R26.
+
+*This doc updates with R25 final data when round completes.*
+
+* Section 1 — Bridge Crew agent → model mapping
+
+** @atoz — wiki/prose specialist
+
+*Tasks owned (per harness):* B1 (cross-link audit), B5 (section
+rewrite), B11 (DEC draft), B20 (Summary section add).
+
+*Recommended primary:* K2-kimi-k2.6 via Moonshot+Parasail.
+*Fallback:* K1-qwen30 via Novita.
+*Sample size when benched:* n=25-50 (raw-quality leader has
+high variance; needs samples to settle).
+
+| Round  | Best variant for @atoz tasks         | Evidence                              |
+|--------+--------------------------------------+---------------------------------------|
+| R15-17 | K1-qwen30                            | Frontier on B1 every round            |
+| R18 v2 | K1+K11 corrupted by mech-FP          | Quality judge re-rank: K5 > K1 > K7   |
+| R19    | K1 score 618/$0.29                   | First clean cross-task data           |
+| R20    | K2-kimi at n=25 score 488            | Raw-quality leader confirmed          |
+| R24    | K2-kimi at n=40 score 666.85         | Highest single-variant in bench history |
+
+*Why K2 primary:* On prose-shape briefs (B5/B11/B20) K2 produces
+more nuanced output than K1 once n≥25. K1 is cheaper but K2 wins
+the absolute-quality comparison.
+
+*Why K1 fallback:* If K2 broker hiccups, K1 is the safe default
+that always delivers.
+
+*Constraint:* `max_tokens=4096` cap on K2 (R25 patch P5)
+prevents R24-style runaway prose (`finish=length` after 13 iters
+at 23-29k chars).
+
+** @data — code/elisp specialist
+
+*Tasks owned:* B7 (docstrings + type hints), B25 (write new elisp),
+B26 (defcustom add).
+
+*Recommended primary:* K1-qwen30 (general code) +
+K11-qwen3coder (elisp specifically, budget-capped).
+*Fallback:* K2-kimi-k2.6.
+
+| Task family      | Primary           | Why                                                    |
+|------------------+-------------------+--------------------------------------------------------|
+| Python type-hints (B7) | K1-qwen30   | K7 was best per best-strategy agent; K7 dropped → K1   |
+| Elisp helpers (B25)    | K11-qwen3coder | Best-strategy agent: K11 mech 20 single-cell on B25     |
+| Defcustom (B26)        | DROPPED         | Floor task; not worth running (R25 patch drops it)     |
+
+*Budget hygiene:* K11 dominates K1 by 44× on $/qpt — only worth
+the premium on B25-shape elisp tasks. R25 patch caps K11 spend at
+$1.50/round to prevent over-spend.
+
+*Code-edit ceiling probe (R25-R26):* K33-qwen3-coder-72B (added
+in R25 as ceiling probe). If K33 beats K1 on B7 by ≥3 quality
+points, promote K33; otherwise K1 holds.
+
+** @spock — planning / structured-output specialist
+
+*Implied role:* Phase-1 captain (planning + classification before
+specialist execution). Uses CAPTAIN_MODEL_ID in harness.
+
+*Recommended primary:* K1-qwen30 — fast TTFT, tight output, low
+$/qpt makes plan-generation cheap.
+*Fallback:* K15-kimi-thinking (deferred — high reasoning budget,
+but R24 dropped K15).
+
+*Why K1 for planning:* Plans are short (~500 tokens), latency-
+sensitive (block specialist), don't benefit from K2's prose strength.
+K1's $0.0005/qpt makes the planning phase essentially free.
+
+*Future direction:* K15 (kimi-thinking) was designed for long
+internal reasoning; reasoning-vs-tool split (S39 in R25 design)
+would let K15 plan + K1 execute. Defer to R26 once basic S1-S4
+proven.
+
+** @geordi — chart / visualization specialist
+
+*Per memory:* Chart design uses askbook (not ask) + deepseek-r1
+at q=200, NOT qwen-2.5-72b at q=195 (per
+project_geordi_chart_design_model_tier).
+
+*Recommended primary:* deepseek-r1 via OpenRouter DeepInfra
+(specifically askbook/q=200 path).
+*Fallback:* K2-kimi-k2.6 (creative output for chart copy).
+
+*Notes:* @geordi work is bench-orthogonal (not in B1-B26 nor
+BK1-BK5). Model selection tracked in user memory; bench rounds
+don't move the needle here.
+
+** @boothby — atomic-edit / mechanic specialist
+
+*Tasks owned:* B13 (LICENSE year bump).
+
+*Recommended primary:* K1-qwen30 (cheap atomic edits).
+*Fallback:* K8-deepseekV3.
+
+*Action:* B13 was confirmed floor/broken by best-strategy agent
++ Pareto agent. R25 drops B13 from cell-spec construction. So
+@boothby has no real bench task in R25+. Reclaim @boothby for
+small-atomic file mutations (single-line bumps, defconst toggles)
+in user-driven work, not bench.
+
+** @riker — delegation / multi-agent orchestrator
+
+*Per agents.org:* Riker delegates to other crew members. Doesn't
+directly do bench tasks.
+
+*Recommended primary:* K2-kimi-k2.6 (raw-quality reasoning leader
+for delegation logic).
+*Fallback:* K1-qwen30.
+
+*Why K2:* Delegation requires understanding /which/ specialist to
+hand off to, which is high-variance reasoning. K2's quality lead
+matters more than $/qpt here (delegation is rare; raw quality
+wins).
+
+** @picard — executive summary / strategic decision specialist
+
+*Per agents.org:* Picard renders crew-level decisions, executive
+narratives.
+
+*Recommended primary:* K2-kimi-k2.6 with `max_tokens=4096` cap.
+*Fallback:* K5-claude-solo (sentinel only — when stakes truly
+warrant the 48× premium).
+
+*Why K2:* Picard's outputs are read by user; quality matters more
+than cost. K2 at n=25+ produces consistent prose. If K2 fails
+or output rejects user review, escalate to K5 manually.
+
+* Section 2 — General specialization (custom agents)
+
+For tasks not tied to a specific persona, recommend by /shape/
+not by name. Custom agent authors use this matrix:
+
+| Task shape             | Primary       | Fallback       | Sample size | Why                           |
+|------------------------+---------------+----------------+-------------+-------------------------------|
+| wiki_edit (B1-style)   | K1-qwen30     | K2-kimi-k2.6   | n=10-15     | K1 5/5 frontier; K2 backup    |
+| dec_draft (B11)        | K2-kimi-k2.6  | K1-qwen30      | n=15-25     | Prose nuance; K2 with maxtok  |
+| code_edit (B7)         | K1-qwen30     | K11-qwen3coder | n=10        | K1 + K33 ceiling probe in R25 |
+| elisp_helper (B25)     | K11-qwen3coder | K1-qwen30     | n=8         | K11 worth $1.50 cap here only |
+| atomic / trivial       | K1-qwen30     | K8-deepseekV3  | n=5         | Cheap, deterministic          |
+| long-horizon refactor  | TBD R25 BK    | K1+K2 best-of-3| n=8 in BK   | BK1-BK5 R25 baseline          |
+| critique / review      | K2-kimi-k2.6  | K7-qwen72b     | n=3         | K7 adversarial role only      |
+| executive summary      | K2-kimi-k2.6  | K5-claude-solo | n=3         | Picard-shape; K5 escalation   |
+| planning (no tool-use) | K1-qwen30     | K15-thinking   | n=1         | TTFT matters; K15 deferred    |
+| chart design           | deepseek-r1   | K2-kimi-k2.6   | n=1         | Per memory; askbook/q=200      |
+
+*Decision rule:* if your task fits two shapes, pick the one with
+LOWER fallback cost. The bench has shown K1 holds quality on
+borderline cases.
+
+* Section 3 — Model × hardware matches
+
+** Recommended deployment matrix
+
+| Variant                | Primary host        | $/cell est | When to use                              |
+|------------------------+---------------------+------------+------------------------------------------|
+| K1-qwen30              | OR Novita           | $0.001     | Default scribe                           |
+| K2-kimi-k2.6           | OR Moonshot+Parasail| $0.04      | High-stakes prose, dec_draft             |
+| K8-deepseekV3          | OR DeepInfra        | $0.001     | Atomic / trivial; recovered backup       |
+| K11-qwen3coder         | OR Together         | $0.20      | Elisp ONLY; $1.50 round cap              |
+| K17-glm46              | OR SiliconFlow      | $0.005     | A/B with K2 on prose                     |
+| K20-foss-distill       | Together dedicated H100 endpoint | TBD R26 | A/B vs K1 on B5/B11/B20 |
+| K33-qwen3-coder-72B    | OR Together         | $0.005     | Code ceiling probe (R25)                 |
+| K34-deepseek-v3-pro    | OR DeepInfra        | $0.008     | Reasoning ceiling probe (R25)            |
+| K35-llama-3.1-405B     | OR Together         | $0.015     | Mass-scale FOSS ceiling probe (R25)      |
+| K5-claude-solo         | Anthropic direct    | $0.30      | Sentinel only; quality ceiling reference |
+
+** PROVIDER_PINS deny-list (R24+R25 verified)
+
+| Model                    | Order                | Ignore                |
+|--------------------------+----------------------+-----------------------|
+| moonshotai/kimi-k2.6     | Moonshot, Parasail   | DeepInfra             |
+| moonshotai/kimi-k2-thinking | Moonshot, Novita  |                       |
+| qwen/qwen3-coder         | Together             | SiliconFlow           |
+| qwen/qwen-2.5-72b-instruct | DeepInfra          | Novita (32k cliff)    |
+| meta-llama/llama-3.3-70b | DeepInfra            | AkashML               |
+| z-ai/glm-4.6             | SiliconFlow          | DeepInfra, Z-AI       |
+| deepseek/deepseek-chat-v3-0324 | DeepInfra      | (champion 25/25)      |
+
+*Pin discipline:* never use `allow_fallbacks=False` (R18 v1
+caused 5-variant silent_noop wipe). Pins are advisory; OR
+fallback is the safety net.
+
+** Self-hosted vLLM (R26 work)
+
+For K1 + K2, deploy dedicated vLLM endpoints on RunPod or Together:
+- Eliminates broker tool-format quirks (R19 K8 collapse cause)
+- Removes OR rate cap risk (R21-R23 402 cause)
+- Sub-second TTFT vs 800ms-2s OR (Sp3 from walltime agent)
+- Cost: $40-60/round at A100 80GB SXM, $0/round at idle
+  (autoscale to 0 between rounds)
+
+*RunPod caveat:* dockerArgs unreliable per PM2; use pre-baked
+Docker image with =ENTRYPOINT= set. Don't pass training/serving
+script via API.
+
+*Together caveat:* fine-tuning works flawlessly; serving needs
+dedicated endpoint with `min_replicas=1` (no scale-to-zero
+serverless for fine-tuned models).
+
+** Hardware tier guide
+
+| GPU                  | $/hr (RunPod) | $/hr (Together) | Best for                      |
+|----------------------+---------------+-----------------+-------------------------------|
+| A100 PCIe 80GB       | $1.19         | $4-5            | Single-GPU LoRA training       |
+| A100 SXM 80GB        | $1.39         | $4-5            | Single-GPU vLLM inference      |
+| H100 SXM 80GB        | $2.99         | $5.49           | Single-GPU 70B+ inference      |
+| H200 SXM 140GB       | n/a           | $5.49           | 70B+ with bigger ctx           |
+
+*Discipline:* always confirm GPU is allocated + container actually
+booted (PM2 lesson). Never trust =runtime: null= as proof of
+training.
+
+* Section 4 — Operating model
+
+** Bench / measurement layer
+
+| Component              | Status R25 | Notes                                    |
+|------------------------+------------+------------------------------------------|
+| =scripts/_round*_dials.py= | shipped | Per-round forks; 25 rounds in repo       |
+| =scripts/quality_lint.py=  | shipped + extended | nested-bracket, heading-dup, table-pipe |
+| =scripts/_r19_wiring_patch.py= | shipped | BK1-BK5 + provider.ignore + lint hook |
+| =scripts/_r24_synthesis_patch.py= | shipped | Layer-BK + drops + n bumps         |
+| =scripts/_r25_design_patch.py= | shipped | All R24 must-do items                |
+| WALL_CAP runtime kill  | R25       | threading.Timer wrap                     |
+| G1 cell quality floor  | R25       | drop cells with lint > 8 OR primary < 0  |
+| BK target_files plural | R25       | (was zero-scoring all BK cells)          |
+
+** Daemons + autopilots
+
+| Daemon                          | Purpose                                       |
+|---------------------------------+-----------------------------------------------|
+| =_lora_together_poller.sh=      | Watches Together fine-tune job → pass         |
+| =_r25_autorepair_daemon.sh=     | Heartbeat + AR3/AR7/AR8/AR9/AR10 recipes      |
+| =_openrouter_credit_watcher.sh= | Pause + alert on credit cap; auto-relaunch    |
+
+*Cadence:* 3-min poll. Heartbeats include % done + ETA.
+
+** Pre-flight checklist (G5-G10)
+
+Before any R26+ launch:
+1. OpenRouter headroom > 1.5× round projection
+2. RunPod balance > $20 (if using self-host vLLM)
+3. Disk free > 5 GB
+4. All variants pass `warmup_providers` + valid tool_calls
+5. K20 endpoint reachable (if K20 in roster)
+6. Worktree dir clean of stale `r{N}-*` dirs
+
+** Auto-repair recipes (AR1-AR10)
+
+Documented in
+=docs/wiki/2026-05-08-r25-design.org § Auto-repair recipes=.
+Each fires without prompting user; logs to live-log + progress doc.
+
+* Section 5 — Strategy portfolio
+
+** Active in production (KEEP)
+
+| ID  | Strategy                       | Status                          |
+|-----+--------------------------------+---------------------------------|
+| S25 | Judge-fixes / constitutional   | Inherited R17 carry-forward     |
+| S30 | Pre-edit verification          | Prompt-only; cheap quality lift |
+| N1  | Broker capability matrix       | Implemented as PROVIDER_PINS    |
+| N5  | quality_lint penalty           | Shipped + recalibrated R25      |
+
+** Wire in R26
+
+| ID | Strategy                     | Estimated LOC | Wins                          |
+|----+------------------------------+---------------+-------------------------------|
+| S1 | Hedged-strong (K8→K11)       | ~30           | Cost-bound upper-quality        |
+| S2 | Best-of-N (K1 n=3)           | ~30           | Variance-reduce on prose       |
+| S3 | Critique-revise (K1+K2)      | ~40           | Quality lift on B11           |
+| S4 | TASK_FAMILY_VARIANTS routing | ~20           | Per-task variant selection    |
+
+** Defer to R27+
+
+| ID | Strategy                          | Why defer                       |
+|----+-----------------------------------+----------------------------------|
+| S33 | Speculative decode (model-tier)  | Needs runtime support            |
+| S34 | Async pipeline parallelism       | Needs harness re-architecture    |
+| S37 | Skeleton-then-fill               | Wait for S2/S3 baseline          |
+| S38 | Adversarial ensemble (K7 critic) | Wait for K7 adversarial harness  |
+
+** Retired (DO NOT REVIVE)
+
+| ID | Strategy              | Reason                                  |
+|----+-----------------------+-----------------------------------------|
+| S5 | Constrained decoding (B11 JSON) | Backfired R18: 0 edits applied  |
+| S7 | Context engineering   | Too vague to test                       |
+| S14 | Adversarial training | Subsumed by K20 LoRA path               |
+| S18 | Cost-equalized A/B vs Claude | Spend-headroom doc proved gap   |
+
+* Section 6 — Future direction (R26-R30)
+
+** R26 (next round)
+
+- Wire S1-S4 (composition strategies)
+- K8 confirmation outside B1 (Layer-2 sample)
+- K1 vs K20 LoRA A/B (deploy K20 endpoint via Together)
+- BK6-BK10 long-horizon expansion (after BK1-BK5 R25 baseline)
+- Per-handle LoRAs (K30 @atoz, K31 @data, etc.)
+
+** R27
+
+- Self-host K1+K2 vLLM (P1 from R25 design)
+- Tree-sitter validator (P5)
+- Headless-Emacs cell verifier (P6)
+- S33 speculative decode prototype
+
+** R28-R30
+
+- DSPy-style prompt auto-optimization
+- Multi-LoRA composition (per-handle adapters loaded together)
+- Async pipeline (S34) for critique-revise
+- Tournament self-play between top-3 variants
+
+** Long-term (post-R30)
+
+- Vault RAG fully integrated (Qdrant index already built)
+- LLM-as-task-creator (auto-generate B40-B50 from vault patterns)
+- Self-coded tools (Phase 29 from project notes) — bench detects
+  repeated LLM patterns + proposes deterministic tools
+- Per-user / per-handle calibration (different personas → different
+  weights)
+
+* Section 7 — Cost / spend posture
+
+** Cumulative (R1-R24, R25 in flight)
+
+| Source         | Spend |
+|----------------+-------|
+| OpenRouter (FOSS) | ~$50  |
+| Anthropic (Claude sentinel) | ~$25 |
+| Modal (failed LoRA) | ~$3-5 |
+| RunPod (failed LoRA) | ~$3 |
+| Together (LoRA train) | ~$5-10 |
+| /Total/         | *~$90-100* |
+
+** Per-round budget
+
+- R1-R17: $1-5/round (sequential or 8-way)
+- R18-R24: $2-15/round (16-way + new strategies)
+- R25 target: $15-25 (with K33-K35 large-FOSS probes)
+- R26+ steady-state: $20-30/round
+
+** Cap triggers (G4 / G9)
+
+- Pre-launch: require headroom > round_projection × 1.5
+- Mid-round: pause if spend > 1.5× projection
+- Hard stop: spend > 2× projection writes COST_CIRCUIT_BREAKER
+
+** $/qpt floor (R19-R24 confirmed, R25 verifying)
+
+- K1-qwen30: *$0.0005/qpt* (5/5 rounds stable)
+- Claude K5: *$0.024/qpt* (48-51× over K1)
+- Per-quality-unit advantage holds across n=15 → n=50
+
+* Open questions for the morning (or next step)
+
+These will be answered in the R25 update to this doc:
+
+1. Does K1 hold $0.0005/qpt at n=50? (R25 Layer 1 K1 has finished
+   at this snapshot; awaiting full round leaderboard.)
+
+2. Does K8 generalize beyond B1? (R25 force-adds K8 to Layer 2.)
+
+3. Do K33/K34/K35 large-FOSS variants beat K1 on any task? (R25
+   probes them at n=10 each.)
+
+4. Does Together-trained K20 LoRA beat K1 base? (Endpoint deploy
+   blocked on Together H100 config; deferred to R26.)
+
+5. Does S38 (K7 adversarial role) recover any K7 value? (Deferred
+   to R26 wiring.)
+
+* Cross-references
+
+- =docs/wiki/2026-05-08-r15-r23-grand-synthesis.org= — cross-round verdicts
+- =docs/wiki/2026-05-08-r24-synthesis.org= — most recent round retro
+- =docs/wiki/2026-05-08-r25-design.org= — R25 design with P1-P10 + S33-S40
+- =docs/notes/2026-05-08-bench-arc-post-mortems.org= — PM1-PM6 lessons
+- =docs/wiki/2026-05-08-overnight-r19-r23-brief.org= — round-chain history
+- =docs/wiki/2026-05-08-r25-progress.org= — live R25 daemon log
+- =docs/wiki/2026-05-08-r19-lora-progress.org= — LoRA training timeline
+- =scripts/_round25_dials.py= — current bench harness
+- =scripts/quality_lint.py= — N5 detector implementation
+- =scripts/_r25_autorepair_daemon.sh= — heartbeat + AR recipes

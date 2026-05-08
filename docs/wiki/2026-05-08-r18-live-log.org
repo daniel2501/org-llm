@@ -85,3 +85,425 @@ K15-kimi-thinking  cells=5  score=10.0  cost=$0.0279  cpu=0.00279  noops=0
 K17-glm46  cells=10  score=8.0  cost=$0.0337  cpu=0.00421  noops=0
 K2-kimi-k2.6  cells=15  score=0.0  cost=$0.0426  cpu=null  noops=0
 #+end_src
+
+** [A 2026-05-08 02:18] mid-run diagnosis — K2-kimi DeepInfra tool-format gap
+
+After 15 min / 127 cells (~30%):
+
+- *Most variants recovered* (K1, K7, K6, K5 producing real output)
+- *K8-deepseek-V3 confirmed RECOVERED* — 6 iters, 5 edits, "Completed
+  5 link wraps in literate-tools.org following all quality guardrails."
+- *K2-kimi-k2.6 STILL BROKEN* — 15 cells, all score=0
+  - Inspected one cell: 187s wall, *27,013 chars of pure analysis text*,
+    finish_reason=length, *0 tool_calls* — explained in text mode, never
+    emitted function calls
+  - Provider: DeepInfra
+  - Same model that worked perfectly via Parasail in R14/R15/R16
+
+*Diagnosis.* DeepInfra's serving of moonshotai/kimi-k2.6 does not
+translate kimi's reasoning into OpenAI tool-call format. Kimi
+generates analysis text (its native pre-action narration) but
+DeepInfra's adapter doesn't convert it to =tool_calls=. Parasail
+adapts properly; DeepInfra doesn't.
+
+This is a *broker-serving-quality* issue specific to (Kimi, DeepInfra)
+— not a model regression and not the same as R18 v1's =allow_fallbacks=
+issue.
+
+*R18 v3 fix planned.* Re-pin K2-kimi-k2.6 from DeepInfra back to
+Moonshot/Parasail (the brokers that worked in R14-R17). Wait for v2
+to finish first to preserve the data we have on other variants.
+
+*Other variants still need triage.* K8/K9/K11/K15 each show only
+score=10 across many cells — suspicious that all 4 single-cell-win
+patterns. Could be: only 1 cell scored, others are noise; or scoring
+formula bug. Will re-check on completion.
+
+
+** [autopilot] watching v2 PID 1038443 for exit
+
+
+** [overnight] watching 3 R19-prep agent outputs
+
+** Status check 02:23:16 (R18 v2)
+
+*Process.* PID 1038443, 20:04 elapsed
+*Cells done.* 127
+
+#+begin_src text
+K5-claude-solo  cells=11  score=69.0  cost=$0.9611  cpu=0.01335  noops=0
+K1-qwen30  cells=22  score=48.0  cost=$0.0412  cpu=0.00086  noops=0
+K7-qwen72b  cells=17  score=45.0  cost=$0.0994  cpu=0.00221  noops=0
+K6-llama70b  cells=17  score=38.0  cost=$0.0314  cpu=0.00083  noops=3
+K8-deepseekV3  cells=15  score=10.0  cost=$0.0095  cpu=0.00095  noops=0
+K9-mixtral  cells=5  score=10.0  cost=$0.1147  cpu=0.01147  noops=0
+K11-qwen3coder  cells=10  score=10.0  cost=$0.3835  cpu=0.03835  noops=0
+K15-kimi-thinking  cells=5  score=10.0  cost=$0.0279  cpu=0.00279  noops=0
+K17-glm46  cells=10  score=8.0  cost=$0.0337  cpu=0.00421  noops=0
+K2-kimi-k2.6  cells=15  score=0.0  cost=$0.0426  cpu=null  noops=0
+#+end_src
+
+
+* Round-chain autopilot R19-R23 starting
+[round-chain 02:25:04] started at Fri May  8 02:25:04 AM EDT 2026
+[round-chain 02:25:04] waiting for R18 v2 + v3 chain to complete
+
+
+** [overnight 02:27:39] lora-foss-distill agent COMPLETED
+[overnight 02:27:39] report saved to docs/notes/2026-05-08-r19-prep-lora-foss-distill.org + committed
+[overnight 02:27:39] first 5 lines of report:
+
+#+begin_src text
+:PROPERTIES:
+:ID:       r19-foss-lora-training-report
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R19 — K20-foss-distill LoRA training report
+#+end_src
+[overnight 02:27:39] FOSS LoRA endpoint URL not in pass yet — agent may still be training
+
+
+** [overnight 02:27:39] qdrant-vault-rag agent COMPLETED
+[overnight 02:27:39] report saved to docs/notes/2026-05-08-r19-prep-qdrant-vault-rag.org + committed
+[overnight 02:27:39] first 5 lines of report:
+
+#+begin_src text
+#+TITLE: R19 Track D — Qdrant vault index report
+#+FILETAGS: :r19:rag:qdrant:report:
+
+* Build summary
+- Collection: =org-llm-vault=
+#+end_src
+[overnight 02:27:39] vault_rag.py module wired
+
+
+** [overnight 02:27:39] long-horizon-tasks agent COMPLETED
+[overnight 02:27:39] report saved to docs/notes/2026-05-08-r19-prep-long-horizon-tasks.org + committed
+[overnight 02:27:39] first 5 lines of report:
+
+#+begin_src text
+#+TITLE: R19 Track K — long-horizon multi-file task design
+#+DATE: [2026-05-08]
+#+AUTHOR: claude (design pass for the R19 dial-sweep harness)
+
+* Summary
+#+end_src
+[overnight 02:27:39] long-horizon tasks module ready
+
+
+** [overnight 02:27:39] ALL 3 R19-PREP AGENTS COMPLETE
+[overnight 02:27:39] ready inputs for R19 design pass when user wakes
+
+** R18 v2 COMPLETE — 02:33:16
+
+#+begin_src text
+[02:32:56]         K7-qwen72b  cells=23  score= 91.0  cost=$0.280  $0.0026/u  noops=0
+[02:32:56]     K5-claude-solo  cells=12  score= 87.0  cost=$1.772  $0.0197/u  noops=0
+[02:32:56]        K6-llama70b  cells=23  score= 66.0  cost=$0.065  $0.0010/u  noops=6
+[02:32:56]          K1-qwen30  cells=22  score= 48.0  cost=$0.041  $0.0009/u  noops=0
+[02:32:56]      K8-deepseekV3  cells=15  score= 10.0  cost=$0.010  $0.0010/u  noops=0
+[02:32:56]         K9-mixtral  cells=5  score= 10.0  cost=$0.115  $0.0115/u  noops=0
+[02:32:56]     K11-qwen3coder  cells=10  score= 10.0  cost=$0.384  $0.0384/u  noops=0
+[02:32:56]   K15-kimi-thinking  cells=5  score= 10.0  cost=$0.028  $0.0028/u  noops=0
+[02:32:56]          K17-glm46  cells=10  score=  8.0  cost=$0.034  $0.0042/u  noops=0
+[02:32:56]       K2-kimi-k2.6  cells=15  score=  0.0  cost=$0.043    no-units    noops=0
+[02:32:56] ============================================================
+[02:32:56] 
+[02:32:56] ================================================================================
+[02:32:56] R18 COMPLETE — 140 cells, $2.770 spent
+[02:32:56] ================================================================================
+[02:32:56] ============================================================
+[02:32:56] LEADERBOARD (140 cells done)
+[02:32:56]         K7-qwen72b  cells=23  score= 91.0  cost=$0.280  $0.0026/u  noops=0
+[02:32:56]     K5-claude-solo  cells=12  score= 87.0  cost=$1.772  $0.0197/u  noops=0
+[02:32:56]        K6-llama70b  cells=23  score= 66.0  cost=$0.065  $0.0010/u  noops=6
+[02:32:56]          K1-qwen30  cells=22  score= 48.0  cost=$0.041  $0.0009/u  noops=0
+[02:32:56]      K8-deepseekV3  cells=15  score= 10.0  cost=$0.010  $0.0010/u  noops=0
+[02:32:56]         K9-mixtral  cells=5  score= 10.0  cost=$0.115  $0.0115/u  noops=0
+[02:32:56]     K11-qwen3coder  cells=10  score= 10.0  cost=$0.384  $0.0384/u  noops=0
+[02:32:56]   K15-kimi-thinking  cells=5  score= 10.0  cost=$0.028  $0.0028/u  noops=0
+[02:32:56]          K17-glm46  cells=10  score=  8.0  cost=$0.034  $0.0042/u  noops=0
+[02:32:56]       K2-kimi-k2.6  cells=15  score=  0.0  cost=$0.043    no-units    noops=0
+[02:32:56] ============================================================
+[02:32:56] summary: /home/daniel/repos/org-llm/scripts/_round18_dials_artifacts/summary-1778220192.json
+[02:32:56] live state: /home/daniel/repos/org-llm/scripts/_round18_dials_artifacts/R18_LIVE.json
+#+end_src
+
+
+** [autopilot 02:33:43] v2 EXITED — preparing v3
+[autopilot 02:33:43] v2 final: cells=140 cost=$2.7704
+[autopilot 02:33:43] v2 artifacts moved to /home/daniel/repos/org-llm/scripts/_round18_dials_artifacts/v2/
+[autopilot 02:33:43] harness PROVIDER_PINS updated for K2/K15/K17
+
+
+** [autopilot 02:33:43] launching R18 v3
+[autopilot 02:33:43] v3 PID: 1062882
+[autopilot 02:33:43] v3 watcher PID: 1062884
+
+
+** [autopilot] handed off to v3 + watcher; autopilot exits
+[lora 02:34:41] state=k20-foss-di… Downloading http://pypi-mirror.modal.local:5555/simple/nvidia-curand-cu12/nvidia
+[r19-aggregator 02:35:28] started — watching for 7 analysis reports
+[lora 02:42:54] state=k20-foss-di… retries=0 https://modal.com/apps/daniel2501/main/ap-9ATcS6Bac42FhQiquOr7HL
+
+** Status check 02:43:43 (R18 v3)
+
+*Process.* PID 1062882, 10:00 elapsed
+*Cells done.* 98
+
+#+begin_src text
+K1-qwen30  cells=15  score=12.0  cost=$0.0191  cpu=0.00159  noops=0
+K6-llama70b  cells=10  score=12.0  cost=$0.0047  cpu=0.00039  noops=0
+K5-claude-solo  cells=5  score=10.0  cost=$0.2397  cpu=0.02397  noops=0
+K2-kimi-k2.6  cells=15  score=9.0  cost=$0.0432  cpu=0.0048  noops=0
+K9-mixtral  cells=5  score=9.0  cost=$0.0517  cpu=0.00575  noops=0
+K11-qwen3coder  cells=10  score=8.0  cost=$0.2005  cpu=0.02506  noops=0
+K17-glm46  cells=10  score=8.0  cost=$0.0388  cpu=0.00486  noops=0
+K7-qwen72b  cells=9  score=0.0  cost=$0.0  cpu=null  noops=0
+K8-deepseekV3  cells=15  score=0.0  cost=$0.0024  cpu=null  noops=0
+K15-kimi-thinking  cells=4  score=0.0  cost=$0.0  cpu=null  noops=0
+#+end_src
+[lora 02:52:55] state=k20-foss-di… retries=0 [1ALoading checkpoint shards: 100%|██████████| 16/16 [02:39
+
+** Status check 02:53:43 (R18 v3)
+
+*Process.* PID 1062882, 20:00 elapsed
+*Cells done.* 118
+
+#+begin_src text
+K7-qwen72b  cells=15  score=38.0  cost=$0.1279  cpu=0.00337  noops=0
+K6-llama70b  cells=15  score=23.0  cost=$0.0155  cpu=0.00067  noops=2
+K5-claude-solo  cells=9  score=20.0  cost=$0.5138  cpu=0.02569  noops=0
+K1-qwen30  cells=19  score=14.0  cost=$0.0246  cpu=0.00176  noops=0
+K15-kimi-thinking  cells=5  score=10.0  cost=$0.0307  cpu=0.00307  noops=0
+K2-kimi-k2.6  cells=15  score=9.0  cost=$0.0432  cpu=0.0048  noops=0
+K9-mixtral  cells=5  score=9.0  cost=$0.0517  cpu=0.00575  noops=0
+K11-qwen3coder  cells=10  score=8.0  cost=$0.2005  cpu=0.02506  noops=0
+K17-glm46  cells=10  score=8.0  cost=$0.0388  cpu=0.00486  noops=0
+K8-deepseekV3  cells=15  score=0.0  cost=$0.0024  cpu=null  noops=0
+#+end_src
+[lora 03:02:57] state=k20-foss-di… retries=0   return fn(*args, **kwargs)
+
+** Status check 03:03:43 (R18 v3)
+
+*Process.* PID 1062882, 30:00 elapsed
+*Cells done.* 138
+
+#+begin_src text
+K7-qwen72b  cells=21  score=95.0  cost=$0.2548  cpu=0.00268  noops=0
+K5-claude-solo  cells=12  score=93.0  cost=$1.2125  cpu=0.01304  noops=0
+K6-llama70b  cells=23  score=59.0  cost=$0.0577  cpu=0.00098  noops=5
+K1-qwen30  cells=22  score=48.0  cost=$0.0483  cpu=0.00101  noops=0
+K15-kimi-thinking  cells=5  score=10.0  cost=$0.0307  cpu=0.00307  noops=0
+K2-kimi-k2.6  cells=15  score=9.0  cost=$0.0432  cpu=0.0048  noops=0
+K9-mixtral  cells=5  score=9.0  cost=$0.0517  cpu=0.00575  noops=0
+K11-qwen3coder  cells=10  score=8.0  cost=$0.2005  cpu=0.02506  noops=0
+K17-glm46  cells=10  score=8.0  cost=$0.0388  cpu=0.00486  noops=0
+K8-deepseekV3  cells=15  score=0.0  cost=$0.0024  cpu=null  noops=0
+#+end_src
+[lora 03:12:59] state=k20-foss-di… retries=0 [1A  8%|▊         | 1/12 [13:15<2:25:55, 795.92s/it]
+
+** Status check 03:13:43 (R18 v3)
+
+*Process.* PID 1062882, 40:00 elapsed
+*Cells done.* 139
+
+#+begin_src text
+K7-qwen72b  cells=22  score=107.0  cost=$0.3024  cpu=0.00283  noops=0
+K5-claude-solo  cells=12  score=93.0  cost=$1.2125  cpu=0.01304  noops=0
+K6-llama70b  cells=23  score=59.0  cost=$0.0577  cpu=0.00098  noops=5
+K1-qwen30  cells=22  score=48.0  cost=$0.0483  cpu=0.00101  noops=0
+K15-kimi-thinking  cells=5  score=10.0  cost=$0.0307  cpu=0.00307  noops=0
+K2-kimi-k2.6  cells=15  score=9.0  cost=$0.0432  cpu=0.0048  noops=0
+K9-mixtral  cells=5  score=9.0  cost=$0.0517  cpu=0.00575  noops=0
+K11-qwen3coder  cells=10  score=8.0  cost=$0.2005  cpu=0.02506  noops=0
+K17-glm46  cells=10  score=8.0  cost=$0.0388  cpu=0.00486  noops=0
+K8-deepseekV3  cells=15  score=0.0  cost=$0.0024  cpu=null  noops=0
+#+end_src
+
+
+** [round-chain 03:19:04] R18 (v2+v3) DONE — starting R19 chain
+[round-chain 03:19:04] R18 final: cells=140 cost=$2.1141
+
+
+** [round-chain 03:19:04] === R19: LoRA K20 + RAG + long-horizon (when prep ready) ===
+[round-chain 03:19:04] R19 harness forked from R18 + sed-renamed
+[round-chain 03:19:04] R19 delta: LoRA K20 (if endpoint up) + RAG vault_search + long-horizon tasks
+[round-chain 03:19:04]   LoRA endpoint NOT up — skipping K20 variant for R19
+[round-chain 03:19:04]   long-horizon tasks module ready — TODO wire into harness (R19 v2)
+[round-chain 03:19:04] launching R19
+[round-chain 03:19:04] R19 PID: 1090503
+[lora 03:23:00] state=k20-foss-di… retries=0 [1A  8%|▊         | 1/12 [13:15<2:25:55, 795.92s/it]
+
+** R18 v3 COMPLETE — 03:23:43
+
+#+begin_src text
+[03:17:50]         K7-qwen72b  cells=23  score=113.0  cost=$0.428  $0.0038/u  noops=0
+[03:17:50]     K5-claude-solo  cells=12  score= 93.0  cost=$1.212  $0.0130/u  noops=0
+[03:17:50]        K6-llama70b  cells=23  score= 59.0  cost=$0.058  $0.0010/u  noops=5
+[03:17:50]          K1-qwen30  cells=22  score= 48.0  cost=$0.048  $0.0010/u  noops=0
+[03:17:50]   K15-kimi-thinking  cells=5  score= 10.0  cost=$0.031  $0.0031/u  noops=0
+[03:17:50]       K2-kimi-k2.6  cells=15  score=  9.0  cost=$0.043  $0.0048/u  noops=0
+[03:17:50]         K9-mixtral  cells=5  score=  9.0  cost=$0.052  $0.0057/u  noops=0
+[03:17:50]     K11-qwen3coder  cells=10  score=  8.0  cost=$0.201  $0.0251/u  noops=0
+[03:17:50]          K17-glm46  cells=10  score=  8.0  cost=$0.039  $0.0049/u  noops=0
+[03:17:50]      K8-deepseekV3  cells=15  score=  0.0  cost=$0.002    no-units    noops=0
+[03:17:50] ============================================================
+[03:17:50] 
+[03:17:50] ================================================================================
+[03:17:50] R18 COMPLETE — 140 cells, $2.114 spent
+[03:17:50] ================================================================================
+[03:17:50] ============================================================
+[03:17:50] LEADERBOARD (140 cells done)
+[03:17:50]         K7-qwen72b  cells=23  score=113.0  cost=$0.428  $0.0038/u  noops=0
+[03:17:50]     K5-claude-solo  cells=12  score= 93.0  cost=$1.212  $0.0130/u  noops=0
+[03:17:50]        K6-llama70b  cells=23  score= 59.0  cost=$0.058  $0.0010/u  noops=5
+[03:17:50]          K1-qwen30  cells=22  score= 48.0  cost=$0.048  $0.0010/u  noops=0
+[03:17:50]   K15-kimi-thinking  cells=5  score= 10.0  cost=$0.031  $0.0031/u  noops=0
+[03:17:50]       K2-kimi-k2.6  cells=15  score=  9.0  cost=$0.043  $0.0048/u  noops=0
+[03:17:50]         K9-mixtral  cells=5  score=  9.0  cost=$0.052  $0.0057/u  noops=0
+[03:17:50]     K11-qwen3coder  cells=10  score=  8.0  cost=$0.201  $0.0251/u  noops=0
+[03:17:50]          K17-glm46  cells=10  score=  8.0  cost=$0.039  $0.0049/u  noops=0
+[03:17:50]      K8-deepseekV3  cells=15  score=  0.0  cost=$0.002    no-units    noops=0
+[03:17:50] ============================================================
+[03:17:50] summary: /home/daniel/repos/org-llm/scripts/_round18_dials_artifacts/summary-1778222023.json
+[03:17:50] live state: /home/daniel/repos/org-llm/scripts/_round18_dials_artifacts/R18_LIVE.json
+#+end_src
+[lora 03:33:02] state=k20-foss-di… retries=0 [1A  8%|▊         | 1/12 [13:15<2:25:55, 795.92s/it]
+[lora 03:43:03] state=k20-foss-di… retries=0 [1A  8%|▊         | 1/12 [13:15<2:25:55, 795.92s/it]
+[lora 03:53:05] state=k20-foss-di… retries=0 [1A  8%|▊         | 1/12 [13:15<2:25:55, 795.92s/it]
+[r19-aggregator 03:55:28] 75 min deadline hit — aggregating with 1/7 reports
+[r19-aggregator 03:55:28] aggregated to /home/daniel/repos/org-llm/docs/wiki/2026-05-08-r19-master-plan-inputs.org + committed
+[lora 04:03:06] state=k20-foss-di… retries=0 [1A  8%|▊         | 1/12 [13:15<2:25:55, 795.92s/it]
+[round-chain 04:09:05] R19 COMPLETE: cells=120 cost=$9.7509
+
+
+** [round-chain 04:09:05] === R20: n=25 bump on K2/K8 for variance (proxy for S2 best-of-N) ===
+[round-chain 04:09:05] R20 harness forked from R19 + sed-renamed
+[round-chain 04:09:05] R20 delta: S2 best-of-N voting + S3 critique-revise on prose tasks
+[round-chain 04:09:05]   bumped K2/K8 to n=25 for variance estimation (proxy for S2 vote)
+[round-chain 04:09:05] launching R20
+[round-chain 04:09:05] R20 PID: 1119171
+[lora 04:13:08] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 04:23:09] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 04:33:11] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[round-chain 04:39:05] R20 COMPLETE: cells=140 cost=$4.4056
+
+
+** [round-chain 04:39:05] === R21: tier-A — auto-prune via dead-variant filter ===
+[round-chain 04:39:05] R21 harness forked from R20 + sed-renamed
+[round-chain 04:39:05] R21 delta: tier-A strategies — task allow-list refinement
+[round-chain 04:39:05]   R21: relying on R20 dead-variant filter to auto-prune
+[round-chain 04:39:05] launching R21
+[round-chain 04:39:05] R21 PID: 1138429
+[lora 04:43:13] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[round-chain 04:45:05] R21 COMPLETE: cells=127 cost=$1.1981
+
+
+** [round-chain 04:45:05] === R22: observer-LLM placeholder (manual build needed) ===
+[round-chain 04:45:05] R22 harness forked from R21 + sed-renamed
+[round-chain 04:45:05] R22 delta: observer-LLM placeholder (full impl deferred)
+[round-chain 04:45:05]   R22: observer LLM impl needs runtime additions, skipping for now
+[round-chain 04:45:05] launching R22
+[round-chain 04:45:05] R22 PID: 1143526
+[round-chain 04:49:05] R22 COMPLETE: cells=127 cost=$1.132
+
+
+** [round-chain 04:49:05] === R23: tournament self-play placeholder (manual build needed) ===
+[round-chain 04:49:05] R23 harness forked from R22 + sed-renamed
+[round-chain 04:49:05] R23 delta: tournament self-play placeholder
+[round-chain 04:49:05]   R23: tournament needs judge layer, skipping for now
+[round-chain 04:49:05] launching R23
+[round-chain 04:49:05] R23 PID: 1147848
+[lora 04:53:15] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[round-chain 05:01:05] R23 COMPLETE: cells=127 cost=$1.6117
+
+
+** [round-chain 05:01:05] === R19-R23 chain COMPLETE ===
+[round-chain 05:01:05] morning review pending — check live-log + each round's artifacts
+[lora 05:03:16] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 05:13:18] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 05:23:19] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 05:33:21] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 05:43:22] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 05:53:24] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 06:03:25] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 06:13:27] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 06:23:29] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 06:33:30] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 06:43:32] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 06:53:33] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 07:03:35] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 07:13:37] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 07:23:39] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[lora 07:33:40] state=k20-foss-di… retries=0 WARNING: Logs may not be continuous
+[credit-watcher 07:34:31] started — polling OpenRouter credits every 5 min, floor=$5.00
+[credit-watcher 07:34:31] credits=$90 used=$30.457450647 headroom=$59.54
+[credit-watcher 07:34:31] headroom $59.54 >= $5.00 — launching R21/R22/R23 retry + R24
+[credit-watcher 07:34:31] re-running R21 (existing harness, fresh artifacts)
+[credit-watcher 07:34:31] R21 PID: 1215867
+[lora-runpod 07:47:31] watching pod v66zx1wdcrtzc0 + HF daniel2501/k20-foss-distill
+[lora-runpod 07:47:32] pod=RUNNING uptime=0.0m spend=$0.00 gpu=null%
+[lora-runpod 07:54:12] watching pod jxgnvn01vaps1b + HF daniel2501/k20-foss-distill
+[lora-runpod 07:54:13] pod=RUNNING uptime=0.0m spend=$0.00 gpu=null%
+[lora-runpod 08:04:14] pod=RUNNING uptime=0.0m spend=$0.00 gpu=null%
+[lora-runpod 08:14:16] pod=RUNNING uptime=0.0m spend=$0.00 gpu=null%
+[lora-runpod 08:24:17] pod=RUNNING uptime=0.0m spend=$0.00 gpu=null%
+[lora-runpod 08:28:54] watching pod q1zkmptzg7czhx + HF daniel2501/k20-foss-distill
+[lora-runpod 08:28:54] pod=RUNNING uptime=0.0m spend=$0.00 gpu=null%
+[lora-runpod 08:38:56] pod=RUNNING uptime=0.0m spend=$0.00 gpu=null%
+[lora-daemon 08:49:56] daemon STARTED — polling every 180s
+[lora-daemon 08:49:56] STRATEGY=S_MODAL launching
+[lora-daemon 08:53:27] Modal: not yet progressed but not stuck either; waiting
+[lora-daemon 08:56:28] Modal: not yet progressed but not stuck either; waiting
+[lora-daemon 08:59:28] Modal: not yet progressed but not stuck either; waiting
+[lora-daemon 09:02:29] Modal: not yet progressed but not stuck either; waiting
+[lora-daemon 09:05:29] Modal STUCK — preemption or queue. Killing + retrying
+╭─ Error ──────────────────────────────────────────────────────────────────────╮
+│ No App with name '' found in the 'main' environment.                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+[lora-daemon 09:05:35] STRATEGY=S_MODAL launching
+[lora-daemon 09:09:06] Modal: not yet progressed but not stuck either; waiting
+[lora-daemon 09:12:07] Modal: not yet progressed but not stuck either; waiting
+[lora-daemon 09:15:07] Modal: not yet progressed but not stuck either; waiting
+[lora-daemon 09:18:07] Modal: not yet progressed but not stuck either; waiting
+[lora-daemon 09:21:08] Modal STUCK — preemption or queue. Killing + retrying
+╭─ Error ──────────────────────────────────────────────────────────────────────╮
+│ No App with name '' found in the 'main' environment.                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+[lora-daemon 09:21:14] STRATEGY=S_MODAL launching
+[lora-daemon 09:24:45] Modal: not yet progressed but not stuck either; waiting
+[lora-daemon 09:27:45] Modal: not yet progressed but not stuck either; waiting
+[lora-daemon 09:30:46] Modal: not yet progressed but not stuck either; waiting
+[lora-together 10:21:19] started polling Together job ft-985a8266-3945
+[lora-together 10:21:20] status=running output=pending
+[lora-together 10:24:21] status=running output=pending
+[lora-together 10:27:21] status=compressing output=pending
+[lora-together 10:27:21] unknown status: compressing — continuing
+[lora-together 10:30:22] status=uploading output=pending
+[lora-together 10:30:22] unknown status: uploading — continuing
+[lora-together 10:33:23] status=completed output=pending
+[lora-together 10:33:23] TRAINING COMPLETE — output: 
+[lora-together 10:33:23] endpoint URL + model stored in pass
+[lora-together 10:33:23] poller exit
+[r25-daemon 10:37:24] R25 daemon STARTED — polling every 180s
+[r25-daemon 10:37:24] discovered R25 PID=28922
+[r25-daemon 10:37:24] R25 harness PID=28922; entering monitor loop
+[r25-daemon 10:37:24] heartbeat cells=0 cost=$0 top=?@?
+[r25-daemon 10:40:24] discovered R25 PID=28979
+[r25-daemon 10:40:24] heartbeat cells=54 cost=$0 top=K1-qwen30@278.0
+[r25-daemon 10:43:24] heartbeat cells=67 cost=$0 top=K1-qwen30@401.0
+[r25-daemon 10:46:25] heartbeat cells=89 cost=$0 top=K1-qwen30@401.0
+[r25-daemon 10:48:04] heartbeat cells=105/470 pct=22.3% eta=37.0min rate=9.86/min cost=$0 top=K2-kimi-k2.6@464.0
+[r25-daemon 10:48:04] R25 daemon STARTED — polling every 180s
+[r25-daemon 10:48:04] discovered R25 PID=28979
+[r25-daemon 10:48:04] R25 harness PID=28979; entering monitor loop
+[r25-daemon 10:48:04] heartbeat cells=105/470 pct=22.3% eta=37.0min rate=9.86/min cost=$0 top=K2-kimi-k2.6@464.0
+[r25-daemon 10:51:04] heartbeat cells=133/470 pct=28.3% eta=34.6min rate=9.74/min cost=$0 top=K2-kimi-k2.6@486.0
+[r25-daemon 10:54:04] heartbeat cells=144/470 pct=30.6% eta=37.7min rate=8.65/min cost=$0 top=K2-kimi-k2.6@486.0
+[r25-daemon 10:57:04] heartbeat cells=148/470 pct=31.5% eta=42.8min rate=7.53/min cost=$0 top=K2-kimi-k2.6@486.0
+[r25-daemon 10:59:08] R25 daemon STARTED — polling every 180s
+[r25-daemon 10:59:08] discovered R25 PID=28979
+[r25-daemon 10:59:08] R25 harness PID=28979; entering monitor loop
+[r25-daemon 10:59:08] heartbeat cells=150/470 pct=31.9% eta=46.3min rate=6.91/min cost=$0 top=K2-kimi-k2.6@486.0
+[r25-daemon 10:59:38] cap raised $20 → $100 per user; daemon restarted PID 46844
