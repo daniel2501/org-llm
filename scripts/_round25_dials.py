@@ -133,6 +133,10 @@ print(f"[R24] active variants: {[v[0] for v in VARIANTS]}")
 
 # R25_DESIGN: drop K7 generative
 _R25_DROP_GENERATIVE = {"K7-qwen72b"}
+# R26 P1-1/P1-2/P1-5 — extend drops: K17 (loops both brokers), K33 (slug=K11), K34/K35 (dead OR slugs)
+_R26_DROPPED = {"K17-glm46", "K33-qwen3-coder-72b", "K34-deepseek-v3-pro", "K35-llama-3.1-405b"}
+VARIANTS = [v for v in VARIANTS if v[0] not in _R26_DROPPED]
+print(f"[R26] dropped K17/K33/K34/K35 from active pool ({len(VARIANTS)} active variants remain)")
 VARIANTS = [v for v in VARIANTS if v[0] not in _R25_DROP_GENERATIVE]
 print(f"[R25] dropped K7-qwen72b from generative pool ({len(VARIANTS)} active variants remain)")
 
@@ -1669,21 +1673,34 @@ def execute_cell(task, variant, dial, layer_label):
         suffix += 1
         cell_dir = base.with_name(f"{base.name}__s{suffix}")
     cell_dir.mkdir(parents=True, exist_ok=True)
-    # R25 fix — enforce WALL_CAP_PER_CELL_S at runtime via a sub-future.
-    # PM3 / R25 walltime agent: one K2 cell ran 1612s (27 min) holding
-    # Layer 1 open for 9 min. The constant existed but no enforcement.
-    # On timeout we abandon the inner thread (Python can't kill it
-    # cleanly) but the outer worker is freed for the next cell, so
-    # parallelism keeps flowing.
+    # R26 P0-3 — enforce WALL_CAP at runtime via TPE-without-context-manager.
+    # The R25 version used `with TPE(max_workers=1) as _inner` which
+    # called shutdown(wait=True) on context-exit, blocking the OUTER
+    # worker until the inner thread finished. Cells got the
+    # `wall_cap_killed:400s` LABEL but `wall_seconds` actually ran
+    # 455-1697s (R25 walltime agent §2). The cap was a label, not a kill.
+    #
+    # Fix: drop the `with` so shutdown(wait=False) lets the outer worker
+    # return immediately. The inner thread keeps running in background
+    # until natural completion (Python can't kill threads cleanly), but
+    # the outer pool worker is FREED — parallelism keeps flowing.
+    #
+    # Acceptance probe: spawn synthetic 500s cell; assert outer worker
+    # exits within 410s. (Inner thread leak is bounded; tracked in P2-?
+    # for future multiprocessing.Process replacement when we're willing
+    # to handle pickling all task/variant/dial/cell_dir args.)
     from concurrent.futures import ThreadPoolExecutor as _TPE, TimeoutError as _FTO
     _wall_cap = globals().get("WALL_CAP_PER_CELL_S", 600)
+    _inner = _TPE(max_workers=1)
     try:
-        with _TPE(max_workers=1) as _inner:
-            _fut = _inner.submit(run_one_cell, task, name, model_id, mode,
-                                  dial, cell_dir)
-            cell = _fut.result(timeout=_wall_cap)
+        _fut = _inner.submit(run_one_cell, task, name, model_id, mode,
+                              dial, cell_dir)
+        cell = _fut.result(timeout=_wall_cap)
+        _inner.shutdown(wait=False)
     except _FTO:
         log(f"      ! {name} WALL_CAP_KILLED on {task['id']} (>{_wall_cap}s)")
+        # Don't wait for inner thread; let it leak. Outer worker freed.
+        _inner.shutdown(wait=False)
         cell = {"variant": name, "task_id": task['id'],
                   "error": f"wall_cap_killed:{_wall_cap}s",
                   "wall_cap_killed": True,
@@ -1691,6 +1708,7 @@ def execute_cell(task, variant, dial, layer_label):
                   "dial_label": dial.label()}
         write_cell_result(cell_dir, cell)
     except Exception as exc:
+        _inner.shutdown(wait=False)
         log(f"      ! {name} ERROR: {exc}")
         cell = {"variant": name, "task_id": task['id'],
                   "error": str(exc), "dial": asdict(dial),

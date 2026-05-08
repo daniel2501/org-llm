@@ -83,7 +83,8 @@ variant name.
 assert response =output_chars ≤ 16k= (4096 tokens × ~4 chars/tok
 = ~16k char ceiling). Run 3 sample probes; all must pass.
 
-** DOING P0-3: WALL_CAP runtime kill (via multiprocessing.Process) (replace ThreadPoolExecutor shim)
+** DONE P0-3: WALL_CAP runtime kill (TPE without context-manager)
+   - shipped; outer worker freed at cap (probe: 5s exit on 5s cap = PASS); inner thread leaks until natural exit (acceptable trade) (replace ThreadPoolExecutor shim)
 :PROPERTIES:
 :ESTIMATE: 1 hr
 :SOURCE:   r25-walltime §2; case-studies §P0
@@ -166,7 +167,7 @@ non-zero with the failed-probe name in stderr.
 
 * P1 — config + setup for the R26 launch itself
 
-** TODO P1-1: Drop K34/K35 from VARIANTS list
+** DONE P1-1: Drop K34/K35 from VARIANTS list
 :PROPERTIES:
 :ESTIMATE: 5 min
 :SOURCE:   r25-providers §3; case-studies §P1
@@ -177,7 +178,7 @@ K34 = HTTP 400 dead slug (DeepSeek-V3-Pro doesn't exist on OR);
 K35 = HTTP 404 (Llama-3.1-405b slug invalid). Both wasted 1 L1
 cell each in R25.
 
-** TODO P1-2: Rename or drop K33
+** DONE P1-2: Drop K33 (slug duplicates K11)
 :PROPERTIES:
 :ESTIMATE: 10 min
 :SOURCE:   r25-providers §4; case-studies §P1
@@ -211,7 +212,7 @@ prefill stall. Set =MODAL_KIMI_ENABLED=1= in R26 launch env;
 verify Modal endpoint still responsive (not subject to billing
 cap).
 
-** TODO P1-5: Drop K17-glm46 from active roster
+** DONE P1-5: Drop K17-glm46 from active roster
 :PROPERTIES:
 :ESTIMATE: 5 min
 :SOURCE:   r25-providers §5; case-studies §P1
