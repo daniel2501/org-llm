@@ -155,7 +155,7 @@ REFUSES TO LAUNCH if more than 30% of variants fail.
 assert it returns =PREFLIGHT_FAIL= sentinel + variant
 removed-from-round logged.
 
-** TODO P0-6: Patch verification step in _r26_design_patch.py
+** DONE P0-6: Patch verification step in _r26_design_patch.py
 :PROPERTIES:
 :ESTIMATE: 2 hr
 :SOURCE:   case-studies §P1-12; PM6
