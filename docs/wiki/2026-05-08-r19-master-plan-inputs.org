@@ -1,0 +1,230 @@
+:PROPERTIES:
+:ID:       r19-master-plan-inputs
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R19 master-plan inputs — concatenated cross-round analyses
+#+FILETAGS: :wiki:r19:design:master-plan:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Auto-aggregated by =scripts/_r19_master_plan_aggregator.sh=
+when 7 cross-round analysis agents finished overnight 2026-05-08.
+Each section below is the verbatim content of one agent's report.
+Use this as the input batch for the next session's R19 design pass.
+
+*Expanded.* Per the meta-synthesizer agent's note, true synthesis
+needs LLM judgment; this aggregator simply assembles the inputs
+in one place so morning-Claude can scan them and produce
+=docs/wiki/2026-05-08-r19-master-plan.org= with proper section-by-
+section synthesis (10-section template documented in the meta-synth
+spawn prompt).
+
+* Reports included
+
+- =/tmp/r19-cross-round-quality-trend.org= MISSING (agent didn't finish in time)
+- =/tmp/r19-pareto-evolution.org= MISSING (agent didn't finish in time)
+- =/tmp/r19-failure-mode-taxonomy.org= MISSING (agent didn't finish in time)
+- =/tmp/r19-variant-longevity.org= MISSING (agent didn't finish in time)
+- =/tmp/r19-best-strategy-per-shape.org= MISSING (agent didn't finish in time)
+- =/tmp/r19-outlier-deepdive.org= MISSING (agent didn't finish in time)
+- =/tmp/r19-strategy-effectiveness.org= ✓
+
+
+* === r19-cross-round-quality-trend ===
+
+/(report not produced)/
+
+
+* === r19-pareto-evolution ===
+
+/(report not produced)/
+
+
+* === r19-failure-mode-taxonomy ===
+
+/(report not produced)/
+
+
+* === r19-variant-longevity ===
+
+/(report not produced)/
+
+
+* === r19-best-strategy-per-shape ===
+
+/(report not produced)/
+
+
+* === r19-outlier-deepdive ===
+
+/(report not produced)/
+
+
+* === r19-strategy-effectiveness ===
+
+:PROPERTIES:
+:ID:       r19-strategy-effectiveness
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R18 v2 — strategy S1-S32 effectiveness audit
+#+FILETAGS: :wiki:r19:audit:strategies:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R18 v2 finished at 02:32 EDT with 140 cells / $2.77 spent
+(0.7% of $375 cap). Of the 32 catalogued strategies, only 2 were
+actually wired into ~main()~ — S5 (constrained decoding) and S6
+(Modal-Kimi, gated off). S1/S2/S3/S4 exist as orphaned constants
+(~HEDGED_ESCALATIONS~, ~BEST_OF_N_TASKS~, ~CRITIQUE_REVISE_TASKS~,
+~TASK_FAMILY_VARIANTS~) but ~main()~ never references them. S7-S20
++ S21-S32 are paper-only.
+
+*Expanded.* R18's realized improvements were all R17-era infra
+carry-forward (worktree mutex, advisory-pin revert, append-only
+enforcement, judge-fixes header, per-task tool gating). Headline
+finding: the new strategies that were actually wired produced no
+measurable quality lift. The wins are all R17 carry-forward. S5
+JSON-mode BACKFIRED — every B11 cell emitted valid JSON to text
+but ~edits_applied=0~ since harness has no JSON→org renderer.
+
+* Strategy implementation status (S1-S32)
+
+| ID         | Tier | Strategy                       | Implementation        | In main loop? |
+|------------+------+--------------------------------+-----------------------+---------------|
+| S1         | S    | Hedged-strong execution        | constants only        | NO            |
+| S2         | S    | Best-of-N voting               | constants only        | NO            |
+| S3         | S    | Critique-then-revise           | constants only        | NO            |
+| S4         | S    | Specialty routing per family   | constants only        | NO            |
+| S5         | S    | Constrained decoding (B11 JSON)| WIRED                 | YES           |
+| S6         | S    | Modal-Kimi pre-warmed pool     | WIRED, deployed       | YES (off)     |
+| S9         | A    | RAG-lite                       | R19-prep agent landed | NO (R19)      |
+| S10        | A    | Per-handle LoRAs               | R19-prep agent landed | NO (R19)      |
+| S12        | A    | Provider failover              | partial (advisory)    | YES (degraded)|
+| S25        | S*   | Constitutional AI              | partial (R17 carry)   | YES (degraded)|
+| S30        | A*   | Pre-edit verification          | partial (prompt-only) | YES           |
+| S7-S8 etc  | A/B  | various                        | not present           | NO            |
+
+* Did the targeted metric improve in R18 v2?
+
+| ID                | Targeted metric              | R17 baseline       | R18 v2                                        | Improved?       |
+|-------------------+------------------------------+--------------------+-----------------------------------------------+-----------------|
+| S5 constrained    | B11 format errors → 0        | K2 missed Expanded | format 100% valid; *edits_applied=0 across 4* | *NO — backfired*|
+| S6 Modal-Kimi     | Kimi p90 190s → 30s          | K2 mean ~187s      | DISABLED in v2                                | N/A             |
+| S25 judge-fixes   | reduce verbatim+UUID-fab     | Claude 1 fab/cell  | K7 1 ablation cell fab=5; rest fab≈0          | partial         |
+| S30 survey-edit   | prevent silent_noop          | K6 noop=3          | K6 noop=6 (worse), K2 0/15                    | NO              |
+| Worktree mutex    | parallel race kills          | races              | 0 errors                                      | YES             |
+| Advisory revert   | tool-format silent_noops     | n/a                | K8/K11/K15/K17 still flat                     | partial         |
+| Append-only       | B11 mass deletion            | K1 1643-line del   | 0 B11 deletions                               | YES (held)      |
+
+* Per-strategy impact estimate
+
+| ID                         | Δquality        | Δcost  | Δwall      | Notes                  |
+|----------------------------+-----------------+--------+------------+------------------------|
+| S1 hedged                  | 0               | 0      | 0          | not wired              |
+| S2 best-of-N               | 0               | 0      | 0          | not wired              |
+| S3 critique-revise         | 0               | 0      | 0          | not wired              |
+| S4 specialty rt            | 0               | 0      | 0          | not wired              |
+| S5 JSON-mode               | *−7 to −10 B11* | ~0     | −60s       | NEGATIVE               |
+| S6 Modal-Kimi              | 0               | 0      | 0          | deployed but disabled  |
+| S25 judge fixes            | +2-3 (carried)  | 0      | 0          | inherited R17          |
+| S30 survey-before-edit     | +0-1            | 0      | +5-10s     | weak                   |
+| infra mutex                | reliability     | 0      | 0          | enables 16-way         |
+| infra pins                 | mixed           | 0      | 0          | broker-side gap        |
+| infra append-only          | downside guard  | 0      | 0          | held                   |
+| infra $5 budget + 16/24 it | longer cells    | +small | +variable  | K7-B25 ran 14 iters    |
+
+R18 v2 leaderboard per-cell averages: Claude 7.25, K7 3.96, K6 2.87,
+K1 2.18 — Claude still wins per-cell; the "FOSS beats Claude"
+narrative the strategies were designed to prove is *not* visible
+in v2 data.
+
+* Top-5 strategies to KEEP and SCALE for R19
+
+| Rank | Strategy                        | Reason                                                                     | R19 action                                              |
+|------+---------------------------------+----------------------------------------------------------------------------+---------------------------------------------------------|
+|    1 | S1 hedged-strong execution      | Right idea, never wired; K7 $0.0026/u and K11 $0.0384/u opposite ends      | wire ~run_with_escalation~ around layer-2; thresh ≥12   |
+|    2 | S2 best-of-N voting (FOSS)      | Cheapest cells (K1 $0.0009/u, K6 $0.001/u): n=5 vote = $0.005 < one K11    | wire ~run_best_of_n~ for B5/B11/B20; modal-stop on agree|
+|    3 | S3 critique-then-revise         | Two cheap models > one premium; addresses K2 missed-Expanded structurally  | wire K1 draft → K2 critique → K1 revise on B11+B5       |
+|    4 | S4 specialty routing per family | TASK_FAMILY_VARIANTS already tuned, just unused                            | reference TASK_FAMILY_VARIANTS in cell_specs            |
+|    5 | S25 judge-fixes / constitutional| Highest ROI artifact; free quality, prompt-only                            | extend with B5/B7-specific principles + structured check|
+
+* Strategies to RETIRE or PROVE BROKEN
+
+| ID                        | Verdict                | Why                                                                  |
+|---------------------------+------------------------+----------------------------------------------------------------------|
+| *S5 constrained (B11)*    | RETIRE in current form | Replaced edits with JSON text; need JSON→org post-processor (= N2)   |
+| S6 Modal-Kimi pool        | DEFER + measure        | Endpoint deployed but disabled; needs pre-flight latency probe       |
+| S7 context engineering    | RETIRE                 | Too vague to test; subsumed by S25                                   |
+| S8 scratchpad memory      | RETIRE                 | No FOSS model in v2 used scratchpad space                            |
+| S11 Reflexion             | DEFER to R20           | Needs fail-success labels; tractable only after BK1-BK5              |
+| S13 quality-aware modal-stop | DEFER to R20        | Needs reliable per-cell quality signal                               |
+| S14 adversarial training  | RETIRE                 | Requires LoRA pipeline; too far from catalog leverage                |
+| S15 tool-discovery prompt | RETIRE                 | All v2 cells ignored list_dir-class probes                           |
+| S17 multi-modal compose   | RETIRE                 | Subsumed by S3+S4                                                    |
+| S18 cost-equalized A/B    | RETIRE                 | Spend-headroom doc already proved gap                                |
+| S20 self-judge            | DEFER                  | Same-model bias risk                                                 |
+| S21,S22,S31,S32           | already RETIRED        | per user 2026-05-08                                                  |
+| S23 learned router        | DEFER to R20           | Needs ≥500 (task,variant,score) tuples; v2 produced 140              |
+| S24 iterative refinement  | MERGE into S3          |                                                                      |
+| S26 speculative decoding  | RETIRE                 | Provider-side, not a harness lever                                   |
+| S27 confidence-weighted   | DEFER                  | Needs T14 calibration first                                          |
+| S28 symbolic-LLM B40      | KEEP, move to tracker  | Wrong round                                                          |
+| S29 memory-augmented      | RETIRE                 | Same as S8                                                           |
+| S30 pre-edit verification | KEEP as prompt-only    | No need to elevate                                                   |
+
+* New strategies the audit reveals as gaps
+
+The catalog mostly added complexity. Four gaps it /missed/ explain
+real v2 failures:
+
+| New ID | Strategy                          | Mechanism                                                                         | Why audit reveals                                                |
+|--------+-----------------------------------+-----------------------------------------------------------------------------------+------------------------------------------------------------------|
+| *N1*   | Broker-serving capability matrix  | Pre-run probe each (model, broker) with 1-tool-call test; route only to working   | K2-DeepInfra and K8/K11/K15/K17 silent_noops are broker bugs     |
+| *N2*   | JSON-to-org renderer (proper S5)  | Deterministic post-processor turns B11_RESPONSE_FORMAT JSON → edit_file call      | S5 was right idea, half-implemented                              |
+| *N3*   | Task-pair expectation gate        | Before scheduling (variant, task) cells, check past data: if score=0 in last N    | K2 went 0/15 on B1 — wasted ~190s × 15 = 47 min + $0.04          |
+| *N4*   | Wire-the-catalog mandate          | Catalog entries not referenced by main() get stripped or labeled :DRAFT:          | 4 of 6 Tier-S strategies were dead constants                     |
+| *N5*   | Per-cell ground-truth verifier    | B25/B26: load file in sub-Emacs and run asserted call; B11: validate :ID: grammar | K7-B25 wrote correct elisp but no auto-check fired               |
+
+* Process-level findings
+
+- *Catalog inflation outpaced wiring.* 32 strategies + 28 tests
+  catalogued; ~6 partly wired; ~2 actually driving cells.
+- *S1-S4 are the cheapest wins still on the table.* Combined wiring
+  effort ~80-120 lines.
+- *Spend ($2.77) was 0.7% of cap.* The "spend headroom" framing
+  encouraged catalog growth but didn't translate to executed cells —
+  v2 ended at 140 cells vs the 1500-2600 maximalist estimate. Gating
+  constraint was /implementation/, not budget.
+- *R18 v3* IS running (PID 1062882, started 02:33 EDT) — agent's
+  initial claim was incorrect; v3 autopilot did fire and re-pinned
+  K2/K15/K17 brokers per plan.
+
+* R19 recommended portfolio
+
+| Layer                  | Items                                                              | Cells | Cost      |
+|------------------------+--------------------------------------------------------------------+-------+-----------|
+| Infra                  | N1 broker probe, N2 JSON→org, N3 task-pair gate, v3 K2 re-pin      | 0     | <$0.10    |
+| Strategy v1 must-wire  | S1, S2, S3, S4                                                     | ~300  | ~$2-4     |
+| Strategy v1 carry      | S25, S30                                                           | embed | $0        |
+| Tests                  | T2 long-horizon (BK1-BK5 ready), T3 regression, T15 validity, N5   | ~250  | ~$3-5     |
+| R20 backlog            | S11, S13, S23, T13                                                 | -     | -         |
+
+*R19 total estimate*: ~550 cells, ~$8-15, 2-4h wall — focused,
+ambitious-where-it-counts. Do *not* re-attempt the maximalist
+1500-2600 cell plan until S1-S4 are proven in a ~200-cell pilot.
+
+* Cross-references
+
+- =docs/wiki/2026-05-08-r18-tests-and-strategies.org= — S1-S20 / T1-T10 catalog
+- =docs/wiki/2026-05-08-r18-blow-claude-out-of-water.org= — S21-S32 / T11-T28
+- =scripts/_round18_dials.py= — implementation
+- =scripts/_round18_dials_artifacts/v2/= — R18 v2 results
+- =docs/notes/2026-05-08-r19-prep-long-horizon-tasks.org= — Track K (BK1-BK5)
+
