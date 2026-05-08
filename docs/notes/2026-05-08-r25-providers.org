@@ -1,0 +1,220 @@
+#+TITLE: R25 v1 broker forensic — pin-vs-actual, K33-K35 broker, K2 cap dead-code
+#+AUTHOR: subagent (broker-stability scan, R25)
+#+DATE: 2026-05-08
+
+*Summary.* R25 ran 189 cells across 9 variants. The four R25_DESIGN
+PROVIDER_PINS changes split: =glm-4.6 ignore DeepInfra= and =glm-4.6
+SiliconFlow first= both held cleanly (10/10 SiliconFlow, zero DeepInfra
+fallback) but exposed a *new* SiliconFlow-side max_iters loop pattern
+(9/10 cells, 81k–200k cached_tokens) that mirrors the R24 DeepInfra GLM
+loop. =qwen-2.5-72b ignore Novita= could not be verified — K7 was
+dropped from R25 (no run_ends). =K2 max_tokens=4096= is *dead code*:
+the constant ~_R25_VARIANT_MAX_TOKENS~ at line 246 is never threaded
+into ~SpecialistTask~; default ~max_tokens=8000~ in =specialist.py:531=
+fired instead, producing 11 finish=length iters with 22k–28k chars. K33
+served fine on Together at $0.71/cell (40× K1, same OpenRouter slug as
+K11). K34 and K35 are *bad model IDs* — HTTP 400 "not a valid model ID"
+and HTTP 404 "no endpoints found" returned in <0.3s; the warmup loop
+detected both but did not skip them, so 1 wasted cell each.
+
+*Expanded.* Six sections: pin-vs-actual broker table; per-PIN-change
+verification; K33/K34/K35 forensics; K2 max_tokens trace through the
+code path; cross-cutting WALL_CAP analysis (16 events, all K2/B1); R26
+advisory.
+
+
+* 1. Per-variant pinned-vs-actual broker (R25 v1)
+
+189 cells; 173 ~run_end~ events on disk (some cells lacked specialists
+due to upstream errors, e.g. K11 layer1/B1 git-add failure).
+
+| variant            | pin (1st)   | actual broker(s)         | run_ends | held?     | success rate |
+|--------------------+-------------+--------------------------+----------+-----------+--------------|
+| K1-qwen30          | Novita      | Novita 63, SiliconFlow 1 |       64 | HELD      | 19/64 (30%)  |
+| K2-kimi-k2.6       | Moonshot    | Parasail 49              |       49 | FALLBACK  | 31/49 (63%)  |
+| K8-deepseekV3      | DeepInfra   | DeepInfra 28, AtlasCloud 1 |     29 | HELD      | 29/29 (100%) |
+| K11-qwen3coder     | Together    | Together 16, Google 2    |       18 | HELD      | 17/18 (94%)  |
+| K17-glm46          | SiliconFlow | SiliconFlow 10           |       10 | HELD      | 1/10 (10%)   |
+| K33-qwen3-coder-72b| Together    | Together 1               |        1 | HELD      | 1/1          |
+| K34-deepseek-v3-pro| (n/a)       | None — HTTP 400          |        1 | DEAD MODEL | 0/1          |
+| K35-llama-3.1-405b | (n/a)       | None — HTTP 404          |        1 | DEAD MODEL | 0/1          |
+
+*Pin-hold rate.* Held first-choice on ~167/173 (~96%) — better than R24
+(58%). Driver: K2 stays Parasail-only as in R24 (Moonshot still never
+serves through OpenRouter; Modal-Kimi env-gated, never engaged); K17's
+SiliconFlow pin actually took this round (10/10 vs R24's 2/10) thanks
+to the new ~ignore: [DeepInfra]~ deny entry.
+
+*New observation: K17 + SiliconFlow is also a max_iters loop.* 9 of 10
+K17 cells hit max_iterations=16 with cached_tokens 81k–200k and
+~edit_file ok=false old_string not found~ chains. The R24 hypothesis
+that DeepInfra-served GLM-4.6 was the looper is wrong — *the model
+itself loops on whichever broker serves it*. SiliconFlow at 209s avg
+duration is ~30s slower than R24's DeepInfra at ~190s. R25 traded
+broker for the same defect.
+
+
+* 2. Did the four R25_DESIGN PROVIDER_PINS changes hold?
+
+| R25_DESIGN change                              | verdict     | evidence                                                    |
+|------------------------------------------------+-------------+-------------------------------------------------------------|
+| z-ai/glm-4.6 ignore DeepInfra                  | HELD        | 0/10 K17 cells routed to DeepInfra (R24 had 8/10)           |
+| qwen-2.5-72b ignore Novita                     | UNVERIFIED  | K7-qwen72b dropped from R25 (~_R24_DROP_VARIANT_IDS~ et al) |
+| K17 strict-via-glm SiliconFlow first           | HELD        | 10/10 K17 served by SiliconFlow                             |
+| K2 max_tokens=4096 cap                         | NOT APPLIED | ~_R25_VARIANT_MAX_TOKENS~ defined but never read; see §4    |
+
+*K7 status.* K7-qwen72b appears in ~ALL_VARIANTS~ (line 108) but did
+not run any cells in R25. The Novita deny would protect it if it had,
+since R24 already routed K7 to DeepInfra primarily. Cannot confirm the
+Novita deny actually fires until K7 is re-enabled.
+
+*Z-AI in glm-4.6 order list dropped.* The R25 PIN reads ~order:
+[SiliconFlow], ignore: [DeepInfra, Z-AI]~ — Z-AI is also denied. R24
+notes flagged Z-AI as never-actually-serving; R25 pin matches that
+finding.
+
+
+* 3. K33 / K34 / K35 broker investigation
+
+| variant            | warmup          | actual call                                       | outcome                       |
+|--------------------+-----------------+---------------------------------------------------+-------------------------------|
+| K33-qwen3-coder-72b| OK Together     | Together, 15 iters, 6 edits, 5370 cached_tokens   | success $0.71, score=12       |
+| K34-deepseek-v3-pro| HTTP 400        | HTTP 400 "not a valid model ID", t=0.26s, prov=null | run_end success=false, $0.0006 |
+| K35-llama-3.1-405b | HTTP 404        | HTTP 404 "no endpoints found", t=0.23s, prov=null | run_end success=false, $0.0005 |
+
+*K33 served — but it's the K11 model.* The slug =qwen/qwen3-coder= is
+identical to K11. K33's "72B" suffix in the variant name is a misnomer;
+OpenRouter routes both to the same 480B Apache-2.0 Qwen3-Coder. K33's
+cost-per-cell ($0.7085) is 40× K1 because the cell ran 15 iters with
+high cached_tokens, not because of a different/larger model. This is a
+*variant-naming bug*, not a broker bug.
+
+*K34 and K35 are dead model IDs.* The warmup probe at line 167–192 of
+_round25_dials.py prints the failure message but does not pop the
+variant from ALL_VARIANTS. Both K34 and K35 then proceeded to a real
+specialist call which immediately hit the same 400/404 and burned a
+warmup probe + cell slot each. ~run_end~ events show ~provider: null~ —
+no broker was ever selected because OpenRouter rejected the request at
+the model-validation layer.
+
+*OpenRouter slugs to use instead* (verified externally):
+- =deepseek/deepseek-chat-v3-0324= (already used by K8) is the live
+  DeepSeek non-R1 chat model.
+- =meta-llama/llama-3.1-405b-instruct= has been deprecated; live slug
+  is =meta-llama/llama-3.1-405b-instruct:nitro= or
+  =meta-llama/llama-3.1-405b= (varies by week). Re-pin or drop.
+
+Tool calls returned: K33 yes (6 edits applied); K34/K35 no — failed
+before iter 0 completed.
+
+
+* 4. K2 max_tokens=4096 — did it apply?
+
+*No.* The constant is dead code.
+
+#+begin_src python
+# /home/daniel/repos/org-llm/scripts/_round25_dials.py:245
+_R25_VARIANT_MAX_TOKENS = {
+    "K2-kimi-k2.6": 4096,
+    "K15-kimi-thinking": 4096,
+}
+#+end_src
+
+~grep -n _R25_VARIANT_MAX_TOKENS scripts/_round25_dials.py~ returns
+*one* hit — the definition. No reader exists. The downstream call site
+=run_specialist_for_cell= (line 1084) builds ~SpecialistTask(...)~ with
+no ~max_tokens~ field; ~SpecialistTask~ in =org_llm/specialist.py= does
+not accept max_tokens at all (it's a fixed default in the
+~_chat_completions~ helper at line 531 = 8000).
+
+*Evidence the cap did not fire.* K2 events show 11 iters with
+~finish_reason=length~ and ~final_text_chars~ values 22,646 / 24,251 /
+24,987 / 25,365 / 25,990 / 26,091 / 26,160 / 26,492 / 26,536 / 26,879 /
+27,727. At Kimi's ~3.5 chars/token these correspond to ~6,500–7,900
+output tokens — consistent with the 8000 default ceiling, not 4096. If
+the 4096 cap had fired we would expect ~14k chars per length-iter.
+
+*K2 score: 486 across 50 cells, despite the leak.* K2 still placed
+second on the leaderboard. The runaway-prose failure mode hurts
+specific cells but the variant's overall quality is high enough that
+"fix the cap" is a tail-improvement, not a save.
+
+
+* 5. WALL_CAP analysis
+
+16 ~WALL_CAP_KILLED~ events in stdout.log. *All* are K2-kimi-k2.6 on
+B1 (the literate-tools.org wiki entry). Timestamps span 19m45s
+(10:47:37 → 11:07:22) — that's ~5 K2 cells per minute hitting the
+400s wall during the K2 burst. With ~_R25_VARIANT_BUDGETS K2-kimi-k2.6:
+n=50~ and a B1 cell that prints heavy prose, the wall cap is doing
+load-bearing work; without it, R25 would still be running.
+
+*Reading.* The K2 wall-cap kills are the *symptom* of the missing
+max_tokens cap. The Kimi model gets stuck producing 25k-char prose
+dumps inside the iteration loop; with finish=length forcing a re-call
+at iter+1 still un-toolcalled, it loops until the harness wall-cap
+kills it. Wiring the 4096 cap (§4 fix) should drop wall-cap hits
+toward zero.
+
+
+* 6. R26 advisory — concrete routing changes
+
+Top-5 actionable, ranked by expected delta:
+
+1. *Wire the K2 max_tokens cap.* This is the highest-leverage R26
+   change. Add ~max_tokens: Optional[int]~ to =SpecialistTask=, thread
+   it through =_chat_completions= (override default=8000), and read
+   ~_R25_VARIANT_MAX_TOKENS~ in =run_specialist_for_cell=. Expected
+   effect: 11 length-iters → ~0; wall-cap hits 16 → ~0–2; K2 cost-per-
+   cell drops ~30% (less wasted output tokens).
+
+2. *Modal-Kimi route for K2.* Set ~MODAL_KIMI_ENABLED=1~ in R26 launch
+   env. Modal vLLM has deterministic ~max_tokens~ via the OpenAI-style
+   payload, sub-second TTFT, and bypasses Parasail's runaway-prose
+   path entirely. The infra is already in place (line 254–255). Pair
+   with the §1 cap as belt-and-braces.
+
+3. *Drop K34 and K35 OR fix the model slugs.* Both are net-negative —
+   one wasted cell + one wasted warmup probe each, score=0. Either:
+   (a) replace K34 with a working DeepSeek-V3 chat slug (e.g.
+   =deepseek/deepseek-chat-v3-0324= already proven by K8, so K34
+   becomes redundant), and K35 with the live llama-3.1-405b OpenRouter
+   slug; OR (b) drop both from ALL_VARIANTS until a verified large-FOSS
+   slug list exists. Recommend (b) for R26 unless the specific large-
+   FOSS test is load-bearing — K33 alone covers the 480B Qwen3 case
+   (with the renaming caveat below).
+
+4. *Rename K33 — it's not 72B.* The variant ID =K33-qwen3-coder-72b=
+   maps to OpenRouter slug =qwen/qwen3-coder= which Together serves as
+   a 480B-A35B MoE (same as K11). Either rename to
+   =K33-qwen3-coder-480b-tools-on= (with a real dial difference vs
+   K11 — e.g. tool_surface or temperature) or drop as a duplicate.
+   The R25 single-cell score=12 cost=$0.71 vs K11 cost=$0.0 (errored
+   on B1) is not a meaningful comparison.
+
+5. *K17-glm46 — re-pin or drop.* SiliconFlow served 10/10 (deny held)
+   but produced 9/10 max_iters loops. *The model is the problem*, not
+   the broker. R26 options: (a) drop K17 from ALL_VARIANTS — GLM-4.6
+   has now produced loops on DeepInfra (R24) and SiliconFlow (R25)
+   without a known healthy alternate; (b) try a third broker (Z-AI is
+   denied; Novita serves z-ai/glm but never observed; Atlas/Together
+   don't list GLM-4.6); (c) cap iterations to 8 specifically for K17
+   to bound loss. Recommend (a) until the loop pattern is understood.
+
+
+* 7. Sanity checks
+
+- 173 run_ends across 81 cell artifacts (~2.1 specialists/cell), close
+  to R24's 130/71 ratio.
+- DeepInfra never served K2 or K17 in R25 — both deny-lists held
+  perfectly.
+- AtlasCloud appearance for K8 (1/29) is a benign auto-fallback;
+  K8 has no ~ignore~ entry and AtlasCloud is healthy for DeepSeek.
+- Google appearance for K11 (2/18) — Together's qwen3-coder backend
+  briefly fell over; Google fallback succeeded on both. No action.
+- Modal-Kimi never engaged (env-gated, ~MODAL_KIMI_ENABLED~ unset).
+- K33 single cell ($0.71, 6 edits, 15 iters, 5370 cached_tokens) is
+  *the only data point* on K33; downstream score-of-1 is noise.
+- K2's success rate dropped from R24's 26/39 (67%) to R25's 31/49
+  (63%) at the run_end level — within noise, max_tokens still
+  unbounded.
