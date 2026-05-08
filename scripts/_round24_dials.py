@@ -68,11 +68,11 @@ except ImportError:
     BROAD_TOOLS_FULL = BROAD_TOOLS_PLUS_ELISP
     OS_TOOLS, ORG_TOOLS = [], []
 
-ARTIFACTS = REPO / "scripts/_round18_dials_artifacts"
+ARTIFACTS = REPO / "scripts/_round24_dials_artifacts"
 ARTIFACTS.mkdir(exist_ok=True)
 EPOCH = int(time.time())
 LOG = ARTIFACTS / f"log-{EPOCH}.txt"
-LIVE = ARTIFACTS / "R18_LIVE.json"
+LIVE = ARTIFACTS / "R24_LIVE.json"
 
 PICARD_PRIMER_FILE = REPO / "docs/wiki/picard-agor-primer.org"
 L1A_FILE = REPO / "docs/wiki/org-llm-cli-primer.org"
@@ -121,6 +121,11 @@ VARIANTS = [
     # External baseline (FOSS rule applies; sentinel only)
     ("K5-claude-solo",  None,                                    "claude-solo"),
 ]
+
+# R24_SYNTHESIS: drop K9 + K15
+_R24_DROP_VARIANT_IDS = {"K9-mixtral", "K15-kimi-thinking"}
+VARIANTS = [v for v in VARIANTS if v[0] not in _R24_DROP_VARIANT_IDS]
+print(f"[R24] active variants: {[v[0] for v in VARIANTS]}")
 
 
 # R17 fix B1 — eager prefetch cache (compute each task's prefetch ONCE
@@ -174,23 +179,27 @@ def warmup_providers():
 # Strict pinning made K7/K8/K17/K15/K5 silent. Falling back to advisory pin
 # (preferred broker, but allow OR to use any tool-capable backup).
 PROVIDER_PINS = {
-    "moonshotai/kimi-k2.6":               {"order": ["Moonshot", "Parasail"]},
+    # R19_WIRING: provider.ignore — DeepInfra tool-format gap (R18 broker forensics)
+    "moonshotai/kimi-k2.6":               {"order": ["Moonshot", "Parasail"], "ignore": ["DeepInfra"]},
     "moonshotai/kimi-k2-thinking":        {"order": ["Moonshot", "Novita"]},
     "deepseek/deepseek-r1":               {"order": ["DeepInfra"]},
     "deepseek/deepseek-chat-v3-0324":     {"order": ["DeepInfra"]},
     "deepseek/deepseek-coder":            {"order": ["DeepInfra"]},
     "qwen/qwen3-coder-30b-a3b-instruct":  {"order": ["Novita"]},
     "qwen/qwen-2.5-72b-instruct":         {"order": ["DeepInfra"]},
-    "qwen/qwen3-coder":                   {"order": ["Together"]},
+    # R19_WIRING: provider.ignore — SiliconFlow silent-text fallback
+    "qwen/qwen3-coder":                   {"order": ["Together"], "ignore": ["SiliconFlow"]},
     "qwen/qwen3.6-27b":                   {"order": ["Together"]},
     "qwen/qwen-2.5-coder-32b-instruct":   {"order": ["DeepInfra"]},
-    "meta-llama/llama-3.3-70b-instruct":  {"order": ["DeepInfra"]},
+    # R19_WIRING: provider.ignore — AkashML silent_noop
+    "meta-llama/llama-3.3-70b-instruct":  {"order": ["DeepInfra"], "ignore": ["AkashML"]},
     "meta-llama/llama-3.1-405b-instruct": {"order": ["Together"]},
     "meta-llama/llama-4-instruct":        {"order": ["Together"]},
     "mistralai/mixtral-8x22b-instruct":   {"order": ["Mistral"]},
     "openai/gpt-oss-120b":                {"order": ["Parasail"]},
     "openai/gpt-oss-20b":                 {"order": ["Parasail"]},
-    "z-ai/glm-4.6":                       {"order": ["Z-AI", "SiliconFlow"]},
+    # R19_WIRING: Z-AI never actually served — flip SiliconFlow first
+    "z-ai/glm-4.6":                       {"order": ["SiliconFlow", "Z-AI"]},
 }
 
 # R18 — Modal-Kimi route override (S6 Tier-S strategy). Kimi cells use
@@ -457,7 +466,7 @@ def prefetch_b25(task):
              "target_dir_exists": parent.exists(),
              "target_dir_writable": os.access(parent, os.W_OK) if parent.exists() else False,
              "spec": ("Create a NEW elisp file at the target path with a single "
-                       "defun named `org-llm-r18-shout` that takes one string arg "
+                       "defun named `org-llm-r24-shout` that takes one string arg "
                        "and returns it uppercased with three exclamation marks. "
                        "Then verify it loads via load_elisp_file, and call it "
                        "via eval_elisp on the input \"hello\" to confirm output "
@@ -601,13 +610,13 @@ TASKS = [
     {"id": "B25", "label": "write a new elisp helper file + validate",
      "target_file": "tests/manual_test_helper_r16.el",
      "goal": ("Create a NEW elisp file at the target path with a single "
-                "defun named `org-llm-r18-shout` that takes one string arg "
+                "defun named `org-llm-r24-shout` that takes one string arg "
                 "and returns it uppercased with three exclamation marks. "
                 "Use the elisp primer + doom conventions reference. After "
                 "writing, call load_elisp_file to verify it loads cleanly, "
                 "then call eval_elisp with code "
                 "`(progn (load \"<absolute-path-to-your-file>\") "
-                "(org-llm-r18-shout \"hello\"))` to confirm it returns "
+                "(org-llm-r24-shout \"hello\"))` to confirm it returns "
                 "\"HELLO!!!\". Do NOT modify any other file."),
      "n_changes": 1, "prefetch": prefetch_b25,
      "primary_metric": "in_scope_changes"},
@@ -624,6 +633,14 @@ TASKS = [
      "n_changes": 1, "prefetch": prefetch_b26,
      "primary_metric": "in_scope_changes"},
 ]
+
+# R19_WIRING: BK1-BK5
+try:
+    from scripts._round19_long_horizon_tasks import LONG_HORIZON_TASKS
+    TASKS.extend(LONG_HORIZON_TASKS)
+    print(f"[R19] Loaded {len(LONG_HORIZON_TASKS)} long-horizon tasks (BK1-BK5)")
+except Exception as _e:
+    print(f"[R19] BK1-BK5 import failed: {_e} — proceeding without")
 
 
 PLAN_FORMAT = """
@@ -769,6 +786,7 @@ def analyze_diff(diff_text, target_files, prefetch):
         "id_fabrication_count": fab_count,
         "wrap_categories": cat_counts,
         "inserted_links": inserted_links,
+        "diff_text": diff_text,  # R19_WIRING: stash for quality_lint
     }
 
 
@@ -1099,7 +1117,7 @@ def run_specialist_for_cell(wt_path, task, handle, plan_brief, prefetch,
         subprocess.run(["git", "-C", str(wt_path), "add", "-A"],
                          capture_output=True, check=True)
         subprocess.run(["git", "-C", str(wt_path), "commit", "-m",
-                          f"r18 {task['id']} {handle}: specialist edits"],
+                          f"r20 {task['id']} {handle}: specialist edits"],
                          capture_output=True)
     return result
 
@@ -1174,7 +1192,7 @@ def safe_worktree_add(wt_name: str, wt_path, max_retries: int = 3):
 
 
 def run_claude_solo_cell(task, dial, run_dir):
-    wt_name = f"r18-{task['id']}-K5-claude-solo-{dial.label()}-{EPOCH}"
+    wt_name = f"r24-{task['id']}-K5-claude-solo-{dial.label()}-{EPOCH}"
     wt_path = REPO.parent / "org-llm-worktrees" / wt_name
     safe_worktree_add(wt_name, wt_path)
     prefetch = get_prefetch(task) if task.get("prefetch") else {}
@@ -1225,8 +1243,10 @@ def run_claude_solo_cell(task, dial, run_dir):
     diff_full, diff_stat = wt_diff_vs_base(wt_path)
     (run_dir / "diff.patch").write_text(diff_full)
 
-    # R25 fix — accept plural `target_files` (BK1-BK5 fixtures) AND
-    # singular `target_file` (B1-B26). See R24 quality-judge agent.
+    # R25 fix — BK1-BK5 fixtures use plural `target_files` (R17 task-dict
+    # template); B1-B26 use singular `target_file`. Accept either; fall
+    # back to []. Without this fix, all BK cells got primary=0 because
+    # every edit landed in out-of-scope (R24 quality-judge agent finding).
     target_files = (
         list(task["target_files"]) if task.get("target_files")
         else ([task["target_file"]] if task.get("target_file") else [])
@@ -1282,7 +1302,7 @@ def run_one_cell(task, variant_name, specialist_model_id, mode,
     # bench (it has — d07cd85), Agor's worktrees branch from the older SHA and
     # lack files committed since. Direct `git worktree add` always uses
     # fresh trunk. Same path Claude-solo cells already use.
-    wt_name = f"r18-{task['id']}-{variant_name}-{dial.label()}-{EPOCH}"
+    wt_name = f"r24-{task['id']}-{variant_name}-{dial.label()}-{EPOCH}"
     wt_path = REPO.parent / "org-llm-worktrees" / wt_name
     safe_worktree_add(wt_name, wt_path)   # R18 mutex fix
     time.sleep(0.3)
@@ -1320,8 +1340,10 @@ def run_one_cell(task, variant_name, specialist_model_id, mode,
     diff_full, diff_stat = wt_diff_vs_base(wt_path)
     (run_dir / "diff.patch").write_text(diff_full)
 
-    # R25 fix — accept plural `target_files` (BK1-BK5 fixtures) AND
-    # singular `target_file` (B1-B26). See R24 quality-judge agent.
+    # R25 fix — BK1-BK5 fixtures use plural `target_files` (R17 task-dict
+    # template); B1-B26 use singular `target_file`. Accept either; fall
+    # back to []. Without this fix, all BK cells got primary=0 because
+    # every edit landed in out-of-scope (R24 quality-judge agent finding).
     target_files = (
         list(task["target_files"]) if task.get("target_files")
         else ([task["target_file"]] if task.get("target_file") else [])
@@ -1373,8 +1395,22 @@ def score_cell(cell):
     else:
         primary = min(in_total, 50)
     score = primary - fab * 3 - min(out_total, 100) * 0.05
+    # R19_WIRING: quality_lint penalty (N5)
+    lint_pen = 0.0
+    lint = {}
+    if _R19_LINT_AVAILABLE:
+        diff_text = (cell.get("analysis") or {}).get("diff_text") or ""
+        if diff_text:
+            try:
+                lint = _r19_lint_patch(diff_text)
+                lint_pen = lint.get("score_penalty", 0.0)
+            except Exception:
+                lint = {}
+    score = score - lint_pen
     return {"score": round(score, 2), "primary": primary,
-             "in_total": in_total, "out_total": out_total, "fab": fab}
+             "in_total": in_total, "out_total": out_total,
+             "fab": fab, "lint_penalty": lint_pen,
+             "lint": lint}
 
 
 def cost_per_unit(cell):
@@ -1388,7 +1424,7 @@ def cost_per_unit(cell):
 
 
 def update_live_state(all_cells: list[dict]):
-    """O6: rewrite R18_LIVE.json after each cell."""
+    """O6: rewrite R24_LIVE.json after each cell."""
     leaderboard: dict = {}
     for c in all_cells:
         v = c.get("variant", "?")
@@ -1454,6 +1490,17 @@ def print_leaderboard(all_cells: list[dict]):
 
 # ── Main ────────────────────────────────────────────────────────────────
 PARALLELISM = int(os.environ.get("R18_PARALLELISM", "16"))   # all-night R18 doubles 8 → 16
+WALL_CAP_PER_CELL_S = 400  # R24_SYNTHESIS: per-cell wall cap
+
+# R19_WIRING: quality_lint
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from quality_lint import lint_patch as _r19_lint_patch
+    _R19_LINT_AVAILABLE = True
+except Exception as _e:
+    print(f"[R19] quality_lint import failed: {_e}")
+    _R19_LINT_AVAILABLE = False
+
 state_lock = None   # initialized in main()
 worktree_lock = None   # R18 fix — git worktree race fix from R17 quality agent
 ALL_CELLS: list[dict] = []   # shared across composition strategies
@@ -1623,7 +1670,7 @@ def main():
     import threading
     state_lock = threading.Lock()
     worktree_lock = threading.Lock()   # R18 — fix git worktree concurrency race
-    log(f"Round-18 — overnight scope + maximalist strategies + Modal-Kimi")
+    log(f"Round-24 — overnight scope + maximalist strategies + Modal-Kimi")
     log(f"  trunk HEAD: " + subprocess.run(
         ["git", "-C", str(REPO), "rev-parse", "--short", "trunk"],
         capture_output=True, text=True).stdout.strip())
@@ -1671,9 +1718,9 @@ def main():
     # Per spend-headroom analysis: 23-33× cheaper than Claude per qpt;
     # plenty of room to bump samples for variance estimation.
     N_REPLICATES_L1 = {
-        "K8-deepseekV3":     15,  # validated workhorse (R17 stability)
-        "K1-qwen30":         15,  # cheap workhorse default
-        "K2-kimi-k2.6":      15,  # quality leader; underweighted in R17
+        "K8-deepseekV3":     25,  # validated workhorse (R17 stability)
+        "K1-qwen30":         20,  # R24_SYNTHESIS: K1-B1 sample-up  # cheap workhorse default
+        "K2-kimi-k2.6":      25,  # quality leader; underweighted in R17
         "K11-qwen3coder":    10,  # premium reference
         "K7-qwen72b":        10,  # post-repin probe
         "K6-llama70b":       10,  # n=1 score 4 (R17) — needs more shots
@@ -1707,11 +1754,24 @@ def main():
     # ── Layer 2: top-3 FOSS + Claude × remaining tasks ───────────────────
     advancing = [v for v in VARIANTS if v[0] in top3_foss
                   or v[2] == "claude-solo"]
+    # R24_SYNTHESIS: drop floor/broken tasks
+    _R24_DROP_TASK_IDS = {"B13", "B20", "B26"}
     cell_specs = [(task, variant, BEST_CONFIG, "layer2")
                    for task in TASKS[1:]
+                   if task.get("id") not in _R24_DROP_TASK_IDS
+                   and not task.get("id", "").startswith("BK")
                    for variant in advancing]
     run_layer_parallel("LAYER 2 — top-3 FOSS + Claude × remaining tasks",
                           cell_specs, all_cells)
+
+    # R24_SYNTHESIS: K11-B25 sample-up
+    k11_var = next((v for v in VARIANTS if v[0] == "K11-qwen3coder"), None)
+    b25_task = next((t for t in TASKS if t.get("id") == "B25"), None)
+    if k11_var and b25_task:
+        log("\nLayer K11-B25 sample-up — n=8 verification of elisp lead")
+        k11b25_specs = [(b25_task, k11_var, BEST_CONFIG, "layer_k11b25")
+                          for _ in range(8)]
+        run_layer_parallel("LAYER K11-B25 (n=8)", k11b25_specs, all_cells)
 
     # ── Layer 3: dial ablation on B1 + top-2 FOSS ────────────────────────
     top2_foss = [v for v in VARIANTS if v[0] in top3_foss[:2]]
@@ -1723,8 +1783,23 @@ def main():
 
     # ── Final summary ────────────────────────────────────────────────────
     log("")
-    log("=" * 80)
-    log(f"R18 COMPLETE — {len(all_cells)} cells, ${PROGRESS.spent:.3f} spent")
+
+    # R24_SYNTHESIS: Layer-BK selector
+    bk_tasks = [t for t in TASKS if t.get("id", "").startswith("BK")]
+    if bk_tasks and top3_foss:
+        log(f"\nLayer BK — long-horizon tasks: {[t['id'] for t in bk_tasks]}")
+        bk_advancing = [v for v in VARIANTS if v[0] in top3_foss
+                          or v[2] == "claude-solo"]
+        bk_specs = [(task, variant, BEST_CONFIG, "layer_bk")
+                       for task in bk_tasks
+                       for variant in bk_advancing]
+        run_layer_parallel("LAYER BK — BK1-BK5 long-horizon",
+                              bk_specs, all_cells)
+    else:
+        log("\nLayer BK skipped — no BK tasks loaded or no top-3 FOSS yet")
+
+        log("=" * 80)
+    log(f"R24 COMPLETE — {len(all_cells)} cells, ${PROGRESS.spent:.3f} spent")
     log("=" * 80)
     print_leaderboard(all_cells)
 
