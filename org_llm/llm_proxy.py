@@ -4004,6 +4004,35 @@ def _build_cloud_request(orig_body: bytes, parsed: Optional[dict],
         # turn while halving generation time.
         if mt is None or (isinstance(mt, (int, float)) and mt > 2048):
             body_obj["max_tokens"] = 2048
+        # OpenRouter `provider` routing — let the user pin / exclude
+        # specific upstreams. Default `cloud_provider_ignore' = "Groq"
+        # because Groq is banned per project rule (see
+        # `feedback_no_groq.md' in author memory). Override / extend
+        # via:
+        #   org-llm config cloud_provider_ignore "Groq,DeepInfra"
+        #   org-llm config cloud_provider_only "Nebius,Lambda"
+        # `only' wins over `ignore' if both are set. Only injected
+        # when the endpoint looks like OpenRouter — other providers
+        # (Together / DeepInfra direct / etc.) don't speak the
+        # `provider' field.
+        endpoint = target.get("endpoint") or ""
+        if "openrouter.ai" in endpoint:
+            ignore_csv = _proxy_cfg_str("cloud_provider_ignore", "Groq")
+            only_csv   = _proxy_cfg_str("cloud_provider_only", "")
+            ignore_list = [s.strip() for s in ignore_csv.split(",") if s.strip()]
+            only_list   = [s.strip() for s in only_csv.split(",")   if s.strip()]
+            if only_list or ignore_list:
+                provider_block: dict = {}
+                if only_list:
+                    provider_block["only"] = only_list
+                if ignore_list:
+                    provider_block["ignore"] = ignore_list
+                # Merge with any caller-supplied provider routing
+                existing = body_obj.get("provider") or {}
+                if isinstance(existing, dict):
+                    for k, v in existing.items():
+                        provider_block.setdefault(k, v)
+                body_obj["provider"] = provider_block
         out_body = json.dumps(body_obj).encode()
     else:
         out_body = orig_body
