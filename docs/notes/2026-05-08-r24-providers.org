@@ -1,0 +1,213 @@
+#+TITLE: R24 v1 broker forensic — what to pin/deny for R25+
+#+AUTHOR: subagent (broker-stability scan)
+#+DATE: 2026-05-08
+
+*Summary.* R24 v1 produced 130 specialist ~run_end~ events across 71 cell
+artifacts. R19_WIRING deny-lists held cleanly for K8 (recovered 38→164),
+K11 (Together exclusive), K17 (no AkashML routing), and K6 (no AkashML).
+K6's 4/10 silent_noops were *DeepInfra-served, not provider-mismatched* —
+the deny-list cannot fix a model the pinned broker also fumbles. K7's
+−693 is a *fabrication blast on the variant side* (DeepInfra and Novita
+both delivered tool calls fine; the model just hallucinated edits that
+didn't exist). One new R24 finding: *K17-glm46 on DeepInfra max-iters
+loops* with 125k–197k cached tokens per run — an unbounded retry pattern
+that wasn't visible in R18 (only 1 K17 cell there). R25 should flip K17
+back to SiliconFlow-first deny-DeepInfra and demote K6 from baseline.
+
+*Expanded.* Five sections: per-variant pin-vs-actual; confirmed-broken
+new in R24; confirmed-working; deny-list verification per R19_WIRING;
+length / text-with-no-tool cells; and a recommended R25 PROVIDER_PINS.
+
+
+* 1. Per-variant: pinned vs actual broker (R24 v1)
+
+130 ~run_end~ events on disk. Note ~allow_fallbacks~ default-True kept
+the advisory pin pattern from R18 v2 — these counts are by run_end, not
+per cell_result (each cell can host multi-specialist runs).
+
+| variant         | pin (1st)    | actual broker | n  | held?    | notes                                        |
+|-----------------+--------------+---------------+----+----------+----------------------------------------------|
+| K1-qwen30       | Novita       | Novita        | 18 | HELD     | layer1/B1 only                               |
+| K2-kimi-k2.6    | Moonshot     | Parasail      | 39 | FALLBACK | Modal env not set; Parasail served all       |
+| K6-llama70b     | DeepInfra    | DeepInfra     | 10 | HELD     | 4 silent_noops on the *pinned* broker        |
+| K7-qwen72b      | DeepInfra    | DeepInfra     |  6 | HELD     | high-iter loops; fabrication on top          |
+| K7-qwen72b      |              | Novita        |  3 | FALLBACK | hit Novita 32k context cap (HTTP 400)        |
+| K8-deepseekV3   | DeepInfra    | DeepInfra     | 25 | HELD     | 100% success; clean tool-call adapter        |
+| K11-qwen3coder  | Together     | Together      | 18 | HELD     | layer_k11b25 + layer1; SiliconFlow excluded  |
+| K17-glm46       | SiliconFlow  | DeepInfra     |  8 | FALLBACK | DeepInfra ate the runs; max_iters loops      |
+| K17-glm46       |              | SiliconFlow   |  2 | HELD     | both succeeded                               |
+
+*Pin-hold rate.* Held first-choice on ~75/130 (~58%). Lower than R18 v2
+(90%) because (a) Parasail dominates K2 entirely, and (b) DeepInfra
+appears to win SiliconFlow vs DeepInfra ties on speed for GLM-4.6 even
+with SiliconFlow listed first. Modal-Kimi route was never engaged
+(env-gated, ~MODAL_KIMI_ENABLED~ unset).
+
+
+* 2. Confirmed-broken combinations new in R24
+
+Combinations where the broker × model × tool-format produced a
+recoverable but degraded contract. "New in R24" means not flagged in
+R18.
+
+| broker      | model                              | symptom (R24)                                          | n     |
+|-------------+------------------------------------+--------------------------------------------------------+-------|
+| DeepInfra   | z-ai/glm-4.6                       | max_iters loops, 125k–197k cached tokens, 0–5 edits    | 6/8   |
+| DeepInfra   | meta-llama/llama-3.3-70b-instruct  | silent_noop with $0 cost (3 in seed1, 1 in s2)         | 4/10  |
+| Novita      | qwen/qwen-2.5-72b-instruct         | HTTP 400 — 32k context cap exceeded mid-run            | 1     |
+| Parasail    | moonshotai/kimi-k2.6               | finish=length, 23k–28k char prose dumps, 0 tool_calls  | 13    |
+| DeepInfra   | qwen/qwen-2.5-72b-instruct         | max_iters loops with high edit counts (4–18)           | 4/9   |
+| SiliconFlow | z-ai/glm-4.6                       | 1/2 max_iters with cached_tokens=185k                  | 1/2   |
+
+*New flags.* The K17 + DeepInfra max-iters loop is novel — R18 saw GLM
+on SiliconFlow only (n=1). DeepInfra GLM appears to *return tool calls
+that don't make progress* (cached tokens accumulate, edits stall).
+Parasail × Kimi finish=length is also new — R18 had 1 case, R24 has 13
+(the unfolded K2 prose problem). Novita × Qwen-72b hard-capped at 32k
+on s4: this is the broker's own context limit, not a route issue.
+
+
+* 3. Confirmed-working combinations
+
+| broker     | model                              | n    | observation                                  |
+|------------+------------------------------------+------+----------------------------------------------|
+| DeepInfra  | deepseek/deepseek-chat-v3-0324     | 25/25 | 100% success; cheapest healthy route in R24  |
+| Together   | qwen/qwen3-coder                   | 17/18 | one adaptive_abort (s4, 4.4s)                |
+| Novita     | qwen/qwen3-coder-30b-a3b-instruct  |  4/18 | strong fallback rate; many max_iters but recover |
+| Parasail   | moonshotai/kimi-k2.6               | 26/39 | clean tool format when not finish=length     |
+| SiliconFlow| z-ai/glm-4.6                       |  1/2  | 1 success, 1 max_iters                       |
+| DeepInfra  | meta-llama/llama-3.3-70b-instruct  |  4/10 | when it succeeds, fast (70–183s)             |
+| DeepInfra  | qwen/qwen-2.5-72b-instruct         |  3/9  | recovers when not looping                    |
+
+*Champion.* DeepInfra × deepseek-chat-v3-0324 — 25/25 with no tool-format
+quirks, no max_iters, no length truncation. This is the R24 stability
+winner and validates the R19_WIRING flip from R18 v1 ("Here are the
+function calls:" stop bug → fixed by allowing fallbacks, in R24 just
+DeepInfra-only).
+
+
+* 4. Did R19_WIRING deny-lists fully take?
+
+Verifying each ~ignore~ entry routed away from the named broker.
+
+| variant       | model                              | denied broker | seen in R24? | verdict      |
+|---------------+------------------------------------+---------------+--------------+--------------|
+| K2-kimi-k2.6  | moonshotai/kimi-k2.6               | DeepInfra     | NO           | DENY HELD    |
+| K11-qwen3coder| qwen/qwen3-coder                   | SiliconFlow   | NO           | DENY HELD    |
+| K6-llama70b   | meta-llama/llama-3.3-70b-instruct  | AkashML       | NO           | DENY HELD    |
+
+All three deny-lists fully held. K8-deepseekV3 had no deny-list (just an
+order pin to DeepInfra) — also held 25/25. K17-glm46 has no ~ignore~ —
+DeepInfra served 8/10 despite SiliconFlow listed first; this is *not*
+a deny-list miss but a missing deny on DeepInfra given the new failure
+mode. Fix: add ~"ignore": ["DeepInfra"]~ to GLM-4.6 in R25 (see §6).
+
+*Reading.* Deny-lists work as written. The R24 surprise is that for
+K17, the broker that needs to be denied (DeepInfra) is the one
+~allow_fallbacks~ default-promoted when SiliconFlow had a slow first
+token — and DeepInfra-served GLM is a max-iters loop machine.
+
+
+* 5. Cells with finish_reason=length OR text_with_no_tool_calls
+
+13 ~length~ iters across 6 K2-kimi-k2.6 cells; 1 ~length~ iter on K7
+(s3 iter 14, 3.7k chars). All Parasail-served for K2.
+
+| variant       | layer/task/cell                                    | provider | iters w/ length | max chars |
+|---------------+----------------------------------------------------+----------+-----------------+-----------|
+| K2-kimi-k2.6  | layer1/B1/__bt_pb_m1_tb_s1                         | Parasail | 5               | 27,696    |
+| K2-kimi-k2.6  | layer1/B1/...__s3                                  | Parasail | 2               | 25,594    |
+| K2-kimi-k2.6  | layer1/B1/...__s4                                  | Parasail | 1               | 25,114    |
+| K2-kimi-k2.6  | layer1/B1/...__s6                                  | Parasail | 2               | 27,892    |
+| K2-kimi-k2.6  | layer1/B1/...__s7                                  | Parasail | 1               | 28,144    |
+| K2-kimi-k2.6  | layer2/B5/__bt_pb_m1_tb_s1                         | Parasail | 1               | 29,380    |
+| K7-qwen72b    | layer1/B1/...__s3                                  | DeepInfra | 1              |  3,739    |
+
+Silent-text-with-no-tool-calls (tool_calls=0 + final_text_chars>0 +
+finish=stop, mid-loop, recoverable): observed across K17, K6, K11, K2,
+K1 — the ambient mid-loop pattern from R18 persists. Counted via
+~silent_streak >= 1~ in iter_end events; not blocking when streak ≤ 2.
+
+*Reading.* K2 + Parasail = the runaway-prose failure mode. The model
+keeps generating analysis text past 24k chars instead of emitting a
+tool call. ~max_tokens~ is presumably ~25k~ on this route. R25 fix:
+either cap K2 at lower ~max_tokens~, force a stricter system prompt, or
+add a Parasail-side reasoning_effort knob if available. K7's single
+length event is benign noise.
+
+
+* 6. Recommended PROVIDER_PINS for R25+
+
+Diff vs current ~scripts/_round24_dials.py~ (lines 181–203):
+
+| model                              | R24 pin (order, ignore)         | R25+ proposed                                | rationale                                                |
+|------------------------------------+---------------------------------+----------------------------------------------+----------------------------------------------------------|
+| moonshotai/kimi-k2.6               | [Moonshot, Parasail], -DeepInfra | [Moonshot, Parasail], -DeepInfra (unchanged) | held; runaway-length is a *model* knob, not broker       |
+| deepseek/deepseek-chat-v3-0324     | [DeepInfra]                     | [DeepInfra] (unchanged)                      | 25/25 stability winner                                   |
+| qwen/qwen-2.5-72b-instruct         | [DeepInfra]                     | [DeepInfra], -Novita                         | Novita 32k cap → HTTP 400 in R24                         |
+| qwen/qwen3-coder                   | [Together], -SiliconFlow        | [Together], -SiliconFlow (unchanged)         | held                                                     |
+| meta-llama/llama-3.3-70b-instruct  | [DeepInfra], -AkashML           | DEMOTE — see §7                              | DeepInfra also produces silent_noops (4/10)              |
+| z-ai/glm-4.6                       | [SiliconFlow, Z-AI]             | [SiliconFlow], -DeepInfra, -Z-AI             | DeepInfra max-iters loop machine (6/8); Z-AI never serves |
+| qwen/qwen3-coder-30b-a3b-instruct  | [Novita]                        | [Novita] (unchanged)                         | held (K1-qwen30 in baseline)                             |
+
+*New deny-list entries needed in R25.*
+- ~"qwen/qwen-2.5-72b-instruct": {"order": ["DeepInfra"], "ignore": ["Novita"]}~
+- ~"z-ai/glm-4.6":               {"order": ["SiliconFlow"], "ignore": ["DeepInfra", "Z-AI"]}~
+
+*Modal-Kimi.* MODAL_KIMI_ENABLED was unset in R24, so the override path
+never fired. If the Modal endpoint is still warm, R25 should flip it on
+for K2 to A/B Parasail vs Modal on the runaway-prose failure mode (a
+self-hosted vLLM is the cleanest place to bound max_tokens deterministically).
+
+
+* 7. R25 advisory — concrete routing changes
+
+Top-5 actionable, ranked by expected delta:
+
+1. *K17-glm46.* Add ~"ignore": ["DeepInfra"]~ to ~z-ai/glm-4.6~. Force
+   SiliconFlow only; if SiliconFlow is slow, accept the latency rather
+   than DeepInfra's max-iters loop. R24 SiliconFlow K17 was 1/2 success
+   in 80s vs DeepInfra K17 was 0/6 in 170–190s each — DeepInfra both
+   slower *and* failing. Drop Z-AI from the order list (still never
+   actually serves; was an R18 carryover).
+2. *K6-llama70b — demote from baseline to test pool.* DeepInfra (the
+   pinned broker, AkashML denied) still produced 4/10 silent_noops on
+   the same model. This is a *model + broker* failure, not a routing
+   problem deny-list can fix. Move K6 to side-pool / S38 adversarial
+   strategy testing only, like K7. If retained in baseline, add an
+   ~ignore-DeepInfra~ and pin to a different broker — but R24 has no
+   data on alternates for L3.3-70b (R18 saw 1 AkashML cell, also bad).
+   Cleanest path: drop K6 entirely until R25 surveys Together / Fireworks
+   for L3.3-70b tool-call adapter quality.
+3. *K7-qwen72b.* Already a fabrication-side disaster (−693 from
+   hallucinated edits, not broker). If kept as adversarial in S38, add
+   ~"ignore": ["Novita"]~ to ~qwen/qwen-2.5-72b-instruct~ (32k cap is a
+   real cliff). DeepInfra-only with the variant-side bracket-disaster
+   problem isolated to the model contract is a cleaner experiment.
+4. *K2-kimi-k2.6 max_tokens cap.* Set ~max_tokens=4096~ or lower on
+   Parasail-served K2 cells *or* enable Modal route. 13 length-truncated
+   cells at 23–29k chars is most of K2's silent-text taxonomy in R24.
+   This is harness-side, not PROVIDER_PINS, but it belongs in the same
+   stability story.
+5. *Add a "deny SiliconFlow when serving slow-first-token" health check.*
+   SiliconFlow K17 took 80s for a successful run vs DeepInfra K17's 170s
+   max-iters fail — counter-intuitively SiliconFlow is the *fast and
+   correct* path here. The broker bypass that lets DeepInfra win (8 vs
+   2) suggests an OpenRouter-side latency-balancing heuristic working
+   against us. R25 may need a strict ~order~ override (no fallbacks)
+   for K17 specifically, accepting SiliconFlow availability risk to
+   gain quality.
+
+
+* 8. Sanity checks
+
+- ~R24_LIVE.json~ confirms K8-deepseekV3 = 164 score, 0 silent_noops
+  (recovered from R19's 38). K6-llama70b = 38 score, 4 silent_noops.
+  K7-qwen72b = −693 score, 0 silent_noops (fabrication, not broker).
+- 130 run_ends / 71 cell artifacts means ~1.83 specialists per cell on
+  average (multi-specialist plans, mostly @atoz + @riker). K8 had 25
+  run_ends across 15 cell_dirs.
+- No Modal route engaged. No AkashML routing observed (deny held).
+- Total successful run_ends: 84/130 (~65%). Excluding K7/K6/K17 (the
+  three weak spots): 82/96 = 85%. Excluding all variants except K8 +
+  K1 + K11 + K2: 67/100 ≈ 67% (K2's length truncations drag this).
