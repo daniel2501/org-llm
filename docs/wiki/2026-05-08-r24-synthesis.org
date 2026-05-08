@@ -1,0 +1,313 @@
+:PROPERTIES:
+:ID:       r24-synthesis
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R24 — 4-agent synthesis + lessons for R25
+#+FILETAGS: :wiki:bench:r24:synthesis:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R24 ran 147 cells / $13.29 / 54 min wall and confirmed
+the K1+K8 FOSS frontier holds, K8-deepseekV3 fully recovered from
+its R19 collapse (164/25 cells), and K7-qwen72b deserves a
+generative-role retire (score −693, 16-deep nested-bracket
+cascades). The four R24 agents also surfaced *two bench-correctness
+bugs* that R25 must fix before any new claim is valid: (1) the
+=quality_lint= nested-bracket detector falsely flags well-formed
+links after multi-line links (~190 of K1+K11's 234 penalty points
+were FPs), and (2) all 10 BK long-horizon cells got primary=0 due
+to a harness mis-categorization of target_files as out-of-scope.
+
+*Expanded.* The arc R18→R19→R24 has been a story of the harness
+gradually catching up to the strategy. R18 wiped 64% of cells via
+worktree races (fixed in fc59d1c). R19 had the right strategy
+(BK1-BK5 wired) but the long-horizon tasks never selected (fixed
+in R24 with Layer-BK). R24 has BK1-BK5 firing but every cell
+scores zero because of the target_files bug. The pattern: each
+round's headline finding is itself a bug that the next round
+exposes. R25's prep MUST fix the two bugs above plus extend
+WALL_CAP enforcement (the constant exists but is not enforced;
+one K2 cell ran 1612s holding Layer 1 open for 9 min).
+
+* Headline numbers
+
+| Metric                                  | Value                              |
+|-----------------------------------------+------------------------------------|
+| Cells                                   | 147                                |
+| Wall                                    | 54.3 min (8:19:42 → 9:14:02)       |
+| Spend                                   | $13.29 (FOSS $9.26 + Claude $4.03) |
+| K1 $/qpt (corrected, not detector-FP)   | *$0.00054 — 5/5 frontier hold*     |
+| K8 $/qpt (RECOVERED)                    | $0.00090                           |
+| K5-claude $/qpt                         | $0.02569                           |
+| FOSS-vs-Claude moat                     | *48× (held)*                       |
+| Pin-hold rate                           | 58% (vs R18's 90%)                 |
+| Effective parallelism (32 workers)      | 9.39× = 29% efficiency             |
+| K7 score (first ever negative)          | *−693 across 10 cells*             |
+
+* Per-variant verdicts (corrected by quality-judge agent)
+
+Adjusted = primary mean − /real/ lint penalty (FP-bug-corrected).
+
+| Variant            | Cells | Mech  | Adjusted | $/qpt    | Verdict for R25                     |
+|--------------------+-------+-------+----------+----------+-------------------------------------|
+| *K1-qwen30*        |    20 | 23.72 | *32.22*  | $0.00054 | KEEP — primary scribe, 5/5 frontier |
+| K17-glm46          |    10 | —     | 25.90    | —        | KEEP — confirm at n=15+ in R25      |
+| K2-kimi-k2.6       |    40 | —     | 17.23    | $0.0045  | KEEP — bump to n=50+ task-diverse   |
+| K5-claude-solo     |    14 | —     | 11.57    | $0.02569 | KEEP — sentinel only                |
+| K11-qwen3coder     |    18 | —     | 10.17    | $0.0233  | DEMOTE — premium not justified      |
+| K8-deepseekV3      |    25 |  6.56 | 6.56     | $0.00090 | KEEP + EXPAND outside B1            |
+| K6-llama70b        |    10 |  3.80 | 3.80     | —        | *DROP* — DeepInfra×Llama-70b broken |
+| K7-qwen72b         |    10 | −69.3 | −69.30   | —        | DROP generative; KEEP S38 adversary |
+
+K1's adjusted lead is dramatic but n=18 holds with low variance.
+K2's strength is robustness at n=39: leader on raw quality with
+modest stdev but 6.7× more $/qpt than K1.
+
+* Bench-correctness bugs (R25 BLOCKERS)
+
+** Bug 1 — quality_lint nested-bracket detector multi-line FP
+
+*Discovered by:* R24 quality-judge agent.
+
+*Mechanism.* =count_nested_bracket_depth= walks only =+= lines.
+A multi-line org link like:
+
+#+begin_src text
++ - See [[id:abc][some
+   long display text spanning
+   lines]]
+#+end_src
+
+gets concatenated to:
+
+#+begin_src text
+- See [[id:abc][some
+  long display text spanning
+#+end_src
+
+(closing =]]= is on a context line, dropped). Cursor sees =[[=
+without =]]= → depth 1, never reset. A subsequent well-formed
+=[[id:UUID][label]]= on the next added line registers as
+"depth=2" → false-positive nested_bracket count.
+
+*Blast radius.* ~190 of the 234 lint-penalty points assigned to
+K1-qwen30 + K11-qwen3coder in R24 are FPs. K1's "real" adjusted
+score is 32.22 not 23.72. Leaderboard rank ordering is mostly
+preserved (K1 still #1 corrected) but score magnitudes are
+under-reported.
+
+*Fix shipped.* =count_nested_bracket_depth= now scans each line
+independently — depth resets per line. Catches within-line
+cascades (R18 K6/K7 archetype) but doesn't propagate ghosts.
+File: =scripts/quality_lint.py=.
+
+** Bug 2 — BK long-horizon cells primary=0 due to target_files
+
+*Discovered by:* R24 quality-judge agent.
+
+*Mechanism.* =analyze_diff= categorizes each diff hunk as in-scope
+or out-of-scope based on the task's =target_files= list. The
+=_round19_long_horizon_tasks.py= fixtures (BK1-BK5) define
+=target_files= as test-fixture paths only, not the actual
+implementation paths the task asks the model to edit. Result:
+every BK cell's edits land in "out-of-scope" buckets, primary
+metric = 0, score = 0 regardless of actual edit quality.
+
+*Verified separately.* Hand-inspection of BK1 (rename refactor),
+BK2 (typer subcommand + test), BK4 (dataclass + schema), BK5 (11
+wrap-edits) shows working clean implementations on disk in the
+worktrees. The MODEL did the work; the HARNESS failed to credit it.
+
+*Blast radius.* All 10 BK cells (~30 min wall, ~$3 spend)
+produced no usable signal. The "BK1-BK5 long-horizon FOSS-vs-
+Claude question" remains *unanswered* by R24.
+
+*Fix needed for R25.* Update =scripts/_round19_long_horizon_tasks.py=
+to populate =target_files= with the ACTUAL implementation paths
+each BK task touches:
+
+| Task | target_files needs                                                 |
+|------+--------------------------------------------------------------------|
+| BK1  | =org_llm/specialist.py=, =scripts/_round{20,21,22,23,24}_dials.py= |
+| BK2  | =org_llm/cli_specialist.py=, plus the new test file path           |
+| BK3  | =org_llm/specialist.py= (the failing test injection lives here)    |
+| BK4  | =org_llm/specialist.py=, =scripts/specialist_schema.json=          |
+| BK5  | 5 wiki/notes pages cited by BK fixture                             |
+
+Plus: verify =analyze_diff= treats those paths as "in scope" by
+default. Per-task allow-list works.
+
+* Wall time + parallelism reality check
+
+** R24 wall = 54.3 min, NOT 22 min
+
+The "22 min" we'd been quoting was the timestamp of R24's first
+stdout LEADERBOARD print. Round actually ran 54.3 min total.
+Walltime agent measured: log timestamps 08:19:42 → 09:14:02 =
+3260s.
+
+** Doubling workers 16→32 made wall WORSE
+
+R18 (16 workers, 140 cells, ~28 min) → R24 (32 workers, 147 cells,
+~54 min). Why:
+- Layer 1 sample-up scaled from 80 cells to 115 cells (more n
+  on K1/K2/K8) → sum-of-walls grew ~7.4×
+- Workers grew only 2× → backlog
+- =WALL_CAP_PER_CELL_S=400= was added as a constant but never
+  enforced at runtime
+- One K2-kimi-k2.6 cell ran *1612s (27 min)* alone, holding
+  Layer 1 open for the final 9 min
+
+** K7 owns 5/10 of round's longest cells
+
+K7 sum-of-walls = 5594s (mean 559s/cell). Drop K7 (Sp4) saves
+~930s of R25 wall. Highest-impact speedup per agent ranking.
+
+** Layer-BK was actually FAST
+
+Layer-BK ran 10 cells in 157s (mean 16s/cell) — much faster than
+R25 design's projection of 15-25 min. Long-horizon is NOT the
+wall risk we expected. The slow cells are big-prose B11 + B5,
+not multi-file BK.
+
+** R25 wall projection
+
+Speedups ranked by R24-actual wall savings:
+
+| Rank | Speedup                          | Wall savings       |
+|------+----------------------------------+--------------------|
+|    1 | Sp4 — drop K7                    | −930s              |
+|    2 | Sp3 — self-host K1 + K2          | −680s              |
+|    3 | Sp2 — pipeline L1 → L2           | −485s              |
+|    4 | Sp1 — skip Layer 3               | −444s              |
+|    5 | Sp5 — S33 speculative decode     | −0 to −300s (low confidence) |
+|    6 | Sp6 — S34 async pipeline         | −180 to −300s      |
+|    7 | Sp7 — drop B7/B25 sample         | −120s              |
+
+R25 projection: 22-28 min for ~470 cells with Sp4 + Sp3 + Sp2 +
+WALL_CAP enforced.
+
+* Provider stability — R19_WIRING deny-lists held; new gaps surfaced
+
+** Pin-hold rate 58% (down from R18's 90%)
+
+Mostly Parasail outranking Modal-Kimi for K2 (Modal env not set)
+and DeepInfra outranking SiliconFlow for K17 despite SiliconFlow
+listed first. R25 needs strict ordering for K17.
+
+** Confirmed-broken combos
+
+- *DeepInfra × z-ai/glm-4.6* (NEW R24): 6/8 cells max_iters with
+  125k-197k cached tokens. DeepInfra returns tool calls that
+  don't make progress.
+- *DeepInfra × Llama-3.3-70b* (model contract issue): 4/10 K6
+  silent_noops on the *pinned* broker. K6 should be demoted from
+  baseline entirely.
+- *Novita × Qwen-2.5-72b* (32k context cliff): HTTP 400 on s4.
+
+** Confirmed champions
+
+- *DeepInfra × DeepSeek-chat-v3-0324 = 25/25*. K8 recovery is
+  fully real and durable.
+- *Together × Qwen3-Coder-30B* (K1 base): clean across 20 cells.
+
+** R25 PROVIDER_PINS changes (5 ranked)
+
+1. Add =ignore: ["DeepInfra"]= to =z-ai/glm-4.6=; drop Z-AI from order
+2. Demote K6-llama70b from baseline (DeepInfra×Llama broken at
+   model contract; deny-list cannot fix)
+3. Add =ignore: ["Novita"]= to qwen-2.5-72b (32k cliff)
+4. Cap K2 =max_tokens= or enable Modal-Kimi route (finish=length
+   on 13 iter cells across 6 K2 cells)
+5. Strict order (no fallbacks) for K17 to force SiliconFlow
+
+* Cost-quality Pareto
+
+** R24 frontier (3 variants)
+
+K1-qwen30 ($0.00054/qpt), K8-deepseekV3 ($0.00090/qpt),
+K6-llama70b ($0.00145/qpt cheapest cell). Widest frontier since
+R16 — but K6's frontier seat is an artifact of producing 1
+high-score cell among 4 silent_noops. Real frontier after
+quality_lint correctness fix is K1 + K8 only.
+
+** Claude moat held at 48×
+
+K5-claude $0.02569/qpt vs K1 $0.00054/qpt. Larger than R19's 51×
+quoted but well within rounding noise — same conclusion.
+
+** Dominated variants
+
+- K11-qwen3coder strictly dominated by K1 (44× cheaper at same
+  task quality on equal n). Premium pool relegation.
+- K7-qwen72b first ever negative aggregate variant in bench
+  history. Quality-lint annihilation legitimate.
+
+* R25 must-do list (consolidating all 4 agents)
+
+| #  | Item                                              | Source agent | Owner       |
+|----+---------------------------------------------------+--------------+-------------|
+|  1 | Fix quality_lint multi-line FP                    | quality      | DONE shipped|
+|  2 | Populate BK1-BK5 target_files                     | quality      | R25 prep    |
+|  3 | Wire WALL_CAP runtime kill (threading.Timer)      | walltime     | R25 prep    |
+|  4 | Drop K7 from generative role; keep adversarial S38| quality+walltime | R25 prep |
+|  5 | Demote K6 entirely from baseline                  | providers+Pareto | R25 prep |
+|  6 | PROVIDER_PINS: 5 ranked changes                   | providers    | R25 prep    |
+|  7 | Cap K2 max_tokens or enable Modal-Kimi            | providers    | R25 prep    |
+|  8 | K8 expand outside B1 (only tested on B1 in R24)   | quality+Pareto | R25 prep |
+|  9 | K2 bump to n=50+ with task diversity              | quality+Pareto | R25 prep |
+| 10 | K17 strict-order to force SiliconFlow             | providers    | R25 prep    |
+| 11 | Instrument wall_seconds for ALL variants (not just K5) | walltime | R25 prep    |
+| 12 | K11 demote to premium-pool with $1.50 cap         | Pareto       | R25 prep    |
+
+* Open questions for R26
+
+1. *Does K8 hold its R24 recovery on tasks beyond B1?* R24 only
+   exercised K8 on B1 (n=25). Layer 2 cells excluded K8 from
+   advancing. R25 must put K8 on B5/B7/B11/B25 to confirm.
+
+2. *Is K6's broken-at-DeepInfra terminal?* If we rerouted K6 to
+   Together/Parasail, would silent_noops disappear? Worth a 10-
+   cell probe before final retire.
+
+3. *What does "real" K1 look like at n=50+?* K1's $/qpt has been
+   stable at [0.00045, 0.00078] across 5 rounds at n=15-28. n=50+
+   would settle whether the ceiling is the model or the bench
+   quality_lint calibration.
+
+4. *Are the new K33/K34/K35 large-FOSS variants worth the
+   complexity?* R24 didn't test them. R25 will. If K33 doesn't
+   beat K1 on B7 code_edit, the "smaller-model + matched fine-
+   tuning" thesis holds and we drop large-FOSS focus.
+
+5. *Will K20 LoRA ever ship?* Modal billing-cap, RunPod
+   dockerArgs unreliable, Together fine-tuning under
+   investigation. The LoRA path needs its own Round 0.
+
+* Cross-references
+
+** Input agent reports
+
+- =docs/notes/2026-05-08-r24-quality-judge.org= — detector bug + BK target_files bug
+- =docs/notes/2026-05-08-r24-pareto.org= — 3-variant frontier; K11 dominated; K7 first negative
+- =docs/notes/2026-05-08-r24-walltime.org= — 54 min wall; 32-way regression; K7 owns longest cells
+- =docs/notes/2026-05-08-r24-providers.org= — pin-hold 58%; 5 ranked changes; DeepInfra×Llama broken
+
+** Related synthesis
+
+- =docs/wiki/2026-05-08-r18-synthesis.org= — drove R19/R24 wiring patches
+- =docs/wiki/2026-05-08-r15-r23-grand-synthesis.org= — cross-round verdicts
+- =docs/wiki/2026-05-08-r25-design.org= — power-ups + new tests + speed budget
+- =docs/notes/2026-05-08-bench-arc-post-mortems.org= — PM1-PM6 infra/process
+
+** Code artifacts
+
+- =scripts/_round24_dials.py= — the harness that ran
+- =scripts/_round24_dials_artifacts/= — raw data
+- =scripts/quality_lint.py= — bug fix shipped
+- =scripts/_round19_long_horizon_tasks.py= — needs target_files fix
+- =scripts/_r24_synthesis_patch.py= — feeds into R25 patch

@@ -131,26 +131,32 @@ def count_stacked_docstrings(diff_text: str) -> int:
 
 
 def count_nested_bracket_depth(text: str) -> int:
-    """Count instances where bracket nesting exceeds depth 1.
+    """Count instances where bracket nesting exceeds depth 1, scanning
+    each line independently so unclosed brackets at a line boundary
+    don't propagate to subsequent lines.
 
-    R18 K6/K7 produced [[id:...][[[id:...][...]]]] — 4-level nesting
-    from re-wrapping already-linked text. Org parser silently broken;
-    mech rewarded.
+    R24 quality-judge bug: cross-line counting falsely flagged any
+    well-formed link after a multi-line link whose closing ]] sat on
+    an unchanged diff context line — ~190 of K1+K11's 234 lint-
+    penalty points were false positives. Per-line scan still catches
+    R18 K6/K7's [[id:][[[id:][...]]]] cascades because they're
+    within a single line, but stops counting cross-line ghosts.
     """
-    depth = 0
     deep_count = 0
-    i = 0
-    while i < len(text) - 1:
-        if text[i:i + 2] == _BRACKET_OPEN:
-            depth += 1
-            if depth > 1:
-                deep_count += 1
-            i += 2
-        elif text[i:i + 2] == _BRACKET_CLOSE:
-            depth = max(depth - 1, 0)
-            i += 2
-        else:
-            i += 1
+    for line in text.splitlines():
+        depth = 0
+        i = 0
+        while i < len(line) - 1:
+            if line[i:i + 2] == _BRACKET_OPEN:
+                depth += 1
+                if depth > 1:
+                    deep_count += 1
+                i += 2
+            elif line[i:i + 2] == _BRACKET_CLOSE:
+                depth = max(depth - 1, 0)
+                i += 2
+            else:
+                i += 1
     return deep_count
 
 
