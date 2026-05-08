@@ -27,8 +27,9 @@ set -uo pipefail
 REPO=/home/daniel/repos/org-llm
 LOG=$REPO/docs/wiki/2026-05-08-r18-live-log.org
 PROGRESS=$REPO/docs/wiki/2026-05-08-r19-lora-progress.org
-ATTEMPT_CAP=10
+ATTEMPT_CAP=30   # raised after first run hit the cap on too-small GPUs
 PER_ATTEMPT_TIMEOUT=600   # 10 min per attempt
+MIN_GPU_MEMORY_GB=80      # 30B model needs >= 60GB; 80GB safe floor
 
 cd "$REPO"
 
@@ -59,18 +60,20 @@ log_line "deploy daemon STARTED for model $MODEL_NAME"
 log_doc "Together LoRA deploy daemon started — try every hardware × API shape until success"
 
 # ── Discover available hardware ─────────────────────────────────────────
-log_line "discovering hardware options"
+log_line "discovering hardware options (filtering to >= ${MIN_GPU_MEMORY_GB}GB)"
 HARDWARE_LIST=$(curl -sS --max-time 15 https://api.together.xyz/v1/hardware \
     -H "Authorization: Bearer $TG_KEY" 2>/dev/null \
-    | jq -r '.data[] | select(.specs.gpu_count == 1) | "\(.id) \(.pricing.cents_per_minute)"' 2>/dev/null \
+    | jq -r --argjson min "$MIN_GPU_MEMORY_GB" \
+        '.data[] | select(.specs.gpu_count >= 1 and .specs.gpu_memory >= $min)
+                | "\(.id) \(.pricing.cents_per_minute)"' 2>/dev/null \
     | sort -k2 -n)
 
 if [ -z "$HARDWARE_LIST" ]; then
-    log_line "no hardware list; falling back to default trio"
-    HARDWARE_LIST=$(printf "1x_nvidia_h100_80gb_sxm 9.15\n1x_nvidia_h200_140gb_sxm 9.15\n")
+    log_line "no hardware list; falling back to known 80GB+ trio"
+    HARDWARE_LIST=$(printf "1x_nvidia_h100_80gb_sxm 9.15\n1x_nvidia_a100_80gb_sxm 6.67\n1x_nvidia_h200_140gb_sxm 9.15\n2x_nvidia_h100_80gb_sxm 18.30\n")
 fi
 
-log_doc "Available hardware (gpu_count=1, cheapest first):"
+log_doc "Compatible hardware (>= ${MIN_GPU_MEMORY_GB}GB, cheapest first):"
 log_doc_block "$HARDWARE_LIST"
 
 # ── Probe loop ──────────────────────────────────────────────────────────
