@@ -537,7 +537,7 @@ R25 P9 wrote =wall_seconds= into the round summary but per-cell
 Move the timing into =run_one_cell= itself, not just
 =execute_cell='s wrapper.
 
-** TODO P2-5: Strategy-novelty check between rounds
+** DONE P2-5: Strategy-novelty check between rounds
 :PROPERTIES:
 :ESTIMATE: 1 hr
 :SOURCE:   PM6-G2; case-studies §P2-23
