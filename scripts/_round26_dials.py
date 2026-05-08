@@ -1381,6 +1381,12 @@ def run_claude_solo_cell(task, dial, run_dir):
 
 def run_one_cell(task, variant_name, specialist_model_id, mode,
                   dial: DialConfig, run_dir):
+    # R26 P2-4: per-cell wall_seconds for ALL variants. R25 P9 only set
+    # wall_seconds in execute_cell's wrapper, AFTER write_cell_result had
+    # already fired — so cell_result.json lacked wall_seconds for FOSS
+    # cells (only K5-claude-solo had it via its own elapsed). Stamp here
+    # at entry so every write below picks it up.
+    _r26_t0 = time.time()
     log(f"  -- {variant_name} dial={dial.label()} ({mode})")
     if mode == "claude-solo":
         return run_claude_solo_cell(task, dial, run_dir)
@@ -1409,6 +1415,7 @@ def run_one_cell(task, variant_name, specialist_model_id, mode,
             cell = {"variant": variant_name, "task_id": task['id'],
                      "phase1_cost": p1_cost, "error": "plan_parse_failed",
                      "dial": asdict(dial), "dial_label": dial.label()}
+            cell["wall_seconds"] = round(time.time() - _r26_t0, 1)
             write_cell_result(run_dir, cell)
             return cell
         (run_dir / "phase1_plan.json").write_text(json.dumps(plan, indent=2))
@@ -1477,6 +1484,7 @@ def run_one_cell(task, variant_name, specialist_model_id, mode,
              "wt_path": str(wt_path), "analysis": analysis,
              "prefetch": prefetch, "dial": asdict(dial),
              "dial_label": dial.label()}
+    cell["wall_seconds"] = round(time.time() - _r26_t0, 1)
     write_cell_result(run_dir, cell)
     return cell
 
