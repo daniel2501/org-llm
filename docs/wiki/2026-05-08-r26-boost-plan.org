@@ -1076,6 +1076,303 @@ P0/P1 layer.
 PM3-G, PM5-G2, PM6-G2 for the post-mortem-derived guardrails this
 layer enforces.
 
+* Pre-flight: thorough launch gates (R26)
+
+*Summary.* R25 shipped 11 patches; 3 of 11 were dead code (max_tokens
+constant unread, WALL_CAP label-only, top-3 selector picking cells not
+variants) and *none of the three were caught by pre-flight*. Pre-flight
+existed but only checked /credit + disk + worktree + warmup ping/ — it
+did not prove behavior had actually changed. R26 closes this with six
+gate categories that PROVE behavior change before the round launches:
+(1) provider funding, (2) endpoint health (real chat completion, not
+ping), (3) K20 endpoint resume, (4) per-patch behavioral probe, (5)
+machine resources, (6) configuration sanity. A single entry-point
+script =scripts/_r26_preflight.sh= runs all six in order and writes a
+=PREFLIGHT_PASS= or =PREFLIGHT_FAIL= sentinel. The round-launch wrapper
+refuses to invoke the python harness without =PREFLIGHT_PASS=.
+
+*Expanded.* The R25 verification gap was structural, not incidental
+(see §2-B). Patches were "shipped" in the sense that the file changed;
+they were dead in the sense that the run-time path never executed the
+new code. The fix is a pre-flight that exercises each patch end-to-end
+on representative input, asserts the observable behavior change, and
+gates launch on the assertion. This costs ~2-3 min wall and ~$0.05 in
+LLM probe traffic per round — trivial relative to the $9.67 R25 spent
+producing 5 floor-drops + 16 wall-cap kills + 3 dead patches. The gate
+philosophy is /fail loudly before any cell runs/, not /detect after the
+fact/. Where the existing go-forward-config §"Pre-flight checklist"
+listed six items at one level of depth, R26 expands to six categories
+each with multiple gates and explicit fail-actions. This section
+complements §12 (self-healing layer): pre-flight prevents launch on
+broken state; §12 catches degradation /during/ the round.
+
+** Gate matrix (six categories)
+
+| Cat | Gate                                       | Pass criterion                                              | Fail action                                | Cost  | Wall  | Source PM     |
+|-----+--------------------------------------------+-------------------------------------------------------------+--------------------------------------------+-------+-------+---------------|
+| 1   | OpenRouter headroom                        | =balance > round_projection × 1.5= (R26 ~$25 → ≥$40)        | abort; alert; top-up                       | $0    | 1s    | PM6, R21-R23 402 |
+| 1   | RunPod balance                             | =clientBalance > $20=                                       | abort; alert; top-up                       | $0    | 1s    | PM2           |
+| 1   | Together balance                           | =GET /v1/finance= returns nonzero usable balance            | warn; mark Together-routes optional        | $0    | 1s    | §3 §5         |
+| 1   | Anthropic budget                           | =$ANTHROPIC_BUDGET_USED= env present + < manual cap         | warn; K5 sentinel disabled                 | $0    | 0s    | go-forward §7 |
+| 1   | Modal capped check                         | skip if =MODAL_BILLING_CAPPED=1=                            | route Kimi-K2 via OR Parasail              | $0    | 0s    | PM1           |
+| 1   | HF + Qdrant quota                          | LFS bytes < 90% quota; Qdrant collection writeable          | warn; defer K20 v2 push                    | $0    | 2s    | §5            |
+| 2   | Per-variant chat completion                | =POST /chat/completions= with prompt ="Reply: PING"=, =max_tokens=10= → response matches =/PING/i= | hold-out variant; log reason | ~$0.0005/var | ~3s/var | R18 v1 silent_noop |
+| 2   | Provider field check                       | =response.provider= ∈ allowed set per PROVIDER_PINS         | hold-out variant; log reason               | (above) | (above) | R19 K8 collapse |
+| 2   | finish_reason check                        | =choices[0].finish_reason ∈ {stop, length}=                 | hold-out variant; log reason               | (above) | (above) | R25 K2 finish=length runaway |
+| 2   | Round-level fail rate                      | held-out variants ≤ =MAX_HOLDOUT_PCT= (default 30%)         | abort round entirely                       | $0    | 0s    | R18 v1 64% wipe |
+| 3   | K20 endpoint resume                        | =bash scripts/_k20_endpoint_resume.sh= exits 0              | skip K20 from round; do NOT block          | $0.001 | ~10s | R26 §3        |
+| 3   | K20 model name match                       | resume-script printed model-slug = =_round26_dials.py='s K20 model_id | abort; mismatch is a config bug    | $0    | 1s    | go-forward §3 |
+| 4   | =max_tokens= cap probe                     | send long-context prompt to K2; assert =output_tokens ≤ _R26_VARIANT_MAX_TOKENS["K2"]= (default 4096) | abort; max_tokens still dead | ~$0.02 | ~30s | R25 PM (max_tokens dead) |
+| 4   | WALL_CAP runtime probe                     | spawn synthetic 500s sleep cell; assert killed within 410s wall | abort; WALL_CAP still label-only       | $0    | ~410s (or skip if =FAST_PREFLIGHT=1=) | R25 walltime PM |
+| 4   | Top-3 selector probe                       | feed mocked roster {K1×3, K8×3, K11×3, K17×3}; assert =top3_foss_after_layer1= returns 3 distinct variants | abort; selector dedupe still wrong | $0 | ~1s | R25 case-study 5 |
+| 4   | Per-line bracket lint probe                | re-run =count_bracket_errors= on saved R25 K11/K17/K8 diffs; assert each ≤ 1.0 lint penalty/cell | abort; lint regression  | $0    | ~5s   | R25 quality_lint PM |
+| 4   | Warmup pre-flight (negative)               | inject known-bad model slug =qwen/_DEAD_MODEL_TEST=; assert pre-flight returns FAIL | abort; warmup not gating         | $0    | ~3s   | R18 v1 silent_noop |
+| 4   | K20 endpoint reachable + sanity            | =scripts/_k20_endpoint_resume.sh= returns 0 AND adapter responds | skip K20 from round (do NOT block)    | $0.001 | (cat 3 reuses) | R26 §3 |
+| 5   | Disk free                                  | =df -h .= reports > 5 GB free in repo parent                | abort; alert; prune                        | $0    | 1s    | go-forward §4 |
+| 5   | Stale worktree prune                       | any =r{N-1}-*= dir older than 1h auto-pruned via =git worktree prune= | log + auto-fix; do not block      | $0    | ~5s   | R18 wipe + G6 |
+| 5   | CPU load average                           | =uptime= 1-min load avg < 4.0                               | warn + delay 60s; abort if still > 4.0     | $0    | 1s    | R26 dogfood   |
+| 6   | =PARALLELISM != 0=                         | env =R26_PARALLELISM= or default constant > 0               | abort; config bug                          | $0    | 0s    | trivial sanity |
+| 6   | =PROVIDER_PINS= sanity                     | for each variant, primary broker ∉ deny-list                | abort; pin regression                      | $0    | 1s    | R25 deny-list update |
+| 6   | =EPOCH= uniqueness                         | =EPOCH= ≠ any prior round's =EPOCH= in artifacts dir        | abort; replay collision                    | $0    | 1s    | R18 wipe race |
+| 6   | BK1-BK15 fixture sanity                    | every BK fixture has =target_files= populated AND every file exists on disk | abort; fixture broken          | $0    | 2s    | R25 case-study (BK target_files) |
+| 6   | K20 model match                            | (cat 3 K20 model name match — reused here)                  | (above)                                    | $0    | 0s    | -             |
+
+** Provider funding gates — implementation notes
+
+The =GET /v1/finance= call against Together is /unverified/ in any
+existing org-llm script; if the endpoint signature differs from the
+table above, the pre-flight should treat a 4xx response as "balance
+unknown" (warn, do not abort) and route critical Together calls (K20
+serverless multi-LoRA, K11 Together pin) through their primary pin
+with extra alarm. Same defensive posture for HF + Qdrant — neither has
+a stable balance API. Anthropic is manual: =$ANTHROPIC_BUDGET_USED= is
+user-tracked and may be stale. Modal currently capped (PM1 + R26 §3 §5)
+so the pre-flight default-skips Modal-Kimi K2 routes unless =MODAL_BILLING_CAPPED=
+is unset.
+
+Reviewer-flagged caveat from PM6: even with all funding gates passing,
+a /strategy-novelty/ check (PM6-G2) prevents launching a round whose
+=_r26_design_patch.py= is byte-equivalent to the prior round's. R26's
+patch is novel by construction (verify_patch_landed-per-patch is new);
+this gate matters more for R27+ to prevent fork-and-rename re-launches.
+
+** Endpoint health gates — what the chat probe must check
+
+Per-variant probe schema:
+
+#+begin_src python
+{
+    "model": variant.model_id,
+    "messages": [{"role": "user", "content": "Reply: PING"}],
+    "max_tokens": 10,
+    "temperature": 0,
+    "extra_body": {"provider": variant.provider_pin or {}},
+}
+#+end_src
+
+Acceptance trio:
+1. =/PING/i.search(response.choices[0].message.content)= matches.
+2. =response.provider= (or =response.model.split(":")[0]= depending on
+   broker) is a member of =PROVIDER_PINS[variant.model_id]["order"]= —
+   never an =ignore= entry.
+3. =response.choices[0].finish_reason= ∈ ={"stop", "length"}= (no
+   =error=, =content_filter=, =null=).
+
+A variant failing any of the three goes into =held_out_variants[]= with
+a structured reason. The round refuses to launch if =len(held_out) /
+len(roster) > MAX_HOLDOUT_PCT=. =MAX_HOLDOUT_PCT= defaults to 0.30
+(30%); R26 may set it to 0.20 once the K34/K35 dead-slugs are dropped
+and the roster is tighter.
+
+*Why this matters more than warmup_providers.* Existing
+=warmup_providers= sends a 1-token request and counts success as
+"endpoint reachable". R18 v1 K8-DeepInfra passed warmup AND silently
+noop'd 5 cells in a row because warmup didn't exercise =tool_calls=
+formatting. The R26 chat-probe doesn't fix that specific gap (probe
+prompt has no tool calls), but it DOES catch the broader "endpoint is
+returning garbage / wrong provider / never-stops" failure modes that
+warmup misses. A separate /tool-call probe gate/ is queued for R27 once
+S1-S4 composition lands and tool-call shape becomes a controlled
+variable.
+
+** Patch verification gates — concrete probe specs
+
+Each R26 patch in =_r26_design_patch.py= ships with a probe in
+=_r26_design_patch.py:verify_patch_landed_<name>()=. The pre-flight
+script imports + invokes each.
+
+| Patch                                | Probe function                          | Asserts                                                  |
+|--------------------------------------+-----------------------------------------+----------------------------------------------------------|
+| max_tokens cap wired                 | =verify_max_tokens_landed=              | K2 prompt → finish=length AND output_tokens ≤ 4096        |
+| WALL_CAP via mp.Process              | =verify_wallcap_landed=                 | 500s sleep cell killed in ≤410s wall_seconds              |
+| Top-3 selector dedupe by variant     | =verify_top3_selector_landed=           | mocked roster returns 3 distinct variant names           |
+| count_bracket_errors per-line        | =verify_lint_perline_landed=            | K11/K17/K8 saved diffs each ≤ 1.0 lint penalty/cell       |
+| Variant warmup-failure pre-flight    | =verify_warmup_gate_landed=             | injected dead slug → pre-flight returns FAIL              |
+| K20 serverless multi-LoRA loaded     | =verify_k20_adapter_landed=             | known-distribution prompt → response shape diverges from K1-base (or skip if K20 disabled) |
+
+The probe is not the patch; the probe is the /assertion that the patch
+fired/. R25 had patches without probes; R26 forbids that pattern.
+
+*Skip rule.* =FAST_PREFLIGHT=1= environment skips the WALL_CAP probe
+(only one that takes >30s) and substitutes a static-source check
+(=grep -E "multiprocessing\.Process|mp\.Process" scripts/_r26_design_patch.py=).
+Useful for iterative dev; never set in production launch.
+
+** Resource gates — defensive defaults
+
+| Resource     | Threshold            | Rationale                                            |
+|--------------+----------------------+------------------------------------------------------|
+| Disk free    | > 5 GB               | go-forward §4; ~200-400 MB/round artifacts + worktree |
+| Worktree age | > 1 h → auto-prune   | G6; R18 wipe race + R26 multi-round dogfooding       |
+| Load average | < 4.0 (1-min)        | dogfood: laptop running other agents shouldn't be saturated |
+
+The load-average gate is new for R26 — added because R25-R26 dev runs
+multiple analysis agents + LoRA training pollers in parallel, and a
+saturated machine produced bench wall-cap kills that were measurement
+artifacts not model artifacts. A 60s delay-and-retry softens this; a
+hard abort fires only if load stays > 4.0 across two successive checks.
+
+** Configuration gates — catch the silent regressions
+
+| Constant                | Check                                                                 |
+|-------------------------+-----------------------------------------------------------------------|
+| =PARALLELISM=           | int > 0 (env override or module-level default)                        |
+| =PROVIDER_PINS=         | every variant's primary not in deny-list                              |
+| =EPOCH=                 | = =int(time.time())= AND not present in =ARTIFACTS/= subdirs           |
+| =BK_FIXTURES=           | each fixture has non-empty =target_files=; every path =Path(p).exists()= |
+| K20 model_id            | matches =bash scripts/_k20_endpoint_resume.sh --print-model=          |
+
+PROVIDER_PINS sanity catches the R23 "primary moved to deny-list" case
+before any cell runs. EPOCH uniqueness catches PM6's round-fork pattern
+where =sed -i= leaves stale prior-round IDs. BK fixture sanity catches
+the R25 case where =target_files=[]= (the fix that made Layer-BK
+finally fire in R25) silently regresses.
+
+** Single entry-point script
+
+=scripts/_r26_preflight.sh= runs all six categories in order:
+
+#+begin_src bash
+#!/usr/bin/env bash
+# Usage: bash scripts/_r26_preflight.sh [--fast]
+# Exit 0 → writes $ARTIFACTS/PREFLIGHT_PASS sentinel.
+# Exit non-zero → writes $ARTIFACTS/PREFLIGHT_FAIL with structured reason.
+set -euo pipefail
+ARTIFACTS=${ARTIFACTS:-/home/daniel/repos/org-llm/scripts/_round26_dials_artifacts}
+mkdir -p "$ARTIFACTS"
+rm -f "$ARTIFACTS"/PREFLIGHT_{PASS,FAIL}
+
+run_gate() {
+    local cat="$1" name="$2"; shift 2
+    if "$@"; then
+        echo "[PASS] $cat/$name"
+    else
+        echo "[FAIL] $cat/$name" | tee -a "$ARTIFACTS/PREFLIGHT_FAIL"
+        exit 1
+    fi
+}
+
+# Cat 1 — provider funding
+run_gate funding openrouter_headroom python -m scripts._r26_preflight cat1_openrouter
+run_gate funding runpod_balance       python -m scripts._r26_preflight cat1_runpod
+run_gate funding together_balance     python -m scripts._r26_preflight cat1_together
+run_gate funding hf_qdrant_quota      python -m scripts._r26_preflight cat1_hf_qdrant
+# Cat 2 — endpoint health
+run_gate health  variant_chat_probes  python -m scripts._r26_preflight cat2
+# Cat 3 — K20 resume (soft-fail: skip K20 instead of abort)
+if bash scripts/_k20_endpoint_resume.sh; then
+    echo "[PASS] k20/endpoint_resume"
+else
+    echo "[SKIP] k20/endpoint_resume — K20 dropped from round" \
+        | tee -a "$ARTIFACTS/PREFLIGHT_K20_SKIP"
+fi
+# Cat 4 — patch verification
+run_gate patches verify_all           python -m scripts._r26_preflight cat4
+# Cat 5 — resources
+run_gate disk    free_5gb             python -m scripts._r26_preflight cat5_disk
+run_gate worktree prune_stale         python -m scripts._r26_preflight cat5_worktree
+run_gate cpu     loadavg              python -m scripts._r26_preflight cat5_cpu
+# Cat 6 — config
+run_gate config  parallelism_pins_epoch_fixtures python -m scripts._r26_preflight cat6
+
+touch "$ARTIFACTS/PREFLIGHT_PASS"
+echo "PREFLIGHT_PASS at $(date -Is)"
+#+end_src
+
+The round-launch wrapper checks for =$ARTIFACTS/PREFLIGHT_PASS= before
+invoking the python harness:
+
+#+begin_src bash
+[[ -f "$ARTIFACTS/PREFLIGHT_PASS" ]] || {
+    echo "PREFLIGHT_PASS sentinel missing; refusing to launch R26"
+    exit 1
+}
+python scripts/_round26_dials.py "$@"
+#+end_src
+
+*K20 special case.* Cat-3 (K20 endpoint resume) is the only gate
+allowed to fail without blocking — its failure removes K20 from the
+round roster instead of aborting. This codifies the §3 fallback chain:
+serverless multi-LoRA might be unavailable for the base model, in
+which case R26 launches without K20 rather than blocking on a
+nice-to-have. Every other gate is hard-block.
+
+** Cost + wall expectations per gate category
+
+| Category           | LLM cost        | Wall                | Notes                                  |
+|--------------------+-----------------+---------------------+----------------------------------------|
+| 1. Funding         | $0              | ~5s (HTTP only)     | balance APIs are fast                  |
+| 2. Endpoint health | ~$0.005-0.01    | ~30s (parallel)     | one chat per variant, 8-12 variants    |
+| 3. K20 resume      | ~$0.001         | ~10s                | reuses existing script                 |
+| 4. Patch probes    | ~$0.02-0.05     | ~30-60s (or 410s WALL_CAP) | unless =FAST_PREFLIGHT=1=       |
+| 5. Resources       | $0              | ~5s                 | =df= + =git worktree= + =uptime=       |
+| 6. Configuration   | $0              | ~3s                 | static analysis + path stats           |
+| /Total/            | *~$0.03-0.06*   | *~80s* fast / *~7m* with WALL_CAP | trivial vs $25 round budget |
+
+** Acceptance criteria (R26 pre-flight)
+
+1. =scripts/_r26_preflight.sh= exists, executable, runs in < 90s with
+   =--fast= or < 8 min full.
+2. =PREFLIGHT_PASS= sentinel only written if all 26 gates pass (or
+   K20 cat-3 soft-fails to /skip K20/).
+3. Round-launch wrapper hard-fails if sentinel missing.
+4. Each cat-4 patch probe imports from =_r26_design_patch.py= and
+   asserts the observable behavior change end-to-end (NOT just
+   "constant defined" / "function exists").
+5. Failed gates write a structured =$ARTIFACTS/PREFLIGHT_FAIL= JSON
+   with =gate=, =reason=, =suggested_action=.
+6. Re-running pre-flight after fix-up is idempotent (rm both
+   sentinels first; re-run; check new sentinel).
+7. The pre-flight itself is gated by a /smoke-test/ probe before
+   R26 launch: feed it a known-bad config (e.g. =PARALLELISM=0=) and
+   confirm it FAILs. (Meta-gate per PM2-cross-cut: detection lag is
+   the killer; we test the detector before relying on it.)
+
+** What this prevents
+
+| R25 failure                        | R26 gate that catches it                    |
+|------------------------------------+---------------------------------------------|
+| max_tokens dead code               | cat-4 verify_max_tokens_landed              |
+| WALL_CAP label-only                | cat-4 verify_wallcap_landed                 |
+| Top-3 selector picked cells        | cat-4 verify_top3_selector_landed           |
+| count_bracket_errors cross-line FP | cat-4 verify_lint_perline_landed            |
+| K33 = K11 slug duplicate           | cat-2 endpoint health (slug returns wrong model card) + cat-6 PROVIDER_PINS sanity |
+| K34 HTTP 400 / K35 HTTP 404        | cat-2 endpoint health hold-out + round-level fail-rate cap |
+| OpenRouter 402 mid-round (R21-R23) | cat-1 OR headroom gate (1.5× projection)    |
+| Modal billing cap silent (PM1)     | cat-1 Modal capped check + skip             |
+| RunPod runtime=null pod (PM2)      | cat-3 endpoint resume (uses pre-baked image) |
+| BK1-BK5 silent zero-score          | cat-6 BK fixture sanity (target_files populated + paths exist) |
+| Worktree race wipe (R18)           | cat-5 stale worktree prune + cat-6 EPOCH uniqueness |
+
+*Cross-link.* This section operationalizes the §2-B verification-gap
+diagnosis + §7's R25-patch verification gate as a hard pre-launch
+gate; §12's self-healing layer is the in-flight complement (catches
+degradation /during/ the round). PM-source threads: PM1 (Modal silent
+cap), PM2 (RunPod runtime=null), PM3 (K7 quality_lint over-penalty),
+PM6 (round-chain dead deltas), and the cross-cutting "detection lag is
+the killer" theme from
+[[file:docs/notes/2026-05-08-bench-arc-post-mortems.org]].
+
 * Cross-references
 
 ** Wiki (input docs)
