@@ -366,7 +366,7 @@ introduction. Real paths in =doom/*.el=, =extensions/emacs/*.el=,
 Add to =scripts/_round19_long_horizon_tasks.py= (extend
 =LONG_HORIZON_TASKS= list).
 
-** TODO P1-15: BK3 bug-injection pre-stage hook
+** DONE P1-15: BK3 bug-injection pre-stage hook
 :PROPERTIES:
 :ESTIMATE: 30 min
 :SOURCE:   case-studies §P2-21
@@ -377,6 +377,16 @@ BK3's =apply_starting_state(workdir)= installs the failing test
 + inverts the two =_check_append_only= returns. R25 didn't run
 BK3 (selector bug excluded). Verify the hook fires per BK3 cell
 in R26.
+
+*Done 2026-05-08:* added =maybe_apply_starting_state(task,
+wt_path)= helper to =scripts/_round26_dials.py=, called from
+both =run_claude_solo_cell= and =run_one_cell= immediately after
+=safe_worktree_add= (before phase-1 prefetch / specialist).
+No-op for tasks lacking the hook. Smoke verified via
+=scripts/_bk3_smoke.py= on a fresh =git worktree=: failing test
+file written (952 B), both =_check_append_only= return
+inversions present exactly once each, and re-running the hook is
+byte-identical (idempotent).
 
 ** TODO P1-16: Wire org-mcp into specialist tool surface
 :PROPERTIES:

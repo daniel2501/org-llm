@@ -320,6 +320,16 @@ _R25_VARIANT_MAX_TOKENS = {
 # R18 — Modal-Kimi route override (S6 Tier-S strategy). Kimi cells use
 # Modal-self-hosted endpoint when MODAL_KIMI_ENABLED env is "1".
 # Sub-second TTFT vs Parasail's 2-200s tail.
+#
+# R26 P1-4 status (2026-05-08): the launch-checklist plan was to flip
+# this default-ON for R26 to dodge Parasail's 60-180s prefill stall
+# (R25 saw 16 K2 WALL_CAP_KILLED). Pre-flight ping returned HTTP 429
+# "workspace billing cycle spend limit reached" (matches PM1 in
+# docs/notes/2026-05-08-bench-arc-post-mortems.org). Default stays
+# OFF until the Modal billing cycle resets; flip to default-ON by
+# changing the gate below to `os.environ.get("MODAL_KIMI_ENABLED",
+# "1") == "1"` once a curl ping returns HTTP 200 < 5s. P1-4 tracked
+# PARTIAL in the launch checklist for this reason.
 MODAL_KIMI_URL = "https://daniel2501--org-llm-kimi-k26-vllm-serve.modal.run/v1/chat/completions"
 MODAL_KIMI_VARIANTS = {"K2-kimi-k2.6", "K15-kimi-thinking"}
 
@@ -435,6 +445,24 @@ def log(msg, also_to_stdout=True):
     if also_to_stdout: print(line, flush=True)
     LOG.parent.mkdir(parents=True, exist_ok=True)
     LOG.open("a").write(line + "\n")
+
+
+# R26 P1-15 — BK3 bug-injection pre-stage hook. BK1-BK5 fixtures
+# (from scripts/_round19_long_horizon_tasks.py) may carry an
+# `apply_starting_state(workdir)` callable. BK3 uses it to install a
+# failing test + invert two `_check_append_only` returns so the
+# model has a real bug to fix. The hook must fire on a fresh
+# worktree, AFTER `git worktree add`, BEFORE phase-1 prefetch +
+# specialist run. Idempotent — re-runs are safe.
+def maybe_apply_starting_state(task, wt_path):
+    fn = task.get("apply_starting_state")
+    if not fn:
+        return
+    ok, msg = fn(wt_path)
+    if not ok:
+        raise RuntimeError(
+            f"apply_starting_state failed for {task.get('id')}: {msg}")
+    log(f"  -- applied starting state for {task.get('id')}: {msg}")
 
 
 def tok():
@@ -1318,6 +1346,10 @@ def run_claude_solo_cell(task, dial, run_dir):
     wt_name = f"r26-{task['id']}-K5-claude-solo-{dial.label()}-{EPOCH}"
     wt_path = REPO.parent / "org-llm-worktrees" / wt_name
     safe_worktree_add(wt_name, wt_path)
+    # R26 P1-15 — BK3 bug-injection (failing test + inverted
+    # _check_append_only returns) on the fresh worktree, before any
+    # prefetch / specialist work. No-op for tasks without the hook.
+    maybe_apply_starting_state(task, wt_path)
     prefetch = get_prefetch(task) if task.get("prefetch") else {}
 
     if dial.brief_mode == "loose":
@@ -1388,6 +1420,15 @@ def run_claude_solo_cell(task, dial, run_dir):
 
 def run_one_cell(task, variant_name, specialist_model_id, mode,
                   dial: DialConfig, run_dir):
+    # R26 P2-4: per-cell wall_seconds for ALL variants. R25 P9 only set
+    # wall_seconds in execute_cell's wrapper, AFTER write_cell_result had
+    # already fired — so cell_result.json lacked wall_seconds for FOSS
+    # cells (only K5-claude-solo had it via its own elapsed). Stamp here
+    # at entry so every write below picks it up.
+    # P1-21c re-apply: P1-7 commit (9fc4c2c) was branched off pre-P2-4
+    # and reverted these three lines. Restored 2026-05-08 by harness
+    # verification agent.
+    _r26_t0 = time.time()
     log(f"  -- {variant_name} dial={dial.label()} ({mode})")
     if mode == "claude-solo":
         return run_claude_solo_cell(task, dial, run_dir)
@@ -1416,6 +1457,7 @@ def run_one_cell(task, variant_name, specialist_model_id, mode,
             cell = {"variant": variant_name, "task_id": task['id'],
                      "phase1_cost": p1_cost, "error": "plan_parse_failed",
                      "dial": asdict(dial), "dial_label": dial.label()}
+            cell["wall_seconds"] = round(time.time() - _r26_t0, 1)
             write_cell_result(run_dir, cell)
             return cell
         (run_dir / "phase1_plan.json").write_text(json.dumps(plan, indent=2))
@@ -1428,6 +1470,11 @@ def run_one_cell(task, variant_name, specialist_model_id, mode,
     wt_name = f"r26-{task['id']}-{variant_name}-{dial.label()}-{EPOCH}"
     wt_path = REPO.parent / "org-llm-worktrees" / wt_name
     safe_worktree_add(wt_name, wt_path)   # R18 mutex fix
+    # R26 P1-15 — BK3 bug-injection (failing test + inverted
+    # _check_append_only returns) on the fresh worktree, after
+    # `git worktree add` and before specialist phase 1 starts.
+    # No-op for tasks without an `apply_starting_state` hook.
+    maybe_apply_starting_state(task, wt_path)
     time.sleep(0.3)
 
     specialists = []
@@ -1484,6 +1531,7 @@ def run_one_cell(task, variant_name, specialist_model_id, mode,
              "wt_path": str(wt_path), "analysis": analysis,
              "prefetch": prefetch, "dial": asdict(dial),
              "dial_label": dial.label()}
+    cell["wall_seconds"] = round(time.time() - _r26_t0, 1)
     write_cell_result(run_dir, cell)
     return cell
 
