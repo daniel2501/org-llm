@@ -1,0 +1,385 @@
+:PROPERTIES:
+:ID:       r18-synthesis
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R18 — 4-agent synthesis + lessons for R19
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:synthesis:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Four parallel agents (quality, Pareto, providers, walltime) +
+a strategy-effectiveness audit re-read R18 v2 (140 cells / $2.77 / 28 min
+wall, 50 ok + 90 worktree errors). Convergent finding: *R18's
+"leaderboard" is stat-noise* — the worktree-collision bug killed 64% of
+cells before they could spend, S5 JSON-mode BACKFIRED on B11 (valid JSON,
+zero edits applied), and the apparent K7-qwen72b "mech lead" is heavily
+inflated by broken-bracket diffs the harness doesn't penalize. The two
+real R18 wins are infra carry-forward, not new strategy: *worktree mutex
+held* and *append-only enforcement held* (zero B11 mass-delete events).
+The new strategies (S1-S4) that would have produced quality lift were
+catalogued but never wired into ~main()~.
+
+*Expanded.* This synthesis is the consolidated read across
+[[file:../notes/2026-05-08-r18-quality-judge.org]],
+[[file:../notes/2026-05-08-r18-pareto.org]],
+[[file:../notes/2026-05-08-r18-providers.org]],
+[[file:../notes/2026-05-08-r18-walltime.org]], the strategy audit at
+=/tmp/r19-strategy-effectiveness.org=, and the live narrative at
+[[file:2026-05-08-r18-live-log.org]]. R19's portfolio is *narrower than
+R18's design* (550 cells, $8-15, 2-4h) — wire S1-S4 in a 200-cell pilot
+*before* spending up to the cap. The R18 design's Tracks D-P were
+catalogued faster than they were implemented; R19 closes the
+implementation gap before adding anything new.
+
+* 1. Executive summary
+
+Six headline findings:
+
+1. *Worktree collisions blew up the round.* 90 of 140 cells died at
+   =git worktree add= concurrency. Affected K8 14/15, K11 9/10, K17
+   9/10, K1 14/22 of layer-2 attempts. Without this fix, R18 v2's
+   leaderboard is stat-noise.
+2. *S5 (constrained-decoding JSON-mode for B11) BACKFIRED.* Format was
+   100% valid; ~edits_applied=0~ across all 4 cells because the harness
+   has no JSON→org renderer. Per-strategy delta: −7 to −10 quality on B11.
+3. *K7-qwen72b's "mech 91" lead is mostly hallucinated quality.*
+   Quality-judge re-rank found K7 cells loaded with =])= bracket
+   mismatches, label-eats-sentence, fabricated UUIDs (=12345678-...=
+   on the d6_tool dial). Per-cell quality avg: 10.4 vs Claude's 17.3.
+4. *K6-llama70b genuinely climbed onto the FOSS frontier* — n=14 across
+   8 tasks, $0.0010/u, often produces table-mangling and nested-bracket
+   disasters but cheap enough to redeem. K1+K6 are the layer-2 paired
+   FOSS Pareto frontier.
+5. *K2-kimi-k2.6 went 0/15 (broker breakage).* DeepInfra serves Kimi
+   without OpenAI tool-call adapter; 27k chars of analysis text, zero
+   ~tool_calls~. v3 re-pin to Parasail/Moonshot recovered it (5 edits
+   applied on a v3 sample cell).
+6. *S1-S4 were catalogued but never wired.* Hedged execution, best-of-N,
+   critique-then-revise, specialty routing — all exist as orphaned
+   constants. R19's biggest unrealized lever.
+
+R17 carry-forward held: worktree mutex (when it worked: 0 errors on
+the cells that didn't collide), append-only enforcement (0 B11
+mass-deletes), judge-fixes prompt header, per-task tool gating.
+
+* 2. What worked (R17 carry-forward held)
+
+| #  | Carry-forward                                | Status                                    | Source agent |
+|----+----------------------------------------------+-------------------------------------------+--------------|
+|  1 | Worktree mutex (concept)                     | Implemented; failure mode shifted upstream | quality      |
+|  2 | Append-only DEC enforcement (B11)            | 0 mass-deletions in v2                    | quality      |
+|  3 | Judge-fixes prompt header                    | K7 fab=0 on most cells (1 ablation outlier)| audit        |
+|  4 | Per-task tool gating                         | K6/K1 silent_noop on no-tool dials = correct | quality   |
+|  5 | Adaptive abort baseline                      | K2 noop=15 caught early; no runaway        | walltime     |
+|  6 | Pin-hold rate                                | 38/42 disk-truth cells held first-choice pin (90%) | providers |
+|  7 | Per-cell wall distribution stable vs R17     | p50 29s, p90 183s, p99 ~600s (within ±10%) | walltime     |
+|  8 | Layer-barrier overhead near-zero             | layer2→3 transition = 1.3s, layer3 end = 1.6s | walltime  |
+
+The engine itself is not regressing. Per-cell wall + cost behave like
+R17 modulo the long-tail cells (K5/K7/K15) which dominate.
+
+* 3. What broke
+
+** 3a. Worktree-add concurrency (HIGH severity, round-killer)
+
+90 of 140 cells errored at =git worktree add= when ≥2 cells targeted
+adjacent paths simultaneously. Affected ratios:
+
+| variant | layer-2 errors | total errors |
+|---------+----------------+--------------|
+| K8      | 14/15          | 14           |
+| K1      | 14/22          | 14           |
+| K11     | 9/10           | 9            |
+| K17     | 9/10           | 9            |
+| K6      | 9/23           | 9            |
+| K7      | 9/23           | 9            |
+
+Source: [[file:../notes/2026-05-08-r18-quality-judge.org]] §0 caveat
++ [[file:../notes/2026-05-08-r18-pareto.org]] §all-ok-cells "err" col.
+The R18 design (P15-P19 preflight) didn't include a worktree concurrency
+test. R19 *must* gate on this.
+
+** 3b. S5 constrained-decoding backfire (NEGATIVE quality lift)
+
+Per [[file:/tmp/r19-strategy-effectiveness.org]]:
+
+- B11 cells with ~response_format={type: json_object}~: 4/4 produced
+  valid JSON, 4/4 ~edits_applied=0~.
+- Harness doesn't auto-route JSON output → ~edit_file~ tool calls.
+- Net effect: per-cell quality −7 to −10 on B11.
+
+S5 needs a JSON→org post-processor (= new strategy *N2*) before re-trying.
+Until then, B11 reverts to free-form tool-call mode.
+
+** 3c. Mech-score hallucinated quality
+
+[[file:../notes/2026-05-08-r18-quality-judge.org]] §5 quantifies the
+gap. Per-variant quality re-rank vs mech rank:
+
+| variant         |  n | mean mech | mean q | mech rank | quality rank | shift |
+|-----------------+----+-----------+--------+-----------+--------------+-------|
+| K5-claude-solo  |  8 |      10.9 |   17.3 |         3 |            1 | +2    |
+| K1-qwen30       |  8 |       6.0 |   12.8 |         5 |            2 | +3    |
+| K7-qwen72b      | 14 |       6.5 |   10.4 |         4 |            3 | +1    |
+| K6-llama70b     | 14 |       4.7 |    9.0 |         6 |            4 | +2    |
+| K11-qwen3coder  |  1 |      10.0 |   13.0 |         2 |            6 | −4    |
+| K8-deepseekV3   |  1 |      10.0 |   14.0 |         2 |            7 | −5    |
+
+Mech rewards link-count + diff-size; doesn't penalize broken brackets,
+fabricated UUIDs, nested-bracket disasters, table-row mangling, or
+unreachable code (K1 B7 added a 2nd =return= block — mech 18, q 6).
+
+The "K7 mech 91 leader" headline in [[file:2026-05-08-r18-live-log.org]]
+is the most-affected datum.
+
+** 3d. Provider pinning advisory rollback
+
+R18 v1 set =allow_fallbacks: false= → catastrophic silent_noop on K7/K8/
+K17/K15 (DeepInfra doesn't honor OpenAI tool-call format for several
+models). Reverted to advisory at 02:00 → v2 launched. Net: pin-hold
+rate dropped from "intended-strict" to 90% advisory. K2/K15/K17 fell
+back off-pin in v2; K17 served on SiliconFlow (worked) instead of Z-AI.
+
+** 3e. K2-kimi-k2.6 broker bug (regression)
+
+DeepInfra served K2 with the wrong tool-call adapter — 187s wall,
+27,013 chars of analysis text, finish_reason=length, 0 tool_calls. All
+15 cells scored 0. v3 re-pin to Parasail/Moonshot recovered K2 (5 iters,
+5 edits on the v3 sample cell). Per [[file:../notes/2026-05-08-r18-providers.org]]
+§5: K2 v3 succeeded "by accident" — actually fell to DeepInfra again
+but the adapter had been fixed between 02:00 and 02:33.
+
+* 4. Variant verdicts
+
+10 variants ran in v2. Per-variant 1-paragraph verdict, with one of
+{KEEP, KEEP+GATE, REWORK, DROP}:
+
+** K1-qwen30 — KEEP (FOSS frontier, default scribe)
+
+Layer-2 paired n=7: $0.00078/qpt — best $/qpt of any variant. Quality
+12.8/20 mean. One destructive cell (B7 unreachable =return=) and one
+silent_noop (B5) but otherwise clean. Held R17 frontier slot. *R19
+default scribe.* (Per [[file:../notes/2026-05-08-r18-pareto.org]] §2
++ [[file:../notes/2026-05-08-r18-quality-judge.org]] §6.)
+
+** K2-kimi-k2.6 — REWORK (re-pin then re-field)
+
+0/15 in v2 due to DeepInfra adapter bug. v3 re-pin to Parasail/Moonshot
+recovered. n=10 in R19 with =provider.ignore=DeepInfra= explicitly set.
+Score remains unverified post-fix.
+
+** K5-claude-solo — KEEP as ceiling (sentinel only)
+
+Quality 17.3/20 mean (highest), $1.77 per round (12 cells). Proprietary
++ FOSS-only routing rule keeps K5 out of production scribe. *Use as
+quality ceiling + Opus-judge blind-rater seed only.*
+
+** K6-llama70b — KEEP+GATE (frontier climber, bracket-validator gate)
+
+n=14 layer-2, $0.00094/qpt — *climbed onto frontier from R17's n=1*.
+But: B1 produced nested-bracket disaster (=[[id:UUID][[[id:UUID][...]]]]=)
+and table-row mangling. R19 must gate K6 behind a post-edit org-link
+parser (proposed N5). Without gate, K6 productivity is illusory on
+wrap-cross-link tasks (B1-shaped).
+
+** K7-qwen72b — KEEP+GATE (premium-FOSS sanity probe, NOT default)
+
+Mech 91 leader in v2 raw board; quality re-rank drops to rank 3.
+Broken-bracket diffs at alarming rate (12/14 cells had at least one
+silent-text mid-loop iter on DeepInfra). $0.00266/qpt — 3.4× K1 for
+~80% of K1's quality. *Same gate as K6 (bracket validator).* n=10 at
+most in R19; do not default-route.
+
+** K8-deepseekV3 — REWORK (R17 frontier, blocked by worktree errors)
+
+R17 winner across all 4 R17 agents. R18 v2: blocked 14/15 layer-2
+attempts. The 1 cell that ran scored q=14, $0.00095/qpt — in line with
+R17 frontier expectations. *Re-field with worktree fix.* Risk: not
+truly tested in R18. n=15 in R19 contingent on worktree mutex working.
+
+** K9-mixtral — DROP-ish (dominated, n=1)
+
+$0.1147/cell — 12× K8 for same score. Per
+[[file:../notes/2026-05-08-r18-pareto.org]] §3: strictly dominated by
+K8 on every axis. R18-design projection $0.041 vs actual $0.1147 (180%
+over). *Drop from R19 default roster*; keep as n=3 graduation probe only.
+
+** K11-qwen3coder — DROP from default (confirmed dominated 2× in a row)
+
+$0.3835/cell single B1, mech 10. *40× K8's cost for same score.*
+Confirmed dominated 2 rounds running. *Retire from default roster*;
+keep n=5 in R19 as one final dominated-confirmation probe before formal
+removal. (Caveat: [[file:../notes/2026-05-08-r18-quality-judge.org]]
+notes K11 quality 13/20 on its single cell — not catastrophic, just
+catastrophically expensive.)
+
+** K15-kimi-thinking — DROP from layer1 (side-pool only)
+
+Single 398.8s cell on B1; was R17's long-pole and is again. Per
+[[file:../notes/2026-05-08-r18-walltime.org]] §6: K15 alone held
+layer1 open until +459s when other cells finished by +75s. *Side-pool
+only* — never gate layer-promotion on K15.
+
+** K17-glm46 — KEEP at low n (no signal)
+
+n=1 quality 9; same as R17. R18 didn't graduate it past n=1 because
+worktree errors blocked the layer-2 sweep. R19: n=10 with
+order=[SiliconFlow, Z-AI] (flip per
+[[file:../notes/2026-05-08-r18-providers.org]] §6 — Z-AI never actually
+served a v2/v3 cell).
+
+* 5. Strategy verdicts
+
+S1-S6 (Tier-S strategies from R18 design) + new gaps N1-N5 surfaced by
+the strategy effectiveness audit at =/tmp/r19-strategy-effectiveness.org=:
+
+| ID  | Strategy                       | Status v2          | Verdict         | R19 action                              |
+|-----+--------------------------------+--------------------+-----------------+-----------------------------------------|
+| S1  | Hedged-strong execution        | constants only     | KEEP, wire      | =run_with_escalation= around layer-2    |
+| S2  | Best-of-N voting (FOSS)        | constants only     | KEEP, wire      | =run_best_of_n= for B5/B11/B20          |
+| S3  | Critique-then-revise           | constants only     | KEEP, wire      | K1 draft → K2 critique → K1 revise      |
+| S4  | Specialty routing per family   | constants only     | KEEP, wire      | reference TASK_FAMILY_VARIANTS          |
+| S5  | Constrained decoding (B11 JSON)| WIRED              | RETIRE in form  | replace with N2 (JSON→org post-process) |
+| S6  | Modal-Kimi pre-warmed pool     | DEPLOYED, disabled | DEFER + measure | pre-flight latency probe                |
+| N1  | Broker capability matrix       | new gap            | NEW, wire       | pre-run 1-tool-call probe per (m,b)     |
+| N2  | JSON→org renderer              | new gap            | NEW, wire       | deterministic post-processor            |
+| N3  | Task-pair expectation gate     | new gap            | NEW, wire       | skip (variant,task) with 0 history      |
+| N4  | Wire-the-catalog mandate       | new gap            | NEW, process    | dead constants → :DRAFT: or strip       |
+| N5  | Per-cell ground-truth verifier | new gap            | NEW, wire       | bracket parser, AST verify, B11 grammar |
+
+Detail per
+[[file:/tmp/r19-strategy-effectiveness.org]]. Top finding: *S1-S4 are
+the cheapest wins still on the table* — combined wiring effort
+80-120 lines. Process-level finding: catalog inflation (32 strategies,
+28 tests) outpaced wiring (6 partly wired, 2 actually driving cells).
+
+* 6. Cross-cutting findings — areas where multiple agents converged
+
+** Theme A — Worktree concurrency is the #1 R18 failure mode
+
+| Agent     | Datum                                                         |
+|-----------+---------------------------------------------------------------|
+| Quality   | "90 of 140 cells errored at =git worktree add= concurrency"  |
+| Pareto    | "K8 lost 14/15 layer-2 attempts, K1 lost 14"                  |
+| Audit     | "infra mutex enables 16-way" — wired but didn't hold @ scale  |
+
+R19 must gate on a worktree-concurrency preflight (P20 below).
+
+** Theme B — Mech score systematically over-rewards K7/K6, under-rewards K1/K5
+
+Quality + audit converge: K7's mech 91 lead is bracket-disaster
+inflation; K1+K5 are quality-rank top-2; the harness needs negative
+mech penalties for broken brackets, fab-UUIDs, unreachable code, and
+heading destruction. *N5 (per-cell ground-truth verifier) is the
+quality-judge automation path.*
+
+** Theme C — Layer-2 long-tail dictates wall, not parallelism
+
+Walltime + audit converge: layer2 wall = 650s, of which K5-claude on B5
+= 648s. 15 of 16 workers idle for ~9 minutes. *Pipeline layers, don't
+gate-and-wait.* R19 should launch layer3 cells once layer2 is 80%
+complete. (Per [[file:../notes/2026-05-08-r18-walltime.org]] §5.)
+
+** Theme D — Pin-hold rate is high but the wrong question
+
+Provider/cache + quality converge: 90% pin-hold on disk-truth cells.
+But "the right pin" depends on which broker honors the OpenAI tool-call
+adapter for the routed model. Pin-hold ≠ tool-call-success. R19 needs
+*per-(model, broker) capability probe* (N1) before pinning.
+
+** Theme E — Spend was 0.7% of cap; gating constraint was implementation
+
+R18 spent $2.77 of the $375 cap. Per
+[[file:/tmp/r19-strategy-effectiveness.org]] §process: "spend headroom"
+framing encouraged catalog growth but didn't translate to executed
+cells — v2 ended at 140 cells vs the maximalist 1500-2600 estimate.
+*R19 should set a $50 cap to force deliberate variant×n stratification.*
+
+* 7. R19 portfolio recommendation (~550 cells, ~$8-15, 2-4h)
+
+Per [[file:/tmp/r19-strategy-effectiveness.org]] §R19 recommended portfolio
++ [[file:../notes/2026-05-08-r18-pareto.org]] §5 stratification.
+
+** Layer slate
+
+| Layer                  | Items                                                       | Cells | Cost    |
+|------------------------+-------------------------------------------------------------+-------+---------|
+| Infra preflight        | N1 broker probe, N2 JSON→org, N3 task-pair gate, P20 wt-mutex | 0   | <$0.10  |
+| Strategy must-wire     | S1, S2, S3, S4 in 200-cell pilot (B1+B5+B11)                | ~200  | ~$2-4   |
+| Variant frontier sweep | K1 ×15, K6 ×15, K8 ×15, K7 ×10, K2 ×10, K11 ×5, K17 ×10     | ~80×8=640 (cap to ~250) | ~$3-5 |
+| Tests                  | T2 long-horizon BK1-BK5, T3 regression, N5 verifier          | ~50   | ~$2-3   |
+| LoRA K20 pilot         | K20-foss-distill ×5 across B1+B5+B25 (R19 Track G)          | ~15   | <$0.50  |
+| Reserve                | retry budget + hedged-90s cells                              | -     | ~$2     |
+
+*Total target: ~550 cells, $8-15, 2-4h wall.* Hard cap: $50.
+
+** Stratification table (per-variant)
+
+| variant            |  n | rationale                                       | est. $ |
+|--------------------+----+-------------------------------------------------+--------|
+| K1-qwen30          | 15 | layer-2 frontier; cheapest $/qpt at scale       | ~$0.60 |
+| K6-llama70b        | 15 | climbed onto frontier R18; B1 winner            | ~$0.70 |
+| K8-deepseekV3      | 15 | re-field after worktree fix; R17 frontier       | ~$0.20 |
+| K7-qwen72b         | 10 | premium-FOSS sanity probe; with bracket gate    | ~$2.10 |
+| K2-kimi-k2.6       | 10 | re-pin Parasail; recover R17 score              | ~$0.50 |
+| K11-qwen3coder     |  5 | confirm-dominated probe only; do NOT default    | ~$2.00 |
+| K15/K17/K9         |  3 | n=3 is the "n=1-no-signal" graduation bar       | ~$0.40 |
+| K20-foss-distill   |  5 | new LoRA tier; $/qpt unknown                    | ~$0.20 |
+
+** R19 must-do gotcha-fixes
+
+|  # | Fix                                                                  | Source agent       | Severity |
+|----+----------------------------------------------------------------------+--------------------+----------|
+|  1 | Worktree-add concurrency mutex (P20 preflight + retry)               | quality, pareto    | HIGH     |
+|  2 | Wire S1+S2+S3+S4 into ~main()~ (the dead-constant fix)               | audit              | HIGH     |
+|  3 | N1: per-(model, broker) tool-call capability probe before pin        | providers          | HIGH     |
+|  4 | N5 quality-lint: bracket parser, fab-UUID detector, AST unreachable  | quality, audit     | HIGH     |
+|  5 | N2: JSON→org post-processor for B11 (or kill S5 entirely)            | audit              | MEDIUM   |
+|  6 | Pipeline layer2 → layer3 at 80% complete (don't wait for long-tail)  | walltime           | MEDIUM   |
+|  7 | Hedged retry on cells > 300s (p90); first-to-finish wins             | walltime           | MEDIUM   |
+|  8 | =provider.ignore= on confirmed-broken (broker, model) combos         | providers          | MEDIUM   |
+|  9 | N3: task-pair expectation gate (skip score=0-in-last-N variants)     | audit              | MEDIUM   |
+| 10 | N4: catalog hygiene — strip or :DRAFT: dead constants                | audit              | LOW      |
+
+* 8. Open questions for the morning
+
+1. *Can S1 (hedged) + S2 (best-of-N) lift K1+K6 quality enough to close
+   the K7 mech-vs-quality gap?* Pre-committed bar: +3 quality on B5 +
+   B11. If yes → S1+S2 are wired-in defaults for R20.
+2. *Does the worktree mutex preflight (P20) actually hold under 16-way?*
+   R18 had a mutex but it failed at scale. Need a stress test on
+   parallel =git worktree add= before R19 launch.
+3. *Is K2-kimi-k2.6's recovery durable?* v3 success on DeepInfra
+   (which broke v2) was "by accident" per provider agent. Need n=10
+   with explicit Parasail pin to confirm.
+4. *Should K11 be formally retired?* 2 rounds of dominated. Cost-bench
+   says yes. But quality-judge re-rank says K11 q=13 on its single B1
+   is competitive. n=5 in R19 to break the tie.
+5. *N5 verifier — Python or elisp implementation?* Bracket parser
+   exists in =org-element=; AST checks exist in Python. Cross-language
+   harness shim needed. Where does the verifier live?
+6. *Does S6 Modal-Kimi actually beat DeepInfra-Kimi (now that v3 K2
+   recovered)?* Need pre-flight latency + cost probe before re-enabling.
+7. *Should we keep the $375 cap or drop to $50?* Audit recommends $50
+   to force stratification discipline. R18-design Tracks D-P assumed
+   the higher cap.
+8. *Long-horizon BK1-BK5 — own pool or layered into main bench?*
+   Walltime agent recommends own pool starting t=0 to avoid serializing
+   on a 1500s long-tail cell.
+
+* Cross-references
+
+- [[file:../notes/2026-05-08-r18-quality-judge.org]] — quality re-rank, mech vs quality gap
+- [[file:../notes/2026-05-08-r18-pareto.org]] — cost-quality Pareto frontier, $/qpt by variant
+- [[file:../notes/2026-05-08-r18-providers.org]] — broker × model tool-call capability matrix
+- [[file:../notes/2026-05-08-r18-walltime.org]] — parallel efficiency, layer-tail analysis
+- [[file:/tmp/r19-strategy-effectiveness.org]] — S1-S32 audit, N1-N5 gaps
+- [[file:2026-05-08-r18-live-log.org]] — v1/v2/v3 narrative
+- [[file:2026-05-07-r18-design.org]] — original R18 plan (Tracks D-P)
+- [[file:2026-05-08-r17-synthesis.org]] — R17 retro this mirrors
+- [[file:2026-05-08-foss-spend-headroom.org]] — Claude $/qpt baseline
+- =scripts/_round18_dials_artifacts/v2/= — raw cell data
