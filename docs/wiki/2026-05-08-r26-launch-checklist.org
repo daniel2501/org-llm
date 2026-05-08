@@ -547,7 +547,7 @@ Reject any future round whose patch content (modulo round IDs)
 is byte-identical to the prior. Prevents R20-R23-style
 zero-strategy-delta rounds.
 
-** TODO P2-6: Pre-emit grammar gate (proper N5)
+** PARTIAL P2-6: Pre-emit grammar gate (starter shipped; full impl R27)
 :PROPERTIES:
 :ESTIMATE: 2 days
 :SOURCE:   PM3-G2; case-studies §P2-19
