@@ -245,7 +245,7 @@ cap wasn't enforced via the budget hook. Verify
 =_R25_VARIANT_BUDGETS= dict actually filters cell-specs in
 =_round26_dials.py='s =run_layer_parallel=.
 
-** TODO P1-7: Wire S1-S4 composition strategies
+** DONE P1-7: Wire S1-S4 composition strategies
 :PROPERTIES:
 :ESTIMATE: 4 hr (~80-120 LOC per strategy-effectiveness agent)
 :SOURCE:   strategy-effectiveness agent (R18); boost plan §1
