@@ -1,0 +1,588 @@
+:PROPERTIES:
+:ID:       r26-launch-checklist
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R26 launch checklist — every item to ship before round fires
+#+FILETAGS: :wiki:bench:r26:checklist:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+#+TODO: TODO DOING BLOCKED | DONE CANCELLED
+
+* Summary
+
+*Summary.* Single-file living checklist for every prep item that
+must ship before R26 launches. Sourced from
+=docs/wiki/2026-05-08-r26-boost-plan.org= (P0/P1/P2 launch plan +
+self-healing layer + pre-flight gates) + =docs/wiki/2026-05-08-r25-case-studies.org=
+(32-rec list with acceptance criteria). Each item has status,
+estimate, dependencies, and acceptance probe.
+
+*Expanded.* The boost plan is comprehensive but spread across 4
+sections (§9 launch plan, §11 reviewer revisions, §12 self-healing,
+§13 pre-flight gates). This checklist consolidates them into one
+list of executable work, ordered by dependency. Updated in place
+as items move TODO → DOING → DONE. Acceptance probes from boost
+plan's §13 verify each P0 patch actually changes runtime behavior
+(addressing PM6 — the verification gap that let 3 of 11 R25
+patches ship as dead code).
+
+* Status legend
+
+| State    | Meaning                                              |
+|----------+------------------------------------------------------|
+| TODO     | Not started                                          |
+| DOING    | In progress                                          |
+| BLOCKED  | Waiting on external dep                              |
+| DONE     | Ready; acceptance probe passed                       |
+| CANCELLED| No longer needed (with rationale)                    |
+
+* P0 — correctness blockers (R26 cannot launch without these)
+
+** TODO P0-1: Fix top-3 selector dedupe by variant
+:PROPERTIES:
+:ESTIMATE: 30 min
+:SOURCE:   r25-quality-judge §R-2; case-studies §P0
+:DEPS:     none
+:END:
+
+Current bug at =scripts/_round25_dials.py:1675=:
+=top3_foss = [c["variant"] for c in foss_cells[:3]]= picks
+individual /cells/ not distinct /variants/. R25 had all 3 top
+cells as K1 → L2/L3/BK collapsed to K1-only.
+
+Fix: aggregate by variant first, rank by per-cell mean (not sum,
+so wall_cap kills don't dilute), take top-3 distinct variants.
+
+*Acceptance probe.* Run synthetic =top3_foss=...= with mocked
+cells where K1 has 50 cells of mean=23, K2 has 40 cells of
+mean=15, K8 has 25 cells of mean=10. Assert returns exactly
+=["K1-qwen30", "K2-kimi-k2.6", "K8-deepseekV3"]= in that order.
+
+** TODO P0-2: Wire K2 max_tokens through SpecialistTask + _chat_completions
+:PROPERTIES:
+:ESTIMATE: 2 hr
+:SOURCE:   r25-providers §1; case-studies §P0
+:DEPS:     none
+:END:
+
+R25 P5 patch defined =_R25_VARIANT_MAX_TOKENS= dict but nothing
+read it. Default 8000 still fired. K2 produced 22-28k char
+prose, hit 16 WALL_CAP kills.
+
+Fix: add =max_tokens: Optional[int]= to =SpecialistTask=
+dataclass; thread through =_chat_completions= override (default
+8000 → variant-specific cap when present); read
+=_R25_VARIANT_MAX_TOKENS= in =run_specialist_for_cell= per
+variant name.
+
+*Acceptance probe.* Send a long-prompt to K2 via the harness;
+assert response =output_chars ≤ 16k= (4096 tokens × ~4 chars/tok
+= ~16k char ceiling). Run 3 sample probes; all must pass.
+
+** TODO P0-3: WALL_CAP runtime kill via threading.Event (replace ThreadPoolExecutor shim)
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   r25-walltime §2; case-studies §P0
+:DEPS:     none
+:END:
+
+R25's =with ThreadPoolExecutor(max_workers=1) as _inner= shim
+calls =shutdown(wait=True)= on context exit, blocking outer
+worker until inner thread finishes. Cell records
+=wall_cap_killed:400s= label but actual =wall_seconds=
+ranged 455-1697s.
+
+Fix: replace ThreadPoolExecutor shim with =threading.Event=
+polled by =run_one_cell= at each tool-call boundary (or
+=multiprocessing.Process= terminated cleanly).
+
+*Acceptance probe.* Spawn a synthetic 500s cell (=time.sleep(500)=
+in a tool); assert kill fires within 410s. Repeat 3 times; all
+must pass.
+
+** TODO P0-4: Patch count_bracket_errors to per-line scan
+:PROPERTIES:
+:ESTIMATE: 15 min
+:SOURCE:   r25-quality-judge §R-1; case-studies §P0
+:DEPS:     none
+:END:
+
+=count_nested_bracket_depth= got the per-line fix in R25 prep,
+but =count_bracket_errors= still has the same cross-line
+cascade bug — caused ~25 K11/K17/K8 cells to be FP-flagged
+in R25.
+
+Fix: mirror the per-line walker into =count_bracket_errors=
+in =scripts/quality_lint.py=.
+
+*Acceptance probe.* Re-run lint on 3 known-clean R25 saved
+diffs from K11/K17/K8 cells (cells flagged by FP-1 with
+penalty 6/8/10/17). Assert post-fix penalty ≤ 1.0 per cell.
+
+** TODO P0-5: Variant warmup pre-flight refuses launch on bad slug
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   case-studies §P0; r25-providers §3
+:DEPS:     none
+:END:
+
+R25 warmup detected K34/K35 dead model slugs at 10:38:39 but
+didn't skip them — each got a wasted L1 cell.
+
+Fix: warmup must call chat-completions with a real prompt (not
+just a 1-token ping); assert content matches =/PING/i=. Failed
+variants get HELD OUT of the round with a logged reason. Round
+REFUSES TO LAUNCH if more than 30% of variants fail.
+
+*Acceptance probe.* Inject a known-bad model slug
+(=foo/nonexistent-model-id=) into VARIANTS; run pre-flight;
+assert it returns =PREFLIGHT_FAIL= sentinel + variant
+removed-from-round logged.
+
+** TODO P0-6: Patch verification step in _r26_design_patch.py
+:PROPERTIES:
+:ESTIMATE: 2 hr
+:SOURCE:   case-studies §P1-12; PM6
+:DEPS:     P0-1, P0-2, P0-3, P0-4, P0-5 (these are the patches it verifies)
+:END:
+
+PM6 lesson: R25 had 3 of 11 patches that landed in code but
+didn't change behavior. The R26 patch script needs a
+=verify_patch_landed= step per patch — runs an end-to-end
+behavior probe before the harness launches.
+
+Fix: extend =_r26_design_patch.py= to call each patch's
+acceptance probe (P0-1 through P0-5) and abort if any fails.
+
+*Acceptance probe.* Apply R26 patch to a /tmp clone where
+ONE of the patches is intentionally broken (e.g., revert
+P0-2's max_tokens read); assert =_r26_design_patch.py= exits
+non-zero with the failed-probe name in stderr.
+
+* P1 — config + setup for the R26 launch itself
+
+** TODO P1-1: Drop K34/K35 from VARIANTS list
+:PROPERTIES:
+:ESTIMATE: 5 min
+:SOURCE:   r25-providers §3; case-studies §P1
+:DEPS:     none
+:END:
+
+K34 = HTTP 400 dead slug (DeepSeek-V3-Pro doesn't exist on OR);
+K35 = HTTP 404 (Llama-3.1-405b slug invalid). Both wasted 1 L1
+cell each in R25.
+
+** TODO P1-2: Rename or drop K33
+:PROPERTIES:
+:ESTIMATE: 10 min
+:SOURCE:   r25-providers §4; case-studies §P1
+:DEPS:     none
+:END:
+
+K33 slug =qwen/qwen3-coder= duplicates K11 (480B MoE, not
+72B). Either pin K33 to a verified Qwen3-Coder-72B endpoint OR
+drop. Recommend drop in R26 unless we find a real 72B slug.
+
+** TODO P1-3: Force K8 to Layer-2 + add B11/B26 mini-probes
+:PROPERTIES:
+:ESTIMATE: 30 min
+:SOURCE:   r25-quality-judge §R-5; case-studies §P1
+:DEPS:     P0-1 (selector dedupe required for force-add to work)
+:END:
+
+R25 force-listed K8 to L2 but selector bug excluded it; the 4
+force-listed K8 cells silent_noop'd on B5/B7/B11/B25. R26: K8
+on B11+B26 at n=5 each before any "K8 generalizes" claim.
+
+** TODO P1-4: MODAL_KIMI_ENABLED=1 for K2 fallback
+:PROPERTIES:
+:ESTIMATE: 30 min
+:SOURCE:   r25-providers §2; case-studies §P1
+:DEPS:     P0-2 (max_tokens wiring should be in)
+:END:
+
+Modal-Kimi route has sub-second TTFT vs Parasail's 60-180s
+prefill stall. Set =MODAL_KIMI_ENABLED=1= in R26 launch env;
+verify Modal endpoint still responsive (not subject to billing
+cap).
+
+** TODO P1-5: Drop K17-glm46 from active roster
+:PROPERTIES:
+:ESTIMATE: 5 min
+:SOURCE:   r25-providers §5; case-studies §P1
+:DEPS:     none
+:END:
+
+K17 loops on BOTH DeepInfra and SiliconFlow (model-side
+issue, not broker). 81-200k cached_tokens per cell, no
+convergence. Drop until loop pattern is understood.
+
+** TODO P1-6: K11 budget cap at $1.50/round
+:PROPERTIES:
+:ESTIMATE: 30 min
+:SOURCE:   case-studies §P1; r24-pareto
+:DEPS:     none
+:END:
+
+R25 had a $1.50 cap declared but K11 spent $3.04 (29 cells) —
+cap wasn't enforced via the budget hook. Verify
+=_R25_VARIANT_BUDGETS= dict actually filters cell-specs in
+=_round26_dials.py='s =run_layer_parallel=.
+
+** TODO P1-7: Wire S1-S4 composition strategies
+:PROPERTIES:
+:ESTIMATE: 4 hr (~80-120 LOC per strategy-effectiveness agent)
+:SOURCE:   strategy-effectiveness agent (R18); boost plan §1
+:DEPS:     P0-1 (selector); P0-3 (WALL_CAP)
+:END:
+
+S1 hedged-strong escalation, S2 best-of-N voting, S3
+critique-revise pair, S4 specialty routing per task family.
+All four are orphaned constants since R18.
+
+Fix: implement helpers =run_with_escalation()=,
+=run_best_of_n()=, =run_critique_revise()=,
+=route_by_task_family()= in =execute_cell= or sibling module.
+
+*Acceptance probe.* Smoke test each strategy on a single cell:
+S1 force a fail on primary, assert escalation fires; S2 call
+3-cell vote on B5, assert majority result chosen; S3 K1→K2→K1
+on B11, assert two LLM calls in trajectory; S4 verify
+TASK_FAMILY_VARIANTS dict honored when constructing cell-specs.
+
+** TODO P1-8: Layer-BK on FULL advancing pool (not top-3)
+:PROPERTIES:
+:ESTIMATE: 30 min
+:SOURCE:   r25-quality-judge §R-4; case-studies §P1
+:DEPS:     P0-1 (selector)
+:END:
+
+R25 Layer-BK was 10 cells (5 BK tasks × top-3 FOSS=K1+K5).
+With selector fix, R26 should run BK1-BK15 across every
+variant clearing Layer-1 score>0.
+
+** TODO P1-9: Re-introduce K6-llama70b at n=15 on Together/Parasail
+:PROPERTIES:
+:ESTIMATE: 30 min
+:SOURCE:   r25-synthesis §14; case-studies §P1
+:DEPS:     P0-5 (warmup pre-flight; K6 could fail warmup)
+:END:
+
+R25 dropped K6 due to DeepInfra×Llama-3.3-70b model-contract
+issue. Together/Parasail brokers were never tried for K6.
+Re-enable as a small probe to verify whether the
+broken-pinned-broker conclusion holds on alt providers.
+
+** TODO P1-10: K20 endpoint resume + pause hooks in harness
+:PROPERTIES:
+:ESTIMATE: 30 min
+:SOURCE:   case-studies §P2-14; boost plan §3
+:DEPS:     none (helper scripts already exist)
+:END:
+
+Helper scripts =_k20_endpoint_resume.sh= and
+=_k20_endpoint_pause.sh= already shipped. R26 harness needs to
+call resume at start of round (if K20 in active VARIANTS) and
+pause at end (in =_post_round_cleanup= or similar).
+
+** TODO P1-11: COST_CIRCUIT_BREAKER honored by harness
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   r25-design §G4; case-studies §P2-25; self-healing §5
+:DEPS:     none
+:END:
+
+R25 daemon writes =$ARTIFACTS/COST_CIRCUIT_BREAKER= sentinel
+when spend > 1.5× projection but harness has no read of that
+file. Wire =run_layer_parallel= to check the file before each
+layer + abort gracefully if present.
+
+** TODO P1-12: LIVE_DENY_LIST file written by daemon, read by harness
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   self-healing §5
+:DEPS:     none
+:END:
+
+Daemon writes =$ARTIFACTS/LIVE_DENY_LIST= when a (variant,
+broker) combo exceeds failure rate threshold. Harness reads
+before each cell-spec construction; filters out denied combos.
+
+** TODO P1-13: Cell replay manifest cell_replay.jsonl
+:PROPERTIES:
+:ESTIMATE: 2 hr
+:SOURCE:   self-healing §3
+:DEPS:     none
+:END:
+
+Per-cell-spec line; harness writes after each cell completes
+(or fails). Self-healing daemon reads on round-crash to
+identify which cells didn't finish; relaunches just those
+(worktree-name-collision-safe).
+
+** TODO P1-14: Add BK6-BK15 elisp/org tests to fixtures
+:PROPERTIES:
+:ESTIMATE: 4 hr (10 tests × ~25 min/each)
+:SOURCE:   boost plan §6 (reviewer-fixed paths)
+:DEPS:     none
+:END:
+
+10 new tests focused on elisp + org-mode authoring:
+ERT test authoring, org-babel tangle/detangle, org-element
+parse + verify, org-roam node creation + backlink, defcustom +
+defface authoring, org-table validation, capture template
+authoring, org-id management, byte-compile-clean, makem.sh
+introduction. Real paths in =doom/*.el=, =extensions/emacs/*.el=,
+=tests/test_org_llm_chat.el=.
+
+Add to =scripts/_round19_long_horizon_tasks.py= (extend
+=LONG_HORIZON_TASKS= list).
+
+** TODO P1-15: BK3 bug-injection pre-stage hook
+:PROPERTIES:
+:ESTIMATE: 30 min
+:SOURCE:   case-studies §P2-21
+:DEPS:     none
+:END:
+
+BK3's =apply_starting_state(workdir)= installs the failing test
++ inverts the two =_check_append_only= returns. R25 didn't run
+BK3 (selector bug excluded). Verify the hook fires per BK3 cell
+in R26.
+
+** TODO P1-16: Wire org-mcp into specialist tool surface
+:PROPERTIES:
+:ESTIMATE: 4 hr
+:SOURCE:   boost plan §4
+:DEPS:     none
+:END:
+
+org-mcp v0.9 (MELPA, ~3-line install per reviewer verification).
+Adds tools: list todos, refile, create node, query agenda. Wire
+into =BROAD_TOOLS_PLUS_ELISP= or new =MCP_TOOLS= list. Test
+specialist can call =mcp.org_list_todos= as a tool.
+
+** TODO P1-17: Wire org-roam-mcp for vault search
+:PROPERTIES:
+:ESTIMATE: 3 hr
+:SOURCE:   boost plan §4
+:DEPS:     none
+:END:
+
+aserranoni/org-roam-mcp v0.2.0. Adds =search_nodes=, =get_node=,
+=get_backlinks=. Replaces the current Qdrant-based
+=vault_search= tool OR runs alongside it.
+
+** TODO P1-18: Wire emacs-mcp-server (rhblind v0.7.0) for elisp eval
+:PROPERTIES:
+:ESTIMATE: 3 hr
+:SOURCE:   boost plan §4 (reviewer pinned to v0.7.0)
+:DEPS:     none
+:END:
+
+rhblind/emacs-mcp-server v0.7.0 (released 2026-05-04). Pure-elisp
+MCP server. Adds tools: read buffer, eval elisp, navigate file,
+batch query. Replaces ad-hoc =eval_elisp= and =load_elisp_file=
+tools with proper MCP-protocol-mediated calls.
+
+** TODO P1-19: scripts/_r26_preflight.sh entry point
+:PROPERTIES:
+:ESTIMATE: 3 hr
+:SOURCE:   boost plan §13
+:DEPS:     P0-1 through P0-6 (preflight invokes their probes)
+:END:
+
+Single entry-point script runs all 6 gate categories: provider
+funding, endpoint health, K20 resume, patch verification,
+resource gates, configuration sanity. Writes
+=$ARTIFACTS/PREFLIGHT_{PASS|FAIL}= sentinel. R26 launch wrapper
+checks for PASS before invoking python harness.
+
+** TODO P1-20: Self-healing daemon scripts/_r26_self_healing_daemon.sh
+:PROPERTIES:
+:ESTIMATE: 6 hr
+:SOURCE:   boost plan §12
+:DEPS:     P1-11, P1-12, P1-13 (file-based contracts the daemon writes)
+:END:
+
+State machine MONITORING → DETECTING → FIXING → RELAUNCHING.
+60s in-round / 5min between-round cadence. Catches cell-level,
+variant-level, layer-level, round-level, endpoint-level
+failures. Auto-fixes within $5/round cap.
+
+** TODO P1-21: R26 fork harness scripts/_round26_dials.py
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   prior round-fork pattern (R25 etc.)
+:DEPS:     P0-1 through P0-6, P1-1 through P1-20
+:END:
+
+Fork =scripts/_round25_dials.py= → =_round26_dials.py=,
+sed-rename round IDs, apply =_r26_design_patch.py= (extends
+=_r25_design_patch.py= with P1 changes), syntax-verify, smoke
+preflight.
+
+* P2 — capability investments (R26 → R28 incrementally; not blocking)
+
+** TODO P2-1: Tree-sitter org-parser validator
+:PROPERTIES:
+:ESTIMATE: 1-2 days
+:SOURCE:   r25-design §P5
+:END:
+
+Replace regex-based =quality_lint.py= bracket-balance + nested
+detectors with =tree-sitter-org=. Catches multi-line link
+continuations, escaped brackets in source blocks, etc.
+
+** TODO P2-2: Headless-Emacs cell verifier
+:PROPERTIES:
+:ESTIMATE: 1 day
+:SOURCE:   r25-design §P6
+:END:
+
+Spawn =emacs --batch=, load the edit, run
+=org-element-parse-buffer= + =org-id-update-id-locations=,
+return JSON diagnostics. Gold-standard semantic gate.
+
+** TODO P2-3: Self-host K1+K2 vLLM endpoints (Spheron H100 PCIe)
+:PROPERTIES:
+:ESTIMATE: 1-2 days
+:SOURCE:   boost plan §7; reviewer demoted Spheron behind RunPod
+:END:
+
+Eliminates broker tool-format gaps + OR rate cap risk. Cost
+$2.01/hr × 2-4h/round on Spheron. Use pre-baked Docker image
+(PM2: don't pass training script via API). Reviewer demoted
+behind RunPod-PCIe (PM2-proven fallback) until smoke-tested.
+
+** TODO P2-4: Per-cell wall_seconds for ALL variants
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   r25-walltime §instrumentation gap; case-studies §P2-16
+:END:
+
+R25 P9 wrote =wall_seconds= into the round summary but per-cell
+=cell_result.json= only has it for K5-claude (14/189 cells).
+Move the timing into =run_one_cell= itself, not just
+=execute_cell='s wrapper.
+
+** TODO P2-5: Strategy-novelty check between rounds
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   PM6-G2; case-studies §P2-23
+:END:
+
+Reject any future round whose patch content (modulo round IDs)
+is byte-identical to the prior. Prevents R20-R23-style
+zero-strategy-delta rounds.
+
+** TODO P2-6: Pre-emit grammar gate (proper N5)
+:PROPERTIES:
+:ESTIMATE: 2 days
+:SOURCE:   PM3-G2; case-studies §P2-19
+:END:
+
+Currently =quality_lint.py= penalizes /post-emit/. R26+ should
+add an =edit_file= guard that REJECTS edits with bracket nesting
+depth > 1 OR fab UUIDs OR table pipe loss BEFORE landing in
+diff. Cell loop forces retry on rejection.
+
+** TODO P2-7: Together Serverless Multi-LoRA pre-flight + migration
+:PROPERTIES:
+:ESTIMATE: 4 hr
+:SOURCE:   boost plan §3 + reviewer caveat
+:END:
+
+Verify Qwen3-Coder-30B is actually in Together's serverless
+multi-LoRA roster (reviewer flagged: blog only names Llama-3.1
++ Qwen-2.5). If supported: migrate K20 from dedicated endpoint
+($7.98/hr) to serverless (per-token base price). If not: stay
+on dedicated for R26; train K20 v2 on a confirmed-supported
+base in R27.
+
+** TODO P2-8: K20 v2 — re-distill on 500+ pairs
+:PROPERTIES:
+:ESTIMATE: 1 day (if K20 v1 wins R26 A/B)
+:SOURCE:   R25 design H2; boost plan §10
+:END:
+
+If R26 K20 vs K1 A/B shows ≥3 quality points lift on ≥3 of 5
+prose tasks, K20 v2 pipeline graduates: extend
+=05_build_foss_distill.py= to consume R24+R25 successful cells,
+re-train via Together fine-tune API, A/B in R27.
+
+* Dependencies graph (key blockers)
+
+#+begin_src text
+P0-1 (selector) ──── P1-3 (K8 force-add)
+                ├──── P1-7 (S1-S4 wiring)
+                └──── P1-8 (Layer-BK pool)
+
+P0-2 (max_tokens) ── P1-4 (MODAL_KIMI for K2)
+
+P0-3 (WALL_CAP) ──── P1-7 (S1-S4 wiring needs reliable kill)
+
+P0-1..P0-6 ────────── P0-6 (patch verification step verifies these)
+                └──── P1-19 (preflight invokes their probes)
+                └──── P1-21 (R26 fork applies all)
+
+P1-11..P1-13 ──────── P1-20 (self-healing daemon needs file contracts)
+#+end_src
+
+* Sequence to ship (recommended)
+
+Day 1 (correctness blockers):
+- P0-4 (15 min) → P0-1 (30 min) → P0-3 (1 hr) → P0-5 (1 hr) → P0-2 (2 hr)
+
+Day 2 (verification + setup):
+- P0-6 (2 hr) → P1-1 / P1-2 / P1-5 / P1-6 (~1 hr together) → P1-3 (30 min)
+- P1-10 / P1-11 / P1-12 / P1-13 (~5 hr; daemon contracts)
+
+Day 3 (R26 features):
+- P1-14 (4 hr; BK6-BK15) → P1-7 (4 hr; S1-S4) → P1-8 (30 min)
+
+Day 4 (MCP integrations + infra):
+- P1-16 / P1-17 / P1-18 (~10 hr; MCP servers)
+- P1-19 (3 hr; preflight script)
+- P1-20 (6 hr; self-healing daemon)
+
+Day 5 (launch):
+- P1-21 (1 hr; fork harness)
+- Run preflight; resolve any FAIL gates
+- Launch R26 with self-healing daemon
+
+* Total budget
+
+| Phase | Estimated wall | Expected cost |
+|-------+----------------+---------------|
+| P0    | ~7 hr          | $0 (code only)|
+| P1    | ~30 hr         | ~$10 (smoke probes + K20 pre-flight) |
+| /Total to launch/ | *~37 hr (3-5 work days)* | *~$10* |
+| R26 round itself  | 30-60 min wall | ~$15-25 (per envelope target) |
+
+P2 work continues across R26 → R28 incrementally; not on
+critical path to R26 launch.
+
+* Cross-references
+
+** Source docs
+
+- =docs/wiki/2026-05-08-r26-boost-plan.org= — full design (1422 lines, 13 sections)
+- =docs/wiki/2026-05-08-r25-case-studies.org= — 32 R26 recommendations + acceptance criteria
+- =docs/wiki/2026-05-08-r25-synthesis.org= — round retro
+- =docs/wiki/2026-05-08-org-llm-go-forward-config.org= — production playbook
+- =docs/notes/2026-05-08-bench-arc-post-mortems.org= — PM1-PM6
+- =docs/notes/2026-05-08-r25-{quality-judge,pareto,walltime,providers}.org= — agent reports
+
+** Code artifacts (touched by P0+P1)
+
+- =scripts/_round25_dials.py= — current harness (fork to =_round26_dials.py= for P1-21)
+- =scripts/_round19_long_horizon_tasks.py= — BK fixtures (extend for P1-14)
+- =scripts/quality_lint.py= — fix for P0-4
+- =scripts/_r25_design_patch.py= — extend to =_r26_design_patch.py= for P0-6
+- =scripts/_r25_autorepair_daemon.sh= — extend to =_r26_self_healing_daemon.sh= for P1-20
+- =org_llm/specialist.py= — change for P0-2 (max_tokens), P0-3 (WALL_CAP)
+- =scripts/_k20_endpoint_resume.sh= + =_k20_endpoint_pause.sh= — already shipped (P1-10 wires into harness)

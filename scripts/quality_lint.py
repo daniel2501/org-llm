@@ -60,28 +60,45 @@ def _added_lines(diff_text: str) -> List[str]:
 
 
 def count_bracket_errors(text: str) -> int:
-    """Count unbalanced or nested-misplaced [[ ]] pairs in added text."""
-    opens = text.count(_BRACKET_OPEN)
-    closes = text.count(_BRACKET_CLOSE)
-    imbalance = abs(opens - closes)
+    """Count unbalanced or nested-misplaced [[ ]] pairs in added text.
 
-    # Nested: [[ ... [[ ... ]] ... ]] is illegal in org-mode bracket
-    # links. Find any "[[" inside an unclosed pair.
-    nested = 0
-    depth = 0
-    i = 0
-    while i < len(text) - 1:
-        if text[i:i + 2] == _BRACKET_OPEN:
-            if depth > 0:
-                nested += 1
-            depth += 1
-            i += 2
-        elif text[i:i + 2] == _BRACKET_CLOSE:
-            depth = max(depth - 1, 0)
-            i += 2
-        else:
-            i += 1
-    return imbalance + nested
+    R26 P0-4 fix: scan each line independently. The previous version
+    counted across the whole concatenated added text, which produced
+    false positives when a multi-line link had its closing ]] on a
+    diff context line (dropped by `_added_lines`). The R25 quality-
+    judge agent traced ~25 K11/K17/K8 cells (1 broken line each)
+    being reported as 6/8/10/17 imbalanced because preceding
+    multi-line links left dangling [[ that propagated.
+
+    Per-line scan still catches:
+      - intra-line imbalance (e.g. `[[id:foo]` with one missing `]`)
+      - intra-line nesting (R18 K6/K7's [[id:][[[id:]...]]] cascades)
+    while filtering cross-line false positives.
+    """
+    total = 0
+    for line in text.splitlines():
+        opens = line.count(_BRACKET_OPEN)
+        closes = line.count(_BRACKET_CLOSE)
+        imbalance = abs(opens - closes)
+
+        # Within-line nesting check
+        nested = 0
+        depth = 0
+        i = 0
+        while i < len(line) - 1:
+            if line[i:i + 2] == _BRACKET_OPEN:
+                if depth > 0:
+                    nested += 1
+                depth += 1
+                i += 2
+            elif line[i:i + 2] == _BRACKET_CLOSE:
+                depth = max(depth - 1, 0)
+                i += 2
+            else:
+                i += 1
+
+        total += imbalance + nested
+    return total
 
 
 def count_fabricated_uuids(text: str) -> int:
