@@ -169,28 +169,28 @@ def warmup_providers():
 # R17 — provider pinning per cache audit 2026-05-07.
 # Pin each route to a single OR provider to stabilize prefix cache + latency.
 # R18 — provider pins per cache audit + R17 provider/cache agent findings.
-# KEY CHANGE from R17: add `allow_fallbacks: false` (without it OR treats
-# `order` as advisory and rotates anyway — only 2/12 R17 cells hit pinned
-# broker). Brokers remapped to ones that ACTUALLY serve+cache today (per
-# R17 provider/cache agent's audit).
+# R18 v2: kept advisory pins (allow_fallbacks default True) — v1 hit a wall:
+# DeepInfra serves Kimi/Llama with tools but NOT deepseek-chat-v3 / qwen-72b.
+# Strict pinning made K7/K8/K17/K15/K5 silent. Falling back to advisory pin
+# (preferred broker, but allow OR to use any tool-capable backup).
 PROVIDER_PINS = {
-    "moonshotai/kimi-k2.6":               {"order": ["DeepInfra"], "allow_fallbacks": False},
-    "moonshotai/kimi-k2-thinking":        {"order": ["Novita"], "allow_fallbacks": False},
-    "deepseek/deepseek-r1":               {"order": ["DeepInfra"], "allow_fallbacks": False},
-    "deepseek/deepseek-chat-v3-0324":     {"order": ["DeepInfra"], "allow_fallbacks": False},
-    "deepseek/deepseek-coder":            {"order": ["DeepInfra"], "allow_fallbacks": False},
-    "qwen/qwen3-coder-30b-a3b-instruct":  {"order": ["Novita"], "allow_fallbacks": False},
-    "qwen/qwen-2.5-72b-instruct":         {"order": ["DeepInfra"], "allow_fallbacks": False},
-    "qwen/qwen3-coder":                   {"order": ["Together"], "allow_fallbacks": False},
-    "qwen/qwen3.6-27b":                   {"order": ["Together"], "allow_fallbacks": False},
-    "qwen/qwen-2.5-coder-32b-instruct":   {"order": ["DeepInfra"], "allow_fallbacks": False},
-    "meta-llama/llama-3.3-70b-instruct":  {"order": ["DeepInfra"], "allow_fallbacks": False},
-    "meta-llama/llama-3.1-405b-instruct": {"order": ["Together"], "allow_fallbacks": False},
-    "meta-llama/llama-4-instruct":        {"order": ["Together"], "allow_fallbacks": False},
-    "mistralai/mixtral-8x22b-instruct":   {"order": ["Mistral"], "allow_fallbacks": False},
-    "openai/gpt-oss-120b":                {"order": ["Parasail"], "allow_fallbacks": False},
-    "openai/gpt-oss-20b":                 {"order": ["Parasail"], "allow_fallbacks": False},
-    "z-ai/glm-4.6":                       {"order": ["SiliconFlow"], "allow_fallbacks": False},
+    "moonshotai/kimi-k2.6":               {"order": ["DeepInfra"]},
+    "moonshotai/kimi-k2-thinking":        {"order": ["Novita"]},
+    "deepseek/deepseek-r1":               {"order": ["DeepInfra"]},
+    "deepseek/deepseek-chat-v3-0324":     {"order": ["DeepInfra"]},
+    "deepseek/deepseek-coder":            {"order": ["DeepInfra"]},
+    "qwen/qwen3-coder-30b-a3b-instruct":  {"order": ["Novita"]},
+    "qwen/qwen-2.5-72b-instruct":         {"order": ["DeepInfra"]},
+    "qwen/qwen3-coder":                   {"order": ["Together"]},
+    "qwen/qwen3.6-27b":                   {"order": ["Together"]},
+    "qwen/qwen-2.5-coder-32b-instruct":   {"order": ["DeepInfra"]},
+    "meta-llama/llama-3.3-70b-instruct":  {"order": ["DeepInfra"]},
+    "meta-llama/llama-3.1-405b-instruct": {"order": ["Together"]},
+    "meta-llama/llama-4-instruct":        {"order": ["Together"]},
+    "mistralai/mixtral-8x22b-instruct":   {"order": ["Mistral"]},
+    "openai/gpt-oss-120b":                {"order": ["Parasail"]},
+    "openai/gpt-oss-20b":                 {"order": ["Parasail"]},
+    "z-ai/glm-4.6":                       {"order": ["SiliconFlow"]},
 }
 
 # R18 — Modal-Kimi route override (S6 Tier-S strategy). Kimi cells use
