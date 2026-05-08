@@ -289,12 +289,12 @@ K34-deepseek-v3-pro  cells=1  score=0.0  cost=$0.0006  cpu=null  noops=0
 
 *** AR3 — worktree storm fix (APPLIED)
 
-| Metric             | Value         |
-|--------------------+---------------|
-| r25-* dirs before  | 12 |
-| stale (>5min)      | 0    |
-| r25-* dirs after   | 12  |
-| pruned             | 0 |
+| Metric            | Value |
+|-------------------+-------|
+| r25-* dirs before |    12 |
+| stale (>5min)     |     0 |
+| r25-* dirs after  |    12 |
+| pruned            |     0 |
 
 *** AR11 — variant fail-rate watch
 
@@ -308,11 +308,11 @@ swap mid-run (no harness hook); deferred to R26 design.
 
 *Large-FOSS ceiling probes (K33/K34/K35):*
 
-| Variant | Status |
-|---------+--------|
+| Variant             | Status                                      |
+|---------------------+---------------------------------------------|
 | K33-qwen3-coder-72b | cells=1 score=12.0 cost=$0.7085 cpu=0.05904 |
-| K34-deepseek-v3-pro | cells=1 score=0.0 cost=$0.0006 cpu=null |
-| K35-llama-3.1-405b  | cells=1 score=0.0 cost=$0.0005 cpu=null |
+| K34-deepseek-v3-pro | cells=1 score=0.0 cost=$0.0006 cpu=null     |
+| K35-llama-3.1-405b  | cells=1 score=0.0 cost=$0.0005 cpu=null     |
 
 #+begin_quote
 K33 first cell: $0.71 / score 12 = $0.059/qpt = *100× K1's
@@ -324,13 +324,44 @@ once n≥3 cells confirm.
 
 *** AR12 — OR headroom proactive watch
 
-| Metric                       | Value           |
-|------------------------------+-----------------|
-| Cells done                   | 164 / 470    |
-| Spend so far                 | $0         |
-| Avg cost/cell                | $0.00000          |
-| Remaining cells              | 306            |
-| Projected remaining cost     | $0.00     |
-| OpenRouter headroom          | $31.917379191000002     |
-| Status                       | OK |
+| Metric                   | Value               |
+|--------------------------+---------------------|
+| Cells done               | 164 / 470           |
+| Spend so far             | $0                  |
+| Avg cost/cell            | $0.00000            |
+| Remaining cells          | 306                 |
+| Projected remaining cost | $0.00               |
+| OpenRouter headroom      | $31.917379191000002 |
+| Status                   | OK                  |
 
+
+** Status check 11:14:24 — 36.8% done, ETA 63.5min
+
+*Process.* PID 28979, 36:59 elapsed
+*Progress.* 173/470 cells = 36.8%
+*Throughput.* 4.68 cells/min
+*ETA.* 63.5min
+*Spend.* $0 (cap $100)
+
+#+begin_src text
+K2-kimi-k2.6  cells=50  score=486.0  cost=$1.7746  cpu=0.00365  noops=0
+K1-qwen30  cells=54  score=410.0  cost=$0.2359  cpu=0.00053  noops=0
+K11-qwen3coder  cells=18  score=299.0  cost=$3.0359  cpu=0.00821  noops=0
+K8-deepseekV3  cells=29  score=239.0  cost=$0.1689  cpu=0.00057  noops=0
+K17-glm46  cells=10  score=119.0  cost=$0.7529  cpu=0.00423  noops=0
+K5-claude-solo  cells=9  score=104.0  cost=$2.0488  cpu=0.01951  noops=0
+K33-qwen3-coder-72b  cells=1  score=12.0  cost=$0.7085  cpu=0.05904  noops=0
+K35-llama-3.1-405b  cells=1  score=0.0  cost=$0.0005  cpu=null  noops=0
+K34-deepseek-v3-pro  cells=1  score=0.0  cost=$0.0006  cpu=null  noops=0
+#+end_src
+
+** [r25-daemon 11:14:24] AR11: K2 WALL_CAP kill rate 100% of 16 kills — broker swap candidate for R26 (try Modal route)
+
+** R25 COMPLETE — 11:16:52
+
+*Cells.* 189
+*Spend.* $9.6709
+*Top variant.* K1-qwen30 score=517.0 cells=65 $0.3378
+
+Awaiting Claude-session analysis agent spawn (4 agents + synthesis
++ go-forward config update). Sentinel at /tmp/R25_DONE_SPAWN_AGENTS.
