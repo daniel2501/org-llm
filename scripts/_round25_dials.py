@@ -1799,7 +1799,24 @@ def run_layer_parallel(layer_name, cell_specs, all_cells):
     log("=" * 80)
     log(f"{layer_name} — {len(cell_specs)} cells, {PARALLELISM}-way parallel")
     log("=" * 80)
+    # R26 P1-6 — honor _R25_VARIANT_BUDGETS at submit time. K11 ($1.50
+    # cap), K33/K34/K35 caps were declared in R25 prep but the filter
+    # function _r25_should_skip_for_budget was never called. Apply it
+    # NOW so K11 cells stop accruing once variant cumulative spend
+    # exceeds cap (R24 K11 spent $4.39 across 18 cells; cap should
+    # have stopped at ~6 cells).
     layer_results: list[dict] = []
+    skipped_for_budget = []
+    filtered_specs = []
+    for s in cell_specs:
+        if _r25_should_skip_for_budget(s, all_cells):
+            skipped_for_budget.append(s)
+        else:
+            filtered_specs.append(s)
+    if skipped_for_budget:
+        log(f"  R26-budget: skipped {len(skipped_for_budget)} cells over variant cap "
+            f"({sorted({s[1][0] for s in skipped_for_budget})})")
+    cell_specs = filtered_specs
     with ThreadPoolExecutor(max_workers=PARALLELISM) as pool:
         futures = {pool.submit(execute_cell, *s): s for s in cell_specs}
         for f in as_completed(futures):
@@ -1855,6 +1872,38 @@ def main():
     # R17 fix B4 — per-provider warmup ping
     if os.environ.get("R17_SKIP_WARMUP") != "1":
         warmup_providers()
+
+    # R26 P1-10 — resume K20 endpoint if K20 is in active VARIANTS.
+    # The Together dedicated endpoint costs $7.98/hr while running;
+    # resume at round start, pause at round end (atexit hook below).
+    if any(v[0].startswith("K20-") for v in VARIANTS):
+        log("K20 in active variants — resuming Together endpoint")
+        try:
+            rc = subprocess.run(
+                ["bash", str(REPO / "scripts/_k20_endpoint_resume.sh")],
+                capture_output=True, text=True, timeout=600,
+            )
+            if rc.returncode == 0:
+                log(f"  K20 endpoint resumed: {rc.stdout.strip()}")
+                # Register pause helper so endpoint stops on round exit
+                import atexit
+                def _pause_k20_on_exit():
+                    try:
+                        subprocess.run(
+                            ["bash", str(REPO / "scripts/_k20_endpoint_pause.sh")],
+                            capture_output=True, timeout=30,
+                        )
+                        log("[exit] K20 endpoint paused")
+                    except Exception:
+                        pass
+                atexit.register(_pause_k20_on_exit)
+            else:
+                log(f"  K20 resume FAILED: {rc.stderr.strip()[:200]}")
+                log("  removing K20 from active VARIANTS for this round")
+                VARIANTS[:] = [v for v in VARIANTS if not v[0].startswith("K20-")]
+        except Exception as exc:
+            log(f"  K20 resume exception: {exc} — removing K20 from VARIANTS")
+            VARIANTS[:] = [v for v in VARIANTS if not v[0].startswith("K20-")]
 
     # Cell counts:
     #   Layer 1: 9 variants × 1 task (B1) × 1 config = 9

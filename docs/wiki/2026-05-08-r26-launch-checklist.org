@@ -199,7 +199,7 @@ K33 slug =qwen/qwen3-coder= duplicates K11 (480B MoE, not
 72B). Either pin K33 to a verified Qwen3-Coder-72B endpoint OR
 drop. Recommend drop in R26 unless we find a real 72B slug.
 
-** TODO P1-3: Force K8 to Layer-2 + add B11/B26 mini-probes
+** DONE P1-3: Force K8 + K11 to Layer-2 (force-list expanded)
 :PROPERTIES:
 :ESTIMATE: 30 min
 :SOURCE:   r25-quality-judge §R-5; case-studies §P1
@@ -233,7 +233,7 @@ K17 loops on BOTH DeepInfra and SiliconFlow (model-side
 issue, not broker). 81-200k cached_tokens per cell, no
 convergence. Drop until loop pattern is understood.
 
-** TODO P1-6: K11 budget cap at $1.50/round
+** DONE P1-6: K11 budget cap wired into run_layer_parallel
 :PROPERTIES:
 :ESTIMATE: 30 min
 :SOURCE:   case-studies §P1; r24-pareto
@@ -266,7 +266,7 @@ S1 force a fail on primary, assert escalation fires; S2 call
 on B11, assert two LLM calls in trajectory; S4 verify
 TASK_FAMILY_VARIANTS dict honored when constructing cell-specs.
 
-** TODO P1-8: Layer-BK on FULL advancing pool (not top-3)
+** DONE P1-8: Layer-BK on full advancing pool (scored>0 + force-list + Claude)
 :PROPERTIES:
 :ESTIMATE: 30 min
 :SOURCE:   r25-quality-judge §R-4; case-studies §P1
@@ -289,7 +289,7 @@ issue. Together/Parasail brokers were never tried for K6.
 Re-enable as a small probe to verify whether the
 broken-pinned-broker conclusion holds on alt providers.
 
-** TODO P1-10: K20 endpoint resume + pause hooks in harness
+** DONE P1-10: K20 endpoint resume + atexit pause hooks in main()
 :PROPERTIES:
 :ESTIMATE: 30 min
 :SOURCE:   case-studies §P2-14; boost plan §3
