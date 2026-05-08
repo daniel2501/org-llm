@@ -159,7 +159,7 @@ row "Modal" "billing-cap unless reset"
 row "Anthropic" "not API-queryable; check console.anthropic.com"
 
 # HF — auth probe only
-HF_TOKEN=$(pass org-llm/cloud/huggingface/api-key 2>/dev/null | head -1)
+HF_TOKEN=$(pass org-llm/cloud/huggingface/token 2>/dev/null | head -1)
 if [ -z "$HF_TOKEN" ]; then
     warn "HuggingFace       no token in pass"
 else
