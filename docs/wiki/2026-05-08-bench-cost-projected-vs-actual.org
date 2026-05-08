@@ -30,8 +30,22 @@ the cost cap as a sanity floor, not a constraint.
 |-------+-------------------------+-----------------+---------|
 | R15   | $15-25 (lean), $25 cap | $1.62           | ~13× cheaper |
 | R16   | $40-60 (lean), $80-100 (full), $100 cap | $2.07 | ~25-50× cheaper |
-| R17 (proj.) | $50-100 / $100 cap | (running) | est ~$5-15 |
+| R17   | $50-100 / $100 cap | $4.45 | ~12-22× cheaper |
 | R18 (proj.) | $80-200 / $375 cap | TBD | est ~$15-50 |
+
+** R17 cost detail (59 cells, $4.45)
+
+| Variant | Cells | Total | Per-cell | Notes |
+|---------+-------+-------+----------+-------|
+| K11-qwen3coder (480B) | 14 | $3.02 | $0.216 | 75% of total spend; 480B premium |
+| K5-claude-solo | 8 | $1.14 | $0.143 | external baseline |
+| K1-qwen30 | 14 | $0.082 | $0.006 | workhorse, cheapest at scale |
+| K8-deepseek-V3 | 10 | $0.039 | $0.004 | cheapest by 2× |
+| K2-kimi-k2.6 | 2 | $0.038 | $0.019 | n=2 thin |
+| Others (1 cell each) | 11 | ~$0.08 | varies | mostly silent |
+
+K11 dominated cost (~75%). For R18, avoid promoting K11 to
+non-discriminating tasks — its cost-per-quality is 30× K1-qwen30's.
 
 * Why projections keep overshooting
 

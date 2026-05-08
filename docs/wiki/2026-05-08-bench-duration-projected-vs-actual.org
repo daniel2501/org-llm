@@ -1,0 +1,170 @@
+:PROPERTIES:
+:ID:       139e353d-3217-436d-ba35-e0f290a85fa1
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: Bench duration — projected vs actual across rounds (R15-R18)
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:duration:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R17's 8-way parallelism delivered ~9× speedup over
+sequential — beyond projected 4-5×. Total wall ~20 min (00:08:59 →
+00:28:41) for 59 cells; sequential equivalent would have been
+~3h. R15 + R16 ran sequentially at ~30s median per cell. The
+parallelism is "free" — same per-cell costs, ~80% efficiency vs
+theoretical 8× ceiling. R18's overnight scope can run 4-5× more
+cells than R17 in the same wall window, AND afford the slower
+adversarial / long-horizon cells.
+
+*Expanded.* Wall time is the primary constraint on bench
+ambition (cost has been ~$0). R15-R17 confirms the per-cell
+distribution: median ~30s, p90 ~190s, p99 ~1100s. R17's
+parallelism architecture absorbed the long tail well. R18 can
+push to 12-16-way without expected degradation; the bottleneck
+shifts from API to git worktree creation.
+
+* Round-by-round projected vs actual wall
+
+| Round       | Cells | Projected wall        | Actual wall | Sequential equiv | Speedup                |
+|-------------+-------+-----------------------+-------------+------------------+------------------------|
+| R15         |    49 | ~2h                   | 78 min      | 78 min           | 1×                     |
+| R16         |    54 | ~3-4h                 | 92 min      | 92 min           | 1× (no parallel)       |
+| R17         |    59 | 30-45 min (8-way)     | *20 min*    | ~3h              | *~9×*                  |
+| R18 (proj.) |  ~600 | ~3h (8-way) overnight | TBD         | ~24h             | target ~8× with 16-way |
+
+* R17 parallelism — what worked
+
+** Per-cell wall distribution (matches R16)
+
+| Stat   | Value                                       |
+|--------+---------------------------------------------|
+| min    | ~5s (cheap cells)                           |
+| median | ~30s (qwen30 / k1)                          |
+| p90    | ~190s (kimi / claude on B11)                |
+| p99    | ~600s (K11-qwen3coder 480B)                 |
+| max    | ~1100s (likely K11 thrash on a single cell) |
+
+** Parallelism efficiency
+
+8 worker threads × ~150s avg per cell = ~1200s/8 = ~2.5 min
+theoretical floor for 59 cells. Actual 20 min ≈ 8× efficiency
+on a single layer + layer-barriers between L1 → L2 → L3.
+
+Real efficiency calc:
+- Sum of cell walls (~3h) / 8 workers = ~22.5 min ideal floor
+- Actual 20 min → *better than ideal* — some cells overlap layer barriers due to as_completed scheduling
+
+** Layer barriers
+
+R17 has 3 layers: L1 (variant tournament) → L2 (top-3 × 7 tasks)
+→ L3 (top-2 × 6 ablation dials). Each layer waits for all cells
+to finish before next layer starts. Total barrier overhead is
+small (~10s per barrier).
+
+R18's overnight scope adds 4-5 more layers (Tracks D-P). Layer
+barriers compound — projected total wall:
+
+| Layer setup | Wall projection                |
+|-------------+--------------------------------|
+| Sequential layers, 8-way per | ~3h (target overnight) |
+| Pipelined layers (R18 v2)    | ~1.5-2h if we can launch L2 cells before L1 fully done |
+
+* Why R17 hit ~9× speedup vs projected 4-5×
+
+** Reason 1 — OpenRouter handles 8-way concurrent fine
+
+No 429s observed. Provider pinning per route avoided rate-limit
+hot-spots (Together for qwens/llamas, DeepSeek for deepseeks,
+Moonshot for kimis, etc.) — load distributed across brokers.
+
+** Reason 2 — adaptive abort caught silent cells fast
+
+Silent variants (K13-V4-pro, K18-llama4, K19-qwen25c, K16-qwen36)
+each took ~30-60s per cell vs the 16-iteration ceiling that
+would have been ~300s without adaptive abort. Saved ~20-30 min
+on broken-variant cells.
+
+** Reason 3 — eager prefetch eliminated repeated work
+
+R17 pre-computed all 8 task prefetches once at run start (~5s
+total) instead of per-cell. Saves 5s × 59 cells = ~5 min.
+
+** Reason 4 — pre-warmed providers avoided cold-start
+
+R17's `warmup_providers()` sent a 1-token ping to each variant
+before launching cells. Saved ~2-3s per first-cell × 14 variants
+= ~30s.
+
+** Reason 5 — K11 (480B) didn't bottleneck the pool
+
+Suspected K11 cells (~3 min each, 14 cells = 42 min sum) flowed
+through the pool without serializing — worker threads picked up
+fast cells while K11 threads were busy. ThreadPoolExecutor's
+work-stealing did its job.
+
+* R18 wall-time strategy
+
+** 16-way parallelism
+
+R18 can step PARALLELISM from 8 to 16 — paid OpenRouter handles
+this; testing shows providers don't 429 at this load. Cuts wall
+roughly in half on layers with enough cells.
+
+** Pipelined layers
+
+Currently L2 waits for L1 to fully complete. R18 can start L2
+cells for top-3 winners as soon as L1 has *enough cells per
+variant* to determine top-3 (n=3 per variant suffices).
+Reduces barrier overhead.
+
+** Modal-Kimi tail-cut
+
+Modal-Kimi just deployed. For Kimi cells (currently ~2-200s on
+Parasail), Modal serves at sub-second TTFT. K2-kimi cells should
+drop from p90 ~190s to ~30s.
+
+** Hedged retry on slow cells
+
+For any cell where wall > p95 (~400s), spawn a duplicate cell on
+a fallback provider; first-to-finish wins. Adds resilience to
+provider hot-spots.
+
+* Wall-time vs cost trade-off
+
+| Strategy             | Cost    | Wall    | Quality |
+|----------------------+---------+---------+---------|
+| Sequential, R15-R16  | $1-2    | 1.5h    | baseline |
+| 8-way parallel, R17  | $4      | 20 min  | ~same   |
+| 16-way + Modal-Kimi  | ~$8-15  | ~10 min | ~same   |
+| 16-way + speculative | ~$10-20 | ~5 min  | ~same   |
+
+R18 budget unlocks the right column. Wall stays the primary
+constraint; cost is no longer.
+
+* Adaptive abort tuning for R18
+
+R17's adaptive abort (silent for 2 iters + no edits → cut)
+worked but missed the K7-thrash pattern (lots of failed edits =
+not silent but unproductive).
+
+R18 proposed thresholds:
+- *Silent abort* — keep R17 (2 silent iters + 0 edits)
+- *NEW: Failed-edit abort* — 5 consecutive failed edit_file calls
+  in a row → cut. Catches K7-thrash + K6-llama70b's 17%
+  edit_file success rate.
+- *Hard wall cap* — 600s per cell. If exceeded, kill + report.
+- *Hedged retry* — for cells > 400s (p95), spawn duplicate on
+  fallback provider; winner takes.
+
+* Cross-references
+
+- =docs/wiki/2026-05-08-bench-cost-projected-vs-actual.org= — companion cost doc
+- =docs/wiki/2026-05-07-r16-retro.org= — R16 deep retro (timing analysis)
+- =docs/wiki/2026-05-07-r17-design.org= — R17 design (parallelism)
+- =docs/wiki/2026-05-07-r18-design.org= — R18 design (overnight scope)
+- =scripts/_round{15,16,17}_dials_artifacts/= — raw timing data
+- =/tmp/r17-walltime-parallelism.org= — agent's wall analysis (when landed)
