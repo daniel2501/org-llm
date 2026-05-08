@@ -74,6 +74,13 @@ EPOCH = int(time.time())
 LOG = ARTIFACTS / f"log-{EPOCH}.txt"
 LIVE = ARTIFACTS / "R26_LIVE.json"
 
+# R26 P1-11/P1-12/P1-13 — file contracts the self-healing daemon writes
+# and the harness reads. See docs/wiki/2026-05-08-r26-boost-plan.org §12
+# "Harness changes required" table.
+COST_CIRCUIT_BREAKER_FILE = ARTIFACTS / "COST_CIRCUIT_BREAKER"
+LIVE_DENY_LIST_FILE = ARTIFACTS / "LIVE_DENY_LIST"
+CELL_REPLAY_FILE = ARTIFACTS / "cell_replay.jsonl"
+
 PICARD_PRIMER_FILE = REPO / "docs/wiki/picard-agor-primer.org"
 L1A_FILE = REPO / "docs/wiki/org-llm-cli-primer.org"
 L1B_FILE = REPO / "docs/wiki/org-mode-per-agent-primer.org"
@@ -1381,12 +1388,6 @@ def run_claude_solo_cell(task, dial, run_dir):
 
 def run_one_cell(task, variant_name, specialist_model_id, mode,
                   dial: DialConfig, run_dir):
-    # R26 P2-4: per-cell wall_seconds for ALL variants. R25 P9 only set
-    # wall_seconds in execute_cell's wrapper, AFTER write_cell_result had
-    # already fired — so cell_result.json lacked wall_seconds for FOSS
-    # cells (only K5-claude-solo had it via its own elapsed). Stamp here
-    # at entry so every write below picks it up.
-    _r26_t0 = time.time()
     log(f"  -- {variant_name} dial={dial.label()} ({mode})")
     if mode == "claude-solo":
         return run_claude_solo_cell(task, dial, run_dir)
@@ -1415,7 +1416,6 @@ def run_one_cell(task, variant_name, specialist_model_id, mode,
             cell = {"variant": variant_name, "task_id": task['id'],
                      "phase1_cost": p1_cost, "error": "plan_parse_failed",
                      "dial": asdict(dial), "dial_label": dial.label()}
-            cell["wall_seconds"] = round(time.time() - _r26_t0, 1)
             write_cell_result(run_dir, cell)
             return cell
         (run_dir / "phase1_plan.json").write_text(json.dumps(plan, indent=2))
@@ -1484,7 +1484,6 @@ def run_one_cell(task, variant_name, specialist_model_id, mode,
              "wt_path": str(wt_path), "analysis": analysis,
              "prefetch": prefetch, "dial": asdict(dial),
              "dial_label": dial.label()}
-    cell["wall_seconds"] = round(time.time() - _r26_t0, 1)
     write_cell_result(run_dir, cell)
     return cell
 
@@ -1736,6 +1735,175 @@ THINKING_VARIANTS = {"K15-kimi-thinking"}
 FRONTIER_VARIANTS = {"K11-qwen3coder", "K12-llama405b", "K13-deepseekV4"}
 
 
+# ── R26 P1-7: S1-S4 composition strategy wiring ────────────────────────
+# The four constants above (HEDGED_ESCALATIONS, BEST_OF_N_TASKS,
+# CRITIQUE_REVISE_TASKS, TASK_FAMILY_VARIANTS) shipped in R18 but
+# nothing read them. The four helpers below are the runtime hooks.
+
+def _resolve_variant_tuple(name, variants_pool=None):
+    """Look up the (name, model_id, mode) tuple for a given variant name."""
+    pool = variants_pool if variants_pool is not None else VARIANTS
+    for v in pool:
+        if v[0] == name:
+            return v
+    return None
+
+
+# S1 hedged-strong escalation ──────────────────────────────────────────
+def _should_escalate(cell):
+    """Return the escalation target variant-name if the cell's variant is
+    in HEDGED_ESCALATIONS AND its primary score is below threshold; else
+    None.
+
+    Acceptance probe (no API): synthesize a cell dict with primary < 12
+    and variant in HEDGED_ESCALATIONS; assert this returns the mapped
+    fallback name."""
+    name = cell.get("variant")
+    if not name or name not in HEDGED_ESCALATIONS:
+        return None
+    s = score_cell(cell) if (cell.get("analysis") or cell.get("error")
+                              or cell.get("specialists")) else {}
+    primary = s.get("primary", 0)
+    if primary >= HEDGED_QUALITY_THRESHOLD:
+        return None
+    return HEDGED_ESCALATIONS[name]
+
+
+def _build_escalation_spec(parent_spec, fallback_name, variants_pool=None):
+    """Given a cell-spec tuple and a fallback variant-name, build a new
+    cell-spec tuple for the fallback variant. Returns None if the
+    fallback variant isn't in the active pool."""
+    task, _variant, dial, layer_label = parent_spec
+    fallback = _resolve_variant_tuple(fallback_name, variants_pool)
+    if fallback is None:
+        return None
+    return (task, fallback, dial, f"{layer_label}_hedged")
+
+
+# S2 best-of-N voting ──────────────────────────────────────────────────
+def _expand_best_of_n(cell_specs):
+    """Multiply specs for (task in BEST_OF_N_TASKS, variant=BEST_OF_N_VARIANT)
+    by BEST_OF_N_SAMPLES. The execute_cell suffix logic (=__s1, __s2, ...=)
+    already disambiguates artifact directories.
+
+    Acceptance probe (no API): build cell_specs for B5 with a
+    BEST_OF_N_VARIANT cell; assert resulting list has BEST_OF_N_SAMPLES
+    copies (same task+variant+dial, different artifact suffixes via
+    execute_cell)."""
+    expanded = []
+    for spec in cell_specs:
+        task, variant, _dial, _layer = spec
+        tid = task.get("id") if isinstance(task, dict) else None
+        vname = variant[0]
+        if tid in BEST_OF_N_TASKS and vname == BEST_OF_N_VARIANT:
+            for _ in range(BEST_OF_N_SAMPLES):
+                expanded.append(spec)
+        else:
+            expanded.append(spec)
+    return expanded
+
+
+# S3 critique-revise ──────────────────────────────────────────────────
+def _build_critique_prompt(task, draft_diff_text):
+    """Brief for the critic (K2). Reads the K1 draft's diff and produces
+    short, specific feedback the reviser can act on."""
+    return (
+        "You are a senior reviewer. A drafter just produced the patch below "
+        f"for task {task['id']} ({task.get('label','')}).\n\n"
+        f"TASK GOAL:\n{task.get('goal','')}\n\n"
+        "DRAFT PATCH:\n```\n"
+        + (draft_diff_text or "(empty)") + "\n```\n\n"
+        "Write 3-6 bullet points of specific, actionable critique. Focus on:\n"
+        "- Missing required sections (Summary./Expanded.)\n"
+        "- ID fabrication or out-of-scope edits\n"
+        "- Bracket / link / table syntax problems\n"
+        "- Anything that would lower a quality_lint score\n"
+        "Do NOT rewrite the patch; only critique it.\n"
+    )
+
+
+def _build_revise_brief(original_brief, critique_text):
+    """The second K1 cell receives the original brief plus the critic's
+    feedback, prefixed with the load-bearing string the acceptance probe
+    asserts on."""
+    return (
+        original_brief.rstrip()
+        + "\n\nReviewer feedback: "
+        + (critique_text or "").strip()
+        + "\n\nApply this feedback to the patch you produce.\n"
+    )
+
+
+def run_layer_critique_revise(advancing, all_cells, variants_pool=None):
+    """S3 layer — for each task in CRITIQUE_REVISE_TASKS where K1 + K2 are
+    both in =advancing=, run K1-draft → K2-critique-via-call_openrouter →
+    K1-revise (with critic feedback appended to the brief)."""
+    pool = variants_pool if variants_pool is not None else VARIANTS
+    advancing_names = {v[0] for v in advancing}
+    if not ({"K1-qwen30", "K2-kimi-k2.6"} <= advancing_names):
+        log("S3 layer_critique_revise — skipped (need both K1 + K2 in advancing)")
+        return []
+    k1 = _resolve_variant_tuple("K1-qwen30", pool)
+    k2 = _resolve_variant_tuple("K2-kimi-k2.6", pool)
+    if k1 is None or k2 is None:
+        log("S3 layer_critique_revise — skipped (K1 or K2 not in active VARIANTS)")
+        return []
+    revise_cells: list[dict] = []
+    for task in TASKS:
+        if task.get("id") not in CRITIQUE_REVISE_TASKS:
+            continue
+        log(f"S3 critique-revise on {task['id']} (K1 → K2 critic → K1 revise)")
+        # 1. K1 draft
+        draft_cell = execute_cell(task, k1, BEST_CONFIG, "layer_cr_draft")
+        all_cells.append(draft_cell)
+        diff_text = (draft_cell.get("analysis") or {}).get("diff_text") or ""
+        # 2. K2 critique via call_openrouter (prose, not a tool-using cell)
+        critique_text = ""
+        try:
+            critique_text, _cost = call_openrouter(
+                k2[1], _build_critique_prompt(task, diff_text))
+        except Exception as exc:
+            log(f"  S3 critic call failed on {task['id']}: {exc}")
+            critique_text = ""
+        # 3. K1 revise with critique appended to the brief
+        original_brief = task.get("goal", "")
+        revised_task = dict(task)
+        revised_task["goal"] = _build_revise_brief(original_brief, critique_text)
+        revise_cell = execute_cell(revised_task, k1, BEST_CONFIG, "layer_cr_revise")
+        revise_cell["s3_critique_text"] = critique_text
+        revise_cells.append(revise_cell)
+        all_cells.append(revise_cell)
+    return revise_cells
+
+
+# S4 specialty routing ─────────────────────────────────────────────────
+def _filter_specs_by_family(cell_specs):
+    """For each spec, if TASK_TO_FAMILY has the task AND TASK_FAMILY_VARIANTS
+    has that family, keep the spec only when the variant name is in the
+    family's allowed list. Specs whose task has no family entry pass
+    through unchanged.
+
+    Acceptance probe (no API): Layer-2 cell_specs for B25 (family=elisp)
+    with a wiki_edit-only variant (e.g. K1-qwen30) get filtered out;
+    only K2-kimi-k2.6 (the elisp-family-tagged variant) survives."""
+    kept = []
+    for spec in cell_specs:
+        task, variant, _dial, _layer = spec
+        tid = task.get("id") if isinstance(task, dict) else None
+        family = TASK_TO_FAMILY.get(tid)
+        if family is None:
+            kept.append(spec)
+            continue
+        allowed = TASK_FAMILY_VARIANTS.get(family)
+        if allowed is None:
+            kept.append(spec)
+            continue
+        if variant[0] in allowed:
+            kept.append(spec)
+        # else: filter out
+    return kept
+
+
 def execute_cell(task, variant, dial, layer_label):
     _r25_t0_exec = time.time()  # R25_DESIGN: wall_seconds instrumentation
     name, model_id, mode = variant
@@ -1825,6 +1993,11 @@ def run_layer_parallel(layer_name, cell_specs, all_cells):
         log(f"  R26-budget: skipped {len(skipped_for_budget)} cells over variant cap "
             f"({sorted({s[1][0] for s in skipped_for_budget})})")
     cell_specs = filtered_specs
+    # R26 P1-7 (S1): collect hedged-escalation specs from low-primary
+    # cells finishing in this layer, then run them as a small fallback
+    # batch after the main pool drains. Bounded depth: a fallback cell
+    # that ALSO scores low does not re-escalate (no recursion).
+    escalation_specs: list = []
     with ThreadPoolExecutor(max_workers=PARALLELISM) as pool:
         futures = {pool.submit(execute_cell, *s): s for s in cell_specs}
         for f in as_completed(futures):
@@ -1845,6 +2018,38 @@ def run_layer_parallel(layer_name, cell_specs, all_cells):
                 update_live_state(all_cells)
                 if len(all_cells) % 5 == 0:
                     print_leaderboard(all_cells)
+                # S1 hedged-strong escalation
+                fallback_name = _should_escalate(cell)
+                if fallback_name:
+                    esc_spec = _build_escalation_spec(spec, fallback_name)
+                    if esc_spec is not None:
+                        escalation_specs.append(esc_spec)
+                        log(f"    S1 escalating {cell.get('variant')} → "
+                            f"{fallback_name} on {spec[0].get('id','?')} "
+                            f"(primary={s.get('primary',0)} < {HEDGED_QUALITY_THRESHOLD})")
+    # S1: run escalation fallbacks as a sub-batch (no further escalation)
+    if escalation_specs:
+        log(f"  S1 hedged-strong: running {len(escalation_specs)} fallback cells")
+        with ThreadPoolExecutor(max_workers=PARALLELISM) as pool:
+            efutures = {pool.submit(execute_cell, *s): s for s in escalation_specs}
+            for f in as_completed(efutures):
+                spec = efutures[f]
+                try:
+                    cell = f.result()
+                except Exception as exc:
+                    _, variant, _, _ = spec
+                    log(f"  ! S1 fallback worker died on {variant[0]}: {exc}")
+                    continue
+                with state_lock:
+                    cell["hedged_escalation"] = True
+                    layer_results.append(cell)
+                    all_cells.append(cell)
+                    s = score_cell(cell)
+                    prog = PROGRESS.cell_done(cell)
+                    log(f"    [S1] {cell.get('variant','?'):>16} "
+                        f"score={s.get('score',0):.1f} "
+                        f"primary={s.get('primary',0)} {prog}")
+                    update_live_state(all_cells)
     return layer_results
 
 
@@ -2007,8 +2212,23 @@ def main():
                    if task.get("id") not in _R24_DROP_TASK_IDS
                    and not task.get("id", "").startswith("BK")
                    for variant in advancing]
+    # R26 P1-7 (S4) — specialty routing: keep only variants tagged for
+    # the task's family (when both task and family entry are present).
+    _pre_s4_count = len(cell_specs)
+    cell_specs = _filter_specs_by_family(cell_specs)
+    log(f"  S4 specialty routing: {_pre_s4_count} → {len(cell_specs)} cells")
+    # R26 P1-7 (S2) — best-of-N voting: multiply BEST_OF_N_VARIANT cells
+    # on BEST_OF_N_TASKS by BEST_OF_N_SAMPLES.
+    _pre_s2_count = len(cell_specs)
+    cell_specs = _expand_best_of_n(cell_specs)
+    log(f"  S2 best-of-N: {_pre_s2_count} → {len(cell_specs)} cells")
     run_layer_parallel("LAYER 2 — top-3 FOSS + Claude × remaining tasks",
                           cell_specs, all_cells)
+
+    # R26 P1-7 (S3) — critique-revise: K1 draft → K2 critique → K1 revise
+    # for tasks in CRITIQUE_REVISE_TASKS where K1 + K2 both advance.
+    if os.environ.get("R26_DISABLE_S3") != "1":
+        run_layer_critique_revise(advancing, all_cells)
 
     # R24_SYNTHESIS: K11-B25 sample-up
     k11_var = next((v for v in VARIANTS if v[0] == "K11-qwen3coder"), None)
@@ -2079,5 +2299,129 @@ def main():
     log(f"live state: {LIVE}")
 
 
+# ── R26 P1-7 acceptance probes (no API; mocks only) ──────────────────
+def _r26_p1_7_acceptance_probes():
+    """Smoke test S1-S4 wiring without spawning real cells. Run via:
+        python scripts/_round26_dials.py --test-s1234
+    Asserts each strategy's helper does what the launch checklist
+    promised. Returns (passed, failed) counts."""
+    passed = []
+    failed = []
+
+    def check(name, cond, detail=""):
+        if cond:
+            passed.append(name)
+            print(f"  PASS  {name}")
+        else:
+            failed.append((name, detail))
+            print(f"  FAIL  {name}: {detail}")
+
+    # S1: low primary on K8-deepseekV3 → escalate to K11-qwen3coder
+    fake_cell = {
+        "variant": "K8-deepseekV3",
+        "task_id": "B5",
+        "analysis": {
+            "diff_in_scope": {"insertions": 4, "deletions": 4},
+            "diff_out_of_scope": {"insertions": 0, "deletions": 0},
+            "wrap_categories": {},
+            "id_fabrication_count": 0,
+        },
+    }
+    s1_target = _should_escalate(fake_cell)
+    check("S1: low-primary K8 escalates to K11",
+          s1_target == "K11-qwen3coder",
+          f"got {s1_target!r}, expected K11-qwen3coder "
+          f"(primary={score_cell(fake_cell).get('primary')})")
+
+    # S1 negative: high primary should NOT escalate
+    fake_cell_high = {
+        "variant": "K8-deepseekV3",
+        "task_id": "B5",
+        "analysis": {
+            "diff_in_scope": {"insertions": 30, "deletions": 0},
+            "diff_out_of_scope": {"insertions": 0, "deletions": 0},
+            "wrap_categories": {},
+            "id_fabrication_count": 0,
+        },
+    }
+    check("S1: high-primary K8 does NOT escalate",
+          _should_escalate(fake_cell_high) is None,
+          "expected None when primary >= threshold")
+
+    # S2: BEST_OF_N_VARIANT × BEST_OF_N task expands to BEST_OF_N_SAMPLES
+    fake_dial = type("D", (), {"label": lambda self: "best"})()
+    fake_task = {"id": "B5", "label": "wiki edit"}
+    fake_variant = (BEST_OF_N_VARIANT, "model/whatever", "specialist")
+    specs = [(fake_task, fake_variant, fake_dial, "layer2")]
+    expanded = _expand_best_of_n(specs)
+    check("S2: B5 + BEST_OF_N_VARIANT expands to N copies",
+          len(expanded) == BEST_OF_N_SAMPLES,
+          f"got {len(expanded)} cells, expected {BEST_OF_N_SAMPLES}")
+    check("S2: all expanded specs are identical (suffix logic in execute_cell)",
+          all(s == specs[0] for s in expanded),
+          "expansion produced non-identical specs")
+
+    # S2 negative: non-BEST_OF_N task is unaffected
+    other_task = {"id": "B7", "label": "code edit"}
+    other_specs = [(other_task, fake_variant, fake_dial, "layer2")]
+    check("S2: non-BEST_OF_N task is not multiplied",
+          len(_expand_best_of_n(other_specs)) == 1,
+          "non-BEST_OF_N task got multiplied")
+
+    # S3: revise brief contains "Reviewer feedback:" + critique text
+    revise_brief = _build_revise_brief(
+        "Original task brief.",
+        "- Missing Summary section\n- Bracket count wrong",
+    )
+    check("S3: revise brief contains 'Reviewer feedback:'",
+          "Reviewer feedback:" in revise_brief, revise_brief[:200])
+    check("S3: revise brief contains critic text",
+          "Missing Summary section" in revise_brief, revise_brief[:200])
+    check("S3: revise brief preserves original brief",
+          "Original task brief." in revise_brief, revise_brief[:200])
+
+    # S3: critique prompt names task + draft diff
+    cprompt = _build_critique_prompt(
+        {"id": "B11", "label": "DEC", "goal": "Author DEC-XXX."},
+        "diff --git a/foo b/foo\n+hello\n",
+    )
+    check("S3: critique prompt names task id",
+          "B11" in cprompt, cprompt[:200])
+    check("S3: critique prompt embeds draft diff",
+          "+hello" in cprompt, cprompt[:200])
+
+    # S4: B25 (elisp) only allows K2-kimi-k2.6, filters out K1-qwen30
+    k1_t = ("K1-qwen30", "qwen/qwen3-30b-a3b", "specialist")
+    k2_t = ("K2-kimi-k2.6", "moonshot/kimi-k2", "specialist")
+    k8_t = ("K8-deepseekV3", "deepseek/deepseek-chat", "specialist")
+    b25_task = {"id": "B25", "label": "elisp"}
+    layer2_specs = [
+        (b25_task, k1_t, fake_dial, "layer2"),
+        (b25_task, k2_t, fake_dial, "layer2"),
+        (b25_task, k8_t, fake_dial, "layer2"),
+    ]
+    filtered = _filter_specs_by_family(layer2_specs)
+    filtered_names = {s[1][0] for s in filtered}
+    check("S4: B25 (elisp) keeps K2-kimi-k2.6",
+          "K2-kimi-k2.6" in filtered_names, str(filtered_names))
+    check("S4: B25 (elisp) drops K1-qwen30 (wiki_edit-only)",
+          "K1-qwen30" not in filtered_names, str(filtered_names))
+    check("S4: B25 (elisp) drops K8-deepseekV3 (not in elisp family)",
+          "K8-deepseekV3" not in filtered_names, str(filtered_names))
+
+    # S4 negative: task with no family entry passes through
+    bk_task = {"id": "BK1", "label": "long horizon"}
+    bk_specs = [(bk_task, k1_t, fake_dial, "layer_bk")]
+    check("S4: tasks without family entry pass through",
+          len(_filter_specs_by_family(bk_specs)) == 1,
+          "BK1 without family was filtered out")
+
+    print(f"\n{len(passed)} passed, {len(failed)} failed")
+    return passed, failed
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--test-s1234":
+        _, failures = _r26_p1_7_acceptance_probes()
+        sys.exit(0 if not failures else 1)
     main()
