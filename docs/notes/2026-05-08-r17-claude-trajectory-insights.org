@@ -1,0 +1,246 @@
+#+TITLE: R18 — Claude Trajectory Mining (S22 from R18 design)
+#+DATE: 2026-05-08
+#+AUTHOR: research subagent (Opus, read-only)
+
+* Goal
+Replicate Claude's "5-small-habits-stacked" survey-before-edit pattern
+mechanically: extract per-task-shape canonical tool-call sequences from R17
+K5-claude-solo cells so FOSS variants can replay them step-by-step without
+needing to know the sequence themselves.
+
+Source: =scripts/_round17_dials_artifacts/{layer1,layer2}/<TASK>/K5-claude-solo__bt_pb_m1_tb_s1/stream.jsonl=
+Cells observed: B1 (7 calls), B5 (3), B7 (1 read, no-op), B11 (8), B13 (3),
+B20 (0, no-op), B25 (3), B26 (4). Wall times 5–507s; cost $0.04–$0.42.
+
+* Tool mapping (Claude → FOSS surface)
+| Claude tool                        | FOSS equivalent (R17 surface) | Notes                                                     |
+|------------------------------------+-------------------------------+-----------------------------------------------------------|
+| Read(file_path[, offset, limit])   | read_file                     | direct map; FOSS already supports offset/limit            |
+| Edit(file_path, old, new)          | edit_file                     | direct map; both anchor on old_string                     |
+| Write(file_path, content)          | write_file                    | direct map (only B25 used Write)                          |
+| Bash(=tail/head/grep/wc=)          | run_shell (read-only subset)  | NOT exposed in R17; needs new survey_shell tool OR recipe |
+| Bash(=python3 -c "import uuid…"=)  | run_python                    | already exists                                             |
+| Bash(=emacs --batch --eval…=)      | load_elisp_file / eval_elisp  | already exists                                             |
+| Bash(=git add/commit=)             | (harness-managed)             | strip from replay; harness commits at end                 |
+| Bash(=git diff --stat=)            | (skip)                        | Claude's self-verify; harness does its own diff analysis  |
+
+Key gap: Claude's read-only =Bash= shell calls (tail/grep/wc) have NO FOSS
+equivalent. R18 needs either (a) a constrained =survey_shell= tool whitelisted
+to {tail, head, grep, wc, sort -u}, or (b) replace those steps with
+=read_file(offset=...)= / repeated grep-shaped find_canonical_id calls.
+
+* Per-task canonical trajectories
+** B1 — cross-link audit (7 steps, 5 edits stacked)
+| # | Tool      | Args template                                                               | Success check                  |
+|---+-----------+-----------------------------------------------------------------------------+--------------------------------|
+| 1 | read_file | path={target_file}                                                          | bytes returned ≥ 1000          |
+| 2 | edit_file | path={target_file}; old=prose-around-{candidate_text_1}; new=[[id:{uuid_1}][{label_1}]]-wrap | replacements==1                 |
+| 3 | edit_file | …{candidate_text_2}…                                                        | replacements==1                |
+| 4 | edit_file | …{candidate_text_3}…                                                        | replacements==1                |
+| 5 | edit_file | …{candidate_text_4}…                                                        | replacements==1                |
+| 6 | edit_file | …{candidate_text_5}…                                                        | replacements==1                |
+| 7 | (commit)  | harness-managed                                                             | n/a                            |
+
+Notes: Claude pulls UUIDs straight from the prefetched candidate list. No
+=find_canonical_id= call observed (D6 was tool=off in this cell).
+
+** B5 — paragraph rewrite (3 steps)
+| # | Tool      | Args template                                                                                           | Success check                |
+|---+-----------+---------------------------------------------------------------------------------------------------------+------------------------------|
+| 1 | read_file | path={target_file}                                                                                      | file_chars ≥ 5000            |
+| 2 | edit_file | path={target_file}; old=full-text-of-paragraph-at-{prefetch.longest_paragraph_index}; new={tightened}   | replacements==1; ≥30% shorter |
+| 3 | (commit)  | harness                                                                                                 | n/a                          |
+
+Note: Claude's "read 1–2 adjacent paragraphs" sub-step happens inside the
+single Read (whole-file read), not a second read.
+
+** B7 — docstrings/type-hints (1 step, no-op detected)
+| # | Tool      | Args template          | Success check                            |
+|---+-----------+------------------------+------------------------------------------|
+| 1 | read_file | path=org_llm/avatars.py | file already typed → emit TASK_DONE no-op |
+
+Trajectory is: read → recognize file already complies → no-op. Replay must
+include a "no-op decision predicate" (file has type hints AND docstrings on
+all =def=).
+
+** B11 — DEC append (8 steps — the "9 tool calls" R17 judge cited)
+| # | Tool       | Args template                                                  | Success check                       |
+|---+------------+----------------------------------------------------------------+-------------------------------------|
+| 1 | read_tail  | tail -120 {target_file}  (or read_file with offset=-4000c)     | tail bytes ≥ 1000                   |
+| 2 | run_python | code="import uuid; print(uuid.uuid4())"                        | stdout matches uuid4 regex          |
+| 3 | grep       | pattern="^\*\* DEC-0" {target_file} \vert tail -5             | ≥3 matches → DEC numbering visible  |
+| 4 | read_file  | path={target_file}; offset={last_dec_line}; limit=30           | one full DEC body returned          |
+| 5 | shell_wc   | wc -l {target_file} && tail -5 {target_file}                   | last 5 lines captured               |
+| 6 | grep       | pattern=":STATUS:" {target_file} \vert sort -u                | enumerates allowed status values    |
+| 7 | edit_file  | old=last-3-5-lines-of-tail; new=last-lines + new-DEC-skeleton  | replacements==1; no deletions       |
+| 8 | (commit)   | harness                                                        | n/a                                 |
+
+This is the trajectory the R17 quality judge praised. Steps 3, 5, 6 are
+shell-shaped surveys with no FOSS equivalent — they MUST become either
+constrained-shell calls or grep/read_file equivalents.
+
+** B13 — LICENSE year bump (3 steps)
+| # | Tool      | Args template                                                | Success check        |
+|---+-----------+--------------------------------------------------------------+----------------------|
+| 1 | read_file | path=LICENSE                                                 | bytes returned       |
+| 2 | edit_file | old="Copyright (c) 2025 {holder}"; new="Copyright (c) 2026 {holder}" | replacements==1 |
+| 3 | (commit)  | harness                                                      | n/a                  |
+
+Trivial; baseline for harness plumbing.
+
+** B20 — wiki Summary add (0 steps — prefetch no-op)
+| # | Tool       | Args template                              | Success check |
+|---+------------+--------------------------------------------+---------------|
+| 0 | (prefetch) | check prefetch.has_summary; if true, no-op | no-op emitted |
+
+Claude consulted the prefetch and returned TASK_DONE without any tool call.
+Replay must check =prefetch.has_summary= as the very first gate.
+
+** B25 — new elisp file + validate (3 steps)
+| # | Tool             | Args template                                                            | Success check                  |
+|---+------------------+--------------------------------------------------------------------------+--------------------------------|
+| 1 | write_file       | path={target_file}; content=defun-org-llm-r17-shout                      | file written; bytes>0          |
+| 2 | eval_elisp       | code=(progn (load "{abs_path}") (org-llm-r17-shout "hello"))             | stdout contains "HELLO!!!"    |
+| 3 | (commit)         | harness                                                                  | n/a                            |
+
+Note: Claude used =Bash emacs --batch --eval= directly — but FOSS already has
+the equivalent =eval_elisp= tool. Replay should substitute. Skip the explicit
+=load_elisp_file= step — Claude collapsed load+eval into one =eval_elisp=.
+
+** B26 — defcustom add to existing elisp (4 steps)
+| # | Tool             | Args template                                                                  | Success check                |
+|---+------------------+--------------------------------------------------------------------------------+------------------------------|
+| 1 | read_file        | path={target_file}                                                             | bytes returned               |
+| 2 | edit_file        | old=existing-defcustom-block (5+ lines); new=existing+new-defcustom-budget     | replacements==1              |
+| 3 | load_elisp_file  | path={target_file}                                                             | no error in stderr           |
+| 4 | (commit)         | harness                                                                        | n/a                          |
+
+* replay_claude_trajectory — pseudocode
+#+begin_src python
+# scripts/_r18_trajectory_replay.py (new file, not yet written)
+
+TRAJECTORIES = {
+    "B1":  [("read_file",  {"path": "{target_file}"}),
+            *[("edit_file", {"path": "{target_file}",
+                              "old_template": "prose_around_{candidate}",
+                              "new_template": "[[id:{uuid}][{label}]]-wrapped"})
+              for _ in range(5)]],
+    "B5":  [("read_file",  {"path": "{target_file}"}),
+            ("edit_file",  {"path": "{target_file}",
+                              "old_template": "{prefetch.longest_paragraph_text}",
+                              "new_template": "{tightened_30pct}"})],
+    "B7":  [("read_file",  {"path": "org_llm/avatars.py"}),
+            ("noop_if",    {"predicate": "file_already_typed"})],
+    "B11": [("read_tail",  {"path": "{target_file}", "n": 120}),
+            ("run_python", {"code": "import uuid; print(uuid.uuid4())"}),
+            ("grep",       {"pattern": "^\\*\\* DEC-0", "path": "{target_file}",
+                             "post": "tail -5"}),
+            ("read_file",  {"path": "{target_file}",
+                             "offset": "{last_dec_line}", "limit": 30}),
+            ("shell",      {"cmd": "tail -5 {target_file}"}),
+            ("grep",       {"pattern": ":STATUS:", "path": "{target_file}",
+                             "post": "sort -u"}),
+            ("edit_file",  {"path": "{target_file}",
+                             "old_template": "{tail_5_lines}",
+                             "new_template": "{tail_5_lines}\\n{new_dec_skeleton}"})],
+    "B13": [("read_file",  {"path": "LICENSE"}),
+            ("edit_file",  {"path": "LICENSE",
+                              "old_template": "Copyright (c) 2025 {holder}",
+                              "new_template": "Copyright (c) 2026 {holder}"})],
+    "B20": [("noop_if",    {"predicate": "prefetch.has_summary"})],
+    "B25": [("write_file", {"path": "{target_file}",
+                              "content_template": "{shout_defun_body}"}),
+            ("eval_elisp", {"code": "(progn (load \"{abs_path}\") "
+                                     "(org-llm-r17-shout \"hello\"))",
+                              "expect_substring": "HELLO!!!"})],
+    "B26": [("read_file",       {"path": "{target_file}"}),
+            ("edit_file",       {"path": "{target_file}",
+                                   "old_template": "{anchor_defcustom_block}",
+                                   "new_template": "{anchor + new_defcustom}"}),
+            ("load_elisp_file", {"path": "{target_file}"})],
+}
+
+def replay_claude_trajectory(task, variant, prefetch, target_file, llm_call):
+    """Walk the canonical trajectory; LLM only fills templates, harness drives.
+
+    Each step is one of:
+      - mechanical (read_file, run_python, grep, shell): harness runs directly
+      - llm-bound (edit_file, write_file): variant LLM is asked ONLY to fill
+        the {…} templates given the read/grep results so far.
+
+    The variant never decides WHICH tool to call next — only what content to
+    put in the slots. Survey is mechanical; insertion is LLM-shaped.
+    """
+    ctx = {"prefetch": prefetch, "target_file": target_file,
+           "step_results": []}
+    for tool, args in TRAJECTORIES[task]:
+        if tool == "noop_if" and eval_predicate(args["predicate"], ctx):
+            return {"status": "noop", "reason": args["predicate"]}
+        if tool in ("read_file", "run_python", "grep", "shell",
+                     "load_elisp_file", "eval_elisp", "read_tail"):
+            result = HARNESS_TOOLS[tool](**resolve(args, ctx))
+            assert success_check(tool, result), f"{tool} failed: {result}"
+            ctx["step_results"].append((tool, result))
+        elif tool in ("edit_file", "write_file"):
+            # LLM fills {…} placeholders given accumulated context
+            filled = llm_call(variant=variant,
+                                tool=tool,
+                                templates=args,
+                                context=ctx)
+            result = HARNESS_TOOLS[tool](**filled)
+            ctx["step_results"].append((tool, result))
+    return {"status": "ok", "trace": ctx["step_results"]}
+#+end_src
+
+* Implementation notes — easy vs. needs-refactor
+| Task | Easy / hard | Why                                                                              |
+|------+-------------+----------------------------------------------------------------------------------|
+| B13  | trivial     | 1 read + 1 edit; no shell-shaped survey                                          |
+| B20  | trivial     | pure no-op gated on prefetch                                                     |
+| B7   | trivial     | 1 read + no-op decision predicate                                                |
+| B5   | easy        | 1 read + 1 edit; LLM only fills the tightened-text slot                          |
+| B26  | easy        | read + edit + load_elisp_file (already in FOSS surface)                          |
+| B25  | easy        | write_file + eval_elisp (collapse Claude's emacs --batch into FOSS eval_elisp)   |
+| B1   | medium      | 5 stacked edits; LLM must pick which 5 candidates from prefetch list             |
+| B11  | hard        | needs constrained survey_shell tool (tail/grep/wc/sort -u) OR redesign as repeated read_file w/ offsets + grep-equivalent (e.g. find_canonical_id-style) |
+
+Hard part for B11: 3 of 8 steps are read-only shell calls. Two options:
+1. Add a =survey_shell= tool whitelisting {head, tail, grep, wc, sort -u}.
+   Cleanest replay; small new tool surface.
+2. Pre-compute the survey results in prefetch (last_dec_line, dec_numbering,
+   allowed_status_values, last_5_lines). Move the work upstream — variant
+   sees a richer prefetch and the trajectory shrinks to {read_file,
+   run_python(uuid), edit_file}. Aligns with R18 design's "manager
+   pre-fetch + agent narrates" pattern.
+
+Recommendation: option (2). It is aligned with the existing
+=manager_prefetch_pattern= memory, doesn't widen the tool surface, and makes
+the trajectory definition cleaner (mechanical survey → LLM-only-fills-slots).
+
+* Recommended R18 v1 priority — wire 3 trajectories first
+| Pick | Task | Rationale                                                                                  |
+|------+------+--------------------------------------------------------------------------------------------|
+| 1    | B11  | highest-value; this is THE trajectory the R17 quality judge cited; demonstrates survey-before-edit; if FOSS replays B11 well, hypothesis is validated |
+| 2    | B5   | simplest non-trivial path (read + 1 edit); validates that LLM "fill the slot" pattern works without trajectory branching                              |
+| 3    | B25  | covers the elisp surface; orthogonal failure modes (write_file + eval_elisp) catch issues read+edit-only tasks miss; quick wall-time (~16s)           |
+
+Order: ship B5 + B25 first as plumbing-shakedown (low cost, fast feedback),
+then attempt B11 (the headline) once the replay scaffold is solid.
+
+Skip for v1: B1 (5-stack of similar edits — adds branching complexity without
+new failure-mode coverage), B7 / B13 / B20 (trivial; no insight gain), B26
+(redundant with B25 once elisp path works).
+
+* Loose ends / open questions
+- Claude's =git diff --stat && git add && git commit= step — strip from
+  replay (harness handles commit). Confirmed: every K5 cell ends with a
+  =git add && git commit= Bash call.
+- Claude's "msg-text" narration between tool calls is not load-bearing; it's
+  for the human reader. Drop from replay.
+- B11 step 5 (=wc -l && tail -5=) is partially redundant with step 1 (=tail
+  -120=). A tighter prefetch would collapse steps 1, 3, 5, 6 → one
+  prefetch dict.
+- The "anchor_defcustom_block" template in B26 needs the LLM to extract a
+  5–10 line block from the read_file result — the variant's job is shrunk
+  but still non-trivial. Worth A/B-ing whether the trajectory replay's edit
+  step itself benefits from FOSS sub-prompting.
