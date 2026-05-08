@@ -471,7 +471,7 @@ $2.01/hr × 2-4h/round on Spheron. Use pre-baked Docker image
 (PM2: don't pass training script via API). Reviewer demoted
 behind RunPod-PCIe (PM2-proven fallback) until smoke-tested.
 
-** TODO P2-4: Per-cell wall_seconds for ALL variants
+** DONE P2-4: Per-cell wall_seconds for ALL variants
 :PROPERTIES:
 :ESTIMATE: 1 hr
 :SOURCE:   r25-walltime §instrumentation gap; case-studies §P2-16
