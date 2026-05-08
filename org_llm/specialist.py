@@ -234,6 +234,18 @@ LOAD_ELISP_FILE_TOOL = {
 ELISP_TOOLS = [EVAL_ELISP_TOOL, LOAD_ELISP_FILE_TOOL]
 BROAD_TOOLS_PLUS_ELISP = BROAD_TOOLS + ELISP_TOOLS
 
+# R26 P1-18 — MCP-mediated elisp eval via rhblind/emacs-mcp-server v0.7.0.
+# Lazy import keeps `org_llm.mcp_emacs` optional (depends on a running
+# Emacs daemon + the cloned server). Falls back to empty list when the
+# module can't load — specialists keep working with `eval_elisp` /
+# `load_elisp_file` (the `emacs --batch` variants).
+try:
+    from org_llm.mcp_emacs import MCP_EMACS_TOOLS as _MCP_EMACS_TOOLS
+except Exception:  # pragma: no cover — optional dep
+    _MCP_EMACS_TOOLS = []
+ELISP_TOOLS_PLUS_MCP = ELISP_TOOLS + list(_MCP_EMACS_TOOLS)
+BROAD_TOOLS_PLUS_ELISP_MCP = BROAD_TOOLS + ELISP_TOOLS_PLUS_MCP
+
 
 # ── OS / shell tools (R16+) — Claude-Code parity surface ────────────────
 RUN_SHELL_TOOL = {
@@ -1014,6 +1026,28 @@ def _dispatch_tool_call(name: str, args: dict, workdir: Path,
         except subprocess.TimeoutExpired:
             return False, "emacs load: timeout (30s)"
 
+    # R26 P1-18 — MCP-mediated elisp eval via rhblind/emacs-mcp-server.
+    # These coexist with eval_elisp / load_elisp_file above. The MCP
+    # variants share a long-lived Emacs daemon (warm state, org-roam DB,
+    # buffer cache) instead of spawning `emacs --batch` per call.
+    if name.startswith("mcp_emacs_"):
+        try:
+            from org_llm import mcp_emacs as _me
+        except Exception as exc:
+            return False, f"mcp_emacs unavailable: {exc}"
+        dispatchers = {
+            "mcp_emacs_eval_elisp": _me.dispatch_eval_elisp,
+            "mcp_emacs_read_buffer": _me.dispatch_read_buffer,
+            "mcp_emacs_list_buffers": _me.dispatch_list_buffers,
+            "mcp_emacs_find_file": _me.dispatch_find_file,
+            "mcp_emacs_execute_command": _me.dispatch_execute_command,
+            "mcp_emacs_get_diagnostics": _me.dispatch_get_diagnostics,
+        }
+        fn = dispatchers.get(name)
+        if fn is None:
+            return False, f"unknown mcp_emacs tool: {name}"
+        return fn(args)
+
     if name == "run_shell":
         cmd = args.get("command") or ""
         if not cmd:
@@ -1248,6 +1282,34 @@ def _dispatch_tool_call(name: str, args: dict, workdir: Path,
         except Exception as exc:
             return False, f"mcp_roam_get_backlinks failed: {exc.__class__.__name__}: {exc}"
         return True, json.dumps(links, ensure_ascii=False)
+
+    if name.startswith("mcp_org_"):
+        # R26 P1-16 — org-mcp wrapper. Each tool dispatches to a function
+        # in org_llm/mcp_org.py which shells to `emacs --batch`. Wrappers
+        # return (ok, json-or-message) directly so we just forward.
+        try:
+            from org_llm import mcp_org as _mo
+        except ImportError as exc:
+            return False, f"org-mcp wrapper unavailable: {exc}"
+        if name == "mcp_org_list_todos":
+            return _mo.list_todos(workdir, args.get("state_filter"))
+        if name == "mcp_org_refile_node":
+            return _mo.refile_node(
+                workdir, args.get("node_id") or "",
+                args.get("target_path") or "")
+        if name == "mcp_org_create_node":
+            return _mo.create_node(
+                workdir, args.get("parent_path") or "",
+                args.get("title") or "", args.get("body") or "")
+        if name == "mcp_org_query_agenda":
+            try:
+                days = int(args.get("days") or 7)
+            except (TypeError, ValueError):
+                days = 7
+            return _mo.query_agenda(workdir, days)
+        if name == "mcp_org_search_by_tag":
+            return _mo.search_by_tag(workdir, args.get("tag") or "")
+        return False, f"unknown mcp_org tool: {name}"
 
     return False, f"unknown tool: {name}"
 
