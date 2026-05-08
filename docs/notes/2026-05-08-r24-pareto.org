@@ -1,0 +1,245 @@
+:PROPERTIES:
+:ID:       r24-pareto-frontier
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R24 -- cost-quality Pareto frontier + cost-per-quality leaderboard
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:r24:pareto:cost:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R24 ran 147 cells / *$13.29 spent* / 53 min wall across
+8 variants; layer-1 absorbed 132 cells (mostly B1), layer-2 + layer_bk
+fired only on K2 and K5. Three errors only -- the worktree-retry fix
+held. *K1-qwen30 is back on the $/qpt frontier at $0.00054/qpt* (R20
+0.00045, R19 0.00047 -- all within noise); *K8-deepseekV3 climbed
+back on at $0.00090/qpt* after R20's regression. K11 is dominated
+again (44x K1). K7 produced the round's most striking failure: lint
+penalty avalanche drove *score=-693* across 10 cells, the first
+strictly-negative-aggregate variant in the bench history.
+
+*Expanded.* The frontier has three FOSS points this round (K1 cheapest
+$/qpt, K8 second-cheapest at half K1's absolute spend, K6 cheapest
+absolute cell at $0.0055) versus R19/R20's two-point frontier. K2
+keeps the highest absolute score (667) but at *8.5x K1's $/qpt* --
+peer on quality, dominated on efficiency. K17 climbed back ($0.00239
+/qpt, n=10/259 score) after R20's 402-blackout, sitting just off the
+frontier. K11's $4.39 single-variant spend was the biggest cost
+surprise; K2's $3.05 (mostly B1, n=30) and K5's $4.03 (full task
+matrix) round out the top-3 spend. The bench now has *5 rounds* of
+K1 $/qpt readings clustered in [0.00045, 0.00078]; no other variant
+has that stability.
+
+* Section 1 -- Per-variant cost-per-quality leaderboard
+
+Costs = =phase1_cost_usd + specialist_cost_usd= for FOSS variants;
+=cost_usd= for K5 (Anthropic-billed, informational). Score = harness
+mech (in-scope edits - fab - lint penalty). =$/qpt= sorted ascending
+(lower better). FOSS variants only on the routable frontier.
+
+| variant         |  n |   $total | $/cell  |  score | q/cell |   $/qpt | verdict                  |
+|-----------------+----+----------+---------+--------+--------+---------+--------------------------|
+| K1-qwen30       | 20 | 0.2294   | 0.01147 |  427.0 |  21.35 | 0.00054 | FRONTIER -- best $/qpt   |
+| K8-deepseekV3   | 25 | 0.1482   | 0.00593 |  164.0 |   6.56 | 0.00090 | FRONTIER -- 2nd $/qpt    |
+| K6-llama70b     | 10 | 0.0552   | 0.00552 |   38.0 |   3.80 | 0.00145 | FRONTIER -- cheapest cell |
+| K17-glm46       | 10 | 0.6191   | 0.06191 |  259.0 |  25.90 | 0.00239 | near-frontier (n=10 B1)  |
+| K2-kimi-k2.6    | 40 | 3.0504   | 0.07626 |  667.0 |  16.67 | 0.00457 | quality peer, dominated  |
+| K11-qwen3coder  | 18 | 4.3884   | 0.24380 |  183.0 |  10.17 | 0.02398 | DOMINATED (44x K1)       |
+| K5-claude-solo  | 14 | 4.0313   | 0.28795 |  157.0 |  11.21 | 0.02569 | proprietary -- exclude   |
+| K7-qwen72b      | 10 | 0.7677   | 0.07677 | -693.0 | -69.30 |    inf  | NEGATIVE -- lint runaway |
+
+Score totals are aggregated across all layers a variant ran. K1/K6/K7/
+K8/K11/K17 ran B1-only; K2 ran the full 8-task matrix at low n outside
+B1; K5 ran the full matrix.
+
+* Section 2 -- Pareto frontier set
+
+Computed on FOSS only (project routing rule -- K5 informational).
+Pareto-dominance = =cost <= AND score >=, strictly better on one axis=.
+
+| variant         |  n |  $total |  score |  $/qpt | role                       |
+|-----------------+----+---------+--------+--------+----------------------------|
+| K1-qwen30       | 20 | 0.2294  |  427.0 | 0.00054 | FRONTIER -- best $/qpt    |
+| K8-deepseekV3   | 25 | 0.1482  |  164.0 | 0.00090 | FRONTIER -- 2nd best $/qpt |
+| K6-llama70b     | 10 | 0.0552  |   38.0 | 0.00145 | FRONTIER -- cheapest absolute |
+
+K1 dominates on $/qpt; K8 sits at 60% of K1's total spend with 38% of
+K1's score (still on frontier because no cheaper variant equals or
+exceeds K8's score); K6 owns the cheapest absolute cell. *Three-variant
+FOSS frontier* -- widest since R16.
+
+** Informational baseline
+
+| variant        |  n | $total | score | $/qpt   | role                  |
+|----------------+----+--------+-------+---------+-----------------------|
+| K5-claude-solo | 14 | 4.0313 | 157.0 | 0.02569 | proprietary ceiling   |
+
+K5 is *48x* more expensive per qpt than K1. The R19->R20 Claude drift
+($0.0242 -> $0.02569) continues; FOSS-vs-Claude moat now ~48x at K1's
+operating point.
+
+* Section 3 -- Dominated variants + by whom
+
+| variant         |  $total |  score | dominated by                                    |
+|-----------------+---------+--------+-------------------------------------------------|
+| K17-glm46       | 0.6191  |  259.0 | K1 ($0.23 / 427 -- cheaper AND higher score)    |
+| K2-kimi-k2.6    | 3.0504  |  667.0 | K1 (8.5x cheaper $/qpt; K2 wins raw, loses /$) |
+| K11-qwen3coder  | 4.3884  |  183.0 | K1, K8, K6 (44x K1's $/qpt; 27x K8's; 17x K6)  |
+| K7-qwen72b      | 0.7677  | -693.0 | every other variant (negative-score outlier)   |
+
+K11 is *strictly dominated by all three frontier variants on both
+axes* -- highest $/qpt, fourth-highest absolute spend, fewer score
+points than K1. K17 climbed quality-wise but K1's lower spend at higher
+score still dominates it; if K17 had run at K1's per-cell cost it would
+be on frontier. K7's lint avalanche (bracket_errors up to 46/cell,
+nested_brackets up to 45/cell) drove score from baseline 28 down through
+-108 -- a fab-style regression of the lint subsystem on this model.
+
+* Section 4 -- Frontier movers vs R19 / R20
+
+Reference: =docs/notes/2026-05-08-cross-round-pareto-evolution.org=
+(R15-R19) and =docs/notes/2026-05-08-cross-round-r20-r23-supplement.org=
+(R20-R23).
+
+| variant        | R19 $/qpt | R20 $/qpt | R24 $/qpt | move                          |
+|----------------+-----------+-----------+-----------+-------------------------------|
+| K1-qwen30      | 0.00047   | 0.00045   | 0.00054   | held (within 20% noise band)  |
+| K8-deepseekV3  | 0.00170   | 0.00092   | 0.00090   | climbed back onto frontier    |
+| K6-llama70b    | 0.00160   | (n=10/26) | 0.00145   | climbed back onto frontier    |
+| K2-kimi-k2.6   | 0.00263   | 0.00326   | 0.00457   | drifted further off frontier  |
+| K17-glm46      | 0.00370   | 402-block | 0.00239   | climbed (recovered post-cap)  |
+| K11-qwen3coder | 0.01040   | 402-cliff | 0.02398   | held dominated; cost rose 2.3x |
+| K7-qwen72b     | 0.00159   | (n=10/270)| inf (-693)| collapsed (lint runaway)      |
+| K5-claude-solo | 0.02420   | 0.02569   | 0.02569   | proprietary -- flat           |
+
+*Net frontier change.* R19 frontier was K1-only; R20 was K1+K8;
+*R24 widens to K1+K8+K6* -- three frontier points with K8 reclaiming
+its R17 role and K6 reclaiming its R18 role. K7 fell off catastrophically;
+K17 climbed back from 402-blackout but missed frontier by ~2.6x cost.
+
+* Section 5 -- R25 budget implication
+
+Claude reference at R24 prices: K5 measured at *$0.02569/qpt*.
+K1 at $0.00054 = *48x cheaper per qpt*. The R19 51x peak is essentially
+held; the K1 readout is the most stable cross-round signal in the bench.
+
+** "Beat Claude by Nx" budget table at R24 prices
+
+| target gap   | budget $/qpt | variants x n             | task coverage | est. total $ |
+|--------------+--------------+--------------------------+---------------+--------------|
+| 1x parity    | 0.02569      | K11 x 15 (still over)    | 8 + BK1-BK5   | ~$15        |
+| 5x cheaper   | 0.00514      | K2 x 20 + K17 x 10       | 8 + BK1-BK5   | ~$8         |
+| 11x cheaper  | 0.00234      | K17 x 15 + K8 x 25       | 8 + BK1-BK5   | ~$3         |
+| 28x cheaper  | 0.00091      | K8 x 25 + K6 x 15        | 8 + BK1-BK5   | ~$1         |
+| *48x cheaper* | *0.00054*   | *K1 x 28 (R19/R20/R24 envelope)* | 8 + BK1-BK5 | *~$0.40* |
+| 100x cheaper | 0.00026      | K20-foss-distill (LoRA)  | TBD           | $13-22 train |
+
+** R25 stratification recommendation
+
+| variant            |  n  | rationale                                       | est. $  |
+|--------------------+-----+-------------------------------------------------+---------|
+| K1-qwen30          |  28 | cross-round frontier (5 rounds confirmed)       | ~$0.45  |
+| K8-deepseekV3      |  25 | reclaimed frontier; cheapest absolute spend     | ~$0.20  |
+| K6-llama70b        |  15 | frontier (cheapest cell); revive long-horizon   | ~$0.10  |
+| K17-glm46          |  15 | climbed; second-highest q/cell; bigger n needed | ~$1.00  |
+| K2-kimi-k2.6       |  15 | quality peer; reduce from R24 n=40 (overspent)  | ~$1.20  |
+| K11-qwen3coder     |   5 | confirm-dominated probe only; bound the spend   | ~$1.20  |
+| K7-qwen72b         |   5 | post-lint-fix re-probe; track regression cause  | ~$0.40  |
+| K5-claude-solo     |  10 | informational anchor; full task matrix          | ~$3.00  |
+| K20-foss-distill   |   5 | LoRA tier (deferred from R19+); $/qpt unknown   | ~$0.20  |
+| *Total layer-1+2+BK* |   | 123 cells + Claude anchor                       | *~$8*   |
+
+R25 budget envelope: *$10-15* including LoRA training prep ($13-22 one-shot
+on Modal). Versus R24's $13.29 actual and the $375 design cap, R25 has
+*30x cap headroom* and *48x quality-per-dollar headroom* before approaching
+Claude's $/qpt at K1's operating point.
+
+* Section 6 -- Cost surprises this round
+
+Projected (R20-R23 supplement table) vs actual per-variant totals.
+
+| variant         | R20 $/cell | R24 $/cell | delta  | surprise direction              |
+|-----------------+------------+------------+--------+---------------------------------|
+| K1-qwen30       | 0.0085     | 0.01147    | +35%   | UP -- task mix shifted, n=20    |
+| K2-kimi-k2.6    | 0.0635     | 0.07626    | +20%   | UP -- ran multi-task at n=40    |
+| K8-deepseekV3   | 0.0046     | 0.00593    | +29%   | UP -- modest                    |
+| K11-qwen3coder  | 0.243      | 0.24380    | flat   | as expected (always volatile)   |
+| K17-glm46       | (402)      | 0.06191    | new    | UP -- ran clean at $0.62 total  |
+| K6-llama70b     | (n=2/no)   | 0.00552    | new    | as expected                     |
+| K7-qwen72b      | 0.0250     | 0.07677    | +207%  | *UP 3x -- AND score collapsed*  |
+| K5-claude-solo  | 0.0822     | 0.28795    | +250%  | *UP 3.5x -- full BK1-BK5 spend* |
+
+** Headline surprises
+
+1. *K2 spent $3.05 vs ~$1.00 R20 projection.* Driver: 30 layer-1 B1
+   cells at high n + 4 layer-2 cells + 5 layer_bk cells across BK1-BK5.
+   The layer_bk cells averaged $0.10 each and produced *negative
+   aggregate score* (-8 across 5 cells, lint penalties on long-horizon
+   tasks). Recommend reducing K2 n=40 -> n=15 in R25 -- the variance
+   is not paying for itself at this depth.
+
+2. *K11 spent $4.39 -- biggest single-variant spend in R24* and the
+   highest single-variant spend across all bench rounds (vs R19 $2.43,
+   R20 $2.40 stub). 10 B1 cells at $0.36 each + 8 B25 cells at $0.09
+   each. Per-cell on B1 is now *2x R19's $0.18*. The credit-killer
+   variant from the R20-R23 supplement is still credit-killing.
+
+3. *K8 recovered.* R20 $0.00092/qpt with score 124 -> R24 $0.00090/qpt
+   with score 164 at the same n=25. The R19 score=38 regression (per
+   R20 supplement) was a transient; K8 is structurally on the frontier
+   when it runs cleanly. *K8 + K6 reclaim the second-tier frontier
+   position that K1 absorbed in R19.*
+
+4. *K7 score=-693 is the round's biggest anomaly.* All 10 cells ran
+   without harness errors. Primary score 19-28 (in the K1/K8 zone)
+   gated by lint penalties of 25-136 driven by *bracket_errors and
+   nested_brackets compounding*. This is the first time the lint
+   subsystem produced a strictly-negative aggregate at production n.
+   Either K7's tokenizer regressed, the lint rule regressed, or both.
+
+5. *K5 cost tripled vs R20.* $0.0822/cell -> $0.28795/cell. R20-R23
+   K5 ran B1-only; R24 K5 ran the full 8-task matrix including layer_bk
+   long-horizon at $0.10-0.34 per cell. This is the FIRST cross-round
+   read of Claude on BK1-BK5 -- and Claude's negative scores on the
+   layer_bk cells (-8 aggregate) match K2's pattern, suggesting the
+   long-horizon tasks penalize *all* solvers at low n.
+
+6. *Total round spend $13.29 vs ~$5 projected.* 2.6x over. Drivers: K11
+   (35% of budget), K5 (30%), K2 (23%). The three frontier variants
+   (K1+K8+K6) consumed only $0.43 combined -- *3.2% of round spend
+   delivered 53% of total scoring volume*. R25 must rebalance.
+
+* Section 7 -- R25 advisory (concrete recommendations)
+
+1. *Lock K1+K8+K6 as the R25 default frontier* (n=28+25+15 ~ $0.75).
+   Three rounds of evidence (R19+R20+R24) show K1's $/qpt is the bench
+   floor; K8/K6 fill the second/cheapest-cell slots cleanly.
+
+2. *Cap K2 at n=15 single-task* (not R24's n=40 multi-task). The
+   layer_bk -8 aggregate is a negative-ROI experiment; re-run BK at
+   n=3 only after fixtures validated against another variant. Save ~$2.
+
+3. *Move K11+K17 into a "premium pool" with $1.50/round cap each.*
+   K11 alone consumed 35% of R24 for 15% of scoring volume; K17 is
+   promising but 4.4x K1's per-cell cost. Bounded pool resolves the
+   credit-cliff pattern the R20-R23 supplement flagged.
+
+4. *Diagnose K7 lint runaway BEFORE re-running at n>=5.* B1 cells
+   produced primary=28 (K1-tier) gated to score=-108 by bracket lint.
+   Either floor lint penalty at score=0 or fix K7 output format
+   upstream; re-probing at production n without diagnosis wastes $0.77.
+
+5. *Schedule BK1-BK5 into layer-1 with 3+ FOSS variants (K1, K8, K17).*
+   R24's layer_bk fired only on K2/K5; long-horizon signal is still
+   under-sampled. Budget ~$0.50 for 3 variants x 5 BK x 1 cell.
+
+* Cross-references
+
+- =scripts/_round24_dials_artifacts/summary-1778242782.json= -- raw cells
+- =docs/wiki/2026-05-08-foss-spend-headroom.org= -- Claude $/qpt baseline
+- =docs/notes/2026-05-08-r18-pareto.org= -- R18 frontier pattern (mirrored)
+- =docs/notes/2026-05-08-cross-round-pareto-evolution.org= -- R15-R19 trajectory
+- =docs/notes/2026-05-08-cross-round-r20-r23-supplement.org= -- R20-R23 trajectory
