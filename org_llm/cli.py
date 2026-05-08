@@ -7773,34 +7773,155 @@ def chat_dispatch(
                 "back to the normal LLM path."
             )
         else:
-            # TODO(agor-prototype): real spawn lives here.
-            # Pseudocode for the eventual implementation:
-            #
-            #   from .captains_log_agor_bridge import AgorClient
-            #   client = AgorClient()
-            #   wt = client.ensure_worktree(agent)         # idempotent
-            #   sess = client.create_session(wt, agent, prompt,
-            #                                  agentic_tool="opencode",
-            #                                  model="qwen/qwen-2.5-72b-instruct")
-            #   result = client.run_until_done(sess.id, timeout=120)
-            #   payload["session_url"] = sess.url
-            #   payload["content"] = result.text
-            #   payload["dispatched"] = True
-            #
-            # Per `feedback_agor_no_claude.md`: agentic_tool MUST
-            # be a FOSS one (opencode), modelConfig MUST be FOSS
-            # (qwen / llama / deepseek via OpenRouter or local
-            # ollama). No Claude as the crew's runtime.
-            payload["dispatched"] = False
-            payload["session_url"] = None
-            payload["content"] = (
-                f"⚙ Agor dispatch stub — would spawn @{agent} session "
-                f"for: {prompt[:200]}{'…' if len(prompt) > 200 else ''}\n\n"
-                "(Layer 3 prototype — wire body is a stub. Replace "
-                "the TODO in `org_llm/cli.py:chat_dispatch' with a "
-                "real `AgorClient' call when the spawn surface is "
-                "ready.)"
+            # Real Agor spawn body. Per `feedback_agor_no_claude.md':
+            # agentic_tool = "opencode" (FOSS), model defaults to
+            # the user's `cloud_model' config (also FOSS-via-
+            # OpenRouter per `feedback_foss_models_only.md').
+            from .captains_log_agor_bridge.agor_client import AgorClient
+            import subprocess as _sp
+            import tempfile as _tf
+            import shutil as _shutil
+            client = AgorClient()
+            # Step 1: pick a registered Agor repo (auto-discover
+            # the org-llm repo by local_path, otherwise take first).
+            repos, rerr = client.list_repos()
+            if rerr or not repos:
+                payload["content"] = (
+                    f"chat-dispatch: no Agor repos registered "
+                    f"(error: {rerr.detail if rerr else 'empty'}). "
+                    "Register a repo via `agor` CLI before using "
+                    "shell-capable agents in chat."
+                )
+                indent = 2 if pretty else None
+                typer.echo(_json.dumps(payload, indent=indent))
+                raise typer.Exit(0)
+            org_repo = next(
+                (r for r in repos
+                 if str(r.get("local_path") or "").rstrip("/")
+                    == str(os.path.expanduser("~/repos/org-llm"))),
+                repos[0],
             )
+            # Agor's REST schema uses `repo_id', not `id'.
+            repo_id = org_repo.get("repo_id") or org_repo.get("id")
+            # Step 2: create a worktree dedicated to this agent.
+            # Use a stable per-agent name so subsequent calls
+            # COULD reuse — for now we always create a fresh one
+            # with a per-call suffix to keep the prototype simple.
+            import time as _t
+            wt_name = f"chat-{agent}-{int(_t.time())}"
+            wt, werr = client.create_worktree(
+                repo_id, wt_name,
+                source_branch=org_repo.get("default_branch"),
+            )
+            if werr or not wt:
+                payload["content"] = (
+                    f"chat-dispatch: worktree create failed "
+                    f"(error: {werr.detail if werr else 'no body'})."
+                )
+                indent = 2 if pretty else None
+                typer.echo(_json.dumps(payload, indent=indent))
+                raise typer.Exit(0)
+            wt_id = wt.get("worktree_id")
+            wt_path = wt.get("path") or ""
+            # Worktree filesystem creation is async on the daemon
+            # side — the REST response returns immediately but the
+            # actual `git worktree add' may take a second or two.
+            # Poll for the path to exist before we hand it to opencode.
+            if wt_path:
+                import time as _wt_t
+                deadline = _wt_t.time() + 10.0
+                while not os.path.isdir(wt_path) and _wt_t.time() < deadline:
+                    _wt_t.sleep(0.25)
+            # Step 3: create a session bound to that worktree.
+            sess, serr = client.create_session(
+                wt_id, agentic_tool="opencode",
+                title=f"chat-dispatch @{agent}",
+            )
+            if serr or not sess:
+                payload["content"] = (
+                    f"chat-dispatch: session create failed "
+                    f"(error: {serr.detail if serr else 'no body'})."
+                )
+                indent = 2 if pretty else None
+                typer.echo(_json.dumps(payload, indent=indent))
+                raise typer.Exit(0)
+            sid = sess.get("session_id")
+            mcp_tok = sess.get("mcp_token")
+            payload["session_url"] = f"{client.base_url}/sessions/{sid}"
+            # Step 4: write per-worktree opencode config with the agor
+            # MCP server entry. opencode discovers `.opencode/opencode.json'
+            # from cwd. Token is session-scoped (24h expiry).
+            opencode = _shutil.which("opencode")
+            if not opencode:
+                payload["content"] = (
+                    "chat-dispatch: `opencode' binary not found on PATH. "
+                    "Install opencode to use Agor-routed agents."
+                )
+            elif not wt_path or not os.path.isdir(wt_path):
+                payload["content"] = (
+                    f"chat-dispatch: worktree path not on disk after 10s "
+                    f"({wt_path!r}). Daemon may be lagging; retry."
+                )
+            else:
+                oc_dir = os.path.join(wt_path, ".opencode")
+                os.makedirs(oc_dir, exist_ok=True)
+                oc_config = os.path.join(oc_dir, "opencode.json")
+                with open(oc_config, "w") as f:
+                    _json.dump({
+                        "mcp": {
+                            "agor": {
+                                "type":    "remote",
+                                "url":     f"{client.base_url}/mcp",
+                                "headers": {"Authorization":
+                                              f"Bearer {mcp_tok}"},
+                                "enabled": True,
+                            },
+                        },
+                    }, f, indent=2)
+                full_prompt = f"@{agent} {prompt}"
+                try:
+                    proc = _sp.run(
+                        [opencode, "run", full_prompt,
+                         "--dir", wt_path,
+                         "--format", "json"],
+                        capture_output=True, text=True, timeout=180,
+                    )
+                except _sp.TimeoutExpired:
+                    payload["content"] = (
+                        "chat-dispatch: opencode exceeded 180s timeout. "
+                        f"Session at {payload['session_url']} may still "
+                        "be running — inspect manually."
+                    )
+                    indent = 2 if pretty else None
+                    typer.echo(_json.dumps(payload, indent=indent))
+                    raise typer.Exit(0)
+                if proc.returncode == 0:
+                    # Parse JSON-Lines, concatenate every `text' event.
+                    # opencode's `run --format json' streams one event
+                    # per line; final assistant turn is one or more
+                    # events with type="text" carrying part.text.
+                    chunks = []
+                    for line in (proc.stdout or "").splitlines():
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            ev = _json.loads(line)
+                        except _json.JSONDecodeError:
+                            continue
+                        if ev.get("type") == "text":
+                            t = (ev.get("part") or {}).get("text") or ""
+                            if t:
+                                chunks.append(t)
+                    text = "".join(chunks).strip()
+                    payload["dispatched"] = True
+                    payload["content"] = text or \
+                        "(opencode exited 0 with no `text' events)"
+                else:
+                    payload["content"] = (
+                        f"opencode rc={proc.returncode}\n"
+                        f"stderr (tail):\n{(proc.stderr or '')[-1500:]}"
+                    )
     except Exception as e:
         payload["content"] = f"chat-dispatch error: {e}"
     indent = 2 if pretty else None

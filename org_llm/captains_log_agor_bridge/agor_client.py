@@ -232,6 +232,87 @@ class AgorClient:
             "children":   children,
         }, None)
 
+    # ── spawn surface (write API) ───────────────────────────────
+    #
+    # The smoke script (=scripts/agor-smoke.sh=) drives the same
+    # endpoints. Adding them here so the chat-dispatch CLI verb
+    # can reuse them programmatically without shelling out to bash.
+
+    def list_repos(self) -> tuple[Optional[list], Optional[AgorError]]:
+        """GET /repos — returns the list of registered Agor repos.
+        Each repo dict has at least `id`, `local_path`, `name`,
+        `default_branch`."""
+        body, err = self._request("GET", "/repos")
+        if err is not None:
+            return (None, err)
+        # The daemon returns either a bare list OR `{data: [...]}` —
+        # tolerate both shapes.
+        if isinstance(body, list):
+            return (body, None)
+        if isinstance(body, dict):
+            data = body.get("data")
+            if isinstance(data, list):
+                return (data, None)
+            # Some endpoints return `{<id>: <repo>, ...}`
+            return (list(body.values()), None)
+        return ([], None)
+
+    def find_repo_by_path(self, local_path: str,
+                          ) -> tuple[Optional[dict], Optional[AgorError]]:
+        """Look up a repo by its `local_path' field. Useful for
+        callers that know the repo on disk but not its Agor id."""
+        repos, err = self.list_repos()
+        if err is not None:
+            return (None, err)
+        for r in repos or []:
+            if isinstance(r, dict) and r.get("local_path") == local_path:
+                return (r, None)
+        return (None, AgorError(kind="not_found",
+                                  detail=f"no repo with local_path={local_path}"))
+
+    def create_worktree(self, repo_id: str, name: str,
+                          source_branch: Optional[str] = None,
+                          ) -> tuple[Optional[dict], Optional[AgorError]]:
+        """POST /repos/:id/worktrees. Creates a new git worktree at
+        =<.agor>/worktrees/<repo>/<name>=. Returns the worktree dict
+        with `worktree_id`, `path`, `worktree_unique_id`.
+
+        `source_branch' defaults to the repo's `default_branch' (the
+        daemon will resolve when omitted)."""
+        body: dict[str, Any] = {
+            "name":          name,
+            "ref":           name,
+            "createBranch":  True,
+            "pullLatest":    False,
+            "refType":       "branch",
+        }
+        if source_branch:
+            body["sourceBranch"] = source_branch
+        return self._request("POST", f"/repos/{repo_id}/worktrees",
+                              body=body)
+
+    def create_session(self, worktree_id: str, *,
+                        agentic_tool: str = "opencode",
+                        title: Optional[str] = None,
+                        ) -> tuple[Optional[dict], Optional[AgorError]]:
+        """POST /sessions. Returns dict with `session_id` and
+        `mcp_token` (admin-role JWT scoped to this session, default
+        24h expiry).
+
+        `agentic_tool' defaults to `\"opencode\"` per the project
+        rule that Agor-spawned crew sessions must use FOSS tooling
+        only (see `feedback_agor_no_claude.md' in author memory).
+        Passing `\"claude-code\"` is a footgun — included as an
+        explicit override only because the smoke script uses it
+        for tooling validation, not real crew work."""
+        body: dict[str, Any] = {
+            "worktree_id":   worktree_id,
+            "agentic_tool":  agentic_tool,
+        }
+        if title:
+            body["title"] = title
+        return self._request("POST", "/sessions", body=body)
+
     def invalidate(self, session_id: Optional[str] = None) -> None:
         """Drop cached entries. Pass None to clear everything; useful
         for tests and for the (future) v0.1 proxy interceptor that
