@@ -138,13 +138,28 @@ serverless multi-LoRA support (released early 2025) makes this
 unnecessary: fine-tuned LoRA adapters are served at the
 *base-model per-token price* with zero idle cost. K20 deployment
 becomes a 30-minute config change, not a $130-200/month commitment.
+*Caveat (reviewer-verified):* the cited blog only names "Llama
+3.1" and "Qwen 2.5" as supported base-model families — it does
+NOT explicitly list =Qwen3-Coder-30B-A3B-Instruct=. The fallback
+chain below is therefore load-bearing, not optional, until R26
+preflight confirms the K20 base model is in the multi-LoRA roster.
 
 *Expanded.* Source:
 https://www.together.ai/blog/serverless-multi-lora-fine-tune-and-deploy-hundreds-of-adapters-for-model-customization-at-scale.
 The blog explicitly covers the exact use case: register a LoRA
 adapter, query the base-model endpoint with =model= = adapter ID,
 pay base-model rates per token. No reservation, no idle, no
-per-adapter dedicated infra.
+per-adapter dedicated infra. *The blog also leaves three things
+under-specified*: (a) exhaustive list of supported base models
+(only Llama 3.1 and Qwen 2.5 named — Qwen3-Coder family NOT
+confirmed); (b) whether adapters trained via Together's own
+fine-tune API are auto-registered or require a separate deploy
+step; (c) minimum LoRA rank / target-module compatibility rules.
+R26 preflight (§3 implementation step 1) MUST resolve all three
+before launch, because the R25 LoRA training already shipped
+=ft-985a8266= against =qwen3-coder-30b-a3b-instruct= and a
+"base-model not supported for serverless multi-LoRA" failure
+would force the fallback chain below.
 
 ** Cost comparison
 
@@ -158,12 +173,23 @@ Same A/B against K1-base, ~50x cheaper deployment.
 
 ** Implementation
 
-1. Verify =ft-985a8266= (K20 v1) is "completed" and adapter weights
+1. *Preflight: confirm base-model serverless multi-LoRA support.*
+   GET =https://api.together.xyz/v1/models= and grep for
+   =qwen3-coder-30b-a3b-instruct=; check the model card for
+   =serverless: true= AND =supports_lora_adapters: true= (or
+   equivalent flag). If absent, hard-skip §3 and route to fallback
+   chain. Acceptance: a smoke-test inference call to the base model
+   must succeed AND a "list adapters" call (or equivalent) for the
+   base must return a non-error response.
+2. Verify =ft-985a8266= (K20 v1) is "completed" and adapter weights
    are accessible via =POST /fine-tunes/{id}/download= or attached
-   to a serverless deployment ID.
-2. Register the adapter via Together's serverless adapter API
+   to a serverless deployment ID. *Re-check rank + target_modules*
+   metadata against Together's serverless multi-LoRA constraints
+   (the blog references "Configurable LoRA rank" and "Layer-specific
+   adapter application" but does not publish numeric thresholds).
+3. Register the adapter via Together's serverless adapter API
    (=together fine-tune deploy --adapter ID= or REST equivalent).
-3. Add K20 to =_round26_dials.py=:
+4. Add K20 to =_round26_dials.py=:
    #+begin_src python
    "K20-foss-distill-v1": {
        "model_id": "qwen3-coder-30b-a3b-instruct",
@@ -172,10 +198,10 @@ Same A/B against K1-base, ~50x cheaper deployment.
        ...
    }
    #+end_src
-4. Wire =_chat_completions= to pass the adapter ID via Together's
+5. Wire =_chat_completions= to pass the adapter ID via Together's
    serverless multi-LoRA query schema (=model="<base>:<adapter>"=
    or equivalent based on the API spec).
-5. Probe behavioral effect — send a known training-distribution
+6. Probe behavioral effect — send a known training-distribution
    prompt; assert response shape differs from K1-base. This is
    the §2-B verification gate applied to K20.
 
@@ -188,6 +214,13 @@ If serverless multi-LoRA is unavailable for our base model
 3. Doubleword Takeoff Serverless LoRA.
 4. Spheron dedicated H100 PCIe at $2.01/hr (cheaper than Together's
    $5.49/hr dedicated; only used if every serverless option fails).
+   *Reviewer note:* Spheron pricing/availability is not cross-checked
+   in any prior org-llm doc; treat the $2.01/hr figure as unverified
+   until R26 preflight confirms a working endpoint stand-up against
+   the listed pricing page. RunPod ($1.39-2.99/hr) is the proven
+   fallback per PM2 in =bench-arc-post-mortems.org= — keep RunPod
+   ahead of Spheron in the fallback ordering until Spheron has a
+   one-cell smoke result.
 
 * 4. MCP server integrations — concrete shortlist
 
@@ -206,16 +239,27 @@ bench measures against.
 
 ** Shortlist (ranked by leverage)
 
-| # | Server                  | URL                                                       | Role           | Leverage |
-|---+-------------------------+-----------------------------------------------------------+----------------+----------|
-| 1 | org-mcp                 | https://github.com/laurynas-biveinis/org-mcp              | org-task ops   | high     |
-| 2 | emacs-mcp-server (rhblind) | https://github.com/rhblind/emacs-mcp-server           | pure elisp eval | high    |
-| 3 | org-roam-mcp            | https://github.com/aserranoni/org-roam-mcp               | vault Q&A      | med-high |
-| 4 | gptel + mcp.el          | https://github.com/karthink/gptel + https://github.com/lizqwerscott/mcp.el | client side | med |
-| 5 | vault-mcp               | https://github.com/robbiemu/vault-mcp                     | semantic search RAG | med  |
-| 6 | emacs-mcp-server (vivekhaldar) | https://github.com/vivekhaldar/emacs-mcp-server   | python+elisp   | low      |
-| 7 | mcp-local-rag           | https://github.com/nkapila6/mcp-local-rag                | RAG fallback   | low      |
-| 8 | ClawMem                 | https://github.com/yoloshii/ClawMem                       | memory layer   | low      |
+| # | Server                  | URL                                                       | Role           | Leverage | Verified |
+|---+-------------------------+-----------------------------------------------------------+----------------+----------+----------|
+| 1 | org-mcp                 | https://github.com/laurynas-biveinis/org-mcp              | org-task ops   | high     | YES — v0.9 Nov 2025; MELPA; standard MCP; ~3-line install |
+| 2 | emacs-mcp-server (rhblind) | https://github.com/rhblind/emacs-mcp-server           | pure elisp eval | high    | YES — v0.7.0 May 4 2026; pure-elisp; Unix socket; standard MCP; 13-16 tools |
+| 3 | org-roam-mcp            | https://github.com/aserranoni/org-roam-mcp               | vault Q&A      | med-high | YES — v0.2.0; uvx/pip install; standard MCP; documents Claude Code config |
+| 4 | gptel + mcp.el          | https://github.com/karthink/gptel + https://github.com/lizqwerscott/mcp.el | client side | med | YES — gptel 1229 commits, 3.3k stars, MCP via mcp.el; mcp.el needs Emacs 30+ |
+| 5 | vault-mcp               | https://github.com/robbiemu/vault-mcp                     | semantic search RAG | med  | YES — v0.5.0; FastAPI-MCP; uv install; ChromaDB-backed |
+| 6 | emacs-mcp-server (vivekhaldar) | https://github.com/vivekhaldar/emacs-mcp-server   | python+elisp   | low      | not-verified — covered by #2 |
+| 7 | mcp-local-rag           | https://github.com/nkapila6/mcp-local-rag                | RAG fallback   | low      | not-verified — redundant with #5 |
+| 8 | ClawMem                 | https://github.com/yoloshii/ClawMem                       | memory layer   | low      | not-verified — out of scope for R26 |
+
+*Reviewer notes on verification.* Top-3 MCP servers (org-mcp,
+rhblind emacs-mcp-server, org-roam-mcp) all verified actively
+maintained AND standards-MCP compliant AND installable in <25 LOC.
+*emacs-mcp-server (rhblind) v0.7.0 was released 2026-05-04* — four
+days before this doc — so the integration target is current. Two
+caveats: (a) rhblind v0.7.0 is recent enough that breaking changes
+between R26 launch + R27 follow-up are plausible; pin to a tag,
+not =main=. (b) =org-roam-mcp= activity is harder to date (only 14
+commits, no recent timestamp on home page); recommend a one-cell
+smoke before relying on it for B1 grounding.
 
 ** Top-3 integration plans
 
@@ -335,18 +379,48 @@ edit a fixture file inside the worktree, then the verifier runs
 
 ** New test specs (BK6-BK15)
 
+*Reviewer correction (live-tree audit, 2026-05-08).* The original
+target_files referenced =elisp/= and =test/= directories that *do
+not exist* in the repo — live elisp lives at =doom/*.el= (3 files:
+=org-llm.el=, =org-llm-chat.el=, =org-llm-specialist.el=) and
+=extensions/emacs/org-llm.el=, with the only ert test fixture at
+=tests/test_org_llm_chat.el=. =Makefile= and =makem.sh= also do not
+exist. Paths below have been rewritten to the live tree; BK15
+("makem.sh project orchestration") is replaced by a *task that
+introduces makem.sh* (legitimate net-new infra), since asking the
+specialist to add a target to a Makefile that doesn't exist is
+just BK15 by another name. =checkdoc= and =batch-byte-compile= are
+both built into Emacs 30.2 (verified =emacs --version= on host),
+so no extra package install is needed for BK10/BK14.
+
 | ID    | Label                       | Target files                                      | Expected changes                                | Primary metric        | Validator command |
 |-------+-----------------------------+---------------------------------------------------+-------------------------------------------------+-----------------------+-------------------|
-| BK6   | ERT test authoring          | =elisp/org-llm-foo.el=, =test/test-foo.el=        | new defun + 3 ert-deftest covering happy/edge/err | tests pass count    | =emacs -batch -l ert -l test/test-foo.el -f ert-run-tests-batch-and-exit= |
-| BK7   | org-babel tangle/detangle   | =elisp/literate-config.org=                       | add src block with =:tangle yes=, run tangle    | tangled-file exists + diff | =emacs -batch -l org -f org-babel-tangle= |
-| BK8   | org-element parse + assert  | =docs/wiki/<page>.org=                            | add property drawer with new ID                 | element tree shape    | =emacs -batch --eval "(progn (find-file ...) (org-element-parse-buffer))"= |
+| BK6   | ERT test authoring          | =doom/org-llm.el=, =tests/test_org_llm_chat.el= (extend) | new defun + 3 ert-deftest covering happy/edge/err | tests pass count    | =emacs -batch -l ert -l tests/test_org_llm_chat.el -f ert-run-tests-batch-and-exit= |
+| BK7   | org-babel tangle/detangle   | =docs/wiki/literate-tools.org= (existing)         | add src block with =:tangle yes=, run tangle    | tangled-file exists + diff | =emacs -batch -l org --eval "(progn (find-file \"docs/wiki/literate-tools.org\") (org-babel-tangle))"= |
+| BK8   | org-element parse + assert  | =docs/wiki/<existing-page>.org=                   | add property drawer with new ID                 | element tree shape    | =emacs -batch --eval "(progn (find-file \"<page>\") (let ((tree (org-element-parse-buffer))) (princ (length tree))))"= |
 | BK9   | org-roam node + backlink    | =docs/wiki/<new>.org=, =docs/wiki/<existing>.org= | new node with org-roam-id + backlink to existing | =org-roam-db= row count | =emacs -batch -l org-roam --eval "(org-roam-db-sync)"= + SQL count |
-| BK10  | defcustom + defface authoring | =elisp/org-llm-theme.el=                        | new defcustom with valid type + defface         | byte-compile success  | =emacs -batch -f batch-byte-compile elisp/org-llm-theme.el= |
-| BK11  | org-table validation        | =docs/wiki/<page>.org= (table region)             | add 5x4 table with =#+TBLFM= computed col       | TBLFM evaluates clean | =emacs -batch --eval "(org-table-recalculate t)"= |
-| BK12  | capture template authoring  | =elisp/org-llm-capture.el=                        | new entry in =org-capture-templates= alist      | =org-capture= in dry-run | =emacs -batch --eval "(org-capture nil \"key\")"= |
+| BK10  | defcustom + defface authoring | =doom/org-llm.el= (extend; existing 280+ LOC)   | new defcustom with valid type + defface         | byte-compile success  | =emacs -batch -f batch-byte-compile doom/org-llm.el= |
+| BK11  | org-table validation        | =docs/wiki/<page>.org= (table region)             | add 5x4 table with =#+TBLFM= computed col       | TBLFM evaluates clean | =emacs -batch --eval "(progn (find-file \"<page>\") (org-table-recalculate t))"= |
+| BK12  | capture template authoring  | =doom/org-llm.el= (extend; SPC l keymap section)  | new entry in =org-capture-templates= alist      | byte-compile clean    | =emacs -batch -f batch-byte-compile doom/org-llm.el= (=org-capture= dry-run too brittle for batch) |
 | BK13  | org-id management           | =docs/wiki/<page>.org= (multiple headings)        | =org-id-get-create= 5 headings, no collisions   | unique IDs in =org-id-locations= | =emacs -batch -l org-id --eval "(org-id-update-id-locations)"= |
-| BK14  | checkdoc + elisp-lint clean | =elisp/org-llm-foo.el= (existing)                 | add 2 commentary docstrings, fix lint issues    | 0 checkdoc warnings   | =emacs -batch -f checkdoc-batch elisp/org-llm-foo.el= |
-| BK15  | makem.sh project orchestration | repo root (=Makefile=, =makem.sh=)             | add =all-tests= target running ERT + checkdoc + lint | exit 0           | =./makem.sh all= or =make all-tests= |
+| BK14  | checkdoc + elisp-lint clean | =doom/org-llm-chat.el= (existing)                 | add 2 commentary docstrings, fix lint issues    | 0 checkdoc warnings   | =emacs -batch --eval "(checkdoc-file \"doom/org-llm-chat.el\")"= (=checkdoc-batch= is interactive; use =checkdoc-file=) |
+| BK15  | introduce makem.sh + Makefile  | repo root: NEW =makem.sh= + =Makefile=         | add =makem.sh= (download from upstream pin) + =Makefile= with =test= target | exit 0 | =./makem.sh all= |
+
+*Reviewer flags on validators.*
+- BK6: extending =tests/test_org_llm_chat.el= keeps the test
+  inside the existing ERT package; if specialist must create a
+  brand-new test file, use =tests/test_org_llm_<feature>.el= so it
+  follows the existing convention (=test_org_llm_chat.el=).
+- BK12: =(org-capture nil "key")= is interactive and stalls under
+  =--batch=; replace with byte-compile-clean check (the
+  defcustom/defcapture-templates list is what we're testing).
+- BK14: =checkdoc-batch= is not a function; the canonical batch
+  entry point is =(checkdoc-file FILE)=. Per Emacs 30.2 host
+  =checkdoc.el=.
+- BK15: rephrased — adding =all-tests= to a nonexistent Makefile
+  is meaningless; introducing the testing infrastructure as a new
+  artifact is the real test of whether the specialist can author
+  CI surface from scratch.
 
 ** Acceptance + scoring
 
@@ -504,21 +578,27 @@ rough wall estimate.
 
 ** P1 — ships in R26 launch
 
-| #  | Item                                          | Cost   | Wall ETA | Notes                                          |
-|----+-----------------------------------------------+--------+----------+------------------------------------------------|
-| 7  | Together serverless multi-LoRA K20 deploy    | ~$5    | 2h       | §3 above; A/B vs K1 base                       |
-| 8  | Spheron H100 K1+K2 vLLM endpoints            | $4-8/round | 4h | Pre-baked Docker per PM2; heartbeat daemon     |
-| 9  | Modal-Kimi K2 endpoint (=MODAL_KIMI_ENABLED=1=) | ~$2  | 1h       | Sub-second TTFT, kills WALL_CAP root cause     |
-| 10 | =org-mcp= integration in specialist tools    | $0     | 4h       | §4 top integration                             |
-| 11 | =emacs-mcp-server= (rhblind) wired           | $0     | 3h       | Pure-elisp; Unix socket; per-cell connection   |
-| 12 | =org-roam-mcp= for B1 grounding              | $0     | 2h       | Drops fab_uuid on B1                           |
-| 13 | New tests BK6-BK15 (10 elisp/org tests)      | $1.60  | 6h       | §6 above                                       |
-| 14 | Drop K34/K35; rename or drop K33             | $0     | 30m      | Free 2 cells worth of L1 budget                |
-| 15 | K8 force-list on B5/B7/B11/B25 + BK pool    | $1     | with launch | /After/ selector fix; K8 promotion gate    |
-| 16 | K17 — investigate or drop (3 options)        | $1     | 2h       | (a) drop; (b) Novita probe; (c) max_iters cap=8 |
-| 17 | K11 budget cap enforced (=$1.50/round=)      | $0     | 1h       | Verify =_R26_VARIANT_BUDGETS= filters cell-specs |
-| 18 | Layer-BK = full advancing pool               | $2-4   | with launch | Removes "K1+K5 only" Layer-BK gap           |
-| 19 | BK6-BK15 + headless-Emacs verifier wiring    | $0     | 3h       | §6 + §7                                        |
+*Reviewer revision.* Acceptance criteria column added (was Notes
+only); every P1 now has a measurable signal mirroring the P0
+verify-probe pattern. P1 #8 (Spheron) acceptance is gated on
+preflight smoke; if smoke fails, fall back to RunPod + pre-baked
+Docker (PM2). P1 #15-19 previously had no probe.
+
+| #  | Item                                          | Cost   | Wall ETA | Acceptance criterion                                        |
+|----+-----------------------------------------------+--------+----------+-------------------------------------------------------------|
+| 7  | Together serverless multi-LoRA K20 deploy    | ~$5    | 2h       | K20 chat-completion call returns text differing from K1-base on training-distribution prompt; cost ≤ K1 base price/token |
+| 8  | Spheron H100 K1+K2 vLLM endpoints            | $4-8/round | 4h | Smoke: 3-prompt sweep against each endpoint returns valid completions in < 5s; if fail, fall back to RunPod (PM2 image) |
+| 9  | Modal-Kimi K2 endpoint (=MODAL_KIMI_ENABLED=1=) | ~$2  | 1h       | =MODAL_KIMI_ENABLED=1= round: K2 cells WALL_CAP_KILLED count = 0; K2 mean wall ≤ 200s |
+| 10 | =org-mcp= integration in specialist tools    | $0     | 4h       | =org-mcp.add-heading= call from specialist returns parseable element with property drawer |
+| 11 | =emacs-mcp-server= (rhblind) wired           | $0     | 3h       | =eval-elisp= round-trip succeeds; pinned to v0.7.0 tag, not =main= |
+| 12 | =org-roam-mcp= for B1 grounding              | $0     | 2h       | B1 fab_uuid mean ≤ 0.5/cell across n=10 K1 cells (R25 baseline ~2-3/cell on K2)  |
+| 13 | New tests BK6-BK15 (10 elisp/org tests)      | $1.60  | 6h       | All 10 tests have a green-on-empty-edit smoke run (no specialist) AND green-on-trivial-edit run before R26 launches them |
+| 14 | Drop K34/K35; rename or drop K33             | $0     | 30m      | =ALL_VARIANTS= post-fix: K34/K35 absent; K33 either renamed with distinct dial config OR removed |
+| 15 | K8 force-list on B5/B7/B11/B25 + BK pool    | $1     | with launch | After selector fix: K8 produces ≥1 non-silent_noop run on each of B11, B26 (n=5 each); K8 generalization claim gated on this |
+| 16 | K17 — investigate or drop (3 options)        | $1     | 2h       | If keep: K17 max_iter loops < 30% of K17 cells; if drop: K17 absent from =ALL_VARIANTS= |
+| 17 | K11 budget cap enforced (=$1.50/round=)      | $0     | 1h       | Round summary shows K11 spend ≤ $1.50; cells beyond cap recorded as =budget_capped= |
+| 18 | Layer-BK = full advancing pool               | $2-4   | with launch | Layer-BK runs ≥3 distinct FOSS variants on each BK1-BK5 (not just K1+K5)  |
+| 19 | BK6-BK15 + headless-Emacs verifier wiring    | $0     | 3h       | A 1-cell K1 smoke through BK6 lands a green ERT exit (= validator command exits 0) |
 
 ** P2 — ships across R26 → R28
 
@@ -618,6 +698,152 @@ pool show ≤5% per-variant $/qpt drift.
 =project_self_coded_tools=); LLM-as-task-creator generating
 B40-B50 from observed vault patterns; multi-LoRA composition
 (per-handle adapters loaded together for orchestrator-style cells).
+
+* 11. Reviewer's revisions (2026-05-08)
+
+*Summary.* Second-pass review against the four R25 agent notes
+(=r25-{quality-judge,pareto,walltime,providers}=), the R25
+synthesis + case-studies docs, the go-forward-config doc, and the
+post-mortems. Six classes of revision were applied in-place; this
+section logs what changed and why, plus the cross-walk to the
+case-studies 32-rec list (completeness gate).
+
+** What changed and why
+
+1. *§3 Together serverless multi-LoRA — added base-model
+   verification preflight + caveat.* The cited blog only names
+   "Llama 3.1" and "Qwen 2.5" as supported families;
+   =Qwen3-Coder-30B-A3B-Instruct= is NOT explicitly listed. The
+   original §3 framed the pivot as confirmed; reviewer demoted to
+   "verified pricing model + unconfirmed roster" and made the
+   fallback chain load-bearing. Added preflight step 1 (call
+   Together =/v1/models= + check serverless+lora flags) ahead of
+   the existing implementation steps; renumbered.
+
+2. *§3 Spheron unverified-pricing flag.* Spheron does not appear
+   in any prior org-llm doc; the $2.01/hr H100 PCIe figure is
+   sourced only from the boost plan itself. Demoted Spheron to
+   "behind RunPod in fallback ordering until smoke-tested" per
+   PM2's RunPod-with-pre-baked-Docker proven path.
+
+3. *§4 MCP server verification column added.* All five
+   recommended MCP servers (org-mcp, rhblind emacs-mcp-server,
+   org-roam-mcp, gptel+mcp.el, vault-mcp) verified actively
+   maintained AND standards-MCP compliant via direct README/page
+   fetch. *rhblind emacs-mcp-server v0.7.0 was released 2026-05-04
+   — four days before this doc* — so pin to the v0.7.0 tag, not
+   =main=. =org-roam-mcp= activity is harder to date; recommend
+   one-cell smoke before relying on it for B1.
+
+4. *§6 BK6-BK15 target_files corrected to live tree.* Live tree
+   has =doom/*.el= (3 files) + =extensions/emacs/org-llm.el= +
+   =tests/test_org_llm_chat.el=, NOT =elisp/= or =test/=.
+   =Makefile= and =makem.sh= do not exist. BK15 was rewritten
+   from "add =all-tests= target" (impossible — no Makefile) to
+   "introduce =makem.sh= + =Makefile=" (legitimate net-new
+   infra). BK12 validator changed from interactive
+   =(org-capture nil "key")= (stalls under =--batch=) to
+   =batch-byte-compile= clean. BK14 validator changed from
+   nonexistent =checkdoc-batch= to canonical =(checkdoc-file
+   FILE)= per Emacs 30.2 host. Verified =emacs --version=: GNU
+   Emacs 30.2 on host, so =checkdoc= and =batch-byte-compile=
+   are built-ins; no extra package install needed.
+
+5. *§9 P1 acceptance-criteria column added.* Items 14-19 had no
+   measurable probe; reviewer added one each, mirroring the P0
+   verify-probe pattern. Especially #15 (K8 generalization
+   gate), #18 (Layer-BK distinct-variants probe), and #19
+   (BK6-BK15 smoke probe) — these were the items most likely to
+   ship "patch landed but didn't fire" failures (the meta-bug R26
+   is supposed to prevent).
+
+6. *Cost math (left unchanged but verified).* Allocation table
+   sums to $140 ($5+$20+$10+$30+$30+$20+$25), matching the §5
+   stated headroom of $120-140. R26 round itself ($25-40 incl.
+   Spheron $4-8) fits inside the OpenRouter base-bench allocation
+   ($30) plus modest infra spend. *Reviewer-confirmed: budget is
+   internally consistent.*
+
+** Completeness vs case-studies 32-rec list
+
+Cross-walk (boost plan section ↔ case-studies recommendation):
+
+| Case-study #          | Boost plan placement              | Status                         |
+|-----------------------+-----------------------------------+--------------------------------|
+| 1 top-3 selector      | §9 P0 #1                          | covered                        |
+| 2 max_tokens wired    | §9 P0 #2                          | covered                        |
+| 3 WALL_CAP kill       | §9 P0 #3                          | covered                        |
+| 4 count_bracket per-line | §9 P0 #4                       | covered                        |
+| 5 variant pre-flight  | §9 P0 #5                          | covered                        |
+| 6 Drop K34/K35        | §9 P1 #14                         | covered                        |
+| 7 Rename or drop K33  | §9 P1 #14 (combined)              | covered                        |
+| 8 K8 force-add Layer-2 | §9 P1 #15                        | covered                        |
+| 9 Modal-Kimi K2       | §9 P1 #9                          | covered                        |
+| 10 Drop K17           | §9 P1 #16                         | covered (3 options)            |
+| 11 K11 budget cap     | §9 P1 #17                         | covered                        |
+| 12 Verify-every-patch | §2-B + §7 verification gate + §9 P0 #6 | covered                   |
+| 13 S1-S4 wiring       | §9 P2 #23                         | deferred to R26-R27            |
+| 14 Together K20 deploy | §3 + §9 P1 #7                    | *pivoted* to serverless        |
+| 15 Self-host K1+K2    | §9 P1 #8 + §1 Bet 3              | covered (Spheron primary, RunPod fallback) |
+| 16 Per-cell wall_seconds | NOT EXPLICIT in boost plan     | *gap* — see below              |
+| 17 Tree-sitter validator | §9 P2 #20                       | covered                        |
+| 18 Headless-Emacs verifier | §9 P2 #21 + §7 + §6 BK6-BK15 | covered                        |
+| 19 Pre-emit grammar gate (proper N5) | §9 P2 #22          | covered                        |
+| 20 BK1-BK5 → Layer-1  | §2-C insight + §9 P1 #18         | covered (Layer-BK = full pool) |
+| 21 BK3 bug-injection pre-stage | NOT EXPLICIT                | *gap* — see below              |
+| 22 Tournament critique-revise | §9 P2 #23 (S1-S4) part-of   | partial (S3 lift bundled)      |
+| 23 Strategy-novelty check | NOT EXPLICIT                  | *gap* — see below              |
+| 24 Pre-flight credit/disk/endpoint | §5 decision rules        | covered (loose)                |
+| 25 Cost circuit-breaker honored | NOT EXPLICIT                | *gap* — see below              |
+| 26 K17 three options  | §9 P1 #16                         | covered                        |
+| 27 Re-introduce K6 on Together/Parasail | NOT EXPLICIT          | *gap* — see below              |
+| 28 R26 envelope $8-12 / 115 cells | §1 + §5                  | covered ($25-40 round w/ infra) |
+| 29 K2 wall_cap raise to 600s belt-and-braces | §9 P1 #9 implies | covered (Modal-Kimi obviates)  |
+| 30 K33 dial-difference enforcement | §9 P1 #14              | covered                        |
+| 31 Layer-BK on full advancing pool | §9 P1 #18              | covered                        |
+| 32 K8/K11 promotion gate | §9 P1 #15 + §2-A insight       | covered                        |
+
+*Gaps surfaced (5 of 32 not explicit in boost plan):*
+- *#16 per-cell =wall_seconds= for ALL variants (not just K5).*
+  R25 P9 instrumented summary-level only; =cell_result.json= still
+  has wall only for Claude. R26 fix: move timing into
+  =run_one_cell=, not just =execute_cell=. Add to §9 P1.
+- *#21 BK3 bug-injection pre-stage.* The
+  =apply_starting_state(workdir)= hook exists but R25 didn't run
+  BK3 (selector bug excluded). With selector fixed (P0-1) AND
+  Layer-BK on full pool (P1 #18), BK3 should fire and the hook
+  needs to be wired. Add to §9 P1.
+- *#23 strategy-novelty check between rounds.* PM6-G2 from
+  =bench-arc-post-mortems.org=. Without this, R26→R27→R28 risk
+  re-creating the R20-R23 byte-identical-fork pattern. Add to §9
+  P2 #N.
+- *#25 cost circuit-breaker that the harness honors.* R25 daemon
+  writes =COST_CIRCUIT_BREAKER= sentinel but harness never reads
+  it. Wire =run_layer_parallel= to check before each layer. Add
+  to §9 P0 (it's a gate, not a nicety).
+- *#27 Re-introduce K6-llama70b at n=15 on Together/Parasail.*
+  R25 dropped K6 due to DeepInfra-broker artifact. R26 should
+  re-probe on alt brokers. Add to §9 P1 (n=15, low-risk).
+
+*Add these gaps to §9 in a follow-up edit pass; not done in this
+revision pass to keep the diff focused on consistency + verification +
+live-tree truth.*
+
+** Reviewer-confirmed (no change needed)
+
+- *§2-A K8 generalization unresolved* — boost plan correctly
+  refuses to claim K8 as proven; matches case-studies CS5
+  correction. Don't soften.
+- *§2-B 3-of-11 patches dead-code* — boost plan correctly
+  identifies this as structural; verification gate in §7 mirrors
+  case-studies rec #12.
+- *§2-C Layer-BK fired* — boost plan correctly cites the 10/10
+  result; matches synthesis doc.
+- *§2-D Claude moat 59x layer1-matched* — boost plan correctly
+  refuses the headline 22x; matches synthesis doc and pareto note.
+- *Cost envelope $25-40/round* — internally consistent and
+  matches the case-studies §28 advisory ($8-12 base bench + ~$15
+  infra).
 
 * Cross-references
 
