@@ -135,7 +135,7 @@ in =scripts/quality_lint.py=.
 diffs from K11/K17/K8 cells (cells flagged by FP-1 with
 penalty 6/8/10/17). Assert post-fix penalty ≤ 1.0 per cell.
 
-** TODO P0-5: Variant warmup pre-flight refuses launch on bad slug
+** DONE P0-5: Variant warmup pre-flight refuses launch on bad slug
 :PROPERTIES:
 :ESTIMATE: 1 hr
 :SOURCE:   case-studies §P0; r25-providers §3
