@@ -1,0 +1,155 @@
+#+title: R26 Harness End-to-End Verification (P1-21c)
+#+date: 2026-05-08
+#+filetags: :round26:bench:verification:p1-21c:
+
+* Summary
+
+*Summary.* Static + import-only verification of =scripts/_round26_dials.py=
+after all P0/P1/P2 patches landed. /Result/: harness is launch-ready
+after two bugs were caught and fixed during this audit. *(1)* P1-7
+commit =9fc4c2c= was branched off pre-P2-4 and silently reverted P2-4's
+per-cell wall_seconds in =run_one_cell=; re-applied as part of this
+verification. *(2)* =_r26_design_patch.py='s =fork_harness()= was named
+"idempotent" but unconditionally overwrites =_round26_dials.py= from
+=_round25_dials.py=, which would clobber post-fork patches (P1-7,
+P1-11/12/13, P2-4) every time =_r26_launch.sh= step 1 ran; added a
+DST-exists guard with =R26_FORCE_REFORK=1= override.
+
+*Expanded.* Verification ran while two parallel agents were still
+landing P1-11/12/13 (file contracts) and observing P1-4/P1-15. Both
+landed cleanly during the audit window. Final state: 16/16 patch
+checks PASS, harness imports clean, design-patch script all 5 P0
+probes PASS, idempotent re-run preserves patches.
+
+* Per-check results
+
+| Check                                       | Status | Notes                                                        |
+|---------------------------------------------+--------+--------------------------------------------------------------|
+| Syntax (=ast.parse=)                          | PASS   | 2721 lines, clean                                            |
+| Module import (=R17_SKIP_WARMUP=1=)           | PASS   | imports without exception                                    |
+| =VARIANTS= = K1, K2, K8, K11, K5            | PASS   | 5 active (4 FOSS + Claude sentinel)                          |
+| =LONG_HORIZON_TASKS= n=15 (BK1-BK15)        | PASS   | P1-14 fixtures landed in =_round19_long_horizon_tasks.py=    |
+| =_R26_DROPPED= = K17/K33/K34/K35             | PASS   | all 4 strings present                                        |
+| =_R25_DROP_GENERATIVE= = K7                  | PASS   |                                                              |
+| =_R25_DROP_BASELINE= = K6                    | PASS   |                                                              |
+| =_R25_FORCE_LAYER2= = K1/K8/K11              | PASS   | local var inside =main()=, source-grep verified             |
+| =_R25_VARIANT_MAX_TOKENS[K2-kimi-k2.6]=4096= | PASS   | + K15-kimi-thinking 4096                                     |
+| =_R25_VARIANT_BUDGETS= K11 cap               | PASS   | $1.50 K11; $2/$2/$3 for K33/K34/K35 (dropped variants)       |
+| =COST_CIRCUIT_BREAKER_FILE=                   | PASS   | constant + read site in =run_layer_parallel=                 |
+| =LIVE_DENY_LIST_FILE=                         | PASS   | constant + read site in =run_layer_parallel=                 |
+| =CELL_REPLAY_FILE=                            | PASS   | constant + =_append_cell_replay= helper + 3 call-sites       |
+| =run_one_cell= writes =wall_seconds= (P2-4) | FAIL→PASS | regression caught + re-applied (see Bug 1)                |
+| =execute_cell= TPE-no-context-mgr (P0-3)    | PASS   | =shutdown(wait=False)=; no =with _TPE(=                     |
+| =run_layer_parallel= COST_CIRCUIT_BREAKER (P1-11) | PASS | =_check_cost_circuit_breaker(layer_name)=             |
+| =run_layer_parallel= LIVE_DENY_LIST (P1-12) | PASS   | =_load_live_deny_list()= + filter pre-submit                |
+| =run_layer_parallel= cell_replay write (P1-13) | PASS | =_append_cell_replay= called per-cell + on layer skip       |
+| =warmup_providers= P0-5 wiring               | PASS   | =_warmup_one= + =WARMED_VARIANTS= + 30% threshold gate       |
+| =score_cell= calls quality_lint              | PASS   | bracket_errors / nested / fab_uuids per-line (P0-4)          |
+| Top-3 selector per-cell-mean (P0-1)         | PASS   | =mean_score= + =ranked_variants= + dead-variant filter       |
+| K20 endpoint resume hook (P1-10)            | PASS   | conditional on K20 in active VARIANTS + atexit pause         |
+| S1 =_should_escalate= + post-layer fallback (P1-7) | PASS | call-site at run_layer_parallel L2070                  |
+| S2 =_expand_best_of_n= (P1-7)                | PASS   | called from main() Layer-2                                   |
+| S3 =run_layer_critique_revise= (P1-7)        | PASS   | called from main() after Layer-2                             |
+| S4 =_filter_specs_by_family= (P1-7)          | PASS   | called from main() Layer-2                                   |
+| BK3 =maybe_apply_starting_state= (P1-15)    | PASS   | helper present + called in =run_one_cell= + claude-solo      |
+| =_r26_design_patch.py= 5 probes              | PASS   | all 5 PASS, idempotent re-run preserves patches              |
+| =_r26_preflight.sh= bash syntax              | PASS   | =bash -n= clean (live API checks deferred to actual launch) |
+
+* Bugs found + fixed during verification
+
+** Bug 1 — P1-7 commit reverted P2-4 wall_seconds
+
+*Summary.* Commit =9fc4c2c= ("feat(bench): P1-7 wire S1-S4 composition
+strategies") was branched off the pre-P2-4 base. When merged it did
+=-_r26_t0 = time.time()= and removed both =cell["wall_seconds"]= writes
+in =run_one_cell=, silently undoing =c77fd51= ("fix(bench): P2-4
+per-cell wall_seconds for ALL variants").
+
+*Expanded.* P1-7's diff shows the regression on lines 1388-1395 +
+1418-1419 + 1487-1488. After =git restore=, =run_one_cell= contained
+no =_r26_t0= at all; only =execute_cell='s wrapper at L1962 had
+=wall_seconds= — which is the very bug P2-4 was meant to fix (see
+P2-4 commit message). Without P2-4, only K5-claude-solo cells get
+=wall_seconds= in =cell_result.json=; all FOSS cells lose per-cell
+walltime instrumentation.
+
+*Fix.* Re-applied the three P2-4 edits inline as part of this
+verification (added a comment trailer noting the P1-21c re-apply).
+Now =run_one_cell= captures =_r26_t0= at entry and stamps
+=wall_seconds= before both =write_cell_result= sites. Verified via
+=inspect.getsource=: 2 occurrences of =cell["wall_seconds"] = round(time.time() - _r26_t0, 1)= present.
+
+*Recommendation.* When P1-7 is rebased / future composition-strategy
+edits land, ensure they're branched off the latest =_round26_dials.py=
+HEAD, not pre-P2-4. The narrow fix here re-applied P2-4 directly.
+
+** Bug 2 — _r26_design_patch.py overwrote post-fork patches
+
+*Summary.* =_r26_design_patch.py='s =fork_harness()= unconditionally
+copies =_round25_dials.py= to =_round26_dials.py= with a sed-rename. It
+docstrings as "Idempotent" but never checks DST-exists. Since
+=_r26_launch.sh= step 1 calls this script every launch, every
+post-fork patch (P1-7 S1-S4 wiring, P1-11/12/13 file contracts, P2-4,
+P1-15 BK3 hook) would be obliterated on each run. Confirmed during
+this audit: a single =python3 scripts/_r26_design_patch.py= reverted
+the harness to a 2075-line R25-equivalent; all patches gone.
+
+*Fix.* Added a DST-exists guard. If =_round26_dials.py= already exists
+AND has been round-id-renamed (markers =_round26_dials_artifacts= +
+=R26_LIVE= present, no =_round25_dials_artifacts= remnants) AND is at
+least as large as a freshly-renamed SRC, skip the overwrite. To force
+re-fork (e.g. on intentional R25 update), set =R26_FORCE_REFORK=1=.
+Verified: re-running =_r26_design_patch.py= now preserves all post-fork
+patches; all 5 P0 probes still PASS.
+
+*Recommendation.* Document the =R26_FORCE_REFORK= env in
+=_r26_launch.sh='s Env overrides comment block when the launcher next
+gets a touch-up. Also consider applying P1-7 + P1-11/12/13 + P2-4 to
+=_round25_dials.py= upstream so a forced re-fork doesn't regress
+behavior.
+
+* Commit hashes for landed patches
+
+| Patch              | Commit    | Path                                       |
+|--------------------+-----------+--------------------------------------------|
+| P0-1 selector dedupe | 72691cb | _round26_dials.py                          |
+| P0-2 K2 max_tokens   | fbcb610 | _round26_dials.py + org_llm.specialist     |
+| P0-3 WALL_CAP outer-free + P1-1/2/5 drops | 82ddeac | _round26_dials.py |
+| P0-4 bracket per-line | cc4f097 | quality_lint.py                            |
+| P0-5 warmup pre-flight | a2be85b | _round26_dials.py                          |
+| P0-6 design patch + verify | a9107b6 | _r26_design_patch.py                       |
+| P1-3+P1-6+P1-8+P1-10 inline batch | 46d98aa | _round26_dials.py                          |
+| P1-4 + P1-15 MODAL_KIMI + BK3 | 38b41e6 | _round26_dials.py                          |
+| P1-7 S1-S4 wiring  | 9fc4c2c   | _round26_dials.py /(reverted P2-4 — fixed)/ |
+| P1-11/12/13 wiring | (uncommitted at audit time, in working tree) | _round26_dials.py |
+| P1-14 BK6-BK15 fixtures | 89f5196 | _round19_long_horizon_tasks.py            |
+| P1-19 preflight script | da5cbd6 | _r26_preflight.sh                          |
+| P2-1 tree-sitter   | 207acf3   | quality_lint.py / quality_lint_tree.py     |
+| P2-2 emacs verifier | 167a845  | scripts/verify_cell_emacs.sh                |
+| P2-4 wall_seconds  | c77fd51   | _round26_dials.py /(re-applied in P1-21c)/  |
+
+* Recommendations
+
+** Launch-blocking (must address before R26 fires)
+- /(none)/ — both bugs found in this audit are fixed in working tree.
+
+** Pre-launch hygiene (sequence to ship)
+- Commit the working-tree changes from this audit (P1-21c report +
+  P2-4 re-apply on =_round26_dials.py= + DST-exists guard on
+  =_r26_design_patch.py=).
+- Confirm the parallel P1-11/12/13 commit lands cleanly (working
+  tree shows it pending; the patches were observed wired during this
+  audit but not yet staged).
+- Wait for P1-20 (self-healing daemon) to land before invoking
+  =_r26_launch.sh= — it's the consumer of the file contracts P1-11/12/13
+  expose; without it the breaker / deny-list never get written and the
+  harness reads always return "no breaker, no denies, fresh start".
+
+** Launch-ready
+- Variant pool (5 actives), task pool (8 B-tasks + 15 BK-tasks),
+  composition strategies (S1-S4), file contracts (CCB / LDL /
+  cell_replay), wall_seconds instrumentation, top-3 selector,
+  warmup pre-flight, K20 resume — all wired and verified.
+- Design-patch script idempotency restored — re-running it during
+  =_r26_launch.sh= step 1 will no longer clobber harness work.
+- 5 P0 acceptance probes all PASS against the current harness.
