@@ -507,3 +507,17 @@ K8-deepseekV3  cells=15  score=0.0  cost=$0.0024  cpu=null  noops=0
 [r25-daemon 10:59:08] R25 harness PID=28979; entering monitor loop
 [r25-daemon 10:59:08] heartbeat cells=150/470 pct=31.9% eta=46.3min rate=6.91/min cost=$0 top=K2-kimi-k2.6@486.0
 [r25-daemon 10:59:38] cap raised $20 → $100 per user; daemon restarted PID 46844
+[r25-daemon 11:02:08] heartbeat cells=151/470 pct=32.1% eta=52.2min rate=6.11/min cost=$0 top=K2-kimi-k2.6@486.0
+[r25-handoff 11:03:51] watching R25 PID=28979; will fire handoff when round exits
+[r25-daemon 11:05:08] heartbeat cells=152/470 pct=32.3% eta=58.0min rate=5.48/min cost=$0 top=K2-kimi-k2.6@486.0
+[r25-daemon 11:08:08] heartbeat cells=161/470 pct=34.3% eta=59.0min rate=5.24/min cost=$0 top=K2-kimi-k2.6@486.0
+[r25-daemon 11:11:23] R25 daemon STARTED — polling every 180s
+[r25-daemon 11:11:23] discovered R25 PID=28979
+[r25-daemon 11:11:23] R25 harness PID=28979; entering monitor loop
+[r25-daemon 11:11:23] heartbeat cells=164/470 pct=34.9% eta=63.4min rate=4.83/min cost=$0 top=K2-kimi-k2.6@486.0
+[r25-daemon 11:11:23] AR3: pruned 9 stale r25-* worktrees (was 21)
+[r25-daemon 11:11:23] AR11: 16 WALL_CAP kills, 100% on K2
+[r25-daemon 11:11:24] AR12: OR headroom $31.917379191000002; projected remaining cost $0.00
+[r25-daemon 11:12:16] AR3 pruned 0 worktrees (12→12)
+[r25-daemon 11:12:16] AR11 watch: 100% K2 WALL_CAP concentration → R26 broker-swap signal
+[r25-daemon 11:12:16] AR12 watch: OR headroom $31.917379191000002 vs projected $0.00

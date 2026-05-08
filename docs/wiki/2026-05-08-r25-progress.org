@@ -198,3 +198,139 @@ K33-qwen3-coder-72b  cells=1  score=12.0  cost=$0.7085  cpu=0.05904  noops=0
 K35-llama-3.1-405b  cells=1  score=0.0  cost=$0.0005  cpu=null  noops=0
 K34-deepseek-v3-pro  cells=1  score=0.0  cost=$0.0006  cpu=null  noops=0
 #+end_src
+
+** Status check 11:02:08 — 32.1% done, ETA 52.2min
+
+*Process.* PID 28979, 24:43 elapsed
+*Progress.* 151/470 cells = 32.1%
+*Throughput.* 6.11 cells/min
+*ETA.* 52.2min
+*Spend.* $0 (cap $100)
+
+#+begin_src text
+K2-kimi-k2.6  cells=48  score=486.0  cost=$1.7746  cpu=0.00365  noops=0
+K1-qwen30  cells=50  score=401.0  cost=$0.2285  cpu=0.00052  noops=0
+K8-deepseekV3  cells=25  score=228.0  cost=$0.1584  cpu=0.00056  noops=0
+K11-qwen3coder  cells=10  score=129.0  cost=$2.529  cpu=0.01265  noops=0
+K17-glm46  cells=10  score=119.0  cost=$0.7529  cpu=0.00423  noops=0
+K5-claude-solo  cells=5  score=30.0  cost=$1.0104  cpu=0.03368  noops=0
+K33-qwen3-coder-72b  cells=1  score=12.0  cost=$0.7085  cpu=0.05904  noops=0
+K35-llama-3.1-405b  cells=1  score=0.0  cost=$0.0005  cpu=null  noops=0
+K34-deepseek-v3-pro  cells=1  score=0.0  cost=$0.0006  cpu=null  noops=0
+#+end_src
+
+** Status check 11:05:08 — 32.3% done, ETA 58.0min
+
+*Process.* PID 28979, 27:43 elapsed
+*Progress.* 152/470 cells = 32.3%
+*Throughput.* 5.48 cells/min
+*ETA.* 58.0min
+*Spend.* $0 (cap $100)
+
+#+begin_src text
+K2-kimi-k2.6  cells=49  score=486.0  cost=$1.7746  cpu=0.00365  noops=0
+K1-qwen30  cells=50  score=401.0  cost=$0.2285  cpu=0.00052  noops=0
+K8-deepseekV3  cells=25  score=228.0  cost=$0.1584  cpu=0.00056  noops=0
+K11-qwen3coder  cells=10  score=129.0  cost=$2.529  cpu=0.01265  noops=0
+K17-glm46  cells=10  score=119.0  cost=$0.7529  cpu=0.00423  noops=0
+K5-claude-solo  cells=5  score=30.0  cost=$1.0104  cpu=0.03368  noops=0
+K33-qwen3-coder-72b  cells=1  score=12.0  cost=$0.7085  cpu=0.05904  noops=0
+K35-llama-3.1-405b  cells=1  score=0.0  cost=$0.0005  cpu=null  noops=0
+K34-deepseek-v3-pro  cells=1  score=0.0  cost=$0.0006  cpu=null  noops=0
+#+end_src
+
+** Status check 11:08:08 — 34.3% done, ETA 59.0min
+
+*Process.* PID 28979, 30:44 elapsed
+*Progress.* 161/470 cells = 34.3%
+*Throughput.* 5.24 cells/min
+*ETA.* 59.0min
+*Spend.* $0 (cap $100)
+
+#+begin_src text
+K2-kimi-k2.6  cells=50  score=486.0  cost=$1.7746  cpu=0.00365  noops=0
+K1-qwen30  cells=54  score=410.0  cost=$0.2359  cpu=0.00053  noops=0
+K8-deepseekV3  cells=27  score=228.0  cost=$0.1632  cpu=0.00057  noops=0
+K11-qwen3coder  cells=10  score=129.0  cost=$2.529  cpu=0.01265  noops=0
+K17-glm46  cells=10  score=119.0  cost=$0.7529  cpu=0.00423  noops=0
+K5-claude-solo  cells=7  score=37.0  cost=$1.1943  cpu=0.03228  noops=0
+K33-qwen3-coder-72b  cells=1  score=12.0  cost=$0.7085  cpu=0.05904  noops=0
+K35-llama-3.1-405b  cells=1  score=0.0  cost=$0.0005  cpu=null  noops=0
+K34-deepseek-v3-pro  cells=1  score=0.0  cost=$0.0006  cpu=null  noops=0
+#+end_src
+
+** [r25-daemon 11:11:23] Daemon started. PID-arg=28979.
+
+** Status check 11:11:23 — 34.9% done, ETA 63.4min
+
+*Process.* PID 28979, 33:58 elapsed
+*Progress.* 164/470 cells = 34.9%
+*Throughput.* 4.83 cells/min
+*ETA.* 63.4min
+*Spend.* $0 (cap $100)
+
+#+begin_src text
+K2-kimi-k2.6  cells=50  score=486.0  cost=$1.7746  cpu=0.00365  noops=0
+K1-qwen30  cells=54  score=410.0  cost=$0.2359  cpu=0.00053  noops=0
+K8-deepseekV3  cells=29  score=239.0  cost=$0.1689  cpu=0.00057  noops=0
+K11-qwen3coder  cells=10  score=129.0  cost=$2.529  cpu=0.01265  noops=0
+K17-glm46  cells=10  score=119.0  cost=$0.7529  cpu=0.00423  noops=0
+K5-claude-solo  cells=8  score=86.0  cost=$1.4199  cpu=0.01632  noops=0
+K33-qwen3-coder-72b  cells=1  score=12.0  cost=$0.7085  cpu=0.05904  noops=0
+K35-llama-3.1-405b  cells=1  score=0.0  cost=$0.0005  cpu=null  noops=0
+K34-deepseek-v3-pro  cells=1  score=0.0  cost=$0.0006  cpu=null  noops=0
+#+end_src
+
+** [r25-daemon 11:11:23] AR3: worktree count 21 > 20 — aggressive prune
+
+** [r25-daemon 11:11:23] AR11: K2 WALL_CAP kill rate 100% of 16 kills — broker swap candidate for R26 (try Modal route)
+
+** Fix + Watch report — 11:12:16
+
+*** AR3 — worktree storm fix (APPLIED)
+
+| Metric             | Value         |
+|--------------------+---------------|
+| r25-* dirs before  | 12 |
+| stale (>5min)      | 0    |
+| r25-* dirs after   | 12  |
+| pruned             | 0 |
+
+*** AR11 — variant fail-rate watch
+
+*WALL_CAP kill concentration:* 16 total, 16 on K2 (100%).
+
+#+begin_quote
+100% K2 concentration → *broker-swap candidate for R26*. Try
+Modal-Kimi route (sub-second TTFT) instead of Parasail. Cannot
+swap mid-run (no harness hook); deferred to R26 design.
+#+end_quote
+
+*Large-FOSS ceiling probes (K33/K34/K35):*
+
+| Variant | Status |
+|---------+--------|
+| K33-qwen3-coder-72b | cells=1 score=12.0 cost=$0.7085 cpu=0.05904 |
+| K34-deepseek-v3-pro | cells=1 score=0.0 cost=$0.0006 cpu=null |
+| K35-llama-3.1-405b  | cells=1 score=0.0 cost=$0.0005 cpu=null |
+
+#+begin_quote
+K33 first cell: $0.71 / score 12 = $0.059/qpt = *100× K1's
+$0.0005/qpt*. If holds for n=10, K33 not worth ceiling-probe
+inclusion. R26 question Q4 leaning "no — large-FOSS NOT worth
+complexity at this task pool". Daemon will mark abort signal
+once n≥3 cells confirm.
+#+end_quote
+
+*** AR12 — OR headroom proactive watch
+
+| Metric                       | Value           |
+|------------------------------+-----------------|
+| Cells done                   | 164 / 470    |
+| Spend so far                 | $0         |
+| Avg cost/cell                | $0.00000          |
+| Remaining cells              | 306            |
+| Projected remaining cost     | $0.00     |
+| OpenRouter headroom          | $31.917379191000002     |
+| Status                       | OK |
+
