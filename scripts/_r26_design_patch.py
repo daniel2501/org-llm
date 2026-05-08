@@ -34,7 +34,18 @@ ARTIFACTS = REPO / "scripts/_round26_dials_artifacts"
 
 
 def fork_harness() -> bool:
-    """cp + sed-rename round IDs. Idempotent."""
+    """cp + sed-rename round IDs. Idempotent.
+
+    P1-21c fix (2026-05-08): skip overwrite if DST already exists AND has
+    been round-id-renamed AND is at least as large as the renamed SRC
+    would be. This protects post-fork patches (P1-7 S1-S4 wiring,
+    P1-11/12/13 file contracts, P2-4 wall_seconds, P1-15 BK3 hook,
+    etc.) from being clobbered if the design-patch step is re-run as
+    part of _r26_launch.sh after patches have already been layered.
+
+    To force re-fork (e.g. R25 source moved forward and you want a
+    clean re-base), set R26_FORCE_REFORK=1.
+    """
     if not SRC.exists():
         print(f"[r26] ERR: source harness not found: {SRC}")
         return False
@@ -46,6 +57,24 @@ def fork_harness() -> bool:
                  .replace("r25-", "r26-")
                  .replace("R25 ", "R26 ")
                  .replace("Round-25", "Round-26"))
+    import os
+    force = os.environ.get("R26_FORCE_REFORK", "0") == "1"
+    if DST.exists() and not force:
+        cur = DST.read_text()
+        # Already renamed (R25→R26 markers present, no leftover R25 ones)
+        # and at least as large as the renamed source (suggests post-fork
+        # patches have been applied on top).
+        already_renamed = ("_round26_dials_artifacts" in cur
+                            and "R26_LIVE" in cur
+                            and "_round25_dials_artifacts" not in cur)
+        has_post_fork_patches = len(cur) >= len(renamed)
+        if already_renamed and has_post_fork_patches:
+            print(f"[r26] DST exists, already renamed, "
+                  f"and {len(cur) - len(renamed)} chars larger than "
+                  f"freshly-renamed SRC — preserving post-fork patches "
+                  f"(set R26_FORCE_REFORK=1 to override)")
+            ARTIFACTS.mkdir(parents=True, exist_ok=True)
+            return True
     DST.write_text(renamed)
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     print(f"[r26] forked {SRC.name} → {DST.name} ({len(renamed)} chars)")
