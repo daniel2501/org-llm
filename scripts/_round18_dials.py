@@ -174,8 +174,8 @@ def warmup_providers():
 # Strict pinning made K7/K8/K17/K15/K5 silent. Falling back to advisory pin
 # (preferred broker, but allow OR to use any tool-capable backup).
 PROVIDER_PINS = {
-    "moonshotai/kimi-k2.6":               {"order": ["DeepInfra"]},
-    "moonshotai/kimi-k2-thinking":        {"order": ["Novita"]},
+    "moonshotai/kimi-k2.6":               {"order": ["Moonshot", "Parasail"]},
+    "moonshotai/kimi-k2-thinking":        {"order": ["Moonshot", "Novita"]},
     "deepseek/deepseek-r1":               {"order": ["DeepInfra"]},
     "deepseek/deepseek-chat-v3-0324":     {"order": ["DeepInfra"]},
     "deepseek/deepseek-coder":            {"order": ["DeepInfra"]},
@@ -190,7 +190,7 @@ PROVIDER_PINS = {
     "mistralai/mixtral-8x22b-instruct":   {"order": ["Mistral"]},
     "openai/gpt-oss-120b":                {"order": ["Parasail"]},
     "openai/gpt-oss-20b":                 {"order": ["Parasail"]},
-    "z-ai/glm-4.6":                       {"order": ["SiliconFlow"]},
+    "z-ai/glm-4.6":                       {"order": ["Z-AI", "SiliconFlow"]},
 }
 
 # R18 — Modal-Kimi route override (S6 Tier-S strategy). Kimi cells use
@@ -1104,16 +1104,70 @@ def run_specialist_for_cell(wt_path, task, handle, plan_brief, prefetch,
     return result
 
 
-def safe_worktree_add(wt_name: str, wt_path):
-    """R18 fix — git worktree concurrency mutex. R17 quality agent caught
-    K2/K8/K13 cells dying at parallel git worktree races."""
+def safe_worktree_add(wt_name: str, wt_path, max_retries: int = 3):
+    """R18+ fix — git worktree concurrency mutex with retry-on-collision.
+
+    Mutex prevents concurrent `git worktree add` racing on the index lock
+    (caught by R17 quality agent). Retry handles two further failure modes
+    surfaced by R18 v2/v3 quality + walltime agents:
+      1. Branch already exists from a prior aborted cell — `git branch -D`
+         + retry.
+      2. Worktree path already exists on disk — `git worktree remove
+         --force` + rmtree + retry.
+
+    On unrecoverable failure, raises the original CalledProcessError so
+    the caller can record the cell as failed instead of all subsequent
+    cells inheriting a poisoned worktree slot.
+    """
+    import shutil as _shutil
     wt_path.parent.mkdir(parents=True, exist_ok=True)
+
     if worktree_lock is not None:
         worktree_lock.acquire()
     try:
-        subprocess.run(["git", "-C", str(REPO), "worktree", "add",
-                          "-b", wt_name, str(wt_path), "trunk"],
-                          check=True, capture_output=True)
+        last_err = None
+        for attempt in range(max_retries + 1):
+            try:
+                subprocess.run(
+                    ["git", "-C", str(REPO), "worktree", "add",
+                     "-b", wt_name, str(wt_path), "trunk"],
+                    check=True, capture_output=True,
+                )
+                return
+            except subprocess.CalledProcessError as e:
+                last_err = e
+                stderr = (e.stderr or b"").decode("utf-8", errors="replace")
+
+                # Best-effort cleanup of the two known collision modes
+                # before retrying.
+                if "already exists" in stderr or "is already checked out" in stderr or wt_path.exists():
+                    subprocess.run(
+                        ["git", "-C", str(REPO), "worktree", "remove",
+                         "--force", str(wt_path)],
+                        capture_output=True,
+                    )
+                    if wt_path.exists():
+                        try:
+                            _shutil.rmtree(wt_path, ignore_errors=True)
+                        except Exception:
+                            pass
+
+                if "already exists" in stderr or "is not a valid branch" in stderr:
+                    subprocess.run(
+                        ["git", "-C", str(REPO), "branch", "-D", wt_name],
+                        capture_output=True,
+                    )
+
+                # Stale `git worktree` admin cache for a removed path.
+                subprocess.run(
+                    ["git", "-C", str(REPO), "worktree", "prune"],
+                    capture_output=True,
+                )
+
+                if attempt < max_retries:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                raise last_err
     finally:
         if worktree_lock is not None:
             worktree_lock.release()
