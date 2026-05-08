@@ -336,7 +336,7 @@ Per-cell-spec line; harness writes after each cell completes
 identify which cells didn't finish; relaunches just those
 (worktree-name-collision-safe).
 
-** TODO P1-14: Add BK6-BK15 elisp/org tests to fixtures
+** DONE P1-14: Add BK6-BK15 elisp/org tests to fixtures
 :PROPERTIES:
 :ESTIMATE: 4 hr (10 tests × ~25 min/each)
 :SOURCE:   boost plan §6 (reviewer-fixed paths)
