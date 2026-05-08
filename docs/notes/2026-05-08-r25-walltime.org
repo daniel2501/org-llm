@@ -1,0 +1,220 @@
+:PROPERTIES:
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R25 — walltime + WALL_CAP enforcement analysis (PARALLELISM=32, cap=400s)
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:duration:r25:
+#+OPTIONS: toc:1 num:nil
+
+* Summary
+
+R25 ran *189 cells in 39m23s wall* (2363s) at *32-way parallel* —
+*15 min faster than R24 with 28% more cells* (R24: 147 / 54.3 min).
+The =WALL_CAP_PER_CELL_S=400= enforcement (R25 P9) *fired 16 times,
+100% on K2-kimi-k2.6 / B1* — but the =ThreadPoolExecutor= shim around
+=run_one_cell= waits at context-exit for the inner thread, so the cap
+*records the kill* without freeing the outer worker. K2 killed-cell
+=wall_seconds= ranges 455-1697s, far past the 400s ceiling. Layer 1
+remained bound at 1723s (28.7 min) — same shape as R24. The cap
+ships a label, not the latency floor it advertises. R25 still beat
+R24 on wall because K7-qwen72b dropped (Sp4) and Layers 2/3/BK/K11
+all ran near theoretical-ceiling parallelism. Fixing the cap is R26's
+single biggest lever — real outer-thread kill drops L1 to ~650s.
+
+* 1. Total wall — R25 vs R24
+
+| Round | Cells | Workers | Wall (min)   | Wall (s) | Cells/min | Long-pole          |
+|-------+-------+---------+--------------+----------+-----------+--------------------|
+| R24   |   147 |      32 | 54.3         |     3260 |      2.71 | K2/B1 = 1612s      |
+| R25   |   189 |      32 | *39.4*       |     2363 |    *4.80* | K2/B1 = *1697s*    |
+| Δ     |  +42  |    flat | *-14.9 min*  |   -897s  |    +77%   | flat (cap NA)      |
+
+R25 is *1.77× R24's throughput* (cells/min). Drivers, ordered by
+contribution: K7-qwen72b dropped (Sp4 saved ~5594s of L1 sum-walls);
+L3 shrank from 444s to 73s (top-2 FOSS deduped to a single K1, so
+L3=6 cells × 1 variant); L2=381s vs R24's 466s; new L-K11-B25 added
+just 29s. The =-15 min= win is /not/ from WALL_CAP enforcement —
+the cap fired 16 times but the outer worker stayed pinned.
+
+* 2. Per-cell wall distribution (n=189, all variants instrumented)
+
+*Summary.* p50=64s, p90=346s, p99=1283s, max=1697s. Bimodal:
+K1/K8/K11/K17 cluster under 250s; K2 stretches a tail with 16 cells
+past 400s and 4 past 1000s. Median is 60% lower than R24 (29s vs
+160s) because K7's 700-1000s outliers are gone and half the round
+is sub-50s K1 / K11-B25 cells.
+
+*Expanded.* All 189 cells in =summary-1778251044.json= carry
+=wall_seconds= (P9 instrumented FOSS variants). For =wall_cap_killed=
+cells, =wall_seconds= reflects the inner thread's full duration past
+the cap, not the moment the cap fired — see §3.
+
+| Stat | R25 wall (s) | R24 wall (s) | Δ      |
+|------+--------------+--------------+--------|
+| p25  |         25.0 |           81 | -69%   |
+| p50  |         64.1 |          160 | -60%   |
+| p75  |        191.9 |          249 | -23%   |
+| p90  |        346.3 |          311 | +11%   |
+| p95  |        626.1 |          674 | -7%    |
+| p99  |       1283.2 |         1068 | +20%   |
+| max  |       1697.7 |         1612 | +5%    |
+| mean |        156.3 |          204 | -23%   |
+
+Tails worsened (p99 +20%, max +5%); body improved (p25 -69%, p50
+-60%). K2's tail is uncapped; R26 must fix the cap-enforcement bug.
+
+* 3. WALL_CAP enforcement — fired but did not free workers
+
+*Summary.* The cap raised =TimeoutError= on 16 K2/B1 cells, wrote
+=error: wall_cap_killed:400s= into result records, and printed the
+WALL_CAP_KILLED log line at the 400s mark. But the surrounding =with
+ThreadPoolExecutor= context manager calls =shutdown(wait=True)= on
+exit, blocking the outer worker until the inner thread finishes.
+
+*Expanded.* From =scripts/_round25_dials.py:1681=:
+
+#+begin_src python
+with _TPE(max_workers=1) as _inner:
+    _fut = _inner.submit(run_one_cell, ...)
+    cell = _fut.result(timeout=_wall_cap)   # raises after 400s
+# at __exit__, shutdown(wait=True) blocks until _fut completes
+#+end_src
+
+Evidence: WALL_CAP_KILLED log lines fire spread across the full
+1723s L1 wall (10:47:37 first, 11:07:22 last — 1185s spread). If the
+cap freed workers, the 16 kills would cluster within ~30s near the
+400s mark. They trail the layer because each outer worker is pinned
+waiting for its zombie inner thread. FIFO@32 with K2 walls clamped
+to 400s = *650s* L1 wall instead of 1723s. Cap under-delivered ~1073s.
+
+* 4. Why is K2 100% of WALL_CAP kills?
+
+*Summary.* K2 routes via OpenRouter → Moonshot/Parasail.
+=MODAL_KIMI_ENABLED= was *not set*, so the self-hosted vLLM endpoint
+was bypassed. Both brokers exhibit multi-second TTFT and 60-180s
+prefill stalls on long prefixes (B1 = 5691 chars). With =max_tokens=4096=
+and =n=50= sample-up, K2 was the only variant reliably exceeding 400s.
+
+*Expanded.* Per-variant aggregates:
+
+| Variant         | n  | sum (s) | max (s) | med (s) | mean (s) | killed |
+|-----------------+----+---------+---------+---------+----------+--------|
+| K2-kimi-k2.6    | 50 |  19,598 |  1697.7 |   272.5 |    392.0 | *16/50*|
+| K8-deepseekV3   | 29 |   3,213 |   241.0 |   107.3 |    110.8 |    0   |
+| K17-glm46       | 10 |   2,185 |   253.0 |   228.9 |    218.5 |    0   |
+| K1-qwen30       | 65 |   2,169 |   106.0 |    23.2 |     33.4 |    0   |
+| K5-claude-solo  | 14 |   1,126 |   380.6 |    41.0 |     80.4 |    0   |
+| K11-qwen3coder  | 18 |   1,111 |   139.0 |    53.4 |     61.7 |    0   |
+| K33/K34/K35     |  3 |     137 |   108.0 |    14.0 |     45.7 |    0   |
+
+K2 owns *66% of round walls* (19,598/29,538) on *26% of cells*
+(50/189). K2 is bimodal: 19 cells <100s, 16 cells >800s. Hypotheses:
+
+1. *Broker prefill stall*. Moonshot exhibits 60-180s TTFT under load.
+   =["Moonshot", "Parasail"]= preference means Moonshot is tried first;
+   on Moonshot timeout, Parasail inherits with its own prefill latency.
+2. *max_tokens=4096 isn't enough*. K2 still hits length-limit; 4096
+   tokens at 30-40 tok/s = 100-140s output time alone. With prefill,
+   ~200-300s is the happy path.
+3. *32-way parallelism amplifies broker queue*. ~8-12 K2 cells in
+   flight against one Moonshot endpoint compounds queue time. R24 saw
+   the same K2/B1 outlier (1612s) at 32-way.
+4. *No retry budget / no HTTP timeout*. Hanging broker → cell waits
+   indefinitely until WALL_CAP fires.
+
+* 5. Parallel efficiency at 32 workers — R25 vs R24
+
+| Layer            |   n |  Sum walls | Max cell | Actual | Eff par |
+|------------------+-----+------------+----------+--------+---------|
+| layer1           | 153 |     27,856 |     1698 |   1723 |  16.17× |
+| layer2           |  12 |        766 |      381 |    381 |   2.01× |
+| layer_k11b25     |   8 |        200 |       29 |     29 |   6.91× |
+| layer3 (6 dials) |   6 |        236 |       73 |     73 |   3.23× |
+| layer_bk         |  10 |        480 |       82 |     82 |   5.86× |
+| /Round/          | 189 |   /29,538/ |     1698 | /2363/ | /12.50×/|
+
+Round eff par: *12.50× of 32 = 39.1% of ceiling* (vs R24's 9.39× =
+29.3%). R25 gained mainly because K7-qwen72b's outliers are gone,
+leaving K2's single dominant outlier as the only L1 long pole. L1
+remains max-cell-bound: 16 workers held one slow K2 each while ~16
+idled for the last 1300s. With a real cap clamping to 400s, L1
+FIFO@32 = *650s* and L1 eff par doubles to ~32× — full saturation.
+
+* 6. Why didn't Layer 3 / Layer-BK / comp fully run?
+
+*Summary.* All scheduled layers ran to completion in 1m45s after L1.
+Shrunken cell counts are by-design dedup: L1's =top3_foss= resolved to
+*=['K1-qwen30', 'K1-qwen30', 'K1-qwen30']=* — same variant 3× —
+because K1 won B1 quality and K2 took 16 zero-score wall-cap kills.
+Downstream layers saw 1-2 unique FOSS variants.
+
+*Expanded.* Layer barrier timeline:
+
+| Transition          | Time     | Δ from prev | Cells in slot |
+|---------------------+----------+-------------+---------------|
+| ROUND_START         | 10:37:24 | -           | -             |
+| LAYER 1 start       | 10:38:39 | +75s        | 153           |
+| LAYER 2 start       | 11:07:22 | +1723s      | 12            |
+| LAYER K11-B25 start | 11:13:43 | +381s       | 8             |
+| LAYER 3 start       | 11:14:12 | +29s        | 6             |
+| LAYER BK start      | 11:15:25 | +73s        | 10            |
+| R25 COMPLETE        | 11:16:47 | +82s        | -             |
+
+Pre-L1 startup 75s (vs R24's 63s — BK1-BK5 prefetch). Inter-layer
+barriers ≤2s, <10s total. *There is no "comp" layer in R25's runner*
+— composition strategies (S1 hedged, S2 best-of-N, S3 critique-revise,
+S5 constrained) run inline within the host layer, not as a separate
+barrier. L3 ran =top2_foss[:2]= × =6 ABLATION_DIALS= = 6 cells (not
+12) because dedup; results still valid for K1 but lack K2/K11
+counterpoint. Layer-BK ran 5 tasks × (K1 + K5) = 10 cells in 82s —
+*faster than R24's 157s* at same cell count.
+
+* 7. R26 advisory — fix the cap, swap K2 broker, hold parallelism
+
+*Summary.* Three R26 actions ranked by Layer-1-wall savings:
+
+| Rank | Action                          | Wall save     | Confidence | Cost     |
+|------+---------------------------------+---------------+------------+----------|
+| 1    | Fix WALL_CAP outer-kill         | -1073s on L1  | high       | 1 patch  |
+| 2    | Self-host K2 via Modal          | -800-1500s    | high       | env flag |
+| 3    | Reduce K2 n=50 → n=20 in L1     | -300s         | medium     | 1 const  |
+| 4    | Hold PARALLELISM=32             | 0s            | high       | -        |
+| 5    | Drop WALL_CAP to 300s           | +risk on K2   | low        | 1 const  |
+
+*Expanded.*
+
+1. *Fix WALL_CAP outer-kill* (PM3-bis). Replace =ThreadPoolExecutor=
+   shim with =multiprocessing.Process= (terminate-able) OR a
+   =threading.Event= that =run_one_cell= polls to abort in-flight HTTP.
+   Current shim is /worse than no cap/ — eats CPU on zombie threads and
+   pretends to enforce. Acceptance: L1 lands ≤650s on rerun.
+2. *K2 broker swap to Modal-Kimi*. =MODAL_KIMI_ENABLED=1= routes K2 to
+   =org-llm-kimi-k26-vllm-serve.modal.run=. R18 quoted "sub-second TTFT
+   vs Parasail's 2-200s tail." Even at half-quote, K2 median 272s →
+   ~80s and outliers stop. Verify endpoint health pre-R26; cold-start
+   adds 30-60s to first cell.
+3. *K2 n=50 → n=20 in L1*. With Modal-Kimi the broker variance
+   collapses; n=20 is enough for p10/p90 CIs. Saves ~300s.
+4. *Hold PARALLELISM=32*. L2/L3/BK/L-K11 are at theoretical ceiling.
+   With cap+Modal, L1 FIFO@32 ≈ 400s; @64 ≈ 250s — not worth 32 more fds.
+5. *Reject* cap=300s. K2's honest median (excluding kills) is 272s; a
+   300s cap kills normal K2 cells. Hold 400s; fix enforcement.
+
+*R26 wall projection* (cumulative):
+
+| Scenario                              | R26 wall  | Notes                  |
+|---------------------------------------+-----------+------------------------|
+| R25 as-is rerun                       | ~40 min   | baseline               |
+| + cap actually kills inner threads    | *22-25min*| L1 → 650s              |
+| + Modal-Kimi enabled                  | *14-18min*| K2 outliers stop       |
+| + n=20 K2 in L1                       | *13-16min*| 30 fewer cells         |
+
+*Headline*: working WALL_CAP + Modal-Kimi takes R26 to *under 20 min
+for ~190 cells* — half R25's wall, a quarter of R24.
+
+* Cross-references
+
+- =docs/notes/2026-05-08-r24-walltime.org= — R24 baseline
+- =scripts/_round25_dials.py:1672-1703= — execute_cell + WALL_CAP shim
+- =scripts/_round25_dials.py:254-255= — MODAL_KIMI route override
+- =scripts/_round25_dials_artifacts/{log,summary}-1778251044.{txt,json}=
+- =scripts/_r25_walltime_analysis.py= — analysis script
