@@ -1,0 +1,482 @@
+:PROPERTIES:
+:ID:       r25-design
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R25 design — FOSS power-ups, self-host stack, new tests T29-T44
+#+FILETAGS: :wiki:bench:r25:design:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R25 stops being a measurement round and starts being a
+*scaling* round: self-hosted K1/K2 endpoints (eliminate broker
+tool-format gaps + 402 caps + rate limits), K20-foss-distill v2
+re-trained on R24 successful trajectories (~500 pairs vs 81),
+three new large-FOSS variants (K33 Qwen3-Coder-72B, K34 DeepSeek-
+V3-Pro, K35 Llama-3.1-405B) for ceiling probes, S1-S4 composition
+strategies finally wired, and a tree-sitter org-parser validator
+plus headless-Emacs cell verifier replacing the current regex
+quality_lint. Total budget envelope ~$110-150 against $120-140
+combined headroom.
+
+*Expanded.* R15-R24 established the cheap-FOSS Pareto frontier
+(K1-qwen30 at $0.00047/qpt, 51× under Claude). R25 invests the
+spend headroom in /infrastructure/ that lets that frontier
+compound — self-hosting removes the broker-quality variance that
+caused 64% R18 wipe + R19 K8 collapse + R23 402 cap. Large-FOSS
+ceiling probes test whether K1 wins because it's actually good
+or because the bench's task pool is too small for 70B+ models
+to outshine. Composition strategies (S1-S4) are the cheapest
+unrealized R20+ leverage. K20 v2 graduates LoRA fine-tuning from
+proof-of-concept to first-class variant.
+
+* Cost headroom analysis
+
+** Spend to date
+
+| Round       | Cells | Cost (FOSS via OR) | Cost (Claude direct) | Notes                          |
+|-------------+-------+--------------------+----------------------+--------------------------------|
+| R15         |    49 | $1.62              | tracked separately   |                                |
+| R16         |    54 | $2.07              |                      |                                |
+| R17         |    59 | $4.45              |                      |                                |
+| R18 v2+v3   |   140 | $2.11              |                      | worktree wiped 64%             |
+| R19         |   120 | $9.75              |                      | BK prep + most spend           |
+| R20         |   140 | $4.41              |                      | n=25 on K2/K8                  |
+| R21 retry   |   119 | partial            |                      | killed mid-run for R24 priority|
+| R22 (orig)  |   127 | $1.13              |                      | Claude only (402 era)          |
+| R23 (orig)  |   127 | $1.61              |                      | Claude only (402 era)          |
+| R24         |   ~400 | ~$10-12 (in flight) |                      | live now                       |
+
+Bench rounds FOSS spend to date: ~*$25 spent + ~$10 in-flight*.
+
+** Cloud account balances
+
+| Account                 | Balance / Headroom    | Source                               |
+|-------------------------+-----------------------+--------------------------------------|
+| OpenRouter              | $90 credit / $43 free | =curl /api/v1/credits=               |
+| RunPod                  | $77.74                | =myself { clientBalance }=           |
+| Anthropic               | ~$15-20 spent (est)   | not queryable via API                |
+| Modal                   | ~free tier left       | killed Kimi serve + LoRA driver      |
+| Together / DeepInfra    | unused (OR routes)    |                                      |
+| HuggingFace Hub         | private repos free    | dataset + adapter live there         |
+| Qdrant Cloud            | tiny fraction of 1GB  | RAG vault                            |
+| /Combined headroom/     | *~$120-140 free*      |                                      |
+
+** R25 budget envelope
+
+| Item                                    | Cost     | Why                                            |
+|-----------------------------------------+----------+------------------------------------------------|
+| Self-host K1-qwen30 + K2-kimi (vLLM)    | $40-60   | RunPod serverless A100, ~10h serve time        |
+| K20 v2 LoRA training (bigger corpus)    | $8-15    | H100 SXM 1-2h on 500-pair dataset              |
+| New large-FOSS variants (K33/K34/K35)   | $20-35   | n=10 each on B1+B5+B11+B25 + BK1+BK3           |
+| R25 base bench (S1-S4 + comp + A/B)     | $15-25   | ~390 cells at average $0.04/cell               |
+| Tree-sitter validator dev               | $0       | local Python                                   |
+| Headless-Emacs verifier dev             | $0       | local Emacs                                    |
+| Buffer for surprise costs               | $20      | runtime guards retry-overhead, ablation        |
+| /Total estimate/                        | *$103-155* | within combined headroom                     |
+
+* New tests T29-T44 (revised list)
+
+R18 catalogued T1-T28; T1-T10 wired (mostly via cell-spec design).
+R25 adds 16 new tests, focused on R24 outputs + power-up validation.
+
+| ID  | Name                                | Wired?    | Description                                                                  |
+|-----+-------------------------------------+-----------+------------------------------------------------------------------------------|
+| T29 | Self-host K1 latency p50/p99        | new       | Measure TTFT + total wall vs OpenRouter K1; need ≤50% to justify             |
+| T30 | Self-host K2 broker-quality holdout | new       | Self-hosted Kimi vs Parasail Kimi on tool-format edges                       |
+| T31 | K20 v2 vs K20 v1 on B5/B11/B20      | new       | 500-pair LoRA vs 81-pair; +3 quality bar                                     |
+| T32 | K20 v2 vs K1 base                   | new       | Same-base A/B; the headline LoRA test                                        |
+| T33 | K33 Qwen3-Coder-72B ceiling probe   | new       | Does 2.4× more params beat K1 on B7 code_edit?                               |
+| T34 | K34 DeepSeek-V3-Pro ceiling probe   | new       | Mixed-of-experts large-FOSS; B11 dec_draft particularly                      |
+| T35 | K35 Llama-3.1-405B ceiling probe    | new       | Largest available FOSS; expected expensive but maybe ceiling-defining        |
+| T36 | S1 hedged-strong escalation         | new       | K8 → K11 fallback if quality < 12; check escalation rate                     |
+| T37 | S2 best-of-3 K1 vs single K7        | new       | Composition bar — best-of-3 K1 (cheap) vs single K7 (premium)                |
+| T38 | S3 critique-revise on B11           | new       | K1 draft → K2 critique → K1 revise; measure quality lift                     |
+| T39 | S4 TASK_FAMILY_VARIANTS routing     | new       | Per-task-family variant selection via dict (S4 finally on)                   |
+| T40 | Provider failover on IncompleteRead | new       | Inject failure; verify retry on next pin's broker                            |
+| T41 | First-iter tool-call format gate    | new       | Re-route on stop+0-tools+function-call announcement                          |
+| T42 | Tree-sitter org-parser validator    | new       | Replace regex bracket-count with real org-mode parser                        |
+| T43 | Headless-Emacs cell verifier        | new       | Spawn =emacs --batch=, load edit, =org-element-parse-buffer=                 |
+| T44 | BK1-BK5 holdout repeatability       | new       | Re-run BK1-BK5 with R24 winners; check 51× ratio holds on long-horizon       |
+
+R18-era tests carrying forward (T1, T2, T3, T15) embed in T36-T44.
+T11-T14, T16-T28 deferred or merged.
+
+* Power-ups (the "more compute, more FOSS" answer)
+
+** P1 — Self-hosted K1-qwen30 + K2-kimi-k2.6 endpoints
+
+*Why:* OpenRouter broker variance is the single largest source of
+non-model failure in R15-R24 (DeepInfra K2 tool-format gap, K8
+silent_noop on AkashML, R21-R23 402 cap). Self-hosting eliminates
+all of these.
+
+*How:* Re-use =/tmp/lora_prep/07_modal_serve_k20.py= pattern.
+Deploy two RunPod serverless endpoints:
+
+- =org-llm-k1-vllm= — Qwen3-Coder-30B-A3B-Instruct on A100 80GB
+  PCIe ($1.19/hr); vLLM in production-OpenAI-compatible mode
+- =org-llm-k2-vllm= — Kimi-K2.6 (ai-chip-friendly variant) on H100
+  SXM 80GB ($2.99/hr); same vLLM stack
+
+*Cost:* 5h serve time per round × $4 average × 2 endpoints = ~$40.
+With autoscaledown_window=300s, idle cost during dev ~$0.50/hr.
+
+*Tests:* T29 (K1 latency), T30 (K2 broker-quality holdout).
+
+** P2 — K20 v2 — bigger corpus from R24 successes
+
+*Why:* K20 v1 was 81 FOSS-distill pairs from R14-R17. R24 will
+land another ~250-300 quality > 14 cells. Re-distill from the
+union → ~500 pairs.
+
+*How:* Extend =05_build_foss_distill.py= to consume R18-R24
+artifacts. Re-train via existing RunPod pipeline. Push to a new
+HF repo =daniel2501/k20-foss-distill-v2=.
+
+*Cost:* $8-15 for ~2h H100 SXM training.
+
+*Tests:* T31, T32.
+
+** P3 — Large-FOSS ceiling variants K33/K34/K35
+
+*Why:* All 51× headlines come from comparing K1-30B vs Claude.
+The bench has not yet probed whether 70B+ FOSS beats Claude OR
+whether the task pool is just too small for 405B to outshine 30B.
+
+| ID  | Model                  | Provider             | Est $/cell  |
+|-----+------------------------+----------------------+-------------|
+| K33 | Qwen3-Coder-72B        | Together             | $0.03-0.05  |
+| K34 | DeepSeek-V3-Pro        | DeepInfra (or Modal) | $0.04-0.08  |
+| K35 | Llama-3.1-405B         | Together             | $0.08-0.15  |
+
+*Cost:* n=10 each × 6 tasks × 3 variants × $0.07 avg = ~$30.
+
+*Tests:* T33, T34, T35.
+
+** P4 — S1-S4 composition layers wired
+
+*Why:* Strategy-effectiveness agent's finding: "S1-S4 catalogued
+but never wired into main() — biggest unrealized R19 lever."
+Cost-quality math says best-of-3 K1 ($0.005) > single K11 ($0.04)
+on prose tasks.
+
+*How:* Add helpers to =execute_cell= /
+=run_layer_parallel=:
+- =run_with_escalation(primary, fallback, threshold)= for S1
+- =run_best_of_n(variant, n, vote_strategy)= for S2
+- =run_critique_revise(drafter, critic)= for S3
+- =TASK_FAMILY_VARIANTS= dict reference in cell-spec construction (S4)
+
+*Cost:* embedded in R25 base bench.
+
+*Tests:* T36, T37, T38, T39.
+
+** P5 — Tree-sitter org-parser validator (replaces regex lint)
+
+*Why:* Outlier agent found bracket-imbalance is 22% of R19 cells
+but the regex lint only catches imbalance, not nesting depth >1
+(K6/K7's =[[id:][[[id:]]]]=) or bad heading hierarchy. Real
+parser catches all.
+
+*How:* =pip install tree-sitter tree-sitter-org=. Add
+=quality_lint_tree.py= that parses added text + walks the AST
+for: balanced links, no nested links, heading hierarchy
+consistency, table well-formedness. Wire into =score_cell()=
+alongside existing =quality_lint.py=.
+
+*Cost:* $0 (local Python).
+
+*Tests:* T42.
+
+** P6 — Headless-Emacs cell verifier (gold-standard validator)
+
+*Why:* No regex/AST validator catches semantic correctness of
+an org-mode edit. Real Emacs does. Spawn =emacs --batch=, load
+the edit, run =org-element-parse-buffer= + =org-id-update-id-
+locations= + check no errors, then exit. Result is a strong
+"does this actually work in the user's editor" signal.
+
+*How:* Add =scripts/verify_cell_emacs.sh= that takes a worktree
+path + task target file, runs the verification, returns 0 + JSON
+diagnostics or non-zero + error.
+
+*Cost:* $0 (local).
+
+*Tests:* T43.
+
+** P7 — Runtime guards (failure-modes agent recommendations)
+
+*Why:* Three of the failure-mode agent's six guards are pure
+runtime hooks that prevent infra failures from leaking into the
+leaderboard.
+
+*How:*
+1. =provider_failover_on_network_drop= in specialist.py HTTP retry
+2. =first_iter_tool_call_gate= in execute_cell main loop
+3. =cross_process_worktree_mutex= via =fcntl.flock= on
+   =~/.cache/org-llm-bench-worktree.lock=
+
+*Cost:* embedded.
+
+*Tests:* T40, T41 (T1 cross-process worktree shipped via flock
+in safe_worktree_add update — verified zero collisions).
+
+** P8 — Per-handle LoRAs (stretch, may defer to R26)
+
+*Why:* Bridge Crew personas (@atoz, @data, @spock, @geordi,
+@boothby, @riker, @picard) each write differently. A single K20
+LoRA averages over them. Per-handle LoRAs would specialize.
+
+*How:* Stratify K20 v2 corpus by =@handle=. Train 7 small
+adapters. At inference time, inject the right adapter based
+on task's persona.
+
+*Cost:* $15-30 for 7× small training runs.
+
+*Decision:* If R25 K20 v2 lands and beats K1 by ≥3, defer per-handle
+to R26. If K20 v2 underperforms, pivot to per-handle in R25.5.
+
+* New FOSS coordination strategies S33-S40 (blazing-fast accuracy)
+
+S1-S4 are the textbook (hedged / best-of-N / critique-revise /
+specialty routing) and graduate to working code in R25. Beyond
+those, eight new coordination patterns target the orthogonal
+axes: /wall time/ and /accuracy ceiling/. Two FOSS models are
+typically 1-3% the cost of one Claude call; coordination is where
+that headroom converts to outcomes.
+
+** S33 — Speculative decode at the model tier
+
+*Pattern.* K6-llama70b drafts the next 40-80 tokens. K2-kimi-k2.6
+verifies + accepts/rejects in one forward pass. If rejected, K2
+generates the correction. Net throughput: 2-3× faster than K2 alone
+at the same quality. Cost: small K6 draft cost (~$0.0005/cell)
+amortized.
+
+*When it wins.* Long-output cells (B11 DEC drafts, BK1 multi-file
+refactors) where most tokens are predictable.
+
+*Wall savings.* ~40-50% on output-heavy cells.
+
+*Test.* T45 — speculative-decode K6+K2 vs single K2 on B11+BK1.
+
+** S34 — Async pipeline parallelism
+
+*Pattern.* While K1 generates cell N's edit, K2 critiques cell N-1
+in parallel. Layer 2 overall wall = max(generate, critique)
+instead of sum. Critique-revise (S3) overhead drops from 3× wall
+to 1.2× wall.
+
+*When it wins.* Any S3-style chain of cells.
+
+*Wall savings.* ~50% on S3-shaped layers.
+
+*Test.* T46 — same S3 task pool, sync vs async pipeline.
+
+** S35 — Diversified consensus voting
+
+*Pattern.* Best-of-5 split across model families: 2× K1-qwen30, 2×
+K2-kimi-k2.6, 1× K8-deepseek. If ≥4 agree (semantic match on the
+edit, not byte-equal), ship. If no consensus, escalate to K11.
+Catches family-specific blind spots that pure-K1 best-of-3 misses.
+
+*When it wins.* Tasks where models disagree on /which line/ to edit
+(B11 append vs replace ambiguity, B7 type-hint placement).
+
+*Quality lift estimate.* +2-4 quality points on consensus-broken
+cells; +0 elsewhere. So a quality /backstop/, not blanket lift.
+
+*Test.* T47 — diversified-5 vs same-family-3 best-of-N.
+
+** S36 — Token-level model routing within one cell
+
+*Pattern.* In a single cell trajectory, route different actions to
+the model best at them:
+
+| Phase                | Model            | Rationale                              |
+|----------------------+------------------+----------------------------------------|
+| Read + plan          | K1-qwen30        | Cheap, structured, fast tool-call      |
+| Prose generation     | K2-kimi-k2.6     | Best raw-quality on natural-language   |
+| Tool-call formatting | K8-deepseekV3    | After R24 recovery — clean tool format |
+| Validation           | K17-glm46        | Often catches what others miss         |
+
+*When it wins.* Long cells (BK1-BK5 long-horizon) where each phase
+benefits from a different specialty.
+
+*Implementation.* Cell-level orchestrator decides the phase
+boundaries; routes to the right model per phase.
+
+*Test.* T48 — token-routed cell vs single-model cell on BK1.
+
+** S37 — Skeleton-then-fill
+
+*Pattern.* Two-stage hierarchical:
+1. K1-qwen30 produces a structural /skeleton/ (which files to
+   edit, what type of change, where in each file)
+2. K2-kimi-k2.6 fills in the actual edit content per the skeleton
+
+K1's structured-output strength + K2's prose strength. Each model
+does ~50% of the work but at its own specialty.
+
+*When it wins.* Multi-file refactors (BK3, BK5). Solo K1 misses
+some prose nuance; solo K2 over-rewrites structure.
+
+*Test.* T49 — skeleton-then-fill vs single K2 on BK3.
+
+** S38 — Adversarial ensemble (K7 redemption arc)
+
+*Pattern.* K7-qwen72b (currently negative-score in R24 due to
+bracket disasters when /generating/) is repurposed as an
+/adversarial critic/. K1 generates an edit. K7 attempts to find
+flaws (bracket bugs, scope leaks, fab UUIDs). K1 fixes K7's
+complaints. K7 stops being a generator and becomes a
+better-than-quality_lint reviewer.
+
+*When it wins.* Tasks where bracket grammar matters (B11, BK5).
+
+*Cost.* Adds ~$0.05/cell for K7 review pass.
+
+*Test.* T50 — K1+K7-adversarial vs K1+quality_lint-only on B11+BK5.
+
+** S39 — Reasoning-vs-tool split (matching model to mode)
+
+*Pattern.* K15-kimi-thinking is tuned for long internal reasoning
+without tool calls. K1 is tuned for short bursts of tool-call +
+edit. Split:
+1. K15 plans (long thinking, no tools)
+2. K1 executes (short cells, all tools)
+
+K15 gets to use its full reasoning budget; K1 gets clean planning
+input. Each model does what it's actually trained for.
+
+*Test.* T51 — K15+K1 split vs single K1 on BK3+BK5.
+
+** S40 — Cell-level beam search
+
+*Pattern.* Run 5 parallel K1 cells with different temperature
+seeds (0.0 / 0.3 / 0.5 / 0.7 / 1.0) plus prompt-paraphrase
+variations. Score by quality_lint penalty (lower = better) AND
+edit-correctness check (headless-Emacs verifier from P6). Pick
+best.
+
+*Versus best-of-N (S2):* S2 is majority vote on the /same/ prompt;
+S40 is /diverse/ search across temperature + prompt variations.
+Better at catching cells where the right answer needs creativity.
+
+*Wall.* Same as best-of-5 since parallel. Cost 5× single cell.
+
+*Test.* T52 — beam-K1 vs best-of-3 K1 on B5+B11+BK1.
+
+** Power-up summary table
+
+| ID  | Strategy                          | Quality lift | Wall delta  | Cost delta | Best for                      |
+|-----+-----------------------------------+--------------+-------------+------------+-------------------------------|
+| S1  | Hedged-strong escalation          | +2-3pt       | minimal     | -30% avg   | when primary fails             |
+| S2  | Best-of-N voting                  | +1-2pt       | 0           | n×         | prose where variance hurts     |
+| S3  | Critique-then-revise              | +3-5pt       | 3×          | 3×         | DEC drafts, structured prose   |
+| S4  | Specialty routing per family      | +1-3pt       | 0           | -10%       | mixed task batches             |
+| *S33* | *Speculative decode tier*       | 0            | *-40-50%*   | -10%       | output-heavy cells             |
+| *S34* | *Async pipeline*                | 0            | *-50%*      | 0          | S3-shaped layers               |
+| S35 | Diversified consensus             | +2-4pt       | 0           | 5×         | family-blind-spot tasks        |
+| S36 | Token-level model routing         | +1-3pt       | 0           | varies     | long cells (BK)                |
+| S37 | Skeleton-then-fill                | +2-4pt       | 1.5×        | 1.5×       | multi-file refactors           |
+| S38 | Adversarial ensemble (K7-redempt) | +3-5pt       | 1.5×        | 1.3×       | bracket-grammar tasks          |
+| S39 | Reasoning-vs-tool split           | +2-4pt       | 1.3×        | 1.5×       | long-horizon BK                |
+| S40 | Cell-level beam search            | +2-4pt       | 0           | 5×         | hard prose cells               |
+
+* R25 implementation order
+
+1. *Power-ups infrastructure (sequential, before R25 launch)*
+   1.1 P1 — deploy K1 + K2 vLLM endpoints on RunPod (~30 min)
+   1.2 P5 — tree-sitter validator (~1h dev)
+   1.3 P6 — headless-Emacs verifier (~1h dev)
+   1.4 P7 — runtime guards in specialist.py (~2h dev)
+   1.5 P2 — K20 v2 distill corpus rebuild (~30 min wait for R24, then build)
+   1.6 P2 — K20 v2 LoRA training launch (~2h)
+   1.7 P3 — wire K33/K34/K35 into VARIANTS
+
+2. *Wire S1-S4 (composition)*
+   2.1 P4 — extend =_r24_synthesis_patch.py= → =_r25_design_patch.py=
+   2.2 Helpers in =execute_cell= for hedged / best-of-N / critique-revise
+
+3. *Compose harness*
+   3.1 Fork =_round24_dials.py= → =_round25_dials.py=
+   3.2 Apply patches: =_r19_wiring_patch= + =_r24_synthesis_patch=
+       + =_r25_design_patch=
+   3.3 Smoke preflight on each new variant (K33/K34/K35) + each
+       new strategy (S1/S2/S3) + each new validator (P5/P6)
+
+4. *Launch*
+   4.1 Launch R25 with =R18_PARALLELISM=32=
+   4.2 Live-log + watcher + auto-commit
+
+5. *Analysis*
+   5.1 Spawn 4-6 R24-style analysis agents on R25 results
+   5.2 Synthesis doc
+
+* Variant roster (R25)
+
+| Variant                    | Status     | Source                | Est $/qpt | Test |
+|----------------------------+------------+-----------------------+-----------+------|
+| *K1-qwen30* (self-host)    | KEEP       | Local vLLM            | ~$0.0001  | T29  |
+| K1-qwen30 (OpenRouter)     | A/B        | OR (Novita)           | ~$0.0005  | T29  |
+| *K2-kimi-k2.6* (self-host) | KEEP       | Local vLLM            | ~$0.0008  | T30  |
+| K11-qwen3coder             | KEEP       | OR (Together)         | ~$0.02    |      |
+| K8-deepseekV3              | KEEP       | OR                    | ~$0.001   |      |
+| K17-glm46                  | KEEP       | OR (SiliconFlow→Z-AI) | ~$0.003   |      |
+| *K20-foss-distill-v2*      | NEW high   | RunPod vLLM           | ~$0.0003  | T31,T32 |
+| K33-qwen3-coder-72b        | NEW probe  | OR (Together)         | ~$0.003   | T33  |
+| K34-deepseek-v3-pro        | NEW probe  | OR (DeepInfra)        | ~$0.005   | T34  |
+| K35-llama-3.1-405b         | NEW probe  | OR (Together)         | ~$0.01    | T35  |
+| K5-claude-solo (sentinel)  | KEEP info  | Anthropic direct      | ~$0.024   |      |
+
+K6, K7, K9, K15 dropped (R24 outcome confirms K7 negative-score
+penalty + K6 noop rate).
+
+* Task pool (R25)
+
+| Task   | Owner family    | n      | Notes                                       |
+|--------+-----------------+--------+---------------------------------------------|
+| B1     | wiki_edit       | 25     | + dial ablation incl new dials              |
+| B5     | small_atomic    | 12     | S2 best-of-N + S3 critique-revise           |
+| B7     | code_edit       | 10     | K33 ceiling probe lives here                |
+| B11    | dec_draft       | 12     | S3 primary test                             |
+| B25    | elisp_helper    | 12     | K11 + K1 + K2 + K34                         |
+| BK1-BK5| long_horizon    | 8 each | T44 holdout — all top variants + comp       |
+
+Total: ~140 base + ~120 BK + ~80 composition + ~50 K20 A/B +
+~80 large-FOSS probes = ~470 cells.
+
+* Open questions (revised)
+
+1. *Will self-hosted K1 actually be cheaper at our scale?* RunPod
+   vLLM idle cost is real; ~$5-10/h. For ~3-5h R25 wall, maybe.
+   For more rounds, definitely. T29 measures real per-cell delta.
+
+2. *Does K33 (72B) beat K1 (30B)?* The "smaller-model-better-fine-
+   tuning" hypothesis: K1 wins because fewer params + matching task
+   distribution. K33 has 2.4× more params; if it doesn't beat K1
+   on B7, the hypothesis holds.
+
+3. *Does K20 v2 beat K1?* Same architecture, just fine-tuned.
+   500 pairs is ~6× v1. If still no improvement, the corpus
+   bottleneck is task-coverage, not size.
+
+4. *BK1-BK5 wall behavior at 8 reps?* R24 will surface this.
+   T44 either confirms or modifies the BK n=8 plan.
+
+5. *S3 critique-revise wall cost?* 3× the LLM calls per cell. If
+   wall > 60s, defer to async-pipeline form for R26.
+
+* Cross-references
+
+- =docs/wiki/2026-05-08-r15-r23-grand-synthesis.org= — drove R25
+- =docs/wiki/2026-05-08-r18-tests-and-strategies.org= — original T1-T28
+- =docs/wiki/2026-05-08-foss-spend-headroom.org= — original 23× projection
+- =scripts/_round24_dials_artifacts/= — R25 input data
+- =/tmp/lora_prep/09_runpod_train_k20.py= — K20 v1 driver (extend for v2)
+- =/tmp/lora_prep/07_modal_serve_k20.py= — vLLM serve template (port to RunPod)
