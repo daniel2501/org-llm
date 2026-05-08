@@ -1,0 +1,251 @@
+:PROPERTIES:
+:ID:       cross-round-quality-trend-r15-r19
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: Cross-round quality trend R15-R19 — per-variant trajectory + R20+ routing
+#+DATE: [2026-05-08]
+#+AUTHOR: Claude (research subagent)
+
+* Summary
+
+*Summary.* Across R15-R19 the only truly stable variant is
+=K5-claude-solo= (CV=0.20, mean 11.3 mech) — every FOSS variant moved
+20+ score points round-to-round, driven by harness changes (R17
+append-only shim, R18 worktree-concurrency disaster, R19 worktree fix
++ scoring-rubric improvements) more than model behavior. R19 vindicated
+the R18-quality-judge thesis: =K1-qwen30= became the FOSS leader (mean
+22.1, $/u=0.0005, 28 cells, top mech 47), and three previously
+under-tested FOSS variants (=K11-qwen3coder=, =K17-glm46=,
+=K2-kimi-k2.6=) clustered with it inside one score band. The mech
+score gap between K1 and K5 has reversed: K1's R19 mean (22.1) now
+exceeds K5's (14.8), confirming that the R15-R17 "Claude ceiling"
+narrative was an artifact of mech-scoring rules that quietly punished
+FOSS abstention/append patterns.
+
+*Expanded.* Cross-round signal stability is dominated by *harness
+deltas*, not model deltas — R18's collapse (mean 2.5, 90/140 worktree
+errors) plus R19's recovery (mean 15.3, 12/120 errors) prove the
+benchmark is currently a harness benchmark. R15-R17 each had a
+different "winner" (K1, K7, K11) because each round shipped a different
+scoring rule (destructive-edit reward, append-only shim, then dial
+sweep). Only R18->R19 shows what looks like a *clean inter-round
+signal*: identical 10-variant pool, dial-sweep stable, fixed harness.
+On that read: K1/K11/K17/K2 are an interchangeable FOSS quartet at
+~$0.001-0.01/u; K7/K6 are the bracket-disaster tier; K8 is the
+cheap-floor; K5 is the quality-ceiling baseline used for blind judging.
+R20+ should *freeze the harness* for two consecutive rounds before
+declaring any variant winner real.
+
+* 1. Per-variant quality timeline (R15 -> R19)
+
+Mean +/- pop-sd of all scored cells per round (layer1+layer2+layer3
+combined; n in parens). =--= = variant absent that round.
+
+| variant            | R15            | R16            | R17           | R18           | R19            |
+|--------------------+----------------+----------------+---------------+---------------+----------------|
+| K1-qwen30          | 8.7+/-12.3 (14) | 10.6+/-11.8 (14) | 6.9+/-7.1 (14) | 2.2+/-4.8 (22) | 22.1+/-19.7 (28) |
+| K2-kimi-k2.6       | 12.9+/-15.0 (8) | 9.5+/-9.5 (8)  | 5.0+/-5.0 (2) | 0.6+/-2.2 (15) | 21.9+/-16.8 (15) |
+| K5-claude-solo     | 11.2+/-14.6 (8) | 11.0+/-14.7 (8) | 11.6+/-15.6 (8) | 7.8+/-13.8 (12) | 14.8+/-13.4 (12) |
+| K7-qwen72b         | 7.8+/-7.1 (14) | 12.1+/-12.0 (14) | 0.0+/-0.0 (1) | 4.9+/-6.2 (23) | 10.8+/-12.0 (10) |
+| K8-deepseekV3      | 6.0 (1)        | 6.0 (1)        | 7.9+/-10.7 (10) | 0.0+/-0.0 (15) | 2.5+/-4.0 (15) |
+| K11-qwen3coder     | --             | 8.0 (1)        | 8.5+/-7.7 (14) | 0.8+/-2.4 (10) | 23.4+/-12.1 (10) |
+| K6-llama70b        | 2.0 (1)        | 4.0 (1)        | 4.0 (1)       | 2.6+/-4.5 (23) | 1.8+/-2.9 (10) |
+| K17-glm46          | --             | --             | 8.0 (1)       | 0.8+/-2.4 (10) | 22.2+/-15.2 (10) |
+| K15-kimi-thinking  | --             | --             | 10.0 (1)      | 2.0+/-4.0 (5) | 13.2+/-9.0 (5)  |
+| K9-mixtral         | 10.0 (1)       | 8.0 (1)        | 10.0 (1)      | 1.8+/-3.6 (5) | 5.6+/-7.3 (5)   |
+
+** Round-meta context
+
+| round | cells | err | cost     | mean q | median | max | top FOSS                          |
+|-------+-------+-----+----------+--------+--------+-----+-----------------------------------|
+| R15   |    49 |   0 |   $1.62  |    9.0 |    6.0 |  50 | K1, K7, K2 (mech)                 |
+| R16   |    54 |   0 |   $2.07  |    9.6 |    8.0 |  50 | K7, K1, K2 (mech, K7 destructive) |
+| R17   |    59 |   9 |   $4.45  |    7.3 |    5.0 |  50 | K1, K11, K8 (append-only shim)    |
+| R18   |   140 |  90 |   $2.11  |    2.5 |    0.0 |  50 | K7, K6, K1 (worktree-collapse)    |
+| R19   |   120 |  12 |   $9.75  |   15.3 |   10.0 |  47 | K1, K11, K17 (clean signal)       |
+
+* 2. Stability winners (cross-round CV of round-means)
+
+Round-mean = mean of all scored cells in that round. CV =
+sd(round_means) / mean(round_means). Lower = more stable. =rounds= =
+number of rounds the variant appeared.
+
+| rank | variant            | rounds | mean | sd  |   CV | comment                                  |
+|------+--------------------+--------+------+-----+------+------------------------------------------|
+|    1 | K5-claude-solo     |      5 | 11.3 | 2.2 | 0.20 | THE stability anchor; same across rubric churn |
+|    2 | K6-llama70b        |      5 |  2.9 | 1.0 | 0.33 | low-but-flat — destructive-floor variant |
+|    3 | K9-mixtral         |      5 |  7.1 | 3.1 | 0.44 | small-n, mostly mid-band                 |
+|    4 | K15-kimi-thinking  |      3 |  8.4 | 4.7 | 0.56 | only seen R17/R18/R19                    |
+|    5 | K7-qwen72b         |      5 |  7.1 | 4.4 | 0.61 | provider-pin failures dominate variance  |
+|    6 | K8-deepseekV3      |      5 |  4.5 | 2.8 | 0.63 | R18 collapse (worktree); else ~$0 floor  |
+|    7 | K1-qwen30          |      5 | 10.1 | 6.6 | 0.65 | swung 2.2 -> 22.1 R18->R19; rubric-sensitive |
+|    8 | K2-kimi-k2.6       |      5 | 10.0 | 7.2 | 0.73 | similar pattern to K1                    |
+|    9 | K11-qwen3coder     |      4 | 10.2 | 8.2 | 0.81 | append-only shim helped in R17           |
+|   10 | K17-glm46          |      3 | 10.3 | 8.9 | 0.86 | only fully scored in R18/R19             |
+
+*Reading.* K5's CV=0.20 is the only number that says "this variant's
+quality is independent of harness state". Every FOSS variant has
+CV>=0.33; the high-CV cluster (K1/K2/K11/K17 at 0.65-0.86) is the
+group whose round-to-round mean *changed by 2-10x*. This means the
+benchmark currently measures "how friendly was this round's scoring
+rubric to FOSS abstention + append-only behavior" more than "how good
+is the model".
+
+* 3. Improved / regressed each round (per-variant deltas)
+
+Round-over-round mean delta (R(n) mean minus R(n-1) mean). +/- = up/down,
+= big swing.
+
+| variant           | R15->R16 | R16->R17 | R17->R18 | R18->R19 |   net |
+|-------------------+----------+----------+----------+----------+-------|
+| K1-qwen30         |    +1.9  |    -3.7  |    -4.7  |   +19.9  | +13.4 |
+| K2-kimi-k2.6      |    -3.4  |    -4.5  |    -4.4  |   +21.3  |  +9.0 |
+| K5-claude-solo    |    -0.2  |    +0.6  |    -3.9  |    +7.0  |  +3.5 |
+| K7-qwen72b        |    +4.4  |   -12.1  |    +4.9  |    +5.9  |  +3.0 |
+| K8-deepseekV3     |     0.0  |    +1.9  |    -7.9  |    +2.5  |  -3.5 |
+| K11-qwen3coder    |   N/A    |    +0.5  |    -7.7  |   +22.6  | +15.4 |
+| K6-llama70b       |    +2.0  |     0.0  |    -1.4  |    -0.8  |  -0.2 |
+| K17-glm46         |   N/A    |   N/A    |    -7.2  |   +21.4  | +14.2 |
+| K15-kimi-thinking |   N/A    |   N/A    |    -8.0  |   +11.2  |  +3.2 |
+| K9-mixtral        |    -2.0  |    +2.0  |    -8.2  |    +3.8  |  -4.4 |
+
+** Per-round narrative
+
+- *R16:* K7 +4.4 (destructive B11 wipe rewarded by mech score). All
+  others +/-3.
+- *R17:* K7 -12.1 (append-only shim corrected R16 inflation +
+  DeepInfra =IncompleteRead=). K1 -3.7 from same shim. Others flat.
+- *R18:* universal -3 to -8 — the 90/140 worktree-concurrency errors
+  flooded the cell pool with score=0 entries; not a model regression.
+- *R19:* big jumps (+11 to +23) for the FOSS quartet K1/K2/K11/K17
+  driven by (a) worktree-mutex fix dropping err to 12/120 and (b)
+  scoring rubric folding in cleaner abstention recognition. K5 only
+  +7 because its R18 baseline was already partially insulated from
+  the worktree collapse.
+
+* 4. Per-task winner heatmap (task x round -> winning variant)
+
+Layer2 canonical bt_pb_m1_tb_s1 cells. =tie@0= = all cells silent_noop
+(usually correct for B20). =Kn= = variant family prefix.
+
+| task | R15           | R16          | R17           | R18           | R19      |
+|------+---------------+--------------+---------------+---------------+----------|
+| B1   | K1            | K7           | K1+K11        | K7            | K1       |
+| B5   | K2+K5         | K7           | K5            | K5            | K5       |
+| B7   | K7            | K7           | tie@0         | K1            | tie@0    |
+| B11  | K1+K2         | K1+K7        | K5            | K5            | K5       |
+| B13  | K1+K2+K5+K7   | K1+K2+K5+K7  | K1+K11+K5+K8  | K1+K5+K6+K7   | K1+K5    |
+| B20  | tie@0         | tie@0        | tie@0         | tie@0         | tie@0    |
+| B25  | K2            | K2           | K11           | K1            | K1       |
+| B26  | K1+K2+K5+K7   | K1+K2+K5+K7  | K1+K11+K5+K8  | K1+K5+K6+K7   | K1+K5    |
+
+** Heatmap reading
+
+- *Wrap-cross-link tasks (B1):* unstable winner (K1, K7, K1+K11, K7,
+  K1). R19 K1 verdict aligns with R17 K1 verdict (the two cleanest
+  rounds); R16/R18 K7 wins were destructive-edit / worktree-noise
+  artifacts. *K1 is the real B1 owner.*
+- *Table edits (B5):* K5 won R17/R18/R19 — three consecutive
+  harness-versions agree. K5 is the right B5 router target. R19's
+  layer2 only had K1+K5 so this is partly forced, but R18 had four
+  variants and K5 still won.
+- *Doc-noise no-op (B7):* tie@0 in 3 of 5 rounds — the spec is a no-op
+  trap; mech score 0 is the *correct* answer. K7 R15/R16 wins were
+  destructive false positives. K1 R18 win is a false positive
+  (unreachable code per R18 quality-judge).
+- *DEC append (B11):* migrated from K1+K2 (destructive R15/R16) to K5
+  (clean append, R17/R18/R19). *K5 is the only confirmed-good B11
+  router target on the FOSS-allowed list; K1/K11 are second tier.*
+- *LICENSE bump (B13):* trivially-tied — every variant produces the
+  same 1-line diff. Use cheapest available variant (K8 or K1).
+- *No-op trap (B20):* never has a non-tie winner. Any variant that
+  abstains is correct; reward must come from rubric not score.
+- *defcustom edit (B25):* migrated K2 -> K11 -> K1, but R18+R19 both
+  K1. Stable for 2 rounds. *K1 is the B25 router target.*
+- *defun add (B26):* always 4-way tied at 5; use K1 (cheapest).
+
+* 5. R20+ routing recommendations per task family
+
+** Task-family clusters
+
+| family             | tasks      | winner pattern                | R20 routing                          |
+|--------------------+------------+-------------------------------+--------------------------------------|
+| wrap-cross-link    | B1         | K1 wins clean rounds          | K1-qwen30 primary, K11 fallback      |
+| table-edit         | B5         | K5 wins 3 consecutive rounds  | K5 primary; K1 fallback (FOSS rule)  |
+| doc-noise no-op    | B7         | tie@0 = correct abstain       | any cheap variant (K8 or K1)         |
+| DEC append         | B11        | K5 wins post-R17              | K5 primary; K1 fallback              |
+| LICENSE bump       | B13        | universal tie                 | K8-deepseekV3 (cheapest)             |
+| no-op trap         | B20        | universal tie                 | K8 (cheapest)                        |
+| defcustom          | B25        | K1 wins R18+R19               | K1-qwen30 primary                    |
+| defun add          | B26        | universal tie                 | K1 or K8 (cheapest)                  |
+
+** Cost/quality position (R19 only — cleanest signal)
+
+| variant         | R19 mean | $/cell  | $/quality-unit | role                       |
+|-----------------+----------+---------+----------------+----------------------------|
+| K1-qwen30       |    22.1  | $0.011  | $0.0005        | DEFAULT FOSS scribe        |
+| K11-qwen3coder  |    23.4  | $0.243  | $0.0104        | quality FOSS, expensive    |
+| K17-glm46       |    22.2  | $0.082  | $0.0037        | second-FOSS option         |
+| K2-kimi-k2.6    |    21.9  | $0.058  | $0.0026        | third-FOSS option          |
+| K5-claude-solo  |    14.8  | $0.370  | $0.0242        | quality-ceiling judge only |
+| K15-kimi-think  |    13.2  | $0.052  | $0.0040        | layer3 probe slot          |
+| K7-qwen72b      |    10.8  | $0.017  | $0.0016        | bracket-validator gated    |
+| K9-mixtral      |     5.6  | $0.076  | $0.0135        | drop                       |
+| K8-deepseekV3   |     2.5  | $0.004  | $0.0017        | LICENSE/no-op tasks only   |
+| K6-llama70b     |     1.8  | $0.003  | $0.0016        | drop or non-destructive only |
+
+** Concrete R20+ rules
+
+1. *Default scribe = K1-qwen30* — mean 22.1 at $0.0005/u; 48-fold
+   cheaper than K5 per quality unit. Promote to org-llm production
+   default once R20 confirms R19's signal.
+2. *Quality ceiling = K5-claude-solo (judge / sentinel only)* —
+   FOSS-only rule blocks production scribe. Keep for blind Opus-judge
+   pairing; mean 14.8 at $0.0242/u.
+3. *Three-way FOSS jury for ambiguous tasks* — K1 + K11 + K17 (or
+   K2). All clustered at 21-23 mean in R19; majority vote on disagree.
+   Total $/u ~$0.017.
+4. *Drop K6-llama70b + K9-mixtral* — both <6 mean, not stable, no
+   strength niche. K6 fails non-destructively (silent_noop) which is
+   harmless but adds zero. K9 is provider-expensive without quality.
+5. *Gate K7-qwen72b behind bracket-validator* — R18-quality-judge
+   identified K7 as broken-bracket-prone. R19 mean 10.8 looks fine but
+   the bracket failures may be hidden by current rubric. Require a
+   post-edit org-mode parse before accepting K7 output.
+6. *Use K8-deepseekV3 for trivial-edit tasks* (B13/B20/B26-class
+   1-liners) — cheapest viable; quality irrelevant when output is
+   0-2 line diff.
+7. *FREEZE THE HARNESS for R20-R21* before any further routing
+   decisions. The R15->R19 churn proves cross-round comparison is
+   currently noise-dominated. Two consecutive rounds with identical
+   scoring + identical worktree infra would let us read real model
+   trajectory.
+8. *Add a worktree-fix regression test* — R18's 90/140 collapse must
+   not recur. The R19 fix (filesystem mutex per quality-judge) is in
+   prod but not tested.
+
+* 6. Open questions for R20
+
+- *Is K1's R19 spike real?* — replicate R19 with no harness changes.
+  If K1 stays at ~22 mean, promote to default scribe. If it drops
+  back to ~7 (R17-equivalent), the jump is rubric-sensitive.
+- *K11/K17/K2 cluster — interchangeable or task-specialized?* — R19
+  data is too small per-task (10 cells each) to differentiate. R20
+  needs a per-task break-out for the FOSS quartet.
+- *K5 reflects production behavior, or routing-noise?* — K5 mean
+  dropped 11.3 -> 14.8 across rounds, which looks stable, but its sd
+  is 13.4 in R19. The bimodal pattern (50 on hits, 0 on no-ops)
+  inflates sd. Need quality-judge re-rank to confirm.
+
+* Appendix: data sources
+
+- =scripts/_round{15,16,17,18,19}_dials_artifacts/summary-*.json= — per-round
+  cell results (49, 54, 59, 140, 120 cells respectively).
+- =scripts/_round18_dials_artifacts/v2/summary-1778220192.json= — R18 v2
+  partial (140 cells, 2.77 USD), worktree-error pool already counted.
+- =docs/notes/2026-05-08-r17-quality-judge.org= — R17 hand-graded re-rank.
+- =docs/notes/2026-05-08-r18-quality-judge.org= — R18 v2 hand-graded re-rank.
+- =scripts/_round19_dials_artifacts/log-1778224745.txt= line 2333 — R19 K5
+  totals (12 cells, $4.434, $0.0242/u).
+
+Investigation cost: $0 (file-only analysis, no LLM judge).

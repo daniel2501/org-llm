@@ -1,0 +1,233 @@
+:PROPERTIES:
+:ID:       cross-round-variant-longevity-r15-r19
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: Cross-round variant longevity — R15 → R19
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:variants:longevity:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R15-R19 churned 19 K-IDs. Only *K1-qwen30* is a true 5/5
+non-zero carry-over (K5-claude-solo also 5/5 but is a sentinel).
+K11 + K2 form the next durable tier. Nine K-IDs already retired
+(K3, K4, K10, K12, K13, K14, K16, K18, K19). R19 surfaced two new
+collapses: K8-deepseekV3 (2.5 mech/cell, down from R17 frontier-winner)
+and K6-llama70b (7/10 silent_noops). The R20+ FOSS-roster expansion
+is *K20-foss-distill* (LoRA on Qwen3-Coder-30B distilled from
+K2+K8+K11), training in flight on Modal at publish time.
+
+*Expanded.* R15 launched 9 variants (K1-K9). R16 added K10-K14;
+only K11+K13 actually executed. R17 piloted K15-K19; K15+K17
+survived, K16/K18/K19 died on invalid IDs or 404s. R18 ran 10
+variants but a worktree-add concurrency bug killed 90/140 cells.
+R19 ran the same 10-variant pool on B1 layer1 + 8-task layer2;
+K8/K6 collapses are the surprise. K20 is the only net-add for R20+
+unless an external FOSS release lands.
+
+* 1. Longevity table — which rounds each variant ran in
+
+Legend: =RAN= (executed cells, scored), =DROP= (declared dead pre-round
+in =DEAD_VARIANTS= or in source comments), =NEW= (first round of life),
+=SIDE= (side-pool only — never gates layer-promotion).
+
+| ID  | Model                           |  R15 |  R16 |  R17 |  R18 |  R19 | rounds-alive |
+|-----+---------------------------------+------+------+------+------+------+--------------|
+| K1  | qwen3-coder-30b-a3b-instruct    | RAN  | RAN  | RAN  | RAN  | RAN  |          5/5 |
+| K2  | moonshotai/kimi-k2.6            | RAN  | RAN  | RAN  | RAN* | RAN  |          5/5 |
+| K3  | deepseek/deepseek-r1            | RAN  | RAN  | DROP | DROP | DROP |          2/5 |
+| K4  | openai/gpt-oss-120b             | RAN  | RAN  | DROP | DROP | DROP |          2/5 |
+| K5  | claude-solo (sentinel)          | RAN  | RAN  | RAN  | RAN  | RAN  |          5/5 |
+| K6  | meta-llama/llama-3.3-70b        | RAN  | RAN  | RAN  | RAN  | RAN  |          5/5 |
+| K7  | qwen/qwen-2.5-72b-instruct      | RAN  | RAN  | RAN  | RAN  | RAN  |          5/5 |
+| K8  | deepseek/deepseek-chat-v3-0324  | RAN  | RAN  | RAN  | RAN+ | RAN  |          5/5 |
+| K9  | mistralai/mixtral-8x22b         | RAN  | RAN  | RAN  | RAN  | RAN  |          5/5 |
+| K10 | deepseek/deepseek-coder         |  —   | NEW  | DROP | DROP | DROP |          1/5 |
+| K11 | qwen/qwen3-coder (480B)         |  —   | NEW  | RAN  | RAN  | RAN  |          4/5 |
+| K12 | meta-llama/llama-3.1-405b       |  —   | NEW  | DROP | DROP | DROP |          1/5 |
+| K13 | deepseek/deepseek-v4-pro        |  —   | NEW  | RAN  | DROP | DROP |          2/5 |
+| K14 | openai/gpt-oss-20b              |  —   | NEW  | DROP | DROP | DROP |          1/5 |
+| K15 | moonshotai/kimi-k2-thinking     |  —   |  —   | NEW  | SIDE | SIDE |          3/5 |
+| K16 | qwen/qwen3.6-27b                |  —   |  —   | NEW  | DROP | DROP |          1/5 |
+| K17 | z-ai/glm-4.6                    |  —   |  —   | NEW  | RAN  | RAN  |          3/5 |
+| K18 | meta-llama/llama-4-instruct     |  —   |  —   | NEW  | DROP | DROP |          1/5 |
+| K19 | qwen/qwen-2.5-coder-32b         |  —   |  —   | NEW  | DROP | DROP |          1/5 |
+| K20 | foss-distill (LoRA)             |  —   |  —   |  —   |  —   | TRAIN|          0/5 |
+
+Notes: R18 K2 (=RAN*=) was zero-yield (DeepInfra adapter bug),
+re-pinned mid-round. R18 K8 (=RAN+=) had 14/15 cells killed by
+worktree-collisions before they could spend.
+
+* 2. Per-variant aggregate scores + rank trajectory
+
+Quality score sourced from each round's published leaderboard. R17/R18
+use *re-ranked quality* (judge agent), not raw mech. R19 uses
+=primary_total / cells= from =R19_LIVE.json= (mech-only at publish
+time; quality re-rank deferred to R19 synthesis).
+
+| ID                | R15 q | R16 q | R17 q | R18 q | R19 mech/cell | trend                  |
+|-------------------+-------+-------+-------+-------+---------------+------------------------|
+| K1-qwen30         |  ~16  |  ~17  |  19.0 |  12.8 |          22.1 | stable-good → R18 dip → R19 lead |
+| K2-kimi-k2.6      |   ~9  |  ~12  |  ~14  |   0.0 |          21.9 | broker-broken R18, recovered R19 |
+| K5-claude-solo    |  20.0 |  20.5 |  20.1 |  17.3 |          14.8 | high ceiling; R19 dip suspect (mech-only)  |
+| K6-llama70b       |    4  |   5.5 |   ~7  |   9.0 |           1.8 | R19 collapse — 7/10 noops |
+| K7-qwen72b        |  ~13  |     0 |   ~0  |  10.4 |          10.8 | TCP drops + bracket disasters; gated |
+| K8-deepseekV3     |   ~9  |  ~14  |  18.6 |  14.0 |           2.5 | R17 winner → R19 collapse |
+| K9-mixtral        |   ~6  |   ~7  |   ~5  |   n/a |           5.6 | strictly dominated; n=1-5 only |
+| K11-qwen3coder    |   —   |  ~17  |  17.3 |  13.0 |          23.4 | premium-tier, expensive |
+| K13-deepseekV4    |   —   |  silent | silent  | DROP  | DROP        | infra-broken in flight |
+| K15-kimi-thinking |   —   |   —   |  ~12  |  ~12  |          13.2 | side-pool long-pole only |
+| K17-glm46         |   —   |   —   |    9  |    9  |          22.2 | R19 breakout (n=10 first time)  |
+| K20-foss-distill  |   —   |   —   |   —   |   —   |    (training) | first scored cells in R20 |
+
+Rank trajectory (R17 → R18 → R19 within each round's ranked field):
+
+| ID            | R17 rank | R18 rank | R19 rank (mech) | net move R17→R19 |
+|---------------+----------+----------+-----------------+------------------|
+| K1-qwen30     |        2 |        2 |               1 | +1               |
+| K2-kimi-k2.6  |        ? |       10 |               2 | recovered        |
+| K11-qwen3coder|        4 |        6 |               3 | -1, but 3/3 alive|
+| K17-glm46     |       10 |        ~ |               4 | +6 (n-driven)    |
+| K5-claude-solo|        1 |        1 |               5 | -4 (sentinel)    |
+| K7-qwen72b    |    bench |        3 |               6 | bracket-gated    |
+| K15-kimi      |     side |     side |               7 | unchanged        |
+| K8-deepseekV3 |        3 |        7 |               8 | -5 (R19 collapse)|
+| K9-mixtral    |        ~ |        ~ |               9 | dominated        |
+| K6-llama70b   |        6 |        4 |              10 | -4 (R19 collapse)|
+
+* 3. Carry-over winners — 3+ rounds, always non-zero
+
+Three variants pass "lived 3+ rounds AND never zero on a round-actual
+leaderboard":
+
+| ID            | rounds | min q | max q | role            |
+|---------------+--------+-------+-------+-----------------|
+| K1-qwen30     |    5/5 |   ~16 |  22.1 | DEFAULT scribe  |
+| K5-claude-solo|    5/5 |  14.8 |  20.5 | quality ceiling |
+| K11-qwen3coder|    4/5 |  13.0 |  23.4 | premium reserve |
+
+K7 (5/5) fails the never-zero clause (R16+R17 TCP drops). K2 fails
+on R18 (0/15 broker bug). *K1 is the natural baseline + chosen base
+model for K20-foss-distill (Qwen3-Coder-30B-A3B-Instruct).*
+
+* 4. Auto-retire candidates
+
+Triggers: (1) score=0 in 2+ rounds, (2) infrastructurally broken,
+(3) catastrophic regression (≥10pt drop round-over-round at same dial).
+
+| ID              | trigger              | rounds      | R20 status         |
+|-----------------+----------------------+-------------+--------------------|
+| K3-deepseekR1   | silent_noop ×2       | R15+R16     | retired — keep     |
+| K4-gptoss120b   | silent_noop ×2       | R15+R16     | retired — keep     |
+| K10-deepseekCv2 | invalid model ID     | R16         | retired — keep     |
+| K12-llama405b   | HTTP 404             | R16         | retired — keep     |
+| K13-deepseekV4  | 3/3 worktree+drops   | R16+R17     | retired — keep     |
+| K14-gptoss20b   | silent_noop          | R16         | retired — keep     |
+| K16-qwen36-27b  | IncompleteRead       | R17         | retired — keep     |
+| K18-llama4      | invalid model ID     | R17         | retired — keep     |
+| K19-qwen25c-32b | HTTP 404             | R17         | retired — keep     |
+| K9-mixtral      | dominated 5/5; cost  | R15-R19     | n=3 probe only     |
+| K6-llama70b     | 7/10 noops R19       | R19 collapse| investigate, gate  |
+| K8-deepseekV3   | 2.5 mech/cell R19    | R19 regress | INVESTIGATE first  |
+
+Three live candidates for R20:
+
+- *K9-mixtral* — dominated 5 rounds running. R18 $0.1147/cell (12× K8
+  for same score). R19: 28 pts/5 cells at $0.0136/qpt. Drop from
+  default; n=3 probe only. Two-strikes-and-out from R20 onward.
+- *K6-llama70b* — R19 collapse ambiguous (R18 was n=14 frontier).
+  R20 gate: re-pin Together, n=10 B1 probe; if ≤5 mech/cell, retire.
+- *K8-deepseekV3* — biggest R19 surprise. R17 cross-agent Pareto
+  winner (18.6 q / $0.00021); R18 blocked by worktree bug; R19 first
+  clean read is brutal. Causes to test: DeepInfra tool-call drift,
+  mutex preflight slow-path, R19 dial mix vs V3 shape. *Forensic
+  walkthrough before retire.*
+
+* 5. New addition recommendations for R20+
+
+No new external FOSS model has been promoted since R18 — R17's
+K15-K19 batch tested everything in scope. Candidate classes worth
+probing for R20+:
+
+| candidate              | source                | priority | why                            |
+|------------------------+-----------------------+----------+--------------------------------|
+| K20-foss-distill       | self-trained on Modal | HIGH     | first-tier ours; A/B pre-committed |
+| K21-deepseek-r1-0528   | OpenRouter newer tag  | LOW      | only if OR exposes; R1 was DROP   |
+| K22-glm-4.6-air        | Z-AI Air variant      | LOW      | K17 worked; smaller cheap probe   |
+| K23-qwen3-235b         | if released           | DEFER    | wait for OR listing               |
+| K24-llama-3.3-405b     | recheck K12 quarterly | DEFER    | K12 was 404 R16                   |
+| K25-mistral-large-2511 | Mistral flagship      | LOW      | Apache 2.0; broad coverage        |
+
+K20 is the only HIGH. Every external candidate is gated on
+working provider pin + tool-call adapter (R18 lesson: pin-hold
+≠ tool-call success). *R20 recommendation: do not add external
+variants beyond K20; spend the slot re-fielding K8 with diagnosis.*
+
+*R20+ pool target.*
+
+| tier         | variants                       |  n | role                        |
+|--------------+--------------------------------+----+-----------------------------|
+| frontier     | K1-qwen30, K20-foss-distill    | 15 | default scribe + new tier   |
+| FOSS premium | K11-qwen3coder, K17-glm46      | 10 | reserve for prose           |
+| diagnose     | K8-deepseekV3, K6-llama70b     | 10 | re-field with diagnosis     |
+| recover      | K2-kimi-k2.6, K7-qwen72b       | 10 | both gated by R18 fixes     |
+| sentinel     | K5-claude-solo                 |  5 | quality ceiling only        |
+| side-pool    | K15-kimi-thinking              |  3 | never gates layer-promote   |
+| probe        | K9-mixtral                     |  3 | one-more-shot before drop   |
+
+* 6. K20-foss-distill integration plan once training lands
+
+*State at publish.* Per =2026-05-08-r19-lora-progress.org=: app
+=ap-9ATcS6Bac42FhQiquOr7HL= on Modal, checkpoint shards loaded,
+eval dataset truncated, training loop entered (12 steps). Adapter
+→ =/vol/k20-foss-distill/=; manifest at =k20_manifest.json=.
+
+*Step-by-step integration.*
+
+| # | step                                                  | gate                          |
+|---+-------------------------------------------------------+-------------------------------|
+| 1 | wait for =k20_manifest.json= write                    | training loss curve sane      |
+| 2 | verify val−train ≤ 0.5 at every epoch boundary        | abort + restart if above      |
+| 3 | deploy =07_modal_serve_k20.py= → vLLM endpoint        | =modal app list= shows serve  |
+| 4 | stash bearer in =pass org-llm/cloud/modal-foss-lora/bearer= | =pass show= returns       |
+| 5 | stash URL in =pass org-llm/cloud/modal-foss-lora/url= | =/v1/models= returns 200      |
+| 6 | add K20 to =VARIANTS= in =_round20_dials.py=          | snippet §5 of LoRA prep       |
+| 7 | run =recipe_ab_harness.py= K20 vs K11 on B1+B5+B11+B25+B26 | n=20 per cell            |
+| 8 | blinded Opus judge via =recipe_ab_judge.py=           | display + edit-acc separately |
+| 9 | decide vs pre-committed bar                           | adopt / narration-only / kill |
+|10 | if adopted: K20 → R20 frontier tier (n=15)            | promotion logged in synthesis |
+
+*A/B bar.* Display-text quality K20 ≥ K11+3; edit-accuracy K20 ≥
+K11−5; blinded Opus rater via =recipe_ab_{harness,judge}.py=.
+
+*Decision rule.* Both cleared → adopt frontier. Display-only +3
+but edit −>5 → narration-only role. Display <+3 → discard run,
+revisit dataset.
+
+*Variant snippet* — see
+=2026-05-08-r19-prep-lora-foss-distill.org= §5 for the full
+=SpecialistTask(handle="K20-foss-distill", ...)= literal.
+
+*Risks.* Training divergence — abort built into SFTConfig
+eval_strategy. Serve cold-start — pre-warm side-pool like K15.
+K20 inherits K8 R19 collapse — A/B vs K11 not K8 (base mismatch).
+Voice over-fit — edit-acc bar catches; narration-only fallback.
+Edit-acc < K1 — K1 + K20 share Qwen3-Coder-30B base, K20 SHOULD
+match-or-beat K1 on edit-acc.
+
+* 7. Cross-references
+
+- =scripts/_round15_dials.py= §VARIANTS — 9-variant launch pool
+- =scripts/_round16_dials.py= §VARIANTS — K10-K14 additions
+- =scripts/_round17_dials.py= §VARIANTS — K15-K19 additions, K3/K4 dropped
+- =scripts/_round18_dials.py= §VARIANTS + =DEAD_VARIANTS=
+- =scripts/_round19_dials.py= §VARIANTS — same active set as R18
+- =scripts/_round19_dials_artifacts/R19_LIVE.json= — R19 leaderboard
+- =docs/wiki/2026-05-08-r17-synthesis.org= §"R18 advancing set"
+- =docs/wiki/2026-05-08-r18-synthesis.org= §4 "Variant verdicts"
+- =docs/wiki/2026-05-08-r19-lora-progress.org= — K20 training in flight
+- =docs/notes/2026-05-08-r19-prep-lora-foss-distill.org= — A/B bar +
+  variant snippet

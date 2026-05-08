@@ -1,0 +1,352 @@
+#+TITLE: Cross-Round Outlier Deep-Dive (R15-R19)
+#+DATE: [2026-05-08]
+#+AUTHOR: Claude (research subagent)
+:PROPERTIES:
+:ROUNDS: R15, R16, R17, R18, R19
+:METHOD: direct inspection of cell_result.json + diff.patch + events.jsonl + R17/R18 judge .org
+:CELLS_DEEP_READ: 15
+:LLM_JUDGE_SPEND: $0.00
+:END:
+
+* Summary
+
+*Summary.* Across R15-R19 the harness produced repeatable extremes.
+*Best cells* share: prefetched canonical IDs, =bt_pb_m1_tb_s1= dial,
+append-only or 1-line surgical edits, K1-qwen30 / K5-claude / K8-deepseekV3
+models, file <300 lines. *Worst cells* share: whole-section overwrites
+on long files (R16 B11 wipes), fabricated UUIDs when prefetch is
+withheld (R18 K7 d6_tool), nested-bracket disasters from re-wrapping
+already-linked text (R18 K6/K7 layer3), table-row pipe loss (R18 K6/K9),
+and provider =IncompleteRead= drops (R17/R18/R19 across K7/K13/K2/K9).
+Mech score rewards link-count and diff-size proxies; it doesn't price
+any of these. Six small validators close most of the gap.
+
+*Expanded.* This file widens the existing R17 + R18 quality-judge
+audits (=docs/notes/2026-05-08-r{17,18}-quality-judge.org=) to R15,
+R16, R19 and pulls diff text from the worst offenders so R20+ prompt
++ tool design can be data-driven, not vibes.
+
+* R15 — best + worst
+
+*Summary.* Baseline of =bt_pb_m1_tb_s1=. K1-qwen30 led on
+cost-quality; K2/K7 shared the upper-mech tier; B20 was a no-op trap
+(4 correct silent-noops scored 0).
+
+** Best
+
+| variant       | task | dial           | mech | what worked                                |
+|---------------+------+----------------+------+--------------------------------------------|
+| K7-qwen72b    | B7   | bt_pb_m1_tb_s1 |   24 | clean type-hint + docstring batch          |
+| K2-kimi-k2.6  | B5   | bt_pb_m1_tb_s1 |   18 | 9-of-9 table candidates linked             |
+| K7-qwen72b    | B1   | bl_pb_m1_tb_s1 |   18 | 9 prefetched IDs wrapped, 0 fabrication    |
+
+K1-qwen30 B1 layer1 (mech 14, $0.00653) is the cost-quality pareto:
+=tool_use: {read_file: 1, edit_file: 5}=, all =on_candidate=. Five
+clean replacements of the form =:TOOL_ROSTER:= property in
+=~/org/org-llm-agents.org=. After= →
+=[[id:a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6][agents.org]]=.
+
+** Worst
+
+| variant       | task | dial           | mech | mode                                  |
+|---------------+------+----------------+------+---------------------------------------|
+| K3-deepseekR1 | B1   | bt_pb_m1_tb_s1 |    0 | empty diff (silent), still cost $0.025 |
+| K4-gptoss120b | B1   | bt_pb_m1_tb_s1 |    0 | =silent_noop= reason                  |
+| K1-qwen30     | B1   | bt_pb_m0_tb_s1 |    0 | no-manager: =in_total=10, primary=0=  |
+
+K1 d7_no_mgr is the tell: harness recorded =1 file changed, 8 ins,
+2 del= but =primary: 0=. Without the manager hint the model touched
+the file but missed the prefetched matchset.
+
+* R16 — best + worst
+
+*Summary.* The destructive-wipe round. Both K1-qwen30 *and*
+K7-qwen72b on B11 hit the 50-cap *while deleting* 146-151 lines of
+DEC-019 to overwrite with a stub DEC-020. Score-cap masked it.
+
+** Best — by mech, but flagged
+
+| variant     | task | mech | flag                                             |
+|-------------+------+------+--------------------------------------------------|
+| K1-qwen30   | B11  |   50 | DESTRUCTIVE — 151 deletions of DEC-019           |
+| K7-qwen72b  | B11  |   50 | DESTRUCTIVE — 146 deletions of DEC-019           |
+| K5-claude   | B11  |   47 | clean append-only — 76 ins, 0 del — REAL best    |
+
+K1's R16 B11 diff opens =@@ -1494,161 +1494,22 @@= and replaces =**
+DEC-019 — Versioning: Hybrid SemVer + acpt suffix= with =** DEC-20
+— Should @picard be auto-created at `org-llm init`...= and *fabricates*
+=:ID: 2026-05-07-12-34-56=. K7 is structurally identical: 11 ins,
+146 del, also fabricates =DEC-20=. K5-claude was the only model to
+append at line 1652 with no deletions and a real UUID — yet the
+harness ranked it 47 (1 borderline =creative= wrap), *below* the
+two destructive cells.
+
+** Worst
+
+| variant       | task | dial           | mech | mode                              |
+|---------------+------+----------------+------+-----------------------------------|
+| K3-deepseekR1 | B1   | bt_pb_m1_tb_s1 |    0 | empty diff at $0.087 (think-loop) |
+| K4-gptoss120b | B1   | bt_pb_m1_tb_s1 |    0 | silent_noop                       |
+| K7-qwen72b    | B1   | bt_pb_m1_tm_s1 |    2 | minimal-tool: 8 in_total, 6 below cap |
+
+The "K7 162-point spike" claim from R17's judge note traces here:
+summed across 9 K7 cells (layer1 + 7 layer3), R16 K7 totalled ≈170,
+*driven by destructive 50 on B11 plus near-baseline B1 cells*. R17's
+append-only shim reverted exactly this win.
+
+* R17 — best + worst
+
+*Summary.* Append-only shim landed; provider repins for K7/K13/K8.
+K11-qwen3coder + K5-claude tied as quality leaders;
+K7→DeepInfra=IncompleteRead(297B); K13→GMICloud=0/3 cells.
+
+** Best
+
+| variant     | task | dial           | mech | qual | what worked                          |
+|-------------+------+----------------+------+------+--------------------------------------|
+| K5-claude   | B11  | bt_pb_m1_tb_s1 |   50 |   23 | textbook DEC-020 append              |
+| K8-deepseekV3 | B11 | bt_pb_m1_tb_s1 |   36 |   18 | append-only, 36 ins, 0 del           |
+| K1-qwen30   | B25  | bt_pb_m1_tb_s1 |   11 |   16 | full elisp w/ ;;; Code: + ends-here  |
+
+R17 judge mean quality: K5=20.1, K1=19.0, K8=18.6, K11=17.3.
+Cost-quality pareto K1 at $0.00031/qual-unit; ceiling K5 at $0.00712.
+K11 is the third FOSS choice but with a 50-100x cost penalty (K11 R17
+B11 cost *$1.57* — 240x K1's $0.0065 baseline).
+
+** Worst
+
+| variant         | task | dial           | mech | mode                                  |
+|-----------------+------+----------------+------+---------------------------------------|
+| K7-qwen72b      | B1   | bt_pb_m1_tb_s1 |    0 | =IncompleteRead(297 bytes)= mid-stream |
+| K13-deepseekV4  | B1   | bt_pb_m1_tb_s1 |    0 | GMICloud =IncompleteRead= 3/3 cells   |
+| K1-qwen30       | B1   | bt_pi_m1_tb_s1 |    0 | =plan_parse_failed= — inlined prefetch broke parser |
+
+The =bt_pi= (prefetch_inline) dial put K1 at 0 and K11 -2 vs =pb=
+across both — measured loss; drop the dial.
+
+* R18 — best + worst
+
+*Summary.* New variants exposed harness blindness to syntax errors.
+K6's "mech-leader" cells were destructive; K7 fabricated UUIDs on
+=bt_pt=; 90 of 140 cells died at git worktree concurrency.
+
+** Best
+
+| variant   | task | dial           | mech | qual | what worked                                  |
+|-----------+------+----------------+------+------+----------------------------------------------|
+| K5-claude | B11  | bt_pb_m1_tb_s1 |   47 |   22 | append-only DEC-020 w/ DEC-014 backlink      |
+| K1-qwen30 | B13  | bt_pb_m1_tb_s1 |    2 |   20 | 1-line LICENSE 2025→2026 — perfect           |
+| K1-qwen30 | B26  | bt_pb_m1_tb_s1 |    5 |   18 | clean defcustom; correct USD docstring       |
+
+** Worst
+
+| variant     | task | dial           | mech | failure mode                          |
+|-------------+------+----------------+------+---------------------------------------|
+| K7-qwen72b  | B1   | bt_pt_m1_tb_s1 |  -13 | UUID fabrication                      |
+| K6-llama70b | B1   | bt_pi_m1_tb_s1 |    2 | nested-bracket disaster               |
+| K1-qwen30   | B7   | bt_pb_m1_tb_s1 |   18 | unreachable code (mech-rewarded bug)  |
+
+K7 =bt_pt= invented IDs when prefetch was withheld:
+
+#+begin_src diff
+-| =~/org/org-llm-config.org=      | one heading per knob ...
++| [[id:12345678-1234-5678-1234-567812345678][~/org/org-llm-config.org]] | ...
++| [[id:23456789-2345-6789-2345-678923456789][~/org/org-llm-agents.org]] | ...
++| [[id:34567890-3456-7890-3456-789034567890][~/org/org-llm-baselines.org]] | ...
+#+end_src
+
+K7 d9_relaxed B1 — iconic 4-level nest:
+
+#+begin_src diff
+-deferred to Phase 2026-05.02 — supervision trinity — initial cut requires relaunch.
++deferred to [[id:43e1b335-...][[[id:43e1b335-...][Phase 2026-05.02 — supervision trinity ...]]]].
+#+end_src
+
+K6 B1 layer1 dropped a leading pipe and broke an org-table:
+
+#+begin_src diff
+-| =~/org/org-llm-agents.org=      | one heading per agent ...
++[[id:a8f4c2e1-...][~/org/org-llm-agents.org]]      | one heading per agent ...
+#+end_src
+
+K1 B7: second copy of =render()= body added *after* an existing
+=return "\n".join(out)= — duplicate, never executed. Mech 18 reward
+on dead code.
+
+* R19 — best + worst
+
+*Summary.* Stability + seed-replication run (no BK long-horizon tasks
+were executed; =_round19_long_horizon_tasks.py= shipped fixtures only).
+K1-qwen30 seeded ~14 B1 cells, mech 34-47; K2/K7/K9 had repeated
+=IncompleteRead= drops; K6 silent_noop'd 7 of 7 B1 seeds.
+
+** Best
+
+| variant       | task | mech | what worked                                  |
+|---------------+------+------+----------------------------------------------|
+| K1-qwen30     | B1   |   47 | 65-line diff, 37 ins / 28 del — high volume  |
+| K5-claude     | B11  |   45 | 88-line append, real ID, DEC-014 + DEC-009 backlink |
+| K8-deepseekV3 | B1   |   38 | 19 ins / 19 del — symmetric clean re-wrap    |
+
+K5 R19 B11 is the cleanest exemplar in the corpus — opens
+=@@ -1637,6 +1637,94 @@= (pure append, line 1637+) with two real
+prefetched IDs: =[[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014]]=
+and =[[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009]]=.
+
+The K1 mech-47 cell *also has defects the harness missed*:
+duplicates the =* Tier 1 — Customize= heading (one fully labeled
+new copy plus the original truncated to a prefix label) AND has a
+2-deep nested bracket on Tier 2:
+
+#+begin_src diff
++* Tier 2 — Manage ([[id:43e1b335-...][[[id:43e1b335-...][Phase 2026-05.16.02 — manage tier]]]])
+#+end_src
+
+R19's high mech is partially illusory.
+
+** Worst
+
+| variant       | task | mech | mode                                       |
+|---------------+------+------+--------------------------------------------|
+| K6-llama70b   | B1   |    0 | 7 silent_noops in a row                    |
+| K7-qwen72b    | B1   |    0 | 3× =IncompleteRead= (517, 1331, 2167B)     |
+| K2-kimi-k2.6  | B1   |    0 | =Expecting value: line 1239= JSON parse    |
+
+R19 had 12 errors + 7 silent_noops in 120 cells. Provider connection
+layer remains the single biggest reliability hit, not model output.
+
+* Cross-cutting — patterns common to *best* cells
+
+*Summary.* Five repeatable traits across all 5 rounds.
+
+*Expanded.*
+
+1. *Prefetch payload with canonical IDs is load-bearing.* Every
+   high-quality B1/B11 cell used the manager's =known_ids= list
+   (R15 K1: 99 IDs available, 7 used). =bt_pi= (inlined prefetch)
+   and =bt_pt= (tool-only prefetch) both produced systematic 0s.
+2. *=bt_pb_m1_tb_s1= dial dominates.* Every top-cell row above is
+   on this dial. =tm= (minimal tools) and =m0= (no manager) produce
+   non-zero best cells but with measurable degradation.
+3. *Append-only beats re-wrap on long files.* K5 R17/R18/R19 B11
+   always appends at EOF (line 1637+/1652+); K1/K7 R16 B11 used
+   =edit_file old/new= to *replace* DEC-019 and got destructive diffs.
+4. *File <300 lines correlates with success.* B1 (324 lines), B25
+   (new ~12-line elisp), B26 (5-line defcustom add) produce most
+   top-3 cells. B11 (~1600-line decisions.org) only succeeds
+   under append-only enforcement.
+5. *Models: K1-qwen30 + K5-claude + K8-deepseekV3 only.* K1 = cost
+   pareto, K5 = quality ceiling, K8 = cheap floor with respectable
+   quality. K11-qwen3coder is third FOSS choice with a 50-240x cost
+   penalty.
+
+* Cross-cutting — patterns common to *worst* cells
+
+*Summary.* Five failure shapes; first four are model defects, fifth
+is harness/provider.
+
+*Expanded.*
+
+1. *Whole-section overwrite on B11 (R16).* K1 + K7 pre-shim diffs
+   = 161 lines deleted, 22 inserted. Mech 50 was the *cap*; without
+   it they'd score >100. Append-only shim eliminates the class.
+2. *Fab-UUIDs on prefetch-bypass dial (R18).* K7 d6_tool inserted
+   =[12345678-1234-5678-1234-567812345678]= when prefetch payload
+   was withheld. =primary: -13, fab=4= flagged it, but only because
+   the harness compared against =known_ids=. Without prefetch the
+   model has no fabrication anchor.
+3. *Nested-bracket disaster (R18 K6/K7 layer3, R19 K1).* When the
+   source already contains =[[*TODO ... Phase 2026-05.20 ...][...]]=
+   and the model re-wraps the inner phrase with another
+   =[[id:...][...]]=, result = =[[id:...][[[id:...][...]]]]=. Org
+   parser silently broken; mech rewarded the wrap insertion.
+4. *Table-row pipe loss (R18 K6, K9).* Replacing =| =verbatim= |=
+   with =[[id:UUID][verbatim]] |= drops the leading pipe. Cell is no
+   longer a valid table row; mech saw 1 wrapped link and rewarded.
+5. *Provider =IncompleteRead= layer (R17, R18, R19).* DeepInfra
+   dropped K7 after 297 bytes; GMICloud dropped K13 across 3
+   retries for $0.00 cost (half-open socket); R19 had 12 across
+   K2/K7/K8/K9. Pre-warm + provider failover is the only fix.
+
+* R20+ recommendations from these extremes
+
+*Summary.* Six small validators close most of the visible quality
+gap; one prompt change for =bt_pt=, one tool primitive
+(=append_at_eof=), and provider failover handle the rest.
+
+*Expanded.*
+
+** Validators (ship as =scripts/quality_lint.py=, fold into mech)
+
+1. *Bracket-balance lint (-3/event).* Regex over inserted lines:
+   =\]\)= without paired =\[\[=, =\]\]\]\]= or deeper, =\[\[\[\[=
+   chains. Already in R18 judge §6.
+2. *Fab-UUID validator (hard 0).* For every inserted
+   =[[id:UUID][...]]=, require =UUID in prefetch.known_ids=. K7's
+   =bt_pt= cells become unrunnable.
+3. *Pipe-balance lint for table rows (-2/event).* Diff lines inserted
+   into a table region (between =|---+---|= rules) without leading =|=
+   are flagged.
+4. *Heading-duplication detector (-5/event).* Track headline-stripped
+   form of every modified =* / ** / ***= line in inserted vs deleted
+   text; if a heading has both a deleted form and a label-truncated
+   inserted form, dock 5 (catches K1 R19 =Tier 1 — Customize= dup).
+5. *Python AST guard for unreachable code (-10/event).* For =.py=
+   diffs, =ast.parse= the post-edit file, walk function bodies, flag
+   any statement after an unconditional =return= (catches K1 R18 B7).
+6. *Append-only enforcement on B11-shape tasks.* When manager
+   classifies =stakes: high= and brief says "add a new DEC heading",
+   gate =edit_file=: if =old_string= matches an existing =DEC-NNN=
+   body, refuse + require =append_at_eof=.
+
+** Prompt changes
+
+- *Add explicit "use only the IDs in <prefetch>" sentence to the
+  brief when prefetch payload is withheld* (=bt_pt= dial). K7
+  defaulted to =[12345678-...]= as a syntactic placeholder; the
+  =bt_pt= brief currently relies on the model voluntarily calling
+  the prefetch tool, with no forcing function if it doesn't.
+- *Re-order brief: prefetch matchset BEFORE task description.*
+  R17 moved stable bytes first for caching; double down by making
+  the matchset the *first* user-visible content so the model can't
+  frame the task without it.
+- *State the no-op trap on B20-shape tasks.* R18 quality judge gave
+  4-way mech-0 cells quality 18 because they correctly abstained.
+  Briefs should say "if invariant already satisfied, write nothing
+  and return =OK_NOOP=" so abstention is a positive answer.
+
+** Tool changes
+
+- *Add =append_at_eof(path, content)= as a first-class primitive.*
+  Currently must be expressed as =edit_file= with last 80 bytes as
+  =old_string=. All R17/R18/R19 K5 B11 wins used a Claude-only
+  equivalent; FOSS models needed it for parity.
+- *Add =read_lines(path, start, end)= to complement =read_file=.*
+  K1/K11 B11 cells repeatedly read the full 50KB =decisions.org= to
+  find EOF — wastes ~6KB context. Range read would cut K11's $1.57
+  R17 cost and make B11-shape tasks portable to smaller-context
+  FOSS models.
+- *Provider failover layer.* Retry on second-best provider when
+  first returns =IncompleteRead= before scoring 0. Salvages ~25
+  cells across R17-R19.
+
+* Appendix: cells inspected
+
+| round | task | variant         | dial            | role in report                  |
+|-------+------+-----------------+-----------------+---------------------------------|
+| R15   | B1   | K1-qwen30       | bt_pb_m1_tb_s1  | best (cost-quality pareto)      |
+| R15   | B1   | K1-qwen30       | bt_pb_m0_tb_s1  | worst (no-manager regression)   |
+| R16   | B11  | K1-qwen30       | bt_pb_m1_tb_s1  | worst (destructive 151-del)     |
+| R16   | B11  | K7-qwen72b      | bt_pb_m1_tb_s1  | worst (destructive 146-del)     |
+| R16   | B11  | K5-claude-solo  | bt_pb_m1_tb_s1  | best (clean append)             |
+| R17   | B11  | K11-qwen3coder  | bt_pb_m1_tb_s1  | high-cost note ($1.57)          |
+| R18   | B1   | K7-qwen72b      | bt_pt_m1_tb_s1  | worst (UUID fab)                |
+| R18   | B1   | K7-qwen72b      | bt_pb_m1_tb_s0  | worst (4-level nest)            |
+| R18   | B1   | K6-llama70b     | bt_pb_m1_tb_s1  | worst (table-pipe loss)         |
+| R18   | B7   | K1-qwen30       | bt_pb_m1_tb_s1  | worst (unreachable code)        |
+| R19   | B1   | K1-qwen30       | bt_pb_m1_tb_s1  | best mech (47), latent defects  |
+| R19   | B11  | K5-claude-solo  | bt_pb_m1_tb_s1  | best (clean append, 88 ins)     |
+| R19   | B25  | K1-qwen30       | bt_pb_m1_tb_s1  | best (clean elisp scaffold)     |
+
+15 cells deep-read; ~50 skim via summary JSON. Cross-referenced
+against R17 + R18 quality-judge .org. Investigation spend $0.00.

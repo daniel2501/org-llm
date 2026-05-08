@@ -1,0 +1,209 @@
+:PROPERTIES:
+:ID:       d1f4b8c2-3a7e-4b15-9c4d-e8f1a2b3c4d5
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: Cross-round failure-mode taxonomy R15-R19
+#+FILETAGS: :wiki:bench:failure-modes:r15:r16:r17:r18:r19:r20:taxonomy:
+#+DATE: 2026-05-08
+#+AUTHOR: Claude (cross-round forensic subagent)
+#+OPTIONS: toc:1 num:nil
+
+* Summary
+
+*Summary.* Across R15-R19 (359 ~cell_result.json~ on disk), 20 distinct
+failure classes appeared. Three are *load-bearing*: bracket_imbalance
+(53 cells, every round), silent_noop (38 cells, every round), and
+worktree_race (30 cells, R17+R18 only — R18 was the explosion).
+broker_tool_format_gap is the newest hard-pin failure (first
+auto-detectable in R18 v1 K8-deepseekV3, fixed in v2 by
+~allow_fallbacks=True~, regressed in R19 K8 with 5 reproductions).
+fab_uuid is small (13 cells) but high-impact when it lands. R20+ needs
+five guards: pre-create worktrees serially, mech penalty for bracket /
+fab / unreachable code, ~provider.ignore~ deny-list, and a per-task
+~expected_diff_floor~ to reward correct abstain.
+
+*Expanded.* This is a count-based taxonomy. Counts come from a
+deterministic scan of every ~cell_result.json~ under
+~scripts/_round{15..19}_dials_artifacts/~ (including R18's ~v2/~
+subtree), classified by error string, ~analysis~ block, edit-arg
+regex, and ~text_output~ heuristics. Cells that never reached the
+broker (silent harness skips that produced no JSON) are NOT counted —
+the live log notes such cases for R18 v1 (10 silent K7/K8/K17/K15/K5
+variants) and R18 v2 worktree-add concurrency that may have killed up
+to 90 cells without writing JSON. So infra-failure rates here are
+*lower bounds*. The classification rules are documented inline in
+~/tmp/scan_failure_modes.py~ (kept local; the report is the artifact).
+
+* 1. Master failure-mode catalog
+
+| class                  | bucket | detection signal                                             |
+|------------------------+--------+--------------------------------------------------------------|
+| silent_noop            | model  | specialist err matches =silent_noop=, =adaptive_abort=, OR (edits=0 AND text="" with specialists present) |
+| runaway_reasoning      | model  | =finish_reason=length=, OR text_output >10k chars and 0 edits |
+| scope_violation        | model  | =analysis.out_of_scope_files= non-empty                     |
+| destructive_edit       | model  | wholesale rewrite / unreachable-code AST change (judged from R18 v2 quality-judge; not auto-detectable today) |
+| under_count            | model  | brief asks N edits, edits_applied_count<N (needs brief ground truth, not in JSON) |
+| over_count             | model  | edits_applied_count>N (same) |
+| malformed_output       | model  | invalid org/python emitted; today subsumed by bracket_imbalance |
+| max_iter_reached       | infra  | error string matches =max_iterations \(\d+\) reached=        |
+| http_error_402         | infra  | =HTTP 402= or =insufficient credits= in error                |
+| http_error_5xx         | infra  | =HTTP 5\d\d=                                                 |
+| plan_parse_failed      | infra  | error == =plan_parse_failed=                                 |
+| runtime_exception      | infra  | json parse, bad model id, no endpoints, context overflow     |
+| tool_misuse            | model  | =No endpoints found that support tool use= OR text announces calls but 0 tool_calls |
+| tcp_drop               | infra  | =IncompleteRead=, =Connection aborted=, =ConnectionReset=    |
+| worktree_race          | infra  | =git worktree add= returned non-zero exit (255)              |
+| worktree_collision     | infra  | =already checked out= or =already exists=                    |
+| broker_tool_format_gap | infra  | text_output announces calls (=Here are the function calls...=) but tool_calls=0 / edits=0 — broker did not honor OpenAI tool-call contract |
+| append_only_violation  | model  | edit on a DEC-locked / append-only doc (B11-shaped task) — needs spec ground truth |
+| fab_uuid               | model  | =analysis.id_fabrication_count > 0= OR =wrap_categories.creative > 0= |
+| bracket_imbalance      | model  | regex =\]\)= without paired =\[\[=, =\]\]\]\]=, or =\[\[\[\[= in any new_string |
+
+* 2. Round-by-round occurrence table
+
+Counts are *cells with at least one occurrence of class*.  ~n_cells~ is
+the on-disk ~cell_result.json~ count — actual run sizes are larger
+(R18 wrote 140 results but 128 made it to disk after consolidation
+and the v2/ split).
+
+| class                  | R15 | R16 | R17 | R18 | R19 | total |
+|------------------------+-----+-----+-----+-----+-----+-------|
+| n_cells                |  49 |  54 |  55 | 128 |  73 |   359 |
+| silent_noop            |   2 |   4 |   7 |  13 |  12 |    38 |
+| runaway_reasoning      |   0 |   1 |   0 |   1 |   0 |     2 |
+| scope_violation        |   0 |   0 |   0 |   0 |   0 |     0 |
+| destructive_edit       |   - |   - |   - |   * |   - |     * |
+| under_count            |   - |   - |   - |   - |   - |     - |
+| over_count             |   - |   - |   - |   - |   - |     - |
+| malformed_output       |   - |   - |   - |   - |   - |     - |
+| max_iter_reached       |   5 |   1 |   0 |   5 |  11 |    22 |
+| http_error_402         |   0 |   0 |   0 |   0 |   0 |     0 |
+| http_error_5xx         |   0 |   0 |   0 |   0 |   0 |     0 |
+| plan_parse_failed      |   0 |   0 |   1 |   0 |   0 |     1 |
+| runtime_exception      |   0 |   3 |   1 |   0 |   2 |     6 |
+| tool_misuse            |   0 |   0 |   1 |   0 |   0 |     1 |
+| tcp_drop               |   0 |   0 |   3 |   0 |   5 |     8 |
+| worktree_race          |   0 |   0 |   1 |  29 |   0 |    30 |
+| worktree_collision     |   0 |   0 |   0 |   0 |   0 |     0 |
+| broker_tool_format_gap |   0 |   0 |   0 |   * |   5 |     5 |
+| append_only_violation  |   - |   - |   - |   - |   - |     - |
+| fab_uuid               |   2 |   2 |   0 |   7 |   2 |    13 |
+| bracket_imbalance      |   4 |   8 |   9 |  16 |  16 |    53 |
+
+Legend: =0= = none seen, =-= = not auto-detectable from JSON,
+=*= = present but not counted by automated scan (see notes).
+
+Notes:
+- *destructive_edit, malformed_output (org/elisp/python validity beyond
+  brackets), under_count, over_count, append_only_violation* all need
+  ground-truth from the brief or post-edit AST/parse — they exist in
+  the runs (the R18 v2 quality-judge note reproduces ≥6 of them) but
+  are *not* in cell_result.json. R20 should ship ~scripts/quality_lint.py~.
+- *broker_tool_format_gap* in R18: the most catastrophic case was R18
+  v1 K8-deepseekV3 (live-log: ~Here are the function calls...~ then
+  =stop=, 0 tool_calls, KILLED at 02:00 EDT after 5 min / 96 cells).
+  That cell did *not* write a cell_result.json — the harness aborted
+  the run. R18 v2 K2-kimi-k2.6 on DeepInfra wrote 27,013 chars of
+  analysis text with finish_reason=length / 0 tool_calls and IS
+  counted (under runaway_reasoning).
+- *worktree_race* in R18: 29 cell_result.json rows on disk show the
+  =git worktree add ... returned non-zero exit status 255= signature
+  (10 in v2, 19 in v3). The R18 quality-judge note estimates *up to 90
+  total* cells died here, which would mean ~60 never wrote JSON.
+
+* 3. Per-class first-occurrence + root cause + fix-applied + still-occurring
+
+| class                  | first | first cell                                               | root cause                                                              | fix applied                                                  | still occurring? |
+|------------------------+-------+----------------------------------------------------------+-------------------------------------------------------------------------+--------------------------------------------------------------+------------------|
+| silent_noop            | R15   | layer1/B1/K4-gptoss120b__bt_pb_m1_tb_s1                  | model emits no plan and no edits — under-tooled or over-cautious        | R17 added =adaptive_abort= (2 consecutive silent iters)      | yes (R19: 12)    |
+| runaway_reasoning      | R16   | layer1/B1/K3-deepseekR1                                  | reasoning model burns tokens on plan, never calls tools                 | partial: token-budget cap; not enforced for analysis-only    | yes (R18 K2)     |
+| scope_violation        | -     | -                                                        | (none seen on disk; scope_strict dial does its job)                     | =scope_strict=True= default                                  | no               |
+| destructive_edit       | R15   | (R18 v2 quality judge: K6 B1 table-mangle, K1 B7 unreachable code) | model rewrites unrelated content / introduces unreachable AST           | not yet — only judged by hand                                | yes              |
+| under_count / over_count | R15 | (visible in K11 R18 B1 trailing =])= count drift)         | model miscounts requested edits; brief doesn't pin floor                | partial: per-task =expected_diff_floor= proposed             | yes              |
+| malformed_output       | R15   | (subsumed by bracket_imbalance below)                     | model emits invalid org / elisp                                         | not yet                                                      | yes              |
+| max_iter_reached       | R15   | layer3_d8_minimal/B1/K7-qwen72b__bt_pb_m1_tm_s1          | minimal-tools dial + tight brief; model spins without progress          | R16 raised cap 8→16; R17 trimmed playbook                    | yes (R19: 11)    |
+| http_error_402         | -     | -                                                        | (none on disk; credit watcher pre-empts)                                | credit-watcher loop polls every 5 min, floor=$5             | no               |
+| http_error_5xx         | -     | -                                                        | (none; OR-side fallback shields)                                        | provider chains                                              | no               |
+| plan_parse_failed      | R17   | layer3_d6_inline/B1/K1-qwen30__bt_pi_m1_tb_s1            | inline playbook + qwen30 produced unparseable plan                      | parser tightened in R18 (no hits since)                      | no               |
+| runtime_exception      | R16   | layer1/B1/K10-deepseekCv2 (=deepseek/deepseek-coder= bad ID) | dropped/renamed model id still in PIN_MAP                               | R17 cleaned VARIANTS list; one off-list ID still slipped     | yes (R19 json-parse) |
+| tool_misuse            | R17   | layer1/B1/K19-qwen25c-32b__bt_pb_m1_tb_s1                | OpenRouter: =No endpoints found that support tool use=                  | R18 dropped K19 from variants                                | no               |
+| tcp_drop               | R17   | layer1/B1/K7-qwen72b (=IncompleteRead(297)=)             | OR streaming connection dropped mid-response                            | not yet — pure infra                                         | yes (R19: 5)     |
+| worktree_race          | R17   | layer1/B1/K13-deepseekV4__bt_pb_m1_tb_s1                 | parallel ~git worktree add~ on shared repo metadata races               | R18 v2/v3: none — quality-judge calls for filesystem mutex   | yes (R18: 29 / latent in R20+) |
+| worktree_collision     | -     | -                                                        | (no =already exists= signature seen — R18 used unique timestamps)       | timestamp suffix per worktree                                | no               |
+| broker_tool_format_gap | R18   | v1 K8-deepseekV3 (live-log diagnosis); R18 v2 K2-kimi-k2.6 on DeepInfra (27k chars / length / 0 tool_calls); R19 K8-deepseekV3 ×5 (re-emergence) | broker (DeepInfra esp.) does not translate model-native pre-action narration into OpenAI =tool_calls=; ~allow_fallbacks: False= turns it from flaky into fatal | R18 v1→v2: reverted ~allow_fallbacks: False~. R18 v3: re-pinned K2/K15/K17. =provider.ignore= deny-list proposed. | yes (R19 K8 ×5)  |
+| append_only_violation  | R15   | (B11 spec is append-only; not auto-detected)             | model edits in middle of decisions.org instead of appending             | not yet                                                      | yes              |
+| fab_uuid               | R15   | layer1/B1/K7-qwen72b (=creative_wrap=1=)                 | model invents UUIDs (=12345678-1234-...=) instead of using prefetch IDs | partial: =wrap_categories.creative= flag exists; not penalized in mech | yes (R18: 7, R19: 2) |
+| bracket_imbalance      | R15   | layer1/B1/K8-deepseekV3                                  | model emits =])=, =]]]]=, =[[[[= in org-mode link wraps                 | not yet — quality-judge calls for regex penalty (-3 mech)    | yes (R19: 16, the *most-frequent* failure mode in R19) |
+
+* 4. R20+ guard rails needed
+
+Ranked by expected reduction in noise / cost.
+
+| # | guard                                       | targets                          | shape                                                                                           | pre-condition |
+|---+---------------------------------------------+----------------------------------+-------------------------------------------------------------------------------------------------+---------------|
+| 1 | pre-create worktrees serially, then parallel-run | worktree_race                    | before parallel pass, for each cell run ~git worktree add~ with a filesystem mutex; only the run loop is concurrent | one-line harness change in =scripts/_round*_dials.py= run() |
+| 2 | =scripts/quality_lint.py= post-edit pass    | bracket_imbalance, fab_uuid, malformed_output, destructive_edit | regex over diff for =\]\)= (without =\[\[=), =\]\]\]\]+=, =\[\[\[\[+=, =\b[0-9a-f]{8}-[0-9a-f]{4}-...= not in known_ids; AST walk for duplicate =return= in same function body | 1 day to ship; mechs in R20 leaderboard |
+| 3 | OpenRouter ~provider.ignore~ deny-list       | broker_tool_format_gap           | per-model: =ignore: ["DeepInfra"]= for kimi-k2.6; =ignore: ["SiliconFlow"]= for qwen3-coder-30b; =ignore: ["AkashML"]= for llama-70b | 5 lines in PROVIDER_PINS — see ~docs/notes/2026-05-08-r18-providers.org~ §6 |
+| 4 | per-task =expected_diff_floor=               | silent_noop on no-op-trap tasks (B20-shape) | per-task =expected_diff_floor= int; if 0, abstain scored 12-15 not 0; if >0, silent_noop scored 0 | per-task field in tasks fixture; ~10 LOC in scoring |
+| 5 | iter cap proportional to plan steps          | max_iter_reached, runaway_reasoning | replace fixed 16-iter cap with =max(8, 2*plan_steps)= so simple tasks fail fast and rich tasks have headroom | 1-line scoring change |
+| 6 | tool_call format gate at first iter          | broker_tool_format_gap           | if first iter returns finish=stop AND tool_calls=0 AND text matches "function calls"/"i'll call", abort and re-route to next pin | 20 LOC in run loop; ~zero overhead on healthy paths |
+| 7 | bracket-validator gate per K7-qwen72b        | bracket_imbalance (concentrated on K7) | post-edit hook: parse diff with =org-link= validator; if any unbalanced =[[ ]]=, reject + retry | shipped ahead of K7 promotion |
+| 8 | fab-UUID predicate hardening                 | fab_uuid                         | extend =wrap_categories.creative= to flag UUIDs not in =prefetch.known_ids_count= set; mech penalty -10 | tighten predicate in =analysis= step |
+| 9 | append-only DEC validator                    | append_only_violation            | for files with =:APPEND_ONLY: t= property, reject any edit whose old_string is not the file's last 200 chars | 30 LOC in edit_file tool |
+
+* 5. Infrastructure-failure rate vs model-behavior rate per round
+
+A cell is *infra-failed* if it has any of {max_iter_reached, http_402,
+http_5xx, plan_parse_failed, runtime_exception, tcp_drop, worktree_race,
+worktree_collision, broker_tool_format_gap}; *model-failed* if any of
+{silent_noop, runaway_reasoning, scope_violation, tool_misuse,
+fab_uuid, bracket_imbalance}. A cell can be both. Rates use ~n_cells~
+on disk (lower bound — cells that never wrote JSON not counted).
+
+| round | n_cells | infra-fail cells | model-fail cells | infra rate | model rate | both |
+|-------+---------+------------------+------------------+------------+------------+------|
+| R15   |      49 |                5 |                8 |      10.2% |      16.3% |    1 |
+| R16   |      54 |                4 |               14 |       7.4% |      25.9% |    2 |
+| R17   |      55 |                5 |               16 |       9.1% |      29.1% |    1 |
+| R18   |     128 |                5 |               36 |       3.9% |      28.1% |    1 |
+| R19   |      73 |               23 |               29 |      31.5% |      39.7% |   12 |
+
+*Reading R18 carefully.* The on-disk infra-rate of 3.9% looks
+deceptively low because the 90-ish R18 v2 worktree-fail cells from the
+quality-judge audit don't appear in cell_result.json; they show up in
+the live log as missing variants. If we imputed those (90 worktree +
+the 19 v3 worktree on-disk + 10 v2 on-disk), R18 infra-rate is ~70%
+of the run, dwarfing the 28% model-rate. *R18 was an
+infrastructure-bound round*, not a model-quality round.
+
+*R19 is the alarm.* Infra-rate 31.5% on disk is the highest in the
+arc, driven by max_iter_reached (11) + tcp_drop (5) + broker_tool_format_gap
+(5 K8-deepseekV3 cells where the v1 issue regressed). R19 also has the
+highest model-rate (39.7%), driven mostly by bracket_imbalance (16 of
+73 = 22%). The two together mean *only ~30% of R19 cells were
+clean-infra+clean-model* — leaderboard trust on R19 is correspondingly
+low without the quality_lint pass.
+
+*Trend.* Model-rate has been climbing R15→R19 (16% → 26% → 29% → 28%
+→ 40%) because the variant pool expanded (K10-K19 added in R16-R17,
+then more reasoning models in R18) and the brief got tighter in R17+,
+exposing more bracket / fab-UUID failures in tail-quality models.
+Infra-rate is volatile — R17 stable, R18 hidden-bad, R19 visible-bad —
+so guards #1 (worktree mutex) and #3 (provider deny-list) plus #6
+(first-iter tool_call gate) are the highest-leverage shipped-before-R20
+items.
+
+* Appendix: scan provenance
+
+- Scan script: ~/tmp/scan_failure_modes.py~ (deterministic, no LLM).
+- Inputs: every ~cell_result.json~ under
+  ~scripts/_round{15,16,17,18,19}_dials_artifacts/~ — 359 files total.
+  R18 includes both the top-level (v3) layout and the ~v2/~ subtree.
+- Cross-references:
+  - ~docs/wiki/2026-05-08-r18-live-log.org~ — R18 v1/v2/v3 + R19-R23 narrative
+  - ~docs/notes/2026-05-08-r18-quality-judge.org~ — destructive-edit / quality re-rank
+  - ~docs/notes/2026-05-08-r18-providers.org~ — broker tool-format gaps + R19+ pins
+- Caveat: cells that never wrote ~cell_result.json~ (worktree-race
+  before run-start, R18 v1 silent harness skips) are *not* in the
+  counts. Infra-rate per round is therefore a lower bound; R18's true
+  infra-rate is materially higher than the on-disk 3.9%.

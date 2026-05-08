@@ -1,0 +1,275 @@
+:PROPERTIES:
+:ID:       2026-05-08-cross-round-best-strategy
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: Cross-round best (variant, dial, prompt) per task shape — R20 routing matrix
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:routing:r20:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Mined 562 cells across R15, R16, R17, R18 (v1+v2), and R19
+to find the best (variant, dial, prompt-shape) combination per task
+shape. The dominant dial =bt_pb_m1_tb_s1= (tight brief / both-prefetch
+/ manager-on / tool-broad / scope-strict) ran 496 of 562 cells — its
+ablations (~11 cells each) carry weak signal for most tasks but
+suggest =bt_pi_m1_tb_s1= (inline-only prefetch) is the B1 winner.
+Per-task winners separate cleanly: K1-qwen30 dominates wiki-edit
+volume + cost; K2-kimi-k2.6 is the small-atomic frontier; K5-claude
+holds DEC-draft (B11) by 8 quality units but is FOSS-banned; K7-qwen72b
+is the only consistent code-edit (B7) winner; K11-qwen3coder takes
+elisp (B25) at 20 vs runner-up 12 but on n=1. BK1-BK5 long-horizon
+fixtures are wired but unmeasured — R20 first samples.
+
+*Expanded.* This doc collapses the leaderboard view from R15-R19 down
+to a routing decision per task family. The §8 Python literal drops
+directly into =scripts/_round20_dials.py= as =TASK_FAMILY_VARIANTS=.
+Methodology: aggregate every =cell_result.json= via the per-round
+=summary-*.json= rollups, group by (task, variant, dial), rank by
+mean score with sample-count tiebreaker, then collapse tasks into
+families. Caveats: tied-zero floors (B13/B20/B26) carry no signal;
+B11 has only one cell per FOSS variant; dial ablations only ran on
+B1 — every per-task "best dial" outside B1 is =bt_pb_m1_tb_s1= by
+construction.
+
+* 1. Per-task winners across R15-R19
+
+Cells aggregated: 562 total, 496 on default dial =bt_pb_m1_tb_s1=, 66
+across six B1 ablations. Ranked by mean score; ties → max → n.
+
+| task | family       | top variant     |  n | mean | max | best dial        | notes                       |
+|------+--------------+-----------------+----+------+-----+------------------+-----------------------------|
+| B1   | wiki_edit    | K7-qwen72b      |  4 | 18.0 |  20 | =bt_pi_m1_tb_s1= | dial-ablation winner, n=4   |
+| B1   | wiki_edit    | K1-qwen30       | 48 | 12.3 |  47 | =bt_pb_m1_tb_s1= | volume leader; cheapest     |
+| B5   | small_atomic | K5-claude / K2  |  6 | 18.0 |  18 | =bt_pb_m1_tb_s1= | tied; K5 sentinel, K2 FOSS  |
+| B7   | code_edit    | K7-qwen72b      |  4 |  9.0 |  24 | =bt_pb_m1_tb_s1= | only FOSS winner; bimodal   |
+| B11  | dec_draft    | K5-claude-solo  |  6 | 47.5 |  50 | =bt_pb_m1_tb_s1= | ceiling; FOSS gap = 8 qpts  |
+| B11  | dec_draft    | K2-kimi-k2.6    |  2 | 39.5 |  50 | =bt_pb_m1_tb_s1= | best FOSS (n=2)             |
+| B13  | wiki_edit    | (all tied 2.0)  |  - |  2.0 |   2 | =bt_pb_m1_tb_s1= | floor task — drop           |
+| B20  | wiki_edit    | (all tied 0.0)  |  - |  0.0 |   0 | =bt_pb_m1_tb_s1= | broken fixture — drop       |
+| B25  | elisp        | K11-qwen3coder  |  1 | 20.0 |  20 | =bt_pb_m1_tb_s1= | n=1; promote in R20         |
+| B25  | elisp        | K2 / K8         |  2 | 12.0 |  12 | =bt_pb_m1_tb_s1= | best at n≥2 (K8 cheapest)   |
+| B26  | wiki_edit    | (all tied 5.0)  |  - |  5.0 |   5 | =bt_pb_m1_tb_s1= | floor task                  |
+
+* 2. Per-task-family routing recommendation
+
+Family taxonomy: =wiki_edit= (B1, B13, B20, B26), =code_edit= (B7),
+=elisp= (B25), =dec_draft= (B11), =small_atomic= (B5), =long_horizon=
+(BK1-BK5, fixtures only — no measured cells yet).
+
+| family         | primary       |  n | mean | $/qpt    | secondary      | tertiary       | sentinel       |
+|----------------+---------------+----+------+----------+----------------+----------------+----------------|
+| wiki_edit      | K1-qwen30     | 90 |  9.4 | $0.00058 | K11-qwen3coder | K17-glm46      | K5-claude-solo |
+| code_edit      | K7-qwen72b    |  4 |  9.0 | $0.00217 | K1-qwen30      | K6-llama70b    | K5-claude-solo |
+| elisp          | K2-kimi-k2.6  |  2 | 12.0 | $0.00064 | K11-qwen3coder | K1-qwen30      | K5-claude-solo |
+| dec_draft      | K2-kimi-k2.6  |  2 | 39.5 | $0.00223 | K8-deepseekV3  | K1-qwen30      | K5-claude-solo |
+| small_atomic   | K2-kimi-k2.6  |  2 | 18.0 | $0.00099 | K8-deepseekV3  | K7-qwen72b     | K5-claude-solo |
+| long_horizon   | K1-qwen30 ?   |  0 |    - | -        | K7-qwen72b ?   | K11-qwen3coder | K5-claude-solo |
+
+Notes:
+
+- *wiki_edit* — K1 is workhorse; spend headroom allows K11 best-of-N
+  on B1 reference cells (R17: K11 +14% quality @ 34× cost).
+- *code_edit* — K7 is the only FOSS variant scoring ≥9 on B7. K5
+  scores 0/6 (Claude refuses without more context). K11 0/1.
+- *elisp* — K11's 20.0/n=1 is the bench-high but unproven. K2/K8
+  tie at 12.0, K8 cheapest. R20 must resolve via sample-up.
+- *dec_draft* — K1 bimodal (50,50,0,0,0,12.5) → best-of-3 K1 is the
+  right strategy. K8 36/n=1 competitive at 1/4 K2 cost.
+- *small_atomic* — K2+K5 both 18/18. K8 cheaper at 14/18. K7 has
+  max 21 but mean 11.5 → best-of-3 candidate.
+- *long_horizon* — BK1-BK5 fixtures wired but unmeasured. R20 first
+  samples. Default bet: K7 for BK1/BK3/BK4 (code prior), K1 for BK5
+  (wiki cheap), K11 for BK2 (premium ref).
+
+* 3. Optimal prompt template + tool surface + sample size per task
+
+Tool surfaces are defined in =scripts/_round19_long_horizon_tasks.py=
+(=TOOLS_REFACTOR=, =TOOLS_NEW_CODE=, =TOOLS_BUG_FIX=, =TOOLS_WIKI=)
+and =scripts/_round18_dials.py= (=BROAD_TOOLS_FULL=, =MIN_TOOLS=,
+=INLINE_TOOLS=). Brief modes are =tight= (=bt=) vs =loose= (=bl=);
+prefetch is =both= (=pb=), =inline= (=pi=), or =text= (=pt=).
+
+| task | brief | prefetch | manager | tool surface           | n (R20) | rationale                                 |
+|------+-------+----------+---------+------------------------+---------+-------------------------------------------|
+| B1   | tight | inline   | on      | wiki + grep            | 15      | =bt_pi_m1= won n=4 ablation @ mean 18     |
+| B5   | tight | both     | on      | min (read+edit+grep)   | 10      | small-atomic; broad surface unused        |
+| B7   | tight | both     | on      | broad + run_pytest     |  8      | code edit needs verifier loop             |
+| B11  | tight | both     | on      | min (no JSON-mode)     | 12      | best-of-3 K1; S5 retired (R18 backfire)   |
+| B13  | -     | -        | -       | -                      |  0      | floor task; drop from R20                 |
+| B20  | -     | -        | -       | -                      |  0      | broken fixture; drop                      |
+| B25  | tight | both     | on      | broad + run_python     | 10      | re-sample elisp; high-value, n=1 today    |
+| B26  | -     | -        | -       | -                      |  3      | floor at 5.0; keep small probe only       |
+| BK1  | tight | both     | on      | TOOLS_REFACTOR_PY      |  8      | rename across files; pytest verify        |
+| BK2  | tight | both     | on      | TOOLS_NEW_CODE         |  8      | new CLI + new test                        |
+| BK3  | tight | both     | on      | TOOLS_BUG_FIX          |  8      | fix bug given failing test                |
+| BK4  | tight | both     | on      | TOOLS_NEW_CODE         |  8      | dataclass field + propagate               |
+| BK5  | tight | both     | on      | TOOLS_WIKI             | 10      | wiki link normalization across pages      |
+
+Prompt-template bullets surviving all rounds:
+
+- =judge-fixes= header (R17 carry-forward) — kills K7/K11 fab-UUIDs
+- B11 append-only enforcement (R17→R18 carried)
+- prefetched candidate list inline (=pi= on B1, =pb= elsewhere)
+- per-task tool-surface narrowing (broad on small-atomic wastes plan)
+- *NEW R20:* drop S5 JSON-mode until N2 (JSON→org renderer) ships
+- *NEW R20:* wire S1-S4 (hedged / best-of-N / critique / specialty-route)
+
+* 4. Stable winners vs noisy task shapes
+
+Stability measured by stdev across 4+ samples. Tasks with 0 stdev are
+either floor tasks (everyone scores the same) or genuinely solved.
+
+| task | most-sampled variant | n  | stdev | mean | reading                                      |
+|------+----------------------+----+-------+------+----------------------------------------------|
+| B1   | K1-qwen30            | 72 | 15.78 | 11.2 | NOISY — mode-jumps between 0 and 47          |
+| B1   | K6-llama70b          | 45 |  5.40 |  2.8 | stable-low; K6 doesn't help on B1            |
+| B1   | K8-deepseekV3        | 50 |  3.21 |  1.4 | stable-low; worktree errors hid signal       |
+| B11  | K1-qwen30            |  6 | 24.58 | 20.8 | BIMODAL — best-of-N is the answer            |
+| B11  | K5-claude-solo       |  6 |  2.26 | 47.5 | very stable at the ceiling                   |
+| B13  | (any)                | -  |  0.00 |  2.0 | floor task                                   |
+| B20  | (any)                | -  |  0.00 |  0.0 | broken fixture                                |
+| B25  | K1-qwen30            |  6 |  2.45 | 10.0 | stable; nudge to K11/K2 won't break it       |
+| B25  | K5-claude-solo       |  6 |  0.41 |  7.8 | very stable but plateau (under K11)          |
+| B26  | (any)                | -  |  0.00 |  5.0 | floor task                                   |
+| B5   | K5-claude-solo       |  6 |  0.00 | 18.0 | solved                                       |
+| B5   | K7-qwen72b           |  4 |  7.77 | 11.5 | bimodal — best-of-N could lift K7 to 21      |
+| B7   | K7-qwen72b           |  4 | 10.10 |  9.0 | NOISY — max 24 / min 0                       |
+| B7   | K5-claude-solo       |  6 |  0.00 |  0.0 | Claude refuses; not a noise problem          |
+
+*Stable winners* (low-stdev, durable): B5/K5, B5/K2, B11/K5, B13 (all),
+B26 (all), B25/K5, B25/K1.
+
+*Noisy / best-of-N candidates* (stdev ≥ 8 with high max): B1/K1
+(stdev 15.78, max 47), B11/K1 (stdev 24.58, max 50), B7/K7 (stdev
+10.10, max 24), B5/K7 (stdev 7.77, max 21).
+
+*Floor / drop* (no signal): B13, B20, B26.
+
+* 5. Cross-round dial-ablation findings (B1 only)
+
+Ablations ran only on B1, n=11 per dial. =bt_pb_m1_tb_s1= is base.
+
+| dial            | meaning              |  n | mean | max  | delta |
+|-----------------+----------------------+----+------+------+-------|
+| =bt_pi_m1_tb_s1= | inline prefetch      | 11 | 11.5 | 20.0 | +2.4  |
+| =bl_pb_m1_tb_s1= | loose brief          | 11 | 10.7 | 18.0 | +1.6  |
+| =bt_pb_m1_tb_s1= | baseline             | 22 |  9.1 | 47.0 |  0.0  |
+| =bt_pb_m1_tb_s0= | scope non-strict     | 11 |  9.1 | 12.0 |  0.0  |
+| =bt_pb_m0_tb_s1= | manager OFF          | 11 |  8.7 | 18.0 | −0.4  |
+| =bt_pb_m1_tm_s1= | tool surface MIN     | 11 |  8.6 | 15.0 | −0.5  |
+| =bt_pt_m1_tb_s1= | prefetch text-only   | 11 |  -   |  -   | n/a   |
+
+Reading: inline-prefetch (=bt_pi=) is a real signal on B1 (+2.4 at
+n=11). Loose-brief (=bl=) +1.6 may be K7-specific (K7 was the only
+variant scoring 18+ on =bl_pb=). R20 confirms via A/B =bt_pi= vs
+=bt_pb= for K1+K7 on B1 at n=15. Hold dial-ablations to B1+B7 only
+(only tasks with baseline stdev >3.0).
+
+* 6. Comparing this analysis with prior synthesis docs
+
+| Claim                                | R17 doc | R18 doc | This (R15-R19) | Hold? |
+|--------------------------------------+---------+---------+----------------+-------|
+| K8-deepseekV3 = Pareto winner        | yes     | (rework)| confirmed cheap, but n is too low post-worktree-fix | Y, with caveat |
+| K1-qwen30 = workhorse cheapest       | yes     | yes     | confirmed: 90 wiki cells, $0.00058/qpt | YES |
+| K5-claude only as ceiling sentinel   | yes     | yes     | confirmed: dominates B5+B11; FOSS rule excludes | YES |
+| K11-qwen3coder cost-inefficient      | yes     | yes     | confirmed B1+B5; CONTRA on B25 (20.0/n=1) | YES with elisp exception |
+| K7-qwen72b mech-inflated             | -       | yes     | confirmed on B1 (mean 7.1); but B7 is REAL | mixed |
+| K2-kimi-k2.6 underweight (n=2)       | yes     | yes     | confirmed: n=2 across most tasks; need n=10 R20 | YES |
+| S5 JSON-mode backfires on B11        | -       | yes     | confirmed via this analysis (K1 bimodal 50/0/0) | YES |
+| Drop K13/K16/K18/K19 (broken)        | yes     | yes     | confirmed: 0 useful cells | YES |
+
+Three R20 shifts vs prior synthesis:
+
+- *Elisp (B25) is the one task where K11 may earn its cost.* Hidden
+  in R17/R18 by n=1. R20: K11×5 + K2×5 + K8×5 on B25 settles it.
+- *B7 has a real K7 winner.* Mech-inflation critique applies only to
+  wiki_edit (B1); on code_edit (B7), K7 is the only FOSS variant ≥6.
+- *B1 is noisier than leaderboards show.* K1 stdev 15.78 / max 47 →
+  best-of-3 K1 plausibly matches K7 premium. Wire S2 for B1.
+
+* 7. R20 launch matrix — TASK_FAMILY_VARIANTS table
+
+Full (task × variant × dial × n × strategy) matrix → §8 Python literal
+below. Total ~228 cells, ~$7 (under R18-recommended $50 cap). Plus B1
+ablation A/B (n=8) + B7 ablation A/B (n=6). Drop-list: B13/B20
+(floor/broken), K9/K13/K16/K18/K19 (dominated), S5 JSON-mode
+(retired until N2 ships), K15 (side-pool only).
+
+* 8. =TASK_FAMILY_VARIANTS= Python literal (paste into harness)
+
+#+begin_src python
+# R20 routing matrix — derived from R15-R19 cross-round analysis
+# (562 cells, mean+max+stability ranking).
+# See docs/notes/2026-05-08-cross-round-best-strategy-per-shape.org
+TASK_FAMILY_VARIANTS = {
+    "B1": [
+        ("K1-qwen30",      "bt_pi_m1_tb_s1", 15, "best_of_3"),
+        ("K7-qwen72b",     "bt_pi_m1_tb_s1", 10, "hedged"),
+        ("K11-qwen3coder", "bt_pb_m1_tb_s1",  5, "reference"),
+        ("K17-glm46",      "bt_pb_m1_tb_s1",  8, "sweep"),
+        ("K5-claude-solo", "bt_pb_m1_tb_s1",  3, "sentinel"),
+    ],
+    "B5": [
+        ("K2-kimi-k2.6",   "bt_pb_m1_tb_s1", 10, "default"),
+        ("K8-deepseekV3",  "bt_pb_m1_tb_s1", 10, "default"),
+        ("K7-qwen72b",     "bt_pb_m1_tb_s1",  6, "best_of_3"),
+        ("K5-claude-solo", "bt_pb_m1_tb_s1",  3, "sentinel"),
+    ],
+    "B7": [
+        ("K7-qwen72b",     "bt_pb_m1_tb_s1",  8, "best_of_3"),
+        ("K1-qwen30",      "bt_pb_m1_tb_s1", 10, "sweep"),
+        ("K6-llama70b",    "bt_pb_m1_tb_s1",  5, "sweep"),
+    ],
+    "B11": [
+        ("K2-kimi-k2.6",   "bt_pb_m1_tb_s1", 10, "best_of_3"),
+        ("K8-deepseekV3",  "bt_pb_m1_tb_s1",  8, "default"),
+        ("K1-qwen30",      "bt_pb_m1_tb_s1", 12, "best_of_3"),
+        ("K5-claude-solo", "bt_pb_m1_tb_s1",  3, "ceiling"),
+    ],
+    "B25": [
+        ("K11-qwen3coder", "bt_pb_m1_tb_s1",  5, "confirm_or_drop"),
+        ("K2-kimi-k2.6",   "bt_pb_m1_tb_s1",  5, "sweep"),
+        ("K8-deepseekV3",  "bt_pb_m1_tb_s1",  5, "sweep"),
+        ("K1-qwen30",      "bt_pb_m1_tb_s1",  5, "sweep"),
+    ],
+    "B26": [
+        ("K1-qwen30",      "bt_pb_m1_tb_s1",  3, "regression"),
+    ],
+    "BK1": [  # rename across files
+        ("K7-qwen72b",     "bt_pb_m1_tb_s1",  5, "first_look"),
+        ("K1-qwen30",      "bt_pb_m1_tb_s1",  5, "first_look"),
+    ],
+    "BK2": [  # new code + new test
+        ("K11-qwen3coder", "bt_pb_m1_tb_s1",  3, "premium_probe"),
+        ("K7-qwen72b",     "bt_pb_m1_tb_s1",  5, "first_look"),
+        ("K2-kimi-k2.6",   "bt_pb_m1_tb_s1",  3, "first_look"),
+    ],
+    "BK3": [  # bug fix given failing test
+        ("K7-qwen72b",     "bt_pb_m1_tb_s1",  5, "first_look"),
+        ("K1-qwen30",      "bt_pb_m1_tb_s1",  5, "first_look"),
+    ],
+    "BK4": [  # dataclass field + propagate
+        ("K7-qwen72b",     "bt_pb_m1_tb_s1",  3, "first_look"),
+        ("K1-qwen30",      "bt_pb_m1_tb_s1",  3, "first_look"),
+    ],
+    "BK5": [  # wiki link normalization across pages
+        ("K1-qwen30",      "bt_pb_m1_tb_s1",  8, "first_look"),
+        ("K11-qwen3coder", "bt_pb_m1_tb_s1",  3, "premium_probe"),
+    ],
+    # Drop B13, B20 — floor / broken in current harness
+}
+#+end_src
+
+* Cross-references
+
+- =scripts/_round{15,16,17,18,19}_dials_artifacts/= — raw cell data
+- =scripts/_round{15,16,17,18,19}_dials_artifacts/summary-*.json= — per-round rollups
+- =scripts/_round19_long_horizon_tasks.py= — BK1-BK5 fixtures + verifiers
+- [[file:../wiki/2026-05-08-r17-synthesis.org]] — R17 retro
+- [[file:../wiki/2026-05-08-r18-synthesis.org]] — R18 retro + R19 portfolio plan
+- [[file:../wiki/2026-05-08-r18-live-log.org]] — R18 → R19 narrative
+- =/tmp/aggregate_rounds.py= + =/tmp/aggregate_rounds2.py= — aggregation scripts (562 cells)

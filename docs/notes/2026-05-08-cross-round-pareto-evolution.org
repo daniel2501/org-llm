@@ -1,0 +1,242 @@
+:PROPERTIES:
+:ID:       cross-round-pareto-evolution-r15-r19
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: Cross-round Pareto frontier evolution R15 -> R16 -> R17 -> R18 -> R19
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:r15:r16:r17:r18:r19:pareto:cost:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Five rounds traced a clean FOSS Pareto march: K1-qwen30
+went from $0.0005/u (R15, n=14) to *$0.00047/u (R19, n=28)* while
+K5-claude-solo drifted up $0.0106 -> *$0.0242/u*. *FOSS-vs-Claude $/u
+gap widened from 21x to 51x.* K11/K9/K7 dominated multiple times; K2
+fell off (R18 broker) and recovered big (R19).
+
+*Expanded.* Two structural shifts: (1) Claude's $/u drifted *up* every
+round (longer prose, more tool calls), eroding the FOSS bar; (2) FOSS
+$/u held or improved as tasks got harder (R19 added long-horizon
+BK1-BK5), implying real per-token efficiency. K11-qwen3coder is the
+standing case study in "premium FOSS that never earned its premium" --
+dominated R17 (35x K1, +14% mech), R18 (40x K1, equal), R19 (22x K1).
+
+* Section 1 -- Per-round leaderboards
+
+Cost = round total per variant; score = summary mech. =$/u= = cost /
+score (lower better). K5-claude-solo informational only (FOSS-only
+routing rule).
+
+** R15 (49 cells, $1.620, 60 min wall)
+
+| variant         | cells | score |  $cost |    $/u | rank |
+|-----------------+-------+-------+--------+--------+------|
+| K1-qwen30       |    14 |   122 | 0.056  | 0.0005 |    1 |
+| K7-qwen72b      |    14 |   109 | 0.225  | 0.0021 |    3 |
+| K2-kimi-k2.6    |     8 |   103 | 0.216  | 0.0021 |    3 |
+| K5-claude-solo  |     8 |    90 | 0.985  | 0.0106 |    - |
+| K9-mixtral      |     1 |    10 | 0.085  | 0.0085 |  n=1 |
+| K8-deepseekV3   |     1 |     6 | 0.005  | 0.0008 |    2 |
+| K6-llama70b     |     1 |     2 | 0.009  | 0.0043 |  n=1 |
+| K3-deepseekR1   |     1 |     0 | 0.026  |    inf | dead |
+| K4-gptoss120b   |     1 |     0 | 0.013  |    inf | dead |
+
+** R16 (54 cells, $2.071, 93 min wall)
+
+| variant         | cells | score |  $cost |    $/u | rank |
+|-----------------+-------+-------+--------+--------+------|
+| K1-qwen30       |    14 |   149 | 0.083  | 0.0006 |    1 |
+| K7-qwen72b      |    14 |   170 | 0.296  | 0.0017 |    2 |
+| K2-kimi-k2.6    |     8 |    76 | 0.218  | 0.0029 |    4 |
+| K5-claude-solo  |     8 |    88 | 1.052  | 0.0116 |    - |
+| K8-deepseekV3   |     1 |     6 | 0.005  | 0.0008 |    3 |
+| K6-llama70b     |     1 |     4 | 0.002  | 0.0006 |  n=1 |
+| K11-qwen3coder  |     1 |     8 | 0.082  | 0.0102 |  n=1 |
+| K13-deepseekV4  |     1 |    10 | 0.073  | 0.0073 |  n=1 |
+| K9-mixtral      |     1 |     8 | 0.162  | 0.0202 | n=1 dom |
+
+** R17 (59 cells, $4.449, 18 min wall, 8-way parallel)
+
+| variant            | cells | score |  $cost |    $/u | rank |
+|--------------------+-------+-------+--------+--------+------|
+| K1-qwen30          |    14 |    97 | 0.082  | 0.0008 |    1 |
+| K8-deepseekV3      |    10 |    79 | 0.039  | 0.0005 |   1t |
+| K11-qwen3coder     |    14 |   119 | 3.021  | 0.0254 |  dom |
+| K5-claude-solo     |     8 |    93 | 1.145  | 0.0123 |    - |
+| K2-kimi-k2.6       |     2 |    10 | 0.038  | 0.0038 |  n=2 |
+| K9-mixtral         |     1 |    10 | 0.041  | 0.0041 |  n=1 |
+| K15-kimi-thinking  |     1 |    10 | 0.041  | 0.0041 |  n=1 |
+| K17-glm46          |     1 |     8 | 0.039  | 0.0049 |  n=1 |
+| K6-llama70b        |     1 |     4 | 0.002  | 0.0006 | n=1 t |
+
+** R18 v2 (140 cells, $2.770, 28 min wall, 16-way parallel; 90/140 worktree errors)
+
+| variant            | cells | score |  $cost |    $/u | rank      |
+|--------------------+-------+-------+--------+--------+-----------|
+| K7-qwen72b         |    23 |   113 | 0.428  | 0.0038 | runtime   |
+| K6-llama70b        |    23 |    59 | 0.058  | 0.0010 | FRONTIER  |
+| K1-qwen30          |    22 |    48 | 0.048  | 0.0010 | FRONTIER  |
+| K5-claude-solo     |    12 |    93 | 1.212  | 0.0130 | -         |
+| K2-kimi-k2.6       |    15 |     9 | 0.043  | 0.0048 | broken    |
+| K8-deepseekV3      |    15 |     0 | 0.002  |    inf | broken    |
+| K9-mixtral         |     5 |     9 | 0.052  | 0.0057 | n=5 dom   |
+| K11-qwen3coder     |    10 |     8 | 0.201  | 0.0251 | DOMINATED |
+| K15-kimi-thinking  |     5 |    10 | 0.031  | 0.0031 | n=5       |
+| K17-glm46          |    10 |     8 | 0.039  | 0.0049 | dom       |
+
+** R19 (120 cells, $9.751, 48 min wall, ramped n; long-horizon tasks added)
+
+| variant            | cells | score |  $cost |    $/u | rank      |
+|--------------------+-------+-------+--------+--------+-----------|
+| K1-qwen30          |    28 |   618 | 0.293  | 0.00047 | FRONTIER |
+| K2-kimi-k2.6       |    15 |   328 | 0.863  | 0.0026 | recovered |
+| K11-qwen3coder     |    10 |   234 | 2.433  | 0.0104 | DOMINATED |
+| K17-glm46          |    10 |   222 | 0.822  | 0.0037 | climbed   |
+| K5-claude-solo     |    12 |   177 | 4.434  | 0.0242 | -         |
+| K7-qwen72b         |    10 |   108 | 0.171  | 0.0016 | held      |
+| K15-kimi-thinking  |     5 |    66 | 0.261  | 0.0040 | held      |
+| K8-deepseekV3      |    15 |    38 | 0.063  | 0.0017 | regressed |
+| K9-mixtral         |     5 |    28 | 0.379  | 0.0135 | DOMINATED |
+| K6-llama70b        |    10 |    18 | 0.029  | 0.0016 | regressed |
+
+* Section 2 -- Frontier evolution (FOSS only)
+
+Each round's Pareto-optimal FOSS set (cost <= AND score >= than every
+non-frontier variant). K5-claude-solo informational; never on FOSS
+frontier per project rule.
+
+| round | frontier set                | cheapest $/u | best $/u verdict        |
+|-------+-----------------------------+--------------+-------------------------|
+| R15   | K1, K8                      | K8 0.0008    | K1 0.0005 (best total)  |
+| R16   | K1, K8, K6 (n=1), K7        | K6 0.0006    | K1 0.0006               |
+| R17   | K1, K8                      | K8 0.0005    | K1 0.0008 (n=14 stable) |
+| R18v2 | K1, K6                      | K1 0.0010    | K1 = K6 (tie)           |
+| R19   | K1, K7 (mid-tier), K8 (low) | K1 0.00047   | *K1 0.00047 (best ever)* |
+
+*Frontier shifted 3x.* R15->R16 gained K7 (premium tier). R17: K7
+worktree-errored, K8 re-emerged. R18: K8 broker-broke, K6 climbed on.
+R19: K8 regressed, K1 absorbed all headroom -- frontier collapsed to
+one dominant variant (K1) with K7+K8 mid-tier.
+
+* Section 3 -- Variants moving toward frontier each round
+
+| variant       | R15->R16          | R16->R17          | R17->R18          | R18->R19          |
+|---------------+-------------------+-------------------+-------------------+-------------------|
+| K1-qwen30     | held (0.0005-6)   | held (0.0008)     | held (0.0010)     | *improved 0.00047* |
+| K8-deepseekV3 | held n=1          | climbed (n=10)    | broker-broken     | recovered partial |
+| K6-llama70b   | n=1 noisy         | n=1 noisy         | *climbed onto*    | regressed         |
+| K7-qwen72b    | held              | dropped (worktree)| re-emerged (runtime) | held mid    |
+| K2-kimi-k2.6  | held              | dropped (n=2)     | broken (broker)   | *recovered big*   |
+| K17-glm46     | -                 | new n=1           | held n=10         | *climbed (qual)*  |
+| K15-kimi-thk  | -                 | new n=1           | held n=5          | held              |
+
+*Climbers.* K6 (R17->R18), K17 (R18->R19), K2 (R18->R19), K1 every
+round. *K1 is the only variant that improved or held in every R15->R19
+transition.*
+
+* Section 4 -- Variants dominated by previously-inferior peers
+
+| round | dominated     | by                | margin              |
+|-------+---------------+-------------------+---------------------|
+| R16   | K9-mixtral    | K8 (was n=1 R15)  | 25x cheaper, equal q |
+| R17   | K11-qwen3coder | K1, K8 (R15-tier) | 35x cheaper, +/- q   |
+| R17   | K7-qwen72b    | K1 (was tied R15) | worktree-errored, lost  |
+| R18   | K11           | K1, K6            | 40x cheaper, equal q |
+| R18   | K7            | K1                | 2.7x cheaper, more score |
+| R18   | K9            | K6, K1            | 50x cheaper, equal q |
+| R19   | K9            | K7, K1            | 8x cheaper, +score   |
+| R19   | K11           | K1                | 22x cheaper, 2.6x score |
+| R19   | K6            | K1, K7            | dropped score 59 -> 18 |
+| R19   | K8            | K1                | dropped score 79 -> 38 |
+
+*Pattern.* K9 + K11 *consistently dominated by cheap workhorses* every
+round they ran. K7 oscillates (frontier R15-R16, dominated R18). K6
+climbed R18, fell R19. *K1 dominated something every round; was
+dominated by no variant any round.*
+
+* Section 5 -- Cost-per-quality leader per round
+
+| round | leader        |    $/u | runner-up     |    $/u | claude $/u |
+|-------+---------------+--------+---------------+--------+------------|
+| R15   | K1-qwen30     | 0.0005 | K6 (n=1)      | 0.0043 | 0.0106     |
+| R16   | K1-qwen30     | 0.0006 | K6 (n=1)      | 0.0006 | 0.0116     |
+| R17   | K8-deepseekV3 | 0.0005 | K6 (n=1)      | 0.0006 | 0.0123     |
+| R18v2 | K1-qwen30     | 0.0010 | K6-llama70b   | 0.0010 | 0.0130     |
+| R19   | *K1-qwen30*   | *0.00047* | K7/K8/K6   | 0.0016 | 0.0242     |
+
+*Trend.* K1 led 4 of 5 rounds; K8 only when K1 had limited cells (R17).
+*K1's $/u is now $0.00047 -- 51x cheaper than measured Claude
+$0.0242/u.* Improvement is partly task-mix (R19 long-horizon favored
+K1), partly n=28 dilution of fixed plan-cost overhead.
+
+* Section 6 -- R20+ budget implications
+
+Claude $/u drift: 0.0106 -> 0.0116 -> 0.0123 -> 0.0130 -> *0.0242*.
+Claude *2.3x more expensive*; K1 *0.94x* (6% cheaper). *Moat widened
+21x -> 51x in 5 rounds.*
+
+** "Beat Claude by Nx" at R19 prices ($0.0242/u bar)
+
+Task surface = 8 B-tasks + 5 long-horizon BK1-BK5.
+
+| target gap | budget $/u | variants x n          | est. total $ | comment           |
+|------------+------------+-----------------------+--------------+-------------------|
+| 1x parity  | 0.0242     | K11 x 15              | ~$3          | K11 already 2x    |
+| 5x cheap   | 0.0048     | K2 x 15 + K1 x 15     | ~$5          | recovered K2 hits |
+| 15x cheap  | 0.0016     | K7/K8 x 15 + K1 x 28  | ~$1.5        | mid-tier suffices |
+| *51x (R19 actual)* | *0.00047* | *K1 x 28*    | *~$0.30*     | already delivered |
+| 100x cheap | 0.00024    | LoRA on K1            | $13-22 train | K20-foss-distill  |
+
+*Punchline.* K1 at n=28 costs *$0.30 to deliver $15 of Claude-equivalent
+quality* on the same task surface. R20's budget question is no longer
+"can we afford breadth" but "what dimensions does the freed budget
+unlock" (composition, judges, distillation, self-improvement).
+
+* Section 7 -- Cost surprises across rounds
+
+| variant       | R15-cell | R16-cell | R17-cell | R18-cell | R19-cell | drift                |
+|---------------+----------+----------+----------+----------+----------+----------------------|
+| K1-qwen30     | $0.004   | $0.006   | $0.006   | $0.0021  | $0.010   | rose 2x R18->R19     |
+| K7-qwen72b    | $0.016   | $0.021   | (err)    | $0.018   | $0.017   | flat                 |
+| K8-deepseekV3 | $0.005   | $0.005   | $0.004   | $0.0001  | $0.004   | broker-bug R18 dip   |
+| K11-qwen3coder | -        | $0.082   | $0.216   | $0.020   | $0.243   | wild swing 12x range |
+| K2-kimi-k2.6  | $0.027   | $0.027   | $0.019   | $0.003   | $0.058   | recovered R19 high   |
+| K6-llama70b   | $0.009   | $0.002   | $0.002   | $0.0025  | $0.003   | flat low             |
+| K9-mixtral    | $0.085   | $0.162   | $0.041   | $0.010   | $0.076   | volatile             |
+| K15-kimi-thk  | -        | -        | $0.041   | $0.006   | $0.052   | volatile             |
+| K17-glm46     | -        | -        | $0.039   | $0.004   | $0.082   | rose 20x in 2 rounds |
+| K5-claude-solo | $0.123  | $0.132   | $0.143   | $0.101   | $0.370   | *3x R19 spike*       |
+
+** Headline surprises
+
+1. *K5-claude per-cell tripled R18->R19* ($0.101 -> $0.370). Long-horizon
+   BK1-BK5 ballooned Claude's per-task token spend -- mechanism for the
+   $0.0242/u bar.
+2. *K17-glm46 cell cost rose 20x* R18->R19 ($0.004 -> $0.082) *but score
+   rose 28x* (8 -> 222) -- $/u *improved* 0.0049 -> 0.0037. Quiet climber.
+3. *K11 per-cell ranged 12x* across rounds ($0.020-$0.243). Highest-variance
+   variant; never earned its premium any round.
+4. *K6 stayed cheap forever* ($0.002-0.009/cell) but score collapsed R19
+   (59 -> 18) -- cheapest in panel, unstable on long-horizon tasks.
+5. *K1's per-cell rose R18->R19* (0.0021 -> 0.010) yet $/u *improved*
+   (0.0010 -> 0.00047): score rose 13x while cost rose 5x -- absorbed
+   harder tasks efficiently.
+6. *K8 broker bug R18 hid a real R19 regression.* R17 frontier 0.0005/u,
+   R18 broken, R19 0.0017/u (3x worse than R17). Broken round masked
+   the loss-of-frontier story.
+7. *Round total trend.* $1.62 -> $2.07 -> $4.45 -> $2.77 -> $9.75. R17
+   was a "premium variants tested" peak; R19 is the first round where
+   *intentional spend* (n=28 K1 + long-horizon) drove totals, not
+   error-replays.
+
+* Cross-references
+
+- =scripts/_round{15..19}_dials_artifacts/= -- raw cells + stdout leaderboards
+- =scripts/_round18_dials_artifacts/v2/summary-1778220192.json= -- R18 v2
+- =docs/notes/2026-05-08-r17-pareto-routing.org= -- R17 frontier
+- =docs/notes/2026-05-08-r18-pareto.org= -- R18 frontier + dominated set
+- =docs/wiki/2026-05-08-foss-spend-headroom.org= -- 23x baseline (R19: 51x realized)
+- =docs/wiki/2026-05-08-r18-live-log.org= -- round-chain + R19 leaderboard
