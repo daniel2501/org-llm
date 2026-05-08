@@ -450,7 +450,7 @@ Replace regex-based =quality_lint.py= bracket-balance + nested
 detectors with =tree-sitter-org=. Catches multi-line link
 continuations, escaped brackets in source blocks, etc.
 
-** TODO P2-2: Headless-Emacs cell verifier
+** DONE P2-2: Headless-Emacs cell verifier
 :PROPERTIES:
 :ESTIMATE: 1 day
 :SOURCE:   r25-design §P6
