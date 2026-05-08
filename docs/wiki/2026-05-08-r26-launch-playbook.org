@@ -1,0 +1,265 @@
+:PROPERTIES:
+:ID:       r26-launch-playbook
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R26 launch playbook — operator's reference for firing + recovering
+#+FILETAGS: :wiki:bench:r26:playbook:operator:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* One-page operator's playbook for the R26 round.
+Section 1-2 cover what to verify + the single launch command.
+Section 3 maps each launcher state-machine step to its failure
+artifact + suggested recovery. Section 4 covers the post-round
+6-agent spawn pattern. Section 5-7 cover cost ceilings, cold-resume
+for a future Claude session, and K20 endpoint billing lifecycle.
+Section 8 enumerates the provider-billing alert patterns to watch
+for in =stdout.log=.
+
+*Expanded.* The R26 round is fired with a single command —
+=bash scripts/_r26_launch.sh=. The launcher walks a 6-step state
+machine (DESIGN_PATCH → PREFLIGHT → DAEMON_LAUNCHED →
+HARNESS_RUNNING → POST_HANDOFF → DONE), writes a single state file
+(=$ARTIFACTS/LAUNCH_STATE=), and on any failure prints the failed
+step + reason to stderr while leaving the state file at the failed
+step. This doc is the cheat-sheet that turns "I see [FAIL] X" into
+"do Y to recover". It is also the cold-resume protocol: if a future
+Claude session restarts mid-round, sections 1 + 6 give the exact
+sequence to determine state and either wait, kick off the post-round
+handoff manually, or archive a stale round.
+
+Cross-refs:
+- =docs/wiki/2026-05-08-r26-launch-readiness.org= — pre-launch audit
+- =docs/wiki/2026-05-08-r26-launch-checklist.org= — every prep item
+- =docs/wiki/2026-05-08-r26-boost-plan.org= — full design (1422 LOC)
+- =scripts/_r26_launch.sh= — the launcher itself (290 LOC)
+- =scripts/_r26_post_round_analysis.sh= — handoff watcher (215 LOC)
+- =scripts/_r26_self_healing_daemon.sh= — auto-action daemon
+
+* Section 1: Pre-launch sanity (T-2 min)
+
+*Summary.* Three quick checks before firing the launcher: baseline
+state, provider headroom, and absence of stale R26 sentinels. K20
+endpoint state is informational — the launcher's atexit handler
+guarantees pause regardless of pre-state.
+
+*Expanded.* Run these in order. If any fail, fix before invoking
+=_r26_launch.sh= — the launcher itself will catch most issues at
+PREFLIGHT, but failing fast at the operator level avoids a wasted
+$0.20 design-patch pass + a false-alarm PREFLIGHT_FAIL JSONL.
+
+| Check                | Command / target                                                            | Expected                            | If fail                                           |
+|----------------------+-----------------------------------------------------------------------------+-------------------------------------+---------------------------------------------------|
+| Baseline state       | =bash scripts/_r26_status.sh=  (write helper if missing; ad-hoc otherwise) | =LAUNCH_STATE= absent OR =DONE=     | If WIP: see Section 6 (cold-resume)               |
+| OpenRouter headroom  | OR balance API or dashboard                                                 | > $40                               | Top up (recommend $50 for cushion)                |
+| RunPod balance       | RunPod dashboard                                                            | > $20                               | Top up                                            |
+| Stale R26 sentinels  | =ls scripts/_round26_dials_artifacts/PREFLIGHT_FAIL PATCH_VERIFY_FAIL=     | both absent                         | =rm= them; they're idempotent (preflight clears)  |
+| K20 endpoint         | Together dashboard for K20-qwen3coder30b                                    | STOPPED (R26 doesn't use K20)       | OK either way; launcher resumes-then-pauses       |
+| Disk free            | =df -h /home= (or repo mount)                                               | > 5G                                | Free space; preflight cat-5 will block at < 5G    |
+
+If you have no =_r26_status.sh= helper, the inline equivalent is
+=cat scripts/_round26_dials_artifacts/LAUNCH_STATE 2>/dev/null;
+ls scripts/_round26_dials_artifacts/{PREFLIGHT_FAIL,PATCH_VERIFY_FAIL} 2>/dev/null=.
+
+* Section 2: The launch command
+
+*Summary.* =bash scripts/_r26_launch.sh= — single command, single
+state file, single cost ceiling. Wall-clock 18-25 min for the round
+itself; design-patch + preflight add ~1-2 min upfront.
+
+*Expanded.* The launcher narrates each state transition to stdout +
+to =docs/wiki/2026-05-08-r18-live-log.org= via =log_live=. Below is
+the expected message sequence with rough timings; deviations larger
+than 2× should be investigated.
+
+| State            | Marker line                                          | Wall   | What's happening                                                          |
+|------------------+------------------------------------------------------+--------+---------------------------------------------------------------------------|
+| STARTED          | =[r26-launch HH:MM:SS] STATE → STARTED=             | 0s     | Helpers initialized; cost ceiling + parallelism printed                   |
+| DESIGN_PATCH     | =STATE → DESIGN_PATCH= ; =[r26] all 5 probes PASS=  | ~30s   | Forks dials + runs 5 P0 probes (top-3 dedupe, K2 max_tokens, etc.)        |
+| PREFLIGHT        | =STATE → PREFLIGHT= ; 6 cat gates fire             | ~60s   | =[PASS] cat-1/funding=, … =PREFLIGHT_PASS at TS=                          |
+| DAEMON_LAUNCHED  | =STATE → DAEMON_LAUNCHED= ; =daemon PID=N=          | <5s    | Backgrounds =_r26_self_healing_daemon.sh=; PID written to LAUNCH_STATE    |
+| HARNESS_RUNNING  | =STATE → HARNESS_RUNNING= ; =cost-ceiling watchdog= | 18-25m | =python3 _round26_dials.py= main bench loop                               |
+| (in-round)       | =[HH:MM:SS]   -- VARIANT dial=…=  per cell start    | —      | Per-cell narration (round26_dials.py:1438)                                |
+| (in-round)       | =LEADERBOARD (N cells done)= every ~10 cells        | —      | round26_dials.py:1663                                                     |
+| POST_HANDOFF     | =STATE → POST_HANDOFF= ; =handoff OK=               | <30s   | Captures stats, commits artifacts, drops sentinel                         |
+| (sentinel)       | =/tmp/R26_DONE_SPAWN_AGENTS= written                | —      | Contains 6-step agent prompt-template checklist (post-handoff §STEP 1-6) |
+| DONE             | =STATE → DONE= ; =R26 LAUNCH COMPLETE=              | —      | Final summary printed; exit 0                                             |
+
+The expected wall (18-25 min) is the R25-walltime-agent's R26
+projection assuming Sp4 + Sp3 + Sp2 strategies are exploited; if the
+round is still running at 35 min, check =$ARTIFACTS/stdout.log= for
+provider stalls before assuming a hang.
+
+CLI flags:
+- =--dry-run= — runs DESIGN_PATCH + PREFLIGHT only, exits 0 without
+  invoking the harness. Use to validate gates after a top-up.
+- =--skip-preflight= — emergency override (warned). Skips all 6
+  cat gates including funding floor. Don't use unless preflight is
+  itself broken.
+
+* Section 3: What to do if step N fails
+
+*Summary.* Each failed step writes a structured artifact under
+=$ARTIFACTS/= and exits 1 with the failed step name on stderr. The
+=fail_step= function (=_r26_launch.sh= L91-99) writes
+=FAIL=<step>= + =REASON=<text>= to =LAUNCH_STATE= so a cold-resume
+session can read it.
+
+*Expanded.* Map failed step → diagnostic file → recovery action.
+
+| Failed step    | Stderr line                                  | Diagnostic file                                                | Most-likely cause                       | Recovery                                                                |
+|----------------+----------------------------------------------+----------------------------------------------------------------+-----------------------------------------+-------------------------------------------------------------------------|
+| =design_patch= | =P0 acceptance probes failed=                | =$ARTIFACTS/PATCH_VERIFY_FAIL= (sentinel)                       | A P0 patch regressed                    | Inspect probe stdout; fix the broken probe target; re-run launcher      |
+| =preflight=    | =one or more gates failed=                   | =$ARTIFACTS/PREFLIGHT_FAIL= (JSONL: gate / reason / action)    | OR headroom < $40, or stale sentinels   | Read JSONL; do the =suggested_action=; common: top up OR; re-run        |
+| =harness=      | =python3 _round26_dials.py exited rc=N=     | =$ARTIFACTS/stdout.log= last 30 lines (printed inline)         | API rate limit, broker outage, OOM      | Check stdout tail; if recoverable: re-run; if cells partial: see §6     |
+| =post_handoff= | =WARNING: post-handoff exited non-zero=      | =/tmp/r26-launch-hd.XXXXXX= (auto-cleaned; tail printed)       | git commit conflict, sentinel not drop  | Manual: =cd $REPO; git add scripts/_round26_dials_artifacts; git commit=; spawn agents from sentinel |
+
+The launcher's =print_summary= helper (L101-123) auto-runs on any
+=fail_step= and dumps =LAUNCH_STATE= contents + any preflight /
+patch-verify failure JSONL inline to stdout — read THAT first, not
+the diagnostic files, since it's already aggregated.
+
+* Section 4: Post-round analysis (T+round-wall)
+
+*Summary.* When =/tmp/R26_DONE_SPAWN_AGENTS= appears, the post-round
+work is to spawn 4 analysis agents in parallel, then a synthesis
+agent, then a go-forward config update agent. Each block in the
+sentinel file is a copy-paste prompt template.
+
+*Expanded.* The sentinel layout (written by
+=_r26_post_round_analysis.sh= L81-212):
+
+| Step | Agent                                  | Output                                                          |
+|------+----------------------------------------+-----------------------------------------------------------------|
+| 1    | R26 quality judge (blinded 1-5 scoring)| =docs/notes/2026-05-08-r26-quality-judge.org=                    |
+| 2    | R26 Pareto + cost-quality              | =docs/notes/2026-05-08-r26-pareto.org=                            |
+| 3    | R26 walltime + parallelism             | =docs/notes/2026-05-08-r26-walltime.org=                          |
+| 4    | R26 provider forensics                 | =docs/notes/2026-05-08-r26-providers.org=                         |
+| 5    | 4-agent synthesis (after 1-4)          | =docs/wiki/2026-05-08-r26-synthesis.org=                          |
+| 6    | Go-forward config update               | =docs/wiki/2026-05-08-org-llm-go-forward-config.org= (edit)       |
+
+Steps 1-4 are independent — spawn in parallel via Task agents. Step
+5 depends on all four. Step 6 depends on step 5. All output files
+default to .org per the org-default-for-artifacts rule.
+
+* Section 5: Cost ceilings + auto-actions
+
+*Summary.* Hard cap is =R26_MAX_SPEND_USD=$30= (env-tunable). The
+in-launcher watchdog polls =R26_LIVE.json= every 60s + trips
+=COST_CIRCUIT_BREAKER= at 1.0× cap; the daemon trips at 1.5×
+projection ($30 default → $45 trip). Daemon auto-actions are bounded
+by a $5/round ledger.
+
+*Expanded.* Cost ceilings (=_r26_launch.sh= L208-235):
+
+| Trigger                          | Source                              | Threshold              | Action                                        |
+|----------------------------------+-------------------------------------+------------------------+-----------------------------------------------|
+| Launcher cost watchdog           | =_r26_launch.sh= L208-232          | >= =R26_MAX_SPEND_USD= | Writes =COST_CIRCUIT_BREAKER= sentinel        |
+| Daemon cost circuit-breaker      | =_r26_self_healing_daemon.sh=       | > 1.5× ROUND_PROJECTION| Writes =COST_CIRCUIT_BREAKER= sentinel        |
+| Harness honors sentinel          | =_round26_dials.py= L2055-2058     | sentinel present       | Aborts current layer (P1-11)                  |
+| LIVE_DENY_LIST entry             | daemon                              | 3 consec fails per (variant, broker) | JSONL line; harness filters at cell-spec |
+
+Auto-actions the daemon takes (no user prompt; capped at $5/round
+of remediation spend per ledger):
+- Worktree storm prune (kill stale =worktree= dirs)
+- K20 endpoint resume / pause (if K20 in active VARIANTS)
+- Variant fail-rate live deny-list write
+- Crash-recovery =RESUME_PENDING.json= marker emit
+- OR headroom proactive monitor
+
+R26 does NOT have K20 in active VARIANTS (per readiness §7), so the
+K20 plummet detection from R25 is n/a this round.
+
+* Section 6: Cold-resume (Claude session restart mid-round)
+
+*Summary.* If a future Claude session arrives and finds R26 in a
+partial state, do NOT re-launch — read =LAUNCH_STATE= first to
+determine where the prior run stopped. Three branches: still
+running, clean-exit-but-no-handoff, or stale-pids-from-old-round.
+
+*Expanded.* Cold-resume decision tree:
+
+1. =cat scripts/_round26_dials_artifacts/LAUNCH_STATE= — gives
+   current state name + any =FAIL=/=REASON= lines.
+2. =pgrep -fa "_round26_dials\|_r26_self_healing"= — list live PIDs.
+3. =ls /tmp/R26_DONE_SPAWN_AGENTS= — has the post-handoff fired?
+
+Branch table:
+
+| Observation                                                 | Diagnosis                                  | Action                                                                                |
+|-------------------------------------------------------------+--------------------------------------------+---------------------------------------------------------------------------------------|
+| LAUNCH_STATE=HARNESS_RUNNING + python3 PID alive            | Round in flight, normal                    | Wait. Tail =$ARTIFACTS/stdout.log= for progress. Do nothing.                          |
+| LAUNCH_STATE=HARNESS_RUNNING + no python3 PID + no sentinel | Crashed silent                             | Check =stdout.log= last 30 lines. If clean exit: =bash scripts/_r26_post_round_analysis.sh &= manually. If error: read =$ARTIFACTS/RESUME_PENDING.json= (daemon-emitted), set =R26_AUTO_RELAUNCH=1=, re-run launcher. |
+| LAUNCH_STATE=DONE + sentinel present + agents not spawned   | Post-handoff fired, awaiting agents        | Spawn the 6 agents per Section 4.                                                     |
+| LAUNCH_STATE=DONE + sentinel absent                         | Round long-archived                        | Nothing to do. Check =git log= for the bench commit.                                  |
+| Old daemon PIDs alive + R26 long-finished                   | Stale daemons from old round               | =kill <PID>= each; archive =$ARTIFACTS= subdir if needed.                             |
+| FAIL=design_patch in LAUNCH_STATE                           | Prior run died at P0 probes                | Read =$ARTIFACTS/PATCH_VERIFY_FAIL=; fix probe target; re-run launcher.               |
+| FAIL=preflight in LAUNCH_STATE                              | Prior run died at gates                    | Read =$ARTIFACTS/PREFLIGHT_FAIL= JSONL; resolve gate; re-run launcher.                |
+
+* Section 7: K20 dedicated endpoint behavior
+
+*Summary.* Together's K20-qwen3coder30b dedicated endpoint costs
+$7.98/hr while STARTED. Lifecycle is auto-managed: the harness
+resumes K20 at round-start IF K20 is in active VARIANTS, registers
+an =atexit= pause hook, and the launcher's belt-and-braces step 6
+runs the pause helper again on launcher exit.
+
+*Expanded.* Code anchors (in =scripts/_round26_dials.py= around
+L2389-2419):
+
+- L2389-2392 — at start of =main()=, check if any active variant
+  starts with =K20-=; if not, skip resume.
+- L2396-2400 — invoke =scripts/_k20_endpoint_resume.sh=; helper
+  polls until =ready_replicas=1= (~3-8 min).
+- L2402-2412 — =atexit.register(_pause_k20_on_exit)= ensures pause
+  fires regardless of clean exit / SystemExit / ctrl-C.
+- L2414-2419 — if resume FAILS, K20 is removed from VARIANTS and
+  the round proceeds without it.
+
+Belt-and-braces in launcher (=_r26_launch.sh= L272-282): step 6
+runs =scripts/_k20_endpoint_pause.sh= directly. WARN-tolerated if
+already paused.
+
+R26 specifically: K20 is NOT in active VARIANTS (readiness §7), so
+resume + atexit are skipped at runtime. K20 stays STOPPED for the
+entire round; expected K20 billing for R26 = $0. If K20 is added
+later (R27 K20 v2), the lifecycle is: ~30-40 min round wall × $7.98
+= ~$4-5/round.
+
+* Section 8: Provider billing alerts
+
+*Summary.* Three patterns to grep for in =$ARTIFACTS/stdout.log=
+during or after the round. None are launcher-fatal — the harness
+treats all as soft fails per-cell — but they signal to top up or
+adjust pins for R27.
+
+*Expanded.* Patterns + responses:
+
+| Pattern in stdout                            | Provider     | Meaning                            | Response                                                                  |
+|----------------------------------------------+--------------+------------------------------------+---------------------------------------------------------------------------|
+| =HTTP Error 402=                             | OpenRouter   | Credit cap reached                 | Credit-watcher should auto-launch top-up; if not, top up manually          |
+| =billing cycle spend limit reached=          | Modal        | Modal cap (currently dead)         | Expected for R26; =MODAL_BILLING_CAPPED=1= in preflight bypasses Modal probes |
+| =Cloudflare 1010=                            | Together     | Together UA-block                  | UA backport in commit 476fefd should prevent; if seen, check Together UA  |
+| =rate_limit_exceeded= or =429=               | OpenRouter   | Per-key rate limit                 | Daemon will deny-list after 3 consec; expect drop in cells for that variant |
+| =empty content= / =finish_reason=length=     | OR / Together| Truncation                         | Quality-judge agent flags; consider raising =max_tokens= for variant       |
+
+Tail =stdout.log= during the round with =tail -f= in a separate
+buffer if you want live visibility; the launcher's per-step summary
+also surfaces the last 20-30 lines on any failed step automatically.
+
+* Quick reference
+
+| Task                          | Command                                                              |
+|-------------------------------+----------------------------------------------------------------------|
+| Fire R26                      | =bash scripts/_r26_launch.sh=                                        |
+| Dry-run (gates only)          | =bash scripts/_r26_launch.sh --dry-run=                              |
+| Cost ceiling override         | =R26_MAX_SPEND_USD=50 bash scripts/_r26_launch.sh=                   |
+| Read state mid-round          | =cat scripts/_round26_dials_artifacts/LAUNCH_STATE=                  |
+| Tail in-flight stdout         | =tail -f scripts/_round26_dials_artifacts/stdout.log=                |
+| Manual post-handoff           | =bash scripts/_r26_post_round_analysis.sh &=                         |
+| Clear stale sentinels         | =rm scripts/_round26_dials_artifacts/{PREFLIGHT,PATCH_VERIFY}_FAIL=  |
+| Pause K20 manually            | =bash scripts/_k20_endpoint_pause.sh=                                |
