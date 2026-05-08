@@ -1,0 +1,408 @@
+:PROPERTIES:
+:ID:       r25-case-studies
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R25 case studies — how org-llm crew solved (and failed) tasks
+#+FILETAGS: :wiki:bench:r25:case-study:crew:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Five case studies from R25 illustrating how the org-llm
+crew + harness stack actually executes a task end-to-end: persona
+assignment, Captain plan classification, specialist tool-call
+trajectory, validation in-loop, and final score. Includes the
+"clean execution" archetype (K1 on BK1), the head-to-head against
+Claude (same task, 9× cheaper), the runaway-prose failure mode
+(K2 WALL_CAP), the expensive ceiling-probe miss (K33 = K11
+duplicate), and the recovery story (K8 returning from R19 collapse).
+
+*Expanded.* The bench numbers in the synthesis docs (K1 holds
+\$0.0005/qpt, Claude moat 59×, etc.) compress per-cell evidence
+into aggregates. These case studies are the un-compressed view —
+what the actual brief looks like, which tools the model picked
+in what order, what failure looks like at the trajectory level.
+Useful for new crew agents (read the persona briefs), for
+debugging future failure modes (recognize the patterns), and for
+showing reviewers what "FOSS beats Claude" actually means as an
+execution-level claim.
+
+* Case study 1 — BK1 K1-qwen30: the clean execution
+
+*Task.* Rename =BROAD_TOOLS_FULL= → =FULL_TOOL_SURFACE= across
+4 files (10 occurrences total). Validate with
+=python -c 'import org_llm.specialist'= + =pytest tests/test_cli.py=.
+
+*Crew.* @data (code + scribe specialist) — picked because BK1 is
+a code-edit task touching =org_llm/specialist.py= + =scripts/_round*_dials.py=.
+
+*Model.* qwen3-coder-30b-a3b-instruct (K1) via OpenRouter Novita.
+
+*Phase 1 (Captain) plan.* K1 itself classifies the task before
+specialist execution:
+
+#+begin_src json
+{
+  "judgment":   "pattern-match",
+  "recurrence": "recurring",
+  "stakes":     "high"
+}
+playbook: "B"  // simple pattern-match rename, lightest playbook
+#+end_src
+
+Phase 1 cost: *$0.000443* (~one short prompt to K1 itself).
+
+*Specialist brief.* The specialist gets:
+- @data persona (org-mode + code expertise + when to escalate)
+- Pre-fetched context — *every occurrence's filename, line number,
+  and full line text* (saves discovery wall time)
+- 5 quality guardrails (no nested links, no =verbatim= in labels,
+  append-only is literal, no fab UUIDs, follow exact format schemas)
+- Negative examples — actual broken outputs from R15/R16 to AVOID
+
+*Trajectory (4 iterations):*
+
+#+begin_src text
+ITER 0 — discovery (4 reads in parallel)
+  read_file org_llm/specialist.py
+  read_file scripts/_round16_dials.py
+  read_file scripts/_round17_dials.py
+  read_file scripts/_round18_dials.py
+
+ITER 1 — atomic edits (10 in one batch)
+  edit_file org_llm/specialist.py
+    (BROAD_TOOLS_FULL = ... → FULL_TOOL_SURFACE = ...)
+  edit_file scripts/_round16_dials.py × 3
+  edit_file scripts/_round17_dials.py × 3
+  edit_file scripts/_round18_dials.py × 3
+
+ITER 2 — validation
+  run_python "import org_llm.specialist"  → import OK
+  run_pytest tests/test_cli.py -x -q       → exit 0
+
+ITER 3 — final verify
+  run_pytest tests/test_cli.py             → exit 0
+#+end_src
+
+*Result.*
+
+| Metric                  | Value               |
+|-------------------------+---------------------|
+| Cost (P1 + specialist)  | *$0.0224*           |
+| Wall                    | ~2-3 min            |
+| Edits applied           | 10/10               |
+| In-scope files          | 4/4                 |
+| Out-of-scope changes    | 0                   |
+| Lint penalty            | 0 (clean)           |
+| Diff (insertions/deletions) | 10/10           |
+| Score (primary)         | 10 (full credit)    |
+
+*What this teaches.*
+
+1. *The persona brief + pre-fetch eliminates exploration cost.*
+   Without pre-fetched line numbers, K1 would have spent
+   iterations on =grep BROAD_TOOLS_FULL=. With it, ITER 0 is just
+   four reads in parallel.
+
+2. *The Captain's classification keeps Phase 1 cheap.* Playbook B
+   is the lightest. A complex playbook (D, E) would 5-10× the
+   Phase 1 cost. The classification call itself is one short
+   prompt to K1 — total Phase 1 = $0.000443.
+
+3. *K1 batches edits in one iteration.* The model understood the
+   brief end-to-end before acting. Compare to R18 K7 which would
+   have done 10 separate iterations and broken brackets along the
+   way (per R18 quality-judge agent).
+
+4. *Validation is in the loop.* The model called =run_pytest=
+   itself, didn't just trust its edits. The R18-era quality
+   guardrails ("validate after edit") are now baseline behavior.
+
+5. *The 51× FOSS advantage is real at this granularity.* $0.0224
+   total. K5-claude on the same task: $0.20 (case study 2 below) =
+   9× more for an identical diff.
+
+* Case study 2 — BK1 head-to-head: K1-qwen30 vs K5-claude-solo
+
+*Same task as Case Study 1; different model.*
+
+|                            | K1-qwen30                  | K5-claude-solo            |
+|----------------------------+----------------------------+---------------------------|
+| Cost                       | *$0.0224*                  | $0.2007                   |
+| Wall                       | ~2-3 min                   | 80.1s                     |
+| Edits applied              | 10/10                      | 10/10                     |
+| In-scope files             | 4/4                        | 4/4                       |
+| Diff (ins/del)             | 10 / 10                    | 10 / 10                   |
+| Score                      | 10                         | 10                        |
+| Cost-per-quality-unit      | $0.00224                   | $0.0201                   |
+
+*Diffs were byte-identical.*
+
+#+begin_src diff
+-BROAD_TOOLS_FULL = (BROAD_TOOLS_PLUS_ELISP + OS_TOOLS + ORG_TOOLS)
++FULL_TOOL_SURFACE = (BROAD_TOOLS_PLUS_ELISP + OS_TOOLS + ORG_TOOLS)
+#+end_src
+
+(Plus 9 more identical-shape replacements across the 3 dial scripts.)
+
+*What this teaches.*
+
+1. *On a deterministic mechanical task, K1 and K5 produce the
+   same answer.* The 9× cost premium for Claude buys nothing.
+
+2. *Wall time is comparable* (~2-3 min K1 vs 80s K5). Claude is
+   slightly faster per-cell because it batches more aggressively
+   in fewer LLM calls; but K1's wall is well within budget.
+
+3. *This is the BK1-BK5 long-horizon answer in one row.* R26-Q
+   "does the FOSS advantage hold on multi-file refactors?" — yes.
+   K1 dead-even with K5 on BK1 / BK2 / BK4 cells in R25 layer-BK
+   (per quality-judge agent). The 51× headline holds on
+   long-horizon, *not just on cheap atomic tasks*.
+
+4. *Picard delegation can use K1 not K5.* Per the go-forward
+   config doc § Bridge Crew: when Picard escalates a multi-file
+   refactor, K1+K2 is sufficient — Claude is not indicated by
+   bench evidence.
+
+* Case study 3 — K2-kimi WALL_CAP_KILLED: the runaway-prose failure
+
+*Task.* B1 (cross-link audit on =literate-tools.org=) — wrap each
+of 5 candidate phrases as =[[id:UUID][label]]=.
+
+*Crew.* @atoz (wiki/prose specialist).
+*Model.* moonshotai/kimi-k2.6 (K2) via Parasail.
+
+*What happened.* K2 burned through specialist iterations producing
+prose-style analysis text instead of compact tool calls. Each
+iteration emitted ~6,500-7,900 output tokens (consistent with
+default =max_tokens=8000=, NOT the =max_tokens=4096= cap that
+R25 patch P5 was supposed to set).
+
+*Result.*
+
+| Metric              | Value                              |
+|---------------------+------------------------------------|
+| =error=             | =wall_cap_killed:400s=             |
+| =wall_cap_killed=   | =true=                             |
+| Cost                | =null= (cell aborted before stamping) |
+| Specialists         | 0 (cell never finished phase 2)     |
+| Edits applied       | partial — diff has 1-line edit attempt |
+
+A diff WAS produced (the model made one edit before getting
+killed) but the cell was marked failed.
+
+*Three patches that should have prevented this — and why none did:*
+
+| Patch designed                    | Outcome                          |
+|-----------------------------------+----------------------------------|
+| =max_tokens=4096= cap (R25 P5)    | DEAD CODE — constant defined at line 246, never threaded into =SpecialistTask= or =_chat_completions=. Default 8000 still fires. |
+| =WALL_CAP_PER_CELL_S=400= (R24)   | LABEL ONLY — the =ThreadPoolExecutor max_workers=1= shim calls =shutdown(wait=True)= on context exit, which BLOCKS until inner thread finishes. Cell records =wall_cap_killed:400s= but =wall_seconds= actually 455-1697s. Outer worker stays pinned. |
+| =MODAL_KIMI_ENABLED=             | UNSET in R25 → K2 routes via Parasail with 60-180s prefill stalls instead of Modal's sub-second TTFT. |
+
+*All 16 R25 WALL_CAP_KILLED events were on K2-B1.* K2 owns 66% of
+round wall on 26% of cells.
+
+*What this teaches.*
+
+1. *PM6 strikes again.* The R25 design patches landed in code but
+   didn't change behavior. The patch script is too thin to verify
+   behavioral effect — needs a verification step that confirms
+   each patch changes the runtime contract, not just adds text.
+
+2. *Three independent fixes for one problem all failed
+   independently.* The model is fine; the tooling around the
+   model is what broke. R26 critical-path: wire the max_tokens
+   field through =SpecialistTask= properly, replace the
+   =ThreadPoolExecutor= shim with =multiprocessing.Process= or
+   =threading.Event= polling, set =MODAL_KIMI_ENABLED=1=.
+
+3. *K2 is not a flaky model — it's a model that produces verbose
+   output by default and our harness didn't constrain it.* K2's
+   raw quality at clean cells is 666.85 score / 40 cells in R24
+   (highest single-variant aggregate ever).
+
+4. *WALL_CAP as a label is still useful.* Even with the outer
+   worker pinned, the cell's =error= field gets stamped, so
+   downstream analysis can detect + exclude these cells from
+   leaderboard means.
+
+* Case study 4 — K33 ceiling-probe miss: the K11 slug duplicate
+
+*Task.* B1 (cross-link audit) — same as case study 3.
+
+*Crew.* @atoz.
+*Model.* =qwen/qwen3-coder= — labeled as "K33-qwen3-coder-72b" in
+R25 design but the slug is *the same as K11-qwen3coder*, which
+is actually Qwen3-Coder-480B-A35B-Instruct (MoE), NOT 72B.
+*Variant-naming bug; not a distinct model.*
+
+*Result.*
+
+| Metric              | Value                  |
+|---------------------+------------------------|
+| Cost                | *$0.7085*              |
+| Diff in/out         | 6 / 6 (1 file)         |
+| Score               | 12 (=on_candidate × 2 × 1=) |
+| $/qpt               | *$0.05904* — 100× K1   |
+
+*What this teaches.*
+
+1. *Variant-naming hygiene matters.* Adding K33/K34/K35 to the
+   harness was supposed to be a ceiling-probe to test whether
+   larger FOSS models beat K1 on hard tasks. K33 slug-duplicates
+   K11 → no actual probe happened.
+
+2. *K34 + K35 dead model slugs* — neither slug exists on
+   OpenRouter (HTTP 400/404). Warmup detected this at 10:38:39
+   but didn't skip them; they each got 1 cell of budget that
+   silent-noop'd.
+
+3. *Ceiling-probe pre-flight fails open.* The harness should
+   verify each new variant produces a non-empty completion at
+   warmup before allocating any L1 cells. R26 add: warmup that
+   refuses to launch the round if any variant fails sanity.
+
+4. *The R26-Q4 "are large-FOSS variants worth it?" question is
+   answered NO* — K33 (which is actually K11 in disguise) at
+   100× K1; K34/K35 dead slugs. R26 advisory from Pareto agent:
+   drop K34/K35 entirely; defer K33 to a single n=5 B7-only
+   re-probe with =$4= hard cap and ≥3-quality-point promotion gate.
+
+* Case study 5 — K8-deepseekV3 recovery: from R19 collapse to R25 frontier
+
+*Backstory.* K8 was a R17 frontier-winner ($0.00094/qpt at
+quality 18.6). Then in R19, K8 collapsed to score=2.5/cell across
+15 cells — the biggest unexplained variant regression in the
+bench arc. Variant-longevity agent recommended a /forensic
+walkthrough before retire/, not auto-drop.
+
+R24 confirmed the regression was a broker artifact (DeepInfra×
+deepseek-chat-v3-0324 had a tool-format gap). After R19_WIRING
+patch added =provider.ignore= deny-lists, K8 ran cleanly in R24
+(164 score / 25 cells / $0.0009/qpt).
+
+R25 was supposed to confirm K8 generalizes outside B1 (R26-Q1).
+
+*A representative R25 K8 cell.*
+
+Task: B1 (cross-link audit on =literate-tools.org=).
+
+| Metric                  | Value                  |
+|-------------------------+------------------------|
+| Cost                    | $0.012592              |
+| Diff in/out             | 15 / 15 (1 file)       |
+| =on_candidate=          | *15* (perfect)         |
+| =creative= / =unmatched=| 0 / 0                  |
+| =fab=                   | 0                      |
+| Score                   | 30                     |
+
+K8 wrapped 15 candidate phrases — every one matched a real
+prefetch candidate (no creative or fab UUIDs). This is the
+quality K8 had in R17 / re-confirmed in R24 / re-confirmed
+again in R25.
+
+*Aggregate over R25:*
+
+| Variant            | Cells | Score | Cost     | $/qpt     |
+|--------------------+-------+-------+----------+-----------|
+| K8-deepseekV3      |    29 |   239 | $0.17    | *$0.00069*|
+
+K8 is now a *durable second seat* on the FOSS Pareto frontier
+alongside K1.
+
+*The selector caveat.* Per R25 quality-judge agent: the harness's
+top-3 selector (=top3_foss = [c["variant"] for c in foss_cells[:3]]=)
+picks individual /cells/ not /variants/. In R25, all 3 top L1 cells
+were K1, so K8 *never advanced past Layer 1*. The 29 K8 cells are
+all on B1. R26 fix: dedupe the selector by variant + rank by
+per-cell mean, then K8 actually runs on B5/B7/B11/B25 + the BK
+long-horizon set.
+
+*What this teaches.*
+
+1. *Don't auto-retire on a single bad round.* R19 K8 collapse
+   looked terminal; was actually a broker artifact. A +5-cell
+   re-probe at the variant-longevity agent's recommendation
+   would have surfaced this earlier.
+
+2. *Provider deny-lists are real value.* The R19_WIRING patch's
+   =ignore: ["AkashML"]= for Llama-3.3-70b and other deny entries
+   protected K1/K2/K8/K17 across 3 rounds.
+
+3. *K1 + K8 together are the FOSS-frontier story.* K1 is the
+   default scribe; K8 is the recovered backup at near-identical
+   $/qpt. R26 should run K8 on more tasks (Layer 2 force-add)
+   before promoting any conclusion.
+
+* Cross-cutting lessons
+
+** Pre-fetch is the cheapest optimization
+
+Every successful R25 cell relied on pre-fetched context (line
+numbers, candidate phrases, file contents). Without it, the
+discovery cost would dominate. The =eager_prefetch_all_tasks=
+step (~5s wall) saved minutes per cell × 189 cells = ~30+ min of
+round wall.
+
+** The persona brief is a 100-line prompt overhead per cell
+
+@data's persona (~80 lines) + the @data CLI verbs section is
+substantial token cost per cell (~$0.0001 incremental cost per
+cell at K1 prices). Worth it: K1 with @data persona produces
+@data-shaped output (uses run_pytest, validate_org, etc., which
+generic Qwen wouldn't reach for).
+
+** Validation in the loop closes the quality feedback gap
+
+Every K1 trajectory in R25 ended with =run_pytest= or
+=validate_org= or =run_python=. The model is not just trusting
+its edits — it's verifying. R15-R17 cells often skipped this
+step; R25 cells consistently include it. Quality_lint penalty
+catches what verification misses.
+
+** The harness is the bottleneck, not the model
+
+Three R25 patches (K2 max_tokens, WALL_CAP runtime kill, K33
+slug) were dead code. The model performed correctly when the
+harness behaved correctly. R26 must fix the verification gap:
+every patch in =_r25_design_patch.py= should have an end-to-end
+test that confirms behavior change, not just file modification.
+
+** $/qpt is more honest than per-cell quality
+
+K1 mean-score-per-cell trails K2 by 30-40% (K1 ~7.7, K2 ~10).
+But K1 $/qpt = $0.00057, K2 $/qpt = $0.00365 — K1 is *6.4×
+cheaper per quality unit*. For most production work, the $/qpt
+ranking is what matters.
+
+* Cross-references
+
+** R25 evidence
+
+- =scripts/_round25_dials_artifacts/layer_bk/BK1/K1-qwen30__bt_pb_m1_tb_s1/= — Case Study 1+2 source
+- =scripts/_round25_dials_artifacts/layer_bk/BK1/K5-claude-solo__bt_pb_m1_tb_s1/= — Case Study 2
+- =scripts/_round25_dials_artifacts/layer1/B1/K2-kimi-k2.6__bt_pb_m1_tb_s1__s12/= — Case Study 3
+- =scripts/_round25_dials_artifacts/layer1/B1/K33-qwen3-coder-72b__bt_pb_m1_tb_s1/= — Case Study 4
+- =scripts/_round25_dials_artifacts/layer1/B1/K8-deepseekV3__bt_pb_m1_tb_s1__s11/= — Case Study 5
+
+** Related synthesis docs
+
+- =docs/wiki/2026-05-08-r25-synthesis.org= — round retro
+- =docs/wiki/2026-05-08-org-llm-go-forward-config.org= — production playbook
+- =docs/notes/2026-05-08-r25-quality-judge.org= — selector bug + FP-1 half-done
+- =docs/notes/2026-05-08-r25-pareto.org= — frontier verdict
+- =docs/notes/2026-05-08-r25-walltime.org= — WALL_CAP-as-label discovery
+- =docs/notes/2026-05-08-r25-providers.org= — K2 max_tokens dead-code discovery
+- =docs/notes/2026-05-08-bench-arc-post-mortems.org= — PM6 (round-chain too thin)
+
+** Code artifacts referenced
+
+- =scripts/_round25_dials.py= — the R25 harness
+- =scripts/_round19_long_horizon_tasks.py= — BK1-BK5 fixtures
+- =scripts/quality_lint.py= — N5 detector implementation
+- =scripts/_r25_design_patch.py= — the patch script (3 of 11 ineffective)
+- =org_llm/specialist.py= — agent runtime
