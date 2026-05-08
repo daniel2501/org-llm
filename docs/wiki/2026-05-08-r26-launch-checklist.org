@@ -440,7 +440,7 @@ preflight.
 
 * P2 — capability investments (R26 → R28 incrementally; not blocking)
 
-** TODO P2-1: Tree-sitter org-parser validator
+** DONE P2-1: Tree-sitter org-parser validator
 :PROPERTIES:
 :ESTIMATE: 1-2 days
 :SOURCE:   r25-design §P5
