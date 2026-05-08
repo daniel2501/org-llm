@@ -1,0 +1,59 @@
+#+TITLE: R19 Track D — Qdrant vault index report
+#+FILETAGS: :r19:rag:qdrant:report:
+
+* Build summary
+- Collection: =org-llm-vault=
+- Embedder: =sentence-transformers/all-MiniLM-L6-v2= (384-dim, cosine)
+- Files seen (after PII-filename filter): 520
+- Files indexed: 500
+- Files skipped (PII filename): 33
+- Files skipped (vault, no :ID:): 20
+- Total chunks: 6502
+  - wiki: 3255
+  - notes: 167
+  - vault: 3080
+- Collection newly created: True
+- Build duration: 184.0s
+
+* Sample queries
+** =Bridge Crew agent personas= (k=5)
+  - score=0.681 | ~/repos/org-llm/docs/wiki/decisions.org | ** DEC-014 — Cull rubric framework: ternary verdicts + agent-ify default + Bridge Crew
+    3. *Bridge Crew — agent roster cap.* DEC-009's ≤6    curated core cap expands to *≤7*. The Bridge Crew:    =@picard= (manager), =@spock= (researcher), =@data= (scribe),    =@boothby= (hygiene), =@geor...
+  - score=0.607 | ~/repos/org-llm/docs/wiki/user-supplied-agents-library.org | * Summary
+    [[id:a4d1f7c3-6e29-4b8a-9f15-3d8e2c7b91a5][DEC-009]] (extended by [[id:573550f8-a6ee-4581-b16f-20cc4645df21][DEC-014 — Bridge Crew]]) frames the agent roster as *curated core (≤7) + extension path (ev...
+  - score=0.590 | ~/repos/org-llm/docs/wiki/multi-agent-org-llm.org | * Per-agent coordination map
+    For each Bridge Crew member, the 1-2 coordination patterns they'd most plausibly reach for. Tight by design — the page is canon, not a recipe book.
+  - score=0.585 | ~/repos/org-llm/docs/wiki/whole-picture.org | * The agents (Bridge Crew + extension)
+    - *Agent-as-manager* — the agent /manages/ a substrate (resolver   registry, recipe registry, doctor checks, config schema) without   /becoming/ the substrate. Substrate stays deterministic code. - *S...
+  - score=0.584 | ~/repos/org-llm/docs/wiki/cull.org | *** Non-core agents — pre-classified ADDABLE
+    - *Decision:* SPLIT per Bridge Crew (2026-05-05; renamed 2026-05-06 from   "Magnificent Seven") — three agents promoted to CORE roster: @geordi   (analytics; was @analyst), @atoz (wiki; was @curator),...
+** =DEC entry format= (k=3)
+  - score=0.383 | ~/repos/org-llm/docs/wiki/decisions.org | * DEC-NNN — short title
+    :PROPERTIES: :ID:       <uuid> :STATUS:   accepted | superseded-by-DEC-MMM | deprecated :DATE:     [YYYY-MM-DD] :DECIDERS: <names / instance handles> :END:  *Summary.* One-paragraph TL;DR (per wiki Ru...
+  - score=0.377 | ~/repos/org-llm/docs/wiki/2026-05-08-foss-beats-claude-math.org | ** Lever 4 — Worked-example: paste a real DEC verbatim (R17 pre-launch)
+    Per claude-shape recommendation §4 + synthesis Theme. Replace the abstract DEC skeleton with an ACTUAL recent DEC quoted in full as the few-shot exemplar. Pattern-match beats paraphrased instruction. ...
+  - score=0.350 | ~/repos/org-llm/docs/notes/2026-05-04-promotions-wiki-report.org | (top)
+    #+TITLE: Promotions wiki page — drafting report #+DATE: [2026-05-04] #+FILETAGS: :report:wiki:promotions:
+** =Phase 2026-05.20 sync verb= (k=5)
+  - score=0.582 | ~/repos/org-llm/docs/wiki/roadmap.org | ** Status
+    Detail in [[id:9096622a-689c-4bb1-8e32-1654bce48d1c][dev-tracker.org]] § Phase 2026-05.20 — sync verb POC. 29.0 is sprint- eligible (~half-day); 29.1+ depends on Phase 2026-05.17.04 — DB-as-cache step...
+  - score=0.559 | ~/repos/org-llm/docs/wiki/dbt-pipeline.org | * Phase 2026-05.20 — sync verb POC self-coded tools land here
+    The shift this enables: the app gets *faster and more deterministic over time for your specific workflows*. That's the differentiator γ promised. dbt is the substrate that makes Phase 2026-05.20 — syn...
+  - score=0.553 | ~/repos/org-llm/docs/wiki/dev-tracker.org | *** Concrete first instance (29.0): roadmap ↔ dev-tracker sync
+    The user's specific question — "good mechanism for the app to keep roadmap + dev-tracker in sync" — is the *seed example* for Phase 2026-05.20 — sync verb POC.  The sync is rules-based (deterministic)...
+  - score=0.538 | ~/repos/org-llm/docs/wiki/dev-tracker.org | *** Concrete first instance (29.0): roadmap ↔ dev-tracker sync
+    *Phase 2026-05.20 — sync verb POC ships standalone* as a proof-of-concept of the self-coded-tools principle BEFORE the full discover/synthesise loop. It's the smallest possible demonstration; success ...
+  - score=0.534 | ~/repos/org-llm/docs/wiki/whole-picture.org | ** Self-coded tools (Phase 2026-05.20 — sync verb POC)
+    LLM observes pattern → proposes dbt model → tests pass → register. Future invocations skip the LLM. =org-llm tracker sync= (29.0) is the seed.  Cross-refs: [[id:3a986238-898c-4298-a3e3-47157f502c48][t...
+
+* Integration notes
+- Tool wrapper exposed as =vault_search= via =org_llm.specialist.VAULT_SEARCH_TOOL=.
+- Dispatch in =org_llm.specialist._dispatch_tool_call= lazy-imports =org_llm.vault_rag.vault_search=.
+- Add =VAULT_SEARCH_TOOL= to a SpecialistTask's =tools= list to enable retrieval at edit time.
+- Cost is $0: sentence-transformers runs CPU-local; Qdrant free tier (1GB) is well within budget.
+- Re-run this script after vault edits to refresh the index (overwrites existing chunks by deterministic uuid5 over file/heading/idx/sha1).
+
+* PII filter recap
+- Filename patterns skipped: =captains-log=, =personal=, =private=, =credentials=, =secrets=, =passwords=, =pii=
+- Heading patterns skipped: =PASSWORD=, =PRIVATE_KEY=, =SECRET_KEY=, =API_KEY=
+- Vault files require a top-level =:ID:= property; anything else is excluded from the index.
