@@ -401,6 +401,18 @@ VALIDATE_ORG_TOOL = {
 ORG_TOOLS = [ADD_PROPERTY_TOOL, SET_TODO_STATE_TOOL, VALIDATE_ORG_TOOL]
 
 
+# ── Vault RAG tool (R19 Track D) ─────────────────────────────────────────
+# Imported lazily inside the dispatch so the rest of the specialist surface
+# doesn't pay the qdrant-client / sentence-transformers import cost when
+# vault_search isn't on the active toolset.
+try:
+    from org_llm.vault_rag import VAULT_SEARCH_TOOL  # noqa: F401
+except ImportError:
+    VAULT_SEARCH_TOOL = None  # type: ignore[assignment]
+
+RAG_TOOLS = [VAULT_SEARCH_TOOL] if VAULT_SEARCH_TOOL else []
+
+
 # Composite surface — Claude-Code parity for R16
 BROAD_TOOLS_FULL = (BROAD_TOOLS_PLUS_ELISP + OS_TOOLS + ORG_TOOLS)
 
@@ -1142,6 +1154,27 @@ def _dispatch_tool_call(name: str, args: dict, workdir: Path,
             return False, "emacs binary not on PATH"
         except subprocess.TimeoutExpired:
             return False, "set_todo_state: timeout"
+
+    if name == "vault_search":
+        # R19 Track D — RAG retrieval over wiki + notes + vault.
+        # Lazy-import so the heavy ML deps aren't pulled in unless used.
+        query = (args.get("query") or "").strip()
+        if not query:
+            return False, "missing query"
+        try:
+            k = int(args.get("k") or 5)
+        except (TypeError, ValueError):
+            k = 5
+        k = max(1, min(20, k))
+        source = args.get("source")
+        if source not in ("wiki", "notes", "vault", None):
+            source = None
+        try:
+            from org_llm.vault_rag import vault_search as _vs
+            hits = _vs(query, k=k, source_filter=source)
+        except Exception as exc:
+            return False, f"vault_search failed: {exc.__class__.__name__}: {exc}"
+        return True, json.dumps(hits, ensure_ascii=False)
 
     return False, f"unknown tool: {name}"
 
