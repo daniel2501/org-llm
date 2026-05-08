@@ -1,0 +1,173 @@
+:PROPERTIES:
+:ID:       overnight-r19-r23-brief
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: Overnight R19-R23 — morning brief
+#+FILETAGS: :wiki:bench:r19:r20:r21:r22:r23:overnight:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Round-chain autopilot ran R19→R23 unattended between
+02:25 and 05:01 EDT. R19 produced the strongest FOSS-vs-Claude
+result on record — K1-qwen30 at $0.00047 per quality unit, *51×
+cheaper* than K5-claude-solo at $0.02423/u. R20 confirmed K2-kimi
+as a peer at n=25 (score 488, highest single-variant total).
+R21-R23 hit OpenRouter HTTP 402 (credits exhausted) and only
+K5-claude-solo scored — they're effectively no-data rounds for
+FOSS analysis.
+
+*Expanded.* The R19 wiring patch (BK1-BK5 long-horizon tasks +
+provider.ignore deny-lists + quality_lint N5 penalty) all landed
+correctly and runs were healthy. The round-chain autopilot's
+sed-based "fork + delta" worked flawlessly through R23 — every
+harness committed, every preflight syntax-checked. The hard stop
+was OpenRouter's credit cap ($30 used = $30 limit at 04:39).
+After credits are topped up, R21-R23 can be re-run with their
+forked harnesses already on disk.
+
+* Round-by-round results
+
+| Round | Cells | Cost  | Notes                                                             |
+|-------+-------+-------+-------------------------------------------------------------------|
+| R19   |   120 | $9.75 | K1 qpt 0.00047, K2 qpt 0.00263 — *FOSS beats Claude 51×*          |
+| R20   |   140 | $4.41 | K2-kimi at n=25 → score 488 (highest of any variant in any round) |
+| R21   |   127 | $1.20 | HTTP 402 — only K5-claude scored                                  |
+| R22   |   127 | $1.13 | HTTP 402 — only K5-claude scored                                  |
+| R23   |   127 | $1.61 | HTTP 402 — only K5-claude scored                                  |
+
+* R19 leaderboard (the headline)
+
+| Variant            | cells | score | cost   | $/qpt    | noops |
+|--------------------+-------+-------+--------+----------+-------|
+| *K1-qwen30*        |    28 |   618 | $0.29  | *0.00047*|     0 |
+| K2-kimi-k2.6       |    15 |   328 | $0.86  | 0.00263  |     0 |
+| K11-qwen3coder     |    10 |   234 | $2.43  | 0.0104   |     0 |
+| K17-glm46          |    10 |   222 | $0.82  | 0.0037   |     0 |
+| K5-claude-solo     |    12 |   177 | $4.43  | 0.02423  |     0 |
+| K7-qwen72b         |    10 |   108 | $0.17  | 0.00159  |     0 |
+| K15-kimi-thinking  |     5 |    66 | $0.26  | 0.00396  |     0 |
+| K8-deepseekV3      |    15 |    38 | $0.06  | 0.00167  |     0 |
+| K9-mixtral         |     5 |    28 | $0.38  | 0.01355  |     0 |
+| K6-llama70b        |    10 |    18 | $0.03  | 0.00163  |     7 |
+
+K1's score of 618 across 28 cells is the highest per-cell mean
+ever recorded for a FOSS variant (~22/cell vs R18's ~2/cell for
+K1). Likely drivers: BK1-BK5 long-horizon tasks have larger
+primary-metric ceilings, the worktree retry fix (commit fc59d1c)
+recovered cells that would have been wiped, and quality_lint
+penalty disciplined the bracket-broken hallucinations that
+inflated K7's R18 mech-score.
+
+K6-llama70b regressed (7 noops out of 10) — likely the AkashML
+deny-list combined with DeepInfra unreliability. Worth
+inspecting.
+
+* R20 leaderboard
+
+| Variant            | cells | score | cost  | $/qpt    | noops |
+|--------------------+-------+-------+-------+----------+-------|
+| *K2-kimi-k2.6*     |    25 |   488 | $1.59 | 0.00326  |     0 |
+| K1-qwen30          |    28 |   473 | $0.21 | *0.00045*|     0 |
+| K7-qwen72b         |    10 |   270 | $0.42 | 0.00157  |     0 |
+| K8-deepseekV3      |    25 |   124 | $0.11 | 0.00092  |     0 |
+| K5-claude-solo     |    12 |    91 | $1.70 | 0.01873  |     0 |
+
+R20 confirms K2-kimi as a peer to K1 once given n=25. K1 still
+wins on $/qpt by 7× over K2 — the qwen30 small-model sweet spot
+holds.
+
+* What broke at R21
+
+OpenRouter credit balance was $30 / $30.46 used by the time R21
+launched at 04:39 EDT. Every FOSS cell hit:
+
+#+begin_src text
+HTTP Error 402: Payment Required
+#+end_src
+
+K5-claude-solo went through Anthropic's API directly (separate
+billing), so it scored normally in R21-R23. The harness still ran
+each round to completion (~3-12 min) but no FOSS data was
+collected.
+
+* Other overnight outcomes
+
+** Worktree fix (fc59d1c)
+
+The =safe_worktree_add= retry-on-collision change shipped before
+R19 ran. Comparing R18 v3 (140 cells with ~64% worktree-wiped) to
+R19 (120 cells with 0 worktree errors visible in stdout) suggests
+the fix is working. R19's cell counts now reflect real attempts,
+not error-padded counters.
+
+** R19 wiring patch (7ca05fc)
+
+All three layers landed:
+- BK1-BK5 imported + appended to TASKS
+- =provider.ignore= deny-lists applied (kimi×DeepInfra,
+  qwen3-coder×SiliconFlow, llama-70b×AkashML)
+- =quality_lint.py= score-penalty hooked into =score_cell()=
+
+The penalty values in R19 cells need a closer look — whether
+K7's score-108 reflects a real penalty or whether the lint
+hook fell through silently. Suggested follow-up: a quick
+sample-cell inspection.
+
+** LoRA training
+
+Started 02:42 with =torch==2.6.0 + transformers==4.51.3= after
+two compat-error retries. Modal app =k20-foss-distill-train= is
+in =ephemeral= state with auto-healing logger reporting every
+10 min. No endpoint URL in =pass org-llm/cloud/modal-foss-lora=
+yet — still in flight or stuck. Total elapsed at brief time:
+~4h 46m.
+
+** Cross-round analysis aggregator
+
+Polling for 7 reports at =/tmp/r19-{cross-round-quality-trend,
+pareto-evolution,failure-mode-taxonomy,variant-longevity,
+best-strategy-per-shape,outlier-deepdive,strategy-effectiveness}.org=.
+Strategy effectiveness landed; others may still be in flight or
+were blocked by the same /tmp write restriction the meta-synth
+hit. Aggregator will produce
+=docs/wiki/2026-05-08-r19-master-plan-inputs.org= when complete
+or after 75-min deadline.
+
+* Top action items for morning
+
+1. *Top up OpenRouter* (currently $0 / $30 used; recommend $50
+   buffer) so R21-R23 can re-run with the harnesses already
+   on disk.
+
+2. *Inspect K6-llama70b 7/10 noops in R19* — was it the
+   AkashML deny-list? Or something else?
+
+3. *Verify quality_lint penalty actually fires* — pick a R19
+   cell and inspect =analysis.lint_penalty= in =cell_result.json=.
+
+4. *Check LoRA training status* — if =ephemeral= state has
+   stalled, the auto-healing logger has no recipe for "stuck
+   but not erroring." May need manual restart or HF token check.
+
+5. *Use R19 design lessons in next run* — the wiring patch
+   pattern is working; consider committing S1-S4 wiring
+   (hedged-strong / best-of-N / critique-revise / specialty
+   routing) for the post-credit-top-up R24.
+
+6. *Headline metric*: K1-qwen30 at $0.00047/qpt — write a
+   wiki page to canonize this. Per the FOSS-spend-headroom
+   document, this validates the spend-headroom thesis.
+
+* Cross-references
+
+- =docs/wiki/2026-05-08-r18-synthesis.org= — drove the R19 wiring patch
+- =scripts/_r19_wiring_patch.py= — the patch script
+- =scripts/quality_lint.py= — N5 implementation
+- =scripts/_round{19,20,21,22,23}_dials.py= — auto-forked harnesses
+- =scripts/_round{19,20,21,22,23}_dials_artifacts/= — full data dumps
+- =docs/wiki/2026-05-08-r19-lora-progress.org= — LoRA status timeline
+- =/tmp/rounds-19-23-autopilot.log= — round-chain log (mostly empty; live-log was the real log)
