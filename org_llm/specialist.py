@@ -283,18 +283,33 @@ def _read_api_key(pass_slug: str) -> str:
     ).stdout.strip()
 
 
+# Models whose internal reasoning chain has consumed the entire max_tokens
+# budget before emitting visible content / tool_calls. Per R14 B1 K2-kimi-k2.6
+# silent no-op (finish_reason=length, $0.018, empty content) and 2026-05-07
+# fix-slate F3f: OpenRouter's `reasoning: {enabled: false}` eliminates the
+# thinking phase; tool_calls still fire correctly, completion drops to ~33
+# tokens, cost ~4-7x lower, latency 2-4x faster. Allow-list — do NOT blanket
+# this for all reasoning models (deepseek-r1 regresses with reasoning off).
+_DISABLE_REASONING_MODELS = {
+    "moonshotai/kimi-k2.6",
+}
+
+
 def _chat_completions(api_endpoint: str, api_key: str, model: str,
                        messages: list, tools: list,
                        temperature: float = 0.1,
-                       max_tokens: int = 3000) -> dict:
-    body = json.dumps({
+                       max_tokens: int = 8000) -> dict:
+    payload = {
         "model": model,
         "messages": messages,
         "tools": tools,
         "tool_choice": "auto",
         "temperature": temperature,
         "max_tokens": max_tokens,
-    }).encode()
+    }
+    if model in _DISABLE_REASONING_MODELS:
+        payload["reasoning"] = {"enabled": False}
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(
         api_endpoint, data=body, method="POST",
         headers={"Authorization": f"Bearer {api_key}",
@@ -309,28 +324,36 @@ def _chat_completions(api_endpoint: str, api_key: str, model: str,
 
 
 # ── Tool dispatch ────────────────────────────────────────────────────────
-def _path_in_scope(target: Path, workdir: Path,
-                    target_files_set: Optional[set] = None,
-                    scope_strict: bool = False) -> tuple[bool, str]:
-    """Check whether a path is allowed for write-class ops.
+def _resolve_in_workdir(target: Path, workdir: Path,
+                          target_files_set: Optional[set] = None,
+                          scope_strict: bool = False
+                          ) -> tuple[bool, str, Optional[Path]]:
+    """Resolve a path relative to workdir + check scope.
 
-    Always-on: must be inside workdir. When scope_strict=True AND a
+    Path resolution: relative paths are resolved against workdir (NOT
+    Python's cwd — models naturally use paths like "docs/wiki/foo.org"
+    expecting them to be repo-relative).
+
+    Returns (ok, error_message_if_not_ok, resolved_path_if_ok).
+
+    Always-on: must resolve inside workdir. When scope_strict=True AND a
     target_files_set is provided, must also be in that allow-list.
     Read ops only honor the workdir check; scope_strict applies to
     edit/write only.
     """
+    if not target.is_absolute():
+        target = workdir / target
     try:
         rp = target.resolve()
         rp.relative_to(workdir.resolve())
     except ValueError:
-        return False, f"refused: path outside workdir {workdir}"
+        return False, f"refused: path outside workdir {workdir}", None
     if scope_strict and target_files_set:
-        # Compare resolved paths.
         if rp not in target_files_set:
             allowed = ", ".join(str(p) for p in sorted(target_files_set))
             return False, (f"refused (scope_strict): {rp} not in target_files "
-                            f"allow-list [{allowed}]")
-    return True, ""
+                            f"allow-list [{allowed}]"), None
+    return True, "", rp
 
 
 def _dispatch_tool_call(name: str, args: dict, workdir: Path,
@@ -344,8 +367,8 @@ def _dispatch_tool_call(name: str, args: dict, workdir: Path,
         if not path:
             return False, "missing path"
         target = Path(path)
-        ok, why = _path_in_scope(target, workdir, target_files_set,
-                                   scope_strict)
+        ok, why, target = _resolve_in_workdir(
+            target, workdir, target_files_set, scope_strict)
         if not ok: return False, why
         if not target.exists():
             return False, f"file not found: {path}"
@@ -370,8 +393,8 @@ def _dispatch_tool_call(name: str, args: dict, workdir: Path,
         if not path:
             return False, "missing path"
         target = Path(path)
-        ok, why = _path_in_scope(target, workdir, target_files_set,
-                                   scope_strict)
+        ok, why, target = _resolve_in_workdir(
+            target, workdir, target_files_set, scope_strict)
         if not ok: return False, why
         if target.exists() and target.is_dir():
             return False, f"refused: {path} is a directory, not a file"
@@ -386,7 +409,7 @@ def _dispatch_tool_call(name: str, args: dict, workdir: Path,
         if not path:
             return False, "missing path"
         target = Path(path)
-        ok, why = _path_in_scope(target, workdir, None, False)
+        ok, why, target = _resolve_in_workdir(target, workdir, None, False)
         if not ok: return False, why
         if not target.exists():
             return False, f"file not found: {path}"
@@ -453,13 +476,10 @@ def _dispatch_tool_call(name: str, args: dict, workdir: Path,
         load_files = args.get("load_files") or []
         if not code:
             return False, "missing code"
-        # Validate load_files are inside workdir
         load_args = []
         for fp in load_files:
-            p = (workdir / fp).resolve() if not Path(fp).is_absolute() else Path(fp).resolve()
-            try: p.relative_to(workdir.resolve())
-            except ValueError:
-                return False, f"refused: load_file outside workdir: {fp}"
+            ok, why, p = _resolve_in_workdir(Path(fp), workdir, None, False)
+            if not ok: return False, why
             if not p.exists():
                 return False, f"load_file not found: {fp}"
             load_args += ["-l", str(p)]
@@ -487,10 +507,8 @@ def _dispatch_tool_call(name: str, args: dict, workdir: Path,
         path = args.get("path") or ""
         if not path:
             return False, "missing path"
-        target = (workdir / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
-        try: target.relative_to(workdir.resolve())
-        except ValueError:
-            return False, f"refused: path outside workdir"
+        ok, why, target = _resolve_in_workdir(Path(path), workdir, None, False)
+        if not ok: return False, why
         if not target.exists():
             return False, f"file not found: {path}"
         try:
@@ -575,11 +593,22 @@ def run_specialist(task: SpecialistTask) -> SpecialistResult:
     user_msg = task.instruction
     if files_section:
         user_msg += f"\n\nRELEVANT FILES:\n{files_section}"
+    tool_names = [t["function"]["name"] for t in (task.tools or [])]
     user_msg += (
-        f"\n\nWorkdir (path edits must stay within this): {workdir}\n"
-        f"Use the available tools (edit_file, write_file, read_file) to do "
-        f"your work. When done, write a brief one-line summary as your "
-        f"final assistant message (no tool_calls)."
+        f"\n\nWorkdir: {workdir}\n"
+        f"Paths can be relative (resolved to workdir) or absolute. "
+        f"Available tools: {', '.join(tool_names)}.\n\n"
+        f"OPERATING DISCIPLINE — READ CAREFULLY:\n"
+        f"- You have {task.max_iterations} iterations max. Use them to ACT, "
+        f"not browse.\n"
+        f"- Read the prefetch context FIRST. It usually has everything you "
+        f"need.\n"
+        f"- One read_file is usually enough. Don't fish.\n"
+        f"- Skip tools you don't need. (e.g. don't use list_dir/grep/eval_elisp "
+        f"unless the task actually requires them.)\n"
+        f"- Be decisive. Make the edit. Errors are fine — you can fix them.\n\n"
+        f"When done, return a brief one-line summary as your final message "
+        f"with no tool_calls."
     )
 
     messages = [

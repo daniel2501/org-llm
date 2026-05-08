@@ -961,7 +961,7 @@ def score_cell(cell):
 
     # silent_noop
     specs = cell.get("specialists") or []
-    if specs and all(s.get("error", "").startswith("silent_noop") for s in specs):
+    if specs and all((s.get("error") or "").startswith("silent_noop") for s in specs):
         return {"score": 0.0, "reason": "silent_noop"}
 
     if cell.get("task_id") == "B1":

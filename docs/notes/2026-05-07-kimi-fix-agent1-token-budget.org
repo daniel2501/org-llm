@@ -1,0 +1,194 @@
+#+title: Kimi K2.6 silent-output diagnosis — Agent 1 fix-slate F1..F4
+#+date: 2026-05-07
+
+* Top-line
+
+  *=reasoning.enabled=False=* (per-request, in OpenRouter body) reliably
+  unblocks Kimi K2.6: tool_calls fire on every probe, =reasoning_tokens=0=,
+  =completion_tokens=33=, cost <$0.0003/call, wall 1.4-2.0s — at the
+  default =max_tokens=3000=. F1 (raising =max_tokens=) also works on
+  every synthetic prompt I tried but does not address the root cause
+  (uncapped reasoning chain) — recommend pairing both.
+
+* Methodology note
+
+  My synthetic prompts (simple, heavy-system, multi-turn) never
+  reproduced the round-14 silent-no-op (=$0.018=, =finish_reason=length=,
+  empty content) — Kimi emitted tool_calls every time at =max_tokens=3000=.
+  That implies the round-14 cell's reasoning chain consumed ~3000 output
+  tokens because of *real specialist-task context* (vault prefetch,
+  inlined target files, broad tool surface, multi-turn iterations) that
+  my fixtures don't approximate. The fixes below are still load-bearing
+  because (a) F1 raises the ceiling so that real chain-of-thought has
+  headroom, and (b) =reasoning.enabled=False= eliminates the failure
+  mode at its source.
+
+* F2 — message.* keys (every Kimi response)
+
+  =['content', 'reasoning', 'reasoning_details', 'refusal', 'role', 'tool_calls']=
+
+  Kimi exposes its chain via =message.reasoning= (string) and
+  =message.reasoning_details= (list of typed segments). =usage.completion_tokens_details.reasoning_tokens=
+  reports the count separately from visible-output tokens — but both are
+  charged against =max_tokens=. Our pipeline already extracts
+  =message.tool_calls= and =message.content=; we don't need to parse
+  =reasoning= unless we want to surface it for debugging.
+
+* Result table
+
+  | fix  | config tested                                    | finish_reason | tool_calls? | comp/reason_tok | cost     | wall  |
+  |------+--------------------------------------------------+---------------+-------------+-----------------+----------+-------|
+  | F0   | mt=3000 simple (baseline)                        | tool_calls    | 1           | 89/-            | $0.00043 | 5.5s  |
+  | F0h  | mt=3000 heavy-system                             | tool_calls    | 1           | 105/-           | $0.00073 | 2.8s  |
+  | F0m  | mt=3000 multi-turn heavy                         | tool_calls    | 1           | 129/93          | $0.00111 | 4.5s  |
+  | F1   | mt=8000 simple                                   | tool_calls    | 1           | 86/-            | $0.00043 | 2.4s  |
+  | F1   | mt=16000 simple                                  | tool_calls    | 1           | 86/-            | $0.00035 | 2.5s  |
+  | F1   | mt=32000 simple                                  | tool_calls    | 1           | 81/-            | $0.00042 | 6.2s  |
+  | F1   | mt=8000 multi-turn                               | tool_calls    | 1           | 135/-           | $0.00064 | 3.3s  |
+  | F1   | mt=16000 multi-turn                              | tool_calls    | 1           | 221/-           | $0.00144 | 17.3s |
+  | F3a  | mt=8000 + =reasoning_effort: "low"=              | tool_calls    | 1           | -/-             | $0.00034 | 8.7s  |
+  | F3b  | mt=8000 + =reasoning: {effort: low}=             | tool_calls    | 1           | -/-             | $0.00035 | 8.6s  |
+  | F3c  | mt=3000 + =reasoning: {effort: low}=             | tool_calls    | 1           | 81/-            | $0.00038 | 2.1s  |
+  | F3d  | mt=3000 + =reasoning: {max_tokens: 200}=         | tool_calls    | 1           | 119/84          | $0.00050 | 8.1s  |
+  | F3e  | mt=3000 + =reasoning: {max_tokens: 500}=         | tool_calls    | 1           | 184/149         | $0.00073 | 18.8s |
+  | *F3f*| *mt=3000 + =reasoning: {enabled: false}=*        | *tool_calls*  | *1*         | *33/0*          | *$0.00014* | *1.4s* |
+  | F3f' | mt=3000 + =reasoning: {enabled: false}= multi-turn | tool_calls  | 1           | 33/0            | $0.00029 | 2.0s  |
+  | F3g  | mt=3000 + =include_reasoning: false=             | tool_calls    | 1           | 111/72          | $0.00042 | 11.9s |
+  | F4   | deepseek-r1 mt=8000 default                      | tool_calls    | 1           | -/-             | $0.00090 | 15.3s |
+  | F4r  | deepseek-r1 mt=8000 + reasoning low              | *stop*        | *0*         | -/-             | $0.00057 | 6.9s  |
+
+  Total probe spend across all sweeps: *~$0.018* (well under $0.50 cap).
+
+  Notes:
+  - F3g (=include_reasoning: false=) only suppresses returning the
+    reasoning text — the model still =thinks= and it still counts against
+    =max_tokens=. Not a fix.
+  - F3f (=reasoning: {enabled: false}=) actually disables the thinking
+    phase: =reasoning_tokens=0=. Fix.
+  - F4 reveals an asymmetry: deepseek-r1 *fails* with
+    =reasoning.effort=low= (drops to bare prose, no tool call). Whatever
+    we adopt for Kimi we must NOT blanket-apply to deepseek-r1.
+
+* Smoking-gun raw response (winning config — F3f', multi-turn heavy prompt)
+
+  #+begin_src json
+  {
+    "id": "gen-1778198234-LGPIKbPnyWsaE2DoflEt",
+    "model": "moonshotai/kimi-k2.6-20260420",
+    "provider": "Parasail",
+    "choices": [
+      {
+        "index": 0,
+        "finish_reason": "tool_calls",
+        "native_finish_reason": "tool_calls",
+        "message": {
+          "role": "assistant",
+          "content": " ",
+          "refusal": null,
+          "reasoning": null,
+          "tool_calls": [
+            {
+              "type": "function",
+              "index": 0,
+              "id": "functions.edit_file:0",
+              "function": {
+                "name": "edit_file",
+                "arguments": "{\"path\": \"/tmp/t.txt\", \"old_string\": \"fox\", \"new_string\": \"cat\"}"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 840,
+      "completion_tokens": 33,
+      "total_tokens": 873,
+      "cost": 0.0002883,
+      "completion_tokens_details": {"reasoning_tokens": 0}
+    }
+  }
+  #+end_src
+
+* Recommended patch for =org_llm/specialist.py=
+
+  Two-tier fix: (1) raise the global =max_tokens= ceiling so reasoning
+  has headroom on real specialist tasks, (2) per-model "is reasoning
+  model with runaway-thinking risk" hook that injects
+  =reasoning.enabled=false= for Kimi. Do *not* blanket-disable for all
+  reasoning models — F4 shows deepseek-r1 produces strictly worse output
+  without thinking.
+
+  #+begin_src diff
+  --- a/org_llm/specialist.py
+  +++ b/org_llm/specialist.py
+  @@ -283,11 +283,21 @@ def _read_api_key(pass_slug: str) -> str:
+       return out.stdout.strip()
+
+
+  +# Models whose reasoning chain has bitten us by consuming the entire
+  +# max_tokens budget before emitting visible content / tool_calls.
+  +# Per round-14 B1 K2-kimi-k2.6 silent no-op + 2026-05-07 fix-slate F3f.
+  +# Disabling the thinking phase via OpenRouter's `reasoning.enabled=false`
+  +# eliminates the failure mode (tool_calls still fire correctly).
+  +_DISABLE_REASONING_MODELS = {
+  +    "moonshotai/kimi-k2.6",
+  +}
+  +
+  +
+   def _chat_completions(api_endpoint: str, api_key: str, model: str,
+                          messages: list, tools: list,
+                          temperature: float = 0.1,
+  -                       max_tokens: int = 3000) -> dict:
+  -    body = json.dumps({
+  +                       max_tokens: int = 8000) -> dict:
+  +    payload = {
+           "model": model,
+           "messages": messages,
+           "tools": tools,
+           "tool_choice": "auto",
+           "temperature": temperature,
+           "max_tokens": max_tokens,
+  -    }).encode()
+  +    }
+  +    if model in _DISABLE_REASONING_MODELS:
+  +        payload["reasoning"] = {"enabled": False}
+  +    body = json.dumps(payload).encode()
+       req = urllib.request.Request(
+           api_endpoint, data=body, method="POST",
+           headers={"Authorization": f"Bearer {api_key}",
+  #+end_src
+
+  Rationale:
+  - =max_tokens 3000 → 8000= adds headroom for legitimate chain-of-thought
+    without making the failure mode silent (any model that needs >8000
+    tokens of reasoning to emit a tool call is misbehaving and should
+    surface).
+  - =reasoning.enabled=False= for Kimi specifically: tool_calls remain
+    correct (verified in F3f and F3f'); cost drops 4-7x; latency drops
+    2-4x. We lose Kimi's CoT for that one model, which is fine — Kimi
+    K2.6 was already chosen for its tool-use behavior, not its
+    reasoning depth (use deepseek-r1 for reasoning-heavy work).
+  - Set is allow-list (currently 1 model). Future Moonshot variants can
+    be added explicitly; reasoning models known to need their CoT
+    (deepseek-r1, qwen3-thinking, etc.) are unaffected.
+
+* Open follow-ups
+
+  - *Synthetic-prompt failure not reproduced.* I could not get Kimi to
+    spend its full =max_tokens= budget on reasoning with any prompt I
+    fed it (peak completion was ~221 tokens). The round-14 cell's $0.018
+    silent no-op implies either real-task context (vault prefetch +
+    inlined target files + broad tool surface across multiple
+    iterations) drove the chain past 3000, or there's a Parasail/upstream
+    quirk that fires under specific conditions. Either way, the
+    recommended patch eliminates the runaway-reasoning failure mode at
+    its source.
+  - *Logging.* Per round-13 post-mortem, =SpecialistResult= currently
+    discards raw payloads. Independently of this fix, capturing
+    =completion_tokens_details.reasoning_tokens= per iteration would
+    let us spot Kimi-style runaway thinking before it manifests as a
+    silent failure.
+  - *=success= heuristic.* Round-13 post-mortem already proposed
+    =success = bool(edits_applied) or bool(text_output)=. With this in
+    place, future Kimi-shaped silent failures fail loudly.

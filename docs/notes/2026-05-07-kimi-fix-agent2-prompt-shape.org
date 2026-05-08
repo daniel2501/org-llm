@@ -1,0 +1,187 @@
+#+TITLE: Kimi K2.6 Tool-Use Fix Slate — Agent 2 (F5..F9)
+#+DATE: 2026-05-07
+
+* Top-line
+  The bug is reasoning-token exhaustion at small max_tokens; F5/F6
+  alone do not save you when the prompt is deliberation-shaped, but
+  F7/F8 (concise + directive prompt) reliably unblock kimi at the
+  current 3000 budget — recommended fix is "tool_choice=required +
+  reasoning.exclude=true + concise system" plus raising the floor
+  to ~8000 max_tokens for safety.
+
+* Result table
+  All probes against ~moonshotai/kimi-k2.6~ via OpenRouter. "simple
+  prompt" = the canned 2-line user msg targeting the t.txt fixture.
+  "reasoning prompt" = a deliberation-bait prompt asking kimi to weigh
+  multiple framings before acting (constructed to expose the bug).
+
+  | fix       | config tested                                 | prompt-shape   | max_tokens | finish_reason | tool_calls? | comp_toks | cost     |  wall |
+  |-----------+-----------------------------------------------+----------------+------------+---------------+-------------+-----------+----------+-------|
+  | F5        | tool_choice=required                          | simple         |       3000 | tool_calls    | yes (1)     |        83 | $0.00038 |  2.6s |
+  | F6        | tool_choice=function(edit_file)               | simple         |       3000 | tool_calls    | yes (1)     |        71 | $0.00027 |  2.1s |
+  | F7        | minimal user, no system                       | simple         |       3000 | tool_calls    | yes (1)     |        81 | $0.00035 |  5.7s |
+  | F8        | "MUST call... do not think" directive         | simple         |       3000 | tool_calls    | yes (1)     |        92 | $0.00044 | 14.8s |
+  | F9a       | provider={"order":["Moonshot"]}               | simple         |       3000 | tool_calls    | yes (1)     |       169 | $0.00066 |  8.8s |
+  | F9b       | provider={"sort":"throughput"}                | simple         |       3000 | tool_calls    | yes (1)     |        79 | $0.00038 |  2.6s |
+  |-----------+-----------------------------------------------+----------------+------------+---------------+-------------+-----------+----------+-------|
+  | ctrl-3000 | current spec (auto, no provider, default sys) | simple         |       3000 | tool_calls    | yes (1)     |        81 | $0.00040 |  4.9s |
+  | ctrl-8000 | current spec, max_tokens=8000                 | simple         |       8000 | tool_calls    | yes (1)     |       238 | $0.00094 | 14.9s |
+  |-----------+-----------------------------------------------+----------------+------------+---------------+-------------+-----------+----------+-------|
+  | repro-300-auto       | tool_choice=auto                   | reasoning      |        300 | length        | NO          |       300 | $0.00118 |  6.8s |
+  | repro-300-required   | tool_choice=required (F5)          | reasoning      |        300 | length        | NO          |       300 | $0.00114 |  6.6s |
+  | repro-300-fn         | tool_choice=function(F6)           | reasoning      |        300 | length        | NO          |       300 | $0.00118 |  7.0s |
+  | repro-3000-auto      | tool_choice=auto                   | reasoning      |       3000 | tool_calls    | yes (1)     |      2044 | $0.00718 | 84.5s |
+  | repro-3000-required  | tool_choice=required (F5)          | reasoning      |       3000 | tool_calls    | yes (1)     |      2734 | $0.00958 | 86.7s |
+  |-----------+-----------------------------------------------+----------------+------------+---------------+-------------+-----------+----------+-------|
+  | rsn-disabled    | reasoning.enabled=false                  | reasoning      |        300 | length        | NO          |       300 | $0.00111 | 10.5s |
+  | rsn-effort-low  | reasoning.effort=low                     | reasoning      |        300 | length        | NO          |       300 | $0.00111 |  4.4s |
+  | rsn-exclude     | reasoning.exclude=true                   | reasoning      |        300 | length        | NO          |       300 | $0.00111 |  5.0s |
+  | rsn-max-50      | reasoning.max_tokens=50                  | reasoning      |        500 | length        | NO          |       500 | $0.00184 |  8.4s |
+  | rsn-disab+req   | enabled=false + tool_choice=required     | reasoning      |        300 | length        | NO          |       300 | $0.00112 |  6.4s |
+  |-----------+-----------------------------------------------+----------------+------------+---------------+-------------+-----------+----------+-------|
+  | final-3k-req       | required + ACTION_SYSTEM (F5+F8 lite)   | concise+action |       3000 | tool_calls    | yes (1)     |       115 | $0.00046 |  3.2s |
+  | final-3k-req-rsnex | required + reasoning.exclude=true       | concise+action |       3000 | tool_calls    | yes (1)     |       115 | $0.00041 |  3.3s |
+  | final-8k-req       | required, max_tokens=8000               | concise+action |       8000 | tool_calls    | yes (1)     |       115 | $0.00041 |  3.0s |
+  | final-8k-auto      | auto, max_tokens=8000                   | concise+action |       8000 | tool_calls    | yes (1)     |       111 | $0.00044 |  2.9s |
+
+  Total spend across all 21 probes: ~$0.043. Well under $0.50 budget.
+
+* Smoking-gun raw response (F5, first working config)
+#+begin_src json
+{
+  "id": "gen-1778197836-I9xt9RgDPRbmT4dkNXSf",
+  "object": "chat.completion",
+  "created": 1778197836,
+  "model": "moonshotai/kimi-k2.6-20260420",
+  "provider": "Parasail",
+  "system_fingerprint": null,
+  "choices": [
+    {
+      "index": 0,
+      "logprobs": null,
+      "finish_reason": "tool_calls",
+      "native_finish_reason": "tool_calls",
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "refusal": null,
+        "reasoning": " The user wants me to replace 'fox' with 'cat' in the file /tmp/kimi-test/t.txt using the edit_file tool. I need to call the tool with the exact old_string and new_string.",
+        "tool_calls": [
+          {
+            "type": "function",
+            "index": 0,
+            "id": "functions.edit_file:0",
+            "function": {
+              "name": "edit_file",
+              "arguments": "{\"path\": \"/tmp/kimi-test/t.txt\", \"old_string\": \"fox\", \"new_string\": \"cat\"}"
+            }
+          }
+        ],
+        "reasoning_details": [
+          { "type": "reasoning.text",
+            "text": " The user wants me to replace 'fox' with 'cat'...",
+            "format": "unknown", "index": 0 }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 129,
+    "completion_tokens": 83,
+    "total_tokens": 212,
+    "cost": 0.0003841,
+    "completion_tokens_details": {
+      "reasoning_tokens": 43,
+      "image_tokens": 0,
+      "audio_tokens": 0
+    }
+  }
+}
+#+end_src
+
+  Note that ~completion_tokens_details.reasoning_tokens=43~: kimi spent
+  ~half its visible 83 completion tokens on internal reasoning before
+  emitting the tool_call. This is the failure mode at scale.
+
+* Recommended patch for org_llm/specialist.py
+  Combines the cheap belt-and-suspenders fixes that work without any
+  prompt-engineering change at the call site.
+
+#+begin_src diff
+--- a/org_llm/specialist.py
++++ b/org_llm/specialist.py
+@@ -286,16 +286,29 @@ def _read_pass(pass_slug: str) -> str:
+ def _chat_completions(api_endpoint: str, api_key: str, model: str,
+                        messages: list, tools: list,
+                        temperature: float = 0.1,
+-                       max_tokens: int = 3000) -> dict:
+-    body = json.dumps({
++                       max_tokens: int = 8000) -> dict:
++    # Kimi K2.6 (and other thinking models) burn budget on reasoning
++    # tokens before emitting tool_calls. With max_tokens=3000 and a
++    # deliberation-shaped prompt, the budget is exhausted on hidden
++    # reasoning and the response comes back finish_reason="length"
++    # with empty content + zero tool_calls. Two mitigations:
++    #   1) Bump the floor to 8000 so reasoning + tool_call both fit.
++    #   2) Force tool_choice="required" when tools are present, so the
++    #      model cannot finish on a narrative reply.
++    payload = {
+         "model": model,
+         "messages": messages,
+         "tools": tools,
+-        "tool_choice": "auto",
++        "tool_choice": "required" if tools else "auto",
+         "temperature": temperature,
+         "max_tokens": max_tokens,
+-    }).encode()
++    }
++    # Hide raw reasoning text from the response (we don't use it and it
++    # bloats logs); upstream still bills reasoning tokens, but they won't
++    # eat content budget at the new 8000 floor.
++    if "kimi" in model.lower() or "deepseek-r1" in model.lower():
++        payload["reasoning"] = {"exclude": True}
++    body = json.dumps(payload).encode()
+     req = urllib.request.Request(
+         api_endpoint, data=body, method="POST",
+         headers={"Authorization": f"Bearer {api_key}",
+#+end_src
+
+  Caveats:
+  - ~tool_choice="required"~ assumes every specialist call has tools
+    AND wants a tool. Audit call sites: if any pass an empty/optional
+    tools list expecting a chat-only reply, gate on a flag instead.
+  - The 8000 floor doubles a normal call's worst-case cost ceiling but
+    the empirical hit on the simple-prompt path stays at ~$0.0004
+    because finish happens long before 8000 tokens.
+
+* Notes / interactions discovered
+  - *F5/F6 are NOT a complete fix on their own.* When the prompt is
+    deliberation-shaped (e.g. system asks for step-by-step reasoning
+    or user invites weighing options), kimi spends 1200+ reasoning
+    tokens before the budget runs out. ~tool_choice="required"~ at
+    max_tokens=300 still produces ~finish_reason="length"~ with zero
+    tool_calls. F5 only works because the *current* default prompts
+    happen to be terse enough. Any specialist persona that nudges
+    deliberation (e.g. "think carefully") re-triggers the bug.
+  - *F7 (minimal prompt) and F8 (anti-reasoning directive) work but
+    are call-site changes.* They're effective but harder to enforce
+    than a one-line API param flip; should be added as a "tip" in
+    docstrings for new specialist personas, not relied on.
+  - *F9 (provider routing) does not measurably change behavior.* The
+    default provider was Parasail; pinning to ~order=["Moonshot"]~ ran
+    a bit slower (8.8s vs 2.6s) and ~sort=throughput~ was identical.
+    Not worth carrying.
+  - *OpenRouter ~reasoning~ param is partially broken for kimi.*
+    ~reasoning.enabled=false~ does NOT stop kimi from deliberating;
+    it just relocates the deliberation from the ~reasoning~ field into
+    visible ~content~ (still consumes the budget, still finish=length).
+    ~reasoning.exclude=true~ hides the field but billed reasoning
+    tokens are unchanged. ~reasoning.max_tokens=50~ was ignored
+    (got 2083 chars of reasoning back). Treat this param as cosmetic
+    for kimi.
+  - *The cheap winning combo is F5 + concise system prompt + 8000
+    floor.* The recommended patch above hits all three with one edit.
+  - *Cross-check with Agent 1*: their token-budget angle is the same
+    root cause — confirm they're seeing reasoning_tokens consumed in
+    completion_tokens_details. If yes, the budget bump and the
+    prompt-shape fix are complementary, not competing.

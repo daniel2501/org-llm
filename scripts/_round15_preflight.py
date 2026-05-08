@@ -215,13 +215,17 @@ def check_smoke_cell():
         return
     R15 = globals()["R15"]
     tasks_by_id = {t["id"]: t for t in R15["TASKS"]}
-    task = tasks_by_id.get("B13")
+    # Allow override via env var to smoke a different (task, variant) pair.
+    smoke_task = os.environ.get("PREFLIGHT_TASK", "B13")
+    smoke_model = os.environ.get("PREFLIGHT_MODEL",
+                                    "qwen/qwen3-coder-30b-a3b-instruct")
+    task = tasks_by_id.get(smoke_task)
     if task is None:
-        fail("B13 task not found in R15 TASKS")
+        fail(f"{smoke_task} task not found in R15 TASKS")
         return
 
     # Build a temp worktree off trunk
-    wt_name = f"r15-preflight-B13-{int(time.time())}"
+    wt_name = f"r15-preflight-{smoke_task}-{int(time.time())}"
     wt_path = REPO.parent / "org-llm-worktrees" / wt_name
     wt_path.parent.mkdir(parents=True, exist_ok=True)
     cp = subprocess.run(
@@ -249,7 +253,7 @@ def check_smoke_cell():
             workdir=wt_path,
             model="qwen/qwen3-coder-30b-a3b-instruct",
             target_files=target_files,
-            max_iterations=4,
+            max_iterations=int(os.environ.get("PREFLIGHT_MAX_ITERS", "4")),
             max_budget_usd=0.10,
             scope_strict=True,
             tools=list(BROAD_TOOLS_PLUS_ELISP),
