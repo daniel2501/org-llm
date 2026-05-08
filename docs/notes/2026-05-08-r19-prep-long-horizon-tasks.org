@@ -1,0 +1,192 @@
+#+TITLE: R19 Track K — long-horizon multi-file task design
+#+DATE: [2026-05-08]
+#+AUTHOR: claude (design pass for the R19 dial-sweep harness)
+
+* Summary
+
+R17/R18 measured FOSS specialists on mostly single-file edits (B1, B5,
+B7, B11, B13, B20, B25, B26). Track K extends the bench to *real coding
+work that crosses file boundaries* — refactor, new code, bug-fix,
+field-add, wiki-normalize. Each task ships with a deterministic verifier
+that runs in the worktree and returns =(success, message)=.
+
+Module: =scripts/_round19_long_horizon_tasks.py=
+Export: =LONG_HORIZON_TASKS = [BK1, BK2, BK3, BK4, BK5]=
+
+* Why these five (intent + selection)
+
+| Task | Shape          | Why this shape                                                                  |
+|------+----------------+--------------------------------------------------------------------------------|
+| BK1  | rename/refactor | Cheapest multi-file pattern: tests grep-coordination + completeness            |
+| BK2  | new code + test | Tests "extend a CLI surface" — the most common Claude task in this codebase    |
+| BK3  | bug-hunt        | Tests "given a failing test, locate + fix" — the canonical SWE-bench shape     |
+| BK4  | field plumbing  | Tests propagating a change through dataclass + schema + docs                  |
+| BK5  | wiki normalize  | Tests structural-text edits across many files (org cross-link discipline)      |
+
+* Per-task acceptance criteria
+
+** BK1 — rename =BROAD_TOOLS_FULL= → =FULL_TOOL_SURFACE=
+
+*Summary.* Rename a constant used in 4 files (1 in =org_llm/specialist.py=,
+3 each in =scripts/_round{16,17,18}_dials.py=). Verifier asserts 0 old
+occurrences, ≥4 new occurrences, =import org_llm.specialist= works, and
+=pytest tests/test_cli.py= passes.
+
+*Expanded.* Live tree has exactly *10 occurrences* (verified by prefetch
+smoke). The model must edit each file completely; partial renames trip
+the verifier on the import smoke (since the constant is exported by name
+from =specialist.py= and re-imported by the dial scripts).
+
+*Risks / mitigations:*
+- *Risk:* model touches an unrelated file → verifier catches via 4-file
+  scope check + the eventual pytest run.
+- *Risk:* model misses a downstream reference → import smoke fails.
+- *Risk:* model changes only the import alias, not the export → grep
+  count fails (we count =BROAD_TOOLS_FULL= as a literal).
+
+** BK2 — add =org-llm specialist list-tools --json= subcommand
+
+*Summary.* Extend =org_llm/cli_specialist.py= with a new typer command
+=list-tools= that prints =BROAD_TOOLS_FULL= as JSON when =--json= is set.
+Also create =tests/test_cli_specialist_list_tools.py= with a CliRunner
+test. Verifier invokes the CLI directly (=python -m org_llm.cli
+specialist list-tools --json=), parses stdout as JSON, asserts core tool
+names present (=read_file=, =edit_file=, =write_file=, =grep=), and runs
+pytest on the new test file.
+
+*Expanded.* Tests two skills: (a) extend an existing typer app without
+breaking it, and (b) write a CliRunner-based test. Pre-fetch surfaces
+=expected_tool_names= (15 names from the live tree's =BROAD_TOOLS_FULL=)
+so the model has a concrete target set.
+
+*Risks / mitigations:*
+- *Risk:* model imports =BROAD_TOOLS_FULL= but doesn't iterate it → JSON
+  shape wrong, verifier catches.
+- *Risk:* model writes an integration test that hits the live API →
+  excluded by allowed_tools (no network tools).
+- *Risk:* test file gets created but doesn't actually exercise the new
+  command → verifier runs pytest on it; if the test trivially passes
+  without exercising the CLI, the JSON-output check still catches a
+  broken command.
+
+** BK3 — fix =_check_append_only= regression
+
+*Summary.* The harness pre-applies a *starting state* to the worktree:
+(a) inverts the two return values of =_check_append_only= in
+=org_llm/specialist.py=, and (b) writes a *failing test* to
+=tests/test_append_only_bug.py=. The model is told the test fails and
+must locate + fix the bug. Verifier: pytest passes; inverted patterns
+gone; only the two expected files modified.
+
+*Expanded.* The starting-state mutation is *worktree-only* — the live
+tree is never modified. =apply_bk3_starting_state(workdir)= is
+idempotent (re-application is a no-op) so harness retries are safe.
+
+*Risks / mitigations:*
+- *Risk:* model "fixes" by editing the test instead of the function →
+  scope-check verifier rejects test-file modifications (unless they're
+  the pre-staged BK3_TEST_PATH which the model is told NOT to touch;
+  if it does, =git diff --name-only= shows the test as modified vs the
+  pre-staged version, but our scope check whitelists it... improvement
+  candidate: hash-pin the test).
+- *Risk:* model adds a try/except around the failing assert →
+  pytest still fails (test_pure_append_returns_ok asserts
+  ok is True; if function returns False, assert fails regardless).
+- *Risk:* idempotency edge — re-applying patches when both forms already
+  inverted: handled by the early-return-on-already-inverted check.
+
+** BK4 — add =cell_timeout_seconds: float = 120.0= to =SpecialistTask=
+
+*Summary.* Add a typed dataclass field with a default; propagate the
+field name to the JSON schema produced by =cli_specialist.specialist_schema=.
+Verifier: introspects =SpecialistTask= via =dataclasses.fields()=,
+asserts type =float=, default =120.0=; invokes =org-llm specialist
+schema= and asserts =cell_timeout_seconds= in =properties=.
+
+*Expanded.* Pre-fetch surfaces the existing field list (22 fields) so
+the model knows what's already there and avoids duplicates. The field
+default is intentionally a float (not int) so the model has to use
+correct lowercase =float= type annotation.
+
+*Risks / mitigations:*
+- *Risk:* model uses =cell_timeout_seconds: int = 120= → wrong type,
+  verifier catches via =f.type in (float, 'float')=.
+- *Risk:* model adds the field but doesn't update schema → schema CLI
+  missing key, verifier catches.
+- *Risk:* model uses =Optional[float]= → check accepts =float=
+  literally; would need to be widened if the model picks =Optional=.
+  (Acceptable: the spec says "float = 120.0", so strict.)
+
+** BK5 — normalize =[[file:agents.org]]= → =[[id:UUID][agents.org]]=
+
+*Summary.* 11 occurrences across 5 wiki pages (counts verified by
+prefetch smoke). Each page has at least 1 occurrence; total ≥11.
+Verifier: 0 old-form matches; ≥5 new-form matches; each file retains
+≥1 new-form link; bracket-balance preserved per file.
+
+*Expanded.* The agents.org canonical ID is
+=a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6= (verified present in
+=docs/wiki/agents.org=). Both bare-form (=[[file:agents.org]]=) and
+labeled-form (=[[file:agents.org][LABEL]]=) must be replaced; for bare
+form, the model uses =agents.org= as the new label.
+
+*Risks / mitigations:*
+- *Risk:* model accidentally widens scope (rewrites file:* links to
+  other pages) → 5-file scope check catches; surrounding-link audit not
+  built in but adjacent file diffs would surface in a future hardening.
+- *Risk:* model breaks org parsing with mismatched brackets → bracket
+  balance check.
+- *Risk:* model normalizes only some forms → grep-count must be 0;
+  partial work fails verifier.
+
+* Tool-allowlist rationale (per task)
+
+| Task | Tools                                                                       | Why                                              |
+|------+-----------------------------------------------------------------------------+--------------------------------------------------|
+| BK1  | read_file, edit_file, grep, list_dir, run_pytest, run_python              | refactor needs grep + pytest gate                |
+| BK2  | + write_file (new test file)                                                | new test file is brand-new                       |
+| BK3  | read_file, edit_file, grep, list_dir, run_pytest, run_python              | bug-fix; no write_file (don't want new files)    |
+| BK4  | read_file, edit_file, grep, list_dir, run_pytest, run_python              | field plumbing; existing-file edits only         |
+| BK5  | read_file, edit_file, grep, list_dir, find_canonical_id, validate_org      | wiki edits; org-aware tools only                 |
+
+* Verifier idempotency + workdir safety
+
+Every verifier:
+- reads from =workdir= (parameter), never from =REPO=
+- runs pytest with =-p no:cacheprovider= to avoid =.pytest_cache= writes
+- uses =git diff --name-only HEAD= for scope checks (worktree git only)
+- has no side effects on the live tree
+
+The harness creates a fresh worktree from =trunk= per cell; verifier
+output is stored in =cell_result.json= alongside R17/R18 outputs.
+
+* Open follow-ups (R20+)
+
+- *Multi-task chain:* BK1 + BK2 in sequence (rename, then add CLI verb
+  that uses the renamed constant) — tests cross-task coherence.
+- *Mid-task injection:* harness injects a stubbed-out failing test mid-cell
+  to simulate "the user pinned a new requirement" while the cell runs.
+- *Hash-pin the BK3 starting-state test* so the verifier can detect
+  model-tampering with the failing test.
+- *Per-task wall budgets:* BK3 should converge faster than BK2; track
+  median wall + iterations as a quality signal.
+
+* Smoke evidence
+
+Running =python3 scripts/_round19_long_horizon_tasks.py= prints:
+#+begin_example
+  BK1  rename BROAD_TOOLS_FULL across 4 files                       files=4 tools=6
+  BK2  add `specialist list-tools --json` subcommand                files=2 tools=7
+  BK3  fix _check_append_only regression (failing test)             files=2 tools=6
+  BK4  add cell_timeout_seconds to SpecialistTask                   files=2 tools=6
+  BK5  normalize agents.org cross-link form across 5 wiki pages     files=5 tools=6
+
+  BK1 prefetch OK; total_occurrences=10
+  BK2 prefetch OK; expected_tool_names count=15
+  BK3 prefetch OK; function snippet captured
+  BK4 prefetch OK; existing_fields=22, present=False
+  BK5 prefetch OK; total_occurrences=11
+#+end_example
+
+BK3 patches verified to match the live tree exactly once each, so the
+worktree-side bug-injection is unambiguous.
