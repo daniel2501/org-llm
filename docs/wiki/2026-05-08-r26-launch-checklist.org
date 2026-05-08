@@ -378,7 +378,7 @@ Adds tools: list todos, refile, create node, query agenda. Wire
 into =BROAD_TOOLS_PLUS_ELISP= or new =MCP_TOOLS= list. Test
 specialist can call =mcp.org_list_todos= as a tool.
 
-** TODO P1-17: Wire org-roam-mcp for vault search
+** DONE P1-17: Wire org-roam-mcp for vault search
 :PROPERTIES:
 :ESTIMATE: 3 hr
 :SOURCE:   boost plan §4
