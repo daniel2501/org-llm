@@ -37,6 +37,10 @@ TG_KEY=$(pass org-llm/cloud/together/api-key 2>/dev/null | head -1)
 MODEL_NAME=$(pass org-llm/cloud/together/k20-output-model 2>/dev/null | head -1)
 [ -z "$MODEL_NAME" ] && MODEL_NAME="daniel2501_9324/Qwen3-Coder-30B-A3B-Instruct-k20-foss-distill-32c0ef6c"
 
+# Cloudflare in front of api.together.xyz 403s default curl/python UA
+# with "error code: 1010" — set a stable, identifying UA for all calls.
+UA="org-llm/0.1 (https://github.com/daniel2501/org-llm)"
+
 if [ -z "$TG_KEY" ]; then
     echo "no Together key; abort"; exit 1
 fi
@@ -61,7 +65,7 @@ log_doc "Together LoRA deploy daemon started — try every hardware × API shape
 
 # ── Discover available hardware ─────────────────────────────────────────
 log_line "discovering hardware options (filtering to >= ${MIN_GPU_MEMORY_GB}GB)"
-HARDWARE_LIST=$(curl -sS --max-time 15 https://api.together.xyz/v1/hardware \
+HARDWARE_LIST=$(curl -sS --max-time 15 -A "$UA" https://api.together.xyz/v1/hardware \
     -H "Authorization: Bearer $TG_KEY" 2>/dev/null \
     | jq -r --argjson min "$MIN_GPU_MEMORY_GB" \
         '.data[] | select(.specs.gpu_count >= 1 and .specs.gpu_memory >= $min)
@@ -82,7 +86,7 @@ ATTEMPTS_DOC+="\n|---+----------+-------+--------|"
 
 deploy_via_curl_autoscaling() {
     local hw="$1"
-    curl -sS --max-time 30 -X POST https://api.together.xyz/v1/endpoints \
+    curl -sS --max-time 30 -A "$UA" -X POST https://api.together.xyz/v1/endpoints \
         -H "Authorization: Bearer $TG_KEY" \
         -H "Content-Type: application/json" \
         -d "{\"model\":\"$MODEL_NAME\",\"hardware\":\"$hw\",\"autoscaling\":{\"min_replicas\":1,\"max_replicas\":1},\"display_name\":\"k20-foss-distill-$$-$RANDOM\"}"
@@ -90,7 +94,7 @@ deploy_via_curl_autoscaling() {
 
 deploy_via_curl_flat() {
     local hw="$1"
-    curl -sS --max-time 30 -X POST https://api.together.xyz/v1/endpoints \
+    curl -sS --max-time 30 -A "$UA" -X POST https://api.together.xyz/v1/endpoints \
         -H "Authorization: Bearer $TG_KEY" \
         -H "Content-Type: application/json" \
         -d "{\"model\":\"$MODEL_NAME\",\"hardware\":\"$hw\",\"min_replicas\":1,\"max_replicas\":1,\"display_name\":\"k20-foss-distill-$$-$RANDOM\"}"
@@ -102,7 +106,10 @@ deploy_via_sdk() {
 import os, sys, json
 os.environ["TOGETHER_API_KEY"] = "$TG_KEY"
 from together import Together
-client = Together()
+# Cloudflare 403s default UAs with "error code: 1010" — identify as org-llm.
+client = Together(default_headers={
+    "User-Agent": "org-llm/0.1 (https://github.com/daniel2501/org-llm)"
+})
 try:
     ep = client.endpoints.create(
         model="$MODEL_NAME",
@@ -120,7 +127,7 @@ PY
 sanity_test_endpoint() {
     local model="$1"
     local resp
-    resp=$(curl -sS --max-time 30 -X POST https://api.together.xyz/v1/chat/completions \
+    resp=$(curl -sS --max-time 30 -A "$UA" -X POST https://api.together.xyz/v1/chat/completions \
         -H "Authorization: Bearer $TG_KEY" \
         -H "Content-Type: application/json" \
         -d "{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: K20 ALIVE\"}],\"max_tokens\":20}" \
@@ -138,7 +145,7 @@ wait_endpoint_running() {
     local deadline=$(( $(date +%s) + PER_ATTEMPT_TIMEOUT ))
     while [ "$(date +%s)" -lt "$deadline" ]; do
         local state
-        state=$(curl -sS --max-time 15 \
+        state=$(curl -sS --max-time 15 -A "$UA" \
             "https://api.together.xyz/v1/endpoints/$endpoint_id" \
             -H "Authorization: Bearer $TG_KEY" 2>/dev/null \
             | jq -r '.state // empty' 2>/dev/null)
@@ -160,7 +167,7 @@ wait_endpoint_running() {
 stop_endpoint() {
     local endpoint_id="$1"
     [ -z "$endpoint_id" ] && return
-    curl -sS --max-time 15 -X POST \
+    curl -sS --max-time 15 -A "$UA" -X POST \
         "https://api.together.xyz/v1/endpoints/$endpoint_id/stop" \
         -H "Authorization: Bearer $TG_KEY" 2>&1 | head -3 >> "$LOG"
     log_line "  stopped endpoint $endpoint_id"

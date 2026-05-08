@@ -29,7 +29,12 @@ while true; do
 import os, json
 os.environ['TOGETHER_API_KEY'] = '$TG_KEY'
 from together import Together
-ft = Together().fine_tuning.retrieve('$JOB_ID')
+# Cloudflare in front of api.together.xyz 403s opaque/default UAs with
+# 'error code: 1010'. Override the SDK's default UA to identify org-llm.
+client = Together(default_headers={
+    'User-Agent': 'org-llm/0.1 (https://github.com/daniel2501/org-llm)'
+})
+ft = client.fine_tuning.retrieve('$JOB_ID')
 print(json.dumps({
     'status': ft.status,
     'output_name': getattr(ft, 'output_name', None),

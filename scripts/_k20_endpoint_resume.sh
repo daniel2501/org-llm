@@ -27,14 +27,16 @@ log() { echo "[k20-resume $(date +%H:%M:%S)] $*" >> "$LOG"; }
 
 log "starting $EP_ID"
 
-curl -sS --max-time 15 -X PATCH "https://api.together.xyz/v1/endpoints/$EP_ID" \
+UA="org-llm/0.1 (https://github.com/daniel2501/org-llm)"
+
+curl -sS --max-time 15 -A "$UA" -X PATCH "https://api.together.xyz/v1/endpoints/$EP_ID" \
   -H "Authorization: Bearer $TG_KEY" -H "Content-Type: application/json" \
   -d '{"state":"STARTED"}' > /dev/null
 
 # Poll for ready
 DEADLINE=$(($(date +%s) + 480))   # 8 min cap
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-    READY=$(curl -sS --max-time 10 \
+    READY=$(curl -sS --max-time 10 -A "$UA" \
         "https://api.together.xyz/v1/endpoints/$EP_ID" \
         -H "Authorization: Bearer $TG_KEY" \
         | jq -r '.autoscaling.ready_replicas // 0' 2>/dev/null)
@@ -50,7 +52,7 @@ if [ "$READY" -lt 1 ]; then
 fi
 
 # Sanity test
-RESP=$(curl -sS --max-time 30 -X POST https://api.together.xyz/v1/chat/completions \
+RESP=$(curl -sS --max-time 30 -A "$UA" -X POST https://api.together.xyz/v1/chat/completions \
     -H "Authorization: Bearer $TG_KEY" -H "Content-Type: application/json" \
     -d "{\"model\":\"$EP_NAME\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply: K20 ALIVE\"}],\"max_tokens\":20}")
 
