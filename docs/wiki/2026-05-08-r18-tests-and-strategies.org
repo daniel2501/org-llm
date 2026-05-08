@@ -1,0 +1,260 @@
+:PROPERTIES:
+:ID:       a53f71b2-ebb1-49cc-8e06-051fe6813179
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R18 — additional tests + FOSS-empowerment strategies
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:design:r18:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Synthesized from R15+R16+R17 findings + 4-agent R17 scour
++ spend-headroom analysis: 10 new test types + 20 new FOSS-empowerment
+strategies for R18, ranked by leverage. With 23-33× spend headroom
+before reaching Claude per-quality cost, R18 should be ambitious —
+not minimal. Top picks for R18 v1 launch: Tier-S strategies (S1-S5)
++ Tier-S tests (T1-T4) cover the bulk of expected lift; the rest
+populate R18.5 / R19.
+
+*Expanded.* R17 closed the FOSS-vs-Claude gap to 1pt of 25 (Claude
+20.1 vs K1 19.0 + K8 18.6). The remaining levers are mostly orchestration
++ specialty routing, not raw model power. R18 design absorbs these
+plus the must-fix infrastructure gotchas (worktree mutex, provider
+failover, fail-edit-streak abort, etc.).
+
+* Test types — 10 new (R18 v1 picks marked Tier-S)
+
+** Tier-S — must-have for R18 launch
+
+| ID | Test family | What it answers | Cells / Cost |
+|----+-------------+-----------------+--------------|
+| *T1* | *Failure-injection / robustness* — deliberately inject TCP drops, worktree races, malformed prefetch, partial provider unavail. Verify hedged retry + mutex + graceful degradation. | "Are R18's reliability fixes actually working under load?" | ~30 cells, ~$3 |
+| *T2* | *Long-horizon multi-file tasks* — refactor across 3-5 files with pytest gate; cross-file rename with grep verification; API endpoint migration; config from schema. | "Can FOSS handle real dev work, not just single-file edits?" | ~25 cells, ~$10-15 |
+| *T3* | *Quality regression tracking* — re-run R15+R16+R17 wins (B25 K2-kimi 12/12, K8 stability) at scale. | "Do R17's apparent winners hold across more samples?" | ~80 cells, ~$5 |
+| *T4* | *Cross-model composition* — K1-plans→K2-executes; K2-drafts→K8-reviews; K11-generates→K1-critiques; 3-way vote. | "Does composition cross-validate the 1pt gap?" | ~60 cells, ~$8-12 |
+
+** Tier-A — high value, R18 v1 if budget permits
+
+| ID | Test family | What it answers |
+|----+-------------+-----------------|
+| T5 | Cost-quality Pareto exploration — vary max_tokens / max_iterations per variant; measure cost-quality elasticity | "Can K11 stay competitive at 2000 max_tokens?" |
+| T6 | Tool surface ablation — B1 with =apply_link_wrap= deterministic vs LLM; B25 elisp with template-render vs LLM | "Should B1 ditch the LLM entirely?" |
+| T7 | Task fragility — same task, subtly different briefs (paraphrase) — does winner stay? | "How brittle is our routing?" |
+| T8 | Provider drift detection — same prompt across hours/days; track latency, cache, output drift | "Are providers stable over time?" |
+
+** Tier-B — R18.5 / R19
+
+| ID | Test family |
+|----+-------------|
+| T9 | Cache-hit optimization — prefix-stability A/B, cache-warm probes, per-provider comparison |
+| T10 | Model specialization probe — K2 on EVERY elisp-shaped task; K8 on EVERY coding-shaped task; K1 on EVERY wiki-shaped task |
+
+* Empowerment strategies — 20 new (R18 v1 picks marked Tier-S)
+
+** Tier-S — must-have for R18 launch (~6 strategies)
+
+| ID | Strategy | Mechanism | Expected lift |
+|----+----------+-----------+---------------|
+| *S1* | *Hedged-strong execution* | Run K8 (cheap+stable) first; if quality < threshold, escalate to K11 (premium). | Cost-aware routing; upper bound on per-cell cost |
+| *S2* | *Best-of-N voting (FOSS)* | Run same prompt n=5 times via K8 ($0.025/cell), modal-vote on output. | +1-2pt quality at trivial cost |
+| *S3* | *Critique-then-revise* | K1 drafts → K2 critiques → K1 revises with critique. Two-cheap-models pipeline. | Stacks "small habits" without one model knowing all 5 |
+| *S4* | *Specialty routing per task family* | Wiki edits → K1+K8; code → K8+K11; elisp → K2; DEC → K11+K2+K5; inbox → K8+K1 | Each variant on tasks where it shines |
+| *S5* | *Constrained-decoding for structured output* | JSON-mode for B11/B20/B45 via vLLM XGrammar / OpenRouter response_format | Format errors → 0; closes K2's missing-Expanded bug structurally |
+| *S6* | *Modal-Kimi pre-warmed pool* | Keep Modal-Kimi warm for the R18 window; route K2 + K15 there. | Kimi cells from p90 ~190s to ~30s |
+
+** Tier-A — R18 v1 if budget permits (~7 strategies)
+
+| ID | Strategy | Mechanism |
+|----+----------+-----------|
+| S7 | Aggressive context engineering | Distill optimal context per task; iterate based on judge feedback |
+| S8 | Scratchpad with memory | Explicit state object; "I tried X, got Y; trying Z" persists across iters |
+| S9 | Cross-run learning (RAG-lite) | Feed best past cells as exemplars; vault_search retrieval at edit time |
+| S10 | Per-handle LoRAs | Distinct fine-tunes for @atoz / @data / @geordi / @boothby |
+| S11 | Self-correction with reflection | Failed cell → reflection prompt → retry with reflection (Reflexion pattern) |
+| S12 | Provider cycling with fallback chains | primary → secondary → tertiary per variant; auto-failover on TCP drops |
+| S13 | Quality-aware sampling | n=15 default but modal-stop when 5 cells agree |
+
+** Tier-B — R18.5 / R19 (~7 strategies)
+
+| ID | Strategy | Mechanism |
+|----+----------+-----------|
+| S14 | Adversarial-prompt training | Show bad outputs as anti-examples; train rejection of those patterns |
+| S15 | Tool-discovery prompt | =list_tools= call before action; teaches efficient tool selection |
+| S16 | Graduated difficulty in cell | Start simple edits, progressively harder; warmup within cell |
+| S17 | Multi-modal composition | FOSS coding model + reasoning model + writing model in pipeline per task type |
+| S18 | Cost-equalized A/B vs Claude | Spend same per-cell as Claude on FOSS; see if any FOSS+extras beats |
+| S19 | Reverse-engineer Claude's tool-call patterns | Reproduce tail/grep/sed/uuid sequence as deterministic cell |
+| S20 | Single-model ensemble (Best-of-K w/ self-judge) | n cells, model judges its own outputs, picks best |
+
+* R18 v1 launch picks (consolidated)
+
+| Pick | Tests | Strategies | Effort |
+|------+-------+------------+--------|
+| Core | T1-T4 (must-haves) | S1-S6 (must-haves) | ~2-3 days build |
+| If time | T5, T6 | S7-S13 (high-value) | +1-2 days build |
+| Defer | T7-T10 | S14-S20 | R18.5 / R19 |
+
+* Tier-S strategy details (R18 launch)
+
+** S1 — Hedged-strong execution
+
+#+begin_src python
+def run_with_escalation(task, dial):
+    # Run cheap variant first
+    result = run_cell(K8, task, dial)
+    if score_cell(result) >= QUALITY_THRESHOLD:
+        return result
+    # Escalate to premium
+    log(f"escalating to K11 — K8 scored {score_cell(result)}")
+    return run_cell(K11, task, dial)
+#+end_src
+
+Threshold: median R17 quality (~17/25). K8 at $0.0005/u; if escalates,
+K11 at $0.025/u kicks in. Average per-cell cost stays < $0.005.
+
+** S2 — Best-of-N voting
+
+#+begin_src python
+def run_best_of_n(task, dial, n=5, model=K8):
+    results = [run_cell(model, task, dial) for _ in range(n)]
+    # Pick by cell quality score
+    return max(results, key=score_cell)
+#+end_src
+
+Trivial cost: $0.025/cell with K8. Use for prose tasks where quality
+matters most (B11 DEC, B5 rewrite, B20 Summary).
+
+** S3 — Critique-then-revise
+
+#+begin_src python
+def run_critique_revise(task, dial):
+    draft = run_cell(K1, task, dial)
+    critique = run_cell(K2, {**task,
+        "instruction": f"Critique this draft: {draft.text_output}"}, dial)
+    final = run_cell(K1, {**task,
+        "instruction": f"{task.instruction}\n\nCritique to address: {critique.text_output}"},
+        dial)
+    return final
+#+end_src
+
+3 cells per logical task. Cost ~$0.02 vs K11's $0.07. Quality should
+match or beat K11 per claude-shape agent's "5 small habits stacked."
+
+** S4 — Specialty routing per task family
+
+#+begin_src python
+TASK_FAMILY_VARIANTS = {
+    "wiki_edit":   [K1, K8],          # B1, B5, B20
+    "code_edit":   [K8, K11],         # B7, B30, B32
+    "elisp":       [K2],               # B25, B26
+    "dec_draft":   [K11, K2, K5],     # B11
+    "inbox_triage": [K8, K1],          # B40
+    "captains_log": [K1, K2],          # B45
+    "long_horizon": [K8, K11],        # B30+ multi-file
+}
+#+end_src
+
+** S5 — Constrained-decoding for structured output
+
+#+begin_src python
+B11_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "dec_entry",
+        "schema": {
+            "type": "object",
+            "required": ["dec_number", "title", "status",
+                         "summary", "expanded", "context",
+                         "options", "tradeoffs", "decision", "rationale"],
+            "properties": {
+                "dec_number":   {"type": "string", "pattern": "^DEC-[0-9]{3}$"},
+                "title":        {"type": "string"},
+                "status":       {"enum": ["CANDIDATE", "ACCEPTED", "DEPRECATED"]},
+                "summary":      {"type": "string", "minLength": 50, "maxLength": 400},
+                "expanded":     {"type": "string", "minLength": 100, "maxLength": 1000},
+                "context":      {"type": "array", "items": {"type": "string"},
+                                  "minItems": 3, "maxItems": 6},
+                "options":      {"type": "array", "items": {"type": "object"},
+                                  "minItems": 2},
+                "tradeoffs":    {"type": "string", "minLength": 100},
+                "decision":     {"type": "string", "minLength": 5},
+                "rationale":    {"type": "string", "minLength": 100},
+            },
+        },
+    },
+}
+#+end_src
+
+Then harness deterministically renders JSON to org. Format errors → 0.
+
+** S6 — Modal-Kimi pre-warmed pool
+
+#+begin_src bash
+# Cron / pre-launch
+modal run /tmp/modal_vllm/serve_kimi.py --keep-warm 1
+# R18 launch: K2 + K15 routed to Modal endpoint
+# Cool down after R18 finishes
+modal app stop org-llm-kimi-k26-vllm
+#+end_src
+
+Cost: ~$8 for overnight warm. Saves ~10 min wall on Kimi cells.
+
+* Tier-S test details (R18 launch)
+
+** T1 — Failure-injection
+
+Synthetic faults to verify R18 reliability:
+
+| Fault | Injected via | Expected behavior |
+|-------+--------------+-------------------|
+| TCP drop mid-stream | mock urllib.request that raises =IncompleteRead= at iter N | Hedged retry on alternate provider succeeds |
+| Worktree race | spawn 8 simultaneous git worktree adds | Mutex serializes; no collision |
+| Malformed prefetch | inject random JSON corruption | Cell fails gracefully with =prefetch_invalid= error |
+| Partial provider unavail | block one provider's IP | Failover chain kicks in |
+| Token exhaustion | =max_budget_usd=0.001= | =budget_exceeded= terminal state |
+| Scope strict bypass | model attempts =../../etc/foo= | Refused, no file access |
+
+** T2 — Long-horizon multi-file
+
+| Task | Multi-file scope | Verifier |
+|------+------------------+----------|
+| BK1 | rename =SpecialistTask.scope_strict= → =enforce_scope= across =org_llm/= + =scripts/= + =tests/= | =pytest= passes; grep finds 0 stale |
+| BK2 | Add new CLI subcommand: module + test + wiki entry + roadmap update (4 files) | CLI works; test passes; wiki has new ref |
+| BK3 | Fix bug across 3 files: failing test → root cause → patch upstream caller | Regression test passes |
+| BK4 | Add new SpecialistTask field: dataclass + dispatch + docs + R17 task config | Field accessible; dispatch wired; docs match |
+| BK5 | Refactor wiki cross-link infrastructure: update 5+ pages with new convention | Pre-existing tests pass; convention applied |
+
+** T3 — Quality regression tracking
+
+Re-run R17's notable cells with n=10:
+
+| Cell | R17 score | R18 expected | Test for stability |
+|------+-----------+--------------+---------------------|
+| K2 B25 elisp | 12 | 12 ± 2 | Specialty claim holds? |
+| K8 B11 DEC | 36 | 30+ ± 5 | Cheapest variant on hardest task? |
+| K11 B1 wraps | 28-30 | 28+ | Premium-tier consistency? |
+| K1 B11 DEC | 25 | 23+ ± 3 | Workhorse vs hardest task? |
+
+** T4 — Cross-model composition
+
+Three composition patterns, n=10 each on B11 + B5 + B20 + B45:
+
+| Pattern | Sequence | Expected lift |
+|---------+----------+---------------|
+| CN-A    | K1-plans → K2-executes (cheap-then-strong) | +1-2pt over K1 alone |
+| CN-B    | K2-drafts → K8-reviews (creative + judicious) | +1pt; catches Kimi's missed-Expanded bug |
+| CN-C    | K11-generates → K1-critiques (premium + cheap) | +1pt; cheap critic catches K11's over-count |
+| CN-D    | 3-way K1+K2+K8 vote (Tier-S S2) | +0.5-1pt; cost ~3× one cell |
+
+* Cross-references
+
+- =docs/wiki/2026-05-08-r17-synthesis.org= — synthesis (this doc extends)
+- =docs/wiki/2026-05-08-foss-spend-headroom.org= — strategic spend shift
+- =docs/wiki/2026-05-07-r18-design.org= — R18 design (gets these adjustments)
+- =docs/notes/2026-05-08-r17-quality-judge.org= — quality leaderboard + investigations
+- =docs/notes/2026-05-08-r17-pareto-routing.org= — cost-quality findings
+- =docs/notes/2026-05-08-r17-walltime-parallelism.org= — long-pole + abort tuning
+- =docs/notes/2026-05-08-r17-provider-cache.org= — pin remap + fallback chains
