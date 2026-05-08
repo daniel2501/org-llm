@@ -477,6 +477,12 @@ class SpecialistTask:
     # with explicit error. Closes Claude's UUID-fabrication gap (1/B11
     # cell across both rounds; FOSS variants had 0 fabs).
     forbid_unknown_ids: bool = False
+    # R25 P5 / R26 P0-2 — per-task max_tokens cap. When set, overrides
+    # the default 8000 in _chat_completions OpenAI payload. Used to cap
+    # K2 (kimi-k2.6) prose runaway: R25 K2 produced 22-28k char outputs
+    # at default 8000-token ceiling (16 WALL_CAP_KILLED on long cells).
+    # _R25_VARIANT_MAX_TOKENS in scripts/_round25_dials.py reads here.
+    max_tokens: Optional[int] = None
 
 
 @dataclass
@@ -1341,12 +1347,16 @@ def run_specialist(task: SpecialistTask) -> SpecialistResult:
         temp = (task.temperature_override
                   if task.temperature_override is not None
                   else PERSONA_TEMPERATURE_DEFAULTS.get(task.handle, 0.1))
+        # R26 P0-2 — per-task max_tokens override (default 8000 if None)
+        mt_kwargs = ({"max_tokens": task.max_tokens}
+                     if task.max_tokens is not None else {})
         resp = _chat_completions(
             task.api_endpoint, api_key, task.model,
             messages, task.tools,
             response_format=task.response_format,
             provider_pin=task.provider_pin,
             temperature=temp,
+            **mt_kwargs,
         )
         if "_http_error" in resp:
             error = f"HTTP {resp['_http_error']}: {resp['_err_body'][:300]}"

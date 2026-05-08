@@ -162,31 +162,89 @@ def get_prefetch(task: dict) -> dict:
 # R17 fix B4 — per-provider warmup. At run start, send a 1-token
 # completion to each variant so first real call is warm. Saves
 # cold-start latency penalty per provider.
+#
+# R26 P0-5 — warmup is now a REAL pre-flight, not a non-fatal ping.
+# Sends a "Reply with exactly: PING" prompt and asserts the response
+# content matches /PING/i. Variants that fail (HTTP 4xx, missing
+# content, no PING match, timeout, exception) are held out of the
+# round via WARMED_VARIANTS gating. If >30% of variants fail, write
+# PREFLIGHT_FAIL sentinel and SystemExit so the round refuses launch.
+WARMED_VARIANTS: set = set()
+
+
+def _warmup_one(name, model_id, or_key):
+    """Send a real chat completion. Return (ok: bool, reason: str)."""
+    payload = {
+        "model": model_id,
+        "messages": [{"role": "user",
+                      "content": "Reply with exactly: PING"}],
+        "max_tokens": 10, "temperature": 0,
+    }
+    pin = PROVIDER_PINS.get(model_id)
+    if pin: payload["provider"] = pin
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/chat/completions",
+        data=json.dumps(payload).encode(), method="POST",
+        headers={"Authorization": f"Bearer {or_key}",
+                 "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            body = r.read()
+            d = json.loads(body)
+    except urllib.error.HTTPError as exc:
+        return False, f"HTTP {exc.code}"
+    except urllib.error.URLError as exc:
+        return False, f"URLError {exc.reason}"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    try:
+        content = d["choices"][0]["message"]["content"] or ""
+    except (KeyError, IndexError, TypeError) as exc:
+        return False, f"no content ({type(exc).__name__})"
+    if "ping" not in content.lower():
+        snippet = content.strip().replace("\n", " ")[:60]
+        return False, f"no PING match (got: {snippet!r})"
+    return True, f"provider={d.get('provider', '?')}"
+
+
 def warmup_providers():
-    log("warming providers...")
+    """R26 P0-5 pre-flight. Mutates WARMED_VARIANTS + filters VARIANTS."""
+    global VARIANTS
+    log("warming providers (P0-5 pre-flight)...")
     or_key = subprocess.run(["pass", "org-llm/cloud/openrouter/api-key"],
                               capture_output=True, text=True, check=True).stdout.strip()
-    for name, model_id, mode in VARIANTS:
-        if mode != "agor" or model_id is None:
-            continue
-        try:
-            payload = {
-                "model": model_id,
-                "messages": [{"role": "user", "content": "ok"}],
-                "max_tokens": 1, "temperature": 0,
-            }
-            pin = PROVIDER_PINS.get(model_id)
-            if pin: payload["provider"] = pin
-            req = urllib.request.Request(
-                "https://openrouter.ai/api/v1/chat/completions",
-                data=json.dumps(payload).encode(), method="POST",
-                headers={"Authorization": f"Bearer {or_key}",
-                         "Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=30) as r:
-                d = json.loads(r.read())
-            log(f"  warmed {name}: provider={d.get('provider', '?')}")
-        except Exception as exc:
-            log(f"  warmup {name} failed (non-fatal): {exc}")
+    candidates = [(n, m, mode) for (n, m, mode) in VARIANTS
+                   if mode == "agor" and m is not None]
+    failed = []
+    for name, model_id, _mode in candidates:
+        ok, reason = _warmup_one(name, model_id, or_key)
+        if ok:
+            WARMED_VARIANTS.add(name)
+            log(f"  warmed {name}: {reason}")
+        else:
+            failed.append(name)
+            log(f"[warmup-fail {name}: {reason}]")
+    total = len(candidates)
+    n_fail = len(failed)
+    fail_rate = (n_fail / total) if total else 0.0
+    log(f"warmup: {total - n_fail}/{total} OK; fail-rate {fail_rate:.0%}")
+    if total and fail_rate > 0.30:
+        sentinel = ARTIFACTS / "PREFLIGHT_FAIL"
+        sentinel.write_text(
+            f"warmup fail-rate {fail_rate:.0%} > 30% threshold\n"
+            f"failed: {failed}\n")
+        log(f"PREFLIGHT_FAIL: {sentinel}")
+        raise SystemExit("warmup pre-flight: too many variants failed")
+    # Hold dead variants out of the round. Non-agor / model_id=None
+    # variants (e.g. K5-claude-solo) are passed through unchanged.
+    before = [v[0] for v in VARIANTS]
+    VARIANTS = [v for v in VARIANTS
+                if v[2] != "agor" or v[1] is None
+                or v[0] in WARMED_VARIANTS]
+    after = [v[0] for v in VARIANTS]
+    dropped = [n for n in before if n not in after]
+    if dropped:
+        log(f"warmup: dropped {dropped} from round")
 
 
 # R17 — provider pinning per cache audit 2026-05-07.
@@ -1086,7 +1144,8 @@ def task_needs_elisp_kit(task: dict) -> bool:
 
 
 def run_specialist_for_cell(wt_path, task, handle, plan_brief, prefetch,
-                              specialist_model, dial: DialConfig, cell_dir):
+                              specialist_model, dial: DialConfig, cell_dir,
+                              variant_name: str = ""):
     persona = PERSONA_LOOKUP.get(handle, f"You are {handle}.")
     l1_primer = _extract_l1_for_handle(handle)
     instr_prefix = (l1_primer + "\n\n---\n\n") if l1_primer else ""
@@ -1110,6 +1169,12 @@ def run_specialist_for_cell(wt_path, task, handle, plan_brief, prefetch,
     if task["id"] == "B11" and os.environ.get("R18_S5_CONSTRAINED") != "0":
         response_format = B11_RESPONSE_FORMAT
 
+    # R26 P0-2 — variant max_tokens cap (R25 P5 dead-code fix). K2 family
+    # produced 22-28k char prose at default 8000-token ceiling, hit 16
+    # WALL_CAP_KILLED on long cells. Read _R25_VARIANT_MAX_TOKENS here so
+    # the cap actually takes effect downstream in _chat_completions.
+    variant_max_tokens = _R25_VARIANT_MAX_TOKENS.get(variant_name)
+
     spec_task = SpecialistTask(
         handle=handle,
         persona=persona,
@@ -1131,6 +1196,7 @@ def run_specialist_for_cell(wt_path, task, handle, plan_brief, prefetch,
         response_format=response_format,                              # R18 S5
         api_endpoint=api_endpoint,                                     # R18 S6 Modal-Kimi
         api_key_pass_slug=api_key_pass_slug,                           # R18 S6 Modal-Kimi
+        max_tokens=variant_max_tokens,                                 # R26 P0-2 — K2 cap
     )
 
     # O1+O2: stream events to disk + main log as they fire
@@ -1372,7 +1438,8 @@ def run_one_cell(task, variant_name, specialist_model_id, mode,
         if not brief: continue
         result = run_specialist_for_cell(wt_path, task, handle, brief,
                                             prefetch, specialist_model_id,
-                                            dial, run_dir)
+                                            dial, run_dir,
+                                            variant_name=variant_name)
         total_spec_cost += result.cost_usd
         specialists.append({
             "handle": handle,
@@ -1866,7 +1933,13 @@ def main():
     # ── Layer 2: top-3 FOSS + Claude × remaining tasks ───────────────────
     # R25_DESIGN: K8 in Layer-2 advancing pool
     # R26-Q1: K8 must run outside B1 to confirm recovery is broad
-    _R25_FORCE_LAYER2 = {"K8-deepseekV3", "K1-qwen30"}
+    # R26 P1-3: K8 + K11 added to force-list. K8 needs B5/B7/B11/B25 + B11+B26
+    # mini-probe to confirm cross-task generalization (R25 force-listed
+    # but selector bug excluded; the 4 forced cells silent_noop'd — R26
+    # will retry with selector dedupe in P0-1 + dedicated probe at n=5).
+    # K11 added so it gets exercised on B25 elisp (its native task) at
+    # higher n than the layer_k11b25 mini stage.
+    _R25_FORCE_LAYER2 = {"K8-deepseekV3", "K1-qwen30", "K11-qwen3coder"}
     advancing = [v for v in VARIANTS if v[0] in top3_foss
                   or v[0] in _R25_FORCE_LAYER2
                   or v[2] == "claude-solo"]
