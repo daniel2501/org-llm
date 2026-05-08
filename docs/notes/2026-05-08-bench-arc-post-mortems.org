@@ -1,0 +1,379 @@
+:PROPERTIES:
+:ID:       2026-05-08-bench-arc-post-mortems
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R15-R24 bench arc — post-mortems for things that broke
+#+FILETAGS: :notes:bench:postmortem:r25-prep:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Six post-mortems from the R15-R24 bench arc that didn't
+make it into the round-specific synthesis docs but matter for R25
+guardrails. Each has the same shape: what broke, root cause, blast
+radius (cells / dollars / wall), what we changed, and the
+guardrail it informs in R25.
+
+*Expanded.* The grand-synthesis doc covered model + strategy
+verdicts; the cross-round notes covered failure-mode taxonomy at
+the cell level. These post-mortems cover /infrastructure/ and
+/process/ failures — Modal billing, RunPod GraphQL quirks, agent
+write-blocks, the laptop crash, the round-chain's thin sed-fork
+abstraction. R25 needs explicit guards for each.
+
+* PM1 — Modal LoRA training: 4 distinct failures in sequence
+
+** What broke
+
+In order over ~6h:
+
+| #  | Failure                                                       | When           |
+|----+---------------------------------------------------------------+----------------|
+| 1  | =transformers/integrations/finegrained_fp8.py= × =torch 2.4.1=| first launch   |
+|    | =torch.library.custom_op= schema rejected new transformers    |                |
+|    | MoE function signature                                        |                |
+| 2  | =qwen3_moe= architecture not recognized (transformers 4.46.3) | post-bump      |
+| 3  | A100-80GB GPU preempted mid-step (10:11/step → "waiting       | mid-training   |
+|    | to be scheduled" for 5h)                                      |                |
+| 4  | "App creation failed: workspace billing cycle spend limit     | retry attempt 1|
+|    | reached" — Modal monthly cap                                  |                |
+
+** Root causes
+
+- (1, 2): version-conflict labyrinth. Pinning =transformers>=4.46= vs
+  qwen3_moe support floor (4.50+) vs FP8 module breakage in 4.5x.
+  Resolution: pin =torch==2.6.0= + =transformers==4.51.3= + match
+  TRL/peft/bitsandbytes accordingly.
+- (3): Modal A100-80GB serverless capacity contention. The pool is
+  under-provisioned for our peak demand window.
+- (4): Modal's monthly spend limit triggered after the preempted
+  training plus a few small earlier experiments. No warning before
+  the cap fired; subsequent app creations rejected silently from the
+  daemon's perspective (the error was in the modal CLI stdout, not
+  the daemon's stuck-detect).
+
+** Blast radius
+
+- ~3h wall lost to (1) + (2).
+- ~5h pod time billed during preemption ((3)) — small spend due to
+  preemption-not-running pricing but visible queue-wait.
+- ~$3-5 burned in the (4) Modal billing-cap state.
+- Daemon wasted 3 of its 10 attempts on (4) before being killed.
+- *Net: zero adapter produced after ~8h elapsed and ~$3-5 spend.*
+
+** What we changed
+
+- =_lora_progress_logger.sh= got two auto-fix recipes for (1) and
+  (2). Carry forward.
+- Daemon's =modal_stuck= heuristic added "waiting to be scheduled"
+  detection — but only after-the-fact for (3); (4) was undetected.
+
+** R25 guardrail
+
+*PM1-G:* extend =_lora_autorepair_daemon.sh= =modal_stuck= to also
+recognize:
+- ="App creation failed: workspace billing cycle spend limit"= →
+  immediate strategy switch (don't waste attempts)
+- ="No GPU available"= → strategy switch
+- =modal CLI exit code != 0= within 60s of launch → strategy switch
+
+* PM2 — RunPod dockerArgs unreliability
+
+** What broke
+
+Three sequential RunPod pods (H100 SXM 80GB, A100 SXM 80GB, RTX
+3090 sanity-test) all showed identical behavior:
+- =desiredStatus: RUNNING=
+- =runtime: null= (never populated)
+- pod logs: empty (across multiple polls)
+- billing: =currentSpendPerHr > 0= (we WERE being charged)
+- training output: never appeared in HF adapter repo
+
+** Root cause (working hypothesis)
+
+Either:
+- (a) RunPod GraphQL =runtime= + =logs= fields don't reliably
+  populate for our pod creation pattern (=podFindAndDeployOnDemand=
+  + inline =dockerArgs=)
+- (b) Inline =dockerArgs= containing a multiline bash heredoc gets
+  mangled by their API; container starts with default entrypoint
+  but our script never executes
+- (c) The container DOES execute our script but output goes to
+  /dev/null because we don't redirect, and HF push fails for
+  unrelated reasons (auth, network)
+
+Sanity test (tiny =dockerArgs=, RTX 3090, =bash -c "echo HELLO &&
+nvidia-smi && sleep 300"=) ALSO showed empty logs after 90s. So
+the issue is NOT my script being too big — it's something
+fundamental about how RunPod surfaces container output.
+
+** Blast radius
+
+- ~$3 spent across 3 stuck pods.
+- ~1.5h of debug attempts.
+- Adapter still not produced.
+
+** What we changed
+
+- All RunPod pods terminated.
+- Daemon's =S_RUNPOD_DEFAULT= strategy left as
+  =NOT_IMPLEMENTED= because we couldn't get default approach
+  working either.
+
+** R25 guardrail
+
+*PM2-G:* if RunPod is needed in R25 (e.g., for self-hosted K1+K2
+vLLM endpoints in P1), use a /pre-baked Docker image/ pushed to
+Docker Hub instead of inline =dockerArgs=. The image's
+=ENTRYPOINT= runs the training/serving directly. Eliminates the
+=dockerArgs= mystery.
+
+Alternative: use SSH-based pods (PUBLIC_KEY env var) and
+=runpodctl exec= to push commands. Adds local key-management
+complexity but reliable.
+
+* PM3 — R24 K7-qwen72b score = −693 (quality_lint over-penalty)
+
+** What broke
+
+R24 K7-qwen72b cells = 10, score = −693 (mean = −69.3 per cell).
+For comparison, K1-qwen30 mean = +21.4 per cell. K7 was worse than
+"don't bother running".
+
+Specifically: each K7 cell likely accrued:
+- 5-10 nested_brackets (R18 K6/K7 archetype) × −2 = −10 to −20
+- 2-5 heading_duplicates × −3 = −6 to −15
+- 2-5 fab_uuids × −2 = −4 to −10
+- 1-3 table_pipe_loss × −3 = −3 to −9
+- Plus base score from primary − fab × 3 − out_of_scope, often negative
+
+Total per-cell penalty often dwarfed any positive contribution. A
+single R24 K7 cell was reported with score = −102.
+
+** Root cause
+
+R24's quality_lint extensions (added in R25-design prep, shipped
+in R24 via the synthesis patch) were calibrated by the
+outlier-deepdive agent's analysis of /worst/ cells in R15-R19. We
+gave each detector a substantial negative weight to make it /felt/.
+But on a variant that triggers many detectors per cell, penalties
+stack multiplicatively in /negative/ direction.
+
+K7 was always a structural-output-broken model on wiki tasks per
+the quality-judge agent. The new lint weights now formally express
+that. But penalty stacking masks any gradient between "K7 might be
+useful in adversarial role" and "K7 is structurally wrong here".
+
+** Blast radius
+
+- 10 K7 cells × ~$0.077/cell = $0.77 spent producing a leaderboard
+  artifact (negative score) that we already knew the answer to.
+- Slightly delayed Layer 2 (K7 cells take time even when failing).
+
+** What we changed
+
+Nothing in R24 (round was running). R25 design says "drop K7 from
+generative role; keep only as adversarial critic in S38".
+
+** R25 guardrail
+
+*PM3-G:* implement G1 (cell quality floor): if a cell's lint penalty
+> 8 OR primary < 0, mark cell =floor_dropped=, exclude from
+leaderboard, log separately. Prevents a single broken variant from
+swamping log noise / leaderboard storage.
+
+*PM3-G2:* lint-detector calibration: re-fit weights from R24 data
+so that a typical /good/ cell has lint_penalty ≤ 1 and a /typical/
+bad cell has ≤ 5. Currently a typical bad cell hits 10+ — too
+sensitive.
+
+* PM4 — Background agent /tmp write-block
+
+** What broke
+
+When spawning the original 7 cross-round analysis agents (R15-R19
+scope), I told them to write to =/tmp/r19-{...}.org=. Six of seven
+silently failed at the file-write step because /tmp writes are
+denied in the agent sandbox. Only =strategy-effectiveness= returned
+its findings inline (because I'd given a different writing
+instruction). The aggregator script polled for files that never
+appeared and shipped a stub doc.
+
+** Root cause
+
+The agent sandbox restricts writes to certain paths. =/tmp= is
+NOT writable. =/home/daniel/repos/org-llm/docs/notes/= IS
+writable.
+
+I assumed /tmp was a generic scratchpad without checking.
+
+** Blast radius
+
+- 6 agents wasted (~30 min each, ~$1-2 each in API cost).
+- Aggregator produced a stub doc.
+- Had to re-spawn the same 6 agents with corrected output paths
+  (~3h total round-trip).
+
+** What we changed
+
+All later spawn prompts use =docs/notes/= path. The repeated
+incidents are the diagnostic that pushed me to make this rule
+explicit.
+
+** R25 guardrail
+
+*PM4-G:* spawn-prompt template at top of agent prompts:
+=OUTPUT PATH: /home/daniel/repos/org-llm/docs/notes/<file>.org
+Do NOT write to /tmp — that path is blocked.= Make this part of
+every R25 analysis-agent spawn invocation.
+
+* PM5 — Laptop crash (in-memory agent loss)
+
+** What broke
+
+User's laptop crashed mid-session. All in-flight background agents
++ daemons died with the OS. Cloud-side state (RunPod pods, Modal
+apps, OpenRouter balance, HF repos, git commits) all survived
+intact. Local in-progress work (4 R24 analysis agents) was lost
+because they hadn't yet committed.
+
+** Root cause
+
+Background agents are in-memory entities of the local Claude Code
+session. They are NOT durable across crashes/reboots/session-end.
+
+** Blast radius
+
+- 4 R24 analysis agents × ~30 min each = ~2 hours of work erased.
+- Each agent had only just started, so financial blast was
+  small (~$1 in API).
+- Re-spawning is straightforward; their work was deterministic
+  given the same input artifacts.
+
+** What we changed
+
+Re-spawned the 4 agents with same prompts after crash. Each agent
+prompt now ends with explicit =git add + git commit= step so even
+if the AGENT survives long enough to write the file, the result
+makes it into the durable repo.
+
+** R25 guardrail
+
+*PM5-G:* every long-running agent prompt MUST end with explicit
+git-add + git-commit step. Make it part of the spawn template.
+For state that's even more critical (LoRA training URL, R25
+final summary), also write to =pass= entries which survive
+restart.
+
+*PM5-G2:* consider durable agent runtime: a spawned subprocess +
+state file pattern (like =_lora_autorepair_daemon.sh=) is more
+crash-resilient than in-memory Claude agents. For MORE-than-
+analysis tasks (e.g. round forking + launching), prefer the
+daemon pattern.
+
+* PM6 — Round-chain sed-only fork was too thin
+
+** What broke
+
+The R19-R23 round-chain autopilot (=_rounds_19_23_autopilot.sh=)
+forked each round's harness via:
+1. =cp _round{prev}_dials.py _round{n}_dials.py=
+2. =sed -i= for round-id renames (artifacts dir, R{N}_LIVE,
+   r{n}- worktree prefix, R{N} log prefix, Round-{N} comment)
+3. Round-specific delta in the case statement (e.g., bump
+   K2/K8 n; check LoRA endpoint)
+
+The R20-R23 supplement agent later confirmed: /the round-chain's
+"deltas" were mostly cosmetic/. R20 had its K2/K8 n bump (real),
+but R21's "auto-prune" was just the layer1→layer2 filter that's
+been there since R17 — no new prune. R22 + R23 deltas were
+literally =# placeholder, manual build needed= comments.
+
+So the round-chain produced 4 forks (R20-R23) where 3 (R21-R23)
+were /effectively reruns/ of R20 with different round IDs. Then
+R21-R23 hit OpenRouter 402 because they didn't bring new strategy
+to justify the spend.
+
+** Root cause
+
+The =_rounds_19_23_autopilot.sh= = harness layer was
+under-engineered for the level of strategic delta we wanted per
+round. =sed= is fine for rename but doesn't carry strategy logic.
+Strategy lives in =_r19_wiring_patch.py= and =_r24_synthesis_patch.py=
+— the round-chain should call those, not invent its own thin
+deltas.
+
+** Blast radius
+
+- 3 rounds × ~$1.20 each = $3.60 spent on rounds with no novel
+  data.
+- Wasted overnight wall (~30 min total).
+- R21-R23 tripped OpenRouter 402 cap, requiring manual top-up.
+
+** What we changed
+
+Replaced the round-chain autopilot with:
+- =_openrouter_credit_watcher.sh= for credit-recovery automation
+- =_r19_wiring_patch.py= + =_r24_synthesis_patch.py= for real strategy
+  deltas
+- R25 will be hand-launched (not chain-forked) once analysis-driven
+  R25 design patch is built
+
+** R25 guardrail
+
+*PM6-G:* R25 launch flow is /forked + patched + smoke-tested + manual-
+launched/, not auto-chained. The "cheap fork-and-rename" pattern is
+fine for parameter-sweep rounds, but not for strategy-delta rounds.
+A round with a real strategy needs an explicit patch script.
+
+*PM6-G2:* if an autopilot wants to chain N rounds, each round
+config must pass a /strategy-novelty check/: no two consecutive
+rounds have identical patch content (modulo round IDs). Otherwise
+abort with =CHAIN_NOVELTY_FAIL=.
+
+* Cross-cutting themes
+
+1. *Cloud APIs lie or under-document.* RunPod's =runtime= field,
+   Modal's silent billing limits, Together's =config.fine_tuning:
+   null= metadata that doesn't mean what it says. R25 should always
+   confirm via /actual behavior/ (test request, real upload) not
+   the stated metadata.
+
+2. *Detection lag costs more than action lag.* PM1 (Modal
+   billing), PM2 (RunPod runtime=null), PM3 (K7 score plummet),
+   PM6 (R20-R23 dead deltas) were all detected /after/ the fact.
+   In R25, build /pre-condition/ checks (G5 endpoint pre-flight,
+   G9 OR credit pre-flight) so the failures don't even start.
+
+3. *Stack failure modes are silent.* R18 v1's
+   =allow_fallbacks=False= silently broke 5 variants; R19's K8
+   collapse was silent until variant-longevity agent flagged it;
+   R24's K7 score-693 only matters because we're now logging
+   per-variant. R25 needs /quality regression alarm/ (G7) and
+   /provider live deny-list/ (G2) to surface silent stacks
+   in-round.
+
+* R25 launch checklist (consolidated from PM1-PM6)
+
+| Item                                            | From PM    |
+|-------------------------------------------------+------------|
+| Modal stuck-detect: bill-limit + no-GPU + 60s-exit | PM1     |
+| RunPod use pre-baked Docker image                 | PM2      |
+| Quality floor G1 (drop cells with lint penalty > 8 OR primary < 0) | PM3 |
+| Lint-detector recalibration                      | PM3      |
+| Spawn-prompt template: =/docs/notes/= + git commit| PM4 + PM5|
+| Durable daemon for forks/launches (not in-mem)   | PM5      |
+| Strategy-novelty check between rounds            | PM6      |
+| Pre-flight endpoint + credit + disk + worktree   | cross-cut|
+| Quality regression alarm + provider live deny-list | cross-cut |
+
+* Cross-references
+
+- =docs/wiki/2026-05-08-r15-r23-grand-synthesis.org= — model + strategy verdicts
+- =docs/wiki/2026-05-08-r25-design.org= — guardrails G1-G10 + recipes AR1-AR10
+- =docs/wiki/2026-05-08-overnight-r19-r23-brief.org= — round-chain narrative
+- =scripts/_lora_autorepair_daemon.sh= — PM1-G recipes
+- =scripts/_r25_autorepair_daemon.sh= — quality + provider live monitors
