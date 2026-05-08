@@ -4545,7 +4545,18 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "offer to take (doctor probe, gather, delegate to a "
             "specialist) when warranted. If everything truly is "
             "nominal, say so in a sentence — don't list 10 fields. "
-            "A status report should fit in 4–6 lines, not 15."
+            "A status report should fit in 4–6 lines, not 15.\n"
+            "CROSS-TURN CONFIRMATION: if your prior turn ended "
+            "with an offer ('Shall I…?', 'Want me to…?', 'I can "
+            "delegate this if you'd like'), and the user's next "
+            "message is a confirmation — 'yes', 'yep', 'ok', "
+            "'sure', 'please', 'do it', 'go ahead', 'proceed', "
+            "'make it so', 'aye' — treat that as the user "
+            "ACCEPTING THE OFFER and EXECUTE the proposed action "
+            "this turn. Don't restate the offer. Don't switch "
+            "topics. Don't dump telemetry. The user's brief reply "
+            "carries the same intent as if they'd retyped the full "
+            "request."
         ),
     },
     "researcher": {
@@ -4636,7 +4647,17 @@ _PRECONFIGURED_AGENT_PROMPTS: dict[str, dict[str, str]] = {
             "Power users wanting a creative_model for drafting "
             "can clone this agent in ~/org/org-llm-agents.org "
             "with :MODEL_ROLE: creative_model — see "
-            "docs/wiki/agents.org."
+            "docs/wiki/agents.org.\n"
+            "\n"
+            "CROSS-TURN CONFIRMATION: when your prior turn ended "
+            "with a `[y/N]` prompt (Save? Open in new frame? etc.), "
+            "and the user's next message is a confirmation — 'y', "
+            "'yes', 'yep', 'ok', 'sure', 'please', 'do it', 'go "
+            "ahead', 'save it', 'save', 'proceed' — treat that as "
+            "an explicit YES and execute the proposed action this "
+            "turn (capture_note, open_in_emacs, etc.). Don't "
+            "re-ask. Don't repeat the draft. The user's brief "
+            "reply carries the same intent as if they'd typed `y`."
         ),
     },
     "engineer": {
