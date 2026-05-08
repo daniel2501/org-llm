@@ -1,0 +1,337 @@
+:PROPERTIES:
+:ID:       1742ba15-7cfe-4201-9a39-7d6cd3940a4f
+:CREATED:  [2026-05-07]
+:END:
+#+TITLE: Round-16 design — FOSS at parity with Claude on coding + OS + org-mode work
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:design:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R16 advances the bench from "can FOSS specialists do
+basic edits?" (R15) to "can FOSS specialists be as good at coding +
+OS work + org-mode life-management as Claude?" Mission-aligned task
+catalog (org-agenda, weekly review, refile, captain's-log, real
+Python coding, real shell ops) + statistical rigor (n=3 sampling) +
+escalation routing + multi-specialist vote/judge + extended tool
+surface (shell, python, pytest, git introspection).
+
+*Expanded.* Five angles surfaced from R14/R15 learning are bundled
+into R16 because they all need the same plumbing (variance
+estimation, broader tool surface, mission-aligned task fixtures).
+Doing them as separate rounds wastes harness work.
+
+* Goals
+
+| #  | Goal                                                                                  |
+|----+---------------------------------------------------------------------------------------|
+| G1 | Find a FOSS-only configuration that matches Claude on cost-per-correct-edit           |
+| G2 | Surface variance — n=3 sampling so a single noisy cell can't anchor the leaderboard   |
+| G3 | Test orchestration value: escalation, vote/judge, multi-specialist composition        |
+| G4 | Extend tool surface to real coding + OS work (shell, python, pytest, git)             |
+| G5 | Use mission-aligned tasks (org-agenda, refile, captain's-log) — not just B1-shape     |
+
+* Five angles bundled
+
+| Angle | What                            | Where it lands in R16                                            |
+|-------+---------------------------------+------------------------------------------------------------------|
+| A1    | n=3 sampling                    | Every cell runs 3× with different temperature seeds; mean + sd   |
+| A2    | Cheap-then-escalate routing     | New dial =D11 with_escalation=True/False=; A/B vs fixed assignment |
+| A3    | Multi-specialist vote (Path C)  | New dial =D12 voting=mode= ∈ {none, 3-way + judge}                |
+| A4    | Real-code + OS task expansion   | New tasks B30-B36 (Python refactor, test write, shell ops, etc.) |
+| A5    | Task-shape × model fingerprint  | Falls out of A1 — n=3 cells across all (variant, task) pairs     |
+
+* Variant pool
+
+R15's 9 variants survive. R16 adds two specialist coders:
+
+| ID  | Model                                        | Why                                                |
+|-----+----------------------------------------------+----------------------------------------------------|
+| K1  | qwen/qwen3-coder-30b-a3b-instruct            | Carry-over (cheap, fast, on-spec)                  |
+| K2  | moonshotai/kimi-k2.6                         | Carry-over with reasoning fix                      |
+| K3  | deepseek/deepseek-r1                         | Carry-over (reasoning model)                       |
+| K4  | openai/gpt-oss-120b                          | Carry-over                                         |
+| K5  | claude-sonnet (via claude-code)              | External baseline                                  |
+| K6  | meta-llama/llama-3.3-70b-instruct            | Carry-over (R15 5-wrap clean B1 winner)            |
+| K7  | qwen/qwen-2.5-72b-instruct                   | Carry-over                                         |
+| K8  | deepseek/deepseek-chat-v3-0324               | Carry-over                                         |
+| K9  | mistralai/mixtral-8x22b-instruct             | Carry-over                                         |
+| K10 | *deepseek/deepseek-coder-v2-instruct*       | NEW — code-specialist model                        |
+| K11 | *qwen/qwen3-235b-a22b*                      | NEW — large MoE                                    |
+| K12 | *meta-llama/llama-3.1-405b-instruct*        | NEW — premium FOSS, OpenRouter                     |
+| K13 | *Modal-self-hosted Kimi K2.6*               | NEW — dedicated H100 throughput, no Parasail tax    |
+
+* Org-mode-specific advantages baked in (Tier S — biggest leverage)
+
+*Summary.* The app has structured knowledge a generic FOSS model can't
+infer from training data. Hand it to them as tools. Replaces "guess
+at format" with atomic ops. Aligns with =manager pre-fetch + agent
+narrates= memory: deterministic where possible, LLM where not.
+
+| Lever | Tool / mechanism                                                                              | Why FOSS gets stronger                  |
+|-------+-----------------------------------------------------------------------------------------------+-----------------------------------------|
+| L7    | =add_property(file, heading_id, key, value)= — atomic =:PROPERTIES:= drawer write             | No guessing at drawer indent/syntax     |
+| L7    | =set_todo_state(heading_id, state)= — validated state transition (TODO → STARTED → DONE)      | No invalid state writes                 |
+| L7    | =add_heading(parent_id, level, title, props)= — atomic heading insert                          | No level/whitespace guessing            |
+| L7    | =refile_to(source_id, target_path, position)= — atomic refile                                  | Removes "remove + insert" two-step      |
+| L8    | Post-edit validation gate — every write tool runs =org-element-parse-buffer=, rejects if AST breaks | Free correctness ratchet         |
+| L9    | Recipe pre-fetch — per task-shape, harness injects exact slots (=next_dec_number=, =today_date=, =due_in_7_days=, =candidate_ids=, =next_id_uuid=) | Model fills slots; never reasons about format |
+| L10   | =vault_query(query)= — org-roam DB SELECT (=TODO=NEXT AND TAG:work AND DEADLINE<=2026-05-14=) | Structurally-aware search vs grep+regex |
+| L11   | Schema-validated output — DEC, daily-log, weekly-review formats checked against schema pre-commit | Forces structural correctness          |
+
+* Tier A — high leverage, medium effort
+
+| Lever | What                                                                                          |
+|-------+-----------------------------------------------------------------------------------------------|
+| L12   | Captain's-log retrospective — past similar-task results inlined as "what worked / what didn't" |
+| L13   | Per-handle elisp expertise — extend =org-mode-per-agent-primer.org= with elisp sections per agent |
+| L14   | Per-task tool gating — =task["allowed_tools"]= overrides BROAD; no =eval_elisp= on B1, no =run_shell= on wiki |
+| L15   | Live Emacs introspection — =describe_elisp(symbol)= runs =(documentation 'sym)= in batch        |
+
+* Tool surface — extending toward Claude-Code parity
+
+R15 has: =edit_file=, =write_file=, =read_file=, =find_canonical_id=,
+=grep=, =list_dir=, =eval_elisp=, =load_elisp_file=.
+
+R16 adds:
+
+| Tool                | Purpose                                                          | Sandbox                                  |
+|---------------------+------------------------------------------------------------------+------------------------------------------|
+| =run_shell=         | Run a shell command in workdir; capture stdout/stderr/rc         | Cwd=workdir, timeout=30s, output cap 4KB |
+| =run_python=        | Run a Python snippet in subprocess                                | Cwd=workdir, no extra deps, timeout=30s  |
+| =run_pytest=        | Run pytest on a path; capture results structured                 | Wraps =python -m pytest=                 |
+| =git_status=        | Read-only git state (status, diff, log)                          | =git -C workdir <subcommand>= passthru   |
+| =org_query=         | Query org files via emacs --batch + org-element                  | Read-only org parsing                    |
+| =add_property=      | Atomic =:PROPERTIES:= drawer write (Tier S L7)                    | Validates AST after write                |
+| =set_todo_state=    | Validated TODO state transition (Tier S L7)                       | State machine enforced                    |
+| =add_heading=       | Atomic heading insert at level/parent (Tier S L7)                 | AST validation                            |
+| =refile_to=         | Atomic refile (Tier S L7)                                         | Source + target both validated            |
+| =vault_query=       | org-roam DB SELECT (Tier S L10)                                   | Read-only                                 |
+| =describe_elisp=    | =(documentation 'sym)= via emacs --batch (Tier A L15)             | Read-only                                 |
+| =validate_org=      | Run =org-element-parse-buffer= on a file, return errors           | Read-only                                 |
+
+Each new tool surfaces in =BROAD_TOOLS_PLUS_ELISP_PLUS_OS=. The
+existing =D8 tool_surface= dial extends to {minimal, broad, full}.
+=full= adds the OS tools.
+
+*Security stance:* every tool stays inside the worktree (workdir
+scope). No network calls. No mutations outside workdir. =run_shell=
++ =run_python= can still mess up the workdir, but worktrees are
+disposable.
+
+* Mission-aligned task catalog
+
+R15 had 8 tasks (mostly wiki edits + 2 elisp). R16 expands to ~15
+tasks across three families that match the app's actual mission.
+
+** Family 1 — org-mode life management (the app's reason to exist)
+
+| ID   | Task                                                                                | Primary metric                       |
+|------+-------------------------------------------------------------------------------------+--------------------------------------|
+| B40  | Triage =inbox.org=: classify each TODO heading by area; refile to right project file | correct refile placements           |
+| B41  | Generate weekly review: aggregate DONE items from past 7 days into a summary        | summary present + accurate counts    |
+| B42  | Convert ad-hoc note to structured task: paragraph → :PROPERTIES: drawer + headings  | structure validates org-element     |
+| B43  | Propose next actions: read NEXT items, suggest schedule based on EFFORT + deadlines | scheduled items respect constraints  |
+| B44  | Stale TODO sweep: items not touched in 30+ days → propose CANCELLED or archive       | n flagged matches grep ground truth  |
+| B45  | Captain's-log entry from git commits: read =git log --since=24h=, write log entry   | log entry references real commits    |
+
+** Family 2 — real Python coding (parity with Claude)
+
+| ID   | Task                                                                                | Primary metric                       |
+|------+-------------------------------------------------------------------------------------+--------------------------------------|
+| B30  | Add a unit test for =org_llm.specialist._resolve_in_workdir= covering 3 edge cases | =pytest= passes; covers right cases  |
+| B31  | Fix a known bug: =org_llm/specialist.py= had Path resolution bug — restore broken  | regression test passes after fix     |
+| B32  | Refactor: rename a constant + update callers across files                           | grep finds zero stale refs           |
+| B33  | Add new CLI subcommand: =org-llm specialist schema --json= variant                 | =org-llm specialist schema --json= works |
+| B34  | Write a small Python tool from spec: 20-line file checksum utility + tests          | tool runs; tests pass                |
+
+** Family 3 — OS / shell (parity with Claude on bash work)
+
+| ID   | Task                                                                                | Primary metric                       |
+|------+-------------------------------------------------------------------------------------+--------------------------------------|
+| B35  | Find all .py files matching a regex; output count + first 5 lines of each           | output matches deterministic answer  |
+| B36  | Process =git log= JSON: count commits per author in past 30 days                    | counts match =git shortlog -ns=      |
+
+** Family 4 — Tier-S tool exercise (new, validates atomic org tools)
+
+| ID   | Task                                                                                | Primary metric                       |
+|------+-------------------------------------------------------------------------------------+--------------------------------------|
+| B50  | Add =:EFFORT:= property to a heading via =add_property=                             | property present + AST valid         |
+| B51  | Move TODO from TODO → STARTED via =set_todo_state=                                  | state changed; transition log valid  |
+| B52  | Refile a heading from inbox to a project file via =refile_to=                       | source removed, target inserted, IDs |
+| B53  | (adversarial) Try to write malformed org → validation gate must reject              | gate fires; no commit                |
+
+** Family 5 — coordination patterns (Path C/D playbooks)
+
+| ID   | Task                                                                                | Primary metric                       |
+|------+-------------------------------------------------------------------------------------+--------------------------------------|
+| B60  | Review-then-revise: specialist 1 drafts a DEC, specialist 2 reviews + revises        | revision incorporates feedback        |
+| B61  | 3-way vote on which Summary phrasing best fits Rule 2b                               | judge's pick + rationale captured    |
+
+** Carry-over family — modifications based on R14/R15 learning
+
+| ID  | Task                       | R16 modification                                            |
+|-----+----------------------------+-------------------------------------------------------------|
+| B1  | cross-link audit (5 wraps) | Add post-edit =validate_org= step (Tier S L8)               |
+| B5  | section rewrite (clarity)  | Add quantitative =word_count_before/after= validator         |
+| B7  | docstrings + type hints    | Add =run_pytest= validation step (must still pass)          |
+| B11 | DEC entry draft            | Add captain's-log retrospective lever — show last 3 DECs    |
+| B13 | LICENSE year update        | Retain unchanged (clean baseline)                           |
+| B20 | wiki Summary section add   | Add schema-validated output (Rule 2b shape)                 |
+| B25 | new elisp helper file      | Already validates via =load_elisp_file=; retain             |
+| B26 | defcustom in doom/*.el     | Add =run_pytest doom/= step if any tests touch the file     |
+
+Total: 8 carry-over (modified) + 6 org-mission (B40-B45) + 5 code (B30-B34) + 2 OS (B35-B36) + 4 Tier-S exercise (B50-B53) + 2 coordination (B60-B61) = *27 tasks*.
+
+* Cell math (ramped — n=5, 13 variants, 27 tasks)
+
+| Layer | Description                                          | Cells |
+|-------+------------------------------------------------------+-------|
+| L1    | Variant tournament: 13 variants × B1 × n=5            |    65 |
+| L2    | Top-4 FOSS + Claude × 12 representative tasks × n=5  |   300 |
+| L3    | Dial ablation: top-3 FOSS × 6 ablations × B1 × n=5   |    90 |
+| L4    | Escalation A/B: 4 chains × 6 hard tasks × n=5         |   120 |
+| L5    | Vote/judge: 4 hard tasks × {single, 3-vote} × n=5    |    40 |
+|-------+------------------------------------------------------+-------|
+|       | Total                                                |   615 |
+
+*Wall:* ~8-10 hours at current pace; with 4-way parallelism, ~2-3 hours.
+
+*Cost projection:* ~$80-100 across all layers (Claude cells + 405b cells dominant). Within $100 cap.
+
+** Lean v1 — feasibility-first (recommended starting point)
+
+Layers 1 + 2 with full ramped sampling:
+- L1: 65 cells (~30 min with parallelism)
+- L2 (top-4 FOSS + Claude × 12 tasks × n=5): 300 cells (~2 hours with parallelism)
+- Total: 365 cells, ~2.5 hours, ~$40-60
+
+L3-L5 launched separately once L1/L2 yields the top-K winners + variance baselines.
+
+* Juicing FOSS LLMs further (carries over from R15 T1, extends)
+
+Already wired: tools + primer + doom-conventions reference + operating
+discipline note + reasoning fix.
+
+R16 adds:
+
+| Lever                        | What                                                              | Wire-in                                        |
+|------------------------------+-------------------------------------------------------------------+------------------------------------------------|
+| L1 Few-shot examples         | 2-3 done examples per task shape inlined in spec                  | =render_specialist_brief()= per-task examples  |
+| L2 Self-critique mini-loop   | After edit, model checks via tool (pytest/load_elisp/grep), fixes | New flag in spec + tool guidance               |
+| L3 Per-task tool gating      | Limit available tools per task type (no eval_elisp on B1)         | New =task["tools"]= field overrides BROAD     |
+| L4 Background docs (RAG-lite) | Pre-fetch related wiki snippets, inline                          | Per-task =prefetch_related_docs()=             |
+| L5 Per-handle elisp expertise | L1B (per-agent primer) extended with elisp sections              | Update =docs/wiki/org-mode-per-agent-primer.org= |
+| L6 Validation loops          | Harness validates output (pylint, pytest, org-element-parse)      | =task["validator"]= callback per task          |
+
+* Observability v2 — derived from R14/R15 failures
+
+R15's six O1-O6 carry over. R16 adds 14 more, each motivated by a
+specific past failure where earlier visibility would have caught
+the issue faster.
+
+** Statistical / quality monitors
+
+| Hook | What                                                                                            | Caught past failure                |
+|------+-------------------------------------------------------------------------------------------------+-------------------------------------|
+| O7   | Per-cell variance: n=5 mean/sd/median per (variant, task)                                       | qwen30 score 4 → 14 between runs   |
+| O8   | Per-tool error rate: which tools each model fails on (TypeError, scope refused, etc.)           | tool overload exploration          |
+| O9   | Cost-vs-quality Pareto scatter: every (variant, task, sample) on cost × score                   | "is this the best we can buy?"     |
+| O10  | Live fingerprint matrix: variant × task-family heatmap, refresh every 5 cells                   | per-model strengths invisible      |
+| O11  | =finish_reason= tracker: per-cell + running tally of length / stop / tool_calls / content_filter | kimi reasoning runaway             |
+| O12  | =reasoning_tokens= alert: flag any cell where reasoning > 50% of completion tokens               | kimi-shape token waste            |
+| O13  | Silent-noop rate per variant: running %; alert if > 30% over 5 cells                            | kimi K2.6 silent_noop on 4/5 tasks |
+
+** Operational / hygiene monitors
+
+| Hook | What                                                                                              | Caught past failure                |
+|------+---------------------------------------------------------------------------------------------------+-------------------------------------|
+| O14  | Out-of-scope-edit live alarm: any =diff_out_of_scope > 0= halts cell + flags red                  | dirty trunk leak (R14 false alarm) |
+| O15  | Trunk SHA heartbeat: every N cells, verify trunk hasn't drifted; verify worktree base matches    | Agor stale-trunk SHA               |
+| O16  | Provider routing log: which OpenRouter provider served each call (Parasail, Moonshot, etc.)      | provider-specific quirks           |
+| O17  | Disk-space monitor: alert if free < 5GB (worktrees accumulate)                                    | future-proof                        |
+| O18  | Live cost projection: based on cells-done velocity, project total + ETA to budget cap             | mid-run abort signal               |
+| O19  | Failure-mode classifier: bucket each failed cell into known classes (silent_noop, length, scope, fab, parse_failed, http_error, max_iter, budget_cap, runtime_exception) | quick triage                |
+| O20  | Mid-run abort signal: if projected total > budget cap, prompt for kill                            | preserve budget headroom            |
+
+* Pre-flight v2 — bigger and better
+
+*Summary.* R15's preflight (=scripts/_round15_preflight.py=) was a 6-step
+gauntlet that caught most integration bugs at the cost of one cheap
+cell. R16's preflight v2 expands to 14 steps. The bar moves from "is
+the harness syntactically OK?" to "does every dimension we plan to
+test actually behave under realistic load?"
+
+** Pre-flight v2 checklist
+
+| #  | Check                                                                                                | Motivated by                          |
+|----+------------------------------------------------------------------------------------------------------+----------------------------------------|
+| P1 | Imports + tooling (existing)                                                                          | R15 preflight                         |
+| P2 | Per-task prefetch dry-run (existing)                                                                  | R15 preflight                         |
+| P3 | Per-task prompt-assembly dry-run (existing)                                                           | R15 preflight                         |
+| P4 | Tool dispatch — relative + absolute + dir + outside-workdir + scope_strict (existing)                 | R15 preflight                         |
+| P5 | End-to-end smoke cell (existing — B13 K1)                                                             | R15 preflight                         |
+| P6 | *Score-function safety*: synthesize cells with =error=None=, missing keys, edge cases; run score_cell | R15 v2 None.startswith crash         |
+| P7 | *Failure-mode coverage*: synthesize one cell per failure class (silent_noop, length, scope, fab); verify O19 classifier categorizes them correctly | bucket every failure class             |
+| P8 | *Variance smoke*: run B13 K1 three times back-to-back; check sd < threshold                          | qwen30 4 → 14 score variance          |
+| P9 | *Per-task tool gating*: for each task, verify =task["allowed_tools"]= ⊆ available tools             | new L14 lever                         |
+| P10 | *New tool exercises*: dispatch each new R16 tool against a fixture (run_shell, run_python, run_pytest, add_property, set_todo_state, refile_to, vault_query, validate_org, describe_elisp) | R16 tool surface                       |
+| P11 | *Modal endpoint ping*: if K13 enabled, GET Modal endpoint; verify it responds                        | K13 self-host availability             |
+| P12 | *Provider availability*: small probe (1-token completion) to each variant's OpenRouter route          | rate-limit / provider-down before launch |
+| P13 | *Out-of-scope blocker test*: try edit on path outside target_files with scope_strict=True; verify rejected | R14 dirty-trunk false alarm            |
+| P14 | *Trunk-SHA + worktree-base sanity*: verify =git -C workdir merge-base HEAD trunk= matches expected   | R14 stale-trunk diff bug              |
+
+** Dry-run mode
+
+New flag =--dry-run= on the R16 harness: executes every step EXCEPT
+the API call. Returns a synthesized fake response (silent_noop, full
+edit, fabrication, etc.) so the analysis + scoring + leaderboard +
+monitor pipelines all exercise without spending. Catches plumbing
+bugs at zero cost.
+
+* Open questions for R17+
+
+- *Continuous orchestration*: observer LLM watching iterations, intervening
+- *Self-coded tools (Phase 29 angle)*: detect "model wraps an org link" → deterministic helper
+- *Specialty LoRA / fine-tune*: train on org-llm corpus; heaviest, last resort
+- *Cross-run learning*: feed previous-cell results into current cell as "what worked"
+- *Tournament tier*: graduate winners to harder tasks, drop laggards
+
+* Cloud hardware ramp (per user 2026-05-07)
+
+| Knob               | R15 | R16             |
+|--------------------+-----+-----------------|
+| Per-cell budget    | $2  | *$5*             |
+| Max iterations     | 8   | *16*             |
+| Sample size n      | 1   | *5*              |
+| Variant pool size  | 9   | *13*             |
+| Total budget cap   | $25 | *$100*           |
+| Self-host option   | —   | *Modal-Kimi K13* |
+
+** K13 — Modal-self-hosted Kimi K2.6
+
+*Summary.* OpenRouter's Parasail-served Kimi has 2-200s latency.
+Modal-hosted Kimi on H100 should be sub-second per turn. Worth the
+setup cost if R16 finds Kimi competitive on quality.
+
+*Setup outline:*
+
+1. =modal token new= (one-time auth)
+2. Modal app: image with vLLM + kimi weights cached, H100 instance
+3. Endpoint: =POST https://<user>--kimi-k2-6-serve.modal.run/v1/chat/completions=
+4. =SpecialistTask.api_endpoint= override per-cell
+5. Cost: ~$2-4/h H100; for 2 hours of testing, $4-8 dedicated
+
+If Modal setup is non-trivial, defer to R17 (note in the harness
+defines K13 but skips it unless =MODAL_KIMI_ENDPOINT= env var set).
+
+* Cross-references
+
+- [[id:7ce85fa3-c4dc-4c0c-9e8d-2a5ebea9a436][2026-05-07-round-13-postmortem.org]] — R14 fix-batch + R15 candidates
+- [[file:../notes/2026-05-07-kimi-fix-agent1-token-budget.org][docs/notes/2026-05-07-kimi-fix-agent1-token-budget.org]] — kimi diagnosis Agent 1
+- [[file:../notes/2026-05-07-kimi-fix-agent2-prompt-shape.org][docs/notes/2026-05-07-kimi-fix-agent2-prompt-shape.org]] — kimi diagnosis Agent 2
+- =org_llm/specialist.py= — runtime
+- =scripts/_round15_dials.py= — current harness; R16 forks from this
