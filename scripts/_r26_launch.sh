@@ -9,8 +9,9 @@
 #                                   COST_CIRCUIT_BREAKER + LIVE_DENY_LIST +
 #                                   cell_replay.jsonl entries
 #   4. python3 scripts/_round26_dials.py — main bench (R18_PARALLELISM=32)
-#   5. _r26_post_round_handoff.sh — captures stats, commits artifacts, drops
-#                                   sentinel for analysis-agent spawn
+#   5. _r26_post_round_analysis.sh — captures stats, commits artifacts, drops
+#                                   sentinel for analysis-agent spawn (4-agent
+#                                   scour + synthesis + go-forward update)
 #   6. _k20_endpoint_pause.sh     — belt-and-braces (P1-10 already does atexit)
 #
 # Replaces R25's 4-snippet inline launch. Single command, single state file,
@@ -252,7 +253,8 @@ say "  harness exited cleanly (rc=0)"
 # ── 5. Post-round handoff ─────────────────────────────────────────────────
 state POST_HANDOFF
 say "step 5/6 — post-round handoff (capture stats + commit + sentinel)"
-HANDOFF_SCRIPT="$REPO/scripts/_r26_post_round_handoff.sh"
+HANDOFF_SCRIPT="$REPO/scripts/_r26_post_round_analysis.sh"
+[ -f "$HANDOFF_SCRIPT" ] || HANDOFF_SCRIPT="$REPO/scripts/_r26_post_round_handoff.sh"
 [ -f "$HANDOFF_SCRIPT" ] || HANDOFF_SCRIPT="$REPO/scripts/_r25_post_round_handoff.sh"
 if [ -f "$HANDOFF_SCRIPT" ]; then
     HANDOFF_OUT=$(mktemp /tmp/r26-launch-hd.XXXXXX)
