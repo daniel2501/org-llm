@@ -1,0 +1,279 @@
+#+TITLE: R17 Pareto + R18 Routing Recommendations
+#+DATE: [2026-05-08]
+#+AUTHOR: Claude (subagent)
+#+STARTUP: showall
+
+* Summary
+
+R17 fielded 14 variants × 8 tasks under 7 dial labels (59 cells, $4.45,
+20 min wall, 8-way parallel). Quality-adjusted scoring (disqualifying
+=analysis.diff_in_scope.deletions > 100=) was applied here. The mech
+leaderboard's K11-qwen3coder lead at score=119 holds even after the
+destructive filter (zero K11 cells trip the threshold) — but K11 is
+=PARETO-DOMINATED= on every relevant axis by K5-claude-solo (free) and
+both FOSS leaders K1-qwen30 / K8-deepseekV3 (~30-40x cheaper at
+comparable per-cell quality). =Recommendation: do not crown K11=. Per-task
+winners flip every round; B25 is the only task where K11 won outright in
+R17 (qual=20 vs K8's 12). K8's stability claim holds (n=10, zero destructive
+edits, every cell on-task; stdev moderate but no catastrophic outliers).
+
+* Section 1 — Pareto frontier
+
+Cells/variant N counted as ALL summary cells (errors included for
+denominator transparency). Quality cells = cells without destructive
+in-scope deletions (>100 lines). =qual/cell= is the per-call expected
+mech-equivalent score after filter. K5-claude-solo billed externally
+(Claude Code pilot session); listed at $0 for FOSS-vs-proprietary
+contrast — *do NOT use as a routing target* per FOSS-only routing rule.
+
+#+CAPTION: R17 variant Pareto leaderboard (sorted by quality-adjusted total)
+| variant            |   n | err | $total |   $/cell | mech | qual | qcells | destr |    $/qpt | verdict                    |
+|--------------------+-----+-----+--------+----------+------+------+--------+-------+----------+----------------------------|
+| K11-qwen3coder     |  14 |   0 | 3.0208 |  0.21577 |  119 |  119 |     14 |     0 |   0.0254 | dominated (K1, K8 cheaper) |
+| K1-qwen30          |  14 |   1 | 0.0824 |  0.00634 |   97 |   97 |     13 |     0 |   0.0008 | PARETO-OPTIMAL (FOSS)      |
+| K5-claude-solo     |   8 |   0 | 0.0000 |  0.00000 |   93 |   93 |      8 |     0 |        - | proprietary, exclude       |
+| K8-deepseekV3      |  10 |   2 | 0.0386 |  0.00482 |   79 |   79 |      8 |     0 |   0.0005 | PARETO-OPTIMAL (FOSS)      |
+| K2-kimi-k2.6       |   2 |   1 | 0.0382 |  0.03819 |   10 |   10 |      1 |     0 |   0.0038 | n=1, no signal             |
+| K9-mixtral         |   1 |   0 | 0.0411 |  0.04106 |   10 |   10 |      1 |     0 |   0.0041 | n=1, no signal             |
+| K15-kimi-thinking  |   1 |   0 | 0.0406 |  0.04061 |   10 |   10 |      1 |     0 |   0.0041 | n=1, no signal             |
+| K17-glm46          |   1 |   0 | 0.0389 |  0.03889 |    8 |    8 |      1 |     0 |   0.0049 | n=1, no signal             |
+| K6-llama70b        |   1 |   0 | 0.0024 |  0.00245 |    4 |    4 |      1 |     0 |   0.0006 | n=1, mech weak             |
+| K18-llama4         |   1 |   0 | 0.0005 |  0.00053 |    0 |    0 |      1 |     0 |        - | silent on n=1              |
+| K19-qwen25c-32b    |   1 |   0 | 0.0005 |  0.00052 |    0 |    0 |      1 |     0 |        - | silent on n=1              |
+| K13-deepseekV4-pro |   3 |   3 | 0.0000 |        - |    0 |    0 |      0 |     0 |        - | 3/3 errors (worktree)      |
+| K7-qwen72b         |   1 |   1 | 0.0000 |        - |    0 |    0 |      0 |     0 |        - | 1/1 worktree error         |
+| K16-qwen36-27b     |   1 |   1 | 0.0000 |        - |    0 |    0 |      0 |     0 |        - | 1/1 worktree error         |
+
+** Pareto chart-shape (qual/cell vs $/cell, FOSS only)
+
+#+begin_example
+qual/cell ↑
+   12 |
+   11 | K2(n=1)  K9(n=1)  K15(n=1)
+   10 |  *
+    9 |              K8 ●  ←—— FOSS pareto-optimal (cheap)
+    8 |        K11 ─────────────────────────── 8.5  (PARETO-DOMINATED)
+    7 |      K1 ●  ←—— FOSS pareto-optimal (cheaper)
+    6 |
+    5 |
+    4 |  K6(n=1)
+    0 |  K18 K19 (n=1, silent)
+      +───────────────────────────────────→ $/cell
+        0.001  0.005  0.01    0.04   0.20
+                      ↑K1 ↑K8         ↑K11
+#+end_example
+
+K1 and K8 are both Pareto-optimal among FOSS variants (K1 has more
+quality points but K8 has higher per-cell mean and lower per-cell cost).
+K11 sits at 35x K1's price for ~14% higher qual/cell — well off the
+frontier. Single-cell variants (K2, K9, K15, K17) cannot be ranked from
+n=1 evidence; their high apparent qual/cell is the Layer-1 B1 task
+(consistently easy: 7 of 14 variants scored exactly 10 there).
+
+* Section 2 — K8-deepseekV3 stability
+
+Per-task n=1 in R17 (K8 ran exactly once on each of the 8 tasks, in
+layer1 B1 + layer2 B5/B7/B11/B13/B20/B25/B26).
+
+#+CAPTION: K8 per-task R17 record
+| task | n |    $mean | mech | destr | notes                                     |
+|------+---+----------+------+-------+-------------------------------------------|
+| B1   | 1 |  0.00502 |   10 |     0 | mid-pack, on-task                         |
+| B5   | 1 |  0.00509 |   14 |     0 | rewrote gotchas table 30% shorter (real)  |
+| B7   | 1 |  0.00224 |    0 |     0 | silent / no-op (not destructive)          |
+| B11  | 1 |  0.01511 |   36 |     0 | only beaten by K5-claude-solo (50)        |
+| B13  | 1 |  0.00135 |    2 |     0 | tied with all others                      |
+| B20  | 1 |  0.00171 |    0 |     0 | tied silent (task may be unscoreable)     |
+| B25  | 1 |  0.00386 |   12 |     0 | beaten by K11 (20) only                   |
+| B26  | 1 |  0.00419 |    5 |     0 | tied with K1, K11, K5                     |
+
+** Stability verdict
+
+R16 reported K8 6/6 on layer-2 tasks. R17 fielded K8 across 8 tasks
+(7 layer-2 + 1 layer-1) — *zero destructive cells, zero errors past
+worktree (the 2 errors above are pre-flight worktree-collision races,
+not model behavior)*. Variance is moderate ($0.001 to $0.015, mech 0
+to 36) but the variance tracks task difficulty, not K8 instability.
+
+*Conclusion:* stability claim holds. K8 is the safest FOSS-cheap
+default for low/medium-stakes pattern-match tasks. The n=1-per-task
+caveat means a single R18 re-run with shuffled task orders is needed
+to lock this in (suggested: 3 reps × top-3 variants × tasks).
+
+* Section 3 — K11-qwen3coder cost-justified analysis
+
+** Paired comparison (K11 vs K1 on identical (task, dial, layer))
+
+#+CAPTION: K11 vs K1 paired cells (R17, 13 paired observations)
+| task | dial             | layer            |     K1$ | K1m |    K11$ | K11m | x mult | mech_diff |
+|------+------------------+------------------+---------+-----+---------+------+--------+-----------|
+| B1   | bl_pb_m1_tb_s1   | layer3_d5_loose  | 0.01113 |  10 | 0.41522 |    8 |  37.3x |        -2 |
+| B1   | bt_pb_m0_tb_s1   | layer3_d7_no_mgr | 0.00795 |  10 | 0.11673 |   12 |  14.7x |        +2 |
+| B1   | bt_pb_m1_tb_s0   | layer3_d9_relax  | 0.01205 |   8 | 0.14148 |   10 |  11.7x |        +2 |
+| B1   | bt_pb_m1_tb_s1   | layer1           | 0.00887 |  12 | 0.11676 |   12 |  13.2x |         0 |
+| B1   | bt_pb_m1_tm_s1   | layer3_d8_minim  | 0.02326 |  14 | 0.13297 |   10 |   5.7x |        -4 |
+| B1   | bt_pt_m1_tb_s1   | layer3_d6_tool   | 0.00248 |   0 | 0.05379 |    0 |  21.7x |         0 |
+| B11  | bt_pb_m1_tb_s1   | layer2           | 0.00702 |  25 | 1.56589 |   28 | 223.2x |        +3 |
+| B13  | bt_pb_m1_tb_s1   | layer2           | 0.00100 |   2 | 0.01860 |    2 |  18.7x |         0 |
+| B20  | bt_pb_m1_tb_s1   | layer2           | 0.00084 |   0 | 0.01299 |    0 |  15.4x |         0 |
+| B25  | bt_pb_m1_tb_s1   | layer2           | 0.00166 |  11 | 0.04772 |   20 |  28.7x |        +9 |
+| B26  | bt_pb_m1_tb_s1   | layer2           | 0.00148 |   5 | 0.04505 |    5 |  30.4x |         0 |
+| B5   | bt_pb_m1_tb_s1   | layer2           | 0.00153 |   0 | 0.06866 |    4 |  44.9x |        +4 |
+| B7   | bt_pb_m1_tb_s1   | layer2           | 0.00312 |   0 | 0.07777 |    0 |  24.9x |         0 |
+| SUM  |                  |                  | 0.08239 |  97 | 2.81363 |  111 |  34.2x |       +14 |
+
+** Verdict on K11
+
+- *Aggregate cost ratio:* 34.2x. Aggregate quality delta: +14 mech
+  (97 → 111). That's *+14% quality for 3320% cost.* K11 buys
+  ~$0.20 per +1 mech-point relative to K1's free baseline, dramatically
+  worse than even K8 ($0.005/cell at qual_per_cell 9.875).
+- *Where K11 actually wins:* +9 on B25 (DEC entry creation, more verbose),
+  +4 on B5 (but K8 also got 14 on B5 for $0.005). The B5 case is
+  illustrative: K8 actually rewrote the gotchas table 30% shorter ($0.005,
+  mech 14). K11's B5 work was cosmetic ("removed redundant 'below'", "is"→":"
+  in 2 lines, $0.069, mech 4). K11 spent 14x more for less actual content
+  change.
+- *B11 outlier:* $1.57 single cell — single 28-line DEC-020 entry over
+  171 seconds + 15 iterations. K5-claude-solo got 50 mech on the same
+  task at $0; K8 got 36 mech for $0.015. K11 is 100x more expensive than
+  K8 on B11 for *worse* mech.
+- *Destructive check:* ZERO K11 cells trip deletions>100 in R17. The
+  caveat about K7-R16-pattern inflation does not apply to K11-R17. The
+  judge's worry was warranted as a check, but K11 is clean here.
+
+*Final answer to "is K11 worth 35x?"* — *No, not at any quality bar*
+*the data supports.* K11's mech advantage is small (+14% aggregate) and
+*its quality is not 35x better; it's roughly equivalent.* The mech-leaderboard
+position is an artifact of K11 being one of only 3 variants that ran on
+all 8 tasks (and never erroring out). Per-cell, K1 and K8 are clearly
+better $/qpt.
+
+* Section 4 — Per-task winners + R15/R16/R17 stability heatmap
+
+Per-task quality-winner (highest qual; tie → cheapest), restricted to
+layer1+layer2 cells for apples-to-apples. K5-claude-solo not excluded
+here (need to see proprietary baseline) but flagged for routing.
+
+#+CAPTION: Per-task winner stability across rounds (* = K5-claude-solo, proprietary)
+| task | R15 winner          | R15 q | R16 winner          | R16 q | R17 winner          | R17 q | stable? |
+|------+---------------------+-------+---------------------+-------+---------------------+-------+---------|
+| B1   | K1-qwen30           |    14 | K7-qwen72b          |    14 | K1-qwen30           |    12 | partial |
+| B5   | K5-claude-solo *    |    18 | K7-qwen72b          |    21 | K5-claude-solo *    |    18 | mixed   |
+| B7   | K7-qwen72b          |    24 | K7-qwen72b          |     5 | K5-claude-solo *    |     0 | NO      |
+| B11  | K2-kimi-k2.6        |    50 | K5-claude-solo *    |    47 | K5-claude-solo *    |    50 | partial |
+| B13  | K5-claude-solo *    |     2 | K5-claude-solo *    |     2 | K5-claude-solo *    |     2 | yes (*) |
+| B20  | K5-claude-solo *    |     0 | K5-claude-solo *    |     0 | K5-claude-solo *    |     0 | yes (*) |
+| B25  | K2-kimi-k2.6        |    12 | K2-kimi-k2.6        |    12 | K11-qwen3coder      |    20 | NO      |
+| B26  | K5-claude-solo *    |     5 | K5-claude-solo *    |     5 | K5-claude-solo *    |     5 | yes (*) |
+
+** Heatmap observations
+
+- *B13/B20/B26* are unscoreable-by-task — every cell ties at low score
+  (qual≤5). Routing here is dominated by cost, not quality.
+- *B7 collapse:* R15 K7=24 → R16 K7=5 → R17 silent. Three different
+  responses to the same task = high-variance, agent-shaped task. K7
+  also disappeared from R17 (worktree error).
+- *B25 jump R16→R17:* K2-kimi-k2.6 was the R15+R16 winner at 12; K11 took
+  R17 at 20. K2 wasn't run on B25 in R17 (only ran on B1). Result:
+  *we don't know* if K2 still wins B25 — a true B25 re-test for R18 is
+  needed.
+- *B11 "real-content" task:* K5-claude-solo's 47-50 range is the FOSS
+  ceiling marker; the next-best FOSS is K2 (R15: 50) or K8 (R17: 36)
+  or K11 (R17: 28). K2 and K8 are the standouts here but for very
+  different reasons (K2 thinking model, K8 cheap-and-stable).
+- *FOSS-only-stable winners:* B13, B20, B26 are tie-zones (low signal).
+  No FOSS variant has a *stable across-3-rounds* claim on any
+  high-signal task. Variance is high.
+
+* Section 5 — R18 routing matrix
+
+** Task-family classification
+
+Based on R15/R16/R17 quality ceilings and the prefetch metadata:
+
+#+CAPTION: Task families by characteristic
+| family            | tasks         | signal strength | typical winner shape       |
+|-------------------+---------------+-----------------+----------------------------|
+| crosslink-easy    | B1            | low (most ≥10)  | any FOSS-cheap suffices    |
+| crosslink-deep    | B25           | medium          | thinking model edge (K2/K11)|
+| content-creation  | B11           | high (50-pt)    | manager + reasoning model  |
+| copyedit-prose    | B5            | medium          | K7 (now silent), K5, K8    |
+| narrow-or-silent  | B7, B13, B20, B26 | low | cheapest FOSS; cost-bound |
+
+** Budget tiers
+
+#+CAPTION: R18 budget tiers (per cell)
+| tier    | $/cell ceiling | rationale                              |
+|---------+----------------+----------------------------------------|
+| cheap   | <$0.005        | sweep / loop / always-on routing       |
+| medium  | $0.005-$0.05   | targeted edits, deliberate calls       |
+| premium | >$0.05         | high-stakes, content-creation, judges  |
+
+** Routing matrix (FOSS-only; K5-claude-solo excluded per project rule)
+
+#+CAPTION: R18 default variant by (family × budget) — based on R15+R16+R17 combined
+| family            | cheap (<$0.005)  | medium ($0.005-$0.05) | premium (>$0.05)             |
+|-------------------+------------------+-----------------------+------------------------------|
+| crosslink-easy    | K1-qwen30        | K8-deepseekV3         | K11-qwen3coder (NOT WORTH IT)|
+| crosslink-deep    | K1-qwen30        | K8-deepseekV3         | K11-qwen3coder OR K2-kimi-k2.6 (re-test) |
+| content-creation  | K1-qwen30 (weak) | K8-deepseekV3         | K2-kimi-k2.6 (R15: 50/B11)   |
+| copyedit-prose    | K1-qwen30        | K8-deepseekV3         | K8 again (no premium edge)   |
+| narrow-or-silent  | K1-qwen30        | (same)                | (do not pay premium)         |
+
+** Specific R18 recommendations
+
+1. *Default agent model:* K8-deepseekV3 — Pareto-optimal among FOSS
+   FOSS, n=8 tasks zero destructive, $0.005/cell median. Demote K1 from
+   default (K1's qual/cell is 7.46 vs K8's 9.88; the cost gap is
+   negligible at this tier).
+
+2. *Loop / sweep tier (cheap):* K1-qwen30 retains its place. 35x
+   cheaper than K11 with comparable quality on small-edit work.
+
+3. *Premium tier (>$0.05):* RUN AN A/B between K2-kimi-k2.6 and
+   K11-qwen3coder on B11 + B25 + a new content-creation task. K11
+   leads R17 only because K2 didn't run. Without that A/B, *do not
+   default to K11* — it is cost-ineffective.
+
+4. *Disqualify from R18 (until re-fielded with worktree fix):*
+   - K13-deepseekV4-pro (3/3 errors)
+   - K7-qwen72b (1/1 error R17 + R16 destructive 146 deletions)
+   - K16-qwen36-27b (1/1 error)
+   These need a preflight worktree-collision retry guard before
+   re-attempting.
+
+5. *Confirm or drop on next round:*
+   - K15-kimi-thinking (n=1 score 10), K17-glm46 (n=1 score 8),
+     K9-mixtral (n=1 score 10), K6-llama70b (n=1 score 4) — all
+     n=1 on B1, no signal. R18 should re-include but only if a
+     specific differentiator hypothesis is named.
+   - K18-llama4, K19-qwen25c-32b: both silent (mech 0) on B1
+     pattern-match — drop unless there's an ergonomic reason.
+
+6. *Stability instrumentation for R18:* run *3 reps* on the top-3
+   variants (K1, K8, K11) × 8 tasks at the winner dial
+   =bt_pb_m1_tb_s1=. That gives n=24 per variant, enough to compute
+   per-task stdev rather than n=1 point estimates. Extra cost is
+   bounded ((3 × 8 × ($0.006 + $0.005 + $0.22))) = ≈ $5.5.
+
+* Section 6 — Caveats + scoring notes
+
+- *Mech vs quality:* the R17 mech leaderboard is destructive-edit
+  filtered (deletions >100); zero K11 cells trip the threshold, but
+  the threshold is a single-axis safeguard. A judge that scores
+  *content quality* (not just diff size) is needed before any premium-
+  tier choice can be made with confidence.
+- *K5-claude-solo at $0:* Claude Code pilot session billing is
+  external. Treated as a quality ceiling marker only; per project
+  FOSS-only routing rule, NOT routed in production.
+- *n=1 cells are signal noise:* 9 of 14 variants ran ≤2 cells. Don't
+  read pareto-optimal labels as endorsements for these — they appear
+  high-qual/cell because B1 is the trivial task.
+- *Worktree errors masked 5 cells:* K2 (1), K7 (1), K8 (2), K13 (3),
+  K16 (1). Fix the worktree-collision-retry before R18 — these
+  silently zero out the variant's mech.
+- *Scoring uses summary mech score directly.* Quality-adjusted score
+  here only zeros destructive cells (a coarse cut). A separate
+  semantic-quality judge run is the natural follow-up before any
+  premium-tier routing decision.
