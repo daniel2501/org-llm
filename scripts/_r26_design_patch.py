@@ -31,6 +31,7 @@ REPO = Path("/home/daniel/repos/org-llm")
 SRC = REPO / "scripts/_round25_dials.py"
 DST = REPO / "scripts/_round26_dials.py"
 ARTIFACTS = REPO / "scripts/_round26_dials_artifacts"
+NOVELTY_CHECK = REPO / "scripts/_strategy_novelty_check.sh"
 
 
 def fork_harness() -> bool:
@@ -239,6 +240,32 @@ def run_probes() -> int:
     return 0
 
 
+def check_strategy_novelty() -> int:
+    """P2-5 (PM6-G2): reject any chained round whose patch content
+    (modulo round IDs) is byte-identical to the prior. R20-R23 hit
+    this anti-pattern — "deltas" were cosmetic round-ID renames.
+
+    On FAIL: write =$ARTIFACTS/NOVELTY_FAIL= sentinel + return 1
+    (no point running probes if the round is a rerun).
+    """
+    if not NOVELTY_CHECK.exists():
+        print(f"[r26] WARN: novelty checker missing: {NOVELTY_CHECK}")
+        return 0  # advisory; don't block
+    print("[r26] running strategy-novelty check (P2-5 / PM6-G2)")
+    rc = subprocess.call(
+        ["bash", str(NOVELTY_CHECK), str(SRC), str(DST)],
+    )
+    if rc != 0:
+        sentinel = ARTIFACTS / "NOVELTY_FAIL"
+        sentinel.write_text(
+            f"strategy-novelty check FAILED for {DST.name} vs {SRC.name}\n"
+            f"(round is essentially a rerun of prior — no real strategic delta)\n"
+        )
+        print(f"[r26] novelty check FAILED — wrote {sentinel}")
+        return 1
+    return 0
+
+
 def main() -> int:
     print("=== R26 design patch + verification ===")
     if not fork_harness():
@@ -250,6 +277,9 @@ def main() -> int:
         print(f"[r26] forked harness syntax OK")
     except SyntaxError as e:
         print(f"[r26] FATAL: forked harness syntax error: {e}")
+        return 1
+    # P2-5: strategy-novelty gate (PM6-G2). Skip probes if round is a rerun.
+    if check_strategy_novelty() != 0:
         return 1
     return run_probes()
 
