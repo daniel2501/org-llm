@@ -11,42 +11,47 @@
 
 * Executive summary
 
-*Headline.* After 25 rounds of bench (R1-R25), 1019+ cells, and ~$90
-in cumulative spend, =org-llm= can reliably operate on FOSS models
-at *48-51× lower cost-per-quality-unit than Claude*. The default
-scribe is K1-qwen30 (Qwen3-Coder-30B-A3B-Instruct) at $0.0005/qpt,
-served via OpenRouter (Novita preferred). K2-kimi-k2.6 is the
-high-stakes prose specialist; K11-qwen3coder is the elisp specialist
-with budget cap; K8-deepseekV3 is the recovered all-purpose backup.
-K6-llama70b and K7-qwen72b are dropped from production. K5-claude-
-solo remains as a sentinel-only quality ceiling.
+*Headline.* After 25 rounds of bench (R1-R25), ~1208 cells, and
+~$100-110 in cumulative spend, =org-llm= can reliably operate on
+FOSS models at *59× lower cost-per-quality-unit than Claude on the
+matched layer1 slice*. The default scribe is K1-qwen30 (Qwen3-Coder-
+30B-A3B-Instruct) at $0.00057/qpt, served via OpenRouter (Novita
+preferred). K2-kimi-k2.6 is the high-stakes prose specialist;
+K11-qwen3coder is the elisp specialist with budget cap; K8-deepseekV3
+is the *confirmed second frontier point* (R25 $0.00069/qpt). K6-
+llama70b and K7-qwen72b are dropped from production. K5-claude-solo
+remains as a sentinel-only quality ceiling.
 
 *Top 5 recommendations.*
 
-1. *Default LLM = K1-qwen30 via OpenRouter Novita.* 5 of 5 rounds
-   on the FOSS Pareto frontier; $0.0005/qpt; n=50 stable.
+1. *Default LLM = K1-qwen30 via OpenRouter Novita.* 6 of 6 rounds
+   on the FOSS Pareto frontier; $0.00057/qpt at n=50 in R25.
 
-2. *High-stakes prose / DEC drafts = K2-kimi-k2.6 via Moonshot+
-   Parasail.* Raw-quality leader at n=25+, but cap =max_tokens=
-   at 4096 to prevent runaway prose.
+2. *Frontier is now K1+K8 (two-wide), not K1-only.* R25 confirmed
+   K8-deepseekV3 at $0.00069/qpt as the durable second seat —
+   indistinguishable from K1 on cost-per-quality. K8 is the
+   recovered all-purpose backup, not just a B1-only artifact.
 
-3. *Cap K11 spend at $1.50/round.* Premium ($0.02/qpt) but
-   strictly dominated by K1 except on B25-shaped elisp tasks.
+3. *Claude moat is 59× when sliced like-for-like, not 48× R24.*
+   Headline R25 ratio of 22× is layer-mix artifact (K5 ran more
+   layer_bk + layer2 cells where Claude scores higher per dollar).
+   On matched layer1, FOSS pulled further ahead.
 
-4. *Self-host K1 + K2 via vLLM (deferred to R26 if R25 wall is
-   acceptable).* Eliminates broker tool-format gaps (caused R18
-   v1 wipe + R19 K8 collapse) and removes OpenRouter rate caps.
+4. *3 of 11 R25 patches were ineffective — verification gap.* K2
+   max_tokens=4096 cap was dead code (constant defined, never
+   threaded into SpecialistTask); WALL_CAP fired the kill log
+   but ThreadPoolExecutor shim blocked outer worker until inner
+   thread finished; top-3 selector picked individual cells (all
+   K1) instead of distinct variants. R26 must add a verification
+   step on every patch.
 
-5. *Wire S1-S4 composition strategies in R26.* Hedged-strong, best-
-   of-N, critique-revise, specialty routing — all currently
-   orphaned constants. Strategy-effectiveness agent estimated
-   80-120 LOC for combined wiring; biggest unrealized R20+ lever.
+5. *K20 LoRA endpoint deploy still blocked.* Together fine-tuning
+   works flawlessly; hosted serverless endpoint deploy errors out.
+   R26 needs dedicated H100 endpoint (~$5.49/hr) with
+   =min_replicas=1= — no scale-to-zero for fine-tuned models.
 
 *Ongoing.* K20-foss-distill LoRA training completed on Together
-(~$5, 10 min) but hosted endpoint deployment hit a config error —
-A/B test deferred to R26.
-
-*This doc updates with R25 final data when round completes.*
+(~$5, 10 min); endpoint deploy still blocked → R26 dedicated H100.
 
 * Section 1 — Bridge Crew agent → model mapping
 
@@ -56,7 +61,9 @@ A/B test deferred to R26.
 rewrite), B11 (DEC draft), B20 (Summary section add).
 
 *Recommended primary:* K2-kimi-k2.6 via Moonshot+Parasail.
-*Fallback:* K1-qwen30 via Novita.
+*Fallback:* K1-qwen30 via Novita; *secondary fallback K8-deepseekV3*
+(R25 Pareto agent confirmed K8 generalizes — durable frontier
+second seat at $0.00069/qpt).
 *Sample size when benched:* n=25-50 (raw-quality leader has
 high variance; needs samples to settle).
 
@@ -75,9 +82,20 @@ the absolute-quality comparison.
 *Why K1 fallback:* If K2 broker hiccups, K1 is the safe default
 that always delivers.
 
-*Constraint:* `max_tokens=4096` cap on K2 (R25 patch P5)
-prevents R24-style runaway prose (`finish=length` after 13 iters
-at 23-29k chars).
+*Constraint:* `max_tokens=4096` cap on K2 was *intended* in R25
+patch P5 but is *dead code* — `_R25_VARIANT_MAX_TOKENS` constant
+defined at line 245 but never threaded through =SpecialistTask= /
+=_chat_completions= (default 8000 still fires). R25 saw 11 finish=
+length iters at 22-28k chars + 16 WALL_CAP kills, all K2/B1.
+*R26 critical:* wire =max_tokens: Optional[int]= through
+=SpecialistTask= and read the dict in =run_specialist_for_cell=.
+
+*Long-horizon BK observation.* On BK1-BK5 (R25 first clean data),
+K1 is dead-even with K5: BK1 K1=20 / K5=20; BK2 K1=50 / K5=50;
+BK4 K1=3 / K5=3; both abstained on BK3; only BK5 K5 edges K1
+(K5=22 / K1=0 abstain). For Picard-shape delegation /
+multi-file refactor work, K1+K2 is sufficient — Claude
+escalation is no longer indicated by the bench.
 
 ** @data — code/elisp specialist
 
@@ -98,9 +116,13 @@ K11-qwen3coder (elisp specifically, budget-capped).
 the premium on B25-shape elisp tasks. R25 patch caps K11 spend at
 $1.50/round to prevent over-spend.
 
-*Code-edit ceiling probe (R25-R26):* K33-qwen3-coder-72B (added
-in R25 as ceiling probe). If K33 beats K1 on B7 by ≥3 quality
-points, promote K33; otherwise K1 holds.
+*Code-edit ceiling probe.* K33 was *dropped from production*: R25
+broker forensic confirmed =K33-qwen3-coder-72b= maps to OpenRouter
+slug =qwen/qwen3-coder= — *the same slug as K11* (480B-A35B MoE,
+not 72B). K33 was a variant-naming bug, not a distinct model.
+R26 may re-probe with =K33-qwen3-coder-480b-tools-on= as a real
+dial-difference variant on B7 only at n=5 with $4 hard cap, gated
+on q-delta vs K1.
 
 ** @spock — planning / structured-output specialist
 
@@ -167,30 +189,34 @@ wins).
 *Per agents.org:* Picard renders crew-level decisions, executive
 narratives.
 
-*Recommended primary:* K2-kimi-k2.6 with `max_tokens=4096` cap.
-*Fallback:* K5-claude-solo (sentinel only — when stakes truly
-warrant the 48× premium).
+*Recommended primary:* K2-kimi-k2.6 with `max_tokens=4096` cap
+(R26 wiring required — currently dead-code in R25).
+*Fallback:* K1-qwen30 (R25 BK1-BK5 showed K1 dead-even with K5
+on long-horizon delegation/multi-file shape).
+*Sentinel only:* K5-claude-solo (when stakes truly warrant the
+59× premium — bench no longer indicates routine escalation).
 
 *Why K2:* Picard's outputs are read by user; quality matters more
-than cost. K2 at n=25+ produces consistent prose. If K2 fails
-or output rejects user review, escalate to K5 manually.
+than cost. K2 at n=25+ produces consistent prose. K1 is the
+delegation-safe fallback; the BK1-BK5 R25 data is the first
+evidence FOSS handles long-horizon delegation as well as Claude.
 
 * Section 2 — General specialization (custom agents)
 
 For tasks not tied to a specific persona, recommend by /shape/
 not by name. Custom agent authors use this matrix:
 
-| Task shape             | Primary       | Fallback       | Sample size | Why                           |
-|------------------------+---------------+----------------+-------------+-------------------------------|
-| wiki_edit (B1-style)   | K1-qwen30     | K2-kimi-k2.6   | n=10-15     | K1 5/5 frontier; K2 backup    |
-| dec_draft (B11)        | K2-kimi-k2.6  | K1-qwen30      | n=15-25     | Prose nuance; K2 with maxtok  |
-| code_edit (B7)         | K1-qwen30     | K11-qwen3coder | n=10        | K1 + K33 ceiling probe in R25 |
-| elisp_helper (B25)     | K11-qwen3coder | K1-qwen30     | n=8         | K11 worth $1.50 cap here only |
-| atomic / trivial       | K1-qwen30     | K8-deepseekV3  | n=5         | Cheap, deterministic          |
-| long-horizon refactor  | TBD R25 BK    | K1+K2 best-of-3| n=8 in BK   | BK1-BK5 R25 baseline          |
-| critique / review      | K2-kimi-k2.6  | K7-qwen72b     | n=3         | K7 adversarial role only      |
-| executive summary      | K2-kimi-k2.6  | K5-claude-solo | n=3         | Picard-shape; K5 escalation   |
-| planning (no tool-use) | K1-qwen30     | K15-thinking   | n=1         | TTFT matters; K15 deferred    |
+| Task shape             | Primary       | Fallback       | Sample size | Why                            |
+|------------------------+---------------+----------------+-------------+--------------------------------|
+| wiki_edit (B1-style)   | K1-qwen30     | K2-kimi-k2.6   | n=10-15     | K1 6/6 frontier; K2 backup     |
+| dec_draft (B11)        | K2-kimi-k2.6  | K1-qwen30      | n=15-25     | Prose nuance; K2 with maxtok   |
+| code_edit (B7)         | K1-qwen30     | K11-qwen3coder | n=10        | K1 default; K11 budget-capped  |
+| elisp_helper (B25)     | K11-qwen3coder | K1-qwen30     | n=8         | K11 B25 slice $0.003/qpt R25   |
+| atomic / trivial       | K1-qwen30     | K8-deepseekV3  | n=5         | Cheap, deterministic           |
+| long-horizon (BK1-BK5) | K1-qwen30     | K2-kimi-k2.6   | n=8 in BK   | R25: K1 dead-even with K5      |
+| critique / review      | K2-kimi-k2.6  | K8-deepseekV3  | n=3         | K7 dropped; K8 second seat     |
+| executive summary      | K2-kimi-k2.6  | K1-qwen30      | n=3         | Picard-shape; K5 sentinel only |
+| planning (no tool-use) | K1-qwen30     | K15-thinking   | n=1         | TTFT matters; K15 deferred     |
 | chart design           | deepseek-r1   | K2-kimi-k2.6   | n=1         | Per memory; askbook/q=200      |
 
 *Decision rule:* if your task fits two shapes, pick the one with
@@ -201,18 +227,30 @@ borderline cases.
 
 ** Recommended deployment matrix
 
-| Variant                | Primary host        | $/cell est | When to use                              |
-|------------------------+---------------------+------------+------------------------------------------|
-| K1-qwen30              | OR Novita           | $0.001     | Default scribe                           |
-| K2-kimi-k2.6           | OR Moonshot+Parasail| $0.04      | High-stakes prose, dec_draft             |
-| K8-deepseekV3          | OR DeepInfra        | $0.001     | Atomic / trivial; recovered backup       |
-| K11-qwen3coder         | OR Together         | $0.20      | Elisp ONLY; $1.50 round cap              |
-| K17-glm46              | OR SiliconFlow      | $0.005     | A/B with K2 on prose                     |
-| K20-foss-distill       | Together dedicated H100 endpoint | TBD R26 | A/B vs K1 on B5/B11/B20 |
-| K33-qwen3-coder-72B    | OR Together         | $0.005     | Code ceiling probe (R25)                 |
-| K34-deepseek-v3-pro    | OR DeepInfra        | $0.008     | Reasoning ceiling probe (R25)            |
-| K35-llama-3.1-405B     | OR Together         | $0.015     | Mass-scale FOSS ceiling probe (R25)      |
-| K5-claude-solo         | Anthropic direct    | $0.30      | Sentinel only; quality ceiling reference |
+| Variant                | Primary host        | $/cell est | When to use                                |
+|------------------------+---------------------+------------+--------------------------------------------|
+| K1-qwen30              | OR Novita           | $0.005     | Default scribe; 6 of 6 rounds frontier     |
+| K2-kimi-k2.6           | OR Moonshot+Parasail| $0.035     | High-stakes prose, dec_draft               |
+| K8-deepseekV3          | OR DeepInfra        | $0.006     | CHAMPION 25/25 → 29/29 cells R25; 2nd seat |
+| K11-qwen3coder         | OR Together         | $0.063     | Elisp ONLY; B25-slice $0.003/qpt R25       |
+| K17-glm46              | OR SiliconFlow      | $0.075     | A/B with K2; K17-loop watch (max_iters)    |
+| K20-foss-distill       | Together dedicated H100 endpoint | TBD R26 | A/B vs K1 on B5/B11/B20 (deploy blocked) |
+| K5-claude-solo         | Anthropic direct    | $0.21      | Sentinel only; 59× layer1-matched moat     |
+
+*K33/K34/K35 dropped.* R25 ceiling-probe failed: K33 = K11 slug
+duplicate (=qwen/qwen3-coder= 480B both); K34 returned HTTP 400
+"not a valid model ID"; K35 returned HTTP 404 "no endpoints found".
+All three are out of the production matrix. Large-FOSS ceiling
+hypothesis falsified: K33 cost 100× K1 for +50% quality on n=1.
+
+*K8 on DeepInfra is Champion.* R24 noted 25/25 cells; R25 extends
+to 29/29 (success rate 100%, durable second frontier seat at
+$0.00069/qpt). Pin held perfectly across both rounds.
+
+*Together fine-tuning works; endpoint deploy blocked.* K20 LoRA
+training completed cleanly (~$5, 10 min) but the serverless
+endpoint deploy hits a config error. R26 needs dedicated H100
+endpoint with =min_replicas=1=.
 
 ** PROVIDER_PINS deny-list (R24+R25 verified)
 
@@ -321,6 +359,27 @@ Each fires without prompting user; logs to live-log + progress doc.
 | S3 | Critique-revise (K1+K2)      | ~40           | Quality lift on B11           |
 | S4 | TASK_FAMILY_VARIANTS routing | ~20           | Per-task variant selection    |
 
+** R26 critical patches (verification gap from R25)
+
+Three R25 patches were *labelled-but-not-effective*; R26 must wire
+them properly with a verification step:
+
+| Bug                                  | R25 state             | R26 fix                                        |
+|--------------------------------------+-----------------------+------------------------------------------------|
+| =count_bracket_errors= cross-line FP | Per-line nested fixed | Mirror per-line walker into =count_bracket_errors= (single-file patch to =scripts/quality_lint.py=) |
+| Top-3 selector = cells, not variants | All 3 collapsed to K1 | Aggregate by variant first, rank by per-cell mean (not sum), take top-3 distinct |
+| WALL_CAP = label only                | =ThreadPoolExecutor= shim blocks outer worker | Replace with =multiprocessing.Process= (terminate-able) OR =threading.Event= polled by =run_one_cell= to abort in-flight HTTP |
+| K2 max_tokens=4096 dead code         | Constant defined, never threaded | Add =max_tokens: Optional[int]= to =SpecialistTask=, thread through =_chat_completions=, read =_R25_VARIANT_MAX_TOKENS= in =run_specialist_for_cell= |
+
+*Why critical.* All four bugs distorted R25 results: 5 floor-drops
+were FP-1 (not real defects); Layer-2/3/BK collapsed to K1 only
+because the selector deduped wrong; 16 K2/B1 cells ran 455-1697s
+past the 400s cap; K2 produced 22-28k char outputs at the 8000
+default ceiling. Fixing these first means every subsequent round
+measures something real. *Acceptance criteria*: re-run on saved
+diffs; K11/K17/K8 lint collapses to 1.0/cell; top-3 returns 3
+distinct variants; L1 wall lands ≤650s; K2 output chars ≤14k.
+
 ** Defer to R27+
 
 | ID | Strategy                          | Why defer                       |
@@ -374,16 +433,18 @@ Each fires without prompting user; logs to live-log + progress doc.
 
 * Section 7 — Cost / spend posture
 
-** Cumulative (R1-R24, R25 in flight)
+** Cumulative (R1-R25)
+
+R25 added $9.67 (189 cells / 38 min wall / 9 variants).
 
 | Source         | Spend |
 |----------------+-------|
-| OpenRouter (FOSS) | ~$50  |
-| Anthropic (Claude sentinel) | ~$25 |
+| OpenRouter (FOSS) | ~$60  |
+| Anthropic (Claude sentinel) | ~$30 |
 | Modal (failed LoRA) | ~$3-5 |
 | RunPod (failed LoRA) | ~$3 |
 | Together (LoRA train) | ~$5-10 |
-| /Total/         | *~$90-100* |
+| /Total/         | *~$100-110* |
 
 ** Per-round budget
 
@@ -398,29 +459,51 @@ Each fires without prompting user; logs to live-log + progress doc.
 - Mid-round: pause if spend > 1.5× projection
 - Hard stop: spend > 2× projection writes COST_CIRCUIT_BREAKER
 
-** $/qpt floor (R19-R24 confirmed, R25 verifying)
+** $/qpt floor (R19-R25 confirmed)
 
-- K1-qwen30: *$0.0005/qpt* (5/5 rounds stable)
-- Claude K5: *$0.024/qpt* (48-51× over K1)
-- Per-quality-unit advantage holds across n=15 → n=50
+- K1-qwen30: *$0.00057/qpt* (6/6 rounds stable, R25 layer1 n=50)
+- K8-deepseekV3: *$0.00069/qpt* (R25 durable second seat,
+  29/29 cells success)
+- Claude K5: *$0.03368/qpt* (R25 layer1-matched slice)
+- *Layer1-matched moat: 59× over K1* (grew from R24's 48×)
+- Headline aggregate moat shrunk to 22× — layer-mix artifact, not
+  real Claude cost improvement
 
-* Open questions for the morning (or next step)
+* Open questions — R25 answers + R26 carry-forward
 
-These will be answered in the R25 update to this doc:
+R25 closed some questions, opened others:
 
-1. Does K1 hold $0.0005/qpt at n=50? (R25 Layer 1 K1 has finished
-   at this snapshot; awaiting full round leaderboard.)
+1. *Does K1 hold $0.0005/qpt at n=50?* — *YES.* R25 layer1-only:
+   K1 n=50 / $0.00057/qpt / 6 of 6 rounds stable. Floor confirmed.
 
-2. Does K8 generalize beyond B1? (R25 force-adds K8 to Layer 2.)
+2. *Does K8 generalize beyond B1?* — *PARTIAL.* The selector bug
+   (top-3 picked individual cells, all K1) excluded K8 from
+   Layer-2 attempts; K8's 4 force-listed Layer-2 cells silent_noop'd
+   on B5/B7/B11/B25. Need R26 with selector fix to know if K8
+   really generalizes or only excels on B1-shape.
 
-3. Do K33/K34/K35 large-FOSS variants beat K1 on any task? (R25
-   probes them at n=10 each.)
+3. *Do K33/K34/K35 large-FOSS variants beat K1?* — *NO, decisive.*
+   K33 = K11 slug duplicate (both =qwen/qwen3-coder= 480B); K34
+   HTTP 400 dead model ID; K35 HTTP 404 no endpoints. *Drop K34
+   and K35 entirely.* K33 is just K11 with a different name —
+   not a meaningful new variant. Large-FOSS ceiling hypothesis
+   falsified.
 
-4. Does Together-trained K20 LoRA beat K1 base? (Endpoint deploy
-   blocked on Together H100 config; deferred to R26.)
+4. *Does Together-trained K20 LoRA beat K1 base?* — *UNRESOLVED.*
+   Training works (Together fine-tune complete); endpoint deploy
+   still blocked on serverless config. R26 needs dedicated H100
+   endpoint with =min_replicas=1=.
 
-5. Does S38 (K7 adversarial role) recover any K7 value? (Deferred
-   to R26 wiring.)
+5. *Does S38 (K7 adversarial role) recover any K7 value?*
+   — Deferred (K7 not run in R25; Novita deny unverified until
+   K7 re-enabled).
+
+6. *NEW: BK1-BK5 long-horizon FOSS-vs-Claude?* — *K1 dead-even
+   with K5* (R25 first clean BK data). BK1: K1=20 / K5=20; BK2:
+   K1=50 / K5=50; BK4: K1=3 / K5=3; both abstain BK3; BK5: K5=22
+   edges K1=0 abstain. FOSS handles long-horizon delegation
+   shape; Picard-style escalation to Claude no longer needed
+   for routine multi-file work.
 
 * Cross-references
 
