@@ -21,9 +21,9 @@ FOSS + smart composition ≥ single Claude.
 
 *Expanded.* R16 results inform R17 — wait for layer-1 leaders then
 graduate them into composition layers. R17 scope is bigger (3-4 days
-of cells, ~$200-300 (was; new cap $375)) and explicitly tests whether more FOSS LLMs in
-clever orchestrations beat single-strong-Claude on real coding + OS +
-org-mode work.
+of cells, ~$200-300; cap raised to $375 per user 2026-05-08) and
+explicitly tests whether more FOSS LLMs in clever orchestrations
+beat single-strong-Claude on real coding + OS + org-mode work.
 
 * Goals
 
@@ -154,7 +154,7 @@ Pre-committed bar: K20 ≥ +5pp on display-text quality, no >5pp regression.
 |       | Total                                                  | ~1200 |
 
 *Wall:* 6-12 hours with 4-way parallelism (~2-3 days end-to-end).
-*Cost:* ~$200-300 (was; new cap $375) within original $375 envelope.
+*Cost:* ~$200-300; cap raised to $375 per user 2026-05-08.
 
 R17 v1 will likely be split into multiple launches (L1+L2 first,
 L3-L6 contingent on results).
