@@ -558,7 +558,7 @@ add an =edit_file= guard that REJECTS edits with bracket nesting
 depth > 1 OR fab UUIDs OR table pipe loss BEFORE landing in
 diff. Cell loop forces retry on rejection.
 
-** TODO P2-7: Together Serverless Multi-LoRA pre-flight + migration
+** PARTIAL P2-7: Together Serverless Multi-LoRA — probe done
 :PROPERTIES:
 :ESTIMATE: 4 hr
 :SOURCE:   boost plan §3 + reviewer caveat
@@ -570,6 +570,23 @@ multi-LoRA roster (reviewer flagged: blog only names Llama-3.1
 ($7.98/hr) to serverless (per-token base price). If not: stay
 on dedicated for R26; train K20 v2 on a confirmed-supported
 base in R27.
+
+*Probe done 2026-05-08:* verdict =NOT_SUPPORTED=. Together's
+=POST /v1/chat/completions= with the K20 output model returned
+HTTP 400 with =model_not_available= / "Unable to access
+non-serverless model … create and start a new dedicated
+endpoint". Base =Qwen/Qwen3-Coder-30B-A3B-Instruct= itself shows
+=pricing.input=0=, =pricing.output=0=, =pricing.hourly=0= — i.e.
+no public serverless tier. Other Qwen3-Coder variants /are/ on
+serverless (Coder-Next-FP8, Coder-480B-A35B-FP8) but the 30B
+A3B variant is not. *Recommendation: keep dedicated endpoint
+for R26.* R27 K20 v2 must retrain on a confirmed-serverless
+base — Llama-3.1-8B-Instruct or Qwen-2.5-32B-Instruct.
+
+See =docs/notes/2026-05-08-together-slm-probe.org= for full
+findings; probe lives at =scripts/_p2_7_probe_together_slm.py=
+(idempotent re-run; ~$0 since the only billable call errors out
+at HTTP 400).
 
 ** TODO P2-8: K20 v2 — re-distill on 500+ pairs
 :PROPERTIES:
