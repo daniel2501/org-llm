@@ -1,0 +1,199 @@
+:PROPERTIES:
+:ID:       1c40f8b6-b507-48f2-9be1-4699727eb508
+:CREATED:  [2026-05-07]
+:END:
+#+TITLE: Round-17 design — coordination strategies sweep + composition over capability
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:design:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R17 advances from "tune one specialist" (R16) to "compose
+multiple FOSS specialists into a system that beats Claude." Sweeps
+all 10 coordination strategies (C1-C10), adds the FOSS roster's
+2026-Q2 newcomers (Kimi K2-Thinking, Qwen3.6-27B, GLM-4.6), and
+opens a side-track for speculative decoding + Weaver judge ensemble +
+LoRA on the harvested R15+R16 dataset. Working hypothesis: cheap
+FOSS + smart composition ≥ single Claude.
+
+*Expanded.* R16 results inform R17 — wait for layer-1 leaders then
+graduate them into composition layers. R17 scope is bigger (3-4 days
+of cells, ~$200-300) and explicitly tests whether more FOSS LLMs in
+clever orchestrations beat single-strong-Claude on real coding + OS +
+org-mode work.
+
+* Goals
+
+| #  | Goal                                                                                  |
+|----+---------------------------------------------------------------------------------------|
+| G1 | Find a FOSS-multi-agent configuration that ≥ Claude on cost/quality across all tasks  |
+| G2 | Quantify each coordination strategy's marginal value (C1-C10 ablation)                |
+| G3 | Test speculative decoding + judge ensemble for tail-quality wins                       |
+| G4 | Harvest R15+R16+R17 dataset, train first LoRA, A/B vs base                            |
+| G5 | Add 2026-Q2 FOSS roster newcomers; identify any new SOTA on org/elisp                  |
+
+* Coordination strategies — C1-C10 sweep
+
+| ID | Pattern                            | What                                                | Test fixture                                |
+|----+------------------------------------+-----------------------------------------------------+---------------------------------------------|
+| C1 | Hierarchical planner-executor      | Captain (cheap qwen30) plans → specialist executes  | Carry-over from R15/R16 (baseline)          |
+| C2 | Plan-Solve-Verify (PSV)            | planner → executor → verifier loop with retry       | New layer over R16 cells                    |
+| C3 | Mixture-of-Agents (MoA)            | N proposers in parallel, aggregator synthesizes     | Layer 5 vote — RESERVED for prose tasks per research agent |
+| C4 | Tree-of-Thoughts (ToT)             | branch K plans, score, pick best, expand            | New layer for high-stakes tasks (B11 DEC)   |
+| C5 | Self-Consistency vote              | N independent plans → modal answer                  | Already wired (DSC); extend to 3-vote       |
+| C6 | Reflexion                          | After failure, verbal self-reflection, retry        | New retry-with-reflection wrapper in runtime |
+| C7 | Generator-Discriminator            | Generator proposes; critic scores; revise           | New 2-LLM-pair layer over R16 cells         |
+| C8 | Begin/end syncs                    | Models exchange interpretation at start, mutual review at end | Multi-specialist team layer        |
+| C9 | Symbolic planning                  | Formal planner (PDDL-like) for deterministic parts  | For B40 inbox triage (rule-based skeleton)  |
+| C10 | State-tracking scratchpad         | Explicit state object across iterations              | Add to long-horizon cells (B7 docstrings)   |
+
+** Layer structure for C1-C10
+
+| Layer | What                                                              | Cells per task |
+|-------+-------------------------------------------------------------------+----------------|
+| L1    | Per-strategy mini-bench: each Cn × top-2 FOSS × B1 + B11 + B25    | 60 (10 × 2 × 3) |
+| L2    | Strategy stacking: best-3 strategies × all tasks                   | ~60-90         |
+| L3    | A/B vs single-best-FOSS (R16 winner) on full task suite           | ~30-50         |
+
+* Variant pool — R17 additions
+
+R16's 14 variants carry over. R17 adds (per FOSS roster agent 2026-05-07):
+
+| ID  | Model                                | Why                                                     |
+|-----+--------------------------------------+---------------------------------------------------------|
+| K15 | =moonshotai/kimi-k2-thinking=        | MIT — leader on SWE-Multilingual + LiveCodeBench        |
+| K16 | =qwen/qwen3.6-27b=                   | Apache 2.0 dense — 77.2% SWE-V, 22GB-VRAM friendly      |
+| K17 | =z-ai/glm-4.6=                       | MIT — strong agentic-coding traction                     |
+| K18 | =meta-llama/llama-4-instruct=        | If released by R17 launch (per roster agent's tracking) |
+| K19 | =qwen/qwen-2.5-coder-32b-instruct=   | Code specialist; gap vs qwen3-coder-30b                 |
+
+* Tool surface — additions for R17
+
+R16's 15-tool BROAD_TOOLS_FULL carries over. R17 adds:
+
+| Tool             | Purpose                                                          |
+|------------------+------------------------------------------------------------------|
+| =wrap_substring= | Atomic compositional tool — guarantees well-formed link insertion |
+| =add_heading=    | Already defined in R16; activate for R17 task family              |
+| =refile_to=      | Atomic refile — used by B40 inbox triage                          |
+| =vault_query=    | org-roam DB SELECT — used by B43 next-action scheduler            |
+| =describe_elisp= | Live Emacs introspection                                          |
+| =run_dbt=        | dbt model exec for any task touching analytics tier               |
+
+* New tasks for R17
+
+R16's 8 tasks carry over. R17 adds (per R16 design doc Family 1-5):
+
+| ID   | Task                                                                                | Family       |
+|------+-------------------------------------------------------------------------------------+--------------|
+| B30  | Add unit test for =org_llm.specialist._resolve_in_workdir=                          | code         |
+| B31  | Fix a known bug (regression test passes)                                             | code         |
+| B32  | Refactor: rename a constant + update callers                                         | code         |
+| B33  | Add new CLI subcommand                                                                | code         |
+| B34  | Write a small Python tool from spec                                                  | code         |
+| B35  | Find files matching regex; output structured                                          | OS           |
+| B36  | Process git log JSON: count commits per author past 30 days                          | OS           |
+| B40  | Inbox triage: refile each =inbox.org= TODO to right project file                     | org-mission  |
+| B41  | Generate weekly review                                                                | org-mission  |
+| B42  | Convert ad-hoc note → structured task                                                 | org-mission  |
+| B43  | Propose next actions with EFFORT + DEADLINE constraints                              | org-mission  |
+| B44  | Stale TODO sweep                                                                      | org-mission  |
+| B45  | Captain's-log entry from git commits                                                  | org-mission  |
+| B50  | Add =:EFFORT:= property via =add_property= atomic                                   | Tier-S       |
+| B51  | TODO state transition via =set_todo_state= atomic                                   | Tier-S       |
+| B52  | Refile via =refile_to= atomic                                                        | Tier-S       |
+| B53  | (adversarial) Try to write malformed org → validation gate must reject               | Tier-S       |
+| B60  | Review-then-revise: specialist 1 drafts DEC, specialist 2 reviews + revises           | coordination |
+| B61  | 3-way vote on Summary phrasing                                                        | coordination |
+| B62  | (R17 NEW) MoA on B11 DEC drafting — 3 proposers + aggregator                          | coordination |
+| B63  | (R17 NEW) Reflexion on B40 inbox triage failures                                      | coordination |
+
+Total task surface: 30 (R16's 8 + 22 new). Cell math gets large fast —
+strict layer trimming required.
+
+* Speculative decoding / judge ensemble side-track
+
+Per research agent's R17 longer-bets:
+
+| Track       | What                                                              | Cost   | Time  |
+|-------------+-------------------------------------------------------------------+--------+-------|
+| Eagle3 spec | Speculative decoding on Modal-hosted FOSS — ~19% inference cost cut | Modal hours | 1 day |
+| Weaver judge | Judge ensemble (3 cheap FOSS judges, vote) — better than single LLM judge | $5-10  | half-day |
+| MapCoder distill | Distill best-of-K outputs into smaller models                   | Compute  | 2 days |
+
+* LoRA fine-tune track (T2 — finally)
+
+LoRA prep agent already wrote pipeline (=/tmp/lora_prep/=,
+=/tmp/r16-lora-pipeline.org=). R17 picks it up if R15+R16 dataset
+crosses 100k pair tokens.
+
+| Step | What                                                                    |
+|------+-------------------------------------------------------------------------|
+| 1    | Harvest =(task, variant, prompt, output, verdict)= JSONL from R15+R16 cells |
+| 2    | Run =01_build_corpus.py= filter + format. Verify ≥100k pair tokens.       |
+| 3    | =02_train.py= — Modal A100-80GB, qwen3-coder-30b 4-bit QLoRA               |
+| 4    | =03_serve.py= — vLLM with adapter; expose as K20-qwen30-orgllm-lora        |
+| 5    | A/B K20 vs K1 (base) on R17 task suite                                    |
+
+Pre-committed bar: K20 ≥ +5pp on display-text quality, no >5pp regression.
+
+* Cell math — R17 v1 (lean, mostly carry-over from R16)
+
+| Layer | What                                                  | Cells |
+|-------+-------------------------------------------------------+-------|
+| L1    | C1-C10 strategy mini-bench (2 FOSS × 3 tasks × n=3)   |   180 |
+| L2    | Top-3 strategies × top-3 FOSS × all 30 tasks × n=3    |   810 |
+| L3    | New roster K15-K17 × R16 baseline tasks × n=3         |    72 |
+| L4    | Speculative decoding A/B on top FOSS                   |    60 |
+| L5    | Weaver judge ensemble vs single judge (re-score R16)  |     0 |
+| L6    | LoRA K20 A/B vs K1 (if dataset adequate)              |    80 |
+|-------+-------------------------------------------------------+-------|
+|       | Total                                                  | ~1200 |
+
+*Wall:* 6-12 hours with 4-way parallelism (~2-3 days end-to-end).
+*Cost:* ~$200-300 within original $300 envelope.
+
+R17 v1 will likely be split into multiple launches (L1+L2 first,
+L3-L6 contingent on results).
+
+* Observability v3 additions
+
+R16's O7-O20 carry over. R17 adds:
+
+| Hook | What                                                                                                |
+|------+-----------------------------------------------------------------------------------------------------|
+| O21  | Strategy effectiveness matrix: C1-C10 × task-family heatmap                                          |
+| O22  | Provider routing log per cell: which OpenRouter provider served each call (Parasail / Moonshot etc.) |
+| O23  | Spec-decoding hit rate: when used, % of tokens accepted vs rejected (for Eagle3)                    |
+| O24  | Cross-cell context-cache hit rate: vLLM prefix-cache effectiveness                                  |
+| O25  | LoRA-vs-base divergence: token-level differences between K20 and K1 on same prompt                  |
+
+* Open questions / R18+ candidates
+
+- *Continuous orchestration* — observer LLM watching iterations, intervening
+- *Self-coded tools (Phase 29)* — repeated patterns become deterministic
+- *Specialty per-handle LoRAs* — distinct LoRAs for @atoz / @data / @geordi
+- *Cross-run learning* — feed previous-cell results into current spec
+- *Tournament tier* — graduate winners to harder tasks, drop laggards
+- *Org-roam hosted vector index* — RAG over user's vault at edit time
+- *Modal-hosted full pipeline* — entire R17 self-contained, no OpenRouter
+
+* Cross-references
+
+- [[id:7ce85fa3-c4dc-4c0c-9e8d-2a5ebea9a436][2026-05-07-round-13-postmortem.org]] — R14 fix-batch
+- =docs/wiki/2026-05-07-r16-design.org= — R16 design (this doc's predecessor)
+- =/tmp/r16-research-report.org= — SOTA research findings
+- =/tmp/r15-quality-judge-report.org= — quality re-ranking
+- =/tmp/r15-variance-analysis.org= — n-required for tight CIs
+- =/tmp/r15-pareto-analysis.org= — cost/quality frontier
+- =/tmp/r15-failure-modes.org= — failure-class taxonomy
+- =/tmp/r15-tool-patterns.org= — per-task tool gating evidence
+- =/tmp/r15-positive-deviance.org= — winning patterns
+- =/tmp/r16-foss-roster-expansion.org= — K15-K19 candidates
+- =/tmp/r16-lora-pipeline.org= — LoRA pipeline ready-to-launch
+- =/tmp/r16-modal-vllm.org= — Modal self-host (Kimi only, latency win)
+- =/tmp/lora_prep/= — LoRA training scripts (corpus + train + serve)
+- =/tmp/modal_vllm/= — Modal serve scripts
