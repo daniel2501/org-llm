@@ -1,0 +1,668 @@
+:PROPERTIES:
+:ID:       r26-boost-plan
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R26+ boost plan — serverless multi-LoRA, MCP integrations, elisp/org tests, compounded strategies
+#+FILETAGS: :wiki:bench:r26:boost:lora:mcp:elisp:design:
+#+OPTIONS: toc:2 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R26 is the round where the bench stops being just a
+measurement instrument and starts compounding wins: K20 deploys
+via Together /serverless multi-LoRA/ at the base-model per-token
+price (no $5.49/hr dedicated endpoint, no idle cost), the harness
+gains real Emacs through =org-mcp= + =org-roam-mcp= + =vault-mcp=
+inside the specialist tool surface, the test pool grows by 10
+elisp/org-shape tests (BK6-BK15) that exercise capabilities the
+bench has never measured, and ~$120-140 of cloud headroom is
+allocated against high-leverage infra (Spheron H100 self-host,
+Modal-Kimi K2, OR top-up reserve). The R25 verification gap (3 of
+11 patches were dead-code) gates everything: each R26 boost ships
+with an end-to-end behavioral probe before R26 launches.
+
+*Expanded.* R15-R25 surfaced a clean operating model — K1+K8 FOSS
+frontier at $0.0006/qpt, 59x layer1-matched moat over Claude — but
+also a stack of unfinished work: K8 generalization unresolved, K20
+endpoint blocked, MCP integrations un-wired, the harness's verifier
+still regex-only, BK1-BK5 only firing on K1+K5 due to the top-3
+selector bug, and the elisp/org-mode dimension of org-llm's actual
+purpose (Emacs distro, not a generic agent harness) almost entirely
+absent from the test pool. R26 spends the spend-headroom on
+infrastructure that converts the static frontier into a moving one
+— self-hosting kills broker variance, multi-LoRA makes per-handle
+adapters cheap to ship, and Emacs-shaped tests close the gap
+between what we measure and what org-llm is actually for. The five
+R26 boosting bets in §1 each compound: serverless K20 enables A/B
+without idle cost; MCP gives the harness real semantic verification;
+new elisp tests reveal whether K1's lead survives off the bench's
+historical wiki-edit comfort zone.
+
+* 1. Exec summary — top 5 bench-boosting bets for R26
+
+| # | Bet                                       | Cost      | Quality lift     | Wall delta | Risk |
+|---+-------------------------------------------+-----------+------------------+------------+------|
+| 1 | *Together serverless multi-LoRA K20*      | ~$0/hr    | +3-6q on B5/B11/B20 if it lands | 0    | low  |
+| 2 | *MCP-backed specialist tool surface*      | $0        | unlocks elisp/org tests | -10-20% wall on org tasks | med |
+| 3 | *Spheron H100 self-host K1+K2 (4h/round)* | $4-8      | -50% wall, -broker variance | -50% | low  |
+| 4 | *10 new elisp/org-mode tests (BK6-BK15)*  | $2-4 base | reveals real-world ceiling | +5 min | low  |
+| 5 | *R25 verification-gate every patch*       | $0        | prevents 3-of-11 dead-patch repeat | 0  | high if skipped |
+
+The wins compound. Bet 1 makes per-handle LoRAs deployable for the
+first time. Bet 2 lets BK6-BK15 (Bet 4) be evaluated semantically,
+not by regex. Bet 3 amplifies all four other bets by removing
+broker-quality noise from the measurement. Bet 5 is the meta-bet
+that prevents R26 from re-creating R25's "patch landed but didn't
+fire" problem.
+
+Total R26 R&D envelope: *$15-25* base bench + *$10-15* Spheron
+self-host + *~$0* serverless K20 = *~$25-40 round*. Headroom
+($120-140) covers ~3-4 R26-shaped rounds before any top-up.
+
+* 2. Re-analysis insights — what NEW learning came from re-reading
+
+*Summary.* Four insights survive a careful re-read of R25 docs that
+the headline syntheses understate: K8 is /not/ confirmed to
+generalize (it's confirmed to recover on B1, period); the R25
+patch-verification gap is structural, not incidental; Layer-BK
+actually fired (R24's blocker is genuinely resolved); and the
+Claude moat is *59x like-for-like*, not the headline 22x.
+
+** Insight A — K8 generalization is unresolved, not confirmed
+
+[[file:docs/wiki/2026-05-08-r25-case-studies.org]] §"Case study 5"
+explicitly corrects the headline: "*shifts the verdict from
+durable second seat to B1-specific recovery — confirmed;
+cross-task generalization unresolved.*" The 4 force-listed K8
+Layer-2 cells (B5, B7, B11, B25) all silent_noop'd because the
+top-3 selector bug excluded K8. R25's K8 evidence is *25 successful
+B1 cells + 4 Layer-2 silent_noops*. The go-forward-config doc §3
+"K8 on DeepInfra is Champion" overstates what the data supports.
+
+*R26 implication.* Don't promote K8 to "general frontier seat" yet.
+Per-cell K8 must run B11 + B26 at n≥5 each /after/ the top-3
+selector fix lands, before any "K8 generalizes" claim. This is
+gate P0-1 + gate "K8 promotion" combined.
+
+** Insight B — 3 of 11 R25 patches were ineffective: structural verification gap
+
+The R25 case-studies doc §"Cross-cutting lessons → harness is the
+bottleneck" + the synthesis doc §"R25's three INEFFECTIVE patches"
+agree on a pattern: =_R25_VARIANT_MAX_TOKENS= was defined and never
+read; =WALL_CAP= shipped a label not a kill; K33's "72b" slug
+duplicates K11. *Three independent fixes for related problems all
+failed independently.* The =_r25_design_patch.py= script is "too
+thin to verify behavioral effect" ([[file:docs/wiki/2026-05-08-r25-case-studies.org]]
+§Case Study 3, lesson 1).
+
+*R26 implication.* Every patch in =_r26_design_patch.py= ships with a
+=verify_patch_landed()= probe that exercises the behavior change
+end-to-end (e.g. send a 30k-prompt-completion request, assert max
+tokens limited the output to ≤4k; spawn a 500s-sleep cell, assert
+WALL_CAP fires within 410s). No patch lands without its probe
+returning OK. This is non-negotiable: skipping it is how R25
+shipped 3 dead patches.
+
+** Insight C — Layer-BK actually fired, R24 blocker fully resolved
+
+[[file:docs/wiki/2026-05-08-r25-synthesis.org]] §"Layer-BK fired
+with target_files fix (10/10)" confirms the BK1-BK5 long-horizon
+data is now real, despite the K8/K11/K17 missing-coverage gap.
+*K1 dead-even with K5 on BK1/BK2/BK4*, K5 edges BK5, both abstain
+BK3. This is genuinely new evidence that FOSS handles long-horizon
+delegation, not just atomic tasks. The implication for R26 is that
+BK1-BK5 should now be Layer 1, not Layer-BK after-the-fact (per
+[[file:docs/wiki/2026-05-08-r25-case-studies.org]] R26 rec #20).
+
+** Insight D — Claude moat is 59x layer1-matched, not 22x headline
+
+[[file:docs/wiki/2026-05-08-r25-synthesis.org]] §"Headline numbers"
+shows the moat /grew/ from R24's 48x to R25's 59x on the
+layer1-matched slice. The 22x mix-aggregate headline is a
+layer-allocation artifact (K5 ran more layer_bk + layer2 cells
+where Claude scores higher per dollar). *FOSS pulled further ahead*,
+the headline understated the win. This affects R26 messaging
+(don't say "moat shrunk"), and informs the Picard-delegation
+section of the go-forward config: K1+K2 is sufficient for
+multi-file refactor; Claude escalation is no longer
+bench-indicated.
+
+* 3. Together Serverless Multi-LoRA pivot — kill the dedicated-endpoint plan
+
+*Summary.* The R25 plan called for a dedicated H100 endpoint
+($5.49/hr, =min_replicas=1=) to serve K20-foss-distill. Together's
+serverless multi-LoRA support (released early 2025) makes this
+unnecessary: fine-tuned LoRA adapters are served at the
+*base-model per-token price* with zero idle cost. K20 deployment
+becomes a 30-minute config change, not a $130-200/month commitment.
+
+*Expanded.* Source:
+https://www.together.ai/blog/serverless-multi-lora-fine-tune-and-deploy-hundreds-of-adapters-for-model-customization-at-scale.
+The blog explicitly covers the exact use case: register a LoRA
+adapter, query the base-model endpoint with =model= = adapter ID,
+pay base-model rates per token. No reservation, no idle, no
+per-adapter dedicated infra.
+
+** Cost comparison
+
+| Path                                | Setup | Idle  | Per-token                  | R26 cost (50 cells) |
+|-------------------------------------+-------+-------+----------------------------+---------------------|
+| /R25-original/ Together dedicated H100 | $0    | $5.49/hr | base + endpoint amort. | ~$30 (5h reserve)   |
+| /R25-fallback/ RunPod H100 + vLLM   | $30 image | $2.99/hr | self-bill              | ~$15 (5h reserve)   |
+| *R26 — Together serverless multi-LoRA* | *$0*  | *$0*  | *base K1 rate*             | *~$0.30* (50 cells × $0.006) |
+
+Same A/B against K1-base, ~50x cheaper deployment.
+
+** Implementation
+
+1. Verify =ft-985a8266= (K20 v1) is "completed" and adapter weights
+   are accessible via =POST /fine-tunes/{id}/download= or attached
+   to a serverless deployment ID.
+2. Register the adapter via Together's serverless adapter API
+   (=together fine-tune deploy --adapter ID= or REST equivalent).
+3. Add K20 to =_round26_dials.py=:
+   #+begin_src python
+   "K20-foss-distill-v1": {
+       "model_id": "qwen3-coder-30b-a3b-instruct",
+       "lora_adapter": "daniel2501/k20-foss-distill-v1",
+       "broker": "together-serverless",
+       ...
+   }
+   #+end_src
+4. Wire =_chat_completions= to pass the adapter ID via Together's
+   serverless multi-LoRA query schema (=model="<base>:<adapter>"=
+   or equivalent based on the API spec).
+5. Probe behavioral effect — send a known training-distribution
+   prompt; assert response shape differs from K1-base. This is
+   the §2-B verification gate applied to K20.
+
+** Fallback chain
+
+If serverless multi-LoRA is unavailable for our base model
+(=qwen3-coder-30b-a3b-instruct=), fall back to:
+1. Predibase serverless fine-tuned LLMs.
+2. DigitalOcean serverless fine-tuned (similar offering).
+3. Doubleword Takeoff Serverless LoRA.
+4. Spheron dedicated H100 PCIe at $2.01/hr (cheaper than Together's
+   $5.49/hr dedicated; only used if every serverless option fails).
+
+* 4. MCP server integrations — concrete shortlist
+
+*Summary.* Five MCP servers align with org-llm's goals at clearly
+different leverage-per-LOC ratios. Top priority is =org-mcp= +
+=emacs-mcp-server= (rhblind, pure-elisp) — together they give the
+specialist tool surface a real Emacs to drive, which unlocks
+semantic verification (replaces regex post-hoc with editor-side
+truth) and enables the new BK6-BK15 elisp tests in §6.
+
+*Expanded.* MCP integration matters for R26 in two senses: (a) /the
+harness/ uses MCP servers as additional verifiers (gold-standard
+semantic check on every cell), and (b) /org-llm itself/ ships MCP
+clients so user-facing agents reach the same elisp/org tools the
+bench measures against.
+
+** Shortlist (ranked by leverage)
+
+| # | Server                  | URL                                                       | Role           | Leverage |
+|---+-------------------------+-----------------------------------------------------------+----------------+----------|
+| 1 | org-mcp                 | https://github.com/laurynas-biveinis/org-mcp              | org-task ops   | high     |
+| 2 | emacs-mcp-server (rhblind) | https://github.com/rhblind/emacs-mcp-server           | pure elisp eval | high    |
+| 3 | org-roam-mcp            | https://github.com/aserranoni/org-roam-mcp               | vault Q&A      | med-high |
+| 4 | gptel + mcp.el          | https://github.com/karthink/gptel + https://github.com/lizqwerscott/mcp.el | client side | med |
+| 5 | vault-mcp               | https://github.com/robbiemu/vault-mcp                     | semantic search RAG | med  |
+| 6 | emacs-mcp-server (vivekhaldar) | https://github.com/vivekhaldar/emacs-mcp-server   | python+elisp   | low      |
+| 7 | mcp-local-rag           | https://github.com/nkapila6/mcp-local-rag                | RAG fallback   | low      |
+| 8 | ClawMem                 | https://github.com/yoloshii/ClawMem                       | memory layer   | low      |
+
+** Top-3 integration plans
+
+*** =org-mcp= (laurynas-biveinis)
+
+*Why first.* Direct mapping to org-llm's task verbs (capture,
+refile, agenda, todo-state, deadline). The MCP tools become
+specialist tool-surface entries; the harness gates B11/B20/B26 on
+"did the org-mcp action succeed" rather than "did the regex see
+the heading appear in diff".
+
+*Integration LOC.* ~120 (subprocess launcher + tool-call adapter
+in =org_llm/specialist.py=).
+
+*Acceptance gate.* B11 (DEC draft) cell run via org-mcp's
+=add-heading= primitive returns a parseable element with the right
+property drawer, vs. current regex match on diff.
+
+*** =emacs-mcp-server= (rhblind, pure-elisp variant)
+
+*Why second.* Pure elisp, Unix-socket transport, no Python bridge.
+Every BK6-BK15 elisp/org test in §6 needs a way to ASK Emacs "is
+this defcustom valid; does this defface byte-compile; does this
+ert-deftest run green?" The rhblind server answers each via JSON-RPC
+to a real running Emacs.
+
+*Integration LOC.* ~80 (start headless emacs daemon + connect
+client per cell).
+
+*Acceptance gate.* B25 (write new elisp) cell verifier returns
+=byte-compile-file= success + =ert-run-tests-batch= clean exit.
+
+*** =org-roam-mcp= (aserranoni)
+
+*Why third.* Provides =search_nodes= / =get_node= / =get_backlinks=
+to specialist agents. Grounds @atoz cross-link audit (B1) in the
+real vault state instead of a frozen prefetch dict. R26 hypothesis:
+@atoz with org-roam-mcp produces fewer fab UUIDs because the
+vault's actual UUIDs are query-able.
+
+*Integration LOC.* ~60 (just the MCP client wiring; server is upstream).
+
+*Acceptance gate.* B1 fab_uuids count drops to 0 across n≥10 K1 cells.
+
+** Defer to R27+
+
+- =gptel + mcp.el=: client-side; great for user-facing chat, not
+  bench-critical.
+- =vault-mcp=: semantic search RAG. Useful but org-roam-mcp covers
+  the bench's @atoz needs for B1.
+- =mcp-local-rag= / =ClawMem= / vivekhaldar variant: redundant with
+  the top-3 once those land.
+
+* 5. Compute headroom strategy — allocating ~$120-140 free
+
+*Summary.* Total free headroom across cloud accounts is ~$120-140
+([[file:docs/wiki/2026-05-08-r25-design.org]] §"Cloud account
+balances"). R26 allocates against high-leverage items: serverless
+K20 (~$0/hr idle), Spheron H100 self-host for K2 ($2.01/hr × 2-4h),
+Modal-Kimi K2 setup (~$2 one-time), with $30+ reserved for
+OpenRouter top-up insurance.
+
+** Allocation table
+
+| Item                                  | Setup | Per-round | Idle/month | R26 budget | Source/justification |
+|---------------------------------------+-------+-----------+------------+------------+----------------------|
+| Together serverless multi-LoRA K20    | $0    | ~$0.30 (50 cells) | $0     | $5         | §3 above             |
+| Spheron H100 PCIe ($2.01/hr × 2-4h)   | $0    | $4-8       | $0         | $20        | LoRA-hosting alts survey |
+| Modal-Kimi K2 (sub-second TTFT)       | ~$2   | $0.50-2.00 | ~free tier | $10        | [[file:docs/notes/2026-05-08-r25-walltime.org]] |
+| OpenRouter base bench (R26 envelope)  | $0    | $8-12      | $0         | $30        | go-forward-config §7 |
+| OR top-up reserve (insurance)         | -     | -          | -          | $30        | PM6 + R21-R23 402 history |
+| RunPod (LoRA training contingency)    | $0    | $0-15      | $0         | $20        | only if Together fails |
+| Buffer (surprise + new probes)        | -     | -          | -          | $25        | -                    |
+| /Total/                               | -     | -          | -          | *~$140*    | matches headroom      |
+
+** Cloud accounts (by current balance)
+
+| Account            | Balance | Best use                                |
+|--------------------+---------+-----------------------------------------|
+| OpenRouter         | $90     | base bench (FOSS routes); top-up before R27 |
+| RunPod             | $77     | LoRA training fallback only             |
+| Anthropic          | ~$15-20 | K5 sentinel (no longer routine escalation) |
+| Modal              | free tier | K2 sub-second TTFT                    |
+| Together / DeepInfra | unused (OR routes) | direct multi-LoRA via Together |
+| HuggingFace Hub    | free    | adapter storage + dataset pages         |
+
+** Decision rules
+
+- /Default route via OpenRouter/ for all variants except K20 (direct
+  Together for multi-LoRA) and self-hosted K1/K2 endpoints when up.
+- /Self-host only when daemon healthy/ — Spheron/Modal endpoints
+  must heartbeat green before R26 launch; cells fall back to OR
+  pin on heartbeat fail.
+- /Hard cap per round/ at $25; circuit-break at $40 per [[file:docs/wiki/2026-05-08-r25-design.org]] §G4.
+- /Top-up trigger/: any account < $20 → pause R26; alert; top-up;
+  resume.
+
+* 6. New elisp + org-mode tests (BK6-BK15)
+
+*Summary.* Current bench fixtures are largely wiki-edit shaped
+(B1/B5/B11/B20) plus 5 BK long-horizon code/wiki tasks. The elisp
++ org-mode dimension that org-llm /actually targets/ as a product
+is barely tested. R26 adds 10 new BK-level tests focused on ERT
+authoring, org-babel, org-element parsing, org-roam node ops,
+defcustom/defface authoring, org-table validation, capture
+templates, and org-id management. Each ships a deterministic
+verifier (Emacs-batch + ERT, or org-element parse + assertion).
+
+*Expanded.* These tests measure what current bench misses: the
+specialist's ability to write Emacs-shaped artifacts that
+*actually compile and run inside Emacs*. The headless-Emacs
+verifier (P6 from R25 design, §7 below) makes the verifier
+gold-standard. The =emacs-mcp-server= (rhblind) integration from §4
+is the in-loop validator. Tests written so the specialist must
+edit a fixture file inside the worktree, then the verifier runs
+=emacs --batch= against the worktree to score.
+
+** New test specs (BK6-BK15)
+
+| ID    | Label                       | Target files                                      | Expected changes                                | Primary metric        | Validator command |
+|-------+-----------------------------+---------------------------------------------------+-------------------------------------------------+-----------------------+-------------------|
+| BK6   | ERT test authoring          | =elisp/org-llm-foo.el=, =test/test-foo.el=        | new defun + 3 ert-deftest covering happy/edge/err | tests pass count    | =emacs -batch -l ert -l test/test-foo.el -f ert-run-tests-batch-and-exit= |
+| BK7   | org-babel tangle/detangle   | =elisp/literate-config.org=                       | add src block with =:tangle yes=, run tangle    | tangled-file exists + diff | =emacs -batch -l org -f org-babel-tangle= |
+| BK8   | org-element parse + assert  | =docs/wiki/<page>.org=                            | add property drawer with new ID                 | element tree shape    | =emacs -batch --eval "(progn (find-file ...) (org-element-parse-buffer))"= |
+| BK9   | org-roam node + backlink    | =docs/wiki/<new>.org=, =docs/wiki/<existing>.org= | new node with org-roam-id + backlink to existing | =org-roam-db= row count | =emacs -batch -l org-roam --eval "(org-roam-db-sync)"= + SQL count |
+| BK10  | defcustom + defface authoring | =elisp/org-llm-theme.el=                        | new defcustom with valid type + defface         | byte-compile success  | =emacs -batch -f batch-byte-compile elisp/org-llm-theme.el= |
+| BK11  | org-table validation        | =docs/wiki/<page>.org= (table region)             | add 5x4 table with =#+TBLFM= computed col       | TBLFM evaluates clean | =emacs -batch --eval "(org-table-recalculate t)"= |
+| BK12  | capture template authoring  | =elisp/org-llm-capture.el=                        | new entry in =org-capture-templates= alist      | =org-capture= in dry-run | =emacs -batch --eval "(org-capture nil \"key\")"= |
+| BK13  | org-id management           | =docs/wiki/<page>.org= (multiple headings)        | =org-id-get-create= 5 headings, no collisions   | unique IDs in =org-id-locations= | =emacs -batch -l org-id --eval "(org-id-update-id-locations)"= |
+| BK14  | checkdoc + elisp-lint clean | =elisp/org-llm-foo.el= (existing)                 | add 2 commentary docstrings, fix lint issues    | 0 checkdoc warnings   | =emacs -batch -f checkdoc-batch elisp/org-llm-foo.el= |
+| BK15  | makem.sh project orchestration | repo root (=Makefile=, =makem.sh=)             | add =all-tests= target running ERT + checkdoc + lint | exit 0           | =./makem.sh all= or =make all-tests= |
+
+** Acceptance + scoring
+
+Each task scores via:
+- /Primary/: validator command exit 0 (binary 0/N where N = task
+  difficulty weight, e.g. BK6=20, BK10=15, BK13=10).
+- /Mech/: same as primary for these tests (the validator IS the
+  gold-standard mech check).
+- /Quality lint/: standard org/elisp lint (existing
+  =quality_lint.py= + new tree-sitter validator from §7).
+
+** Why these tests
+
+1. *Org-llm IS an Emacs distro* — the [[file:docs/wiki/2026-05-08-org-llm-go-forward-config.org][go-forward-config]] §1
+   bridge-crew matrix maps personas to tasks but the tasks
+   themselves don't exercise Emacs semantics. BK6-BK15 close that.
+2. *Reveals real-world ceiling* — K1's $0.0006/qpt holds on
+   wiki/atomic shapes. Does it hold on /elisp authoring/? BK10
+   + BK14 will tell us.
+3. *Validates MCP integration leverage* — BK6/BK11/BK13 all run
+   cleaner with =emacs-mcp-server= than with =emacs --batch=
+   subprocess (no startup overhead, persistent state). Gives
+   the §4 integration concrete payoff numbers.
+4. *Composable with §7 verifiers* — every BK6-BK15 test feeds
+   directly into the headless-Emacs cell verifier (P6 from R25
+   design); no separate verifier infrastructure needed.
+
+** Sample size + cost
+
+n=8 per test × 10 tests × ~$0.02/cell average (K1) = *~$1.60* per
+full BK6-BK15 sweep. Trivially affordable.
+
+* 7. Boost strategies that compound
+
+*Summary.* Five R26 boosts each have standalone value but compound
+when stacked. A round that ships only Bet 1 (serverless K20)
+captures ~10% of the available wins; shipping all five captures
+~70-80% with shared infrastructure.
+
+** The compounding lattice
+
+| Boost                         | Standalone gain            | Compounds with             | Combined effect                      |
+|-------------------------------+----------------------------+----------------------------+--------------------------------------|
+| Self-hosted K1+K2 (Spheron)   | -50% wall, -broker variance | MCP, BK6-15 verifiers     | semantic verification at sub-second TTFT |
+| K20 LoRA via serverless       | $0 idle, +3-6q on B5/B11   | K1+K2 self-host            | A/B with no wall penalty             |
+| org-mcp + emacs-mcp-server    | gold-standard verifier     | BK6-15, headless-Emacs     | replaces regex with editor-side truth |
+| org-roam-mcp                  | -fab_uuid on B1            | persona briefs, prefetch   | @atoz grounded in real vault state  |
+| Tree-sitter validator (PM3)   | catches multi-line bracket | replaces regex post-hoc    | clean N5 score across all variants  |
+| Headless-Emacs verifier (P6)  | semantic correctness gate  | every BK6-15 + B25         | gold-standard signal end-to-end     |
+
+** Stacked R26 payoff
+
+- /Wall/: K1+K2 self-host on Spheron H100 cuts ~50% on K1+K2 cells
+  (~60% of round). Modal-Kimi K2 cuts another ~30s/cell on K2's
+  prefill (vs OR Parasail's 60-180s stalls). Net round wall: 39:23
+  R25 → est. 18-22 min R26.
+- /Quality/: K20 LoRA A/B reveals whether per-handle adapters earn
+  a +3q lift on @atoz tasks. Coupled with org-roam-mcp grounding,
+  fab_uuid count should approach 0 on n≥10 cells (currently ~2-3
+  per K2 cell at 22-28k chars).
+- /Cost/: Serverless multi-LoRA + self-host idles + better wall =
+  R26 envelope $15-25 even with 50% more cells than R25.
+- /Generalization/: BK6-BK15 plus K8 force-listed onto B11/B26
+  finally answers "does FOSS work everywhere, or just on wiki shapes?"
+
+** R25 patch verification gate (the meta-boost)
+
+Per [[file:docs/wiki/2026-05-08-r25-case-studies.org]] R26-rec #12:
+every R26 patch in =_r26_design_patch.py= ships with a
+=verify_patch_landed()= probe. The harness refuses to launch the
+round if any probe returns non-OK. Concrete probes:
+
+| Patch                            | Probe                                                           |
+|----------------------------------+-----------------------------------------------------------------|
+| max_tokens wired                 | send 30k-prompt to K2; assert =finish=length= AND =output_tokens ≤ 4200= |
+| WALL_CAP via mp.Process          | spawn 500s sleep cell; assert kill within 410s wall_seconds      |
+| top-3 selector dedupe            | mock 3 cells of K1 + 1 of K8; assert top-3 returns 2 distinct vars |
+| count_bracket_errors per-line    | run R25 saved diffs through patched lint; assert K11/K17/K8 ≤1.0/cell |
+| variant pre-flight               | inject dead slug; assert pre-flight refuses launch              |
+| serverless K20 adapter loaded    | known training-distribution prompt; assert response shape diverges from K1-base |
+| MCP server alive                 | call =org-mcp.heading-add=; assert returns parseable element     |
+| headless-Emacs verifier reachable| call =emacs --batch -l ert -f ert-run-tests-batch-and-exit=; assert exit 0 |
+
+* 8. Areas of weakness still unaddressed
+
+*Summary.* R25 evidence reveals four dimensions the bench still
+cannot measure: real multi-day refactor (BK1-BK5 are 1-session
+tasks), editor-state correctness (verifier is filesystem only),
+persona-specific quality (no @atoz vs @data head-to-head data),
+and user-feedback-loop scoring (no human-in-the-loop signal).
+
+** Weakness 1 — Real long-horizon multi-day refactor
+
+BK1-BK5 are *one-session* tasks: prefetch + edit + verify, all
+inside ~5 min wall. Real org-llm work spans multiple sessions —
+user starts a refactor on day 1, comes back day 3 to continue.
+Bench has zero coverage of this.
+
+*R27 prep.* Design BK16-BK20 as /multi-cell sequential/ tests
+where cell N's worktree state is the input to cell N+1's brief.
+Validator runs against final-cell worktree.
+
+** Weakness 2 — Editor-state correctness
+
+Current verifier is filesystem-only: did the file change as
+expected. Doesn't catch "file is fine but Emacs can't open it
+without warnings" or "the org-element tree is inconsistent in a
+way Emacs hides but breaks =org-roam-db-sync=." The §7 headless-
+Emacs verifier is /partial/ coverage; full editor-state needs a
+running Emacs that the bench drives interactively. =gptel= +
+=mcp.el= integration (R27) closes this.
+
+** Weakness 3 — No persona-specific quality data
+
+The go-forward-config doc §1 maps personas (@atoz, @data, etc.) to
+recommended models. *No bench round has actually compared @atoz vs
+@data on the same task with model held constant.* All R25 cells
+used @data persona for code tasks and @atoz for wiki — the persona
+variable is conflated with task family.
+
+*R26 spike.* Add 10 cells: same task (B11), same model (K1), 5
+cells @atoz brief + 5 cells @data brief. Score difference =
+persona effect size. Cheap, decisive.
+
+** Weakness 4 — No human-in-the-loop signal
+
+Quality_lint + tree-sitter + headless-Emacs verifier all measure
+correctness, not /goodness/. Whether a B11 DEC draft is
+"compelling" or "well-structured" is currently unmeasured. Claude
+moat (59x) is on correctness; the moat on /quality of writing/ may
+be different.
+
+*R28+ direction.* Add =scripts/_human_review_queue.py= that pushes
+top-N cells per round to user review (thumbs-up/down). Aggregate
+into a "human quality score" alongside primary/mech/lint. Rare
+samples (n=10/round) but anchors the bench in real subjective value.
+
+* 9. Concrete R26 launch plan — ordered checklist
+
+*Summary.* P0 items gate launch (correctness fixes + verification
+gate). P1 items ship in launch (new boosts, new tests). P2 items
+ship across R26→R28 incrementally. Each item carries a cost +
+rough wall estimate.
+
+** P0 — gates launch (must pass verification probe)
+
+| # | Item                                  | Cost | Wall ETA | Acceptance probe                                |
+|---+---------------------------------------+------+----------+-------------------------------------------------|
+| 1 | Top-3 selector dedupe by variant      | $0   | 1h       | Returns 3 distinct variants on mocked roster    |
+| 2 | =max_tokens= wired through SpecialistTask | $0 | 2h       | K2 30k-prompt → =finish=length= + ≤4200 toks   |
+| 3 | WALL_CAP via =multiprocessing.Process= | $0   | 3h       | 500s-sleep cell killed in ≤410s                |
+| 4 | =count_bracket_errors= per-line       | $0   | 1h       | R25 K11/K17/K8 saved diffs ≤1.0/cell            |
+| 5 | Variant warmup-failure pre-flight     | $0   | 1h       | Dead slug → round refuses launch                |
+| 6 | Verification probes for items 1-5     | $0   | 2h       | All probes green; harness gate enforced         |
+
+** P1 — ships in R26 launch
+
+| #  | Item                                          | Cost   | Wall ETA | Notes                                          |
+|----+-----------------------------------------------+--------+----------+------------------------------------------------|
+| 7  | Together serverless multi-LoRA K20 deploy    | ~$5    | 2h       | §3 above; A/B vs K1 base                       |
+| 8  | Spheron H100 K1+K2 vLLM endpoints            | $4-8/round | 4h | Pre-baked Docker per PM2; heartbeat daemon     |
+| 9  | Modal-Kimi K2 endpoint (=MODAL_KIMI_ENABLED=1=) | ~$2  | 1h       | Sub-second TTFT, kills WALL_CAP root cause     |
+| 10 | =org-mcp= integration in specialist tools    | $0     | 4h       | §4 top integration                             |
+| 11 | =emacs-mcp-server= (rhblind) wired           | $0     | 3h       | Pure-elisp; Unix socket; per-cell connection   |
+| 12 | =org-roam-mcp= for B1 grounding              | $0     | 2h       | Drops fab_uuid on B1                           |
+| 13 | New tests BK6-BK15 (10 elisp/org tests)      | $1.60  | 6h       | §6 above                                       |
+| 14 | Drop K34/K35; rename or drop K33             | $0     | 30m      | Free 2 cells worth of L1 budget                |
+| 15 | K8 force-list on B5/B7/B11/B25 + BK pool    | $1     | with launch | /After/ selector fix; K8 promotion gate    |
+| 16 | K17 — investigate or drop (3 options)        | $1     | 2h       | (a) drop; (b) Novita probe; (c) max_iters cap=8 |
+| 17 | K11 budget cap enforced (=$1.50/round=)      | $0     | 1h       | Verify =_R26_VARIANT_BUDGETS= filters cell-specs |
+| 18 | Layer-BK = full advancing pool               | $2-4   | with launch | Removes "K1+K5 only" Layer-BK gap           |
+| 19 | BK6-BK15 + headless-Emacs verifier wiring    | $0     | 3h       | §6 + §7                                        |
+
+** P2 — ships across R26 → R28
+
+| #  | Item                                          | Cost   | Round |
+|----+-----------------------------------------------+--------+-------|
+| 20 | Tree-sitter org-parser validator (PM3)        | $0     | R26   |
+| 21 | Headless-Emacs cell verifier (P6)             | $0     | R26   |
+| 22 | Pre-emit grammar gate (proper N5)             | $0     | R26-R27 |
+| 23 | S1-S4 composition wiring                      | $1-3   | R26-R27 |
+| 24 | Persona effect-size spike (10 cells)          | $0.20  | R26   |
+| 25 | Per-handle LoRAs (K30 @atoz, K31 @data, ...) | $15-30 | R27   |
+| 26 | DSPy-style prompt auto-optimization           | $5-10  | R28   |
+| 27 | Async pipeline parallelism (S34)              | $0     | R27   |
+| 28 | Skeleton-then-fill (S37)                      | $0     | R27   |
+| 29 | Speculative decode tier (S33)                 | $0     | R28   |
+| 30 | Diversified consensus voting (S35)            | $0     | R27   |
+| 31 | Reasoning-vs-tool split S39 (K15+K1)          | $0     | R28   |
+| 32 | Cell-level beam search (S40)                  | $1-3   | R28   |
+| 33 | Multi-day refactor BK16-BK20 (R27 prep)       | $2-4   | R27   |
+| 34 | Human-in-loop review queue                    | $0     | R28   |
+
+** R26 launch sequence
+
+1. Land all P0 patches + verification probes (1 day).
+2. Wire P1 #7-13 in =_round26_dials.py= + =_r26_design_patch.py= (2 days).
+3. Smoke pre-flight: run 5-cell sanity round; confirm BK6 + K20-A/B + MCP-tools fire (~1h).
+4. Launch R26 with =R26_PARALLELISM=32=.
+5. Spawn 4-agent retro on completion.
+
+* 10. Forward roadmap — R26 → R30
+
+*Summary.* R26 ships verification gate + serverless K20 + MCP +
+BK6-15. R27 cycles to per-handle LoRAs + multi-day refactor +
+async pipeline. R28 brings DSPy + speculative decode + human-in-loop.
+R29 is the consolidation round (drop dead variants, cement winners).
+R30 is the spec-freeze for n=many users + first-class
+=org-llm-bench= CLI verb.
+
+** R26 — boost (this doc)
+
+- Verify-every-patch gate (meta)
+- K20 serverless multi-LoRA A/B
+- Self-host K1+K2 on Spheron
+- =org-mcp= + =emacs-mcp-server= + =org-roam-mcp= integrations
+- BK6-BK15 elisp/org test suite
+- Drop K34/K35; rename or drop K33
+- K8 generalization probe (force-list onto B5/B7/B11/B25)
+
+*Gate to R27.* K20 serverless lands AND BK6-BK15 fires AND K8
+generalization data exists.
+
+** R27 — per-handle + composition
+
+- Per-handle LoRAs (K30 @atoz, K31 @data, K32 @spock, K33 @geordi)
+- Multi-day refactor BK16-BK20 (cross-session state)
+- S1-S4 composition strategies wired (hedged, best-of-N, critique-revise, route)
+- Async pipeline parallelism (S34)
+- Skeleton-then-fill (S37) on long-horizon
+- Tree-sitter validator promoted to default (regex deprecated)
+- Persona effect-size data lands
+
+*Gate to R28.* Per-handle LoRAs beat single-K20 by ≥2q on the
+relevant persona's task family.
+
+** R28 — DSPy + human-in-loop + speculative decode
+
+- DSPy-style prompt auto-optimization (replace hand-tuned briefs)
+- Human-in-loop review queue (n=10 cells/round)
+- Speculative decode tier (S33) on output-heavy cells
+- Diversified consensus voting (S35)
+- Reasoning-vs-tool split (S39) with K15-thinking + K1
+- Tournament strata (top-3 critique-revise pass)
+
+*Gate to R29.* DSPy beats hand-tuned briefs by ≥1q on at least
+one task family; human review correlates ≥0.5 with primary score.
+
+** R29 — consolidation
+
+- Drop variants with no clear role (K17 if max_iters cap doesn't help)
+- Cement K1 + K8 + K20 (or per-handle LoRAs) as production roster
+- Lock in canonical task pool (B1, B5, B7, B11, B25 + BK1-BK20)
+- Decommission round-fork pattern; one canonical =scripts/run_bench.py=
+- Migrate bench to its own pip-installable subpackage
+
+*Gate to R30.* Three consecutive rounds with same roster + same
+pool show ≤5% per-variant $/qpt drift.
+
+** R30 — spec-freeze
+
+- =org-llm bench= CLI verb (top-level)
+- =tracker bench-summary= integration (per [[file:docs/wiki/2026-05-08-org-llm-go-forward-config.org][go-forward-config]] §6)
+- Public bench artifacts on HuggingFace (=daniel2501/org-llm-bench-runs=)
+- Documented run-anywhere recipe for n=many users on n=many vaults
+- First external contributor onboarding doc
+
+*Long-term post-R30.* Cell-coded tools (Phase 29 from
+=project_self_coded_tools=); LLM-as-task-creator generating
+B40-B50 from observed vault patterns; multi-LoRA composition
+(per-handle adapters loaded together for orchestrator-style cells).
+
+* Cross-references
+
+** Wiki (input docs)
+
+- [[file:docs/wiki/2026-05-08-r25-case-studies.org]] — 5 case studies + 32-rec list
+- [[file:docs/wiki/2026-05-08-r25-synthesis.org]] — R25 4-agent retro
+- [[file:docs/wiki/2026-05-08-org-llm-go-forward-config.org]] — production playbook
+- [[file:docs/wiki/2026-05-08-r25-design.org]] — R25 design + power-ups + speed budget
+- [[file:docs/wiki/2026-05-08-r24-synthesis.org]] — R24 retro
+- [[file:docs/wiki/2026-05-08-r15-r23-grand-synthesis.org]] — cross-round verdicts
+
+** Notes (input docs)
+
+- [[file:docs/notes/2026-05-08-r25-quality-judge.org]] — selector bug + FP-1 half-done
+- [[file:docs/notes/2026-05-08-r25-pareto.org]] — frontier; large-FOSS verdict; Option-C
+- [[file:docs/notes/2026-05-08-r25-walltime.org]] — WALL_CAP-as-label discovery
+- [[file:docs/notes/2026-05-08-r25-providers.org]] — max_tokens dead code
+- [[file:docs/notes/2026-05-08-bench-arc-post-mortems.org]] — PM1-PM6
+
+** Code artifacts
+
+- =scripts/_round25_dials.py= — current bench harness (1902 LOC)
+- =scripts/_round19_long_horizon_tasks.py= — BK1-BK5 fixtures (751 LOC); add BK6-BK15
+- =scripts/quality_lint.py= — current lint (276 LOC); per-line walker pending
+- =scripts/_r25_design_patch.py= — patch script (3 of 11 ineffective in R25)
+- =org_llm/specialist.py= — agent runtime; =max_tokens= threading needed
+- =scripts/_r26_design_patch.py= — *NEW* with =verify_patch_landed()= per patch
+- =scripts/_round26_dials.py= — *NEW* fork from R25 with K20 serverless + MCP tools
+
+** External references (web)
+
+- Together serverless multi-LoRA: https://www.together.ai/blog/serverless-multi-lora-fine-tune-and-deploy-hundreds-of-adapters-for-model-customization-at-scale
+- org-mcp: https://github.com/laurynas-biveinis/org-mcp
+- gptel: https://github.com/karthink/gptel
+- mcp.el: https://github.com/lizqwerscott/mcp.el
+- emacs-mcp-server (rhblind, pure-elisp): https://github.com/rhblind/emacs-mcp-server
+- emacs-mcp-server (vivekhaldar, python+elisp): https://github.com/vivekhaldar/emacs-mcp-server
+- org-roam-mcp: https://github.com/aserranoni/org-roam-mcp
+- vault-mcp: https://github.com/robbiemu/vault-mcp
+- mcp-local-rag: https://github.com/nkapila6/mcp-local-rag
+- ClawMem: https://github.com/yoloshii/ClawMem
+- Spheron H100 PCIe pricing: https://spheron.network/ ($2.01/hr)
+- Predibase serverless fine-tuned: https://predibase.com/
+- Doubleword Takeoff Serverless LoRA: https://www.doubleword.ai/
+- ERT batch mode docs: =info "(ert) Running Tests in Batch Mode"=
+- ERT JUnit XML: =EMACS_TEST_JUNIT_REPORT= environment variable
+- makem.sh: https://github.com/alphapapa/makem.sh
