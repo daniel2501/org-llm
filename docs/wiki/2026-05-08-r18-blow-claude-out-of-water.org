@@ -105,50 +105,61 @@ Per user request: T5-T10 join T1-T4 in R18 v1 launch.
 | S31 | Distillation cascade — train series of LoRAs, each from previous + Claude teacher. Compounding refinement |
 | S32 | Cross-vault federation — RAG over MULTIPLE users' vaults (with permissions) for true multi-user signal |
 
-* Top 5 "blow Claude out of water" picks
+* Top 5 "blow Claude out of water" picks (revised 2026-05-08 — no Claude-copy)
+
+User direction 2026-05-08: NO copying Claude's literal actions, NO harvest,
+NO distillation from Claude outputs. Strategies as general principles
+(e.g. "survey-before-edit") are fine; cloning Claude's exact tool sequence
+or training on Claude's outputs is OUT.
 
 Ranked by expected impact × tractability:
 
 | Rank | Pick | Impact | Tractability | Cost |
 |------+------+--------+--------------+------|
-| 1 | *S21 Claude-distillation LoRA* | HIGH — could close Claude gap entirely on prose tasks | MEDIUM — pipeline ready, dataset trivial | $20 |
-| 2 | *S22 Tool-use trajectory cloning* | HIGH — replicates Claude's "5 small habits stacked" mechanically | LOW — needs careful capture + replay logic | $10 |
-| 3 | *S23 Learned router* | MEDIUM-HIGH — better than fixed routing, scales | MEDIUM — needs training data formatting | $5 |
-| 4 | *S5 Constrained decoding (already Tier-S)* | MEDIUM-HIGH — closes K2's missing-Expanded structurally | LOW — XGrammar / response_format wires | $0 |
-| 5 | *T11 Trajectory cloning A/B* (paired with S22) | MEDIUM — proves S22 works | LOW — wraps existing harness | $5 |
+| 1 | *S5 Constrained decoding (already Tier-S)* | HIGH — closes K2's missing-Expanded structurally; pure infrastructure | LOW — JSON-mode response_format wires | $0 |
+| 2 | *S23 Learned router* | MEDIUM-HIGH — better than fixed routing, scales; *trained on R15+R16+R17 FOSS-only outputs* | MEDIUM | $5 |
+| 3 | *S3 Critique-then-revise (Tier-S)* | MEDIUM-HIGH — two-cheap-model pipeline matches premium quality | LOW — wraps existing | $5-10 |
+| 4 | *FOSS-distillation LoRA* (replaces S21) — train K1-qwen30 LoRA on R15+R16+R17 K2/K8/K11 high-quality FOSS cells (NOT Claude) | MEDIUM-HIGH — bootstraps quality without IP issues | MEDIUM | $13-22 |
+| 5 | *S25 Constitutional AI for FOSS* — explicit principle list, model self-critiques | MEDIUM — generic pattern, no Claude-mimicry | LOW | $0 |
+
+*Dropped per user 2026-05-08:*
+- S21 Claude-distillation LoRA — REPLACED with FOSS-only distillation (K2/K8/K11 high-quality cells as teachers)
+- S22 Tool-use trajectory cloning — DROPPED (was Claude-specific replay)
+- S31 Distillation cascade — DROPPED (was Claude-teacher chain)
+- T11 Trajectory cloning A/B — DROPPED
 
 * The maximalist R18 v1 — what gets in
 
-| Bucket | Items |
-|--------+-------|
-| Tier-S strategies (must-have) | S1-S6 + S21-S25 = 11 strategies |
-| Tier-A strategies | S7-S13 + S26-S30 = 12 strategies |
-| Tier-B strategies | S14-S20 + S31-S32 = 9 strategies |
-| Tier-S tests | T1-T4 + T11-T15 = 9 tests |
-| Tier-A tests | T5-T8 + T16-T20 = 9 tests |
-| Tier-B tests | T9-T10 + T21-T28 = 10 tests |
+| Bucket                        | Items                            |
+|-------------------------------+----------------------------------|
+| Tier-S strategies (must-have) | S1-S6 + S21-S25 = 11 strategies  |
+| Tier-A strategies             | S7-S13 + S26-S30 = 12 strategies |
+| Tier-B strategies             | S14-S20 + S31-S32 = 9 strategies |
+| Tier-S tests                  | T1-T4 + T11-T15 = 9 tests        |
+| Tier-A tests                  | T5-T8 + T16-T20 = 9 tests        |
+| Tier-B tests                  | T9-T10 + T21-T28 = 10 tests      |
 
 *Total for R18 v1*: 32 strategies + 28 tests across all tiers.
 
 * Cell math (maximalist R18)
 
-| Layer | What | Cells |
-|-------+------+-------|
-| L1 standard | top-5 × 8 tasks × n=15 | 600 |
-| L2 ablation | dial sweep × top-3 × multi-task | 180 |
-| L3 composition | C1-C10 + S3 + S24 | 200 |
-| L4 LoRA A/B | K1 vs K1-LoRA + K2 vs K2-LoRA + K8 vs K8-LoRA | 80 |
-| L5 distillation A/B (S21) | K1 vs K1-claude-distill | 50 |
-| L6 trajectory cloning (S22) | 5 task types × n=10 | 50 |
-| L7 multi-LLM debate (T12) | 4 prose tasks × 3 debates × n=5 | 60 |
-| L8 self-play eval (T13) | top-3 judge × all cells | overhead, ~0 cells |
-| L9 confidence calibration (T14) | sample 200 cells; ask for confidence | 200 |
-| L10 validity gating cascade (T15) | every layer-1 cell tested against 5 gates | overhead |
-| L11 failure injection (T1) | 30 fault-injected cells | 30 |
-| L12 long-horizon (T2 + BK1-BK5) | 5 multi-file tasks × n=10 × 3 variants | 150 |
-| L13 stress test (T28) | 1000-cell single-prompt stress | 1000 |
-|-------+------+-------|
-| Subtotal | | ~2600 cells |
+| Layer                             | What                                          |              Cells |
+|-----------------------------------+-----------------------------------------------+--------------------|
+| L1 standard                       | top-5 × 8 tasks × n=15                        |                600 |
+| L2 ablation                       | dial sweep × top-3 × multi-task               |                180 |
+| L3 composition                    | C1-C10 + S3 + S24                             |                200 |
+| L4 LoRA A/B                       | K1 vs K1-LoRA + K2 vs K2-LoRA + K8 vs K8-LoRA |                 80 |
+| L5 distillation A/B (S21)         | K1 vs K1-claude-distill                       |                 50 |
+| L6 trajectory cloning (S22)       | 5 task types × n=10                           |                 50 |
+| L7 multi-LLM debate (T12)         | 4 prose tasks × 3 debates × n=5               |                 60 |
+| L8 self-play eval (T13)           | top-3 judge × all cells                       | overhead, ~0 cells |
+| L9 confidence calibration (T14)   | sample 200 cells; ask for confidence          |                200 |
+| L10 validity gating cascade (T15) | every layer-1 cell tested against 5 gates     |           overhead |
+| L11 failure injection (T1)        | 30 fault-injected cells                       |                 30 |
+| L12 long-horizon (T2 + BK1-BK5)   | 5 multi-file tasks × n=10 × 3 variants        |                150 |
+| L13 stress test (T28)             | 1000-cell single-prompt stress                |               1000 |
+|-----------------------------------+-----------------------------------------------+--------------------|
+| Subtotal                          |                                               |        ~2600 cells |
 
 With 16-way parallelism: ~3-6 hours wall.
 Cost: ~$180-280 (under $375 cap with 30%+ headroom).
