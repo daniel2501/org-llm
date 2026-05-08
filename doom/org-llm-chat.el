@@ -285,6 +285,26 @@ different visual width than the plain bottom bar, making the
 frame look misaligned."
   :group 'org-llm-chat)
 
+(defcustom org-llm-chat-shell-agents '()
+  "Agent handles that route via `org-llm chat-dispatch' instead of
+the normal LLM path. Used to send shell-capable workloads through
+an Agor session (which has tool-calling + subprocess execution)
+rather than a single-turn LLM call.
+
+Default is empty — opt in by setting this in your local config:
+
+  (after! org-llm-chat
+    (setq org-llm-chat-shell-agents
+          '(\"engineer\" \"ops\" \"agentsmith\" \"atoz\" \"riker\")))
+
+The agent registry (`org_llm/agents/_builtins.py') is the
+authoritative source of which agents have shell capability — this
+list is your local opt-in mirror. The CLI verb double-checks
+eligibility before actually dispatching, so a typo or stale entry
+falls back to the normal path with a clear message."
+  :type '(repeat string)
+  :group 'org-llm-chat)
+
 (defcustom org-llm-chat-streaming t
   "When non-nil, prefer SSE streaming for proxy backend calls.
 DEC-015 v0.2 — when t, the chat surface sends `stream: true` to
@@ -332,6 +352,24 @@ Both default to today + a fresh random id."
 
 
 ;;; ── prompt parsing ─────────────────────────────────────────────────────────
+
+(defun org-llm-chat--apply-glyph-face-overlay (agent heading-start)
+  "After inserting an agent heading at HEADING-START, look up AGENT's
+glyph in `org-llm-chat-agent-glyphs'. If the glyph string carries
+a text-property face (e.g. `:family \"Trekbats\"' for icon fonts),
+create an overlay over the glyph characters in the buffer with
+that face. Overlay faces win over text-property faces + font-lock-
+applied faces — so the family override sticks even after org-mode
+fontifies the heading line with `org-level-2'."
+  (let ((glyph (cdr (assoc agent org-llm-chat-agent-glyphs))))
+    (when (and glyph (stringp glyph) (not (string-empty-p glyph)))
+      (let ((face (get-text-property 0 'face glyph)))
+        (when face
+          (let* ((glyph-start (+ heading-start 3))   ; skip "** "
+                 (glyph-end   (+ glyph-start (length glyph)))
+                 (ov (make-overlay glyph-start glyph-end)))
+            (overlay-put ov 'face face)
+            (overlay-put ov 'org-llm-chat-agent-glyph t)))))))
 
 (defun org-llm-chat--agent-heading-text (agent &optional suffix)
   "Return the heading body (after `** ') for AGENT.
@@ -590,9 +628,11 @@ of the placeholder heading line."
     (org-back-to-heading t)
     (org-end-of-subtree t t)
     (unless (bolp) (insert "\n"))
-    (let ((start (point-marker)))
-      (insert (format "** %s\n/thinking…/\n"
-                       (org-llm-chat--agent-heading-text agent)))
+    (let* ((start (point-marker))
+           (heading-pos (point)))
+      (insert (concat "** " (org-llm-chat--agent-heading-text agent)
+                       "\n/thinking…/\n"))
+      (org-llm-chat--apply-glyph-face-overlay agent heading-pos)
       (org-llm-chat--start-spinner start)
       start)))
 
@@ -621,7 +661,7 @@ output org-flavoured src blocks; if it emits markdown ```…``` we
 convert below)."
   (let* ((normalised (org-llm-chat--markdown->org body))
          (txt (string-trim (or normalised ""))))
-    (concat (format "** %s\n" (org-llm-chat--agent-heading-text agent))
+    (concat "** " (org-llm-chat--agent-heading-text agent) "\n"
             (if (string-empty-p txt) "(empty response)" txt)
             "\n")))
 
@@ -956,21 +996,68 @@ Returns the content string or nil if the shape doesn't match."
         content)
     (error nil)))
 
-(defun org-llm-chat--call-backend (agent prompt marker)
-  "Call the backend ASYNC for AGENT + PROMPT, replacing MARKER on completion.
-DEC-015 v0.1: prefer HTTP to the running llm-proxy when its port
-file is present + reachable; fall back to shell-out when the
-proxy isn't running (preserves v0 behaviour).
+(defun org-llm-chat--dispatch-via-agor (agent prompt marker)
+  "Route AGENT + PROMPT to `org-llm chat-dispatch' (Agor path).
+Shells out async, parses the JSON response, renders content at
+MARKER. Falls back to the normal LLM path if the CLI returns
+`eligible: false' (agent registry doesn't grant shell)."
+  (let* ((cli (or org-llm-chat-telemetry-cli
+                   (expand-file-name "~/.local/bin/org-llm")))
+         (buf-name (format " *org-llm-chat-dispatch-%d*" (random)))
+         (cb-buf (current-buffer))
+         (proc-buf (generate-new-buffer buf-name))
+         (proc (make-process
+                 :name "org-llm-chat-dispatch"
+                 :buffer proc-buf
+                 :command (list cli "chat-dispatch" agent prompt)
+                 :noquery t
+                 :sentinel
+                 (lambda (proc _event)
+                   (when (memq (process-status proc) '(exit signal))
+                     (let ((rc  (process-exit-status proc))
+                           (out (with-current-buffer (process-buffer proc)
+                                   (buffer-string))))
+                       (kill-buffer (process-buffer proc))
+                       (with-current-buffer cb-buf
+                         (org-llm-chat--dispatch-finalise
+                           agent prompt marker rc out))))))))
+    (setq-local org-llm-chat--pending-process proc)))
 
-DEC-015 v0.2: when `org-llm-chat-streaming' is non-nil (default)
-AND the proxy is reachable, request SSE streaming and rerender
-the placeholder per-token. Setup failures fall back to the v0.1
-non-streaming path automatically."
+(defun org-llm-chat--dispatch-finalise (agent prompt marker rc raw)
+  "Render the chat-dispatch JSON response. On `eligible: false'
+fall back to the normal `--call-backend' path so the user
+doesn't see a routing failure as a dead end."
+  (condition-case err
+      (let* ((json-object-type 'alist)
+             (json-array-type  'list)
+             (json-key-type    'string)
+             (parsed (json-read-from-string raw))
+             (eligible   (cdr (assoc "eligible"   parsed)))
+             (dispatched (cdr (assoc "dispatched" parsed)))
+             (content    (or (cdr (assoc "content" parsed)) "")))
+        (cond
+         ((not (eq eligible t))
+          ;; Ineligible — fall through to normal LLM path. Keep
+          ;; same marker; --call-backend will refresh it.
+          (org-llm-chat--call-backend-default agent prompt marker))
+         (t
+          (org-llm-chat--finalise-response
+            marker agent content (if (eq dispatched t) 0 0)))))
+    (error
+     (org-llm-chat--finalise-response
+       marker agent
+       (format "ERROR parsing chat-dispatch JSON: %s\n\nRAW:\n%s"
+               err raw)
+       -1))))
+
+(defun org-llm-chat--call-backend-default (agent prompt marker)
+  "The non-Agor backend path — proxy SSE / non-streaming / shell.
+Extracted so `--dispatch-via-agor' can fall back here when the
+CLI deems an agent ineligible."
   (let ((port (org-llm-chat--read-proxy-port)))
     (cond
      ((and port (org-llm-chat--proxy-reachable-p port)
-           org-llm-chat-streaming)
-      ;; Try SSE; on setup error fall back to non-streaming proxy.
+            org-llm-chat-streaming)
       (condition-case _err
           (org-llm-chat--call-backend-proxy-sse agent prompt marker port)
         (error
@@ -978,8 +1065,22 @@ non-streaming path automatically."
      ((and port (org-llm-chat--proxy-reachable-p port))
       (org-llm-chat--call-backend-proxy agent prompt marker port))
      (t
-      ;; fallback for when proxy not running — v0 shell-out path
       (org-llm-chat--call-backend-shell agent prompt marker)))))
+
+(defun org-llm-chat--call-backend (agent prompt marker)
+  "Call the backend ASYNC for AGENT + PROMPT, replacing MARKER on completion.
+Routes to Agor (`--dispatch-via-agor') when AGENT is in
+`org-llm-chat-shell-agents' — that path runs the agent in an
+Agor session with tool-calling + shell access. Otherwise routes
+to the normal LLM path (proxy SSE / non-streaming / shell-out
+fallback) via `--call-backend-default'."
+  (cond
+   ((and org-llm-chat-shell-agents
+         (member agent org-llm-chat-shell-agents))
+    (org-llm-chat--dispatch-via-agor agent prompt marker))
+   (t
+    (org-llm-chat--call-backend-default agent prompt marker))))
+
 
 (defun org-llm-chat--call-backend-proxy (agent prompt marker port)
   "Send the prompt to the local proxy at PORT via `url-retrieve'.
@@ -1091,8 +1192,11 @@ Stops the thinking spinner — first byte arrived."
                            (point-max)))))
             (delete-region begin end)
             (goto-char begin)
-            (insert (format "** %s\n"
-                             (org-llm-chat--agent-heading-text agent)))
+            (let ((heading-pos (point)))
+              (insert (concat "** "
+                               (org-llm-chat--agent-heading-text agent)
+                               "\n"))
+              (org-llm-chat--apply-glyph-face-overlay agent heading-pos))
             (let ((ins (point-marker)))
               (set-marker-insertion-type ins t)
               (plist-put state :inserted-pos ins))))))))
@@ -1548,10 +1652,12 @@ case where user editing has broken the trailing structure."
 (defun org-llm-chat--finalise-response (marker agent raw rc)
   "Render RAW as the response under MARKER for AGENT; auto-save on success."
   (let* ((cleaned (org-llm-chat--strip-ansi (or raw "")))
+         ;; concat (not format) so propertized agent glyphs preserve
+         ;; their text properties (e.g. :family for icon-font glyphs).
          (heading-prefix (if (zerop rc)
-                             (format "** %s"
+                             (concat "** "
                                      (org-llm-chat--agent-heading-text agent))
-                           (format "** %s"
+                           (concat "** "
                                    (org-llm-chat--agent-heading-text
                                     agent " ERROR"))))
          (rendered
@@ -1562,6 +1668,10 @@ case where user editing has broken the trailing structure."
                       md))
                   "\n")))
     (org-llm-chat--replace-placeholder marker rendered)
+    ;; Apply the glyph overlay to the freshly-inserted heading —
+    ;; `marker' points at heading start. Wins over org-mode's
+    ;; font-lock + the `org-level-2' face remap.
+    (org-llm-chat--apply-glyph-face-overlay agent marker)
     (org-llm-chat--stop-spinner)
     ;; Always append the next turn + save, even on error, so a stream
     ;; drop or non-zero exit isn't a dead-end. The ERROR line stays

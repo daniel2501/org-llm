@@ -7709,6 +7709,104 @@ def route(
                   "session default)[/dim]")
 
 
+@app.command(name="chat-dispatch", rich_help_panel="Querying")
+def chat_dispatch(
+    agent: Annotated[str, typer.Argument(
+        help="Bare agent handle (no `@'), e.g. `geordi'. Resolved against "
+             "the agent registry to look up capabilities.")],
+    prompt: Annotated[str, typer.Argument(
+        help="The user's prompt body (already stripped of the `@<agent>' "
+             "prefix).")],
+    pretty: Annotated[bool, typer.Option("--pretty", "-P",
+        help="Pretty-print the JSON response (default minified).")] = False,
+):
+    """Dispatch a chat-surface turn to an Agor session for shell-capable agents.
+
+    Layer 3 of agent shell access (see chat-surface architecture):
+    when an agent has the `shell' capability declared in
+    `org_llm/agents/_builtins.py' AND the chat surface routes
+    through this verb, we spawn (or attach to) an Agor session
+    for that agent — Agor handles the tool-calling loop +
+    subprocess execution, returns final text.
+
+    PROTOTYPE STATUS: this verb wires the dispatch SHAPE — agent
+    eligibility check, response envelope, error semantics — but
+    the Agor session-spawn body is a stub that returns a placeholder.
+    Replace the marked TODO with a real `agor-cli` / `AgorClient`
+    call once we settle on the spawn surface.
+
+    Output (JSON to stdout):
+      {
+        "agent":      "<handle>",
+        "eligible":   true|false,
+        "dispatched": true|false,
+        "session_url": "<url-or-null>",
+        "content":    "<text-the-chat-surface-renders>"
+      }
+
+    Eligibility = agent has `_SH' (shell) in its capabilities tuple.
+    Non-eligible agents return `eligible=false' and the chat
+    surface falls back to its normal LLM path.
+    """
+    import json as _json
+    payload: dict = {"agent": agent, "eligible": False,
+                      "dispatched": False, "session_url": None,
+                      "content": ""}
+    try:
+        # Resolve eligibility against the agent registry — single
+        # source of truth, no hardcoded handle list here.
+        from .agents._builtins import _AGENT_META
+        # Match by birth-name OR alias (any of the canonical handle
+        # forms). Keys in _AGENT_META are sometimes the legacy slug,
+        # not the birth name, so look at both.
+        eligible = False
+        for meta in _AGENT_META.values():
+            handles = (meta.birth_name,) + tuple(meta.aliases)
+            if agent in handles and "shell" in meta.capabilities:
+                eligible = True
+                break
+        payload["eligible"] = eligible
+        if not eligible:
+            payload["content"] = (
+                f"Agent @{agent} does not have shell capability "
+                "in the agent registry — chat surface should fall "
+                "back to the normal LLM path."
+            )
+        else:
+            # TODO(agor-prototype): real spawn lives here.
+            # Pseudocode for the eventual implementation:
+            #
+            #   from .captains_log_agor_bridge import AgorClient
+            #   client = AgorClient()
+            #   wt = client.ensure_worktree(agent)         # idempotent
+            #   sess = client.create_session(wt, agent, prompt,
+            #                                  agentic_tool="opencode",
+            #                                  model="qwen/qwen-2.5-72b-instruct")
+            #   result = client.run_until_done(sess.id, timeout=120)
+            #   payload["session_url"] = sess.url
+            #   payload["content"] = result.text
+            #   payload["dispatched"] = True
+            #
+            # Per `feedback_agor_no_claude.md`: agentic_tool MUST
+            # be a FOSS one (opencode), modelConfig MUST be FOSS
+            # (qwen / llama / deepseek via OpenRouter or local
+            # ollama). No Claude as the crew's runtime.
+            payload["dispatched"] = False
+            payload["session_url"] = None
+            payload["content"] = (
+                f"⚙ Agor dispatch stub — would spawn @{agent} session "
+                f"for: {prompt[:200]}{'…' if len(prompt) > 200 else ''}\n\n"
+                "(Layer 3 prototype — wire body is a stub. Replace "
+                "the TODO in `org_llm/cli.py:chat_dispatch' with a "
+                "real `AgorClient' call when the spawn surface is "
+                "ready.)"
+            )
+    except Exception as e:
+        payload["content"] = f"chat-dispatch error: {e}"
+    indent = 2 if pretty else None
+    typer.echo(_json.dumps(payload, indent=indent))
+
+
 @app.command(rich_help_panel="Querying")
 def telemetry(
     pretty: Annotated[bool, typer.Option("--pretty", "-P",

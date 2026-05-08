@@ -1,0 +1,239 @@
+:PROPERTIES:
+:ID:       3a1d8c2e-7f4b-4e91-9a12-c8d3b6e4f5a7
+:CREATED:  [2026-05-07]
+:END:
+#+TITLE: Chat → Agor dispatcher (Layer 3 prototype)
+#+FILETAGS: :wiki:design:emacs:chat:agor:dec-015:
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* When the user submits =@<agent> <prompt>= in
+=org-llm-chat= and =<agent>= has the =shell= capability declared
+in [[file:../../org_llm/agents/_builtins.py][=_builtins.py=]], the chat surface routes the turn to a new
+[[*=org-llm chat-dispatch=][=org-llm chat-dispatch= CLI verb]]
+instead of the normal LLM path. The verb (eventually — see
+status) spawns an Agor session for that agent with shell tools
+available, runs it, returns the final text. Chat surface stays
+single-turn + grounded; shell-capable workflows route to the
+substrate built for them.
+
+*Expanded.* This is the third layer of agent shell access (see
+the three-layer table in [[file:org-mode-chat-surface.org][org-mode-chat-surface.org]]):
+- *Layer 1*: user-driven =!shell <cmd>= prefix (proxy =intercept_shell=).
+- *Layer 2*: agent-capability metadata (declarative, no runtime gate).
+- *Layer 3* (this page): agent-issued shell commands during a chat turn,
+  routed via Agor session that has actual tool-calling.
+
+* Status
+
+| Layer                            | Status                                                |
+|----------------------------------+-------------------------------------------------------|
+| elisp dispatcher                 | shipped (=org-llm-chat--dispatch-via-agor=)           |
+| =org-llm chat-dispatch= CLI verb | shipped (eligibility check + JSON envelope)           |
+| Agor session-spawn body          | *stubbed* — TODO marker in =cli.py= →
+                                     replace with =AgorClient= call          |
+| user opt-in                      | =org-llm-chat-shell-agents= defcustom (empty default) |
+
+* The dispatch path
+
+#+begin_src
+  user types `@atoz update the wiki index'
+       │
+       ▼
+  org-llm-chat-submit
+       │  (parse @atoz prefix → agent="atoz", prompt="update…")
+       ▼
+  org-llm-chat--call-backend
+       │
+       ├── (member "atoz" org-llm-chat-shell-agents)? ✓ → Agor path
+       │       ▼
+       │   org-llm-chat--dispatch-via-agor
+       │       │  shells out: org-llm chat-dispatch atoz "update the wiki…"
+       │       ▼
+       │   CLI: looks up @atoz in _AGENT_META — has shell? ✓
+       │       │
+       │       ├── eligible=true → spawn Agor session (TODO)
+       │       │       └── render returned content under ** Δ @atoz heading
+       │       │
+       │       └── eligible=false → emit JSON, elisp falls through
+       │                            to normal LLM path (--call-backend-default)
+       │
+       └── not in shell-agents → normal LLM path directly
+#+end_src
+
+* Eligibility resolution
+
+The CLI verb resolves =agent → eligibility= against the agent
+registry, *not* a hardcoded list:
+
+#+begin_src python :tangle no
+  for meta in _AGENT_META.values():
+      handles = (meta.birth_name,) + tuple(meta.aliases)
+      if agent in handles and "shell" in meta.capabilities:
+          eligible = True
+          break
+#+end_src
+
+So *birth-name + every alias* is checked. Mirrors the proxy's
+=_known_agents= behaviour. Future renames or user-added agents
+flow through automatically — the chat surface itself ships
+roster-agnostic (per the
+[[id:0c6a2d1e-7c4f-4f1a-bf32-9e1d4f5b6a3c][refactor(chat): roster-agnostic
+commit (61721b0)]]).
+
+* Configuration
+
+** Repo defaults
+- =org-llm-chat-shell-agents= — empty list. No agents route via
+  Agor by default. Users opt in.
+
+** Personal opt-in (Doom config)
+#+begin_src elisp
+  (after! org-llm-chat
+    (setq org-llm-chat-shell-agents
+          '("engineer" "ops" "agentsmith" "atoz" "riker" "boothby")))
+#+end_src
+
+This list mirrors the agents that currently have =_SH= in their
+=_AGENT_META= capabilities.
+
+* Testing the dispatcher (hands-on log)
+
+** Test 1 — eligible agent dispatch
+*Date.* 2026-05-07 (live in chat session 2026-05-07-3206d6.org).
+
+*Setup.*
+- =org-llm-chat-shell-agents= = =("engineer" "ops" "agentsmith" "atoz" "riker" "boothby")=
+- Trekbats glyphs configured per personal Doom config.
+
+*Action.* Submit =@atoz update the wiki index= via =C-RET=.
+
+*Observed.*
+- =--call-backend= matched =atoz= against =shell-agents= and routed to =--dispatch-via-agor=.
+- Async subprocess fired: =org-llm chat-dispatch atoz "update the wiki index"=.
+- CLI looked up =atoz= in =_AGENT_META=, found =shell= capability, returned =eligible: true= + stub content.
+- Elisp parsed JSON, rendered content under =** ⏳ @atoz= (Trekbats UFP-seal glyph).
+
+*Bug surfaced + fixed during the test.*
+- Initial render showed the heading as =**  @atoz= (Trekbats glyph
+  bytes present in buffer, but rendering as tofu — face property
+  was =org-level-2=, not =(:family "Trekbats")=).
+- Cause: heading-insertion sites used =(format "** %s" ...)=. Emacs's
+  =format= STRIPS text properties — so the propertized glyph from
+  =org-llm-chat-agent-glyphs= lost its =:family "Trekbats"= face
+  on insertion.
+- Fix: switched all four heading-insertion sites
+  (=--insert-placeholder=, =--render-response=, =--sse-init-render=,
+  =--finalise-response=) to use =concat= instead of =format=.
+  =concat= preserves text properties; insertion preserves them too.
+- Lesson worth a memory: when wiring icon-font glyphs into
+  rendered buffer text, always use =concat= or direct =insert=
+  calls, never =format= — the latter is the culprit for "the
+  glyph is in the buffer but the face is wrong."
+
+** Test 2 — ineligible agent fallback
+*Date.* 2026-05-07.
+
+*Setup.* Same as Test 1.
+
+*Action.* Submit =@picard system status= via =C-RET=.
+
+*Observed.*
+- =--call-backend= matched =picard= against =shell-agents= →
+  not found (picard's =_AGENT_META= has empty capabilities by
+  design — manager delegates, doesn't shell).
+- Routed to =--call-backend-default= (normal LLM path,
+  cloud-routed qwen-72B via OpenRouter).
+- Picard responded with normal grounded triage answer ("System
+  status is nominal. No recent alerts, battery at 91%…").
+- Confirmed: shell-agent gating is correct — agents NOT in the
+  list bypass Agor entirely.
+
+*Bug surfaced + fixed during the test.*
+- The new heading rendered the Trekbats codepoint correctly (bytes
+  in buffer = U+F041 for picard) but the FACE on that char was
+  =org-level-2=, not =(:family "Trekbats")=. So the PUA codepoint
+  fell back to the system font and rendered as tofu.
+- Cause: even with =concat=-not-=format=, font-lock fires on
+  heading lines AFTER insertion and OVERWRITES the =face= text
+  property with =org-level-2= (org-mode's heading face).
+  Propertize face on the agent-glyphs alist is gone by render time.
+- Fix: =--apply-glyph-face-overlay= helper that creates an
+  OVERLAY over the glyph chars with the face from the agent-
+  glyphs alist. Overlay faces beat text-property faces + font-
+  lock-applied faces, so =:family "Trekbats"= sticks regardless
+  of font-lock activity.
+- Lesson: when wiring icon-font glyphs into a fontified buffer
+  (org-mode, prog-mode, anything with font-lock), text-property
+  =face= isn't sufficient — overlays are the only reliable path.
+
+** Test 3 — list-says-eligible + CLI-says-ineligible (fallthrough)
+*Date.* 2026-05-07.
+
+*Setup.*
+- Temporarily added =spock= to =org-llm-chat-shell-agents=.
+- =spock= has =capabilities=(_R,)= in =_AGENT_META= — NO =_SH=.
+- This creates the test scenario where the elisp dispatcher
+  routes to the CLI (because spock is in the local list), but
+  the CLI's authoritative eligibility check returns false.
+
+*Action.* Submit =@spock logical analysis please= via =C-RET=.
+
+*Observed.*
+- =--call-backend= matched =spock= in =shell-agents= → routed
+  to =--dispatch-via-agor=.
+- Async subprocess: =org-llm chat-dispatch spock "logical analysis please"=.
+- CLI looked up =spock= in =_AGENT_META=, did NOT find =_SH=,
+  returned =eligible: false= with explanatory content.
+- =--dispatch-finalise= saw =eligible != t= → invoked
+  =--call-backend-default= → normal LLM path engaged.
+- Result: spock did NOT get the Agor stub content. The
+  fallthrough to LLM was clean.
+
+*Side effect.*
+- The LLM round-trip then dropped its SSE connection mid-flight
+  (=ERROR: stream closed early=) — an intermittent cloud / network
+  issue unrelated to the dispatcher. The =--sse-finalise= error
+  path correctly recovered: rendered the ERROR line, then auto-
+  appended a fresh =** 🪪 Captain ●●●●= heading below for retry.
+
+*Conclusion.*
+- The two-tier eligibility check is correct: local list is a
+  routing hint, CLI is the source of truth. A user typo in the
+  list (or stale entry after an =_AGENT_META= change) doesn't
+  break the chat — it just adds one CLI round-trip before
+  falling through to the LLM.
+- All three test cases pass; the dispatcher prototype is
+  ready for the actual Agor-spawn body to replace the stub.
+
+** Test 3 — unknown agent
+*Setup.*  …
+
+* TODO Replace stub with real Agor spawn
+
+The =cli.py= =chat-dispatch= verb has a marked TODO block where
+the actual session-spawn lives. Pseudocode (per
+=feedback_agor_no_claude.md=):
+
+#+begin_src python :tangle no
+  from .captains_log_agor_bridge import AgorClient
+  client = AgorClient()
+  wt = client.ensure_worktree(agent)
+  sess = client.create_session(
+      wt, agent, prompt,
+      agentic_tool="opencode",                       # FOSS, no Claude
+      model="qwen/qwen-2.5-72b-instruct",            # FOSS-via-OpenRouter
+  )
+  result = client.run_until_done(sess.id, timeout=120)
+  payload["session_url"] = sess.url
+  payload["content"]     = result.text
+  payload["dispatched"]  = True
+#+end_src
+
+* Connections
+
+- [[file:org-mode-chat-surface.org][org-mode-chat-surface.org]] — the chat surface itself (DEC-015).
+- [[file:multi-agent-org-llm.org][multi-agent-org-llm.org]] — the umbrella feature; "Agor = multi-agent-org-llm" per DEC-017.
+- =feedback_agor_no_claude.md= (memory) — Agor-spawned crew sessions use FOSS agentic_tool + modelConfig only.
