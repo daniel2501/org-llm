@@ -1,0 +1,250 @@
+#+TITLE: R25 Quality Judge Re-Rank
+#+DATE: [2026-05-08]
+#+AUTHOR: Claude (research subagent)
+
+* Summary
+
+*Summary.* R25 shipped the per-line =count_nested_bracket_depth= fix
+recommended by R24 (FP-1), and the fix works — no cell now reports
+=nested_brackets= on multi-line wiki-link wraps. *But the related
+=count_bracket_errors= function still walks across all added text in
+one pass, so its cross-line bracket cascade re-creates FP-1 in a
+different field and wrongly cost K11/K17/K8 ~85 lint points across
+~25 cells, including 5 floor-drops.* The G1 floor (=lint_pen > 8.0= or
+=primary < 0=) excluded 5 cells — every one was a victim of the
+unrepaired FP-1, not a real defect. Layer-BK fully fired (10 cells,
+real BK2 primary=50 wins for both K1 + K5). Layer-3 ran but only on
+K1 because Layer-1's top-3 selector picks individual *cells*, not
+*variants* — so all three "top FOSS" slots collapsed to K1-qwen30.
+
+*Expanded.* On 170 non-error cells across 189 total: K1-qwen30 is
+the round winner whether you go raw mech (n=64, sum 579) or
+adjusted-quality (538.0; 8.41/cell). K2-kimi-k2.6's 18 wall-cap
+kills (16 of them at the 400s wall) damage its sum-rank but its 32
+successful cells averaged 15.19 primary — its per-cell quality
+matches K11's. K8-deepseekV3 confirmed R24's recovery is real (28
+cells, mech 295, $0.006/cell) but its bracket-error signature (6 of
+its 8 lint-flagged cells share the identical pattern from one
+prefetch) is overwhelmingly the FP-1-via-=count_bracket_errors=
+artifact, not real broken links. Five cells in Layer-1 hit the G1
+floor — all five were unfair. Top-3 advancement collapsed to K1
+only, which is why Layer-3 ablation is K1-only and Layer-2 missed
+K2 entirely; this is a selector bug, not a budget shortfall.
+
+* 1. Methodology
+
+Same 0-20 rubric as R18/R24 (edit correctness 6, minimality 4,
+constraint 4, tool-use 3, presentation 3). Re-walked every diff with
+non-zero =lint_penalty=; re-ran =scripts.quality_lint.lint_patch= to
+ground-truth post-R24 detector behavior.
+
+R25 introduces *G1 floor* in =score_cell=:
+=floor_dropped = (lint_pen > 8.0) or (primary < 0)=. Informational
+flag (doesn't subtract score), used to gate production routing recs.
+Intent is sound; trigger threshold (8.0) is fine; *input* (=lint_pen=)
+is corrupted by an unrepaired FP-1 in =count_bracket_errors= (§4).
+
+* 2. Per-variant quality table
+
+Adjusted lint policy: =bracket_errors= is collapsed to *at most 1*
+per cell (per-line audit shows max 1 real broken line; remainder is
+the FP-1-via-=count_bracket_errors= cross-line cascade). Other
+detectors (=nested_brackets=, =heading_dups=, =stacked_docstrings=,
+=fab_uuids=, =table_pipe_loss=, =rule2b_violations=) trusted as-is —
+spot-checks confirm they fire on real defects only.
+
+| variant         | succ | err | mech | raw lp | real lp | adj  | adj/cell | $/qpt    | fdrop |
+|-----------------+------+-----+------+--------+---------+------+----------+----------+-------|
+| K1-qwen30       |   64 |   1 |  579 |   53.0 |    41.0 |  538 |     8.41 | $0.00063 |     0 |
+| K2-kimi-k2.6    |   32 |  18 |  486 |    0.0 |     0.0 |  486 |    15.19 | $0.00365 |     0 |
+| K11-qwen3coder  |   16 |   2 |  370 |   71.0 |     6.0 |  364 |    22.75 | $0.00834 |     4 |
+| K8-deepseekV3   |   28 |   1 |  295 |   56.0 |    21.0 |  274 |     9.79 | $0.00062 |     0 |
+| K5-claude-solo  |   14 |   0 |  200 |    1.0 |     1.0 |  199 |    14.21 | $0.01453 |     0 |
+| K17-glm46       |   10 |   0 |  178 |   59.0 |    10.0 |  168 |    16.80 | $0.00448 |     1 |
+| K33-qwen3-72b   |    1 |   0 |   12 |    0.0 |     0.0 |   12 |    12.00 | $0.05904 |     0 |
+| K34-deepseekV3p |    1 |   0 |    0 |    0.0 |     0.0 |    0 |     0.00 | $inf     |     0 |
+| K35-llama-3.1   |    1 |   0 |    0 |    0.0 |     0.0 |    0 |     0.00 | $inf     |     0 |
+
+K1 ($0.00063) and K8 ($0.00062) are indistinguishable on cost-per-
+quality-pt; both frontier-cheap; *K8's lint is overwhelmingly FP-1*.
+K11's per-cell adj quality (22.75) is the highest of any variant
+n>=10 — B25 elisp is dominant — but carries 4 of 5 floor-drops (all
+FP-1) and 2 errors. K17: small n=10, all-positive, 10 of 59 raw-lint
+real.
+
+K2's 18 errors = 1 plan-parse, 1 git race, *16 wall-cap kills at
+400s*. K2's mean wall on B1 is 200-280s vs K1/K8 <120s. If those
+16 had completed, K2 would have +~25 cells and ~+100 mech.
+
+* 3. Top-10 + bottom-10 cells by quality
+
+** Top-10 (raw mech score)
+
+| variant       | task | layer    | mech | lint | q  | note                                       |
+|---------------+------+----------+------+------+----+--------------------------------------------|
+| K5-claude-solo| BK2  | layer_bk |   50 |  0.0 | 18 | full typer subcommand + test, lint-clean   |
+| K5-claude-solo| B11  | layer2   |   50 |  1.0 | 17 | DEC append; rule2b miss is style nitpick   |
+| K1-qwen30     | BK2  | layer_bk |   50 |  3.0 | 17 | same shape as K5 BK2; one stacked-docstr   |
+| K1-qwen30     | B1   | layer1   |   45 |  0.0 | 17 | clean wrap, lint-zero                      |
+| K1-qwen30     | B1   | layer1   |   42 |  0.0 | 16 | clean wrap, lint-zero                      |
+| K1-qwen30 ×4  | B1   | layer1   |   47 |  6.0 | 16 | FP-1 cluster (real penalty 1.0 each)       |
+| K1-qwen30     | B1   | layer1   |   45 |  6.0 | 15 | FP-1 cluster, slightly lower mech          |
+
+K1's mech=41/lint=6 cluster (4 replicates) is the FP-1 signature:
+1 real broken line in =literate-tools.org=, =count_bracket_errors=
+inflates to 2-imbalance + 4-nested-cross-line = 6.0 raw penalty.
+
+** Bottom-10 (lowest-quality non-error cells)
+
+| variant       | task | layer    | mech | lint | issues            | note                          |
+|---------------+------+----------+------+------+-------------------+-------------------------------|
+| K11 ×3        | B1   | layer1   |   36 | 17.0 | bracket_errors=17 | FLOOR-DROPPED, FP-1           |
+| K11           | B1   | layer1   |   26 | 10.0 | bracket_errors=10 | FLOOR-DROPPED, FP-1           |
+| K17           | B1   | layer1   |   26 | 10.0 | bracket_errors=10 | FLOOR-DROPPED, FP-1           |
+| K35-llama     | B1   | layer1   |    0 |  0.0 | none              | silent_noop                   |
+| K34-deepseekp | B1   | layer1   |    0 |  0.0 | none              | silent_noop                   |
+| K11           | B1   | layer1   |    2 |  2.0 | bracket_errors=2  | partial wrap + 1 real broken  |
+| K1 ×4         | B5/7/11 | layer2 |    0 |  0.0 | none              | task-shape mismatch (no edit) |
+| K1            | BK3  | layer_bk |    0 |  0.0 | none              | defensible abstain            |
+
+The 5 floor-dropped cells are *all* FP-1; rest are silent-noops or
+defensible abstains. Zero R25 cells hit the floor for a real defect.
+
+* 4. Did extended quality_lint produce false positives now?
+
+Mostly fixed; one bug remains.
+
+** What R25's fix accomplished
+
+=count_nested_bracket_depth= scans per-line, depth resets at line
+boundaries. K1's 14 R24 false-positive =nested_brackets=2= cells
+now report 0. R24's recommended FP-1 patch landed.
+
+** What still bites: =count_bracket_errors= cross-line cascade
+
+R25 patched =count_nested_bracket_depth= but left
+=count_bracket_errors= walking all added text in one pass. When a
+diff edits a wiki-link with one missing =]= on a =+=-line whose
+closing context is ten lines later, the walker treats the unclosed
+=[[= as still-open and counts every subsequent well-formed
+=[[id:UUID][label]]= as a new "nested" event. One-real / N-reported:
+
+| cell                          | reported | true | inflation |
+|-------------------------------+----------+------+-----------|
+| K11 s4 B1                     |       17 |    1 |       16x |
+| K11 s2 B1                     |        8 |    1 |        8x |
+| K11 s1 B1                     |        2 |    1 |        2x |
+| K17 s1-s3 B1                  |        6 |    1 |        6x |
+| K17 s4 B1                     |       10 |    1 |       10x |
+| K8 s4-s13 B1 (6 replicates)   |        6 |    1 |        6x |
+
+Six K8 cells share byte-identical 6.0 — same prefetch across seeds,
+all 1 real broken line. K11 s4 amplifies to 17 because its diff has
+20 added bracket-link lines. K8 also legit fires =nested_brackets=1=
+(=[[*TODO [#A] Planned — [[id:...]]]= is a real depth-2 nest), so
+real_lint=2.0 there, not 1.0.
+
+** Concrete R26 fix
+
+Mirror the per-line walker into =count_bracket_errors=: count
+=imbalance= and =nested= line-by-line, sum across lines. Single-file
+patch to =scripts/quality_lint.py=. Validation: re-run on R25 saved
+diffs; K7-style intra-line cascades still fire; K11/K17/K8 cross-
+line cascades collapse to 1.0/cell.
+
+* 5. Did BK1-BK5 actually run?
+
+Yes — Layer-BK fully fired: 10 cells = 5 BK tasks × 2 variants
+(K1-qwen30 + K5-claude-solo). R24's recommended =target_files= /
+=in_scope_files= fix landed; every BK cell has populated in-scope
+counts, no more "harness_oos_misclass":
+
+| variant       | task | primary | mech | note                          |
+|---------------+------+---------+------+-------------------------------|
+| K5-claude-solo| BK1  |      20 |   20 | 4-file rename, lint-clean     |
+| K1-qwen30     | BK1  |      20 |   20 | identical shape to K5         |
+| K5-claude-solo| BK2  |      50 |   50 | full typer subcmd + 42-ln test|
+| K1-qwen30     | BK2  |      50 |   47 | same; 1 stacked-docstring (3) |
+| K5-claude-solo| BK3  |       0 |    0 | abstain — defensible          |
+| K1-qwen30     | BK3  |       0 |    0 | abstain — defensible          |
+| K5-claude-solo| BK4  |       3 |    3 | dataclass field; partial      |
+| K1-qwen30     | BK4  |       3 |    3 | matched K5 shape              |
+| K5-claude-solo| BK5  |      22 |   22 | 8 in-scope, canonical UUIDs   |
+| K1-qwen30     | BK5  |       0 |    0 | empty diff (no edits)         |
+
+R24 FP-3 (BK =target_files= unset) is *resolved*. BK is now
+evaluable. K1+K5 dead-even BK1/BK2/BK4; K5 edges BK5; K1's BK5
+abstain is the one weakness. *But* Layer-BK ran K1+K5 only because
+top-3 collapsed to K1 (see §6); K2/K8/K11/K17 never saw BK.
+
+* 6. Did G1 floor exclude any cells?
+
+Yes — 5 cells, *all unfair*:
+
+| variant | task | lint pen | issues             | fair? |
+|---------+------+----------+--------------------+-------|
+| K11 ×3  | B1   |     17.0 | bracket_errors=17  | NO    |
+| K11     | B1   |     10.0 | bracket_errors=10  | NO    |
+| K17     | B1   |     10.0 | bracket_errors=10  | NO    |
+
+Real defects per cell after audit: 1 broken line each. Real lint
+penalty: 1.0/cell. None should have crossed the 8.0 floor.
+
+G1 *concept* is correct (R18 K7 saw 30+ legit nesting events);
+*threshold* 8.0 is fine; *input* (=lint_pen=) is corrupted by
+FP-1-via-=count_bracket_errors=. Fix the detector → floor works.
+K7-qwen72b (the variant G1 was designed to catch) was correctly
+demoted to S38 adversarial-only per R24 rec, so the round had no
+real K7-style cascades for the floor to catch.
+
+* 7. R26 advisory
+
+** R-1: Patch =count_bracket_errors= per-line, same as =count_nested_bracket_depth=
+
+Single-file change to =scripts/quality_lint.py=. Walker counts
+imbalance + nested per-line, sums across lines. Validation:
+re-run R25 saved diffs; K11/K17/K8 collapse to 1.0/cell; K1 clean
+stays 0; K7-style intra-line cascades unchanged. Removes 4 false
+floor-drops; unblocks G1 for real defects.
+
+** R-2: Fix top-3 selector to pick variants, not cells
+
+Layer-1's =top3_foss = [c["variant"] for c in foss_cells[:3]]=
+picks 3 individual *cells* and dedups by accident. In R25 all 3 were
+K1 (=top3_foss_after_layer1: ["K1-qwen30", "K1-qwen30", "K1-qwen30"]=
+in summary), so Layer-2+3+BK collapsed to K1+Claude+force-list.
+K2's 32 successful cells (15.19 adj/cell) never advanced. Fix:
+aggregate by variant first, rank by per-cell mean (not sum, so
+wall-cap-kills don't dilute), take top-3 distinct variants. With
+this, R25's top-3 would have been K2 (15.19), K17 (16.80), K1
+(8.41) — diverse pool.
+
+** R-3: Raise K2 B1 wall cap from 400s to 600s
+
+K2's mean wall on successful B1 is 200-280s; 400s killed 16 of 50.
+K1/K8 finish <120s — only K2 hits this cap hard. Bump to 600s for
+K2 (or globally); expect +~25 K2 cells at <$1 incremental.
+Alternative: =wall_cap_kill=warn=.
+
+** R-4: Layer-BK on full advancing pool, not just top-3
+
+Currently Layer-BK = top-3 FOSS ∪ Claude. With R-2 that's
+K2+K17+K1+K5 — still missing K8/K11. R26 should run BK1-BK5 across
+every variant that cleared Layer-1 score>0. Per-cell cost ~$0.02
+FOSS / $0.20 Claude; K8+K11+K17 × 5 BK ≈ $2-4 incremental. Cheap
+diversity signal — BK is the only long-horizon family.
+
+** R-5: Force K8 + K11 onto non-B1 tasks before promotion
+
+K8's 28 cells are all B1. R24 advised "test K8 on non-B1 before
+promotion"; R25 force-listed K8 to Layer-2 but its 4 Layer-2 cells
+all silent_noop'd (B5, B7, B11, B25). That's not recovery — it's
+confirmation K8 doesn't generalize off B1. K11's 8 layer_k11b25
+were the only working diversity test. R26: K8 on B11+B26 (n=5 each),
+K11 on B5/B7/B11 (n=5 each); hold K8/K11 promotion decisions until
+non-B1 data exists.
+
+* 8. Cost of investigation
+
+Re-walk + re-lint 30 cells: $0.00 (deterministic). 0 LLM calls.
+Cap was $0.50.
