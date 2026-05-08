@@ -1,0 +1,219 @@
+:PROPERTIES:
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R24 — walltime + parallelism efficiency analysis (PARALLELISM=32)
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:duration:r24:
+#+OPTIONS: toc:1 num:nil
+
+* Summary
+
+R24 ran *147 cells in 54.3 min wall* (3260s) at *32-way parallel* —
+*nearly 2× R18's wall* despite only +5% more cells. Doubling workers
+16 → 32 did not help: the round was *Layer-1-bound*, where a single
+=K2-kimi-k2.6= cell ran *1612s (27 min)* and held the layer open while
+~110 other workers idled. Effective parallelism across the round is
+*7.81×* (24% of the 32-way ceiling) — better than R18's 16% but the
+absolute wall went up because the long-tail variants (K2-kimi, K7-qwen72b)
+got both bigger samples (n=20 + n=10) /and/ no enforcement of
+=WALL_CAP_PER_CELL_S=400=. The new Layer-BK ran cleanly in *157s*
+(2.6 min for 10 long-horizon cells); BK is /not/ the wall problem —
+Layer 1 is. R25 with Sp1+Sp2+Sp3+Sp4 enforced should land at
+*22-28 min* for ~470 cells (5× the cells, half the wall).
+
+Note on the "~22-min process elapsed" estimate in the brief: actual
+wallclock from log timestamps is *54.3 min* (08:19:42 → 09:14:02).
+The 22-min figure may be a stale snapshot or a single phase; this
+analysis uses log-derived numbers throughout.
+
+* 1. Total wall vs projection
+
+| Round  | Cells | Workers | Wall (min) | Wall (s) | Cells/min | Long-pole cell |
+|--------+-------+---------+------------+----------+-----------+----------------|
+| R17    |    59 |       8 |       20.0 |     1200 |       3.0 | K7 ablations   |
+| R18 v2 |   140 |      16 |       28.1 |     1687 |      1.78 | K5/B5 = 648s   |
+| R24    |   147 |      32 |       54.3 |     3260 |      2.71 | K2/B1 = 1612s  |
+
+R18 → R24: workers 2×, cells +5%, wall *1.93×*. Why "more workers"
+didn't help: (1) Layer 1 was scaled up massively (115 cells on B1 vs
+~50 in R18); (2) longest cell got worse (1612s vs 648s — 2.5× ceiling
+regression with =WALL_CAP_PER_CELL_S= unenforced); (3) sum-of-walls
+grew 7.4× (30,009s vs 4,333s) while workers grew only 2×.
+
+* 2. Per-cell wall distribution (n=147)
+
+*Summary.* Median 160s, p90 311s, p95 674s, p99 1068s, max 1612s.
+The distribution is *much wider than R18* on every percentile above
+p50 — long-tail dilation, not a uniform shift.
+
+*Expanded.* Per-cell walls reverse-engineered from log-1778242782.txt
+using FIFO worker simulation (W=32). Layer-1 cells past index 32 have
+their start-time imputed from completion[k-32]; layers ≤32 cells start
+all at layer-open. Limitation: this overestimates wall for cells whose
+predecessor was unusually slow, but the medians are stable.
+
+| Stat | R24 wall (s) | R18 v2 wall (s) | Δ      |
+|------+--------------+-----------------+--------|
+| min  |            1 |             1.5 | flat   |
+| p10  |           26 |             5.7 | 4.6×   |
+| p25  |           81 |            10.6 | 7.6×   |
+| p50  |          160 |            29.1 | 5.5×   |
+| p75  |          249 |            93.5 | 2.7×   |
+| p90  |          311 |           182.6 | 1.7×   |
+| p95  |          674 |           398.8 | 1.7×   |
+| p99  |         1068 |           648.7 | 1.6×   |
+| max  |         1612 |           648.7 | 2.5×   |
+| mean |          204 |            86.7 | 2.4×   |
+
+Every percentile *got slower*. The p50 moved from 29s to 160s — 5.5×
+slower median per cell — because R24 added quality_lint to the manager
+loop and dropped the cell-time wall-cap.
+
+* 3. Per-variant wall distribution + outliers
+
+| Variant         |  n |  min |   med |   max |  mean |    sum |
+|-----------------+----+------+-------+-------+-------+--------|
+| K2-kimi-k2.6    | 40 |   11 | 175.0 |  1612 | 241.6 |   9663 |
+| K8-deepseekV3   | 25 |  129 | 251.0 |   278 | 227.4 |   5686 |
+| K7-qwen72b      | 10 |  139 | 683.0 |  1068 | 559.4 |   5594 |
+| K17-glm46       | 10 |  145 | 219.5 |   272 | 215.4 |   2154 |
+| K5-claude-solo  | 14 |   16 |  91.0 |   466 | 148.9 |   2084 |
+| K11-qwen3coder  | 18 |   24 | 129.0 |   231 |  99.6 |   1793 |
+| K6-llama70b     | 10 |   92 | 176.0 |   224 | 168.4 |   1684 |
+| K1-qwen30       | 20 |    1 |  79.5 |   112 |  67.5 |   1351 |
+
+Outliers (top-10 longest cells, all in Layer 1):
+
+| Wall (s) | Variant       | Notes                       |
+|----------+---------------+-----------------------------|
+|     1612 | K2-kimi-k2.6  | held L1 open final 9 min    |
+|     1068 | K7-qwen72b    | bracket-disaster loop       |
+|      860 | K7-qwen72b    |                             |
+|      822 | K7-qwen72b    |                             |
+|      771 | K7-qwen72b    |                             |
+|      723 | K7-qwen72b    |                             |
+|      684 | K2-kimi-k2.6  |                             |
+|      674 | K2-kimi-k2.6  |                             |
+|      643 | K7-qwen72b    |                             |
+|      599 | K2-kimi-k2.6  |                             |
+
+K7-qwen72b owns 5/10 (and 6/10 K7 cells exceed 600s). K2's tail is
+irregular: 175s median but one outlier at 1612s (9× tail event).
+
+* 4. Parallel efficiency at 32 workers
+
+| Layer    |   n |  Sum-walls | Max cell | Floor | Actual | Eff par |
+|----------+-----+------------+----------+-------+--------+---------|
+| 1        | 115 |     26,686 |     1612 |  1612 |   2097 |  12.73× |
+| 2        |   8 |        991 |      466 |   466 |    466 |   2.13× |
+| K11-B25  |   8 |        217 |       33 |    33 |     33 |   6.58× |
+| 3        |   6 |       1339 |      444 |   444 |    444 |   3.02× |
+| BK       |  10 |        776 |      157 |   157 |    157 |   4.94× |
+| /Total/  | 147 |   /30,009/ |     1612 |  /-/  |  /3197/| /9.39×/ |
+
+Round-level eff par: *9.39× of 32 = 29.3% of ceiling* (vs R18's 16%).
+
+*Layer 1 is the bottleneck.* 115 cells stuffed into one layer for
+per-variant statistics, but the scheduler is max-cell-bound. Even at
+perfect 32-way the floor is the longest cell (1612s). Of L1's 2097s
+wall, only 1612s could be parallelized — the remaining 485s is *idle
+worker time* with one cell running alone. Layers 2/3 had ≤8 cells
+so eff_par > 2.5× is structurally impossible there; they're already
+at theoretical ceiling.
+
+* 5. Layer-barrier overhead
+
+| Transition           | Time      | Δ from prev | Cells in slot |
+|----------------------+-----------+-------------+---------------|
+| ROUND_START          | 08:19:42  | -           | -             |
+| LAYER 1 start        | 08:20:45  | +63s        | 115           |
+| LAYER 2 start        | 08:55:42  | +2097s      | 8             |
+| LAYER K11-B25 start  | 09:03:28  | +466s       | 8             |
+| LAYER 3 start        | 09:04:01  | +33s        | 6             |
+| LAYER BK start       | 09:11:25  | +444s       | 10            |
+| R24 COMPLETE         | 09:14:02  | +157s       | -             |
+
+Pre-Layer-1 startup is 63s (eager prefetch + warmup, comparable to
+R18's 60s). All inter-layer barriers are ≤2s. Pure barrier overhead
+is essentially zero (≤10s round-total). The *real* "wasted" wall is
+single-cell long-tails: ~1300s (22 min) of the 54-min wall is
+one-cell-holds-layer-open time.
+
+* 6. Layer-BK walltime characteristics
+
+*Summary.* BK ran 10 cells (5 tasks × 2 variants) in 157s wall —
+under 3 min for the full long-horizon battery. None of the BK cells
+became wall-pole; the BK layer is *not* an R24 wall problem.
+
+*Expanded.* BK = K2-kimi-k2.6 + K5-claude-solo × BK1-BK5. Per-cell
+walls (sorted desc): 157, 126, 121, 115, 60, 56, 55, 34, 33, 19.
+Median 58s, max 157s, sum 776s. The max-cell (157s K2 on last task)
+defines layer wall. Task ↔ completion mapping isn't recoverable from
+log-only data (summary doesn't preserve order for FOSS cells), but
+the 5 BK tasks land in the 19-157s band — none is dominant.
+
+*BK is much faster than R18's projection* (R18 expected p50 ~600s,
+p90 ~1500s). Either BK fixtures are softer than estimated, or
+=brief_mode=tight= bounds the long-horizon output. Either way, BK is
+*not* an R25 wall risk.
+
+* 7. R25 wall projection — Sp1-Sp7 ranked by implied savings
+
+R25 design carries 7 stack speed-ups (Sp1-Sp7). Ranked by R24-actual
+wall savings:
+
+| Rank | Stack | Mechanism                      | R24 wall hit | Implied save | Confidence |
+|------+-------+--------------------------------+--------------+--------------+------------|
+| 1    | Sp4   | Drop K7-qwen72b                | 5594s sum    | -930s wall   | high       |
+| 2    | Sp3   | Self-host K1+K2 endpoints      | 11,014s sum  | -680s wall   | high       |
+| 3    | Sp2   | Pipeline L1 → L2               | 485s idle    | -485s wall   | medium     |
+| 4    | Sp5   | S33 speculative on long-output | 0s (BK soft) | -0 to -300s  | low (BK)   |
+| 5    | Sp1   | Skip Layer 3 dial ablation     | 444s wall    | -444s wall   | high       |
+| 6    | Sp6   | S34 async pipeline on S3 cells | n/a (R25)    | -180-300s    | medium     |
+| 7    | Sp7   | Drop B7/B25 from L1 sample-up  | n/a (R25)    | -120s wall   | high       |
+
+Ranking notes:
+
+1. *Sp4 (drop K7) wins*. K7's 10 cells summed to 5594s wall with 5
+   cells over 700s; K7 owned 5/10 of the round's worst cells. Wall
+   save derived from K7-cells-as-Layer-1-long-poles: ~930s. K7
+   quality is also dead (-270 score). High confidence.
+2. *Sp3 (self-host K1+K2)*: K2 alone accounted for 9663s (32% of
+   sum-walls) including the 1612s outlier. vLLM prefix-cache TTFT
+   would drop K2 median 175s → ~50s; outlier cells likely stop too
+   (no cloud-broker stochasticity). 680s save is conservative.
+3. *Sp2 (pipeline L1 → L2)*: directly recovers the 485s of idle
+   worker time at end of L1 while one K2 cell ran alone.
+4. *Sp1 (skip Layer 3)*: full L3 wall = 444s. Dial ablation has
+   converged after 6 rounds.
+5. *Sp5 (S33 speculative)*: BK cells were already short in R24
+   (max 157s) so 40-50% reduction buys little; benefit only realized
+   on harder R25 BK fixtures.
+6. *Sp6 (S34 async)*: R25-only, no R24 baseline. ~12 S3 cells × 50%
+   = -180-300s.
+7. *Sp7 (drop B7/B25 from L1)*: R24 didn't run B7/B25 in L1; design
+   quote ~120s.
+
+*Combined R25 wall projection* (with all Sp1-Sp7 enforced + the
+hard =WALL_CAP_PER_CELL_S=400= turned on):
+
+| Scenario                              | R25 wall   | Notes                        |
+|---------------------------------------+------------+------------------------------|
+| R24-style execution at 470 cells      | ~165 min   | Linear scale-up (untenable)  |
+| + Sp1-Sp7 stacks, no wall-cap         | 45-55 min  | R25-design quote             |
+| + Sp1-Sp7 stacks + =wall_cap=400=     | *25-35 min*| Kills 13 outlier cells outright |
+| + skip K7 entirely + self-host K1/K2  | *22-28 min*| Recommended R25 floor        |
+| Hedged retry on cells >300s p90       | *18-25 min*| Aspirational                 |
+
+*Headline*: R25 with Sp4 + Sp3 + Sp2 + =WALL_CAP_PER_CELL_S=400=
+/enforced/ should deliver *22-28 min wall for ~470 cells* — 5× R24's
+cells in half the wall. Leverage is on long-tail variants (K2
+outliers + K7 generally), not on adding more workers.
+
+* Cross-references
+
+- =docs/notes/2026-05-08-r18-walltime.org= — R18 walltime baseline
+- =docs/wiki/2026-05-08-r25-design.org= — Sp1-Sp7 stack definitions
+- =docs/wiki/2026-05-08-r18-synthesis.org= — round synthesis
+- =scripts/_round24_dials_artifacts/log-1778242782.txt= — timestamped event log
+- =scripts/_round24_dials_artifacts/summary-1778242782.json= — total_wall + per-cell metadata
+- =scripts/_round24_dials.py= — runner (note: FOSS cells lack wall_seconds instrumentation)
