@@ -831,6 +831,18 @@ def _dispatch_tool_call(name: str, args: dict, workdir: Path,
         if text.count(old) > 1:
             return False, (f"old_string matches {text.count(old)} times — "
                             f"add surrounding context to make it unique")
+        # R26 P2-6 STARTER — pre-emit grammar gate. Reject structural
+        # defects BEFORE the edit lands in the diff, so the cell loop
+        # forces a retry instead of penalizing post-emit. Default OFF
+        # via EDIT_GATE_ENABLED env var (R27 will flip ON).
+        from org_llm.edit_gate import edit_gate_enabled, gate_edit_file
+        if edit_gate_enabled():
+            ok_g, reason = gate_edit_file(path, old, new)
+            if not ok_g:
+                return False, (
+                    f"edit rejected by pre-emit gate: {reason}; "
+                    f"please fix and retry"
+                )
         new_text = text.replace(old, new, 1)
         target.write_text(new_text)
         # R17 fix #1 — append-only diff shim
