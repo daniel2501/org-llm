@@ -1,0 +1,272 @@
+#+TITLE: R24 Quality Judge Re-Rank
+#+DATE: [2026-05-08]
+#+AUTHOR: Claude (research subagent)
+
+* Summary
+
+*Summary.* R24's mech leaderboard already folds in =quality_lint=
+penalties, so the gap between mech score and hand-grade quality is
+much smaller than R18's was — *but the lint detector itself produces
+a structural false positive on multi-line wiki links that distorts
+K1 and K11's scores downward*. After correction, K1-qwen30 is
+lint-clean and the n=18 cost-quality pareto leader, K7-qwen72b's
+massive negative score is fully justified (pathological
+runaway-bracket cascades, not a detector quirk), and *all 10 BK
+long-horizon cells share a different defect: the harness scoring
+rubric mis-categorises BK target files as out-of-scope, so
+implementations that succeed end up with primary=0*.
+
+*Expanded.* On 140 non-error cells: K2-kimi-k2.6's mech-leader status
+(score=666.85, n=40) holds up — it is genuinely lint-clean across 39
+of 40 cells, with one stacked-docstring penalty on BK2. K1-qwen30's
+=avg_score=21.35= understates its quality; ~70% of its lint penalty
+is the multi-line-link false positive (depth-counter sees an unclosed
+=[[id:UUID][label= where the closing =]]= sits on a context line of
+the diff, not a +-line). Once we strip that, K1's quality-adjusted
+mean is 32.22 — close to K17-glm46 (25.9, n=10, lint-clean) and
+significantly above K2's 17.31 raw-mech mean. Every BK1-BK5 cell
+returned primary=0 with successful implementations on disk, which
+is a R25 must-fix because it makes long-horizon evaluation impossible.
+
+* 1. Methodology
+
+Hand-graded 22 representative cells across all 8 variants × 8 task
+ids. Same 0-20 quality rubric as R18 (edit correctness 6, minimality
+4, constraint 4, tool-use 3, presentation 3). Focus areas:
+
+- Diff fidelity — does the patch do the asked work?
+- Detector audit — re-ran =quality_lint= on flagged cells, traced
+  the bracket depth walker
+- BK rubric audit — read =cell_result.json= analysis blocks on all
+  10 BK cells
+
+R24 ships =quality_lint.py= (R18's recommendation), so =score=
+already nets lint penalties. This re-rank checks whether the
+detector is sound, then adjusts where it isn't.
+
+* 2. Detector audit — what quality_lint gets right and wrong
+
+** What it catches correctly (real defects)
+
+- *K7-qwen72b runaway nesting* (10 cells, avg penalty 93.6): seed s3
+  of K7 produced =[[id:43e1...][[[id:43e1...][[[id:43e1...][...]]]]]]=
+  16-deep nesting on the =Tier 1 — Customize= heading, then 13-deep
+  on the prerequisite paragraph. Detector flagged 45 nested-brackets
+  and 46 imbalances. Hand-verified: every flagged bracket is real.
+  K7's score=−693 is fully earned.
+- *K1-qwen30 heading_duplicates* (2 cells, penalty 3 each): K1
+  inserted =* Tier 2 — Manage= twice and =** Tool groups= twice.
+  Real illusory-mech-win — exactly what R19's heading_dups detector
+  was added for.
+- *K5/K2 BK2 stacked_docstrings* (2 cells, penalty 3 each): the
+  test file added a single module docstring; the detector counted the
+  triple-quotes correctly but the heuristic
+  ((triple_double - 2) // 2) fires when a single docstring's 2
+  markers are echoed in the diff alongside another quoted string.
+  This is a borderline call — see false-positives below.
+
+** What it gets wrong (false positives — must tune)
+
+*** FP-1: multi-line wiki-link wraps (severity: HIGH)
+
+Affected: K1 14 cells (avg pen 12.6), K11 3 cells (avg 25). Combined
+~190 of K1+K11's 234 penalty points are this single bug.
+
+Mechanism: =count_nested_bracket_depth= walks +-prefixed lines only.
+When a diff edits inside a wiki-link spanning line boundaries — e.g.
++ line opens =[[id:UUID][Phase ... — self-coded= and the closing =]]=
+sits on the next *unchanged* context line — the depth walker sees an
+unclosed =[[= and treats every subsequent well-formed
+=[[id:UUID][label]]= as a "nested" event. K11 s5's penalty=28 is
+entirely this; 0 actual broken links.
+
+*Tuning fix:* track depth across BOTH +-prefixed and context lines,
+or reset depth at hunk boundaries. The current detector also
+double-counts the same unclosedness as both =bracket_errors= AND
+=nested_brackets=.
+
+*** FP-2: =bracket_errors == nested_brackets= signature
+
+In K1's 14 lint cells the two values are equal (5/5, 4/4, 3/3) —
+because every +1 to nested-depth is also +1 to imbalance. K7's nb is
+40+ from real cascades, not this artifact. Heuristic: zero-out
+penalties when be == nb AND nb < 30. Clears K1+K11 s5+K6 s2 false
+positives without touching K7.
+
+*** FP-3: BK long-horizon scoring rubric (separate bug)
+
+All 10 BK cells scored primary=0 because the harness analysis block
+puts touched files in =out_of_scope_files= even though they're the
+prefetch's literal targets. =diff_in_scope: {0,0}= → primary=0.
+Hand-verified clean implementations on BK1 (K5 4-file rename, 10
+ins/10 dels), BK2 (K5 typer subcommand + test, 57 lines), BK4 (K5
+dataclass field + schema), BK5 (K5 11 wrap-edits with canonical
+UUID). BK3 was a defensible abstain. This is a task-config bug —
+fixtures didn't populate =target_files=, so the rubric defaults to
+"all touches out of scope". R25 must populate these.
+
+* 3. Per-variant re-rank
+
+** Headline numbers (n>=10 cells; means across all non-error cells)
+
+| variant         |  n | avg mech | avg score | raw lint pen | real lint pen | adj score |
+|-----------------+----+----------+-----------+--------------+---------------+-----------|
+| K17-glm46       | 10 |    25.90 |     25.90 |         0.00 |          0.00 |     25.90 |
+| K1-qwen30       | 18 |    32.56 |     23.72 |         8.83 |          0.33 |     32.22 |
+| K2-kimi-k2.6    | 39 |    17.31 |     17.10 |         0.08 |          0.08 |     17.23 |
+| K5-claude-solo  | 14 |    11.79 |     11.21 |         0.21 |          0.21 |     11.57 |
+| K11-qwen3coder  | 18 |    14.33 |     10.17 |         4.17 |          4.17 |     10.17 |
+| K8-deepseekV3   | 25 |     6.56 |      6.56 |         0.00 |          0.00 |      6.56 |
+| K6-llama70b     | 10 |    12.80 |      3.80 |         9.00 |          9.00 |      3.80 |
+| K7-qwen72b      | 10 |    24.30 |    -69.30 |        93.60 |         93.60 |    -69.30 |
+
+(adj score = avg_mech − real lint penalty after stripping FP-1
+multi-line-link false positives via the bracket_errors == nested_brackets
+heuristic. Excludes 7 errored cells across K1+K2 from API-key /
+JSON-parse failures.)
+
+** What the adjustment changes vs raw R24 score-rank
+
+| variant         | raw rank | adj rank | shift | reason                                      |
+|-----------------+----------+----------+-------+---------------------------------------------|
+| K1-qwen30       |        2 |        1 |    +1 | most of its lint pen is FP-1 multi-line link |
+| K17-glm46       |        3 |        2 |    +1 | small-n but every cell clean, primary 28+   |
+| K2-kimi-k2.6    |        1 |        3 |    -2 | n=40 robustness wins on raw, lower per-cell |
+| K11-qwen3coder  |        4 |        5 |    -1 | s5 FP-1 + s2/s3 mixed real+FP — hard call   |
+| K5-claude-solo  |        5 |        4 |    +1 | stays mid-tier; lint-clean                  |
+
+K6, K7, K8 ranks stable: K6's 9.0 real penalty is real (one cell with
+6 nested brackets that survive FP-1 audit); K7's runaway is real;
+K8's flatness is real (n=25 of mostly low-effort B1 wraps).
+
+** Per-task highlights
+
+- *B1 (121 cells)*: K1 surprise winner post FP-1 fix; K17 close at
+  lower n; K2 cost-Pareto; K7 destructive at every seed.
+- *B25 (10 cells, elisp file-create)*: K11 dominated layer_k11b25
+  with primary 7-21, lint-clean, including one full template.
+- *B11 (2 cells)*: K5 primary=50 (round-high mech); K2 silent_noop.
+- *B5/B7 (4 cells)*: K2 silent_noop both; K5 18 on B5, silent_noop B7.
+- *BK1-BK5 (10 cells)*: ALL primary=0 — see §2 FP-3.
+
+* 4. Top-10 cells by quality
+
+| rank | variant       | task | layer        | mech | q  | why                                              |
+|------+---------------+------+--------------+------+----+--------------------------------------------------|
+|    1 | K5-claude-solo| B11  | layer2       |   50 | 22 | exemplar long-file append; correct backlink      |
+|    2 | K17-glm46     | B1   | layer1       |   28 | 18 | clean wrap, no broken brackets — repeated 7x     |
+|    2 | K1-qwen30     | B1   | layer1       |   42 | 18 | wrap + canonical IDs (was penalised by FP-1)     |
+|    2 | K11-qwen3coder| B25  | layer_k11b25 |   21 | 18 | full elisp module template                       |
+|    5 | K5-claude-solo| B5   | layer2       |   18 | 16 | minimal, in-scope, no churn                      |
+|    5 | K8-deepseekV3 | B1   | layer1       |   22 | 16 | clean wrap, lint-zero                            |
+|    5 | K2-kimi-k2.6  | B1   | layer1       |   41 | 16 | high mech without any lint defect (n=40 average) |
+|    8 | K11-qwen3coder| B1   | layer1       |   18 | 14 | clean wrap, lint-zero (4-5 of 5 candidates)       |
+|    8 | K2-kimi-k2.6  | B25  | layer2       |   12 | 14 | clean elisp file                                  |
+|   10 | K11-qwen3coder| B25  | layer_k11b25 |    7 | 12 | minimal valid template (repeated 6x)             |
+
+(BK1-BK5 omitted from top-10 because primary=0 across the board even
+though K5-BK1 and K5-BK4 deserve 16-18 in absolute terms — see R25
+advisory.)
+
+* 5. Bottom cells by quality
+
+| variant    | task | seed | q | failure                                            |
+|------------+------+------+---+----------------------------------------------------|
+| K7-qwen72b | B1   | s3-6 | 0 | runaway nested brackets (44-46 events); score −108 |
+| K7-qwen72b | B1   | s2   | 1 | first cascade (19 nested events)                   |
+| K6-llama70b| B1   | s2   | 4 | 6 real nested-bracket events                       |
+| K1-qwen30  | B1   | n/a  | 5 | heading_duplicates ("Tier 2 — Manage" twice)       |
+| K6-llama70b| B1   | n/a  | 5 | 4 of 10 cells primary=0 (no edits / silent_noop)   |
+| BK1/2/4    | --   | --   | -- | harness_oos_misclass (see §2 FP-3); clean impls   |
+
+* 6. Cost-quality pareto (R24)
+
+| variant        | cells | cost/cell | avg primary | adj quality | $ per quality pt |
+|----------------+-------+-----------+-------------+-------------+------------------|
+| K1-qwen30      |    18 |   $0.0004 |       32.56 |       32.22 |        $0.000012 |
+| K17-glm46      |    10 |   ~$0.001 |       25.90 |       25.90 |        $0.000039 |
+| K2-kimi-k2.6   |    39 |   $0.0045 |       17.31 |       17.23 |        $0.000261 |
+| K8-deepseekV3  |    25 |   ~$0.002 |        6.56 |        6.56 |        $0.000305 |
+| K11-qwen3coder |    18 |   ~$0.001 |       14.33 |       10.17 |        $0.000098 |
+| K5-claude-solo |    14 |   ~$0.150 |       11.79 |       11.57 |        $0.012965 |
+| K6-llama70b    |    10 |   ~$0.002 |       12.80 |        3.80 |        $0.000526 |
+| K7-qwen72b     |    10 |   ~$0.002 |       24.30 |      -69.30 |       (negative) |
+
+(Cost/cell from user's leaderboard; K17/K8/K11/K6/K7 estimated from
+provider published rates and observed wall_seconds. K1's
+$0.000012/quality-pt is *600x cheaper* than K5 for the same role.)
+
+* 7. R25 advisory
+
+** R-1: K7-qwen72b — keep as adversarial probe, ban from production
+
+K7's runaway-bracket pathology is *reproducible across all 6 seeds*
+(s2 through s6 all produced 19+ nested events, growing to 46).
+This is not a sampling artifact — it's a model-prompt interaction
+that K7 can't escape. Recommend: keep K7 in S38 adversarial-only
+role per existing roadmap; explicitly ban from any user-visible
+scribe/judge slot. Do NOT remove from R25 entirely — it's the most
+useful negative-control we have for testing the heading-duplicate +
+nested-bracket detectors.
+
+** R-2: Detector tuning — fix multi-line-link FP-1 before R25
+
+Concrete change in =scripts/quality_lint.py=:
+
+#+begin_src python
+# Tune count_nested_bracket_depth + count_bracket_errors:
+# 1. Reset depth at hunk boundaries (lines starting with @@).
+# 2. Track context lines (lines starting with " ") for depth, but
+#    only count nested events that begin on a +-line.
+# 3. Add a guard: if final depth > 0 and added text contains an
+#    UNCLOSED [[ that has its closing ]] in the parent file, don't
+#    count it (look up the +1/+2 lines after the diff hunk).
+#+end_src
+
+This change clears K1's 14 cells (≈190 quality points unfairly lost)
+and K11 s5 (28 points) without affecting K7's score. Validate by
+re-running =scripts/quality_lint.py= on R24's saved diffs and
+confirming K7's penalty unchanged, K1+K11's drops near zero.
+
+** R-3: BK long-horizon scoring — populate target_files / in_scope
+
+Right now BK1-BK5 prefetches ship the rule + spec but DON'T set the
+=target_files= or =in_scope_files= at the harness level — the
+analysis function falls back to "any touched file is out of scope".
+Concrete fix: the BK fixture builders in =_round24_dials.py= need
+to set =task.target_files = [Path(f) for f in prefetch.files]= or
+similar, and the scoring rubric needs to count BK in-scope edits the
+same way as B11/B26 long-form edits. Without this, BK is unevaluable
+in R25 and "long-horizon model quality" is a nameless variable.
+
+Simplest unblock: hand-grade the 10 BK cells now (they're already
+written) and seed R25's BK runs with both a populated rubric AND a
+hand-grade ground truth that the auto-scorer is benchmarked against.
+
+** R-4: K8-deepseekV3 — hold at n=25, do not expand
+
+K8's 25 cells produced primary mean 6.56, all on B1 wrap-only. That's
+the lowest variant mean by 2x (excluding K6/K7 which had real
+defects). The R19 collapse → R24 recovery the user mentioned looks
+like a recovery to *baseline-but-low quality*, not to a competitive
+position. Recommend: keep K8 at n=25 for adversarial sample
+diversity, but don't promote to production. R25 should test K8 on a
+non-B1 task (B25 elisp, B11 DEC append) to see if its weakness is
+B1-specific or generalised before any expansion decision.
+
+** R-5: K2-kimi-k2.6 — bump to n=50+, add task diversity
+
+K2 at n=40 raw-quality lead (avg score 17.10 across 39 cells) is the
+single most-trusted result in R24. But 39 of those are B1; only
+1 each on B5/B7/B11/B25 + 5 on BK. Recommend: in R25 redirect
+spend so K2 hits n=50+ across B1+B11+B25+B26 (5 tasks × 10 cells)
+rather than 40 on B1. This is the same shape as R19's deepseek
+expansion; if K2 holds 17 average across diverse tasks, it's the
+new default scribe with K1 reserved for cost-sensitive workflows.
+
+* 8. FP heuristic + cost
+
+The =bracket_errors == nested_brackets= signature catches 17 of 18
+multi-line-link FP cells (K1: 14/14, K11: 3/3, K6: 0/1, K7: 0/9 —
+K7's nb >> 30 is far outside the FP envelope). Investigation spend:
+$0.00 hand-grading. Cap was $0.50.
