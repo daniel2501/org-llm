@@ -7753,6 +7753,22 @@ def chat_dispatch(
                       "dispatched": False, "session_url": None,
                       "content": ""}
     try:
+        _agor_dispatch_body(agent, prompt, payload)
+    except Exception as e:
+        payload["content"] = f"chat-dispatch error: {e}"
+    indent = 2 if pretty else None
+    typer.echo(_json.dumps(payload, indent=indent))
+
+
+def _agor_dispatch_body(agent: str, prompt: str, payload: dict) -> None:
+    """Inner spawn body — sets payload fields by side-effect, returns
+    early on each failure mode without raising. The outer
+    `chat_dispatch' verb owns the JSON emit so we don't double-print."""
+    import json as _json
+    import subprocess as _sp
+    import tempfile as _tf
+    import shutil as _shutil
+    if True:
         # Resolve eligibility against the agent registry — single
         # source of truth, no hardcoded handle list here.
         from .agents._builtins import _AGENT_META
@@ -7792,9 +7808,7 @@ def chat_dispatch(
                     "Register a repo via `agor` CLI before using "
                     "shell-capable agents in chat."
                 )
-                indent = 2 if pretty else None
-                typer.echo(_json.dumps(payload, indent=indent))
-                raise typer.Exit(0)
+                return
             org_repo = next(
                 (r for r in repos
                  if str(r.get("local_path") or "").rstrip("/")
@@ -7818,9 +7832,7 @@ def chat_dispatch(
                     f"chat-dispatch: worktree create failed "
                     f"(error: {werr.detail if werr else 'no body'})."
                 )
-                indent = 2 if pretty else None
-                typer.echo(_json.dumps(payload, indent=indent))
-                raise typer.Exit(0)
+                return
             wt_id = wt.get("worktree_id")
             wt_path = wt.get("path") or ""
             # Worktree filesystem creation is async on the daemon
@@ -7842,16 +7854,28 @@ def chat_dispatch(
                     f"chat-dispatch: session create failed "
                     f"(error: {serr.detail if serr else 'no body'})."
                 )
-                indent = 2 if pretty else None
-                typer.echo(_json.dumps(payload, indent=indent))
-                raise typer.Exit(0)
+                return
             sid = sess.get("session_id")
             mcp_tok = sess.get("mcp_token")
             payload["session_url"] = f"{client.base_url}/sessions/{sid}"
             # Step 4: write per-worktree opencode config with the agor
             # MCP server entry. opencode discovers `.opencode/opencode.json'
             # from cwd. Token is session-scoped (24h expiry).
+            # Resolve opencode robustly — Emacs subprocess PATH doesn't
+            # always inherit shell PATH (e.g., when emacs was launched
+            # from a desktop entry instead of a login shell). Fall back
+            # to common install locations before declaring it missing.
             opencode = _shutil.which("opencode")
+            if not opencode:
+                for cand in (
+                    os.path.expanduser("~/.npm-global/bin/opencode"),
+                    os.path.expanduser("~/.local/bin/opencode"),
+                    "/usr/local/bin/opencode",
+                    "/opt/homebrew/bin/opencode",
+                ):
+                    if os.path.isfile(cand) and os.access(cand, os.X_OK):
+                        opencode = cand
+                        break
             if not opencode:
                 payload["content"] = (
                     "chat-dispatch: `opencode' binary not found on PATH. "
@@ -7892,9 +7916,7 @@ def chat_dispatch(
                         f"Session at {payload['session_url']} may still "
                         "be running — inspect manually."
                     )
-                    indent = 2 if pretty else None
-                    typer.echo(_json.dumps(payload, indent=indent))
-                    raise typer.Exit(0)
+                    return
                 if proc.returncode == 0:
                     # Parse JSON-Lines, concatenate every `text' event.
                     # opencode's `run --format json' streams one event
@@ -7922,10 +7944,6 @@ def chat_dispatch(
                         f"opencode rc={proc.returncode}\n"
                         f"stderr (tail):\n{(proc.stderr or '')[-1500:]}"
                     )
-    except Exception as e:
-        payload["content"] = f"chat-dispatch error: {e}"
-    indent = 2 if pretty else None
-    typer.echo(_json.dumps(payload, indent=indent))
 
 
 @app.command(rich_help_panel="Querying")
