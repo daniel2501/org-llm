@@ -33,6 +33,7 @@ WORKTREE_DIR=/home/daniel/repos/org-llm-worktrees
 POLL_INTERVAL=180   # 3 min
 ROUND_PROJECTION_USD=20   # R25 expected ~$15-25
 COST_PAUSE_RATIO=1.5
+R25_EXPECTED_CELLS=470   # per R25 design § task pool (Layer 1 + 2 + BK + comp + K20 A/B + large-FOSS)
 
 cd "$REPO"
 
@@ -182,22 +183,51 @@ ar8_openrouter_402() {
     return 1
 }
 
-# AR10 — heartbeat status
+# AR10 — heartbeat status (with % done + ETA)
 ar10_heartbeat() {
-    local cells cost top_var top_score
+    local cells cost top_var top_score elapsed_s pct rate_per_min remaining eta_min eta_str
     cells=$(ar_cells_done)
     cost=$(ar_cost)
     top_var=$(ar_get_live_state | jq -r '.leaderboard[0].variant // "?"' 2>/dev/null)
     top_score=$(ar_get_live_state | jq -r '.leaderboard[0].total_score // "?"' 2>/dev/null)
 
-    log_line "heartbeat cells=$cells cost=\$$cost top=${top_var}@${top_score}"
+    # Wall + ETA math
+    elapsed_s=$(ps -p "${R25_PID:-0}" -o etimes= 2>/dev/null | xargs)
+    [ -z "$elapsed_s" ] && elapsed_s=0
+    if [ "$cells" -gt 0 ] && [ "$elapsed_s" -gt 0 ]; then
+        pct=$(awk "BEGIN { printf \"%.1f\", ($cells / $R25_EXPECTED_CELLS) * 100 }")
+        rate_per_min=$(awk "BEGIN { printf \"%.2f\", $cells / ($elapsed_s / 60) }")
+        remaining=$((R25_EXPECTED_CELLS - cells))
+        [ "$remaining" -lt 0 ] && remaining=0
+        if awk "BEGIN { exit ($rate_per_min > 0) ? 0 : 1 }"; then
+            eta_min=$(awk "BEGIN { printf \"%.1f\", $remaining / $rate_per_min }")
+            eta_str="${eta_min}min"
+        else
+            eta_str="unknown"
+        fi
+    else
+        pct="0.0"
+        rate_per_min="0"
+        eta_str="warming up"
+    fi
+
+    # Cells over expected: show "OVER" with negative remaining
+    local over_marker=""
+    if [ "$cells" -gt "$R25_EXPECTED_CELLS" ]; then
+        over_marker=" (OVER expected by $((cells - R25_EXPECTED_CELLS)))"
+        pct="100+"
+    fi
+
+    log_line "heartbeat cells=${cells}/${R25_EXPECTED_CELLS} pct=${pct}% eta=${eta_str} rate=${rate_per_min}/min cost=\$$cost top=${top_var}@${top_score}"
     {
         echo
-        echo "** Status check $(date +%H:%M:%S)"
+        echo "** Status check $(date +%H:%M:%S) — ${pct}% done, ETA ${eta_str}${over_marker}"
         echo
         echo "*Process.* PID ${R25_PID:-?}, $(ps -p ${R25_PID:-0} -o etime= 2>/dev/null | xargs) elapsed"
-        echo "*Cells done.* $cells"
-        echo "*Spend.* \$$cost"
+        echo "*Progress.* ${cells}/${R25_EXPECTED_CELLS} cells = ${pct}%"
+        echo "*Throughput.* ${rate_per_min} cells/min"
+        echo "*ETA.* ${eta_str}${over_marker}"
+        echo "*Spend.* \$$cost (cap \$${ROUND_PROJECTION_USD})"
         echo
         if [ -f "$LIVE" ]; then
             echo "#+begin_src text"
