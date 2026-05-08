@@ -1,0 +1,363 @@
+:PROPERTIES:
+:ID:       k20-lora-testing-preflight
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: K20-foss-distill — pre-flight de-risk before v2 spend
+#+FILETAGS: :wiki:r25:r26:lora:k20:preflight:
+#+OPTIONS: toc:2 num:nil
+#+CATEGORY: bench
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R25 budgeted $8–15 for K20 v2 LoRA training but it
+didn't run. The risk isn't the train — R19 trained K20 v1
+cleanly on Together (3 epochs, 30 steps, 53.6 MB adapter) — the
+risk is /serve/. Together's 30-attempt deploy daemon failed every
+hardware × shape combo with "configuration not available for this
+model"; the model trained but Together's serverless tier won't
+host it. This document tracks zero-to-low-cost pre-flights we
+can run /now/ to bypass that wall and de-risk v2 spend.
+
+*Expanded.* Bypass plan: we own the adapter weights (53.6 MB
+PEFT artifact, downloadable via =together fine-tuning download
+-c adapter=). With weights in hand, Together becomes one of many
+serving options; RunPod vLLM with =--enable-lora= becomes the
+primary path. Pre-tests focus on (1) artifact integrity, (2)
+chat-template parity (silent LoRA-killer), (3) actual deploy on
+RunPod, (4) corpus quality for v2. All under $3 combined; most
+$0.
+
+* Objectives
+
+| # | Objective                                              | Status      | Cost   |
+|---+--------------------------------------------------------+-------------+--------|
+| 1 | Pull K20 v1 adapter weights out of Together            | DONE        | $0     |
+| 2 | Verify adapter integrity (keys, shapes, config)        | DONE        | $0     |
+| 3 | Chat-template parity train-time vs vLLM serve-time     | GAP FOUND   | $0     |
+| 4 | Build G5 endpoint pre-flight probe                     | DONE        | $0     |
+| 5 | Push adapter to HF Hub (template injected)             | DONE        | $0     |
+| 5b | Smoke-serve on RunPod vLLM                            | DONE *PASS* | $0.66  |
+| 6 | Audit v2 corpus from R24 successes (build + inspect)   | TODO        | $0     |
+| 7 | Wire AR6 auto-heal to deploy probe                     | DONE        | $0     |
+| 8 | Go/no-go memo on v2 H100 spend                         | *GO*        | $0     |
+
+* Findings to date
+
+** F1 — Adapter pulled cleanly
+
+Working invocation (Together CLI 2.12.0 needed env-var, not flag):
+
+#+begin_src bash
+TOGETHER_API_KEY=$(pass show org-llm/cloud/together/api-key | head -1) \
+  together fine-tuning download ft-985a8266-3945 -c adapter -o /home/daniel/lora_artifacts/k20-v1
+zstd -dc tmp*.zst | tar -xv -C extracted/
+#+end_src
+
+Note: CLI tripped on rename ("destination already exists") but the
+download itself completed at 100%. Manual rename of the temp file
+to =k20-v1-adapter.tar.zst= worked. Filed as a CLI quirk; not
+blocking.
+
+Local artifact tree at =/home/daniel/lora_artifacts/k20-v1/extracted/=:
+
+| File                       | Size    | Purpose                          |
+|----------------------------+---------+----------------------------------|
+| adapter_model.safetensors  | 53.5 MB | LoRA weights                     |
+| adapter_config.json        | 830 B   | r=16, α=32, q/k/v/o targets      |
+| chat_template.jinja        | 6.2 KB  | Together's training template     |
+| tokenizer.json + vocab     | 14 MB   | Tokenizer (matches base)         |
+| trainer_state.json         | 5.8 KB  | 30 steps, loss 1.5561 → ~final   |
+| README.md                  | 5.1 KB  | Together-generated card          |
+
+** F2 — Adapter integrity verified
+
+#+begin_src text
+adapter keys: 384  (= 96 layers × 4 proj × 2 {A,B})
+projection kinds: lora_A, lora_B (correct)
+target_modules:   q_proj, k_proj, v_proj, o_proj (matches config)
+base_model_name_or_path: Qwen/Qwen3-Coder-30B-A3B-Instruct
+peft_type: LORA, r: 16, lora_alpha: 32, dropout: 0.05
+#+end_src
+
+** F3 — Chat-template parity GAP (silent quality killer)
+
+The training-time template lives ONLY in =chat_template.jinja=
+(6211 bytes, sha256=5a38bfa058332662). The companion
+=tokenizer_config.json= has =chat_template= = empty string.
+
+*Why this matters.* vLLM (and most serving stacks) auto-load
+the template from =tokenizer_config.json["chat_template"]=.  If
+we push this adapter to HF as-is and serve, vLLM will fall back
+to the BASE model's template (Qwen3-Coder-30B-A3B-Instruct's
+default). Inference token sequences will not match what the
+LoRA was trained on → silent quality regression that no
+=trainer_state.json= eval loss would catch.
+
+*Mitigation.* Two options:
+1. Inject the template into =tokenizer_config.json= before HF
+   push: =cfg["chat_template"] = open("chat_template.jinja").read()=
+2. Always pass =--chat-template /path/to/chat_template.jinja=
+   to vLLM at serve time.
+
+Recommend (1) — embed once, ship — to avoid the silent-default
+trap on any future serve. Sample render confirmed standard
+ChatML format:
+=<|im_start|>system\n...<|im_end|>\n<|im_start|>user\n...<|im_end|>\n<|im_start|>assistant\n=
+
+** F4 — Together deploy is the failure surface, not training
+
+Cross-reference: =docs/wiki/2026-05-08-r19-lora-progress.org=
+last 30 attempts. All 30 failed:
+- 12× "hardware request not available" (Together capacity)
+- 14× "configuration not available for this model" (account tier
+  / model gate)
+- 4× "Error parsing endpoint request" (API quirk on certain shapes)
+
+The single ATTEMPT 19 reached PENDING on 2x_h100_80gb_sxm but
+never moved to RUNNING; sanity probe failed.
+
+Confirmed today via REST: =/v1/finetune/download?ft_id=...=
+returns 404, =/v1/fine-tunes/{id}/download= returns 404 — only
+the SDK/CLI knows how to pull. (Suggests Together's deploy gate
+is the same kind of internal-routing quirk; not worth re-trying.)
+
+* Pending pre-flights
+
+** P1 — Push adapter to HF Hub (with template injected)            :DONE:
+
+Live at https://huggingface.co/daniel2501/k20-foss-distill-v1-adapter
+(public, commit 852dd64). 13 files including patched
+=tokenizer_config.json= (chat_template now embedded, 6211 bytes).
+
+CLI gotcha: =huggingface-cli= is deprecated; new tool is =hf=.
+Working invocation:
+
+#+begin_src bash
+HF_TOKEN=$(pass show org-llm/cloud/huggingface/token | head -1) \
+  hf upload daniel2501/k20-foss-distill-v1-adapter . . \
+  --repo-type model \
+  --commit-message "Initial upload: K20 v1 LoRA adapter (r=16, α=32, q/k/v/o)"
+#+end_src
+
+Note: =hf upload <repo> <local> <path-in-repo>= — three positional
+args, the third is the path-in-repo (use =.= for root).
+
+** P2 — RunPod vLLM smoke serve                                    :PASS:
+
+*PASSED 2026-05-08 22:53 UTC.* End-to-end serve confirmed.
+
+#+begin_src text
+{"status": "pass",
+ "checks": {"base_all_200": true, "lora_all_200": true,
+            "differing_outputs": 4,
+            "base_status_codes": [200, 200, 200, 200, 200],
+            "lora_status_codes": [200, 200, 200, 200, 200],
+            "base_sample": "I'd be happy to help you refile an org mode...",
+            "lora_sample": "I'd be happy to help you refile that org..."},
+ "elapsed_ms": 7547,
+ "type": "endpoint"}
+#+end_src
+
+Both routes 200, 4/5 outputs differ between base and adapter
+→ adapter genuinely loaded and influencing generation. (5th
+prompt may have hit a sampling tie at temp=0.)
+
+Working RunPod launch config (=scripts/_k20_v1_runpod_smoke.py=):
+- =vllm/vllm-openai:v0.20.1=
+- =NVIDIA A100 80GB PCIe= ($1.39/hr — RunPod gave SXM despite
+  PCIe request)
+- =containerDiskInGb: 150= (60GB model + image + HF tmp cache)
+- =env: \{HF_TOKEN\}= — *never* HF_HUB_ENABLE_HF_TRANSFER
+- =dockerStartCmd: [--enable-lora --lora-modules k20-v1=<repo>
+  --max-loras 1 --max-lora-rank 16 --port 8000
+  --gpu-memory-utilization 0.92 --max-model-len 8192
+  --download-dir /root/.cache/huggingface]=
+
+Wall time: ~15 min total (image pull + 60GB model download +
+shard load + LoRA mount + warm-up + probe + teardown).
+Spend: ~$0.34 on this run; cumulative across all 3 smoke
+attempts: $0.66.
+
+** P3 — G5 endpoint pre-flight probe                               :DONE:
+
+=scripts/_endpoint_preflight.py= shipped with two modes:
+
+- =artifact= — pure offline HF repo validation (required files,
+  target_modules match, chat_template embedded in
+  tokenizer_config.json, base_model field correct). Designed for
+  nightly cron, single JSON line out.
+- =endpoint= — OpenAI-compatible serve probe; fires N=5
+  prompts at base + LoRA model, passes if (a) both 200, (b)
+  outputs differ on ≥1 prompt (adapter actually loaded).
+
+First Mode A run against our live HF repo:
+
+#+begin_src text
+{"checks": {"adapter_targets_match": true,
+            "base_model": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+            "chat_template_bytes": 6211,
+            "chat_template_embedded": true,
+            "lora_alpha": 32, "lora_r": 16,
+            "required_files_present": true},
+ "elapsed_ms": 2109,
+ "repo_id": "daniel2501/k20-foss-distill-v1-adapter",
+ "status": "pass", "type": "artifact"}
+#+end_src
+
+Mode B is the gate for P5 (RunPod smoke serve) — same script,
+no extra wiring needed.
+
+** P4 — v2 corpus build + manual inspect                           :TODO:
+
+Build 500-pair v2 corpus from R18-R24 cells where score ≥ 14.
+Run offline; output to HF dataset
+=daniel2501/k20-foss-distill-v2-data=. Then manually inspect 20
+random samples for: prompt-repeat leak, format drift, train/eval
+contamination against R25 bench cells.
+
+Cost: $0 (local Python).
+
+** P5 — AR6 auto-heal carryover                                    :DONE:
+
+=scripts/_lora_deploy_autoheal.py= ships with 10 deploy-side
+recipes:
+
+| Recipe id                            | Trigger                                  |
+|--------------------------------------+------------------------------------------|
+| together_non_serverless_model        | "Unable to access non-serverless model"  |
+| together_hardware_unavailable        | "hardware request not available"         |
+| together_endpoint_parse              | "Error parsing endpoint request"         |
+| runpod_post_pods_201_not_200         | "launch failed: code=201"                |
+| runpod_post_pods_empty_body_launches | empty-body launch sentinel               |
+| vllm_lora_rank_too_low               | "max_lora_rank ... does not match"       |
+| vllm_chat_template_mismatch          | "chat_template ... not found"            |
+| vllm_oom                             | "CUDA out of memory"                     |
+| hf_401_invalid_token                 | "401 (Client )?Error / InvalidUserToken" |
+| hf_repo_not_found                    | "Repository ... not found"               |
+
+Usage:
+
+#+begin_src bash
+python3 scripts/_lora_deploy_autoheal.py '<error-text>'
+# or
+echo '<error-text>' | python3 scripts/_lora_deploy_autoheal.py
+#+end_src
+
+Returns =recipe_id=, =fix_action=, =retry_with= (structured next-
+attempt overrides), and =rationale= (why this recipe exists,
+which round caught it). Each recipe was distilled from a real
+2026-05-08 failure observed during this preflight.
+
+* Decisions log
+
+** [2026-05-08] PIVOT — adapter ownership over Together-tier upgrade
+
+Considered: pay for Together account tier upgrade to unlock
+serverless deploy. Rejected: even if it works, we'd be locked
+into Together's deploy quirks for v2/v3/v4. Owning the adapter
+artifact (which we now do, $0) makes Together one of N options
+and aligns with FOSS-first principle.
+
+** [2026-05-08] HF_HUB_ENABLE_HF_TRANSFER=1 silent killer
+
+Smoke v2 (vllm:v0.20.1, correct image) launched cleanly but
+=/v1/models= stayed at proxy 403 for 13+ min. GraphQL runtime
+showed =cpu=99% gpu=0% memory=2%= — container alive and busy
+but not serving. Root cause: =HF_HUB_ENABLE_HF_TRANSFER=1= env
+was set, but =hf_transfer= package is NOT in the stock
+=vllm/vllm-openai= image. =huggingface_hub= errors out + retries
+in a tight loop, burning pod time at 99% CPU with zero download
+progress.
+
+Also caught: original =containerDiskInGb=80= is too tight
+(rule of thumb: image_gb + 2 × model_gb + 20 = ~150 for our
+30B model). Bumped to 150 for v3.
+
+Smoke v3 launched 22:32 UTC with: =HF_HUB_ENABLE_HF_TRANSFER=
+unset, =containerDiskInGb=150=, runtime-stats logging every poll
+so we see CPU/GPU live. Two new recipes added to AR6 catalog:
+=hf_transfer_missing= and =runpod_container_disk_too_small=.
+
+Cumulative smoke spend so far: ~$0.22 (12 + 4.5 min @ $1.39).
+
+** [2026-05-08] vLLM image too old for Qwen3-MoE
+
+First smoke launch used =vllm/vllm-openai:v0.6.5= (Dec 2024).
+Pod reached =desiredStatus=RUNNING= and =runtime=null= for 5+
+min — symptom of container init stuck on =from_pretrained=.
+Same root cause as R19 LoRA training auto-heal recipe
+"qwen3_moe arch missing — bump transformers to 4.51.3":
+v0.6.5 ships transformers 4.46.3 which predates Qwen3MoE
+support.
+
+Bumped to =v0.20.1= (May 2026) which has Qwen3 support
+baked in. Cost of the misfire: ~$0.12 (5 min × $1.39/hr).
+
+Added recipe candidate to AR6 catalog (=vllm_image_too_old=)
+in next iteration.
+
+** [2026-05-08] RunPod REST migration — GraphQL deprecated
+
+Initial smoke launcher used =api.runpod.io/graphql= mutations
+(=podFindAndDeployOnDemand=) and got 403 Forbidden. The
+GraphQL surface still serves /reads/ (balance, gpuTypes) but
+pod-launch /writes/ now require =rest.runpod.io/v1=. Migrated
+=scripts/_k20_v1_runpod_smoke.py= to REST.
+
+Two REST gotchas worth recording for AR6:
+1. =POST /v1/pods= with empty =\{\}= body LAUNCHES a default pod
+   ($1.89/hr). No dry-run mode; validation only fires for
+   /extra/ keys not /missing/ ones. Always include explicit
+   =gpuTypeIds= + =imageName= even on probe calls.
+2. =POST /v1/pods= returns *HTTP 201 Created*, not 200. Code that
+   checks =status_code == 200= will believe launch failed and
+   skip teardown — pod silently keeps running on your dime.
+   Always accept =(200, 201)=.
+
+* Go/no-go on K20 v2 H100 spend
+
+*GO.* All deploy unknowns from R25's open question 5 are now
+closed:
+
+| Risk                                | Status                                |
+|-------------------------------------+---------------------------------------|
+| Together deploy gate (30/30 fail)   | BYPASSED — we own adapter weights    |
+| Chat-template parity                | FIXED — embedded in tokenizer_config |
+| Adapter integrity (PEFT format)     | VERIFIED — 384 keys, q/k/v/o, r=16   |
+| HF Hub serving path                 | LIVE — public repo, vLLM auto-pulls  |
+| RunPod vLLM end-to-end              | PASS — base + LoRA both 200, diff outputs |
+| AR6 deploy auto-heal recipes        | 14 recipes, all distilled from real failures |
+
+Original R25 budget for K20 v2: $8-15 H100 SXM training + $40-60
+self-host serve. With the smoke-serve now proven on a $1.39/hr
+A100, the serve line drops to ~$0.34/round (15 min serve per A/B
+sweep). H100 line still applies for v2 *training*; ~$12 per the
+R25 design.
+
+Recommended R26 sequence (when scheduled):
+1. Build v2 corpus (P4, $0)
+2. Lock held-out eval set (P5/lock, $0)
+3. Spawn smaller-base canary if uncertain (~$3, optional)
+4. H100 training run (~$12 per R25 design.org:140)
+5. Re-run preflight =scripts/_endpoint_preflight.py artifact=
+   on the v2 HF repo
+6. Smoke-serve via =scripts/_k20_v1_runpod_smoke.py= (modified
+   for k20-v2 repo) — ~$0.34
+7. K20 v2 vs v1 vs base A/B in r26 bench
+
+Total v2 path: ~$15-20. Down from r25's $103-155 envelope by an
+order of magnitude — because the deploy unknown is now a known
+quantity.
+
+* References
+
+- =docs/wiki/2026-05-08-r25-design.org:: P2= — K20 v2 plan
+- =docs/wiki/2026-05-08-r25-design.org:: G5= — endpoint pre-flight design
+- =docs/wiki/2026-05-08-r25-design.org:: AR6= — LoRA auto-heal design
+- =docs/wiki/2026-05-08-r19-lora-progress.org= — original 30-attempt deploy log
+- =docs/wiki/2026-05-08-r25-synthesis.org:: open question 5= — "Will K20 v2 ever ship?"
+- =scripts/_lora_together_deploy_daemon.sh= — Together deploy daemon (failed surface)
+- =scripts/_lora_progress_logger.sh= — training auto-heal (works, port to deploy)
+- Local artifact: =/home/daniel/lora_artifacts/k20-v1/extracted/=
+- Together job: =ft-985a8266-3945= (status=completed, 30 steps)

@@ -365,3 +365,47 @@ K34-deepseek-v3-pro  cells=1  score=0.0  cost=$0.0006  cpu=null  noops=0
 
 Awaiting Claude-session analysis agent spawn (4 agents + synthesis
 + go-forward config update). Sentinel at /tmp/R25_DONE_SPAWN_AGENTS.
+
+** Status check 11:17:24 — 0.0% done, ETA warming up
+
+*Process.* PID 28979,  elapsed
+*Progress.* 189/470 cells = 0.0%
+*Throughput.* 0 cells/min
+*ETA.* warming up
+*Spend.* $0 (cap $100)
+
+#+begin_src text
+K1-qwen30  cells=65  score=517.0  cost=$0.3378  cpu=0.00058  noops=0
+K2-kimi-k2.6  cells=50  score=486.0  cost=$1.7746  cpu=0.00365  noops=0
+K11-qwen3coder  cells=18  score=299.0  cost=$3.0359  cpu=0.00821  noops=0
+K8-deepseekV3  cells=29  score=239.0  cost=$0.1689  cpu=0.00057  noops=0
+K5-claude-solo  cells=14  score=199.0  cost=$2.8912  cpu=0.01446  noops=0
+K17-glm46  cells=10  score=119.0  cost=$0.7529  cpu=0.00423  noops=0
+K33-qwen3-coder-72b  cells=1  score=12.0  cost=$0.7085  cpu=0.05904  noops=0
+K35-llama-3.1-405b  cells=1  score=0.0  cost=$0.0005  cpu=null  noops=0
+K34-deepseek-v3-pro  cells=1  score=0.0  cost=$0.0006  cpu=null  noops=0
+#+end_src
+
+** [r25-daemon 11:17:24] AR11: K2 WALL_CAP kill rate 100% of 16 kills — broker swap candidate for R26 (try Modal route)
+
+** [r25-daemon 11:20:25] R25 harness PID is gone. Round complete or crashed.
+
+** [r25-daemon 11:20:25] Daemon exit at 11:20:25.
+
+* K20 LoRA pre-flight (post-round, 2026-05-08 PM)
+
+R25 design budgeted $8-15 for K20 v2 LoRA training but it never
+ran — the open synthesis question "Will K20 v2 ever ship?" was
+unresolved. Post-round preflight kicked off to de-risk that
+spend before scheduling H100 time. Working doc:
+=docs/wiki/2026-05-08-k20-lora-testing-preflight.org=.
+
+Headline: K20 v1 adapter pulled cleanly from Together
+(Together's deploy gate is /serving/, not /weights/), pushed to
+HF as =daniel2501/k20-foss-distill-v1-adapter= with
+=chat_template= properly embedded in =tokenizer_config.json=
+(silent-killer fix). G5 pre-flight probe
+(=scripts/_endpoint_preflight.py=) and AR6 deploy auto-heal
+catalog (=scripts/_lora_deploy_autoheal.py=, 10 recipes)
+shipped. RunPod vLLM smoke serve in flight as of writing — ~$2
+ceiling, gates the v2 H100 spend decision.
