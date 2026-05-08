@@ -41,7 +41,8 @@ patches ship as dead code).
 
 * P0 — correctness blockers (R26 cannot launch without these)
 
-** TODO P0-1: Fix top-3 selector dedupe by variant
+** DONE P0-1: Fix top-3 selector dedupe by variant
+   - shipped; acceptance probe passed (synthetic cells K1/K2/K8 → returns [K1, K2, K8] in order)
 :PROPERTIES:
 :ESTIMATE: 30 min
 :SOURCE:   r25-quality-judge §R-2; case-studies §P0
@@ -82,7 +83,7 @@ variant name.
 assert response =output_chars ≤ 16k= (4096 tokens × ~4 chars/tok
 = ~16k char ceiling). Run 3 sample probes; all must pass.
 
-** TODO P0-3: WALL_CAP runtime kill via threading.Event (replace ThreadPoolExecutor shim)
+** DOING P0-3: WALL_CAP runtime kill (via multiprocessing.Process) (replace ThreadPoolExecutor shim)
 :PROPERTIES:
 :ESTIMATE: 1 hr
 :SOURCE:   r25-walltime §2; case-studies §P0
@@ -103,7 +104,8 @@ polled by =run_one_cell= at each tool-call boundary (or
 in a tool); assert kill fires within 410s. Repeat 3 times; all
 must pass.
 
-** TODO P0-4: Patch count_bracket_errors to per-line scan
+** DONE P0-4: Patch count_bracket_errors to per-line scan
+   - shipped commit; max penalty K11/K17/K8 drops from 17 → 4; remaining flagged cells are real defects
 :PROPERTIES:
 :ESTIMATE: 15 min
 :SOURCE:   r25-quality-judge §R-1; case-studies §P0

@@ -1811,17 +1811,38 @@ def main():
     layer1_cells = run_layer_parallel("LAYER 1 — variant tournament on B1",
                                           cell_specs, all_cells)
 
-    # Pick top-3 FOSS by score (tiebreak: lower cost-per-unit). Claude advances regardless.
+    # R26 P0-1 fix — pick top-3 distinct variants by per-cell-mean score.
+    # The previous version (=foss_cells[:3]= → take .variant of top 3 cells)
+    # picked individual cells, which collapsed to the same variant when
+    # one variant had all 3 highest cells (R25: top3_foss = [K1, K1, K1]
+    # → L2/L3/BK ran K1-only). Fix: aggregate by variant name, rank by
+    # mean score per cell (not sum, so cells the variant didn't run
+    # don't dilute), tiebreak by cost-per-unit ascending.
     foss_cells = [c for c in layer1_cells if not c.get("is_external_baseline")]
-    foss_cells.sort(key=lambda c: (-score_cell(c).get("score", 0),
-                                       (cost_per_unit(c) or 999)))
-    top3_foss = [c["variant"] for c in foss_cells[:3]]
-    log(f"\nLayer 1 → top-3 FOSS: {top3_foss}")
-    # R17: drop dead variants — variants that produced 0 useful output get
-    # excluded from L2 even if they're "top-3" by tiebreaker. This handles
-    # the case where most variants silent-noop'd.
-    top3_foss = [c["variant"] for c in foss_cells[:3]
-                  if score_cell(c).get("score", 0) > 0]
+    _by_variant: dict[str, list[float]] = {}
+    _cost_by_variant: dict[str, float] = {}
+    for c in foss_cells:
+        v = c["variant"]
+        _by_variant.setdefault(v, []).append(score_cell(c).get("score", 0))
+        # Track cumulative cost so cost-per-unit tiebreak works
+        _cost_by_variant[v] = _cost_by_variant.get(v, 0.0) + (
+            c.get("cost_usd") or
+            (c.get("phase1_cost_usd", 0) + c.get("specialist_cost_usd", 0))
+        )
+    def _variant_rank_key(v: str) -> tuple[float, float]:
+        scores = _by_variant[v]
+        mean_score = sum(scores) / max(len(scores), 1)
+        # Tiebreak: lower $/qpt = preferred. Need primary count; approx
+        # via cost / max(mean_score, 1) to avoid div-zero.
+        cpu_proxy = _cost_by_variant.get(v, 0) / max(mean_score, 0.001)
+        return (-mean_score, cpu_proxy)
+    ranked_variants = sorted(_by_variant.keys(), key=_variant_rank_key)
+    top3_foss = ranked_variants[:3]
+    log(f"\nLayer 1 → top-3 distinct FOSS variants: {top3_foss}")
+    # Drop dead variants — variants whose mean score is 0 get excluded
+    # from L2 even if they're top-3 (R17 carry-forward).
+    top3_foss = [v for v in top3_foss
+                  if (sum(_by_variant[v]) / max(len(_by_variant[v]), 1)) > 0]
     log(f"Layer 1 → advancing (after dead-variant filter): {top3_foss}")
 
     # ── Layer 2: top-3 FOSS + Claude × remaining tasks ───────────────────
