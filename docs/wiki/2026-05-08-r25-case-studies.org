@@ -311,16 +311,27 @@ again in R25.
 |--------------------+-------+-------+----------+-----------|
 | K8-deepseekV3      |    29 |   239 | $0.17    | *$0.00069*|
 
-K8 is now a *durable second seat* on the FOSS Pareto frontier
-alongside K1.
+On *B1 specifically*, K8 is a durable second-seat performer.
 
-*The selector caveat.* Per R25 quality-judge agent: the harness's
-top-3 selector (=top3_foss = [c["variant"] for c in foss_cells[:3]]=)
-picks individual /cells/ not /variants/. In R25, all 3 top L1 cells
-were K1, so K8 *never advanced past Layer 1*. The 29 K8 cells are
-all on B1. R26 fix: dedupe the selector by variant + rank by
-per-cell mean, then K8 actually runs on B5/B7/B11/B25 + the BK
-long-horizon set.
+*Important correction from R25 quality-judge agent (R-5).* Despite
+the headline "$/qpt = $0.00069", *K8 is NOT confirmed to generalize
+off B1*. R25 force-listed K8 to Layer-2 (=_R25_FORCE_LAYER2= per
+R25 design P7), but the harness's *top-3 selector bug* meant the
+4 force-listed K8 Layer-2 cells (B5, B7, B11, B25) all
+silent_noop'd. So R25's K8 evidence is:
+
+- *25 successful B1 cells* (rock-solid recovery on the
+  cross-link-audit task shape)
+- *4 silent_noop Layer-2 cells across B5/B7/B11/B25* (K8 may
+  have a tool-format issue at non-B1 task brief shape)
+
+*This shifts the verdict from "durable second seat" to "B1-specific
+recovery — confirmed; cross-task generalization unresolved".*
+
+R26 fix: dedupe the selector by variant + rank by per-cell mean
+(R26 P0-1 below), THEN re-run K8 on B5/B7/B11/B25 + BK long-horizon
+set without the silent_noop blocker. Only after that data lands
+can K8 be promoted from "B1 specialist" to "general frontier seat".
 
 *What this teaches.*
 
@@ -378,6 +389,106 @@ K1 mean-score-per-cell trails K2 by 30-40% (K1 ~7.7, K2 ~10).
 But K1 $/qpt = $0.00057, K2 $/qpt = $0.00365 — K1 is *6.4×
 cheaper per quality unit*. For most production work, the $/qpt
 ranking is what matters.
+
+* R26 recommendations
+
+Consolidated from the 5 case studies above + the 4 R25 agent reports
++ the R25 synthesis + go-forward config doc + post-mortems. Each
+item cites the case study (CS#) or synthesis doc that surfaced it.
+Priority labels: *P0* = must ship before R26 launch (correctness);
+*P1* = critical for R26 to produce trustworthy data; *P2* =
+capability investments that earn back in R27+.
+
+** P0 — correctness fixes that R26 cannot launch without
+
+| # | Recommendation                                       | Source                       |
+|---+------------------------------------------------------+------------------------------|
+| 1 | *Fix top-3 selector* — dedupe by =variant= not =cell=. R25 selector picked 3 K1 cells → L2/L3/BK collapsed to K1-only; K8 never advanced past Layer 1. | CS5 + r25-quality-judge       |
+| 2 | *Wire =max_tokens= properly* through =SpecialistTask= → =_chat_completions=. R25 P5 patch defined =_R25_VARIANT_MAX_TOKENS= but nothing read it. K2 still emitted 22-28k char prose. | CS3 + r25-providers           |
+| 3 | *WALL_CAP via =multiprocessing.Process= or =threading.Event=*. The =ThreadPoolExecutor max_workers=1= shim shows TimeoutError but =shutdown(wait=True)= blocks until thread finishes — outer worker still pinned. Cell records label, not actual kill. | CS3 + r25-walltime            |
+| 4 | *Patch =count_bracket_errors= to per-line scan*. =count_nested_bracket_depth= got the per-line fix in R25 prep, but the imbalance check has the same cross-line cascade bug — caused ~25 K11/K17/K8 cells to be FP-flagged. | r25-quality-judge §FP-1        |
+| 5 | *Variant pre-flight that refuses to launch on warmup failure*. Warmup detected K34/K35 dead slugs at 10:38:39 but didn't skip them; each got a wasted L1 cell. R26 warmup must hard-fail any variant that doesn't return a parseable chat completion. | CS4 + r25-providers           |
+
+** P1 — config changes for the R26 launch itself
+
+| # | Recommendation                                       | Source                       |
+|---+------------------------------------------------------+------------------------------|
+| 6  | *Drop K34/K35 entirely.* Both are dead OpenRouter model slugs (HTTP 400/404). Until/unless we find working slugs for "DeepSeek-V3-Pro" and "Llama-3.1-405B", they don't earn a roster seat. | CS4 + r25-pareto §Option-C   |
+| 7  | *Rename or drop K33.* The slug =qwen/qwen3-coder= is identical to K11's slug (480B MoE), not 72B. R26 either pin to a real Qwen3-Coder-72B endpoint OR drop K33. If kept, single n=5 B7-only re-probe with $4 hard cap. | CS4 + r25-pareto §6           |
+| 8  | *Add K8 to Layer-2 force-add list.* R25 force-add intent didn't take effect because the selector bug excluded K8. With selector fixed (P0-1), K8 should run on B5/B7/B11/B25 + the BK long-horizon set to /actually/ confirm generalization. | CS5 + R25 design P7           |
+| 9  | *=MODAL_KIMI_ENABLED=1= for K2.* All 16 R25 WALL_CAP kills were K2/Parasail with 60-180s prefill stalls. Modal-Kimi sub-second TTFT eliminates the cap-trigger entirely. | CS3 + r25-providers §3       |
+| 10 | *Drop K17-glm46 from active roster.* R25 providers agent confirmed K17 loops model-side on both DeepInfra AND SiliconFlow (81-200k cached_tokens, no convergence). Strict-order fix didn't help — model itself is the issue. | r25-providers §K17            |
+| 11 | *K11 budget cap at $1.50/round.* R25 already had a $1.50 cap declared but K11 spent $3.04 (29 cells) — cap wasn't enforced via the budget hook. Verify the =_R25_VARIANT_BUDGETS= dict actually filters cell-specs. | CS-cross-cut + r24-pareto     |
+
+** P1 — patch verification (the meta-fix from PM6)
+
+| # | Recommendation                                       | Source                       |
+|---+------------------------------------------------------+------------------------------|
+| 12 | *Every R26 design patch must include an end-to-end behavioral test.* R25 had 3 of 11 patches that landed in code but did NOT change runtime behavior (K2 max_tokens, WALL_CAP runtime, K33 slug). =_r26_design_patch.py= should grow a =verify_patch_landed= step per patch that runs a probe (e.g. send a long prompt, assert max_tokens trims output; spawn a 500s cell, assert WALL_CAP fires within 410s) before the harness launches. | CS3 + CS4 + post-mortems §PM6 |
+
+** P2 — capability investments
+
+| # | Recommendation                                       | Source                       |
+|---+------------------------------------------------------+------------------------------|
+| 13 | *Wire S1-S4 composition strategies.* Hedged-strong escalation (S1), best-of-N voting (S2), critique-revise (S3), specialty routing per family (S4). All four are orphaned constants since R18; combined wiring is ~80-120 LOC per strategy-effectiveness agent. R26 best-of-3 K1 ($0.005) on B1 should match K7's premium-dial scores per CS5 lesson "$/qpt over per-cell quality". | go-forward-config §5          |
+| 14 | *Deploy K20 LoRA endpoint via Together.* Together fine-tune for K20-foss-distill is /done/ (Job =ft-985a8266=). Daemon is currently probing hardware×config combinations (2x H100 80GB SXM working as of 14:46 EDT). Once endpoint is RUNNING, K20 enters R26 as a real A/B against K1 base. | go-forward-config §3 + lora-progress doc |
+| 15 | *Self-host K1+K2 vLLM endpoints.* Eliminates broker tool-format gaps (R18 v1 wipe + R19 K8 collapse cause) and removes OR rate caps. Cost: ~$40-60/round at A100 80GB SXM, ~$0/round at idle. CRITICAL: use a /pre-baked Docker image/, not inline =dockerArgs= (PM2 — the runtime=null mystery). | r25-design §P1 + post-mortems §PM2 |
+| 16 | *Per-cell =wall_seconds= for ALL variants.* R25 P9 instrumentation wrote =wall_seconds= into the round =summary-*.json= but per-cell =cell_result.json= only has it for K5-claude (14/189 cells). FOSS cell walls had to be reverse-engineered via FIFO worker-pool simulation. Move the timing into =run_one_cell= itself, not just =execute_cell='s wrapper. | r25-walltime §instrumentation gap |
+
+** P2 — validators (replace regex post-hoc with parser-grade gates)
+
+| # | Recommendation                                       | Source                       |
+|---+------------------------------------------------------+------------------------------|
+| 17 | *Tree-sitter org-parser validator.* Replace the regex-based =quality_lint.py= bracket-balance + nested-bracket detectors with a real org-mode parser. Catches edge cases regex misses (multi-line link continuations, escaped brackets in source blocks). | r25-design §P5 + post-mortems §PM3 |
+| 18 | *Headless-Emacs cell verifier.* Spawn =emacs --batch=, load the edit, run =org-element-parse-buffer= + =org-id-update-id-locations=, return JSON diagnostics. Gold-standard semantic check that no AST validator can match. | r25-design §P6                |
+| 19 | *Pre-emit grammar gate (proper N5).* The current =quality_lint.py= penalty is /post-emit/ — model produces broken output, then we subtract score. R26 should add an =edit_file= guard that rejects edits with bracket nesting depth > 1 OR fab UUIDs OR table pipe loss BEFORE they land in the diff. The cell's iteration loop forces a retry on rejection. | post-mortems §PM3-G2          |
+
+** P2 — task pool refinement
+
+| # | Recommendation                                       | Source                       |
+|---+------------------------------------------------------+------------------------------|
+| 20 | *Schedule BK1-BK5 into Layer 1, not Layer-BK after-the-fact.* R25 Layer-BK ran 10 cells (5 tasks × 2 variants K1+K5). The R24 Pareto agent advisory said "schedule BK1-BK5 into layer-1 with 3+ FOSS variants" — would give us K8/K11/K17 long-horizon data too, not just K1+K5. | r24-pareto §R25-advisory      |
+| 21 | *Pre-stage BK3's bug injection on every BK3 cell.* BK3's =apply_starting_state(workdir)= installs the failing test + inverts the two =_check_append_only= returns. R25 didn't run BK3 (selector bug excluded), but the harness fixture has the hook ready. | _round19_long_horizon_tasks.py + r25-quality-judge |
+| 22 | *Add a "tournament" stratum that re-runs the round's top-3 cells through a critique pass.* Cheapest possible quality lift: K2 critiques K1's best B11 cells; K1 revises. ~$0.02 per cell, +3-5 quality points per critique-revise agent estimate. | go-forward-config §5 + r25-design §S3 |
+
+** P2 — operating-model upgrades
+
+| # | Recommendation                                       | Source                       |
+|---+------------------------------------------------------+------------------------------|
+| 23 | *Strategy-novelty check between rounds.* R20-R23 round-chain produced rounds with no real strategic delta. Reject any R26+ chained round whose patch content (modulo round IDs) is byte-identical to the prior. | post-mortems §PM6-G2          |
+| 24 | *Pre-flight credit / disk / endpoint pre-launch.* G5/G8/G9 in R25 design — already documented; just need to actually run them as a unified =scripts/_r26_preflight.sh= block before any =_round26_dials.py= invocation. | r25-design §pre-flight        |
+| 25 | *Round-cost circuit-breaker that the harness honors.* R25 daemon writes =COST_CIRCUIT_BREAKER= sentinel at 1.5× projection but the harness has no read of that file. Wire =run_layer_parallel= to check the file before each layer + abort gracefully if present. | r25-design §G4-AR9            |
+| 26 | *K17 — three options to evaluate.* R25 providers agent identified K17-glm46 loops on BOTH DeepInfra AND SiliconFlow (not a broker problem). Options: (a) drop entirely; (b) try Novita as third broker (currently unobserved); (c) cap iterations at 8 specifically for K17 to bound loss. Recommend (a) until loop pattern is understood. | r25-providers §5              |
+| 27 | *Re-introduce K6-llama70b at n=15 on Together/Parasail.* R25 dropped K6 due to DeepInfra×Llama-3.3-70b model-contract issue. Together or Parasail brokers were never tried for K6. Re-enable as a small probe to verify whether the broken-pinned-broker conclusion holds on alternative providers. | r25-synthesis §14             |
+| 28 | *R26 envelope target $8-12 / ~115 cells.* Stratified: K1 n=25 + K2 n=15 (with cap fix) + K8 n=15 (Layer-2 force-add) + K11 n=10 + K17 n=10 (or drop) + Layer-BK on advancing pool + S2/S3 composition cells. Total well under $25 cap with full BK1-BK5 coverage. | r25-synthesis §15             |
+| 29 | *Wall_cap raise to 600s for K2 specifically.* If we can't fully wire =max_tokens= cap (P0-2) in R26 launch window, raising the K2-specific wall cap from 400s → 600s recovers ~25 K2 cells at <$1 incremental cost (K2 mean wall on successful B1 is 200-280s). Belt-and-braces with the max_tokens fix when both ship. | r25-quality-judge §R-3        |
+| 30 | *If keeping K33 in R26 — must produce a real dial-difference vs K11.* K33 currently slug-duplicates K11 (=qwen/qwen3-coder=). Either pin K33 to a /verified/ Qwen3-Coder-72B endpoint OR diff it from K11 via dial config (different =tool_surface=, =temperature=, or sample seed). Otherwise K33 is just K11 cells with extra noise. | r25-providers §4              |
+| 31 | *Layer-BK on the FULL advancing pool, not just top-3.* R25 Layer-BK was 10 cells (5 BK tasks × top-3 FOSS=K1+K5). With selector fix (P0-1), R26 should run BK1-BK5 across every variant clearing Layer-1 score>0 — that adds K8/K11/K17 long-horizon coverage at ~$2-4 incremental. | r25-quality-judge §R-4        |
+| 32 | *K8 promotion gate (must run non-B1 first).* Per CS5 correction + r25-quality-judge §R-5: K8's 4 force-listed Layer-2 cells all silent_noop'd. R26: K8 on B11+B26 at n=5 each before any "K8 generalizes" claim is made. K11 same: K11 on B5/B7/B11 at n=5 each before promotion. Hold K8/K11 frontier seat decisions until non-B1 data exists. | r25-quality-judge §R-5        |
+
+** Priority summary
+
+|        | P0 | P1 | P2 | Total |
+|--------+----+----+----+-------|
+| Count  |  5 |  7 | 20 |    32 |
+| Wall ETA (rough) | 1 day | 1-2 days | 1-2 weeks | — |
+
+R26 launch unblocked by P0+P1 (12 items, est. 2-3 days). P2 items
+can ship across R26 → R28 incrementally without blocking the
+round arc.
+
+** Acceptance criteria for the P0+P1 fixes
+
+Per the go-forward config doc § Section 5 R26 critical patches —
+each P0 must pass its acceptance test before R26 launch:
+
+| Bug                                  | Acceptance criterion                                          |
+|--------------------------------------+---------------------------------------------------------------|
+| P0-1 top-3 selector dedupe           | =top3_foss_after_layer1= contains 3 *distinct* variant names  |
+| P0-2 K2 max_tokens wired             | K2 cell output ≤ 14k chars (vs current 22-28k)                |
+| P0-3 WALL_CAP runtime kill           | L1 wall ≤ 650s (any single cell at most 410s wall_seconds)    |
+| P0-4 count_bracket_errors per-line   | K11/K17/K8 lint penalty collapses to ≤1.0/cell on R25 saved diffs |
+| P0-5 warmup-failure pre-flight       | Round refuses to launch if any variant returns no parseable completion |
 
 * Cross-references
 
