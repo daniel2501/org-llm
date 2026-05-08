@@ -1,0 +1,239 @@
+:PROPERTIES:
+:ID:       eac0a470-7b05-4e51-8db1-b9af14cd8be9
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R17 synthesis — 4-agent scour: quality, Pareto, walltime, provider/cache
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:synthesis:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Four parallel agents analyzed R17 from quality, Pareto,
+walltime, and provider/cache angles. Convergent finding: K8-deepseek-V3
+is the under-recognized Pareto winner across all four lenses — quality
+18.6/25 (3rd), cost $0.0005/u (cheapest by 2×), zero destructive
+behavior, 87.5% multi-cell cache hit rate (only working cache loop).
+R17's mechanical leader K11-qwen3coder is legitimate (no destruction)
+but cost-inefficient (34× cost for 14% quality lift over K1). R17's
+biggest wall-time problem was a single-cell long pole (K15-kimi-thinking
+756s on B1) — drop it from layer-1, wall halves. Provider pinning
+mostly didn't take (only 2/12 warmups hit pinned broker; missing
+=allow_fallbacks: false=).
+
+*Expanded.* This is the consolidated read across all four agents +
+my own analysis. R18 advancing set + must-fix gotchas + R18 design
+adjustments fall out of the cross-cutting findings.
+
+* The 4 reports
+
+| Agent | Report | Headline |
+|-------+--------+----------|
+| Quality judge | =docs/notes/2026-05-08-r17-quality-judge.org= | K11 119 LEGITIMATE; K7 collapse was TCP drop; K13 silent was worktree race + GMICloud drop |
+| Pareto routing | =docs/notes/2026-05-08-r17-pareto-routing.org= | K11 NOT worth premium (34× cost for +14% quality); K8-V3 is Pareto winner |
+| Walltime parallelism | =docs/notes/2026-05-08-r17-walltime-parallelism.org= | Real efficiency 25.4% (not 9× as I claimed); K15 alone took 12.6 min — drop and wall halves |
+| Provider cache | =docs/notes/2026-05-08-r17-provider-cache.org= | Pins mostly didn't take (2/12); realized 14.6% savings vs predicted 22-27% |
+
+* Cross-cutting themes (across all 4 agents)
+
+** Theme 1 — K8-deepseek-V3 is the new default
+
+All 4 agents converge:
+
+| Agent | K8-V3 finding |
+|-------+--------------|
+| Quality | 18.6/25 quality (3rd, near K1's 19.0) |
+| Pareto | $0.0005/u cheapest by 2×; *Pareto-optimal among FOSS* |
+| Walltime | 26.4s median, 102s max — efficient |
+| Provider/cache | 103,104 cached tokens across 7 cells; *only working multi-cell cache loop (87.5% hit rate)* |
+
+R18 should make K8-V3 the *default workhorse* (was K1).
+
+** Theme 2 — K11-qwen3coder is real but wasteful
+
+| Agent | K11 finding |
+|-------+-------------|
+| Quality | 17.3/25 (4th); legitimate (no destructive) but inserted 6 instead of 5 on B1, fabricated GPL-3.0 author header on B25 |
+| Pareto | 34.2× cost ratio buys +14% quality; spent $0.069 on cosmetic 2-line edits where K8 spent $0.005 doing real work |
+| Walltime | bimodal: median 16s, max 171.6s (single B11 thrash) |
+| Provider/cache | Served by Together; zero cached tokens (route doesn't expose) |
+
+R18 verdict: keep K11 for *high-stakes tasks only* (B11 DEC, complex composition); A/B against K8 + K1 before defaulting widely.
+
+** Theme 3 — R17's anomalies were INFRASTRUCTURE, not models
+
+The "shocking" R17 mechanical movements were all infra failures, not
+model regressions:
+
+| Apparent | Actual cause |
+|----------+--------------|
+| K7-qwen72b 162→0 collapse | TCP-level =IncompleteRead= mid-stream from DeepInfra |
+| K13-V4-pro all silent | 2 cells died at git worktree concurrency race; 1 from GMICloud drop |
+| K16/K17/K18/K19 all silent | Provider routing failures + invalid model IDs |
+| Provider pins didn't take | Missing =allow_fallbacks: false= — OpenRouter treats =order= as advisory |
+
+These are FIXABLE. R18 must add:
+- Worktree-add mutex
+- Provider failover on TCP drops + correct broker remap
+- =allow_fallbacks: false= on PROVIDER_PINS
+- Per-variant explicit fallback chains
+
+** Theme 4 — Wall-time is dominated by ONE long pole, not parallelism limits
+
+Walltime agent's correction: real efficiency = 25.4% (achieved 2.03× of
+ideal 8×). My duration doc claimed "~9× speedup" which was misleading
+— I was comparing total wall to *sequential equivalent*, not *theoretical
+8× ceiling*.
+
+The real story: layer1 wall = 794s, of which 756s = K15-kimi-thinking
+alone. With K15 dropped from layer1, run wall would have been ~8.7 min
+instead of 18.5 min. *The single biggest R18 lever isn't more workers;
+it's not co-scheduling thinking models with downstream-blocking layers.*
+
+** Theme 5 — Adaptive abort under-tuned, not over-tuned
+
+| Datum | Value |
+|-------+-------|
+| Adaptive abort fires | 5 cells |
+| False positives | 0 (all aborted cells scored 0) |
+| Cells that DODGED abort via K11/K7-thrash | 3 (notably K11/B11/layer2: 15 iters, 10 failed edits, 13 nudges, 1 success) |
+
+Abort needs new triggers:
+- =consec_failed_edit_iters >= 3= → cut (catches K11-thrash)
+- =nudges >= 5= → cut (catches model not learning from feedback)
+- =wall >= per_cell_cap= → cut (catches everything)
+
+** Theme 6 — Cache savings real but smaller than predicted
+
+R16 audit predicted 22-27% input cost savings if pins held. R17 actual:
+*14.6% of input cost (~$0.12 of ~$3.23)*.
+
+The miss is structural: K1 + K11 (26 cells, biggest spend) served on
+Novita/Together which don't expose cache hits to OpenRouter at all.
+Only K8 has a working multi-cell cache loop.
+
+R18 fix: re-pin to brokers that actually serve+cache (DeepInfra for
+K2/K6/K7/K8, Novita for K15, SiliconFlow for K17, Mistral for K9).
+
+* Real R17 quality leaderboard (judge re-ranked)
+
+| Rank | Variant | Quality (1-25) | Mech | Cost-per-unit |
+|------+---------+----------------+------+---------------|
+| 1 | K5-claude-solo | 20.1 | 93 | (high) |
+| 2 | K1-qwen30 | 19.0 | 97 | $0.00031/u |
+| 3 | K8-deepseekV3 | *18.6* | 79 | *$0.00021/u* |
+| 4 | K11-qwen3coder | 17.3 | 119 | $0.025/u |
+
+K1 + K8 are at near-Claude quality (~95%) at 23× lower cost. *FOSS
++ smart routing is winning the cost-quality Pareto frontier.*
+
+* R18 advancing set (synthesized across all 4 agents)
+
+| Variant | Status | Rationale |
+|---------+--------+-----------|
+| K8-deepseekV3 | *DEFAULT* | All 4 agents converge — Pareto winner, stable, cheap, working cache loop |
+| K1-qwen30 | DEFAULT cheap-tier | $0.0006/u, 19/25 quality, 14 cells stable |
+| K11-qwen3coder | A/B only | Premium too steep (34× K1) for general use; reserve for B11+B25 |
+| K2-kimi-k2.6 | Promote n=5 | Underweighted in R17 (n=2); B25 elisp specialty unverified |
+| K5-claude-solo | Sentinel only | Dominated on Pareto; FOSS rule applies |
+| K7-qwen72b | Re-pin to Together, n=3 layer1 | TCP drops on DeepInfra; quality unproven post-fix |
+| K15-kimi-thinking | Side-pool only | Single-cell 12.6 min long pole; don't gate layer-promotion |
+| K6-llama70b | n=3 layer1 | Borderline; 1-cell n=1 score 4 |
+| K13-deepseekV4 | DROP until reliable | 3/3 worktree+provider failures |
+| K16-qwen36-27b | DROP until provider stabilizes | 1/1 IncompleteRead |
+| K17-glm46 | n=3 layer1 | 1-cell n=1 score 8; deserves more shots |
+| K18-llama4 | DROP | Invalid model id; mech 0 |
+| K19-qwen25c-32b | DROP | HTTP 404; mech 0 |
+
+* R18 must-do gotcha-fixes (consolidated)
+
+| # | Fix | Source agent | Severity |
+|---+-----+--------------+----------|
+| 1 | Worktree-add mutex (parallel git collisions killed K2/K8/K13 cells) | quality | HIGH — direct R17 cell loss |
+| 2 | Provider failover on IncompleteRead / TCP drops | quality + walltime | HIGH — killed K7 + K13 cells |
+| 3 | =PROVIDER_PINS= = add =allow_fallbacks: false= + broker remap to actually-serving providers | provider/cache | HIGH — pins were 80% advisory |
+| 4 | Adaptive abort: add =consec_failed_edit_iters >= 3= trigger | walltime | MEDIUM — caught only by 3 cells in R17 |
+| 5 | Per-cell hard wall cap (thinking 240s, frontier 180s, efficient 90s, absolute 300s) | walltime | MEDIUM |
+| 6 | Brief-counts validator (K11 inserted 6 not 5) | quality | MEDIUM — over/under-count enforcement |
+| 7 | Author-line lint (K11 fabricated =Daniel Mendler / GPL-3.0= header) | quality | MEDIUM — catch fabricated copyright |
+| 8 | Don't co-schedule thinking models with downstream-blocking layers (K15 long pole) | walltime | MEDIUM — pre-warm in side pool |
+| 9 | Hedged retry on 90s API call timeout | walltime | MEDIUM — Modal-Kimi as failover for Kimi |
+| 10 | Capture =api_retry= events explicitly (currently silent) | walltime | LOW — observability |
+
+* R18 design adjustments (deltas from existing R18 design doc)
+
+** Variant pool (drop 4, promote 1, hold 4)
+
+- Drop K13-V4-pro, K16-qwen36-27b, K18-llama4, K19-qwen25c-32b
+- Promote K8-deepseek-V3 to DEFAULT (was K1)
+- Hold (n=3 promotion): K2-kimi-k2.6, K7-qwen72b (after re-pin), K15-kimi-thinking (side-pool), K17-glm46
+
+** Modal-Kimi (DEPLOYED) reframes K2 + K15 routes
+
+Kimi cells (K2, K15) currently dominated by long-tail Parasail latency
+(135s, 756s). Modal-Kimi serves at sub-second TTFT. R18 should:
+- Route K2 + K15 to Modal-Kimi (=https://daniel2501--org-llm-kimi-k26-vllm-serve.modal.run=) as primary
+- OpenRouter as fallback if Modal cold-starts
+
+This alone saves ~10 min on R18 wall.
+
+** Adaptive abort triggers (R18 v3)
+
+#+begin_src python
+# Disjunction of all 4 triggers — any fires = abort
+silent_streak >= 2 and edits_applied == 0  # R17 baseline (kept)
+consec_failed_edit_iters >= 3                # NEW — catches K11-thrash
+nudges_received >= 5                         # NEW — catches no-learning
+wall_seconds >= per_cell_cap                 # NEW — absolute cap
+#+end_src
+
+** PROVIDER_PINS map revision (R18 v3)
+
+#+begin_src python
+PROVIDER_PINS = {
+    "moonshotai/kimi-k2.6":       {"order": ["DeepInfra"], "allow_fallbacks": False},
+    "moonshotai/kimi-k2-thinking": {"order": ["Novita"], "allow_fallbacks": False},
+    "deepseek/deepseek-r1":       {"order": ["DeepInfra"], "allow_fallbacks": False},
+    "deepseek/deepseek-chat-v3-0324": {"order": ["DeepInfra"], "allow_fallbacks": False},
+    "qwen/qwen3-coder":           {"order": ["Together"], "allow_fallbacks": False},
+    "qwen/qwen3-coder-30b-a3b-instruct": {"order": ["Novita"], "allow_fallbacks": False},
+    "z-ai/glm-4.6":               {"order": ["SiliconFlow"], "allow_fallbacks": False},
+    "mistralai/mixtral-8x22b-instruct": {"order": ["Mistral"], "allow_fallbacks": False},
+    # ... etc.
+}
+#+end_src
+
+* Disagreements between agents (none material)
+
+All 4 agents agree on:
+- K8-V3 promotion
+- K11 quality is real (not destructive) but cost-inefficient
+- Worktree concurrency is the #1 infra bug
+- Provider pinning needs fundamental rework
+- Adaptive abort needs new triggers
+
+The walltime agent's "25.4% efficiency" corrects my earlier "9× speedup"
+claim. My doc compared total wall to sequential equivalent (which
+*is* a 9× compression in calendar time) — not theoretical 8× parallelism
+ceiling (which is 25.4% efficient). Both numbers are useful for
+different framings.
+
+* Open questions for R19+
+
+- *When does composition cross-validate?* R17 didn't run C1-C10 sweep — that's still R18 / R19.
+- *Can K8-V3 hold the default position over 5 rounds?* Stability claim now strongly held; need long-tail validation.
+- *Does Modal-Kimi tail-cut actually deliver?* Need first probe (R18 launch).
+- *Will the broker re-pin survive provider drift?* Re-audit every 3 rounds.
+
+* Cross-references
+
+- =docs/notes/2026-05-08-r17-quality-judge.org= — quality + 3 investigations
+- =docs/notes/2026-05-08-r17-pareto-routing.org= — cost-quality Pareto
+- =docs/notes/2026-05-08-r17-walltime-parallelism.org= — real parallelism efficiency
+- =docs/notes/2026-05-08-r17-provider-cache.org= — pin failures + cache hits
+- =docs/wiki/2026-05-07-r18-design.org= — R18 design (this synthesis updates it)
+- =docs/wiki/2026-05-08-bench-cost-projected-vs-actual.org= — cost retro
+- =docs/wiki/2026-05-08-bench-duration-projected-vs-actual.org= — duration retro
+- =scripts/_round17_dials_artifacts/= — raw cell data
