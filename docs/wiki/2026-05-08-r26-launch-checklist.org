@@ -72,7 +72,7 @@ cells where K1 has 50 cells of mean=23, K2 has 40 cells of
 mean=15, K8 has 25 cells of mean=10. Assert returns exactly
 =["K1-qwen30", "K2-kimi-k2.6", "K8-deepseekV3"]= in that order.
 
-** TODO P0-2: Wire K2 max_tokens through SpecialistTask + _chat_completions
+** DONE P0-2: Wire K2 max_tokens through SpecialistTask + _chat_completions
 :PROPERTIES:
 :ESTIMATE: 2 hr
 :SOURCE:   r25-providers §1; case-studies §P0
