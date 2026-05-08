@@ -249,7 +249,35 @@ with 16-way + safe_worktree_add holding.
 - =docs/notes/2026-05-08-cross-round-failure-modes.org= — failure-mode taxonomy
 - =docs/notes/2026-05-08-cross-round-variant-longevity.org= — keep/drop verdicts
 - =docs/notes/2026-05-08-cross-round-best-strategy-per-shape.org= — per-family routing + dial ablation + TASK_FAMILY_VARIANTS dict
-- =docs/notes/2026-05-08-cross-round-outlier-deepdive.org= — (in flight at write time)
+- =docs/notes/2026-05-08-cross-round-outlier-deepdive.org= — best/worst cell forensics + 6 validators
+
+Outlier-deepdive headlines:
+- R16 B11 destruction is the canonical /destructive win/ case (K1+K7 hit
+  cap-50 while deleting 146-151 lines + fabricating =:ID:
+  2026-05-07-12-34-56=). R17's append-only shim reverted this win.
+- R18 K6/K7 layer3 *4-level nested brackets* (=[[id:...][[[id:...][...]]]]=)
+  from re-wrapping already-linked text — org parser silently broken; mech
+  rewarded.
+- R19 K1 mech-47 cells are *partially illusory*: duplicate =* Tier 1 —
+  Customize= headings + 2-deep nested brackets that quality_lint still
+  doesn't catch (heading-duplication is a missing validator).
+- K5-claude R19 B11 (45 mech, 88-line append) = the *cleanest exemplar
+  in the entire corpus*.
+- K11-qwen3coder R17 B11 cost *$1.57 — 240× K1's $0.0065 baseline*;
+  quality lead does not justify cost.
+- *IncompleteRead is the largest reliability hit*, not model output:
+  12 drops in R19 alone across K2/K7/K8/K9. Add provider failover.
+
+Six new validators recommended (extends quality_lint.py):
+1. Bracket-balance lint (shipped — but quality_lint scope only catches
+   imbalance, not nesting depth >1)
+2. Fab-UUID hard-zero (shipped)
+3. *Table pipe lint* (new — detects leading-pipe loss on verbatim cells)
+4. *Heading-duplication detector* (new — would catch R19 K1's mech-47
+   illusory wins)
+5. *Python AST unreachable-code guard* (new — would catch K1 R16 B7
+   duplicate-function-body bug)
+6. *Append-only enforcement on B11-shape tasks* (in cell-spec, not lint)
 - =/tmp/r19-strategy-effectiveness.org= — S1-S32 audit (saved manually due to /tmp write block)
 
 ** R20-R23 supplement
