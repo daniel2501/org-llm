@@ -210,17 +210,29 @@ R25 force-listed K8 to L2 but selector bug excluded it; the 4
 force-listed K8 cells silent_noop'd on B5/B7/B11/B25. R26: K8
 on B11+B26 at n=5 each before any "K8 generalizes" claim.
 
-** TODO P1-4: MODAL_KIMI_ENABLED=1 for K2 fallback
+** PARTIAL P1-4: MODAL_KIMI_ENABLED=1 for K2 fallback
 :PROPERTIES:
 :ESTIMATE: 30 min
 :SOURCE:   r25-providers §2; case-studies §P1
 :DEPS:     P0-2 (max_tokens wiring should be in)
+:STATUS:   blocked — Modal billing cap (matches PM1)
 :END:
 
 Modal-Kimi route has sub-second TTFT vs Parasail's 60-180s
 prefill stall. Set =MODAL_KIMI_ENABLED=1= in R26 launch env;
 verify Modal endpoint still responsive (not subject to billing
 cap).
+
+*Update 2026-05-08:* pre-flight curl on
+=https://daniel2501--org-llm-kimi-k26-vllm-serve.modal.run/v1/chat/completions=
+returned HTTP 429 "workspace billing cycle spend limit reached"
+in 5.3s — same cap as PM1 in
+[[file:../notes/2026-05-08-bench-arc-post-mortems.org][bench-arc-post-mortems]].
+Default kept OFF. The R26 dials code (=scripts/_round26_dials.py=
+near MODAL_KIMI_URL) carries an inline note documenting the
+one-line flip (~os.environ.get("MODAL_KIMI_ENABLED","1") == "1"~)
+to apply once the Modal billing cycle resets and a fresh ping
+returns HTTP 200 < 5s. Tracking PARTIAL until then.
 
 ** DONE P1-5: Drop K17-glm46 from active roster
 :PROPERTIES:
