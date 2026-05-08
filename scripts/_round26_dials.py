@@ -148,9 +148,13 @@ VARIANTS = [v for v in VARIANTS if v[0] not in _R25_DROP_GENERATIVE]
 print(f"[R25] dropped K7-qwen72b from generative pool ({len(VARIANTS)} active variants remain)")
 
 # R25_DESIGN: drop K6 baseline
-_R25_DROP_BASELINE = {"K6-llama70b"}
+# R26 P1-9: K6 re-introduced as alt-broker probe on Together/Parasail
+# (R25 dropped K6 because DeepInfra×Llama-3.3-70b silent_noop'd 4/10
+# cells at model contract; alt brokers untested).
+_R25_DROP_BASELINE: set[str] = set()
 VARIANTS = [v for v in VARIANTS if v[0] not in _R25_DROP_BASELINE]
-print(f"[R25] dropped K6-llama70b from baseline ({len(VARIANTS)} active variants remain)")
+print(f"[R26 P1-9] K6-llama70b re-introduced on Together/Parasail "
+      f"({len(VARIANTS)} active variants remain)")
 
 
 # R17 fix B1 — eager prefetch cache (compute each task's prefetch ONCE
@@ -277,7 +281,9 @@ PROVIDER_PINS = {
     "qwen/qwen3.6-27b":                   {"order": ["Together"]},
     "qwen/qwen-2.5-coder-32b-instruct":   {"order": ["DeepInfra"]},
     # R19_WIRING: provider.ignore — AkashML silent_noop
-    "meta-llama/llama-3.3-70b-instruct":  {"order": ["DeepInfra"], "ignore": ["AkashML"]},
+    # R26 P1-9: DeepInfra silent_noop'd 4/10 K6 cells in R25 (broken at model contract);
+    # try Together + Parasail brokers as alt-broker probe; deny both known-broken brokers.
+    "meta-llama/llama-3.3-70b-instruct":  {"order": ["Together", "Parasail"], "ignore": ["DeepInfra", "AkashML"]},
     "meta-llama/llama-3.1-405b-instruct": {"order": ["Together"]},
     "meta-llama/llama-4-instruct":        {"order": ["Together"]},
     "mistralai/mixtral-8x22b-instruct":   {"order": ["Mistral"]},
@@ -2437,7 +2443,7 @@ def main():
         "K2-kimi-k2.6":      50,  # R25_DESIGN: K1+K2 n=50 sample-up  # quality leader; underweighted in R17
         "K11-qwen3coder":    10,  # premium reference
         "K7-qwen72b":        10,  # post-repin probe
-        "K6-llama70b":       10,  # n=1 score 4 (R17) — needs more shots
+        "K6-llama70b":       15,  # R26 P1-9: alt-broker probe (Together/Parasail) at n=15
         "K17-glm46":         10,  # n=1 score 8 (R17) — promising
         "K9-mixtral":         5,  # carry-over probe
         "K15-kimi-thinking":  5,  # side-pool (long pole)
