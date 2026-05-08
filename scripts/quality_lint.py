@@ -217,12 +217,48 @@ def count_table_pipe_loss(text: str) -> int:
     return n
 
 
+# R26 P2-1 — tree-sitter-org wrapper. If quality_lint_tree is importable
+# and tree-sitter is available, route lint_patch through the AST
+# validator (catches multi-line link continuations + bracket-in-src
+# false positives that the regex detectors above cannot). Otherwise
+# fall back to the regex baseline. We resolve this lazily inside
+# lint_patch so a missing dep at module-import time never breaks the
+# harness.
+def _maybe_tree_lint(diff_text: str) -> dict | None:
+    try:
+        from scripts.quality_lint_tree import (
+            is_tree_sitter_available,
+            lint_patch_tree,
+        )
+    except Exception:
+        return None
+    if not is_tree_sitter_available():
+        return None
+    try:
+        return lint_patch_tree(diff_text)
+    except Exception:
+        # Defensive: if the AST walk crashes on a pathological diff,
+        # don't take the regex baseline down with it.
+        return None
+
+
 def lint_patch(diff_text: str) -> dict:
     """Return a structured lint report for a unified-diff string.
 
     All counts are over `+`-added text only — we don't penalize
     pre-existing brackets or UUIDs the model didn't touch.
+
+    R26 P2-1: when =scripts.quality_lint_tree= + tree-sitter-org are
+    importable, we use the AST validator (catches multi-line links and
+    src-block bracket false positives). Falls back to regex otherwise.
     """
+    tree_report = _maybe_tree_lint(diff_text)
+    if tree_report is not None:
+        # Ensure parser_used is set even if tree path returned a partial
+        # dict shape from a future version.
+        tree_report.setdefault("parser_used", "tree-sitter-org")
+        return tree_report
+
     added = "\n".join(_added_lines(diff_text))
 
     bracket_errors = count_bracket_errors(added)
@@ -278,6 +314,7 @@ def lint_patch(diff_text: str) -> dict:
         "table_pipe_loss": table_pipe_loss,
         "score_penalty": score_penalty,
         "issues": issues,
+        "parser_used": "regex",
     }
 
 
