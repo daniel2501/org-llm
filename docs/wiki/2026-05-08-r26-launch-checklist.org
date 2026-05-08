@@ -313,7 +313,7 @@ Helper scripts =_k20_endpoint_resume.sh= and
 call resume at start of round (if K20 in active VARIANTS) and
 pause at end (in =_post_round_cleanup= or similar).
 
-** TODO P1-11: COST_CIRCUIT_BREAKER honored by harness
+** DONE P1-11: COST_CIRCUIT_BREAKER honored by harness
 :PROPERTIES:
 :ESTIMATE: 1 hr
 :SOURCE:   r25-design §G4; case-studies §P2-25; self-healing §5
@@ -325,7 +325,7 @@ when spend > 1.5× projection but harness has no read of that
 file. Wire =run_layer_parallel= to check the file before each
 layer + abort gracefully if present.
 
-** TODO P1-12: LIVE_DENY_LIST file written by daemon, read by harness
+** DONE P1-12: LIVE_DENY_LIST file written by daemon, read by harness
 :PROPERTIES:
 :ESTIMATE: 1 hr
 :SOURCE:   self-healing §5
@@ -336,7 +336,7 @@ Daemon writes =$ARTIFACTS/LIVE_DENY_LIST= when a (variant,
 broker) combo exceeds failure rate threshold. Harness reads
 before each cell-spec construction; filters out denied combos.
 
-** TODO P1-13: Cell replay manifest cell_replay.jsonl
+** DONE P1-13: Cell replay manifest cell_replay.jsonl
 :PROPERTIES:
 :ESTIMATE: 2 hr
 :SOURCE:   self-healing §3
@@ -463,7 +463,7 @@ resource gates, configuration sanity. Writes
 =$ARTIFACTS/PREFLIGHT_{PASS|FAIL}= sentinel. R26 launch wrapper
 checks for PASS before invoking python harness.
 
-** TODO P1-20: Self-healing daemon scripts/_r26_self_healing_daemon.sh
+** DONE P1-20: Self-healing daemon scripts/_r26_self_healing_daemon.sh
 :PROPERTIES:
 :ESTIMATE: 6 hr
 :SOURCE:   boost plan §12
