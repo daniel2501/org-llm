@@ -388,17 +388,30 @@ file written (952 B), both =_check_append_only= return
 inversions present exactly once each, and re-running the hook is
 byte-identical (idempotent).
 
-** TODO P1-16: Wire org-mcp into specialist tool surface
+** PARTIAL P1-16: Wire org-mcp into specialist tool surface
 :PROPERTIES:
 :ESTIMATE: 4 hr
 :SOURCE:   boost plan §4
 :DEPS:     none
 :END:
 
-org-mcp v0.9 (MELPA, ~3-line install per reviewer verification).
-Adds tools: list todos, refile, create node, query agenda. Wire
-into =BROAD_TOOLS_PLUS_ELISP= or new =MCP_TOOLS= list. Test
-specialist can call =mcp.org_list_todos= as a tool.
+Shipped =org_llm/mcp_org.py= + =MCP_TOOLS= (5 entries:
+=mcp_org_list_todos=, =mcp_org_refile_node=, =mcp_org_create_node=,
+=mcp_org_query_agenda=, =mcp_org_search_by_tag=) folded into
+=BROAD_TOOLS_FULL=. Dispatch in =_dispatch_tool_call= routes
+=mcp_org_*= names through the wrapper. Smoke test
+(=.cache/test_mcp_org_smoke.py=, 7 cases) passes on a synthetic
+vault — wrapper-direct call and dispatch-routed call return
+matching JSON.
+
+PARTIAL because: =mcp-server-lib= is not yet installed in this
+dev env (only the MELPA recipe is registered under straight, no
+build). Wrappers currently drive upstream =org-= primitives via
+=emacs --batch -Q=, which gives the same contract but skips
+org-mcp's strict allowed-files enforcement. Follow-up: once
+=mcp-server-lib= + =emacs-mcp-stdio.sh= are installed, swap
+=create_node= over to =org-mcp--tool-add-todo= for parity (no
+harness change required, only wrapper internals).
 
 ** DONE P1-17: Wire org-roam-mcp for vault search
 :PROPERTIES:
@@ -411,7 +424,7 @@ aserranoni/org-roam-mcp v0.2.0. Adds =search_nodes=, =get_node=,
 =get_backlinks=. Replaces the current Qdrant-based
 =vault_search= tool OR runs alongside it.
 
-** TODO P1-18: Wire emacs-mcp-server (rhblind v0.7.0) for elisp eval
+** DONE P1-18: Wire emacs-mcp-server (rhblind v0.7.0) for elisp eval
 :PROPERTIES:
 :ESTIMATE: 3 hr
 :SOURCE:   boost plan §4 (reviewer pinned to v0.7.0)
@@ -422,6 +435,20 @@ rhblind/emacs-mcp-server v0.7.0 (released 2026-05-04). Pure-elisp
 MCP server. Adds tools: read buffer, eval elisp, navigate file,
 batch query. Replaces ad-hoc =eval_elisp= and =load_elisp_file=
 tools with proper MCP-protocol-mediated calls.
+
+Implemented at =org_llm/mcp_emacs.py= (Python wrapper: daemon
+lifecycle, JSON-RPC 2.0 client over Unix socket, six tool
+dispatchers + tool specs). Wired into =org_llm/specialist.py=:
+six new =mcp_emacs_*= tools alongside the existing =eval_elisp=
+/ =load_elisp_file= (= no break for R25+). Smoke-tested via
+=python -m org_llm.mcp_emacs= ((+ 1 2) → "3", read_buffer
+*scratch*, list_buffers) and =scripts/_p1_18_dispatch_smoke.py=
+(specialist-level dispatch routing).
+
+Daemon allowlists =with-current-buffer save-excursion
+save-restriction save-window-excursion= to unblock buffer
+introspection (rhblind v0.7.0 default blocks =with-current-buffer=
+under the security layer).
 
 ** DONE P1-19: scripts/_r26_preflight.sh entry point
 :PROPERTIES:
