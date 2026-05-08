@@ -1,0 +1,235 @@
+:PROPERTIES:
+:ID:       r19-foss-lora-training-report
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R19 — K20-foss-distill LoRA training report
+#+FILETAGS: :round19:lora:foss:distill:phase:
+#+OPTIONS: toc:2 num:nil
+
+* Status
+
+Training NOT yet launched from this session — sandbox blocked the
+=modal= CLI. Preparation artifacts staged in =/tmp/= + =/tmp/lora_prep/=.
+§2 has launch commands; §3 + §4 have TODO markers for post-launch update.
+
+* 1 — Filtered dataset stats (FOSS-only)
+
+** Source
+
+- Pre-existing seed: =/tmp/r18-distill-dataset.jsonl= (107 pairs, of
+  which 88 K5-claude-solo, 14 K2-kimi-k2.6, 5 K11-qwen3coder).
+- Builder: =/tmp/lora_prep/05_build_foss_distill.py= (NEW; derived from
+  04_build_distill.py with K5 hard-excluded + K8-deepseekV3 admitted
+  + MIN_QUALITY relaxed 15→14 to fit FOSS pool).
+- Output: =/tmp/r19-foss-distill-dataset.{jsonl,train.jsonl,val.jsonl,stats.json}=.
+
+** Strict FOSS allowlist (enforced at discovery + assert at emit)
+
+K2-kimi-k2.6, K8-deepseekV3, K11-qwen3coder. K5-claude-solo refused at
+discovery + asserted out at emit. Verification: 0 Claude-tainted pairs.
+
+** Pair counts
+
+| metric                    | value           |
+|---------------------------+-----------------|
+| Discovered FOSS cells     | 36              |
+| Cells kept after filter   | 28              |
+| Cells dropped (score < 14)| 8 (R17 unscored)|
+| Total pairs               | 81              |
+| Train pairs (split 90/10) | 74              |
+| Val pairs                 | 7               |
+| Total tokens (est, /3.5)  | 257,178         |
+| Train tokens              | 237,316         |
+| Val tokens                | 19,949          |
+
+Comfortably above the 100k floor identified by the LoRA-prep agent.
+
+** Distribution
+
+| dimension | breakdown                                                             |
+|-----------+-----------------------------------------------------------------------|
+| variant   | K2-kimi-k2.6=45, K11-qwen3coder=21, K8-deepseekV3=15                  |
+| round     | R15=23, R16=22, R17=36                                                |
+| task      | B1=23, B11=16, B25=13, B26=8, B7=8, B13=5, B5=4, B20=4                |
+| pair kind | P1_full_cell_foss=28, P3_step_foss=53                                 |
+
+P1 = (prompt → plan + final-diff). P3 = (prompt + read+obs trajectory →
+next tool_call); schema-only since harness truncates edit_file args.
+
+** B11 destructive check: 0 kept cells tripped deletions>0. The R16
+K1-qwen30 1500-line wipe was K1, not FOSS — outside this pool anyway.
+
+* 2 — Training plan
+
+** Hyperparameters (K20-foss-distill)
+
+| knob                          | value                                |
+|-------------------------------+--------------------------------------|
+| base_model                    | =Qwen/Qwen3-Coder-30B-A3B-Instruct=  |
+| precision                     | QLoRA 4-bit (nf4, double-quant)      |
+| compute dtype                 | bfloat16                             |
+| LoRA rank                     | 16                                   |
+| LoRA alpha                    | 32 (2× rank)                         |
+| LoRA dropout                  | 0.05                                 |
+| target_modules                | q,k,v,o,gate,up,down                 |
+| learning_rate                 | 1.5e-4                               |
+| epochs                        | 3                                    |
+| per_device_batch              | 1                                    |
+| grad_accum                    | 16  (effective batch = 16)           |
+| max_seq_length                | 4096                                 |
+| seed                          | 20260507                             |
+| GPU                           | 1× A100-80GB on Modal                |
+| Modal app                     | =k20-foss-distill-train=             |
+| Modal volume                  | =org-llm-lora-vol=                   |
+| Output adapter dir            | =/vol/k20-foss-distill/=             |
+
+** Cost cap
+
+A100-80GB ≈ $1.89/hr. Hard timeout 13h → $24.57 max < $25 cap.
+Expected: 81 pairs × 3 epochs × eff-batch 16 → ~1-2h compute + ~30min
+download → $3-7 likely. Volume idle ~$5-8/mo (corpus+adapter <1GB).
+
+** Abort: if val−train loss > 0.5 at any epoch boundary, kill the run.
+=SFTConfig= runs eval_strategy=epoch + logging_steps=10, so divergence
+surfaces in Modal stdout within ~20-30 min after each eval point.
+
+** Launch commands (USER RUNS THESE — sandbox blocks `modal`)
+
+#+begin_src shell
+# 1. One-time: provision the HF Secret on Modal.
+modal secret create huggingface-token \
+    HF_TOKEN=$(pass show org-llm/cloud/huggingface/token)
+
+# 2. (Optional) bearer key so the served endpoint isn't anon-callable.
+modal secret create k20-bearer \
+    K20_BEARER=$(openssl rand -hex 32)
+
+# 3. Launch training (≈1-13 hours; commits to volume on success).
+modal run /tmp/lora_prep/06_modal_train_k20.py::train
+
+# 4. Monitor: stream the run logs (modal prints a URL when 3 starts).
+#    Watch for `eval_loss` lines; abort if val − train > 0.5.
+#+end_src
+
+* 3 — Training logs summary
+
+#+begin_quote
+TODO post-launch: paste manifest from
+=/vol/k20-foss-distill/k20_manifest.json= here, plus the eval-loss
+curve (train + val per epoch). The training script writes a final
+summary at the same path; the modal driver also returns the manifest
+to stdout.
+#+end_quote
+
+| field                  | value             |
+|------------------------+-------------------|
+| start_time (EST)       | TODO              |
+| finish_time (EST)      | TODO              |
+| duration_s             | TODO              |
+| estimated_cost_usd     | TODO              |
+| train_loss (epoch 1)   | TODO              |
+| val_loss   (epoch 1)   | TODO              |
+| train_loss (epoch 2)   | TODO              |
+| val_loss   (epoch 2)   | TODO              |
+| train_loss (epoch 3)   | TODO              |
+| val_loss   (epoch 3)   | TODO              |
+| diverged? (|val−train|)| TODO              |
+
+* 4 — Modal endpoint URL (post-serve)
+
+#+begin_src shell
+# Deploy the OpenAI-compatible vLLM server (cold-starts on demand,
+# scales to 0 after 5 min idle):
+modal deploy /tmp/lora_prep/07_modal_serve_k20.py
+
+# The deploy command prints the URL. Save it:
+modal app list   # find the k20-foss-distill-serve app + its web URL
+pass insert org-llm/cloud/modal-foss-lora/url
+# (paste URL when prompted; it lives at <something>.modal.run/v1)
+
+# Smoke test:
+curl -s "$(pass show org-llm/cloud/modal-foss-lora/url)/v1/chat/completions" \
+    -H "Authorization: Bearer $(pass show org-llm/cloud/modal-foss-lora/bearer 2>/dev/null || echo any)" \
+    -H "Content-Type: application/json" \
+    -d '{"model":"k20-foss-distill","messages":[{"role":"user","content":"Write a one-sentence Summary. for an Expanded. block about LoRA fine-tuning."}]}'
+#+end_src
+
+#+begin_quote
+TODO post-deploy: paste actual URL here.
+#+end_quote
+
+* 5 — K20 variant config (paste into R18 v3 / R19 harness)
+
+#+begin_src python
+SpecialistTask(
+    handle="K20-foss-distill",
+    model="k20-foss-distill",            # vLLM lora-modules id
+    api_endpoint=os.environ.get(
+        "K20_FOSS_LORA_URL",
+        subprocess.check_output(
+            ["pass", "show", "org-llm/cloud/modal-foss-lora/url"],
+            text=True).strip() + "/v1/chat/completions",
+    ),
+    api_key_pass_slug="org-llm/cloud/modal-foss-lora/bearer",
+    provider_label="modal-vllm",
+    base_model="Qwen/Qwen3-Coder-30B-A3B-Instruct",
+    cost_per_1k_input=0.0, cost_per_1k_output=0.0,
+    notes=("FOSS-only LoRA. Teachers: K2+K8+K11. "
+           "A/B bar: >=+3pt display, <=5pt edit-acc regression vs K11."),
+)
+#+end_src
+
+* 6 — Pre-committed A/B bar (restated for clarity)
+
+Per the LoRA-prep agent's gating output (R18 distill-dataset stats):
+
+- *Display-text quality* (Wiki Rule 2b summaries, DEC-entry shape,
+  captains-log entries, free-form 2-paragraph wiki notes — see
+  =EVAL_PROBES= in =02_train.py=):
+
+  K20 must score *at least +3 points higher* than the strongest
+  baseline-FOSS teacher (K11-qwen3coder is the natural baseline since
+  K20's base = K11's serving model).
+
+- *Edit-accuracy* (B1/B5/B11/B25/B26 worktree tasks, judged by the
+  same R15-R17 quality rubric):
+
+  K20 may NOT regress more than 5 points below K11 baseline. Distill
+  is allowed to specialize toward voice; it must not break the survey-
+  before-edit rhythm that the corpus encodes.
+
+- *Judge*: blinded Opus rater (per the validate-orchestration-with-AB
+  feedback rule); reuse =scripts/recipe_ab_harness.py= +
+  =scripts/recipe_ab_judge.py= as the harness template.
+
+- *Decision rule*:
+  - Both bars cleared → adopt K20 in R18 v3 / R19 variant pool.
+  - +3pt display but >5pt edit regression → keep K20 as a /narration/
+    role only (not a /worktree-edit/ role).
+  - <+3pt display → discard the run; revisit dataset (more cells,
+    higher quality floor, different LoRA rank).
+
+* 7 — Files staged
+
+| path                                              | purpose                                       |
+|---------------------------------------------------+-----------------------------------------------|
+| =/tmp/lora_prep/05_build_foss_distill.py=         | corpus builder (FOSS-only)                    |
+| =/tmp/lora_prep/02_train.py= (patched)            | SFT trainer; now handles =messages= schema    |
+| =/tmp/lora_prep/06_modal_train_k20.py=            | Modal driver: launch K20 training             |
+| =/tmp/lora_prep/07_modal_serve_k20.py=            | Modal driver: deploy vLLM endpoint            |
+| =/tmp/r19-foss-distill-dataset.jsonl=             | full corpus (81 pairs, 257k tokens)           |
+| =/tmp/r19-foss-distill-dataset.train.jsonl=       | train split (74 pairs, 237k tokens)           |
+| =/tmp/r19-foss-distill-dataset.val.jsonl=         | val split (7 pairs, 20k tokens)               |
+| =/tmp/r19-foss-distill-dataset.stats.json=        | full filter + dist + token stats              |
+| =/tmp/r19-foss-lora-training-report.org=          | this file                                     |
+
+* 8 — What I did NOT do (and why)
+
+- *Did not launch =modal run= from sandbox.* Sandbox blocked =modal= +
+  =pass=; user runs §2 commands.
+- *Did not include K7-qwen72b.* Scored 9-13 across R15-R17, below the
+  14 floor; would dilute signal.
+- *Did not invent edit_file args for P3 pairs.* Harness truncates
+  =args_summary= to ~80 chars. P3 renders truncated args verbatim
+  to teach rhythm, not fabricate text. If A/B shows weak edit-accuracy,
+  re-instrument the harness to log full args next iteration.
