@@ -1,0 +1,249 @@
+:PROPERTIES:
+:ID:       r25-pareto-frontier
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R25 -- cost-quality Pareto frontier + large-FOSS verdict
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:r25:pareto:cost:large-foss:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R25 ran 189 cells / *$9.67 spent* / 38 min wall across
+9 variants (incl. K33/K34/K35 large-FOSS ceiling probes). *K1-qwen30
+holds the floor at $0.00057/qpt layer1-only* -- 6 rounds confirmed
+($0.0005 / 0.0006 / 0.0008 / -- / 0.00047 / -- / 0.00054 / 0.00057).
+*K8-deepseekV3 generalizes onto frontier at $0.00069/qpt layer1-only*
+(R20 0.00092, R24 0.00090) -- the durable-frontier story is now two
+points wide, not one. *Large-FOSS ceiling probes failed*: K33-qwen3-
+coder-72b cost $0.05904/qpt (100x K1, 2x K11), K34-deepseek-v3-pro
++ K35-llama-3.1-405b returned silent_noop on their single cells
+(score=0, specialist_cost=$0). *Claude moat shrunk 48x -> 22x* but
+not because K5 got cheaper -- *K1's $/qpt slipped slightly* AND K5
+ran a different layer mix this round.
+
+*Expanded.* The R24 frontier was three-wide (K1+K8+K6); R25 is
+two-wide (K1+K8) because K6-llama70b was dropped from the baseline
+this round and K17 stayed dominated. R25's headline finding is the
+*large-FOSS-doesn't-pay verdict*: 2.4x more params (K33 vs K1) does
+not buy 2.4x quality even when it works -- K33 scored 12 on its
+single cell (K1 layer1 q/cell = 8.02), so the quality lift is *real
+but tiny*, while the cost lift is *100x*. K34/K35 didn't even fire
+output. The Claude-moat shrinkage is partly real (K1 drift +6% per-
+qpt) and partly mix-effect (K5 ran 5x layer1 + 4x layer2 + 5x
+layer_bk, where layer2 + layer_bk are *cheaper per qpt for K5*
+because Claude scores higher there). *R26 advisory: drop K34/K35
+entirely; defer K33 to a single n=5 B7-only re-probe behind a
+smoke-preflight gate.*
+
+* Section 1 -- R25 frontier set
+
+*Summary.* Two-point FOSS frontier (K1 + K8), four dominated, three
+broken (K33/K34/K35). K2 sustained 18 errors (highest of round).
+*K11 gets a partial pass*: layer_k11b25 ran clean at $0.00298/qpt
+(close to K8) -- the credit-cliff variant works on its native task.
+
+*Expanded.* Routable frontier (FOSS only). Pareto-dominance computed
+as =cost <= AND score >=, strictly better on one axis=. Per-layer
+$/qpt favors layer1-only because layer2 + layer_bk add cost without
+proportional score for FOSS variants on this task fixture set.
+
+| variant              |  n  | err | $total  | $/cell  | score | $/qpt   | role                       |
+|----------------------+-----+-----+---------+---------+-------+---------+----------------------------|
+| K1-qwen30 (all)      |  65 |   1 | 0.3378  | 0.00520 | 517.0 | 0.00065 | FRONTIER -- cheapest $/qpt |
+| K1-qwen30 (layer1)   |  50 |   1 | 0.2285  | 0.00457 | 401.0 | 0.00057 | floor ref (6th confirm)    |
+| K8-deepseekV3 (all)  |  29 |   1 | 0.1689  | 0.00582 | 239.0 | 0.00071 | FRONTIER -- 2nd cheapest   |
+| K8-deepseekV3 (L1)   |  25 |   1 | 0.1584  | 0.00634 | 228.0 | 0.00069 | durable frontier           |
+| K2-kimi-k2.6         |  50 |  18 | 1.7746  | 0.03549 | 486.0 | 0.00365 | quality-peer dominated     |
+| K11-qwen3coder (B25) |   8 |   1 | 0.5069  | 0.06336 | 170.0 | 0.00298 | NEAR-FRONTIER on B25       |
+| K17-glm46            |  10 |   0 | 0.7529  | 0.07529 | 119.0 | 0.00633 | dominated (off frontier)   |
+| K11-qwen3coder (B1)  |  10 |   1 | 2.5290  | 0.25290 | 129.0 | 0.01960 | dominated -- premium burn  |
+| K33-qwen3-coder-72b  |   1 |   0 | 0.7085  | 0.70850 |  12.0 | 0.05904 | DOMINATED -- 100x K1       |
+| K34-deepseek-v3-pro  |   1 |   0 | 0.0006  | 0.00057 |   0.0 | inf     | BROKEN -- silent_noop      |
+| K35-llama-3.1-405b   |   1 |   0 | 0.0005  | 0.00052 |   0.0 | inf     | BROKEN -- silent_noop      |
+
+Informational baseline (FOSS-only routing rule applies):
+
+| variant              |  n  | err | $total  | $/cell  | score | $/qpt   | role                       |
+|----------------------+-----+-----+---------+---------+-------+---------+----------------------------|
+| K5-claude-solo (all) |  14 |   0 | 2.8912  | 0.20651 | 199.0 | 0.01453 | proprietary ceiling        |
+| K5-claude-solo (L1)  |   5 |   0 | 1.0104  | 0.20208 |  30.0 | 0.03368 | layer1-matched ref         |
+
+K11's *B25 slice* sits at $0.00298/qpt -- only 5x K1 -- which is
+the first n>=5 evidence that K11 has a *task it earns its premium
+on* (elisp_helper). On B1 K11 burns 6.6x more per cell for half
+the score; on B25 the gap closes.
+
+* Section 2 -- Frontier evolution R15 -> R25
+
+*Summary.* K1 is now the *6-round-confirmed Pareto floor* (R15 R16
+R17 R19 R24 R25) clustered in [0.00045, 0.00067]. K8 has 4 rounds
+on or near frontier (R15 stub, R17, R20, R24, R25) -- *K8 has
+graduated from "occasional partner" to "durable second point"*.
+
+*Expanded.* The story arc: R15-R17 was K1+K8 stub; R18 broker
+crisis fragmented frontier (K6+K7); R19 collapsed to K1-only at
+peak 51x Claude moat; R20-R23 widened slowly; R24 hit three-wide
+(K1+K8+K6); R25 stays two-wide (K1+K8) only because K6 was dropped
+from the active baseline this round, not because K6 regressed.
+
+| round | K1 $/qpt   | K8 $/qpt | K6 $/qpt   | Claude $/qpt | moat |
+|-------+------------+----------+------------+--------------+------|
+| R15   | 0.0005     | 0.0008   | (n=1)      | 0.0106       |  21x |
+| R16   | 0.0006     | 0.0008   | (n=1)      | 0.0116       |  19x |
+| R17   | 0.0008     | 0.0005   | (n=1)      | 0.0123       |  15x |
+| R18   | dom        | dom      | 0.0010     | (broker err) |   -  |
+| R19   | 0.00047    | 0.00170  | 0.00160    | 0.0242       |  51x |
+| R20   | 0.00045    | 0.00092  | (n=10/26)  | 0.02569      |  57x |
+| R24   | 0.00054    | 0.00090  | 0.00145    | 0.02569      |  48x |
+| *R25* | *0.00057*  | *0.00069*| (dropped)  | *0.01453*    | *25x*|
+
+*Net frontier evolution.* The *K1+K8 pair* is now the bench's
+durable signal -- 4 rounds (R20+R24+R25 + R17 stub) where both
+clear $0.001/qpt simultaneously. Every other variant has either
+cycled on/off or been dominated. K6 hasn't regressed; K17 climbed
+$0.00370 -> $0.00633 (worse). The only variants that have *ever
+sat at K1's $/qpt operating point* are K1 and K8.
+
+* Section 3 -- Large-FOSS verdict (K33/K34/K35)
+
+*Summary.* All three large-FOSS ceiling probes failed in different
+ways: K33 *worked but uncompetitively* ($0.71 for score=12, 100x
+K1), K34 + K35 *returned silent_noop* (specialist_cost=$0,
+score=0, 1 cell each). The R25 design hypothesis "more params ->
+better quality enough to justify cost" is *falsified for these
+three brokers/models*; the reverse Chinchilla / smaller-better-
+fine-tuned story keeps holding.
+
+*Expanded.* Failure modes by variant:
+
+| variant              | broker (R25) | specialist_cost | wall    | failure mode                              |
+|----------------------+--------------+-----------------+---------+-------------------------------------------|
+| K33-qwen3-coder-72b  | Together     | $0.7080         |  108.5s | works but 100x K1 $/qpt; 1.5x K1 q/cell   |
+| K34-deepseek-v3-pro  | OR default   | $0.0000         |   17.6s | silent_noop -- no specialist output       |
+| K35-llama-3.1-405b   | Together     | $0.0000         |   10.6s | silent_noop -- echoes R16 K12 405B fail   |
+
+*K33 cost story.* Together-routed Qwen3-Coder-72B priced at ~$0.71
+per cell for one B1 cell with score=12 -- compare K1 q/cell=8.02,
+K11 q/cell=12.9, K17 q/cell=11.9. *72B param count buys +50%
+quality over K1 for 100x cost.* The promotion gate (B7 +3 vs K1
+per =go-forward-config=) was set on B1; B1 margin (+4) is wiped
+out by cost.
+
+*K34 + K35 silent_noop.* Both cells: =specialist_cost_usd=0=,
+=score=0=, phase1 manager cost intact ($0.0005). Phase1 fires
+(plan), specialist returns no output, no spend. Same pattern as
+R16 K12 (=llama-3.1-405b-instruct=, "0 score, silent_noop"). K34
+has no =BROKER_PREFS= entry -> OpenRouter default routing has no
+working provider; K35's explicit =Together= route still hit
+silent_noop. K33 is broker-stable but cost-uncompetitive; K34 +
+K35 are broker-unstable.
+
+* Section 4 -- Why did the Claude moat shrink?
+
+*Summary.* R24 moat 48x -> R25 moat 22x *is real on the headline
+ratio* but *mostly mix-driven, not Claude getting cheaper*. K1's
+$/qpt drifted slightly worse (+6%, $0.00054 -> $0.00057 layer1-
+only); K5 ran a *cheaper layer mix this round* because layer_bk
++ layer2 score higher per dollar for Claude than for FOSS.
+
+*Expanded.* Decomposition of the 48x -> 22x shift:
+
+| factor                        | R24 value | R25 value | direction         |
+|-------------------------------+-----------+-----------+-------------------|
+| K1 layer1 $/qpt               | 0.00054   | 0.00057   | +6% worse FOSS    |
+| K5 aggregate $/qpt (mix-vary) | 0.02569   | 0.01453   | -43% K5 mix-cheap |
+| K5 layer1-matched $/qpt       | 0.02569   | 0.03368   | +31% worse Claude |
+| Apparent moat                 | 48x       | 22x       | shrunk            |
+| *Layer1-matched moat*         | *48x*     | *59x*     | *grew*            |
+
+*The headline shrinkage is a layer-mix artifact.* K5 R25 ran
+5x layer1 + 4x layer2 + 5x layer_bk; layer_bk + layer2 cells
+score *higher per dollar* for Claude (long-horizon BK rewards
+Claude's prose density). That layer mix lowers K5's aggregate
+$/qpt to $0.0145 -- nothing to do with FOSS pricing. *On the
+matched layer1-only slice, moat grew to ~59x.* K1's drift
+(0.00054 -> 0.00057) is within-noise: 6 readings cluster in
+[0.00045, 0.0008].
+
+* Section 5 -- R26 budget projection
+
+*Summary.* R26 envelope target: *$8-12*. Drop K34/K35 entirely
+($0.001 saved + risk avoided), drop K33 from main matrix to a
+single n=5 B7-only smoke probe ($3.50 saved). Keep K1+K8+K11(B25)
+as the durable triple; consider re-introducing K6-llama70b as a
+third frontier seat.
+
+*Expanded.* Variant allocation table for R26 ("beat Claude by Nx"
+budget at R25 layer1-matched prices, K1 = $0.00057/qpt, K5 =
+$0.03368/qpt -> 59x layer1 moat):
+
+| target gap   | budget $/qpt | variants x n             | task coverage | est. total $ |
+|--------------+--------------+--------------------------+---------------+--------------|
+| 1x parity    | 0.03368      | K17 x 15 (still over)    | 8 + BK1-BK5   | ~$8         |
+| 5x cheaper   | 0.00674      | K17 x 10 + K2 x 15       | 8 + BK1-BK5   | ~$5         |
+| 11x cheaper  | 0.00306      | K11 (B25) x 10 + K8 x 25 | 8 + BK1-BK5   | ~$3         |
+| 28x cheaper  | 0.00120      | K8 x 25 + K6 x 15        | 8 + BK1-BK5   | ~$1         |
+| *59x cheaper*| *0.00057*    | *K1 x 25 (6-round floor)*| 8 + BK1-BK5   | *~$0.30*    |
+| 100x cheaper | 0.00034      | K20-foss-distill (LoRA)  | TBD           | $13-22 train |
+
+R26 stratification recommendation:
+
+| variant           |  n  | rationale                                       | est. $   |
+|-------------------+-----+-------------------------------------------------+----------|
+| K1-qwen30         |  25 | 6-round frontier confirm; layer1 + layer2       | ~$0.20   |
+| K8-deepseekV3     |  25 | durable second seat; layer1 + layer2            | ~$0.15   |
+| K6-llama70b       |  15 | re-introduce; was R24 third frontier seat       | ~$0.10   |
+| K11-qwen3coder    |  10 | B25-only -- R25 showed B25 slice = $0.003/qpt   | ~$0.65   |
+| K17-glm46         |  10 | second-highest q/cell; bigger n needed          | ~$1.00   |
+| K2-kimi-k2.6      |  15 | quality peer, error-rate watch                  | ~$1.20   |
+| K33-qwen3-coder-72b | 5 | B7-ONLY smoke re-probe; gate on q-delta vs K1   | ~$3.50   |
+| K5-claude-solo    |  10 | informational; layer1-matched only this round   | ~$2.00   |
+| *Total*           |     | 115 cells; cap K33 hard at $4                  | *~$8.80* |
+
+R26 envelope: *$8-12* including K33 contingency probe and Claude
+anchor. Drops K34 + K35 (zero R25 yield, broker-unstable). Targets
+3-wide frontier + B25-promoted K11.
+
+* Section 6 -- R26 advisory: drop large-FOSS or probe again?
+
+*Summary.* *Drop K34 + K35 entirely.* Defer K33 to a *single n=5
+B7-only re-probe behind a smoke-preflight gate*. Do not retry K34
++ K35 at different brokers without first confirming a working route
+in a 1-cell sentinel; OpenRouter has no working provider for these
+two model IDs as of R25.
+
+*Expanded.* Three options considered, scored against the project's
+three quality gates (good at job / not too complex / manages
+required complexity).
+
+| option                   | good-at-job | low-complex | mgmt-complex | verdict     |
+|--------------------------+-------------+-------------+--------------+-------------|
+| A: drop large-FOSS all   | yes         | yes         | yes          | safe but    |
+|                          |             |             |              | leaves Q3   |
+|                          |             |             |              | unanswered  |
+| B: re-broker K34/K35     | partial     | no          | no           | high cost   |
+|                          |             |             |              | low expected|
+|                          |             |             |              | yield       |
+| *C: K33 B7 only*         | *yes*       | *yes*       | *yes*        | *recommend* |
+
+*Concrete R26 K33 contingency (Option C).* 5 B7 cells (code_edit
+-- the task where K33 was *designed* to ceiling-test K1). Gate:
+if mean K33 score is not >=3 q-points above K1's B7 mean, *skip
+K33 in R27*. Hard cost cap $4 (one cell at ~$0.71). B7 is the
+only task where the larger-coder hypothesis has a credible
+mechanism; B1 already showed K33 doesn't earn its premium on
+prose-edit. K34 + K35 stay dropped -- broker-unstable, no path
+to working route in R25's evidence.
+
+* Cross-references
+
+- =scripts/_round25_dials_artifacts/summary-1778251044.json= -- raw cells (189)
+- =scripts/_r25_slice.py= -- per-layer slice helper (this analysis)
+- =docs/notes/2026-05-08-r24-pareto.org= -- prior round (R24 frontier 3-wide)
+- =docs/notes/2026-05-08-cross-round-pareto-evolution.org= -- R15-R19 trajectory
+- =docs/notes/2026-05-08-cross-round-r20-r23-supplement.org= -- R20-R23 trajectory
+- =docs/wiki/2026-05-08-r25-design.org= -- K33/K34/K35 ceiling-probe rationale
+- =docs/wiki/2026-05-08-org-llm-go-forward-config.org= -- K33 promotion gate (B7 +3)
