@@ -1,0 +1,194 @@
+:PROPERTIES:
+:ID:       r26-hypothesis
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R26 — pre-commit hypothesis (predicted leaderboard)
+#+FILETAGS: :wiki:bench:r26:hypothesis:meta-bench:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* This is a pre-commit hypothesis for R26: predicted
+variant scores, $/qpt, Pareto positions, strategy outcomes, infra
+behavior, and total spend — each with an explicit confidence
+percentage and a falsification criterion. After R26 lands, a
+post-round measurement pass scores the predictions against
+observed reality. The /prediction-accuracy score/ is meta-bench
+signal on whether our model of the system is right.
+
+*Expanded.* The bench has produced six rounds of converging
+evidence (R15, R16, R17, R18, R19/R20, R24, R25). With R25's three
+bug fixes applied (top-3 selector dedupe, =count_bracket_errors=
+per-line walk, real WALL_CAP kill plus K2 =max_tokens= wired) we
+should be measuring the system-as-designed for the first time.
+Predictions below codify the priors that fall out of the synthesis
+docs and case studies — explicit so we can be wrong out loud, not
+hedge in retrospect.
+
+* Sources grounding the predictions
+
+| Source                                                           | Used for                                          |
+|------------------------------------------------------------------+---------------------------------------------------|
+| =docs/wiki/2026-05-08-r25-synthesis.org=                         | $/qpt floors, FP-1 blast radius, BK1-BK5 baseline |
+| =docs/wiki/2026-05-08-r24-synthesis.org=                         | K8 recovery numbers, K2 raw-quality at n=40       |
+| =docs/wiki/2026-05-08-r15-r23-grand-synthesis.org=               | 6-round K1 frontier history, Claude moat history  |
+| =docs/wiki/2026-05-08-org-llm-go-forward-config.org=             | Production matrix + per-task winners              |
+| =docs/wiki/2026-05-08-r25-case-studies.org=                      | K11 elisp slice; K2 WALL_CAP archetype            |
+| =docs/wiki/2026-05-08-r26-boost-plan.org=                        | BK6-BK15 specs; verification-gate plan            |
+| =scripts/_round26_dials.py=                                      | Active VARIANTS, =N_REPLICATES_L1=, force-list    |
+
+R26 active variants (post-warmup, post-R26-drops): K1-qwen30,
+K2-kimi-k2.6, K6-llama70b (alt-broker probe), K8-deepseekV3,
+K11-qwen3coder, K5-claude-solo. K17/K33/K34/K35 dropped.
+=N_REPLICATES_L1=: K1=50, K2=50, K6=15, K8=25, K11=10, K5=5.
+
+* Variant predictions
+
+*Summary.* Per-variant predicted bands. Each row pairs an
+assertion (column /Verdict/) with a falsification criterion below.
+Confidence in /Conf/ column.
+
+*Expanded.* Cells = total across L1 + L2 + L3 + Layer-BK (where
+applicable) + composition cells. Score = primary score, summed.
+$/qpt computed against advanced cells where K8/K11 may straddle
+L1+L2 (tracked via slice in post-round). Pareto position assumes
+the R26 selector fix actually advances distinct variants.
+
+| Variant     | Cells   | Score    | $/qpt              | Pareto position                           | Conf | Verdict                                            |
+|-------------+---------+----------+--------------------+-------------------------------------------+------+----------------------------------------------------|
+| K1-qwen30   | 90-110  | 750-950  | $0.00045-$0.00075  | Frontier (cheapest seat)                  | 95%  | 7th-round frontier hold                            |
+| K2-kimi-k2.6| 65-85   | 600-850  | $0.0030-$0.0055    | Dominated on cost, leader on raw quality  | 75%  | n=50 raw-quality leader, max_tokens cap effective  |
+| K6-llama70b | 15      | 0-180    | $0.005-inf         | Floor or dominated                        | 50%  | Alt-broker doesn't fix model-contract issue        |
+| K8-deepseekV3 | 50-70 | 250-450  | $0.00060-$0.00120  | 2nd frontier seat IF generalizes          | 60%  | First real test of off-B1 recovery                 |
+| K11-qwen3coder| 25-40 | 200-350  | $0.002-$0.005 (B25)| B25-only frontier; dominated elsewhere    | 70%  | Elisp specialty + $1.50 cap holds                  |
+| K5-claude-solo| 20-35 | 150-280  | $0.025-$0.040 (L1) | Quality ceiling; cost-dominated           | 60%  | Sentinel; moat depends on BK pool outcomes         |
+
+*Falsification criteria.*
+
+- K1: $/qpt > $0.001 OR mean-score-per-cell < 6.5
+- K2: ≥8 finish=length cells OR per-cell mean < 11
+- K6: ≥12/15 cells score>0 (broker theory was right)
+- K8: ≥2 of B5/B7/B11/B25 produce mean K8 score < 1
+- K11: wins ≥2 non-elisp tasks within 2× K1 $/qpt OR spend > $1.50
+- K5: moat <35× layer1-matched OR fails to advance on ≥2 of BK1-BK5
+
+* Headline predictions
+
+| # | Prediction                                                                | Conf | Falsified if                                            |
+|---+---------------------------------------------------------------------------+------+---------------------------------------------------------|
+| 1 | K1 holds 7/7 rounds at $0.0005/qpt frontier                               | 95%  | K1 $/qpt > $0.001 OR mean-score-per-cell < 6.5          |
+| 2 | K8 generalizes off B1 — broad recovery confirmed                          | 60%  | ≥2 of B5/B7/B11/B25 families produce mean K8 score < 1  |
+| 3 | K6 alt-broker PINGs but produces score>0 in <80% of cells                 | 50%  | K6 ≥12/15 cells with score>0                            |
+| 4 | K2 raw-quality leader at n=50                                             | 75%  | K2 per-cell mean < 11 OR ≥8 finish=length cells         |
+| 5 | K11 elisp specialty wins on B25 only                                      | 70%  | K11 wins ≥2 non-elisp tasks within 2× K1 $/qpt          |
+| 6 | Claude moat 50-60× on Layer 1 only; aggregate slips to 15-25× via mix     | 60%  | Layer1-matched moat <35× OR >75×                        |
+| 7 | BK1-BK5 K1 dead-even with K5 (full pool: K8/K11 also competitive)         | 75%  | K5 leads K1 by ≥6 points on ≥3 of BK1/BK2/BK4           |
+| 8 | BK6-BK15 — at least one variant abstains on BK15 (introduce makem.sh)     | 40%  | Every variant produces a non-empty makem.sh diff        |
+
+* Strategy predictions (S1-S4)
+
+** S1 hedged escalation (K8 → K11)
+
+*Summary.* 8-15 K8 cells fall below threshold (=primary < 12=) and
+escalate to K11; total escalation cost $0.40-$0.90. Confidence:
+55%.
+
+*Expanded.* =HEDGED_QUALITY_THRESHOLD = 12= and K8 generalization
+is unresolved — non-B1 K8 cells likely produce 0/abstain a few
+times, triggering escalation. Falsified if 0 escalations OR >25
+escalations.
+
+** S2 best-of-N (5× K8 on B5/B11/B20/B45)
+
+*Summary.* Best-of-5 K8 on B5/B11/B20 lands within 15% of single
+K2's mean for those tasks but at <50% K2 cost. Confidence: 50%.
+
+*Expanded.* =BEST_OF_N_VARIANT = "K8-deepseekV3"=,
+=BEST_OF_N_SAMPLES = 5=, =BEST_OF_N_TASKS = {B5,B11,B20,B45}=. K8
+on prose is the explicit test. Falsified if best-of-5 K8 mean
+>20% below single K2 OR cost exceeds K2 single-shot.
+
+** S3 critique-revise (K1 → K2 → K1 on B11 + B5)
+
+*Summary.* Final revised K1 score on B11+B5 lifts ≥3 points over
+raw K1. Confidence: 55%.
+
+*Expanded.* The orphan-since-R18 strategy now wired. K1 has
+known bimodal pattern on B11 (50,50,0,0,0,12.5 in R17). Critique
+pass should pull bottom modes up. Falsified if mean lift < 1.5
+points OR critique cost exceeds direct K2 on same task.
+
+** S4 specialty routing (=TASK_FAMILY_VARIANTS=)
+
+*Summary.* Filter drops 30-50% of L2 cell-specs (variants not
+allowed for that task family). Confidence: 80%.
+
+*Expanded.* =TASK_FAMILY_VARIANTS= maps wiki_edit→{K1,K8},
+code_edit→{K8,K11}, elisp→{K2}, dec_draft→{K11,K2,K5},
+small_atomic→{K1,K8}. With ~5 advancing variants × 5 tasks ≈ 25
+specs pre-S4, expect ~12-18 post-S4. Falsified if filter drops
+0 cells OR drops >70% (over-restrictive).
+
+* Infra predictions
+
+| # | Prediction                                                                | Conf | Falsified if                                            |
+|---+---------------------------------------------------------------------------+------+---------------------------------------------------------|
+| 1 | WALL_CAP fires N times — all on K2/Parasail if MODAL_KIMI OFF             | 80%  | ≥3 WALL_CAP events on non-K2 variants                  |
+| 2 | =cell_replay.jsonl= size > 0 — daemon contracts working                   | 95%  | Empty file or no jsonl emission                        |
+| 3 | COST_CIRCUIT_BREAKER NOT triggered                                         | 90%  | Sentinel file exists post-round                        |
+| 4 | Worktree count post-round < 30 stale                                       | 90%  | =ls scripts/_round26_dials_worktrees= ≥ 30 entries     |
+| 5 | K6 silent_noop rate on Together/Parasail: 0-30%                           | 30%  | <0% impossible; ≥40% means broker theory was wrong     |
+| 6 | Top-3 selector returns 3 *distinct* variant names                          | 95%  | =top3_foss_after_layer1= has duplicates                 |
+| 7 | K2 output ≤ 14k chars (max_tokens cap effective)                          | 80%  | Any K2 cell emits ≥18k char output                     |
+| 8 | =count_bracket_errors= per-line — K11/K17/K8 lint ≤1.0/cell on FP cases   | 85%  | Any FP-1 cell still scores nested>5                    |
+
+* Cost predictions
+
+*Summary.* R26 total spend lands in $12-22 range; $30 hard cap
+not approached. Confidence: 80%.
+
+*Expanded.* Stratified projection per layer (=N_REPLICATES_L1=
+explicit in =scripts/_round26_dials.py:2440=).
+
+| Layer / item                              | n × $/cell      | Subtotal       |
+|-------------------------------------------+-----------------+----------------|
+| Layer 1 — K1 (n=50 × ~$0.001)             | 50 × $0.001     | $0.05          |
+| Layer 1 — K2 (n=50 × ~$0.04 capped)       | 50 × $0.012     | $0.60          |
+| Layer 1 — K8 (n=25 × ~$0.001)             | 25 × $0.001     | $0.025         |
+| Layer 1 — K11 (n=10 × ~$0.20 capped $1.50)| 10 × $0.15      | $1.50          |
+| Layer 1 — K6 (n=15 × ~$0.001)             | 15 × $0.001     | $0.015         |
+| Layer 1 — K5 (n=5 × ~$0.30)               | 5 × $0.30       | $1.50          |
+| Layer 2 — advancing × ~5 tasks            | ~30 × $0.005    | $1.00 - $2.00  |
+| Layer-BK — BK1-BK5 × full pool            | ~30 × $0.05     | $5.00 - $10.00 |
+| Layer K11-B25 mini                         | 8 × $0.20 (cap) | already in K11 |
+| Composition cells (S1+S2+S3 add)           | ~50-100 × varied | $2.00 - $4.00 |
+| BK6-BK15 (if scheduled, n=8 × 10 tasks)    | 80 × ~$0.02     | ~$1.60         |
+| /Total/                                   |                  | *$12 - $22*    |
+
+Falsified if total < $8 (round under-ran) OR > $26 (cost cap risk).
+
+* Verdicts (filled in after R26)
+
+/Empty placeholder. Post-round R26 quality-judge agent fills in
+observed values, computes prediction-accuracy score, and notes
+which falsification criteria fired./
+
+** Variant verdicts (post-round)
+** Headline verdicts (post-round)
+** Strategy verdicts (post-round)
+** Infra verdicts (post-round)
+** Cost verdict (post-round)
+** Prediction-accuracy score (post-round)
+
+* Cross-references
+
+- =docs/wiki/2026-05-08-r25-synthesis.org=
+- =docs/wiki/2026-05-08-r24-synthesis.org=
+- =docs/wiki/2026-05-08-r15-r23-grand-synthesis.org=
+- =docs/wiki/2026-05-08-org-llm-go-forward-config.org=
+- =docs/wiki/2026-05-08-r25-case-studies.org=
+- =docs/wiki/2026-05-08-r26-boost-plan.org=
+- =scripts/_round26_dials.py= — active config + =N_REPLICATES_L1=
