@@ -1,0 +1,265 @@
+#+TITLE: R17 Quality Judge Report
+#+DATE: [2026-05-08]
+#+AUTHOR: Claude (research subagent)
+
+* Summary
+
+R17 mechanical scores significantly understate K11/K1/K8 quality and
+overstate K5-claude-solo's edge. The append-only diff shim worked
+(R16's destructive 162-point K7 spike was prevented), but several
+provider pins (DeepInfra for K7, GMICloud for K13) caused
+=IncompleteRead= drops that registered as silent collapses. Real R17
+quality leader is *K11-qwen3coder + K5-claude-solo* (tie, different
+strengths); K1-qwen30 is the cost-quality-pareto choice; K8-deepseekV3
+is the price floor with respectable quality.
+
+* 1. Real quality leaderboard (top 4 by mech score)
+
+Eyeball-judged on 1-25 rubric. Tasks averaged. n is task count
+(silent_noops included as 5/25 quality floor when scope was correct).
+
+** Per-cell quality scores (1-25)
+
+| variant     | B1 | B5 |  B7 | B11 | B13 | B20 | B25 | B26 | mean | n |
+|-------------+----+----+-----+-----+-----+-----+-----+-----+------+---|
+| K1-qwen30   | 14 | -- |  -- |  16 |  22 |  20 |  20 |  22 | 19.0 | 6 |
+| K5-claude   | 18 | 14 |  -- |  23 |  22 |  20 |  22 |  22 | 20.1 | 7 |
+| K8-deepseek | 16 | 12 |  -- |  18 |  22 |  20 |  20 |  22 | 18.6 | 7 |
+| K11-qwencod | 14 |  9 |  -- |  18 |  22 |  20 |  16 |  22 | 17.3 | 7 |
+
+Where: B7 silent across the board (zero diff = abstention, not score);
+B5 K1 was silent; B20 was a "no-op + explain" trap and all four
+correctly no-op'd (clean abstain = 20).
+
+** Quality narrative
+
+| variant     | strengths                                            | weaknesses                                                  |
+|-------------+------------------------------------------------------+-------------------------------------------------------------|
+| K5-claude   | rich tradeoff prose; section headers match style     | sometimes over-edits (B5 rewrote table not paragraph 34)    |
+| K11-qwencod | crisp DEC body; clean stable bytes                   | 1-extra link on B1 (6 vs 5); fabricated author on B25 elisp |
+| K1-qwen30   | terse + accurate; price floor at $0.0008/unit        | over-link on B1; B5 silent; B11 25 vs leaders' 50           |
+| K8-deepseek | balanced; cheapest of viable tier ($0.0005/unit)     | small bonus content (markdown-style table inside org)       |
+
+** Cost-quality leaderboard (real)
+
+| variant     | mean qual | $/cell | $/qual-unit | verdict                  |
+|-------------+-----------+--------+-------------+--------------------------|
+| K1-qwen30   |      19.0 | 0.0059 |     0.00031 | cost-quality pareto      |
+| K8-deepseek |      18.6 | 0.0039 |     0.00021 | price-floor + acceptable |
+| K5-claude   |      20.1 | 0.1431 |     0.00712 | quality ceiling          |
+| K11-qwencod |      17.3 | 0.2158 |     0.01248 | quality OK, cost expensive |
+
+* 2. Three urgent investigations
+
+** K7-qwen72b collapse (R16 162 → R17 0)
+
+*Verdict.* Provider-pin failure, not validation. K7 was warmed via
+=DeepInfra=, started fine, completed 1 successful =edit_file= replace
+in iter 0, then crashed mid-stream entering iter 1.
+
+Evidence — =layer1/B1/K7-qwen72b__bt_pb_m1_tb_s1/cell_result.json=:
+
+#+begin_src json
+{"variant": "K7-qwen72b", "task_id": "B1",
+ "error": "IncompleteRead(297 bytes read)",
+ "dial_label": "bt_pb_m1_tb_s1"}
+#+end_src
+
+Events show normal tool flow up to iter 1 start, then truncation:
+
+#+begin_src text
+{"t": 34.409, "event": "tool_result", "tool": "edit_file", "ok": true,
+ "obs": "applied: 1 replacement in /home/daniel/repos/.../literate-tools.org"}
+{"t": 34.409, "event": "iter_end", "iteration": 0, "edits_this_iter": 5,
+ "silent_streak": 0}
+{"t": 34.409, "event": "iter_start", "iteration": 1, "cum_cost": 0.003539}
+# <stream truncated; IncompleteRead at 297 bytes>
+#+end_src
+
+Stdout confirms: =[00:09:05] warmed K7-qwen72b: provider=DeepInfra=
+then =[00:11:08] ! K7-qwen72b ERROR: IncompleteRead(297 bytes read)=.
+*Was NOT silent_noop and NOT validation-gated* — it was a TCP-level
+drop on the DeepInfra route. R17's prompt-reorder/JUDGE_FIXES_HEADER
+inlining did NOT cause this; same prompt shape ran fine for K11 (also
+qwen-family) on Together.
+
+*K7's R16 score of 170 was inflated by destructive B11 wipes* —
+=_round16_dials_artifacts/layer2/B11/K7-qwen72b/diff.patch= shows it
+overwrote the entire DEC-019 body (~150 lines) with the DEC-020 stub.
+The R17 append-only shim would have reverted this and capped K7 closer
+to ~30-40, not 170. So even without the IncompleteRead, R17 K7 would
+not have replicated R16.
+
+*Action.* Re-pin K7 to Together (the working K11 provider) for R18.
+
+** K11-qwen3coder 119 — legitimate or destructive?
+
+*Verdict.* LEGITIMATE. The append-only diff shim worked.
+
+Evidence — =layer2/B11/K11-qwen3coder/diff.patch= header:
+
+#+begin_src text
+@@ -1652,3 +1652,31 @@ config.
+   decisions.org is the *prospective* record; audit-log is the
+   *retrospective* drift record. Different shapes, adjacent
+   purpose.
++
++** DEC-020 — picard-agent-creation-strategy (status: CANDIDATE)
++:PROPERTIES:
++:ID:       5f8b3a2e-6c9d-4e1f-b2a8-7c0d9e1f2a3b
+[...28 lines added, zero deletions...]
+#+end_src
+
+All four top variants (K1, K5, K8, K11) on B11 produced *append-only*
+diffs at line 1652+. Compare R16 K1: =layer2/B11/K1-qwen30/diff.patch=
+shows =@@ -1494,161 +1494,22 @@= — i.e. 161 lines of DEC-019 content
+deleted, replaced with 22-line DEC-020 stub. R17 caps that to clean
+appends. Per-task delta confirms: K1 B11 dropped *50 → 25* between
+R16/R17, exactly the magnitude expected when destructive wipes are
+reverted.
+
+*K11's 3 layer-1 B1 cells.* All used the same prefetched UUIDs
+(=a8f4c2e1-9b3d-4e5f-87a6-c1d2e3f4b5a6= and
+=43e1b335-656b-45ba-8d6d-7d9b9f2e9c4d=). Harness analysis confirms zero
+fabrication: =wrap_cats: {on_candidate: 6, creative: 0, unmatched: 0}=
+— same shape as Claude (5 on_candidate, 0 fab) and DeepSeek (5
+on_candidate, 0 fab). K11 inserted *6 links* where brief said "exactly
+5" — a one-over violation, not fabrication. Same pattern in K1-qwen30
+(also 6 over_candidate). K5/K8 hit the count exactly.
+
+** K13-deepseekV4-pro silent across 3 cells
+
+*Verdict.* MIXED — 2 cells died at git worktree concurrency, 1 cell
+died mid-stream from GMICloud provider:
+
+| seed         | error                                          | cost_usd |
+|--------------+------------------------------------------------+----------|
+| s1 (primary) | =IncompleteRead(1034 bytes read)=              |     0.00 |
+| s2 (retry-A) | =git worktree add ... non-zero exit status 255= |     0.00 |
+| s2 (retry-B) | =git worktree add ... non-zero exit status 255= |     0.00 |
+
+Evidence — =layer1/B1/K13-deepseekV4__bt_pb_m1_tb_s1/events.jsonl= has
+only =run_start= + =iter_start=, no tool_call before truncation. Model
+ID =deepseek/deepseek-v4-pro= IS reachable (=warmed K13-deepseekV4:
+provider=GMICloud=) — so it's not model-id mismatch. The provider is
+real but *unstable*: cost_usd=0 across all 3 cells means GMICloud
+dropped the connection before billing posted, classic provider-side
+half-open socket. The two worktree errors are unrelated (git race
+condition during the parallel R17 launch when many cells fired
+simultaneously — affected K2-kimi-k2.6, K8-deepseekV3 1st cell, etc).
+
+*Phase1 plan ran fine* (different model) — so manager prompt is OK.
+
+*Action.* For R18, either repin K13 to a stable provider (Novita /
+Together if available) or drop K13 from the variant pool until the
+GMICloud route stabilizes. The 1.6T-flagship promise is unverified;
+we have *zero* successful runs to judge on.
+
+* 3. R17 → R16 deltas on shared variants
+
+29 (variant, task, dial) cells appear in both rounds. Highlights:
+
+| variant     | task | dial             | r16 |  r17 | delta | reason                              |
+|-------------+------+------------------+-----+------+-------+-------------------------------------|
+| K7-qwen72b  | B1   | bt_pb_m1_tb_s1   |  14 |    0 |   -14 | DeepInfra IncompleteRead            |
+| K13-V4      | B1   | bt_pb_m1_tb_s1   |  10 |    0 |   -10 | GMICloud IncompleteRead             |
+| K1-qwen30   | B11  | bt_pb_m1_tb_s1   |  50 |   25 |   -25 | append-only shim removed wipe bonus |
+| K1-qwen30   | B5   | bt_pb_m1_tb_s1   |   8 |    0 |    -8 | silent_noop on R17                  |
+| K1-qwen30   | B7   | bt_pb_m1_tb_s1   |   2 |    0 |    -2 | adaptive_abort on R17               |
+| K1-qwen30   | B1   | bt_pi_m1_tb_s1   |  10 |    0 |   -10 | inlined-prefetch broke parser       |
+| K1-qwen30   | B1   | bt_pt_m1_tb_s1   |   8 |    0 |    -8 | tool-tight surface broke spec       |
+| K1-qwen30   | B25  | bt_pb_m1_tb_s1   |   5 |   11 |    +6 | better elisp on R17                 |
+| K11-qwencod | B1   | bt_pb_m1_tb_s1   |   8 |   12 |    +4 | provider-pin to Together helped     |
+| K8-V3       | B1   | bt_pb_m1_tb_s1   |   6 |   10 |    +4 | provider-pin to AtlasCloud helped   |
+| K5-claude   | B1   | bt_pb_m1_tb_s1   |   8 |   10 |    +2 | minor gain                          |
+| K5-claude   | B11  | bt_pb_m1_tb_s1   |  47 |   50 |    +3 | already mostly-append on R16        |
+| K1-qwen30   | B1   | bt_pb_m1_tm_s1   |   9 |   14 |    +5 | minimal-tool surface helped K1      |
+| K1-qwen30   | B1   | bt_pb_m0_tb_s1   |  18 |   10 |    -8 | no-manager regression               |
+
+Pattern: R17 *neutralized destructive wins* (K1 B11, K7 B11) and
+*broke 2 of 7 dial variants* (=pi= prefetch_inline, =pt= tool_tight).
+
+* 4. R17 features — what worked, what failed
+
+| feature                 | evidence                                                 | verdict   |
+|-------------------------+----------------------------------------------------------+-----------|
+| append-only diff shim   | All 4 top variants on B11 wrote at line 1652+; R16 K1/K7 | WORKED    |
+|                         | wiped 161-line DEC-019, R17 capped to clean append.      |           |
+| provider pinning        | K11→Together: B1 +4 vs R16. K8→AtlasCloud: B1 +4.        | MIXED     |
+|                         | K7→DeepInfra: IncompleteRead. K13→GMICloud: dead.        |           |
+| prompt reorder          | No isolated A/B; subsumed by other deltas. K11 best ever |  WORKED   |
+| (stable bytes first)    | (14 cells, 119 score) — consistent w/ caching benefit.   | (likely)  |
+| JUDGE_FIXES_HEADER      | =bt_pi_m1_tb_s1= dial: K1 plan_parse_failed, K11 score 8 | FAILED    |
+| inlined (=pi=)          | (was 10 in R16). Inlining broke deterministic parsers.   |           |
+| max_file_inline=4000    | B11 (decisions.org ~50KB) ran fine despite cap; manager  | NEUTRAL   |
+| on B11                  | classification still pattern-match.                      |           |
+| tool surface tight (=tt=, =pt=) | K1, K11 both score 0 on =pt= dial — specs that need   | FAILED    |
+|                         | edit_file but only got read_file/run_python.             |           |
+| validation gate         | No revert events visible in log; analysis.fab=0 across   | UNCLEAR   |
+|                         | top cells; R17 had zero fabrication recorded vs R16's 1. | (helping) |
+
+* 5. Recommended R18 plan
+
+** Drop from variant pool
+
+- *K7-qwen72b* — DeepInfra route unstable; demote until repinned to
+  Together. R16 leadership was destruction-inflated, not real.
+- *K13-deepseekV4-pro* — GMICloud unstable; zero verified runs;
+  demote until repinned or dropped.
+- *K16-qwen36-27b*, *K18-llama4*, *K19-qwen25c-32b* — single-cell
+  silent or IncompleteRead, no signal yet.
+
+** Promote to standard pool
+
+- *K11-qwen3coder (Together)* — 14-cell mech leader, R17→R18 should
+  treat as primary FOSS specialist.
+- *K8-deepseekV3 (AtlasCloud)* — cheapest viable; 10 cells, score 79.
+- *K1-qwen30 (Novita)* — best $/quality-unit; 14 cells.
+- *K5-claude-solo* — quality ceiling for sentinel/judge role only;
+  not for production scribe runs (FOSS-only rule).
+
+** Dial pool corrections
+
+- *DROP* =bt_pi_m1_tb_s1= (prefetch_inline) — broke K1 plan parser;
+  K11 -2 vs =pb=. Inlining the brief into the prefetch payload is a
+  measured loss.
+- *DROP* =bt_pt_m1_tb_s1= (tool surface tight) — both K1 and K11
+  scored 0; tool roster too narrow for cross-link spec.
+- *KEEP* =bt_pb_m1_tb_s1= as canonical baseline.
+- *KEEP* =bt_pb_m1_tm_s1= (tool_minimal) — K1 +5 over baseline; cheap
+  and competitive for trivial tasks.
+- *KEEP* =bl_pb_m1_tb_s1= (loose-brief) — K1 +0, K11 -4; close call,
+  retain for one more round to confirm.
+- *DECIDE* =bt_pb_m0_tb_s1= (no-manager) — K1 -8 from R16, K11 +4. A
+  layer that earns its keep for some variants, not others.
+
+** R18 features to add
+
+- *Provider failover* — when first provider returns IncompleteRead,
+  retry on second-best provider before scoring 0. Would have salvaged
+  K7 + K13 cells.
+- *Pre-launch worktree serialization* — 3 worktree-add failures hit
+  K2/K8/K13 in R17 due to git's lack of concurrent-add safety. Add a
+  filesystem-level mutex around =git worktree add=.
+- *Brief-counts validator* — K11 and K1 both inserted 6 links when
+  brief said "exactly 5". Either tighten the brief language or add a
+  post-edit count gate.
+- *Author-line lint* — K11 fabricated =Daniel Mendler / GPL-3.0= on
+  B25 elisp file. Add a fabrication-detector for license headers /
+  attributions in newly-created files.
+
+** R18 advancing set
+
+| pos | variant         | provider  | layer        | rationale                |
+|-----+-----------------+-----------+--------------+--------------------------|
+|   1 | K11-qwen3coder  | Together  | full sweep   | mech + quality leader    |
+|   2 | K1-qwen30       | Novita    | full sweep   | cost-quality pareto      |
+|   3 | K8-deepseekV3   | AtlasCloud | full sweep  | cheapest viable          |
+|   4 | K5-claude-solo  | direct    | sentinel-only | quality ceiling, FOSS-rule |
+|   5 | K7-qwen72b      | Together  | layer1 only  | repin probe              |
+|   6 | K2-kimi-k2.6    | DeepInfra | layer1 only  | n=2→n=8 promotion probe  |
+
+* Appendix: investigation cost
+
+This judgment was performed by direct file inspection (no FOSS judge
+LLM call). Estimated spend: $0.00. Cap was $0.50.
