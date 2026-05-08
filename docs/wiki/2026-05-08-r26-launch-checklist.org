@@ -289,7 +289,7 @@ R25 Layer-BK was 10 cells (5 BK tasks × top-3 FOSS=K1+K5).
 With selector fix, R26 should run BK1-BK15 across every
 variant clearing Layer-1 score>0.
 
-** TODO P1-9: Re-introduce K6-llama70b at n=15 on Together/Parasail
+** DONE P1-9: Re-introduce K6-llama70b at n=15 on Together/Parasail
 :PROPERTIES:
 :ESTIMATE: 30 min
 :SOURCE:   r25-synthesis §14; case-studies §P1
