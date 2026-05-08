@@ -24,6 +24,13 @@ from typing import List
 _BRACKET_OPEN = "[["
 _BRACKET_CLOSE = "]]"
 
+# R24 — additional structural validators motivated by outlier-deepdive
+# agent's analysis of R15-R19 worst cells:
+#   - nested-bracket depth >1 caught R18 K6/K7 [[id:...][[[id:...][...]]]]
+#   - heading_duplication caught R19 K1 mech-47 illusory wins
+#   - table_pipe_loss caught R18 K6/K9 verbatim-cell wraps
+import collections as _collections
+
 # UUID pattern. Real uuid5 hashes never start with placeholder
 # strings like 12345678 / 00000000 / aaaaaaaa, but our R18 cells
 # emitted these constants when models hallucinated.
@@ -123,6 +130,70 @@ def count_stacked_docstrings(diff_text: str) -> int:
     return stacked
 
 
+def count_nested_bracket_depth(text: str) -> int:
+    """Count instances where bracket nesting exceeds depth 1.
+
+    R18 K6/K7 produced [[id:...][[[id:...][...]]]] — 4-level nesting
+    from re-wrapping already-linked text. Org parser silently broken;
+    mech rewarded.
+    """
+    depth = 0
+    deep_count = 0
+    i = 0
+    while i < len(text) - 1:
+        if text[i:i + 2] == _BRACKET_OPEN:
+            depth += 1
+            if depth > 1:
+                deep_count += 1
+            i += 2
+        elif text[i:i + 2] == _BRACKET_CLOSE:
+            depth = max(depth - 1, 0)
+            i += 2
+        else:
+            i += 1
+    return deep_count
+
+
+def count_heading_duplicates(text: str) -> int:
+    """Count level-1+ org headings that appear more than once in
+    added text. R19 K1 mech-47 cells duplicated `* Tier 1 — Customize`."""
+    headings = _RULE_2B_HEADING_RE.findall(text)
+    if len(headings) < 2:
+        return 0
+    counts = _collections.Counter(headings)
+    dup = sum(c - 1 for c in counts.values() if c > 1)
+    return dup
+
+
+def count_table_pipe_loss(text: str) -> int:
+    """Detect malformed org table rows missing leading/trailing pipes.
+
+    R18 K6/K9 wraps of verbatim cells dropped the leading `|` when
+    inserting bracket links inside a table cell.
+
+    Heuristic: an added line that contains 2+ `|` characters but does
+    NOT start with `|` or `+|` (handling diff-prefix already stripped)
+    is likely a table-row pipe-loss.
+    """
+    n = 0
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("|"):
+            continue
+        # Count un-escaped pipes
+        pipes = stripped.count("|")
+        if pipes >= 2:
+            # Only flag if line looks like table content (not prose with
+            # parenthetical pipes). Heuristic: more pipes than common
+            # punctuation, AND looks like cell separators (tokens between
+            # pipes).
+            parts = [p.strip() for p in stripped.split("|")]
+            non_empty = [p for p in parts if p]
+            if len(non_empty) >= 2 and all(len(p) < 80 for p in non_empty):
+                n += 1
+    return n
+
+
 def lint_patch(diff_text: str) -> dict:
     """Return a structured lint report for a unified-diff string.
 
@@ -135,6 +206,9 @@ def lint_patch(diff_text: str) -> dict:
     fab_uuids = count_fabricated_uuids(added)
     rule2b_violations = count_rule2b_violations(added)
     stacked = count_stacked_docstrings(diff_text)
+    nested_depth = count_nested_bracket_depth(added)
+    heading_dups = count_heading_duplicates(added)
+    table_pipe_loss = count_table_pipe_loss(added)
 
     issues: list[str] = []
     if bracket_errors:
@@ -145,14 +219,30 @@ def lint_patch(diff_text: str) -> dict:
         issues.append(f"rule2b_violations={rule2b_violations}")
     if stacked:
         issues.append(f"stacked_docstrings={stacked}")
+    if nested_depth:
+        issues.append(f"nested_brackets={nested_depth}")
+    if heading_dups:
+        issues.append(f"heading_dups={heading_dups}")
+    if table_pipe_loss:
+        issues.append(f"table_pipe_loss={table_pipe_loss}")
 
-    # Score penalty: each bracket error = -1, each fab UUID = -2,
-    # each rule2b violation = -1, each stacked docstring = -3.
+    # Score penalties calibrated by observed harm severity:
+    #   bracket imbalance: -1 (parser-survivable)
+    #   nested-bracket >1: -2 (parser breaks silently — outlier agent
+    #                          flagged this as worse than imbalance)
+    #   fab UUID: -2 (broken cross-references; manual cleanup)
+    #   stacked docstrings: -3 (per R17 quality agent)
+    #   heading duplicate: -3 (illusory mech wins per R19 K1)
+    #   table pipe loss: -3 (silently breaks table rendering)
+    #   Rule 2b miss: -1 (style; user can append later)
     score_penalty = (
         bracket_errors * 1.0
         + fab_uuids * 2.0
         + rule2b_violations * 1.0
         + stacked * 3.0
+        + nested_depth * 2.0
+        + heading_dups * 3.0
+        + table_pipe_loss * 3.0
     )
 
     return {
@@ -160,6 +250,9 @@ def lint_patch(diff_text: str) -> dict:
         "fab_uuids": fab_uuids,
         "rule2b_violations": rule2b_violations,
         "stacked_docstrings": stacked,
+        "nested_brackets": nested_depth,
+        "heading_duplicates": heading_dups,
+        "table_pipe_loss": table_pipe_loss,
         "score_penalty": score_penalty,
         "issues": issues,
     }

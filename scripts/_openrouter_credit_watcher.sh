@@ -43,38 +43,12 @@ while true; do
     sleep 300
 done
 
-# ── Re-run R21, R22, R23 with their existing harnesses (no harness fork) ──
-for n in 21 22 23; do
-    art=$REPO/scripts/_round${n}_dials_artifacts
-    log_line "re-running R$n (existing harness, fresh artifacts)"
-
-    # Snapshot the failed artifacts to /failed_402/ so we don't clobber
-    if [ -d "$art" ]; then
-        mkdir -p "$art/failed_402"
-        mv "$art"/{layer1,layer2,layer3_*,log-*.txt,stdout.log,R${n}_LIVE.json,summary-*.json} "$art/failed_402/" 2>/dev/null || true
-    fi
-
-    nohup python3 "$REPO/scripts/_round${n}_dials.py" > "$art/stdout.log" 2>&1 &
-    pid=$!
-    log_line "R$n PID: $pid"
-
-    # Wait for R$n to finish (90 min cap)
-    timeout=$((SECONDS + 5400))
-    while ps -p $pid >/dev/null 2>&1; do
-        [ $SECONDS -gt $timeout ] && { log_line "R$n TIMEOUT — killing"; kill $pid 2>/dev/null; break; }
-        sleep 120
-    done
-
-    summary=$(ls -t "$art"/summary-*.json 2>/dev/null | head -1)
-    if [ -n "$summary" ]; then
-        cells=$(jq -r '.total_cells // empty' "$summary" 2>/dev/null)
-        cost=$(jq -r '.total_cost_usd // empty' "$summary" 2>/dev/null)
-        log_line "R$n DONE: cells=$cells cost=\$$cost"
-    fi
-done
-
-# ── R24: fork from R20 (the strongest data round) + add S1 hedged ──
-log_line "forking R24 from R20 (data-strongest round) + adding S1 hedged-strong"
+# ── R24: fork from R20 + apply R24 synthesis patch (BK1-BK5, S1-S4, drops) ──
+# Skipping R21/R22/R23 retries — R20-R23 supplement agent confirmed those
+# rounds were pure round-id renames; redoing them on top-up credits buys
+# nothing the synthesis-driven R24 doesn't already deliver.
+log_line "skipping R21/R22/R23 retries (placeholder rounds per supplement agent)"
+log_line "forking R24 from R20 + applying R24 synthesis patch"
 
 cp "$REPO/scripts/_round20_dials.py" "$REPO/scripts/_round24_dials.py"
 mkdir -p "$REPO/scripts/_round24_dials_artifacts"
@@ -84,15 +58,8 @@ sed -i 's|r20-|r24-|g'         "$REPO/scripts/_round24_dials.py"
 sed -i 's|R20 |R24 |g'         "$REPO/scripts/_round24_dials.py"
 sed -i 's|Round-20|Round-24|g' "$REPO/scripts/_round24_dials.py"
 
-# Re-apply the wiring patch (idempotent — markers already there from R19)
-HARNESS=$REPO/scripts/_round24_dials.py python3 -c "
-import sys
-sys.path.insert(0, '$REPO/scripts')
-import _r19_wiring_patch as P
-from pathlib import Path
-P.HARNESS = Path('$REPO/scripts/_round24_dials.py')
-sys.exit(P.main())
-" 2>&1 | tee -a "$LOG"
+# Apply R24 synthesis patch (which calls R19 wiring patch first)
+python3 "$REPO/scripts/_r24_synthesis_patch.py" 2>&1 | tee -a "$LOG"
 
 # Syntax check
 if ! python3 -c "import ast; ast.parse(open('$REPO/scripts/_round24_dials.py').read())" 2>&1; then
@@ -100,8 +67,8 @@ if ! python3 -c "import ast; ast.parse(open('$REPO/scripts/_round24_dials.py').r
     exit 1
 fi
 
-log_line "launching R24"
-nohup python3 "$REPO/scripts/_round24_dials.py" > "$REPO/scripts/_round24_dials_artifacts/stdout.log" 2>&1 &
+log_line "launching R24 with PARALLELISM=32"
+R18_PARALLELISM=32 nohup python3 "$REPO/scripts/_round24_dials.py" > "$REPO/scripts/_round24_dials_artifacts/stdout.log" 2>&1 &
 disown $! 2>/dev/null
 log_line "R24 PID: $!"
 
