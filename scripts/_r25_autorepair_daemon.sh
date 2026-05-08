@@ -116,18 +116,97 @@ ar_cells_done() {
     echo "$s" | jq -r '.cells_done // 0' 2>/dev/null
 }
 
-# AR3 — worktree storm cleanup
+# AR3 — worktree storm cleanup (proactive, not reactive)
+# Lowered threshold per R25 mid-run audit: cleanup at 20 instead of 50,
+# and prune any r25-* worktree dir older than 5 min unconditionally.
 ar3_worktree_storm() {
-    local r25_count
+    local r25_count pruned
     r25_count=$(ls -d "$WORKTREE_DIR"/r25-* 2>/dev/null | wc -l)
-    if [ "$r25_count" -gt 50 ]; then
-        log_line "AR3: $r25_count r25 worktrees → pruning"
-        log_doc "AR3: worktree storm ($r25_count dirs) — pruning"
-        git -C "$REPO" worktree prune --expire=now 2>&1 | head -5
-        find "$WORKTREE_DIR" -maxdepth 1 -name "r25-*" -type d -mmin +10 -exec rm -rf {} \; 2>&1 | head -5
-        return 0
+    pruned=0
+    # Always prune stale dirs older than 5 min
+    if [ "$r25_count" -gt 0 ]; then
+        pruned=$(find "$WORKTREE_DIR" -maxdepth 1 -name "r25-*" -type d -mmin +5 2>/dev/null | wc -l)
+        if [ "$pruned" -gt 0 ]; then
+            git -C "$REPO" worktree prune --expire=5.minutes.ago 2>&1 | head -3
+            find "$WORKTREE_DIR" -maxdepth 1 -name "r25-*" -type d -mmin +5 -exec rm -rf {} \; 2>/dev/null
+            log_line "AR3: pruned $pruned stale r25-* worktrees (was $r25_count)"
+        fi
     fi
-    return 1
+    if [ "$r25_count" -gt 20 ]; then
+        log_doc "AR3: worktree count $r25_count > 20 — aggressive prune"
+    fi
+    return 0
+}
+
+# AR11 — variant fail-rate signal (NEW R25 mid-run upgrade)
+# Detects when a variant has many wall_cap kills, silent_noops, or
+# score=0 cells. Cannot stop the variant mid-run (no harness hook)
+# but surfaces the signal prominently so post-round triage is fast.
+ar11_variant_fail_rate() {
+    local stdout="$ART/stdout.log"
+    [ ! -f "$stdout" ] && return 1
+    # WALL_CAP_KILLED concentration
+    local wcaps_total wcaps_k2 wcaps_k1
+    wcaps_total=$(grep -c "WALL_CAP_KILLED" "$stdout" 2>/dev/null)
+    wcaps_k2=$(grep "WALL_CAP_KILLED" "$stdout" 2>/dev/null | grep -c "K2-")
+    wcaps_k1=$(grep "WALL_CAP_KILLED" "$stdout" 2>/dev/null | grep -c "K1-")
+    if [ "$wcaps_total" -ge 5 ]; then
+        local pct_k2
+        pct_k2=$(awk "BEGIN { printf \"%.0f\", ($wcaps_k2 * 100) / $wcaps_total }")
+        log_line "AR11: $wcaps_total WALL_CAP kills, ${pct_k2}% on K2"
+        if [ "$pct_k2" -ge 70 ]; then
+            log_doc "AR11: K2 WALL_CAP kill rate ${pct_k2}% of $wcaps_total kills — broker swap candidate for R26 (try Modal route)"
+        fi
+    fi
+
+    # K33/K34/K35 ceiling-probe abort signal
+    local probe_zeros
+    for variant in K33 K34 K35; do
+        local cells_n
+        cells_n=$(jq -r ".leaderboard[] | select(.variant | startswith(\"${variant}-\")) | .cells // 0" "$LIVE" 2>/dev/null | head -1)
+        local score_n
+        score_n=$(jq -r ".leaderboard[] | select(.variant | startswith(\"${variant}-\")) | .total_score // 0" "$LIVE" 2>/dev/null | head -1)
+        if [ -n "$cells_n" ] && [ "$cells_n" -ge 3 ] && \
+           awk "BEGIN { exit ($score_n / $cells_n < 1.0) ? 0 : 1 }"; then
+            log_doc "AR11: $variant ceiling probe — $cells_n cells / score $score_n (mean<1) → likely uncompetitive; abort recommended for R26"
+        fi
+    done
+    return 0
+}
+
+# AR12 — OpenRouter headroom proactive monitor
+# G9 cost circuit-breaker fires at $cap × 1.5 = $150 (current).
+# But OR headroom may be the actual binding constraint. If headroom
+# drops below 1× projected remaining round cost, log warning.
+ar12_or_headroom() {
+    local or_key headroom remaining_cells avg_cost projected_remaining
+    or_key=$(pass org-llm/cloud/openrouter/api-key 2>/dev/null | head -1)
+    [ -z "$or_key" ] && return 1
+    headroom=$(curl -sS --max-time 5 https://openrouter.ai/api/v1/credits \
+        -H "Authorization: Bearer $or_key" 2>/dev/null \
+        | jq -r '.data.total_credits - .data.total_usage' 2>/dev/null)
+    [ -z "$headroom" ] && return 1
+    local cells cost
+    cells=$(ar_cells_done)
+    cost=$(ar_cost)
+    if [ "$cells" -gt 10 ]; then
+        avg_cost=$(awk "BEGIN { printf \"%.5f\", $cost / $cells }")
+        remaining_cells=$((R25_EXPECTED_CELLS - cells))
+        [ "$remaining_cells" -lt 0 ] && remaining_cells=0
+        projected_remaining=$(awk "BEGIN { printf \"%.2f\", $avg_cost * $remaining_cells }")
+        log_line "AR12: OR headroom \$$headroom; projected remaining cost \$$projected_remaining"
+        if awk "BEGIN { exit ($headroom < $projected_remaining) ? 0 : 1 }"; then
+            log_doc "AR12: OR headroom \$$headroom < projected remaining \$$projected_remaining — top-up may be needed before round completes"
+            # Pre-emptively (re)launch credit-watcher so it'll auto-resume on top-up
+            if ! pgrep -f "_openrouter_credit_watcher.sh" >/dev/null 2>&1; then
+                nohup bash "$REPO/scripts/_openrouter_credit_watcher.sh" \
+                    > /tmp/credit-watcher.log 2>&1 &
+                disown $! 2>/dev/null
+                log_line "AR12: pre-emptively restarted credit-watcher"
+            fi
+        fi
+    fi
+    return 0
 }
 
 # AR4/AR9 — cost circuit-breaker
@@ -272,6 +351,8 @@ while true; do
     ar7_k7_plummet || true
     ar8_openrouter_402 || true
     ar9_cost_circuit_breaker || true
+    ar11_variant_fail_rate || true
+    ar12_or_headroom || true
 
     sleep "$POLL_INTERVAL"
 done
