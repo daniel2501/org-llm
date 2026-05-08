@@ -1,0 +1,248 @@
+:PROPERTIES:
+:ID:       935fd593-9843-4b6d-8749-e83c23e1f76e
+:CREATED:  [2026-05-07]
+:END:
+#+TITLE: R16 mind-blowing synthesis — 4-agent scour of R15+R16 cells
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:synthesis:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Four parallel agents scoured 100+ R15+R16 cells from
+different angles. Cross-cutting findings: (1) the mechanical
+leaderboard is a poor signal — quality + stability + verifier-
+coverage matter more; (2) B1 is mechanically solvable — 218/218
+successful wraps used pre-fetched IDs, so an =apply_link_wrap=
+deterministic tool would replace the LLM entirely with quality
+parity; (3) small FOSS models want scaffolding (more constraints
+help K1-qwen30); large FOSS models want minimum (K7-qwen72b's best
+dials all *remove* a constraint); (4) K8-deepseek-V3 is the
+deterministic-cheap Pareto winner — the strongest stability signal
+in the dataset; (5) K2-kimi is the confirmed elisp specialist
+(B25 12/12 across rounds); (6) Claude is NOT 100% on UUIDs —
+fabricated 1 cross-link UUID per B11 cell. Three intervention
+tracks: prompt (5 levers), tool (4 atomic tools), routing (5 dead
+variants drop, 1 cheap winner promote).
+
+*Expanded.* This is the consolidated view across the four scour
+agents. It corrects the R16 retro's overcalled K1-no-manager
+finding, surfaces K8-V3 as the under-recognized winner, and lays
+out the prompt + tool + routing changes for R17 v2 / R18.
+
+* Cross-cutting themes (across all 4 agents)
+
+** Theme 1 — Mech leaderboard is misleading; stability + quality matter
+
+Mech ranked: K7-qwen72b 162 > K1-qwen30 149 > K5-claude 88 > K2-kimi 76.
+
+Reality (judge): K5-claude 24.63 > K2-kimi 23.63 > K1-qwen30/K7-qwen72b 20.13.
+
+Plus per the hidden-capability agent: *K8-deepseek-V3 is the most
+stable variant across rounds* (6/6 across R15+R16 at $0.0045/cell)
+— it got 1 cell each round, scored low, was about to be dropped.
+But stability is the strongest signal we have.
+
+** Theme 2 — B1 is mechanically solvable; LLMs add zero value
+
+The self-improvement seeds agent verified: *218/218 successful B1
+wraps re-used a canonical_id that prefetch_b1 had already resolved.*
+The LLM contributes literally zero ID-lookup logic. The wrap step
+is mechanical.
+
+Claude-vs-FOSS shape agent confirmed: even Claude fabricated 1
+cross-link UUID per cell. Nobody is 100% on B1 via the LLM path.
+
+*Implication.* Replace the LLM in B1 with a deterministic
+=apply_link_wrap(file, candidate, target_id)= helper. R18 Track E
+A/B test against the LLM-driven version. Expected: lower cost,
+higher accuracy, faster wall.
+
+** Theme 3 — Small models want scaffolding; large models want minimum
+
+Per per-model-best-config agent's clean abstraction:
+
+| Variant     | Pattern                                                                |
+|-------------+------------------------------------------------------------------------|
+| K1-qwen30   | EVERY constraint helps (manager + tool + scope_strict all add value)   |
+| K7-qwen72b  | EVERY removed constraint helps (inline-only, loose, no-mgr all win)   |
+
+The implication for routing: BEST_CONFIG is wrong for K7. Per-
+variant default is needed. R17 already routes K7-qwen72b to
+=bt_pi_m1_tb_s1=. R18 should ablate other variants on the same
+dial axes.
+
+** Theme 4 — Five variants are infrastructurally broken
+
+Per hidden-capability agent: *K3 emits a plan but no edits; K4 +
+K14 silent-noop; K10 invalid model ID; K12 returns HTTP 404.*
+
+These should be DROPPED from R17/R18 layer-1 onwards; their cells
+are pure waste. R17 harness's dead-variant filter handles this
+post-Layer-1, but pre-filtering at the variant pool definition
+saves the layer-1 cells too (5 cells × ~$0.05 = ~$0.25).
+
+** Theme 5 — Three classes of intervention have very different ROI
+
+| Class | Examples | Effort | Lift | Best for |
+|-------+----------+--------+------+----------|
+| Prompt-level | inline Rule 2b skeleton, GOOD/BAD examples, survey-before-edit | minutes | +2-4pp on quality | structured-format tasks (B11, B20, B45) |
+| Tool-level   | edit_file_unique, apply_link_wrap, generate_uuid, write_elisp_file | hours | success rate → 100%; cost ↓ 5-10x | mechanical tasks (B1, B25) |
+| Routing-level | per-variant dials, drop dead variants, promote K8-V3 | trivial | targets cells where they win | all task types |
+
+* Cross-cutting recommendations
+
+** R17 v1 (already locked-in)
+
+Five quality-judge fixes + 8 launch picks landed before launch
+(append_only shim, verbatim-label ban, file truncation, persona
+temp, eager prefetch, smart retry, etc.) These don't change.
+
+** R17 v2 (small additions before launch — ~30 min build)
+
+| # | Add | Source agent | Effort |
+|---+-----+--------------+--------|
+| 1 | Inline FULL Rule 2b REQUIRED-marked skeleton (B11, B20, B45) | claude-shape Lever B | 10 min |
+| 2 | Survey-before-edit protocol in B11/B5/B20 briefs | claude-shape Lever A | 10 min |
+| 3 | Drop K3, K4, K10, K12, K14 from VARIANTS (5 dead) | hidden-capability | 5 min |
+| 4 | Promote K8-V3 to Layer-1 with 3 cells (not 1) | hidden-capability | 5 min |
+
+** R17.5 / R18 (the big-leverage tools)
+
+| # | Tool / change | Source agent | Wins |
+|---+---------------+--------------+------|
+| 1 | =edit_file_unique= — auto-grow context for unique match | self-improvement | eliminates 100+ retry loops; 43% → 100% success rate |
+| 2 | =apply_link_wrap(file, candidate, target_id)= atomic | self-improvement | B1 LLM cost → $0; success rate → 100% |
+| 3 | =generate_uuid()= as MCP tool | claude-shape Tool 1 | eliminates K7's UUID collision + K1's date-string-as-UUID |
+| 4 | =write_elisp_file(path, defuns, summary)= atomic | claude-shape Tool 2 | enforces Doom conventions deterministically |
+| 5 | =validate_org= as auto post-hook on .org edits | self-improvement | runtime-cost-free quality gate |
+| 6 | Cross-task dial ablation (~76 cells) | per-model best-config | extends per-variant dial findings beyond B1 |
+
+* Disagreements between agents (resolved)
+
+** D1 — K1-qwen30 manager toggle
+
+| Agent | Claim |
+|-------+-------|
+| R16 retro (mine) | "K1-qwen30 +8pp without @picard" |
+| Per-model best-config | n=2 R15+R16 average: no-mgr=9, BEST_CONFIG=12. Manager HELPS. |
+
+*Resolution.* Per-model agent is correct — the R16 retro overcalled
+based on a single-cell outlier (R16 no-mgr=18, R15 no-mgr=0). My
+retro is corrected: K1-qwen30 keeps BEST_CONFIG default in R17.
+
+** D2 — K2-kimi B11 mech score drop (R15 50 → R16 29)
+
+| Agent | Diagnosis |
+|-------+-----------|
+| Hidden-capability | "K2-kimi B11 collapsed R15→R16 (50→29). Manager-prefetch leak hypothesis." |
+| Claude-vs-FOSS shape | "Kimi's brief contained the limp body verbatim — kimi copy-edited it." |
+| Quality judge (earlier) | "Kimi did NOT drop on quality. Mech penalized fewer edits when correct." |
+
+*Resolution.* All 3 partly right. Kimi's R16 brief gave it a thin
+template that it followed too literally; mech scoring counted
+fewer lines as "less work" when actually "same correctness, less
+fluff." R17's inlined Rule 2b skeleton (Lever B) should fix this.
+
+** D3 — K7-qwen72b: variance vs deterministic preference
+
+| Agent | Claim |
+|-------+-------|
+| Per-model best-config | "K7-qwen72b prefers inline-only — robust across rounds" |
+| Hidden-capability | "K7 is wildly dial-and-rerun-sensitive — needs n≥3 retries" |
+
+*Resolution.* Both are true. K7 has high inherent variance AND
+benefits from removing constraints. R17 should: (a) route to
+inline-only, (b) gate K7 cells behind both-K1-and-K2-fail, (c)
+require n≥3 if K7 is the deciding variable.
+
+* Surprises that reshape strategy
+
+** S1 — K8-deepseek-V3 is the under-recognized winner
+
+The cost-per-quality table:
+
+| Variant       | $/cell | Stability | Score ceiling |
+|---------------+--------+-----------+---------------|
+| K1-qwen30     | $0.006 | medium    | 18 (B1)       |
+| K8-deepseek-V3 | $0.005 | *highest* | 6 (B1, n=1)  |
+| K7-qwen72b    | $0.018 | low (variance) | 20 (B1) |
+
+K8-V3 with more cells could match K1-qwen30 on cost AND stability.
+*Single highest-leverage variant addition for R17.*
+
+** S2 — Claude itself fabricates UUIDs
+
+Claude fabricated 1 cross-link UUID per B11 cell across both
+rounds. FOSS variants had 0 fabs (per quality judge: K5 had 1 fab
+on B11 in both rounds; K2/K1/K7 had 0).
+
+*FOSS is actually BETTER on UUID integrity than Claude.* The fix
+is harness-side =find_canonical_id= enforcement, not prompt
+training. R18 Track E.
+
+** S3 — B1 doesn't need an LLM at all
+
+Per self-improvement seeds: 218/218 wraps used prefetch's
+canonical_id. The LLM is doing zero work that the harness can't
+do directly.
+
+*Implication.* R18 should run B1 with NO LLM as A/B vs LLM-driven
+version. If quality holds, B1 becomes a $0 task per cell.
+
+** S4 — Kimi is the elisp specialist; this is reproducible
+
+K2-kimi B25: 12/12 across both rounds. K1 averaged 8, K7 averaged
+7. *Most-reliable cross-round signal in the entire dataset.*
+
+R17/R18 routing: any elisp task → K2-kimi by default.
+
+* What this means for R17 launch
+
+R17 v1 is currently launchable with all 5 quality-judge fixes + 8
+launch picks landed. *Recommended additions before greenlight*
+(~25-30 min build):
+
+1. Inline Rule 2b REQUIRED-marked skeleton in B11/B20 briefs
+2. Survey-before-edit protocol in B11/B5/B20 briefs
+3. Drop K3, K4, K10, K12, K14 from VARIANTS list
+4. Promote K8-deepseek-V3 to layer-1 with 3 cells (test stability claim)
+5. Wire =find_canonical_id= enforcement gate (reject [[id:X]] for unknown UUIDs)
+
+These are pre-launch — no R18 dependency.
+
+* What this means for R18
+
+R18's overnight scope expands to incorporate:
+
+- Track E (self-improvement): land all 4 atomic tools + A/B vs LLM
+- Track J (adversarial): include UUID-fabrication probe (Claude vs FOSS — does FOSS hold the UUID-integrity advantage?)
+- Track L (perf regression): track K8-V3 stability across rounds explicitly
+- Track O (quality rigor): n≥3 for K7-qwen72b cells; n≥5 for any variant declaring a "win"
+- Track M (optimization opps): cross-task dial ablation (~76 cells, finally extending per-variant findings beyond B1)
+
+Plus a new theme:
+
+- *B1-no-LLM A/B* — run B1 entirely deterministically (apply_link_wrap × prefetch candidates) and compare to LLM-driven on quality + cost + wall. If deterministic wins, R18 ships B1 LLM-free.
+
+* Open questions for R19+
+
+- *When do composition strategies (C1-C10) beat single best-FOSS?* R17 layer 4 will tell us.
+- *Does LoRA on harvested R15+R16+R17 dataset add measurable lift over base?* R18 Track G.
+- *Does observer-LLM intervention catch K7's thrash where adaptive abort missed it?* R18 Track F.
+- *Per-handle LoRAs vs per-handle prompt: which is the right specialization layer?* R18 Track G + R18 design.
+- *Cross-vault federation* (someone else's vault as RAG source with permissions) — true multi-user FOSS-LLM org-mode.
+
+* Cross-references
+
+- =/tmp/r17-claude-vs-foss-shape.org= — qualitative deep-dive (5 patterns × 5 levers × 4 tools)
+- =/tmp/r17-per-model-best-config.org= — per-variant dial wins (corrects R16 retro K1 finding)
+- =/tmp/r17-hidden-capability-map.org= — specialty cards + 5-broken-variants list + K8-V3 surprise
+- =/tmp/r17-self-improvement-seeds.org= — 4 atomic tools (218/218 prefetch ID finding)
+- =docs/wiki/2026-05-07-r16-retro.org= — R16 retro (corrected by Agent 2)
+- =docs/wiki/2026-05-07-r17-design.org= — R17 design + launch criteria
+- =docs/wiki/2026-05-07-r18-design.org= — R18 design (overnight scope; absorbs synthesis recommendations)
+- =/tmp/r16-quality-judge-report.org= — earlier judge agent (informs disagreements §)
+- =scripts/_round{15,16}_dials_artifacts/= — raw cell data

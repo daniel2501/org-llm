@@ -433,6 +433,38 @@ class SpecialistTask:
     # JSON-schema). Passed verbatim to the chat-completions API. Used
     # for tasks where output must conform to a strict schema.
     response_format: Optional[dict] = None
+    # R17: OpenRouter provider routing pin. Per cache audit 2026-05-07:
+    # OpenRouter rotates across multiple brokers for the same model
+    # (e.g. DeepSeek-V3 hit 3 different brokers on 5 sequential calls)
+    # which kills prefix-cache hits. Pinning per route stabilizes both
+    # cache + latency. Format: {"order": ["DeepSeek"]} or
+    # {"order": ["Moonshot", "Parasail"], "allow_fallbacks": True}.
+    provider_pin: Optional[dict] = None
+    # R17 quality-judge fix #1 — when True, edit_file rejects any edit
+    # whose post-state diff against the file's initial content shows
+    # deletion lines. APPEND-ONLY tasks (B11 DEC entry drafting) need
+    # this — R16 K1+K7 used edit_file to replace existing content's
+    # entire body as old_string, deleting 151 and 146 lines respectively.
+    append_only: bool = False
+    # R17 quality-judge fix #2 — when True, edit_file rejects any new
+    # text containing =verbatim= markers inside [[id:UUID][...]] link
+    # labels (org renders =foo= literally inside link descriptions).
+    forbid_verbatim_in_labels: bool = False
+    # R17 quality-judge fix #3 — cap inlined RELEVANT FILES section to
+    # last N chars (tail). Per R16 K7-qwen72b ctx-overflow on B11:
+    # full decisions.org breached qwen's 32k context. Set per-task.
+    max_file_inline_chars: Optional[int] = None
+    # R17 quality-judge fix #5 — when True, edit_file on a .py file runs
+    # `ast.parse` post-edit to ensure no FunctionDef has >1 docstring.
+    forbid_stacked_docstrings: bool = False
+    # R17 fix A5 — per-handle temperature override. None = use default 0.1.
+    temperature_override: Optional[float] = None
+    # R17 synthesis addition #5 — UUID enforcement gate. When True,
+    # edit_file/write_file scan the new content for [[id:X][...]] links;
+    # any X not present in the workdir's :ID: registry triggers a revert
+    # with explicit error. Closes Claude's UUID-fabrication gap (1/B11
+    # cell across both rounds; FOSS variants had 0 fabs).
+    forbid_unknown_ids: bool = False
 
 
 @dataclass
@@ -453,6 +485,12 @@ class SpecialistResult:
     # O5: per-tool call counts so the harness can spot which tools each
     # model actually reaches for under D8 broad surface.
     tool_use_breakdown: dict = field(default_factory=dict)
+    # R17 cache audit — sum of cached_tokens reported across iterations.
+    cached_tokens_total: int = 0
+    # R17 cache audit — which OpenRouter broker actually served (Parasail,
+    # Moonshot, DeepInfra, Together, etc.). Useful when provider_pin is None
+    # to identify which routes the model rotated through.
+    provider_seen: Optional[str] = None
 
 
 # ── HTTP / API helpers ───────────────────────────────────────────────────
@@ -479,7 +517,9 @@ def _chat_completions(api_endpoint: str, api_key: str, model: str,
                        messages: list, tools: list,
                        temperature: float = 0.1,
                        max_tokens: int = 8000,
-                       response_format: Optional[dict] = None) -> dict:
+                       response_format: Optional[dict] = None,
+                       provider_pin: Optional[dict] = None,
+                       max_retries: int = 2) -> dict:
     payload = {
         "model": model,
         "messages": messages,
@@ -492,18 +532,52 @@ def _chat_completions(api_endpoint: str, api_key: str, model: str,
         payload["reasoning"] = {"enabled": False}
     if response_format:
         payload["response_format"] = response_format
+    if provider_pin:
+        # R17 — OpenRouter `provider` field for per-route pinning.
+        # Stabilizes prefix cache + latency. See cache audit 2026-05-07.
+        payload["provider"] = provider_pin
     body = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        api_endpoint, data=body, method="POST",
-        headers={"Authorization": f"Bearer {api_key}",
-                 "Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        try: err_body = e.read().decode()
-        except Exception: err_body = "(no body)"
-        return {"_http_error": e.code, "_err_body": err_body}
+    # R17 fix B2 — smart retry on transient HTTP errors (429/502/503/504).
+    # Exponential backoff with jitter. Permanent errors (4xx except 429)
+    # return immediately.
+    import random as _random
+    last_err = None
+    for attempt in range(max_retries + 1):
+        req = urllib.request.Request(
+            api_endpoint, data=body, method="POST",
+            headers={"Authorization": f"Bearer {api_key}",
+                     "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            try: err_body = e.read().decode()
+            except Exception: err_body = "(no body)"
+            last_err = {"_http_error": e.code, "_err_body": err_body}
+            if e.code in (429, 502, 503, 504) and attempt < max_retries:
+                wait = (2 ** attempt) + _random.uniform(0, 1)
+                time.sleep(wait)
+                continue
+            return last_err
+        except (urllib.error.URLError, TimeoutError) as e:
+            last_err = {"_http_error": 0, "_err_body": f"URLError: {e}"}
+            if attempt < max_retries:
+                time.sleep((2 ** attempt) + _random.uniform(0, 1))
+                continue
+            return last_err
+    return last_err or {"_http_error": -1, "_err_body": "no attempts made"}
+
+
+# R17 fix A5 — per-handle temperature override. Passed through from harness.
+PERSONA_TEMPERATURE_DEFAULTS = {
+    "@atoz":     0.0,   # graph hygiene — precision over creativity
+    "@spock":    0.0,   # logic + canon — precision
+    "@boothby":  0.0,   # ops + hygiene — precision
+    "@data":     0.1,   # code + scribe — slight creativity for naming
+    "@riker":    0.2,   # process — moderate
+    "@geordi":   0.4,   # analytics + charts — design choices
+    "@picard":   0.1,   # captain — light creativity for plan synthesis
+}
 
 
 # ── Tool dispatch ────────────────────────────────────────────────────────
@@ -561,14 +635,124 @@ def _validate_org_file(target: Path) -> tuple[bool, str]:
         return True, ""   # don't block on slow validation
 
 
+def _check_append_only(old_text: str, new_text: str) -> tuple[bool, str]:
+    """R17 fix #1 — append-only check. Returns (ok, error_msg).
+
+    The new_text must contain old_text as a STARTING prefix; only
+    appending allowed. If old_text is not a prefix, count the deletion
+    lines for diagnostic.
+    """
+    if new_text.startswith(old_text):
+        return True, ""
+    import difflib
+    diff = list(difflib.unified_diff(
+        old_text.splitlines(keepends=True),
+        new_text.splitlines(keepends=True),
+        lineterm=""))
+    deletions = sum(1 for line in diff
+                       if line.startswith("-") and not line.startswith("---"))
+    return False, (f"APPEND-ONLY violation: edit produced {deletions} deletion "
+                    f"lines. This task is append-only — your new file content "
+                    f"must contain the old content as a starting prefix. "
+                    f"Only ADD at the end (use edit_file with surgical context "
+                    f"from the file's tail).")
+
+
+def _check_no_verbatim_in_labels(text: str) -> tuple[bool, str]:
+    """R17 fix #2 — reject =foo= markers inside [[id:UUID][...]] labels."""
+    import re as _re
+    bad = _re.findall(r"\[\[id:[0-9a-f-]+\]\[[^\]]*=[^\]]*\]\]", text)
+    if bad:
+        return False, (f"VERBATIM-IN-LABEL violation: {len(bad)} link(s) have "
+                        f"=foo= inside the label. Org-mode renders =foo= "
+                        f"literally inside link descriptions. Strip the = "
+                        f"markers before placing text inside [[id:UUID][...]].\n"
+                        f"First offender: {bad[0][:200]}")
+    return True, ""
+
+
+_KNOWN_IDS_CACHE: dict = {"workdir": None, "ids": set()}
+
+
+def _build_known_ids(workdir: Path) -> set:
+    """Walk workdir's docs/wiki/*.org + docs/notes/*.org files; collect
+    every top-level :ID: UUID. Cache per workdir."""
+    if _KNOWN_IDS_CACHE["workdir"] == workdir:
+        return _KNOWN_IDS_CACHE["ids"]
+    import re as _re
+    ids = set()
+    for sub in ("docs/wiki", "docs/notes", "docs"):
+        d = workdir / sub
+        if not d.exists(): continue
+        for org in d.rglob("*.org"):
+            try: text = org.read_text()
+            except Exception: continue
+            for m in _re.finditer(r"^:ID:\s+([0-9a-f-]{8,})", text, _re.MULTILINE):
+                ids.add(m.group(1))
+    _KNOWN_IDS_CACHE["workdir"] = workdir
+    _KNOWN_IDS_CACHE["ids"] = ids
+    return ids
+
+
+def _check_no_unknown_ids(text: str, workdir: Path) -> tuple[bool, str]:
+    """R17 synthesis addition #5 — verify every [[id:X]] in text refers to
+    a UUID that exists in workdir's :ID: registry. Closes UUID-fabrication."""
+    import re as _re
+    known = _build_known_ids(workdir)
+    if not known:
+        return True, ""   # no registry to compare against; permissive
+    inserted = _re.findall(r"\[\[id:([0-9a-f-]{8,})\]", text)
+    unknown = [u for u in inserted if u not in known]
+    if unknown:
+        return False, (f"UUID-fabrication: {len(unknown)} link(s) reference IDs "
+                        f"not in the workdir's :ID: registry. The harness "
+                        f"reverted your edit. Use find_canonical_id(label) to "
+                        f"look up the real UUID, or check the prefetched "
+                        f"candidates list. Unknown IDs: {unknown[:3]}")
+    return True, ""
+
+
+def _check_no_stacked_docstrings(path: Path) -> tuple[bool, str]:
+    """R17 fix #5 — for Python files, ensure no FunctionDef has 2 docstrings."""
+    try: import ast as _ast
+    except ImportError: return True, ""
+    try: tree = _ast.parse(path.read_text())
+    except SyntaxError as exc:
+        return False, f"STACKED-DOCSTRING check failed at parse: {exc}"
+    bad = []
+    for node in _ast.walk(tree):
+        if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef,
+                                    _ast.ClassDef)):
+            continue
+        body = node.body or []
+        if (len(body) >= 2 and isinstance(body[0], _ast.Expr)
+              and isinstance(body[0].value, _ast.Constant)
+              and isinstance(body[0].value.value, str)
+              and isinstance(body[1], _ast.Expr)
+              and isinstance(body[1].value, _ast.Constant)
+              and isinstance(body[1].value.value, str)):
+            bad.append(f"{node.name} (line {node.lineno})")
+    if bad:
+        return False, (f"STACKED-DOCSTRING violation: {len(bad)} function/class "
+                        f"have 2 string literals at the top of body (looks like "
+                        f"a duplicate docstring stacked on existing one). "
+                        f"Offenders: {', '.join(bad[:5])}")
+    return True, ""
+
+
 def _dispatch_tool_call(name: str, args: dict, workdir: Path,
                           target_files_set: Optional[set] = None,
                           scope_strict: bool = False,
-                          validate_after_edit: bool = False) -> tuple[bool, str]:
+                          validate_after_edit: bool = False,
+                          append_only: bool = False,
+                          forbid_verbatim_in_labels: bool = False,
+                          forbid_stacked_docstrings: bool = False,
+                          forbid_unknown_ids: bool = False) -> tuple[bool, str]:
     """Execute a tool call. Returns (ok, observation_text).
 
     When validate_after_edit=True and the edited target is a .org file,
     runs org-element-parse-buffer post-write; reverts on failure (R16 L8).
+    R17 also adds append_only / forbid_verbatim_in_labels / forbid_stacked_docstrings checks.
     """
     if name == "edit_file":
         path = args.get("path", "")
@@ -595,6 +779,30 @@ def _dispatch_tool_call(name: str, args: dict, workdir: Path,
                             f"add surrounding context to make it unique")
         new_text = text.replace(old, new, 1)
         target.write_text(new_text)
+        # R17 fix #1 — append-only diff shim
+        if append_only:
+            ok_v, msg_v = _check_append_only(text, new_text)
+            if not ok_v:
+                target.write_text(text)
+                return False, f"edit reverted — {msg_v}"
+        # R17 fix #2 — verbatim inside link labels
+        if forbid_verbatim_in_labels:
+            ok_v, msg_v = _check_no_verbatim_in_labels(new_text)
+            if not ok_v:
+                target.write_text(text)
+                return False, f"edit reverted — {msg_v}"
+        # R17 fix #5 — stacked docstrings on Python files
+        if forbid_stacked_docstrings and str(target).endswith(".py"):
+            ok_v, msg_v = _check_no_stacked_docstrings(target)
+            if not ok_v:
+                target.write_text(text)
+                return False, f"edit reverted — {msg_v}"
+        # R17 synthesis addition #5 — UUID-fabrication gate
+        if forbid_unknown_ids:
+            ok_v, msg_v = _check_no_unknown_ids(new_text, workdir)
+            if not ok_v:
+                target.write_text(text)
+                return False, f"edit reverted — {msg_v}"
         # R16 L8 validation gate
         if validate_after_edit and str(target).endswith(".org"):
             ok_v, msg_v = _validate_org_file(target)
@@ -629,6 +837,14 @@ def _dispatch_tool_call(name: str, args: dict, workdir: Path,
                     target.unlink()
                 return False, (f"write reverted — org AST validation failed:\n"
                                 f"{msg_v[:300]}")
+        if forbid_unknown_ids:
+            ok_v, msg_v = _check_no_unknown_ids(content, workdir)
+            if not ok_v:
+                if prior is not None:
+                    target.write_text(prior)
+                else:
+                    target.unlink()
+                return False, f"write reverted — {msg_v}"
         return True, f"wrote {len(content)} chars to {path}"
 
     if name == "read_file":
@@ -982,21 +1198,28 @@ def run_specialist(task: SpecialistTask) -> SpecialistResult:
     api_key = _read_api_key(task.api_key_pass_slug)
     workdir = task.workdir.resolve()
 
-    # Initial message: persona + instruction + file contents
+    # Initial message construction. Per R17 cache audit (2026-05-07):
+    # ORDER MATTERS for OpenRouter prefix-caching. Stable bytes FIRST so the
+    # cacheable prefix is maximized. Variable bytes (RELEVANT FILES with
+    # workdir-specific paths, instruction-with-prefetch-JSON) come LAST.
     file_blocks = []
     for fp in task.target_files:
         if fp.exists():
-            file_blocks.append(f"<file path=\"{fp}\">\n{fp.read_text()}\n</file>")
+            content = fp.read_text()
+            # R17 fix #3 — cap inlined file at max_file_inline_chars (tail-truncate)
+            # so prefetch + files don't blow past model context window.
+            # Per R16 K7-qwen72b ctx-overflow on B11.
+            if (task.max_file_inline_chars
+                  and len(content) > task.max_file_inline_chars):
+                content = ("...[truncated to last "
+                            f"{task.max_file_inline_chars} chars]...\n"
+                            + content[-task.max_file_inline_chars:])
+            file_blocks.append(f"<file path=\"{fp}\">\n{content}\n</file>")
     files_section = "\n\n".join(file_blocks) if file_blocks else ""
 
     system_msg = task.persona
-    user_msg = task.instruction
-    if files_section:
-        user_msg += f"\n\nRELEVANT FILES:\n{files_section}"
     tool_names = [t["function"]["name"] for t in (task.tools or [])]
-    user_msg += (
-        f"\n\nWorkdir: {workdir}\n"
-        f"Paths can be relative (resolved to workdir) or absolute. "
+    discipline = (
         f"Available tools: {', '.join(tool_names)}.\n\n"
         f"OPERATING DISCIPLINE — READ CAREFULLY:\n"
         f"- You have {task.max_iterations} iterations max. Use them to ACT, "
@@ -1007,9 +1230,17 @@ def run_specialist(task: SpecialistTask) -> SpecialistResult:
         f"- Skip tools you don't need. (e.g. don't use list_dir/grep/eval_elisp "
         f"unless the task actually requires them.)\n"
         f"- Be decisive. Make the edit. Errors are fine — you can fix them.\n\n"
+        f"Paths can be relative (resolved to workdir) or absolute.\n"
         f"When done, return a brief one-line summary as your final message "
         f"with no tool_calls."
     )
+    # Stable prefix: discipline FIRST. Then instruction (per-task but mostly
+    # constant after R17 reorder). Variable prefix LAST: workdir + file dump.
+    user_msg = discipline + "\n\n" + task.instruction
+    if files_section:
+        user_msg += f"\n\nWorkdir: {workdir}\n\nRELEVANT FILES:\n{files_section}"
+    else:
+        user_msg += f"\n\nWorkdir: {workdir}"
 
     messages = [
         {"role": "system", "content": system_msg},
@@ -1018,6 +1249,8 @@ def run_specialist(task: SpecialistTask) -> SpecialistResult:
 
     edits_applied: list[dict] = []
     cost_total = 0.0
+    cached_tokens_total: int = 0    # R17 cache audit metric
+    provider_seen: Optional[str] = None
     final_text = ""
     error: Optional[str] = None
     events: list[dict] = []
@@ -1039,10 +1272,25 @@ def run_specialist(task: SpecialistTask) -> SpecialistResult:
           scope_strict=task.scope_strict,
           tool_count=len(task.tools))
 
+    # R17 — adaptive iter ceiling. Start with task.max_iterations, but
+    # cut early if the model goes silent for 2 consecutive iterations
+    # (no edits + no text). Saves wall on thrash cells without harming
+    # productive ones.
+    silent_iters_in_a_row = 0
+    edits_per_iter: list[int] = []
+
     for iteration in range(task.max_iterations):
         if cost_total >= task.max_budget_usd:
             error = f"budget cap reached: ${cost_total:.4f}"
             _emit("budget_exceeded", cost=round(cost_total, 6))
+            break
+        # R17 adaptive cut: if the model has been silent for 2 iterations
+        # in a row AND we've made no edits yet, abort the cell early.
+        if (silent_iters_in_a_row >= 2 and not edits_applied
+              and iteration >= 3):
+            error = "adaptive_abort: 2 consecutive silent iterations, no edits"
+            _emit("adaptive_abort", iteration=iteration,
+                  silent_streak=silent_iters_in_a_row)
             break
         _emit("iter_start", iteration=iteration, cum_cost=round(cost_total, 6))
 
@@ -1056,10 +1304,16 @@ def run_specialist(task: SpecialistTask) -> SpecialistResult:
                       f"Be decisive — make the edits, don't browse.")
             messages.append({"role": "user", "content": status})
 
+        # R17 fix A5 — per-handle temperature variance
+        temp = (task.temperature_override
+                  if task.temperature_override is not None
+                  else PERSONA_TEMPERATURE_DEFAULTS.get(task.handle, 0.1))
         resp = _chat_completions(
             task.api_endpoint, api_key, task.model,
             messages, task.tools,
             response_format=task.response_format,
+            provider_pin=task.provider_pin,
+            temperature=temp,
         )
         if "_http_error" in resp:
             error = f"HTTP {resp['_http_error']}: {resp['_err_body'][:300]}"
@@ -1069,6 +1323,11 @@ def run_specialist(task: SpecialistTask) -> SpecialistResult:
         usage = resp.get("usage") or {}
         iter_cost = float(usage.get("cost") or 0)
         cost_total += iter_cost
+        # R17 — capture cache + provider per-iter for post-hoc audit
+        ptd = (usage.get("prompt_tokens_details") or {})
+        cached_tokens_iter = ptd.get("cached_tokens") or 0
+        cached_tokens_total += cached_tokens_iter
+        provider_seen = resp.get("provider") or provider_seen
         choices = resp.get("choices") or []
         if not choices:
             error = "no choices in response"
@@ -1116,6 +1375,10 @@ def run_specialist(task: SpecialistTask) -> SpecialistResult:
                     target_files_set={p.resolve() for p in (task.target_files or [])},
                     scope_strict=task.scope_strict,
                     validate_after_edit=task.validate_after_edit,
+                    append_only=task.append_only,
+                    forbid_verbatim_in_labels=task.forbid_verbatim_in_labels,
+                    forbid_stacked_docstrings=task.forbid_stacked_docstrings,
+                    forbid_unknown_ids=task.forbid_unknown_ids,
                 )
             except Exception as exc:
                 ok = False
@@ -1138,9 +1401,38 @@ def run_specialist(task: SpecialistTask) -> SpecialistResult:
                 "content": observation,
             })
 
+        # R17 — track productivity for adaptive abort
+        edits_this_iter = sum(1 for tc in tool_calls
+                                 if (tc.get("function") or {}).get("name")
+                                    in ("edit_file", "write_file"))
+        edits_per_iter.append(edits_this_iter)
+        if edits_this_iter == 0:
+            silent_iters_in_a_row += 1
+        else:
+            silent_iters_in_a_row = 0
+
+        # R17 fix A4 — self-correction nudge: if any tool result this iter
+        # contained a revert or violation, append a coaching message that
+        # the model will see at the start of next iter.
+        recent_tool_msgs = messages[-len(tool_calls):]
+        if any("reverted" in (m.get("content") or "").lower()
+                  or "violation" in (m.get("content") or "").lower()
+                  for m in recent_tool_msgs):
+            messages.append({
+                "role": "user",
+                "content": ("[harness] Your last edit was reverted by a "
+                              "validation check. Read the error message above "
+                              "carefully — the harness rejected your edit for "
+                              "a specific reason. Try again with a smaller, "
+                              "more surgical edit that respects the rule."),
+            })
+            _emit("self_correction_nudge", iteration=iteration)
+
         _emit("iter_end", iteration=iteration, iter_cost=round(iter_cost, 6),
               cum_cost=round(cost_total, 6), tool_calls=len(tool_calls),
-              finish_reason=finish_reason)
+              finish_reason=finish_reason,
+              edits_this_iter=edits_this_iter,
+              silent_streak=silent_iters_in_a_row)
         if finish_reason == "stop" and not tool_calls:
             break
     else:
@@ -1157,7 +1449,9 @@ def run_specialist(task: SpecialistTask) -> SpecialistResult:
         _emit("silent_noop")
     _emit("run_end", success=(error is None), error=error,
           edits=len(edits_applied), cost=round(cost_total, 6),
-          duration=round(duration, 2))
+          duration=round(duration, 2),
+          cached_tokens=cached_tokens_total,
+          provider=provider_seen)
     return SpecialistResult(
         handle=task.handle,
         success=(error is None),
@@ -1170,4 +1464,6 @@ def run_specialist(task: SpecialistTask) -> SpecialistResult:
         raw_messages=messages,
         events=events,
         tool_use_breakdown=tool_use_breakdown,
+        cached_tokens_total=cached_tokens_total,
+        provider_seen=provider_seen,
     )

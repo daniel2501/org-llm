@@ -1,0 +1,234 @@
+:PROPERTIES:
+:ID:       0f15f637-9ef9-4142-a859-218322436a00
+:CREATED:  [2026-05-07]
+:END:
+#+TITLE: Round-16 deep retro — what worked, what didn't, what shapes R17/R18
+#+FILETAGS: :wiki:multi-agent-org-llm:bench:retro:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R16 ran 54 cells / $2.07 / 1h 32min and surfaced 4 clean
+wins (validation gate, merge-base diff, tool gating, kimi reasoning
+fix) + 1 critical failure (APPEND-ONLY enforcement on B11 — gated
+write_file but left edit_file open, allowing K1+K7 to delete 1500+
+lines via whole-file old_string). The dial ablation surfaced two
+counter-intuitive findings that change R17/R18: K1-qwen30 scores
++8pp WITHOUT @picard, and K7-qwen72b prefers inline-only prefetch
+over both-modes. Quality judge re-ranked: Claude > Kimi > Qwen30
+≈ Qwen72b — opposite of mech leaderboard, with Kimi WINNING B25
+elisp by quality.
+
+*Expanded.* This retro consolidates findings from the live R16 run,
+the R16 quality judge agent, and the R15 → R16 deltas. It informs
+R17's launch criteria + R18's overnight scope.
+
+* R16 by the numbers
+
+| Metric             | Value         |
+|--------------------+---------------|
+| Cells              | 54            |
+| Total cost         | $2.07         |
+| Budget cap         | $25 (used 8%) |
+| Wall (sequential)  | 1h 32min      |
+| Median cell cost   | $0.012        |
+| Median cell wall   | 31s           |
+| p90 cell wall      | 191s          |
+| Max cell wall      | 1169s (K7 thrash on B1 d9_relaxed) |
+| HTTP errors        | 3 (K7 ctx-overflow on B11) |
+| silent_noops       | 2 (vs R15's many) |
+| ID fabrications    | 1 (K5-claude on B11; vs R15's many) |
+| Out-of-scope edits | *0* (vs R15's 22000+ phantom-lines) |
+
+* What worked (4 clean wins)
+
+| # | Feature             | Evidence                                                            |
+|---+---------------------+---------------------------------------------------------------------|
+| 1 | Validation gate     | 0 out-of-scope edits, 1 fab in 54 cells (R15 had many of both)      |
+| 2 | Merge-base diff     | No more dirty-trunk contamination (R15's 22662 phantom lines = 0)    |
+| 3 | Per-task tool gating | =list_dir= called 0 times (R15 had it spammed); focused tool use   |
+| 4 | Kimi reasoning fix  | Kimi 0 silent_noops in 8 cells (R15 had 7+ silent_noops on kimi)    |
+
+* What failed (1 critical bug)
+
+*APPEND-ONLY enforcement on B11.* The R16 design removed =write_file=
+from B11's allowed_tools, but left =edit_file= open. K1-qwen30 and
+K7-qwen72b both used =edit_file= with the entire DEC-019 body as
+=old_string= and replaced it with a DEC-20 stub — *deleting 151 and
+146 lines of decisions.org respectively*. K7 also hit HTTP 400
+ctx-overflow because R16's enriched prefetch breached qwen's 32k.
+
+Mechanical scorer credited these as +50 each (the new DEC body
+counted as insertions), inflating K7's leaderboard #1 position.
+
+R17 fix landed: =append_only=True= flag on the task + harness-level
+diff shim that reverts any edit producing deletion lines + B11
+prefetch capped at 4000 chars to fit qwen's 32k ctx.
+
+* Per-task mech winners
+
+| Task | 1st            | 2nd            | 3rd            | Insight                              |
+|------+----------------+----------------+----------------+--------------------------------------|
+| B1   | K7-qwen72b 20  | K1-qwen30 18   | K7-qwen72b 14  | qwen pattern-matches well on candidates |
+| B5   | K7 21          | K5 18          | K2 18          | rewrite is K7's strong domain         |
+| B7   | K7 5           | K1 2           | K5 0           | code quality tight gap                |
+| B11  | K7 50          | K5 50          | K1 50          | *all 3 inflated by destructive edits*  |
+| B13  | K7 2           | K5 2           | K2 2           | LICENSE year — three-way tie          |
+| B20  | 0 / 0 / 0      |                |                | already had Summary — correct no-op   |
+| *B25* | *K2-kimi 12*  | K5 8           | K7 7           | *kimi BEST on elisp (notable)*        |
+| B26  | K7 5           | K5 5           | K2 5           | defcustom — three-way tie             |
+
+* Dial ablation findings (the gold)
+
+R16's Layer 3 ablated 6 dials × 2 top FOSS variants. Two
+counter-intuitive findings that change R17/R18 defaults:
+
+** K1-qwen30 — manager HURTS
+
+| Dial label                                       | Setting               | primary |
+|--------------------------------------------------+-----------------------+---------|
+| =bt_pb_m0_tb_s1=                                 | NO MANAGER (m0)       |    *18* |
+| =bt_pb_m1_tb_s0=                                 | scope_strict OFF      |      12 |
+| =bl_pb_m1_tb_s1=                                 | brief loose           |      10 |
+| =bt_pi_m1_tb_s1=                                 | inline-only prefetch  |      10 |
+| =bt_pb_m1_tm_s1=                                 | tool surface minimal  |       9 |
+| =bt_pt_m1_tb_s1=                                 | tool-only prefetch    |       8 |
+
+K1-qwen30 with NO @picard manager scores 18 vs ~10 with manager.
+Replicates R15's positive-deviance finding (K1 on B1 d7_no_mgr =
+23/25 quality). *Manager actively hurts qwen30.*
+
+** K7-qwen72b — inline-only prefetch beats both-modes
+
+| Dial label                | Setting              | primary |
+|---------------------------+----------------------+---------|
+| =bt_pi_m1_tb_s1=          | INLINE-only prefetch |    *20* |
+| =bl_pb_m1_tb_s1=          | brief loose          |      10 |
+| =bt_pb_m0_tb_s1=          | no manager           |      10 |
+| =bt_pb_m1_tm_s1=          | tool surface minimal |      10 |
+| =bt_pt_m1_tb_s1=          | tool-only prefetch   |       8 |
+| =bt_pb_m1_tb_s0=          | scope_strict OFF     |       8 |
+
+K7-qwen72b with inline-only prefetch (no =find_canonical_id= tool)
+scores 20 vs ~14 with both-modes. *Tool surface confuses qwen72b
+when prefetch is already complete.*
+
+* Quality vs mechanical — judge re-ranking
+
+R16 mechanical leaderboard:
+1. K7-qwen72b 162
+2. K1-qwen30 149
+3. K5-claude-solo 88
+4. K2-kimi-k2.6 76
+
+R16 quality judge re-ranking (1-25 mean across 8 cells):
+1. *K5-claude-solo 24.63* (mech rank 3)
+2. *K2-kimi-k2.6 23.63* (mech rank 4 — and quality went UP from R15's 20.50)
+3. K1-qwen30 20.13 (mech rank 2)
+3. K7-qwen72b 20.13 (mech rank 1)
+
+Mech inflated qwen variants via destructive B11 edits (50 each that
+were actually 1500-line wipes). Mech penalized kimi for *fewer*
+edits when those fewer edits were correct (R16 B7: kimi correctly
+no-op'd already-typed file; R15 B7 kimi had regressed
+=list[str]= → =List[str]=).
+
+* New variants (K10-K14) — early read
+
+Each got 1 cell on B1; thin signal:
+
+| ID | Model                              | Score | Cost     | Notes                                           |
+|----+------------------------------------+-------+----------+-------------------------------------------------|
+| K10 | =deepseek/deepseek-coder=         |     0 | $0.0005  | silent_noop                                     |
+| K11 | =qwen/qwen3-coder= (480B)         |     8 | $0.082   | promising — 1 cell only, wants more             |
+| K12 | =meta-llama/llama-3.1-405b-instruct= |  0 | $0.0005  | silent_noop or HTTP fail                        |
+| K13 | =deepseek/deepseek-v4-pro= (1.6T) |    10 | $0.073   | flagship — best score among new variants n=1    |
+| K14 | =openai/gpt-oss-20b=              |     0 | $0.006   | silent_noop                                     |
+
+R17 advancing set (per quality judge):
+- *K2-kimi-k2.6* (best FOSS quality)
+- *K13-deepseek-V4-pro* (flagship — needs more cells)
+- K7-qwen72b
+- K1-qwen30
+- *Drop:* K3, K4, K10, K12, K14 (silent), K9-mixtral (variance), K11 (low n=1 output)
+
+* Implications for R17
+
+** Five fixes landed before R17 launch (per quality judge)
+
+1. =append_only= flag + diff shim (revert deletions on append-only tasks)
+2. =forbid_verbatim_in_labels= flag (revert wraps with =foo= inside link labels)
+3. =max_file_inline_chars= per task (B11 capped at 4000 to fit qwen 32k ctx)
+4. Zero-padded DEC-NNN format + inline skeleton in B11 example
+5. =forbid_stacked_docstrings= for Python (catches B7 K2-kimi =List[str]= regression)
+
+** Eight launch picks landed (additional)
+
+A1 skeleton-first B11 · A3 negative examples in JUDGE_FIXES_HEADER ·
+A4 self-correction nudge after revert · A5 persona-specific
+temperature · B1 eager prefetch · B2 smart HTTP retry · B4 per-
+provider warmup · B11 compile-time prompt assembly check
+(preflight).
+
+** Per-variant routing changes for R17/R18
+
+| Variant     | R17 default                        | Rationale                          |
+|-------------+------------------------------------+------------------------------------|
+| K1-qwen30   | =m0= (no manager) for B1-shape     | R16 ablation: +8pp without manager |
+| K7-qwen72b  | =pi= (inline-only prefetch)        | R16 ablation: +6pp without tool    |
+| K2-kimi-k2.6 | BEST_CONFIG (worked)              | judge: best quality FOSS           |
+| K13-V4-pro  | BEST_CONFIG + more cells           | n=1 too thin                       |
+
+* Implications for R18 (overnight)
+
+| Track | Source           | Description                                         |
+|-------+------------------+-----------------------------------------------------|
+| D     | R18 design       | RAG over vault                                       |
+| E     | R16 patterns     | Self-coded tools (Phase 29)                          |
+| F     | K7 thrash        | Observer-LLM intervention (current adaptive abort missed it) |
+| G     | dial findings    | Per-handle LoRAs                                     |
+| J NEW | overnight scope  | Adversarial (prompt injection, ctx flip, malformed) |
+| K NEW | overnight scope  | Long-horizon multi-file tasks                        |
+| L NEW | overnight scope  | Performance regression tracking                      |
+| M NEW | overnight scope  | Optimization opportunity tests                       |
+| N NEW | overnight scope  | Composition / orchestration depth                    |
+| O NEW | overnight scope  | Quality measurement rigor (n=5 minimum, Weaver)      |
+| P NEW | overnight scope  | Self-improvement loop validation                     |
+
+* Failure-mode atlas
+
+| Class                  | Count R16 | R15 baseline | R17 fix                         |
+|------------------------+-----------+--------------+---------------------------------|
+| silent_noop            | 2         | many         | reasoning fix + adaptive abort  |
+| ID fabrication         | 1         | many         | validation gate + prefetch      |
+| out-of-scope edits     | 0         | many         | merge-base diff + scope_strict  |
+| destructive append-only edit | 2  | 1 (K1 B11)   | =append_only= shim + tool gate  |
+| HTTP ctx-overflow      | 3 (K7)    | 0 (smaller prompts) | =max_file_inline_chars= per task |
+| K7-thrash (lots of failed edits) | several | unknown | R18 observer LLM                 |
+
+* Wall-time analysis
+
+R16 ran sequential; R17 will be 8-way parallel. R16's median 31s
+becomes ~30s/cell × ceil(54/8) ≈ 3.5 min for ideal flat distribution.
+R17's projection: ~30-45 min wall total, dominated by p90 outliers
+(191s) and the rare K7-thrash tail (1169s — needs observer LLM in R18).
+
+* Cost analysis
+
+R15: $1.62 / 49 cells = $0.033/cell average
+R16: $2.07 / 54 cells = $0.038/cell average
+R17 projection: ~$0.06/cell × 65 cells (more variants) ≈ $4-5
+
+R18 projection (overnight, all tracks): ~$80-200 — well under $300.
+
+* Cross-references
+
+- =/tmp/r16-quality-judge-report.org= — judge agent (24.63/23.63/20.13/20.13)
+- =docs/wiki/2026-05-07-r17-design.org= — R17 design (this retro shapes it)
+- =docs/wiki/2026-05-07-r18-design.org= — R18 design (overnight scope expanded)
+- =docs/wiki/2026-05-07-round-13-postmortem.org= — earlier post-mortem (R14 → R15)
+- =scripts/_round16_dials_artifacts/summary-1778204847.json= — R16 raw summary
+- =/tmp/r16_deep_retro.py= — analysis script (re-runnable)
