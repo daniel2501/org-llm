@@ -7903,12 +7903,34 @@ def _agor_dispatch_body(agent: str, prompt: str, payload: dict) -> None:
                         },
                     }, f, indent=2)
                 full_prompt = f"@{agent} {prompt}"
+                # Augment PATH for the subprocess so opencode's
+                # `#!/usr/bin/env node' shebang can find Node.js.
+                # The Emacs subprocess inherits a thin PATH that may
+                # lack `~/.guix-profile/bin' / `~/.nvm/.../bin' /
+                # `~/.local/bin'. Prepend the common Node install
+                # locations so subprocess.run finds whichever one
+                # the user has.
+                env = dict(os.environ)
+                home = os.path.expanduser("~")
+                extra_paths = [
+                    f"{home}/.guix-profile/bin",
+                    f"{home}/.nvm/versions/node/v22/bin",
+                    f"{home}/.npm-global/bin",
+                    f"{home}/.local/bin",
+                    "/usr/local/bin",
+                    "/opt/homebrew/bin",
+                ]
+                base_path = env.get("PATH", "")
+                env["PATH"] = ":".join([
+                    p for p in extra_paths if os.path.isdir(p)
+                ] + ([base_path] if base_path else []))
                 try:
                     proc = _sp.run(
                         [opencode, "run", full_prompt,
                          "--dir", wt_path,
                          "--format", "json"],
                         capture_output=True, text=True, timeout=180,
+                        env=env,
                     )
                 except _sp.TimeoutExpired:
                     payload["content"] = (
