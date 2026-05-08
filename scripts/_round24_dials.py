@@ -1407,10 +1407,14 @@ def score_cell(cell):
             except Exception:
                 lint = {}
     score = score - lint_pen
+    # R25 G1 — cell quality floor: cells with severe lint stack OR
+    # negative primary are flagged for leaderboard exclusion (still
+    # logged for forensics). PM3-G in 2026-05-08-bench-arc-post-mortems.
+    floor_dropped = (lint_pen > 8.0) or (primary < 0)
     return {"score": round(score, 2), "primary": primary,
              "in_total": in_total, "out_total": out_total,
              "fab": fab, "lint_penalty": lint_pen,
-             "lint": lint}
+             "lint": lint, "floor_dropped": floor_dropped}
 
 
 def cost_per_unit(cell):
