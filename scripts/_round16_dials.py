@@ -1,0 +1,1307 @@
+#!/usr/bin/env python3
+"""Round-15 — dial sweep + expanded FOSS variant pool, going for stunning
+FOSS results.
+
+Builds on R14's clean-baseline + diff-granularity + ID verification.
+Adds six dials (D5-D10 from the R14 post-mortem) + a wider variant
+pool (8 FOSS + Claude baseline) + a new harder task (B20). Three
+layers:
+
+  Layer 1 — Variant tournament on B1 with BEST CONFIG
+            (every variant × B1 × dials-engaged) → identifies top-3
+            FOSS performers by on_candidate count + cost-per-wrap.
+  Layer 2 — Top-3 FOSS + Claude × all 6 tasks with BEST CONFIG.
+            Measures generality of layer-1 winners across task shapes.
+  Layer 3 — Dial ablation on B1, top-2 FOSS variants. Each cell flips
+            ONE dial from BEST CONFIG to the inverted value. Tells us
+            which dials carry the win.
+
+Observability (six layers, see post-mortem):
+
+  O1 per-iteration log lines (specialist runtime emits, harness mirrors)
+  O2 per-cell events.jsonl (mirror of SpecialistResult.events)
+  O3 running cost / ETA / progress in main log
+  O4 live leaderboard every 5 cells
+  O5 tool_use_breakdown in cell_result.json
+  O6 R15_LIVE.json rewritten after each cell, jq-friendly
+
+Configuration knobs (DialConfig):
+
+  brief_mode: "tight" | "loose"
+  prefetch_mode: "inline" | "tool" | "both"
+  with_manager: bool          # @picard plan vs raw goal to specialist
+  tool_surface: "minimal" | "broad"
+  scope_strict: bool          # edit_file/write_file enforce target_files
+
+The "BEST CONFIG" (chosen up-front for layers 1+2):
+
+  brief_mode=tight, prefetch_mode=both, with_manager=True,
+  tool_surface=broad, scope_strict=True
+
+Best config bets on: tight scope + tool-on-tap + broad surface — the
+combination that should unblock kimi's silent-no-op (D6 tool option
+for canonical IDs) AND let exploration-friendly models (Claude,
+deepseek-R1) reach for grep/list_dir without losing focused models
+(qwen30) to noise.
+"""
+from __future__ import annotations
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.request
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+
+REPO = Path("/home/daniel/repos/org-llm")
+sys.path.insert(0, str(REPO))
+from org_llm.specialist import (  # noqa: E402
+    SpecialistTask, SpecialistResult, run_specialist,
+    DEFAULT_TOOLS, BROAD_TOOLS, BROAD_TOOLS_PLUS_ELISP,
+    FIND_CANONICAL_ID_TOOL,
+)
+try:
+    from org_llm.specialist import BROAD_TOOLS_FULL, OS_TOOLS, ORG_TOOLS  # R16 add
+except ImportError:
+    BROAD_TOOLS_FULL = BROAD_TOOLS_PLUS_ELISP
+    OS_TOOLS, ORG_TOOLS = [], []
+
+ARTIFACTS = REPO / "scripts/_round16_dials_artifacts"
+ARTIFACTS.mkdir(exist_ok=True)
+EPOCH = int(time.time())
+LOG = ARTIFACTS / f"log-{EPOCH}.txt"
+LIVE = ARTIFACTS / "R16_LIVE.json"
+
+PICARD_PRIMER_FILE = REPO / "docs/wiki/picard-agor-primer.org"
+L1A_FILE = REPO / "docs/wiki/org-llm-cli-primer.org"
+L1B_FILE = REPO / "docs/wiki/org-mode-per-agent-primer.org"
+
+BASE = "http://localhost:3030"
+TOKEN_FILE = Path.home() / ".agor" / "cli-token"
+REPO_ID = "019dfbd1-abe8-717b-b0b4-099526fe0b65"
+PER_RUN_TIMEOUT = 900   # 15 min per cell ceiling
+PER_CELL_BUDGET_USD = 5.00   # R16 ramped: up from $2
+PER_CELL_MAX_ITERS = 16      # R16 ramped: up from 8
+
+# R16: Difficulty-Adaptive SC (DSC) instead of flat n=5
+# Per research agent: NAACL 2025 — flat n=5 is wasteful; resample only on
+# verdict failure. DSC matches n=5 quality at <50% cost.
+DSC_BASE_SAMPLES = 1
+DSC_MAX_RESAMPLES = 4   # cap retries on verdict-failure → effective max n=5
+
+CAPTAIN_MODEL_ID = "qwen/qwen3-coder-30b-a3b-instruct"
+
+# Variant pool — R15's 9 + R16 additions per design doc.
+# All FOSS choices honor the user's anti-Groq + Llama/Qwen/DeepSeek/Mixtral rule.
+# K10-K12 added per R16 design; K3 (deepseek-r1) on probation per failure-mode
+# agent (emits tool calls as plain markdown, 0 actual tool_calls in R15).
+# K5-claude-solo demoted from baseline to test variant per Pareto agent
+# (strictly dominated on cost AND quality by 6 other variants).
+VARIANTS = [
+    ("K1-qwen30",       "qwen/qwen3-coder-30b-a3b-instruct",   "agor"),
+    ("K2-kimi-k2.6",    "moonshotai/kimi-k2.6",                 "agor"),
+    ("K3-deepseekR1",   "deepseek/deepseek-r1",                 "agor"),
+    ("K4-gptoss120b",   "openai/gpt-oss-120b",                  "agor"),
+    ("K6-llama70b",     "meta-llama/llama-3.3-70b-instruct",    "agor"),
+    ("K7-qwen72b",      "qwen/qwen-2.5-72b-instruct",           "agor"),
+    ("K8-deepseekV3",   "deepseek/deepseek-chat-v3-0324",       "agor"),
+    ("K9-mixtral",      "mistralai/mixtral-8x22b-instruct",     "agor"),
+    # R16 NEW (per roster agent + design doc)
+    ("K10-deepseekCv2", "deepseek/deepseek-coder",              "agor"),
+    ("K11-qwen3coder",  "qwen/qwen3-coder",                     "agor"),  # 480B Apache 2.0
+    ("K12-llama405b",   "meta-llama/llama-3.1-405b-instruct",   "agor"),
+    ("K13-deepseekV4",  "deepseek/deepseek-v4-pro",             "agor"),  # NEW flagship MIT
+    ("K14-gptoss20b",   "openai/gpt-oss-20b",                   "agor"),  # cheap workhorse
+    # External baseline
+    ("K5-claude-solo",  None,                                    "claude-solo"),
+]
+
+
+# ── Dial configuration ──────────────────────────────────────────────────
+@dataclass
+class DialConfig:
+    """Per-cell dial knobs (R15 D5-D10)."""
+    brief_mode: str = "tight"        # tight | loose
+    prefetch_mode: str = "both"       # inline | tool | both
+    with_manager: bool = True
+    tool_surface: str = "broad"       # minimal | broad
+    scope_strict: bool = True
+
+    def label(self) -> str:
+        return (f"b{self.brief_mode[0]}_p{self.prefetch_mode[0]}_"
+                f"m{int(self.with_manager)}_t{self.tool_surface[0]}_"
+                f"s{int(self.scope_strict)}")
+
+
+BEST_CONFIG = DialConfig(
+    brief_mode="tight", prefetch_mode="both", with_manager=True,
+    tool_surface="broad", scope_strict=True,
+)
+
+# Each ablation cell flips ONE dial from BEST_CONFIG.
+ABLATION_DIALS = [
+    ("d5_loose",   DialConfig(brief_mode="loose", prefetch_mode="both",
+                                with_manager=True, tool_surface="broad",
+                                scope_strict=True)),
+    ("d6_inline",  DialConfig(brief_mode="tight", prefetch_mode="inline",
+                                with_manager=True, tool_surface="broad",
+                                scope_strict=True)),
+    ("d6_tool",    DialConfig(brief_mode="tight", prefetch_mode="tool",
+                                with_manager=True, tool_surface="broad",
+                                scope_strict=True)),
+    ("d7_no_mgr",  DialConfig(brief_mode="tight", prefetch_mode="both",
+                                with_manager=False, tool_surface="broad",
+                                scope_strict=True)),
+    ("d8_minimal", DialConfig(brief_mode="tight", prefetch_mode="both",
+                                with_manager=True, tool_surface="minimal",
+                                scope_strict=True)),
+    ("d9_relaxed", DialConfig(brief_mode="tight", prefetch_mode="both",
+                                with_manager=True, tool_surface="broad",
+                                scope_strict=False)),
+]
+
+
+# ── Misc helpers (carried from R14) ──────────────────────────────────────
+def _strip_org_meta(text):
+    text = re.sub(r"^:PROPERTIES:.*?:END:\s*", "", text, count=1, flags=re.DOTALL)
+    text = re.sub(r"^#\+\w+:.*$\n", "", text, flags=re.MULTILINE)
+    return text.strip()
+
+
+PICARD_PRIMER = _strip_org_meta(PICARD_PRIMER_FILE.read_text())
+L1A_TEXT = _strip_org_meta(L1A_FILE.read_text())
+L1B_TEXT = _strip_org_meta(L1B_FILE.read_text())
+
+
+def _extract_l1_for_handle(handle):
+    h = handle.lstrip("@").lower()
+    sections = []
+    m_base = re.search(r"\* Shared baseline.*?(?=\n\* )", L1B_TEXT, re.DOTALL)
+    if m_base: sections.append("# === ORG-MODE SHARED BASELINE ===\n\n" + m_base.group(0).strip())
+    m_b = re.search(rf"\* @{h} —.*?(?=\n\* )", L1B_TEXT, re.DOTALL | re.IGNORECASE)
+    if m_b: sections.append(f"# === ORG-MODE EXPERTISE for @{h} ===\n\n" + m_b.group(0).strip())
+    m_a = re.search(rf"\*\* @{h} —.*?(?=\n\*\* @|\n\* )", L1A_TEXT, re.DOTALL | re.IGNORECASE)
+    if m_a: sections.append(f"# === ORG-LLM CLI VERBS for @{h} ===\n\n" + m_a.group(0).strip())
+    return "\n\n---\n\n".join(sections) if sections else ""
+
+
+# ── O3: running progress + cost ticker ───────────────────────────────────
+class Progress:
+    def __init__(self, total_cells: int, budget_usd: float):
+        self.total = total_cells
+        self.done = 0
+        self.budget = budget_usd
+        self.spent = 0.0
+        self.t0 = time.time()
+        self.cells: list[dict] = []
+
+    def cell_done(self, cell: dict) -> str:
+        self.done += 1
+        cost = (cell.get("cost_usd")
+                  or (cell.get("phase1_cost_usd", 0)
+                       + cell.get("specialist_cost_usd", 0)))
+        self.spent += cost
+        self.cells.append(cell)
+        elapsed = time.time() - self.t0
+        avg_per_cell = elapsed / max(self.done, 1)
+        eta_seconds = avg_per_cell * (self.total - self.done)
+        return (f"({self.done}/{self.total} cells, ${self.spent:.3f}/${self.budget:.0f}, "
+                f"~{int(eta_seconds/60)} min remaining)")
+
+
+PROGRESS: Progress | None = None
+
+
+def log(msg, also_to_stdout=True):
+    line = f"[{time.strftime('%H:%M:%S')}] {msg}"
+    if also_to_stdout: print(line, flush=True)
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    LOG.open("a").write(line + "\n")
+
+
+def tok():
+    return json.loads(TOKEN_FILE.read_text())["accessToken"]
+
+
+def relogin():
+    pw = subprocess.run(["pass", "org-llm/agor/admin-password"],
+                         capture_output=True, text=True, check=True).stdout.strip()
+    env = os.environ.copy()
+    env["PATH"] = (f"{os.path.expanduser('~/.npm-global/bin')}:"
+                   f"{os.path.expanduser('~/.guix-profile/bin')}:" + env.get("PATH", ""))
+    subprocess.run(["agor", "login", "-e", "admin@agor.live", "-p", pw],
+                    capture_output=True, env=env, check=True)
+
+
+def req(method, path, body=None, retries=1):
+    data = json.dumps(body).encode() if body is not None else None
+    for attempt in range(retries + 1):
+        try:
+            r = urllib.request.Request(BASE + path, data=data, method=method,
+                headers={"Authorization": f"Bearer {tok()}",
+                         "Content-Type": "application/json"})
+            with urllib.request.urlopen(r, timeout=20) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            if e.code == 401 and attempt < retries:
+                relogin()
+                continue
+            raise
+
+
+# ── Prefetch (carried from R14) ──────────────────────────────────────────
+def build_known_ids_map():
+    wiki = REPO / "docs/wiki"
+    id_to_meta, basename_to_ids, dec_to_id = {}, {}, {}
+    for org in sorted(wiki.glob("*.org")):
+        text = org.read_text()
+        m = re.search(r"^:ID:\s+([a-f0-9-]+)", text, re.MULTILINE)
+        if m:
+            uid = m.group(1)
+            id_to_meta[uid] = {"file": org.name}
+            basename_to_ids.setdefault(org.stem, []).append(uid)
+            if org.name == "decisions.org":
+                for dm in re.finditer(r"^\*\* (DEC-\d+)\s", text, re.MULTILINE):
+                    dec_to_id[dm.group(1)] = uid
+    return id_to_meta, basename_to_ids, dec_to_id
+
+
+KNOWN_ID_TO_META, BASENAME_TO_IDS, DEC_TO_ID = build_known_ids_map()
+
+
+def prefetch_b1(task):
+    target = REPO / task["target_file"]
+    text = target.read_text()
+    lines = text.splitlines()
+    roadmap_id = (BASENAME_TO_IDS.get("roadmap") or [None])[0]
+    candidates = []
+    for ln_no, line in enumerate(lines, 1):
+        if "[[id:" in line: continue
+        for m in re.finditer(r"Phase \d{4}-\d{2}\.\d{2}\b", line):
+            if roadmap_id:
+                candidates.append({"line": ln_no, "snippet": line.strip()[:120],
+                                    "matched_text": m.group(0),
+                                    "canonical_owner": "roadmap.org",
+                                    "canonical_id": roadmap_id, "kind": "phase"})
+        for m in re.finditer(r"\bDEC-\d+\b", line):
+            label = m.group(0)
+            if label in DEC_TO_ID:
+                candidates.append({"line": ln_no, "snippet": line.strip()[:120],
+                                    "matched_text": label,
+                                    "canonical_owner": "decisions.org",
+                                    "canonical_id": DEC_TO_ID[label], "kind": "dec"})
+        for stem, ids in BASENAME_TO_IDS.items():
+            for m in re.finditer(r"\b" + re.escape(stem) + r"\.org\b", line):
+                candidates.append({"line": ln_no, "snippet": line.strip()[:120],
+                                    "matched_text": stem + ".org",
+                                    "canonical_owner": stem + ".org",
+                                    "canonical_id": ids[0], "kind": "basename"})
+                break
+    return {"target_path": str(target.relative_to(REPO)),
+             "target_lines": len(lines), "known_ids_count": len(KNOWN_ID_TO_META),
+             "candidates": candidates}
+
+
+def prefetch_passthrough(task):
+    target = REPO / task["target_file"]
+    if target.exists():
+        text = target.read_text()
+        return {"target_path": str(target.relative_to(REPO)),
+                 "target_lines": len(text.splitlines()),
+                 "target_size_bytes": len(text)}
+    return {"target_path": task.get("target_file", ""), "missing": True}
+
+
+def prefetch_b5(task):
+    target = REPO / task["target_file"]
+    text = target.read_text()
+    paragraphs = re.split(r"\n\s*\n", text)
+    longest = max(((i, p) for i, p in enumerate(paragraphs)), key=lambda x: len(x[1]))
+    return {"target_path": str(target.relative_to(REPO)),
+             "target_lines": len(text.splitlines()),
+             "longest_paragraph_index": longest[0],
+             "longest_paragraph_chars": len(longest[1]),
+             "longest_paragraph_preview": longest[1][:500]}
+
+
+def prefetch_b11(task):
+    decisions_text = (REPO / "docs/wiki/decisions.org").read_text()
+    nums = sorted({int(m.group(1)) for m in re.finditer(r"^\*\* DEC-(\d+)\s",
+                                                          decisions_text, re.MULTILINE)})
+    return {"decisions_path": "docs/wiki/decisions.org",
+             "existing_dec_numbers": nums,
+             "next_available": (max(nums) + 1) if nums else 1,
+             "problem_statement": task.get("problem_statement", "")}
+
+
+def prefetch_b20(task):
+    """B20: lift a wiki page that lacks a Summary section, find one to add."""
+    target = REPO / task["target_file"]
+    text = target.read_text()
+    has_summary = bool(re.search(r"^\s*\*Summary\.\*", text, re.MULTILINE))
+    title_m = re.search(r"^#\+TITLE:\s*(.+)$", text, re.MULTILINE)
+    title = title_m.group(1).strip() if title_m else target.stem
+    first_para = ""
+    after_meta = re.sub(r"^(:PROPERTIES:.*?:END:|#\+\w+:.*)\n", "", text,
+                         flags=re.MULTILINE | re.DOTALL).strip()
+    paras = re.split(r"\n\s*\n", after_meta)
+    for p in paras:
+        if not p.startswith("*"):
+            first_para = p.strip()[:600]
+            break
+    return {"target_path": str(target.relative_to(REPO)),
+             "target_lines": len(text.splitlines()),
+             "title": title,
+             "has_summary": has_summary,
+             "first_non_heading_paragraph_preview": first_para}
+
+
+def prefetch_b25(task):
+    """B25: write a NEW elisp helper file. Just confirm target dir is writable."""
+    parent = (REPO / task["target_file"]).parent
+    return {"target_path": task["target_file"],
+             "target_dir_exists": parent.exists(),
+             "target_dir_writable": os.access(parent, os.W_OK) if parent.exists() else False,
+             "spec": ("Create a NEW elisp file at the target path with a single "
+                       "defun named `org-llm-r16-shout` that takes one string arg "
+                       "and returns it uppercased with three exclamation marks. "
+                       "Then verify it loads via load_elisp_file, and call it "
+                       "via eval_elisp on the input \"hello\" to confirm output "
+                       "is \"HELLO!!!\".")}
+
+
+def prefetch_b26(task):
+    """B26: add a defcustom to existing doom/org-llm-specialist.el."""
+    target = REPO / task["target_file"]
+    text = target.read_text()
+    has_defcustom_budget = "org-llm-specialist-default-budget" in text
+    return {"target_path": str(target.relative_to(REPO)),
+             "target_lines": len(text.splitlines()),
+             "has_defcustom_budget_already": has_defcustom_budget,
+             "spec": ("Add a NEW defcustom named `org-llm-specialist-default-budget` "
+                       "to org-llm-specialist.el. Type :type 'number, default 1.0, "
+                       "group 'org-llm-specialist, with a one-line docstring. Place "
+                       "it next to the other defcustoms (around the existing "
+                       "`org-llm-specialist-default-handle` definition). Then verify "
+                       "the file still loads via load_elisp_file. If "
+                       "has_defcustom_budget_already is true, no-op + explain.")}
+
+
+TASKS = [
+    {"id": "B1", "label": "cross-link audit on literate-tools.org",
+     "target_file": "docs/wiki/literate-tools.org",
+     "goal": "Add EXACTLY 5 [[id:UUID][label]] cross-link wrappers around existing prose mentions. Use the canonical_id from the pre-fetched candidates list (or call find_canonical_id when D6=tool). Preserve =...= verbatim formatting INSIDE link labels. Do NOT touch any other file. Do NOT change section headings or structure.",
+     "n_changes": 5, "prefetch": prefetch_b1, "primary_metric": "wrap_categories"},
+    {"id": "B5", "label": "section rewrite for clarity",
+     "target_file": "docs/wiki/agor-pilot-install.org",
+     "goal": "Pick the longest paragraph (see prefetch.longest_paragraph_*) and rewrite IT for tightness — at least 30% shorter. Preserve meaning. Do NOT touch any other file.",
+     "n_changes": 1, "prefetch": prefetch_b5, "primary_metric": "in_scope_changes"},
+    {"id": "B7", "label": "add docstrings + type hints",
+     "target_file": "org_llm/avatars.py",
+     "goal": "**EDIT ONLY THE FILE `org_llm/avatars.py`** — do not touch any other file. Add Python type hints + one-line docstrings to every public function/class. Existing behavior must not change. `python -c 'import org_llm.avatars'` must import cleanly. If the file is already type-hinted, no-op and explain.",
+     "n_changes": None, "prefetch": prefetch_passthrough,
+     "primary_metric": "in_scope_changes"},
+    {"id": "B11", "label": "draft DEC entry for an open question",
+     "target_file": "docs/wiki/decisions.org",
+     "problem_statement": "Should @picard be auto-created at `org-llm init` (eager) OR lazily-spawned on first team-spawn (lazy)?",
+     "append_only": True,   # R16: harness-enforced + write_file gated out via PER_TASK_ALLOWED_TOOLS
+     "goal": "**APPEND-ONLY: 0 deletions verifiable in `git diff`.** Add a new DEC at the END of docs/wiki/decisions.org via edit_file (anchor on the file's tail). Use next-available number (see prefetch.next_available). Format: ** DEC-N — title (status). Body: Context, Options (≥2), Tradeoffs, Decision, Rationale.",
+     "examples": [
+        "DEC FORMAT (skeleton — fill in for the problem at hand):\n"
+        "  ** DEC-N — short-title (status)\n"
+        "  :PROPERTIES:\n"
+        "  :ID:       <new-uuid>\n"
+        "  :CREATED:  [2026-05-07]\n"
+        "  :END:\n\n"
+        "  *Context.* One paragraph stating the problem.\n\n"
+        "  *Options.*\n"
+        "  - Option A — short summary\n"
+        "  - Option B — short summary\n\n"
+        "  *Tradeoffs.* One paragraph weighing options.\n\n"
+        "  *Decision.* The chosen path.\n\n"
+        "  *Rationale.* Why."],
+     "n_changes": 1, "prefetch": prefetch_b11, "primary_metric": "in_scope_changes"},
+    {"id": "B13", "label": "update LICENSE copyright year",
+     "target_file": "LICENSE",
+     "goal": "Update copyright year `2025` → `2026`. If already 2026, no edit needed.",
+     "n_changes": 1, "prefetch": prefetch_passthrough,
+     "primary_metric": "in_scope_changes"},
+    {"id": "B20", "label": "add Summary section to wiki page",
+     "target_file": "docs/wiki/picard-agor-primer.org",
+     "goal": "If this page does NOT already begin with `*Summary.*` (per wiki Rule 2b), add a 1-3 sentence summary block right after the page-level metadata (before any content sections). Format: a single paragraph starting with `*Summary.*` and ending with a period. Pull the gist from the page's first non-heading paragraph (see prefetch). Do NOT modify any other content. If `has_summary` is true in prefetch, no-op + explain.",
+     "n_changes": 1, "prefetch": prefetch_b20,
+     "primary_metric": "in_scope_changes"},
+    # ── Elisp tasks (R15 — wired with primer + doom-conventions reference) ─
+    {"id": "B25", "label": "write a new elisp helper file + validate",
+     "target_file": "tests/manual_test_helper_r16.el",
+     "goal": ("Create a NEW elisp file at the target path with a single "
+                "defun named `org-llm-r16-shout` that takes one string arg "
+                "and returns it uppercased with three exclamation marks. "
+                "Use the elisp primer + doom conventions reference. After "
+                "writing, call load_elisp_file to verify it loads cleanly, "
+                "then call eval_elisp with code "
+                "`(progn (load \"<absolute-path-to-your-file>\") "
+                "(org-llm-r16-shout \"hello\"))` to confirm it returns "
+                "\"HELLO!!!\". Do NOT modify any other file."),
+     "n_changes": 1, "prefetch": prefetch_b25,
+     "primary_metric": "in_scope_changes"},
+    {"id": "B26", "label": "add a defcustom to existing doom/*.el",
+     "target_file": "doom/org-llm-specialist.el",
+     "goal": ("Add a NEW defcustom named `org-llm-specialist-default-budget` "
+                "to org-llm-specialist.el. :type 'number, default 1.0, "
+                ":group 'org-llm-specialist, with a one-line docstring. "
+                "Place it alongside the other defcustoms (near "
+                "`org-llm-specialist-default-handle`). After editing, call "
+                "load_elisp_file to verify the file still loads cleanly. "
+                "If `has_defcustom_budget_already` is true in prefetch, "
+                "no-op + explain. Do NOT touch any other file."),
+     "n_changes": 1, "prefetch": prefetch_b26,
+     "primary_metric": "in_scope_changes"},
+]
+
+
+PLAN_FORMAT = """
+You are @picard executing PHASE 1. Output a JSON plan.
+
+PICARD_PLAN_JSON_BEGIN
+{
+  "classification": {"judgment": "<level>", "recurrence": "<level>", "stakes": "<level>"},
+  "playbook": "<flat|A|B|C|D|E>",
+  "team": [{"handle": "@<handle>", "task_brief": "<full multi-line brief>"}],
+  "rationale": "<one paragraph>"
+}
+PICARD_PLAN_JSON_END
+"""
+
+
+def call_openrouter(model_id, prompt):
+    or_key = subprocess.run(["pass", "org-llm/cloud/openrouter/api-key"],
+                              capture_output=True, text=True, check=True).stdout.strip()
+    body = json.dumps({"model": model_id,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.1, "max_tokens": 3000}).encode()
+    req2 = urllib.request.Request(
+        "https://openrouter.ai/api/v1/chat/completions",
+        data=body, method="POST",
+        headers={"Authorization": f"Bearer {or_key}",
+                 "Content-Type": "application/json"})
+    with urllib.request.urlopen(req2, timeout=180) as resp:
+        data = json.loads(resp.read())
+    text = data["choices"][0]["message"]["content"]
+    cost = float(data.get("usage", {}).get("cost") or 0)
+    return text, cost
+
+
+def parse_plan(text):
+    m = re.search(r"PICARD_PLAN_JSON_BEGIN\s*(.+?)\s*PICARD_PLAN_JSON_END",
+                   text, re.DOTALL)
+    if not m:
+        m2 = re.search(r"(\{[^}]*\"classification\".+\})", text, re.DOTALL)
+        if not m2: return None
+        json_text = m2.group(1)
+    else:
+        json_text = m.group(1).strip()
+    try: return json.loads(json_text)
+    except json.JSONDecodeError: return None
+
+
+PERSONA_LOOKUP = {
+    "@atoz": "You are @atoz — Bridge Crew wiki concept-graph specialist.",
+    "@data": "You are @data — Bridge Crew code + scribe specialist.",
+    "@spock": "You are @spock — Bridge Crew logic + canonical-source reviewer.",
+    "@geordi": "You are @geordi — Bridge Crew analytics + charts specialist.",
+    "@boothby": "You are @boothby — Bridge Crew ops + hygiene specialist.",
+    "@riker": "You are @riker — Bridge Crew process + scheduling specialist.",
+}
+
+
+def default_handle_for_task(task):
+    """When D7=no_manager, pick the right specialist handle for the task."""
+    tid = task["id"]
+    if tid in ("B1", "B11"): return "@atoz"
+    if tid in ("B5", "B20"): return "@atoz"
+    if tid == "B7": return "@data"
+    if tid == "B13": return "@boothby"
+    if tid in ("B25", "B26"): return "@data"   # elisp = code-shaped
+    return "@data"
+
+
+# ── Diff analysis (carried from R14) ─────────────────────────────────────
+INSERTED_LINK_RE = re.compile(r"\[\[id:([0-9a-f-]+)\]\[([^\]]+)\]\]")
+
+
+def parse_diff_files(diff_text):
+    files = {}
+    cur = None
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            m = re.match(r"diff --git a/(.+?) b/(.+)$", line)
+            if m:
+                cur = m.group(2)
+                files[cur] = {"insertions": 0, "deletions": 0,
+                                "added_lines": [], "removed_lines": []}
+        elif cur and line.startswith("+") and not line.startswith("+++"):
+            files[cur]["insertions"] += 1
+            files[cur]["added_lines"].append(line[1:])
+        elif cur and line.startswith("-") and not line.startswith("---"):
+            files[cur]["deletions"] += 1
+            files[cur]["removed_lines"].append(line[1:])
+    return files
+
+
+def analyze_diff(diff_text, target_files, prefetch):
+    files = parse_diff_files(diff_text)
+    target_set = {str(p) for p in (target_files or [])}
+    in_scope_ins = in_scope_del = 0
+    out_scope_ins = out_scope_del = 0
+    in_scope_files = []
+    out_scope_files = []
+    for fp, stats in files.items():
+        if fp in target_set:
+            in_scope_ins += stats["insertions"]
+            in_scope_del += stats["deletions"]
+            in_scope_files.append(fp)
+        else:
+            out_scope_ins += stats["insertions"]
+            out_scope_del += stats["deletions"]
+            out_scope_files.append(fp)
+
+    inserted_links = []
+    candidate_texts = {c.get("matched_text", "")
+                        for c in (prefetch.get("candidates") or [])}
+    for fp, stats in files.items():
+        for added in stats["added_lines"]:
+            for m in INSERTED_LINK_RE.finditer(added):
+                uid, label = m.group(1), m.group(2)
+                in_workdir = uid in KNOWN_ID_TO_META
+                label_norm = label.strip().strip("=")
+                on_candidate = any(
+                    c and (c.lower() in label_norm.lower()
+                            or label_norm.lower() in c.lower())
+                    for c in candidate_texts
+                )
+                inserted_links.append({
+                    "file": fp, "id": uid, "label": label,
+                    "id_in_workdir": in_workdir,
+                    "wrap_category": (
+                        "on_candidate" if on_candidate
+                        else ("creative" if in_workdir else "unmatched")
+                    ),
+                })
+    fab_count = sum(1 for il in inserted_links if not il["id_in_workdir"])
+    cat_counts = {"on_candidate": 0, "creative": 0, "unmatched": 0}
+    for il in inserted_links:
+        cat_counts[il["wrap_category"]] += 1
+
+    return {
+        "files_touched": list(files.keys()),
+        "in_scope_files": in_scope_files,
+        "out_of_scope_files": out_scope_files,
+        "diff_in_scope": {"insertions": in_scope_ins, "deletions": in_scope_del},
+        "diff_out_of_scope": {"insertions": out_scope_ins, "deletions": out_scope_del},
+        "inserted_links_count": len(inserted_links),
+        "id_fabrication_count": fab_count,
+        "wrap_categories": cat_counts,
+        "inserted_links": inserted_links,
+    }
+
+
+def wt_diff_vs_base(wt_path):
+    base = subprocess.run(["git", "-C", str(wt_path), "merge-base",
+                            "HEAD", "trunk"],
+                            capture_output=True, text=True).stdout.strip() or "trunk"
+    diff_full = subprocess.run(["git", "-C", str(wt_path), "diff", base, "HEAD"],
+                                 capture_output=True, text=True).stdout
+    diff_stat = subprocess.run(["git", "-C", str(wt_path), "diff", "--stat",
+                                 base, "HEAD"],
+                                 capture_output=True, text=True).stdout.strip()
+    return diff_full, diff_stat
+
+
+# ── Cell execution ───────────────────────────────────────────────────────
+def write_cell_result(cell_dir, payload):
+    (cell_dir / "cell_result.json").write_text(json.dumps(payload, indent=2,
+                                                             default=str))
+
+
+def write_events_jsonl(cell_dir, events):
+    """O2: per-cell events stream, jq-friendly."""
+    p = cell_dir / "events.jsonl"
+    with p.open("a") as f:
+        for ev in events:
+            f.write(json.dumps(ev) + "\n")
+
+
+# R16 L16 — judge's top-5 prompt fixes from R15 quality assessment.
+# Per `docs/notes/2026-05-07-kimi-fix-*` + the live R15 quality judge agent.
+JUDGE_FIXES_HEADER = """\
+QUALITY GUARDRAILS (read carefully — these caught real R15 failures):
+
+1) LINK LABEL CRAFT — when you wrap a phrase as [[id:UUID][label]], the
+   label should be the FULL descriptive phrase from the source line, not
+   a bare ID/number. GOOD: "[[id:abc123][Phase 2026-05.14 — agent-framework
+   refinements (legacy 23.2 — capability enforcement)]]". BAD:
+   "[[id:abc123][Phase 2026-05.14]]".
+
+2) NO VERBATIM-MARKERS INSIDE LINK DESCRIPTIONS. Org-mode renders
+   "=foo=" inside a link label literally, not as code style. Strip =...=
+   wrappers before placing text inside [[id:UUID][...]].
+
+3) APPEND-ONLY rules are LITERAL: "0 deletions verifiable in `git diff`".
+   If a task says APPEND-ONLY, your diff must show ZERO deletion lines (-).
+   Use edit_file with surgical context, not write_file. Never overwrite a
+   file that contains content you didn't author.
+
+4) UUID INTEGRITY — every [[id:UUID]] you insert MUST be either:
+   - present in the prefetch candidates list, OR
+   - looked up via find_canonical_id (which queries the workdir vault).
+   NEVER invent UUIDs from pattern (a8f4c2e1-... shaped IDs that are
+   also random-looking).
+
+5) FORMAT SCHEMAS — when emitting structured org content (DEC, daily-log,
+   weekly-review), follow the exact section skeleton shown in the brief.
+   Don't paraphrase headings.
+"""
+
+
+def render_specialist_brief(task, plan_brief, dial: DialConfig,
+                              prefetch, handle, instr_prefix):
+    """Build the actual instruction text sent to the specialist."""
+    pieces = [instr_prefix] if instr_prefix else []
+
+    if dial.brief_mode == "loose":
+        pieces.append(
+            f"TASK ({task['id']} — {task['label']}):\n{task['goal']}\n\n"
+            "Audit the situation, decide a reasonable course of action, "
+            "and execute it via the available tools."
+        )
+    else:
+        pieces.append(plan_brief or task["goal"])
+
+    if task.get("n_changes") is not None:
+        pieces.append(f"N-CHANGES RULE: make EXACTLY {task['n_changes']} change(s).")
+
+    # R16 L16: quality guardrails (judge's top-5 fixes)
+    pieces.append(JUDGE_FIXES_HEADER)
+
+    # R16: APPEND-ONLY enforcement — explicit warning when task is tagged.
+    # Per failure-mode agent: K1-qwen30 deleted 1643 lines from decisions.org
+    # despite "Do NOT delete" — needs sharper restating + tool gating.
+    if task.get("append_only"):
+        pieces.append(
+            "**APPEND-ONLY ENFORCEMENT**\n"
+            "This task is APPEND-ONLY. The harness has REMOVED write_file "
+            "from your tool surface. You may ONLY edit_file at the END of "
+            "the file (use surgical old_string→new_string with context "
+            "from the file's tail). Your final `git diff` MUST show ZERO "
+            "lines of deletion (no `-` lines) — only insertions (`+`)."
+        )
+
+    # R16 L16: per-task few-shot demos when defined
+    examples = task.get("examples") or []
+    if examples:
+        pieces.append("WORKED EXAMPLES (apply this style):\n\n"
+                       + "\n\n".join(examples))
+
+    # T1 elisp mastery: primer + doom-conventions reference for elisp tasks
+    if task_needs_elisp_kit(task) and dial.tool_surface == "broad":
+        pieces.append(ELISP_PRIMER)
+        ref = doom_conventions_reference()
+        if ref: pieces.append(ref)
+
+    if dial.prefetch_mode in ("inline", "both"):
+        pieces.append("PRE-FETCHED CONTEXT:\n" + json.dumps(prefetch, indent=2))
+    if dial.prefetch_mode in ("tool", "both"):
+        pieces.append(
+            "TOOL HINT: when you need a canonical UUID for an "
+            "[[id:UUID][label]] cross-link, call find_canonical_id with the "
+            "label. It searches the workdir's :ID:-bearing org files and "
+            "returns matches with score. Use this to verify or look up IDs "
+            "instead of guessing."
+        )
+
+    return "\n\n".join(pieces)
+
+
+def select_tools(dial: DialConfig, task: Optional[dict] = None) -> list[dict]:
+    """Tool surface per dial AND per-task gating (R16 L14).
+
+    Per tool-use agent's R15 analysis:
+      - list_dir was never called → drop entirely from all task surfaces
+      - K7-qwen72b had 52% edit_file success rate from over-broad surface →
+        gate elisp tools out of non-elisp tasks
+      - APPEND-ONLY tasks (B11) should have write_file removed (per failure-
+        mode agent: K1-qwen30 used write_file to overwrite 1643 lines)
+
+    Per-task gating: if PER_TASK_ALLOWED_TOOLS has the task's id, intersect
+    the dial-selected pool with that allow-list. Otherwise fall through.
+    """
+    pool = list(BROAD_TOOLS_FULL) if dial.tool_surface == "broad" else list(DEFAULT_TOOLS)
+    if not task:
+        return pool
+    allowed = task.get("allowed_tools") or PER_TASK_ALLOWED_TOOLS.get(task["id"])
+    if allowed is None:
+        return pool
+    return [t for t in pool if t["function"]["name"] in allowed]
+
+
+# Per-task tool gating (R16 L14, from tool-use analysis agent).
+# None = no override (use dial default). Otherwise: intersection.
+PER_TASK_ALLOWED_TOOLS = {
+    "B1":  {"read_file", "edit_file", "find_canonical_id", "validate_org"},
+    "B5":  {"read_file", "edit_file", "grep", "validate_org"},
+    "B7":  {"read_file", "edit_file", "grep", "run_pytest", "run_python"},
+    # B11: APPEND-ONLY — write_file is REMOVED from surface (per R15 failure-mode)
+    "B11": {"read_file", "edit_file", "find_canonical_id", "validate_org"},  # NO write_file
+    "B13": {"read_file", "edit_file"},
+    "B20": {"read_file", "edit_file", "validate_org"},
+    "B25": {"read_file", "edit_file", "write_file", "eval_elisp", "load_elisp_file"},
+    "B26": {"read_file", "edit_file", "load_elisp_file"},
+    # New R16 tasks:
+    "B30": {"read_file", "edit_file", "write_file", "run_pytest", "run_python", "grep"},
+    "B40": {"read_file", "edit_file", "set_todo_state", "validate_org", "vault_query"},
+}
+
+
+# ── Elisp mastery — T1 primer + doom-conventions reference (R15 D11+) ────
+ELISP_PRIMER = """\
+ELISP PRIMER (read carefully — Emacs Lisp ≠ Common Lisp ≠ Scheme):
+
+* Defining a function:
+    (defun my-fn (x y) "Docstring." (+ x y))
+
+* Defining a customizable variable (Doom / Emacs convention):
+    (defcustom my-mode-foo 42
+      "One-line docstring describing FOO."
+      :type 'integer
+      :group 'my-mode)
+    Common :type values: 'string, 'integer, 'number, 'boolean, 'file,
+    '(repeat string), '(choice (const :tag "Off" nil) (string :tag "Path")).
+
+* Hooks:
+    (add-hook 'after-save-hook #'my-fn)
+    (remove-hook 'after-save-hook #'my-fn)
+
+* Advice (modify existing functions):
+    (advice-add 'foo :around #'my-around-advice)
+
+* Org-mode parsing (preferred over regex when possible):
+    (org-element-parse-buffer)        ; full AST
+    (org-entry-properties)             ; props of entry at point
+    (org-back-to-heading t)
+    (org-element-property :title elem)
+
+* Lisp gotchas FOSS models often get wrong:
+  - Strings use double quotes only. Single quote = quote (not string).
+  - There is NO Common-Lisp `if-let`, but `when-let` and `if-let*` exist.
+  - `let` binds in parallel; `let*` binds sequentially.
+  - `setq` not `set` for variable assignment.
+  - Lists use `(list 1 2 3)` or `'(1 2 3)`. The quote prevents evaluation.
+  - String concat: `(concat "a" "b")`. Format: `(format "x=%d" 42)`.
+  - `print` adds quotes around strings. Use `princ` for raw output.
+
+* Validation discipline (you have these tools — USE them):
+  1. Write your elisp via edit_file/write_file.
+  2. Call load_elisp_file to confirm it parses + loads cleanly.
+  3. If your task involves a function call, also call eval_elisp with
+     `(load \"path\")` then your invocation, to confirm runtime behavior.
+  4. If it fails, READ the stderr carefully and fix. Do NOT guess.
+"""
+
+
+def doom_conventions_reference():
+    """T1: Inline a similar existing .el file as the codebase-style reference."""
+    sample = REPO / "doom/org-llm-specialist.el"
+    try:
+        text = sample.read_text()
+    except FileNotFoundError:
+        return ""
+    head = "\n".join(text.splitlines()[:80])
+    return ("DOOM CONVENTIONS REFERENCE — first ~80 lines of "
+             f"{sample.relative_to(REPO)}; emulate this style "
+             "(file header, lexical-binding, defgroup, defcustom shape, "
+             "autoload markers):\n\n```elisp\n" + head + "\n```")
+
+
+def task_needs_elisp_kit(task: dict) -> bool:
+    return task["id"].startswith(("B25", "B26"))
+
+
+
+
+
+def run_specialist_for_cell(wt_path, task, handle, plan_brief, prefetch,
+                              specialist_model, dial: DialConfig, cell_dir):
+    persona = PERSONA_LOOKUP.get(handle, f"You are {handle}.")
+    l1_primer = _extract_l1_for_handle(handle)
+    instr_prefix = (l1_primer + "\n\n---\n\n") if l1_primer else ""
+    instruction = render_specialist_brief(task, plan_brief, dial, prefetch,
+                                            handle, instr_prefix)
+
+    target_files = []
+    if task.get("target_file"):
+        target_files.append(wt_path / task["target_file"])
+
+    spec_task = SpecialistTask(
+        handle=handle,
+        persona=persona,
+        instruction=instruction,
+        workdir=wt_path,
+        model=specialist_model,
+        target_files=target_files,
+        max_iterations=PER_CELL_MAX_ITERS,    # R16: 8 → 16
+        max_budget_usd=PER_CELL_BUDGET_USD,   # R16: $2 → $5
+        scope_strict=dial.scope_strict,
+        tools=select_tools(dial, task),       # R16 L14: per-task gating
+        validate_after_edit=task.get("validate_after_edit", True),   # R16 L8 default ON
+        inject_budget_status=task.get("inject_budget_status", True), # R16 L19 default ON
+        response_format=task.get("response_format"),                 # R16: constrained decode
+    )
+
+    # O1+O2: stream events to disk + main log as they fire
+    prompt_dir = cell_dir / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    safe_handle = handle.lstrip("@") or "unknown"
+    (prompt_dir / f"{safe_handle}.txt").write_text(
+        f"=== persona ===\n{persona}\n\n"
+        f"=== model ===\n{specialist_model}\n\n"
+        f"=== dial ===\n{json.dumps(asdict(dial), indent=2)}\n\n"
+        f"=== target_files ===\n"
+        + "\n".join(str(p) for p in target_files)
+        + f"\n\n=== instruction ===\n{instruction}\n"
+    )
+    events_p = cell_dir / "events.jsonl"
+
+    def cb(ev: dict) -> None:
+        with events_p.open("a") as f:
+            f.write(json.dumps(ev) + "\n")
+        if ev["event"] == "iter_end":
+            log(f"      [{handle} iter {ev['iteration']}] "
+                f"tools={ev.get('tool_calls', 0)} "
+                f"cum=${ev.get('cum_cost', 0):.4f}",
+                also_to_stdout=False)
+        elif ev["event"] == "tool_call":
+            log(f"      [{handle} iter {ev['iteration']}] "
+                f"→ {ev.get('tool')}",
+                also_to_stdout=False)
+    spec_task._event_callback = cb
+
+    result = run_specialist(spec_task)
+
+    if result.edits_applied:
+        subprocess.run(["git", "-C", str(wt_path), "add", "-A"],
+                         capture_output=True, check=True)
+        subprocess.run(["git", "-C", str(wt_path), "commit", "-m",
+                          f"r16 {task['id']} {handle}: specialist edits"],
+                         capture_output=True)
+    return result
+
+
+def run_claude_solo_cell(task, dial, run_dir):
+    wt_name = f"r16-{task['id']}-K5-claude-solo-{dial.label()}-{EPOCH}"
+    wt_path = REPO.parent / "org-llm-worktrees" / wt_name
+    wt_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "-C", str(REPO), "worktree", "add", "-b", wt_name,
+                     str(wt_path), "trunk"], check=True, capture_output=True)
+    prefetch = task.get("prefetch", lambda t: {})(task)
+
+    if dial.brief_mode == "loose":
+        prompt_body = (f"You are a software/wiki specialist working in "
+                        f"worktree {wt_path}.\n\nTASK ({task['id']} — "
+                        f"{task['label']}):\n{task['goal']}\n\n"
+                        f"Decide on the right action and execute it.")
+    else:
+        prompt_body = (f"You are a software/wiki specialist working in "
+                        f"worktree {wt_path}.\n\nTASK ({task['id']} — "
+                        f"{task['label']}):\n{task['goal']}")
+
+    prefetch_block = ""
+    if dial.prefetch_mode in ("inline", "both"):
+        prefetch_block = f"\n\nPRE-FETCHED CONTEXT:\n{json.dumps(prefetch, indent=2)}"
+
+    prompt = (prompt_body + prefetch_block +
+                "\n\nWhen done, run `git add` + `git commit`, then print "
+                "TASK_DONE. If no-op, explain in one line + commit nothing "
+                "+ print TASK_DONE.")
+
+    (run_dir / "prompts").mkdir(parents=True, exist_ok=True)
+    (run_dir / "prompts" / "claude-solo.txt").write_text(prompt)
+
+    env = os.environ.copy()
+    env["PATH"] = (f"{os.path.expanduser('~/.npm-global/bin')}:"
+                   f"{os.path.expanduser('~/.guix-profile/bin')}:" + env.get("PATH", ""))
+    out = run_dir / "stream.jsonl"
+    cmd = ["claude", "-p", "--model", "sonnet",
+            "--output-format", "stream-json", "--verbose",
+            "--permission-mode", "bypassPermissions",
+            "--max-budget-usd", f"{PER_CELL_BUDGET_USD:.2f}", prompt]
+    t0 = time.time()
+    with out.open("w") as f:
+        rc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env,
+                              cwd=str(wt_path), timeout=PER_RUN_TIMEOUT).returncode
+    elapsed = time.time() - t0
+    cost = 0.0
+    for line in out.read_text().splitlines():
+        line = line.strip()
+        if not line: continue
+        try: ev = json.loads(line)
+        except Exception: continue
+        if ev.get("type") == "result":
+            cost += float(ev.get("total_cost_usd") or 0)
+    diff_full, diff_stat = wt_diff_vs_base(wt_path)
+    (run_dir / "diff.patch").write_text(diff_full)
+
+    target_files = ([task["target_file"]] if task.get("target_file") else [])
+    analysis = analyze_diff(diff_full, target_files, prefetch)
+
+    cell = {"variant": "K5-claude-solo", "task_id": task['id'],
+             "is_external_baseline": True, "cost_usd": round(cost, 4),
+             "wall_seconds": round(elapsed, 1), "diff_stat": diff_stat,
+             "wt_path": str(wt_path), "analysis": analysis,
+             "prefetch": prefetch, "dial": asdict(dial),
+             "dial_label": dial.label()}
+    write_cell_result(run_dir, cell)
+    return cell
+
+
+def run_one_cell(task, variant_name, specialist_model_id, mode,
+                  dial: DialConfig, run_dir):
+    log(f"  -- {variant_name} dial={dial.label()} ({mode})")
+    if mode == "claude-solo":
+        return run_claude_solo_cell(task, dial, run_dir)
+
+    prefetch = task["prefetch"](task)
+    handle = None
+    plan = None
+    p1_cost = 0.0
+
+    if dial.with_manager:
+        n_rule_in_brief = (f"\nN-CHANGES RULE: make EXACTLY {task['n_changes']} change(s)."
+                            if task.get("n_changes") is not None else "")
+        phase1_prompt = (
+            PICARD_PRIMER + "\n\n---\n\n"
+            + f"TASK ({task['id']} — {task['label']}):\n{task['goal']}"
+            + n_rule_in_brief
+            + "\n\nPRE-FETCHED CONTEXT:\n" + json.dumps(prefetch, indent=2)
+            + f"\n\nPRODUCTION CONSTRAINT: specialist runs on `{specialist_model_id}` "
+            + "via `org_llm.specialist` (direct API; no opencode)."
+            + "\n\n---\n\n" + PLAN_FORMAT
+        )
+        plan_text, p1_cost = call_openrouter(CAPTAIN_MODEL_ID, phase1_prompt)
+        (run_dir / "phase1_raw.txt").write_text(plan_text)
+        plan = parse_plan(plan_text)
+        if plan is None:
+            cell = {"variant": variant_name, "task_id": task['id'],
+                     "phase1_cost": p1_cost, "error": "plan_parse_failed",
+                     "dial": asdict(dial), "dial_label": dial.label()}
+            write_cell_result(run_dir, cell)
+            return cell
+        (run_dir / "phase1_plan.json").write_text(json.dumps(plan, indent=2))
+
+    # NOTE: R15 uses `git worktree add` directly (sibling to repo) instead of
+    # Agor REST. Agor caches trunk SHA at startup; if real trunk advances mid-
+    # bench (it has — d07cd85), Agor's worktrees branch from the older SHA and
+    # lack files committed since. Direct `git worktree add` always uses
+    # fresh trunk. Same path Claude-solo cells already use.
+    wt_name = f"r16-{task['id']}-{variant_name}-{dial.label()}-{EPOCH}"
+    wt_path = REPO.parent / "org-llm-worktrees" / wt_name
+    wt_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "-C", str(REPO), "worktree", "add", "-b", wt_name,
+                     str(wt_path), "trunk"], check=True, capture_output=True)
+    time.sleep(0.3)
+
+    specialists = []
+    total_spec_cost = 0.0
+
+    if dial.with_manager and plan:
+        team = plan.get("team", [])
+    else:
+        team = [{"handle": default_handle_for_task(task),
+                  "task_brief": task["goal"]}]
+
+    for spec in team:
+        handle = spec.get("handle", "@unknown")
+        brief = spec.get("task_brief", "")
+        if not brief: continue
+        result = run_specialist_for_cell(wt_path, task, handle, brief,
+                                            prefetch, specialist_model_id,
+                                            dial, run_dir)
+        total_spec_cost += result.cost_usd
+        specialists.append({
+            "handle": handle,
+            "success": result.success,
+            "iterations": result.iterations,
+            "edits_applied": result.edits_applied,
+            "edits_applied_count": len(result.edits_applied),
+            "cost_usd": result.cost_usd,
+            "duration_seconds": result.duration_seconds,
+            "error": result.error,
+            "text_output": result.text_output or "",
+            "tool_use_breakdown": result.tool_use_breakdown,
+        })
+
+    diff_full, diff_stat = wt_diff_vs_base(wt_path)
+    (run_dir / "diff.patch").write_text(diff_full)
+
+    target_files = ([task["target_file"]] if task.get("target_file") else [])
+    analysis = analyze_diff(diff_full, target_files, prefetch)
+
+    cell = {"variant": variant_name, "task_id": task['id'],
+             "specialist_model": specialist_model_id,
+             "phase1_cost_usd": round(p1_cost, 6),
+             "specialist_cost_usd": round(total_spec_cost, 6),
+             "plan_playbook": (plan or {}).get("playbook"),
+             "plan_classification": (plan or {}).get("classification"),
+             "specialists": specialists, "diff_stat": diff_stat,
+             "wt_path": str(wt_path), "analysis": analysis,
+             "prefetch": prefetch, "dial": asdict(dial),
+             "dial_label": dial.label()}
+    write_cell_result(run_dir, cell)
+    return cell
+
+
+# ── Scoring (D10) ────────────────────────────────────────────────────────
+def score_cell(cell):
+    """Return a per-cell composite score for ranking.
+
+    Higher = better. Components:
+    - on_candidate count for B1
+    - in_scope_changes count (insertions+deletions, capped) for others
+    - penalize id_fabrication
+    - penalize out_of_scope changes
+    - silent_noop = 0
+    """
+    if cell.get("error") and not cell.get("analysis"):
+        return {"score": 0.0, "reason": "error"}
+    an = cell.get("analysis") or {}
+    in_s = an.get("diff_in_scope", {})
+    out_s = an.get("diff_out_of_scope", {})
+    cats = an.get("wrap_categories", {})
+    in_total = in_s.get("insertions", 0) + in_s.get("deletions", 0)
+    out_total = out_s.get("insertions", 0) + out_s.get("deletions", 0)
+    fab = an.get("id_fabrication_count", 0)
+
+    # silent_noop
+    specs = cell.get("specialists") or []
+    if specs and all((s.get("error") or "").startswith("silent_noop") for s in specs):
+        return {"score": 0.0, "reason": "silent_noop"}
+
+    if cell.get("task_id") == "B1":
+        primary = cats.get("on_candidate", 0) * 2 + cats.get("creative", 0)
+    else:
+        primary = min(in_total, 50)
+    score = primary - fab * 3 - min(out_total, 100) * 0.05
+    return {"score": round(score, 2), "primary": primary,
+             "in_total": in_total, "out_total": out_total, "fab": fab}
+
+
+def cost_per_unit(cell):
+    cost = (cell.get("cost_usd")
+              or (cell.get("phase1_cost_usd", 0)
+                   + cell.get("specialist_cost_usd", 0)))
+    s = score_cell(cell)
+    primary = s.get("primary", 0)
+    if primary <= 0: return None
+    return round(cost / primary, 5)
+
+
+def update_live_state(all_cells: list[dict]):
+    """O6: rewrite R16_LIVE.json after each cell."""
+    leaderboard: dict = {}
+    for c in all_cells:
+        v = c.get("variant", "?")
+        s = score_cell(c)
+        cost = (c.get("cost_usd")
+                  or (c.get("phase1_cost_usd", 0)
+                       + c.get("specialist_cost_usd", 0)))
+        rec = leaderboard.setdefault(v, {"variant": v, "cells": 0,
+                                            "total_score": 0.0,
+                                            "total_cost": 0.0,
+                                            "primary_total": 0,
+                                            "fab_total": 0,
+                                            "silent_noops": 0})
+        rec["cells"] += 1
+        rec["total_score"] += s.get("score", 0.0)
+        rec["total_cost"] += cost
+        rec["primary_total"] += s.get("primary", 0)
+        rec["fab_total"] += s.get("fab", 0)
+        if s.get("reason") == "silent_noop":
+            rec["silent_noops"] += 1
+    for rec in leaderboard.values():
+        rec["cost_per_unit"] = (
+            round(rec["total_cost"] / rec["primary_total"], 5)
+            if rec["primary_total"] > 0 else None
+        )
+        rec["total_cost"] = round(rec["total_cost"], 4)
+        rec["total_score"] = round(rec["total_score"], 2)
+    LIVE.write_text(json.dumps({
+        "epoch": EPOCH,
+        "cells_done": len(all_cells),
+        "leaderboard": sorted(leaderboard.values(),
+                                 key=lambda r: -r["total_score"]),
+    }, indent=2))
+
+
+def print_leaderboard(all_cells: list[dict]):
+    """O4: tail-able leaderboard appended to log every 5 cells."""
+    leaderboard: dict = {}
+    for c in all_cells:
+        v = c.get("variant", "?")
+        s = score_cell(c)
+        cost = (c.get("cost_usd")
+                  or (c.get("phase1_cost_usd", 0)
+                       + c.get("specialist_cost_usd", 0)))
+        rec = leaderboard.setdefault(v, {"cells": 0, "score": 0.0,
+                                            "cost": 0.0, "primary": 0,
+                                            "noops": 0})
+        rec["cells"] += 1
+        rec["score"] += s.get("score", 0.0)
+        rec["cost"] += cost
+        rec["primary"] += s.get("primary", 0)
+        if s.get("reason") == "silent_noop": rec["noops"] += 1
+    log("=" * 60)
+    log(f"LEADERBOARD ({len(all_cells)} cells done)")
+    rows = sorted(leaderboard.items(), key=lambda kv: -kv[1]["score"])
+    for v, r in rows:
+        cpu = (f"${r['cost']/r['primary']:.4f}/u" if r['primary'] > 0
+                else "  no-units  ")
+        log(f"  {v:>16}  cells={r['cells']}  score={r['score']:>5.1f}  "
+            f"cost=${r['cost']:.3f}  {cpu}  noops={r['noops']}")
+    log("=" * 60)
+
+
+# ── Main ────────────────────────────────────────────────────────────────
+def execute_cell(task, variant, dial, layer_label):
+    name, model_id, mode = variant
+    cell_dir = ARTIFACTS / layer_label / task['id'] / f"{name}__{dial.label()}"
+    cell_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        cell = run_one_cell(task, name, model_id, mode, dial, cell_dir)
+    except Exception as exc:
+        log(f"      ! {name} ERROR: {exc}")
+        cell = {"variant": name, "task_id": task['id'],
+                  "error": str(exc), "dial": asdict(dial),
+                  "dial_label": dial.label()}
+        write_cell_result(cell_dir, cell)
+    cell["layer"] = layer_label
+    return cell
+
+
+def main():
+    global PROGRESS
+    log(f"Round-15 — dial sweep + expanded FOSS pool")
+    log(f"  trunk HEAD: " + subprocess.run(
+        ["git", "-C", str(REPO), "rev-parse", "--short", "trunk"],
+        capture_output=True, text=True).stdout.strip())
+    log(f"  variants: {len(VARIANTS)} (8 FOSS + 1 Claude); "
+        f"tasks: {len(TASKS)}; per-cell budget: ${PER_CELL_BUDGET_USD}")
+    # Best-effort: R15 doesn't use Agor REST (uses git worktree add directly),
+    # but try to relogin in case downstream tooling needs the token.
+    try: relogin()
+    except Exception as exc: log(f"  agor relogin skipped: {exc}")
+
+    # Cell counts:
+    #   Layer 1: 9 variants × 1 task (B1) × 1 config = 9
+    #   Layer 2: top-3 FOSS + Claude × (TASKS - B1) × 1 config = 4 × 7 = 28
+    #     (now 7 remaining tasks: B5, B7, B11, B13, B20, B25, B26)
+    #   Layer 3: top-2 FOSS × 6 ablation dials × B1 = 12
+    EXPECTED_CELLS = 9 + 28 + 12   # = 49
+    PROGRESS = Progress(EXPECTED_CELLS, budget_usd=25.0)
+
+    all_cells: list[dict] = []
+
+    # ── Layer 1: tournament on B1 with BEST_CONFIG ───────────────────────
+    log("")
+    log("=" * 80)
+    log("LAYER 1 — variant tournament on B1 (BEST_CONFIG)")
+    log("=" * 80)
+    b1 = TASKS[0]
+    layer1_cells: list[dict] = []
+    for variant in VARIANTS:
+        cell = execute_cell(b1, variant, BEST_CONFIG, "layer1")
+        layer1_cells.append(cell)
+        all_cells.append(cell)
+        s = score_cell(cell)
+        prog = PROGRESS.cell_done(cell)
+        log(f"    {variant[0]:>16} score={s.get('score',0):.1f} "
+            f"primary={s.get('primary',0)} fab={s.get('fab',0)} "
+            f"out={s.get('out_total',0)} {prog}")
+        update_live_state(all_cells)
+        if len(all_cells) % 5 == 0:
+            print_leaderboard(all_cells)
+
+    # Pick top-3 FOSS by score (tiebreak: lower cost-per-unit). Claude advances regardless.
+    foss_cells = [c for c in layer1_cells if not c.get("is_external_baseline")]
+    foss_cells.sort(key=lambda c: (-score_cell(c).get("score", 0),
+                                       (cost_per_unit(c) or 999)))
+    top3_foss = [c["variant"] for c in foss_cells[:3]]
+    log(f"\nLayer 1 → top-3 FOSS: {top3_foss}")
+
+    # ── Layer 2: top-3 FOSS + Claude × remaining tasks ───────────────────
+    log("")
+    log("=" * 80)
+    log("LAYER 2 — top-3 FOSS + Claude × remaining tasks (BEST_CONFIG)")
+    log("=" * 80)
+    advancing = [v for v in VARIANTS if v[0] in top3_foss
+                  or v[2] == "claude-solo"]
+    for task in TASKS[1:]:
+        log(f"\n=== TASK {task['id']} ({task['label']}) ===")
+        for variant in advancing:
+            cell = execute_cell(task, variant, BEST_CONFIG, "layer2")
+            all_cells.append(cell)
+            s = score_cell(cell)
+            prog = PROGRESS.cell_done(cell)
+            log(f"    {variant[0]:>16} score={s.get('score',0):.1f} "
+                f"primary={s.get('primary',0)} fab={s.get('fab',0)} {prog}")
+            update_live_state(all_cells)
+            if len(all_cells) % 5 == 0:
+                print_leaderboard(all_cells)
+
+    # ── Layer 3: dial ablation on B1 + top-2 FOSS ────────────────────────
+    log("")
+    log("=" * 80)
+    log("LAYER 3 — dial ablation on B1 (top-2 FOSS variants)")
+    log("=" * 80)
+    top2_foss = [v for v in VARIANTS if v[0] in top3_foss[:2]]
+    for variant in top2_foss:
+        log(f"\n=== {variant[0]} dial ablation ===")
+        for dial_label, dial in ABLATION_DIALS:
+            cell = execute_cell(b1, variant, dial, f"layer3_{dial_label}")
+            all_cells.append(cell)
+            s = score_cell(cell)
+            prog = PROGRESS.cell_done(cell)
+            log(f"    {dial_label:>10} → score={s.get('score',0):.1f} "
+                f"primary={s.get('primary',0)} {prog}")
+            update_live_state(all_cells)
+            if len(all_cells) % 5 == 0:
+                print_leaderboard(all_cells)
+
+    # ── Final summary ────────────────────────────────────────────────────
+    log("")
+    log("=" * 80)
+    log(f"R16 COMPLETE — {len(all_cells)} cells, ${PROGRESS.spent:.3f} spent")
+    log("=" * 80)
+    print_leaderboard(all_cells)
+
+    summary = {
+        "epoch": EPOCH,
+        "total_cells": len(all_cells),
+        "total_cost_usd": round(PROGRESS.spent, 4),
+        "total_wall_seconds": round(time.time() - PROGRESS.t0, 1),
+        "best_config": asdict(BEST_CONFIG),
+        "top3_foss_after_layer1": top3_foss,
+        "cells": [{k: v for k, v in c.items()
+                    if k not in ("specialists", "analysis", "prefetch")}
+                   | {"score": score_cell(c)}
+                  for c in all_cells],
+    }
+    summary_p = ARTIFACTS / f"summary-{EPOCH}.json"
+    summary_p.write_text(json.dumps(summary, indent=2, default=str))
+    log(f"summary: {summary_p}")
+    log(f"live state: {LIVE}")
+
+
+if __name__ == "__main__":
+    main()

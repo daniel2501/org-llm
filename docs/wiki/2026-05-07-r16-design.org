@@ -202,14 +202,26 @@ Total: 8 carry-over (modified) + 6 org-mission (B40-B45) + 5 code (B30-B34) + 2 
 
 *Cost projection:* ~$80-100 across all layers (Claude cells + 405b cells dominant). Within $100 cap.
 
-** Lean v1 — feasibility-first (recommended starting point)
+** Full v1 (per user 2026-05-07: "I want R16 to be a big one")
 
-Layers 1 + 2 with full ramped sampling:
-- L1: 65 cells (~30 min with parallelism)
-- L2 (top-4 FOSS + Claude × 12 tasks × n=5): 300 cells (~2 hours with parallelism)
-- Total: 365 cells, ~2.5 hours, ~$40-60
+All 5 layers, all 27 tasks, all 13 variants, n=5 sampling, full
+dial sweep, full escalation chains, full vote/judge layer.
 
-L3-L5 launched separately once L1/L2 yields the top-K winners + variance baselines.
+Total: ~615 cells, ~$80-100, ~2-3 hours with 4-way parallelism.
+
+** Parallelism — required at this scale
+
+Sequential runs at ~2-3 min/cell × 615 cells = 20+ hours. Unworkable.
+
+R16 implements 4-way cell parallelism:
+- Each cell is independent (own worktree, own API call).
+- 4 worker threads pull cells from a queue.
+- Shared state: progress ticker (lock), R16_LIVE.json (lock), failure
+  classifier counters (lock).
+- OpenRouter handles concurrent calls fine; the bottleneck is I/O for
+  worktree creation. Mitigated by pre-creating worktrees in batch.
+
+If 4 turns out too aggressive (rate limits), fall back to 2-way.
 
 * Juicing FOSS LLMs further (carries over from R15 T1, extends)
 
@@ -226,6 +238,13 @@ R16 adds:
 | L4 Background docs (RAG-lite) | Pre-fetch related wiki snippets, inline                          | Per-task =prefetch_related_docs()=             |
 | L5 Per-handle elisp expertise | L1B (per-agent primer) extended with elisp sections              | Update =docs/wiki/org-mode-per-agent-primer.org= |
 | L6 Validation loops          | Harness validates output (pylint, pytest, org-element-parse)      | =task["validator"]= callback per task          |
+| L16 Few-shot demos           | 1-2 fully-worked input/edit/result examples per task shape        | =task["examples"]= injected in spec            |
+| L17 Pre-edit self-check      | Model emits one-line plan before edit; harness validates plan     | New tool =plan_edit(line, action)= or prompt convention |
+| L18 Validation-error retry   | If AST rejects edit, ONE retry with error text in next message    | Loop logic in =run_specialist=                 |
+| L19 Token-budget transparency | Inject "iter X/N, $A/$B used, $C left" each iteration             | =run_specialist= adds to user message per iter |
+| L20 Agenda-context injection | For date/deadline tasks: inject =today=, =next_due_7d=, etc.       | Recipe pre-fetch extension                     |
+| L21 Specialist hand-off      | qwen30 plans (cheap), kimi/llama70b executes (strong)              | New dial D13 =hand_off=on/off=                 |
+| L22 Adaptive max_iterations  | Extend to 16 if edits-per-iter ≥ 1; cut to 4 if silent for 2 iters | Loop logic in =run_specialist=                 |
 
 * Observability v2 — derived from R14/R15 failures
 
