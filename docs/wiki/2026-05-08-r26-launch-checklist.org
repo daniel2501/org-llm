@@ -401,7 +401,7 @@ MCP server. Adds tools: read buffer, eval elisp, navigate file,
 batch query. Replaces ad-hoc =eval_elisp= and =load_elisp_file=
 tools with proper MCP-protocol-mediated calls.
 
-** TODO P1-19: scripts/_r26_preflight.sh entry point
+** DONE P1-19: scripts/_r26_preflight.sh entry point
 :PROPERTIES:
 :ESTIMATE: 3 hr
 :SOURCE:   boost plan §13
