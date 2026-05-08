@@ -1,0 +1,359 @@
+:PROPERTIES:
+:ID:       r25-synthesis
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R25 — 4-agent synthesis + lessons for R26
+#+FILETAGS: :wiki:bench:r25:synthesis:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R25 ran 189 cells / $9.67 / 39:23 wall and surfaced
+*two durable wins* (K1+K8 confirmed as a 6-round, 2-point FOSS
+Pareto floor; Layer-BK long-horizon family fully fired for the
+first time, with K1-qwen30 dead-even with K5-claude-solo on
+BK1/BK2/BK4) and *three R25 patches that had no behavioral
+effect* (K2 max_tokens=4096 was dead-code, WALL_CAP_PER_CELL_S
+shipped as a label not an outer-thread kill, K33's "72b" slug
+duplicates K11). The four R25 agents also surfaced *three new
+bench-correctness bugs* that R26 must fix: top-3 selector picks
+cells not variants (so L2/L3/BK collapsed to K1-only),
+=count_bracket_errors= still walks cross-line and re-creates the
+R24 FP-1 in a different field, and the K34/K35 dead-model warmup
+detected the failure but failed to skip the variant.
+
+*Expanded.* R25 was supposed to be the round where R24's two
+blocker bugs (quality_lint multi-line FP, BK target_files mis-
+categorization) got fixed and the bench finally produced a clean
+long-horizon FOSS-vs-Claude comparison. *Half of that worked.*
+target_files landed and BK1-BK5 are now evaluable. =count_nested_
+bracket_depth= got the per-line walker — but =count_bracket_errors=
+didn't, so the same cross-line cascade re-fires on K8/K11/K17 and
+falsely floor-drops 5 cells. The big finding is the moat
+arithmetic: the headline 22× shrank-from-48× moat is a layer-mix
+artifact; the *layer1-matched moat actually grew to 59×*. K1
+holds at $0.00057/qpt for the 6th consecutive round. The R26 must-
+do list is short and load-bearing: fix the three bugs above, wire
+WALL_CAP into a real kill (or Modal-Kimi K2 route), drop K34/K35,
+and stop calling K33 "72b".
+
+* Headline numbers
+
+| Metric                                    | Value                                |
+|-------------------------------------------+--------------------------------------|
+| Cells                                     | 189 (vs R24 147)                     |
+| Wall                                      | 39:23 (vs R24 54:18)                 |
+| Spend                                     | $9.67 (vs R24 $13.29)                |
+| Throughput                                | 4.80 cells/min (vs R24 2.71)         |
+| K1-qwen30 $/qpt (layer1-only)             | *$0.00057 — 6th-round confirm*       |
+| K8-deepseekV3 $/qpt (layer1-only)         | *$0.00069 — durable 2nd seat*        |
+| K5-claude-solo $/qpt (layer1-matched)     | $0.03368                             |
+| FOSS-vs-Claude moat (layer1-matched)      | *59× (grew from R24's 48×)*          |
+| FOSS-vs-Claude moat (mix-aggregate)       | 22× (mix-artifact, not real shrink)  |
+| Pin-hold rate                             | 96% (vs R24's 58%)                   |
+| WALL_CAP kills                            | 16 — all K2/B1, none freed worker    |
+| Layer-BK cells fired                      | *10/10 (first ever)*                 |
+| K33 q/cell vs K1 q/cell                   | 12 vs 8.02 (+50% q for 100× cost)    |
+| K34/K35 yield                             | 0/2 — silent_noop on dead slugs      |
+| Effective parallelism (32 workers)        | 12.50× = 39.1% (vs R24's 29.3%)      |
+
+* Per-variant verdicts (corrected for FP-1 + selector bug)
+
+Adjusted = primary mean − /real/ lint penalty (cross-line FP
+collapsed to ≤1 per cell). Variants in [K2, K17, K8, K11] never
+saw L2/L3/BK because top-3 selector collapsed to K1-only — their
+n is L1-only by harness bug, not by design.
+
+| Variant              | Cells | Err | Adjusted | Adj/cell | $/qpt    | Verdict for R26                                    |
+|----------------------+-------+-----+----------+----------+----------+----------------------------------------------------|
+| *K1-qwen30*          |    65 |   1 |      538 |     8.41 | $0.00057 | KEEP — 6-round frontier floor, scribe role        |
+| K2-kimi-k2.6         |    50 |  18 |      486 |    15.19 | $0.00365 | KEEP — fix WALL_CAP or Modal route; n=15 next     |
+| K11-qwen3coder (B25) |     8 |   1 |      164 |    20.50 | $0.00298 | KEEP B25-only — earns premium on elisp_helper     |
+| K11-qwen3coder (B1)  |    10 |   1 |      170 |    17.00 | $0.01960 | DROP from B1 — premium burns                       |
+| K17-glm46            |    10 |   0 |      168 |    16.80 | $0.00633 | INVESTIGATE — model-loops on every broker now     |
+| K8-deepseekV3        |    29 |   1 |      274 |     9.79 | $0.00069 | KEEP + force off-B1 — 28 of 29 cells were B1      |
+| K5-claude-solo       |    14 |   0 |      199 |    14.21 | $0.01453 | KEEP — sentinel; layer1-matched at $0.03368/qpt    |
+| K33-qwen3-coder-72b  |     1 |   0 |       12 |    12.00 | $0.05904 | DEFER — n=5 B7-only contingency, drop slug name   |
+| K34-deepseek-v3-pro  |     1 |   0 |        0 |     0.00 | inf      | DROP — dead OpenRouter slug, HTTP 400              |
+| K35-llama-3.1-405b   |     1 |   0 |        0 |     0.00 | inf      | DROP — dead OpenRouter slug, HTTP 404              |
+
+K11's per-cell adjusted (22.75 raw; 20.50 after FP correction) is
+highest of any variant n≥10 — but 4 of 5 floor-drops were FP-1
+victims. K17's 9-of-10 max_iters loops are model-side, not broker-
+side: SiliconFlow served all 10 cleanly and the loops still fired.
+
+* R25's three INEFFECTIVE patches
+
+** P-X1 — K2 max_tokens=4096 cap was dead code
+
+The constant =_R25_VARIANT_MAX_TOKENS = {"K2-kimi-k2.6": 4096, ...}=
+at =scripts/_round25_dials.py:245= is *defined and never read*.
+=SpecialistTask= in =org_llm/specialist.py= does not accept
+=max_tokens=; the 8000-char default in =_chat_completions= fired
+instead. Evidence: K2 finish=length cells produced 22-28k chars =
+~6.5-7.9k output tokens, consistent with 8000 ceiling not 4096.
+The 11 length-iter K2 cells and 16 WALL_CAP kills are downstream
+of this dead-code bug.
+
+*R26 fix.* Add =max_tokens: Optional[int]= to =SpecialistTask=,
+thread through =_chat_completions= override default, read
+=_R25_VARIANT_MAX_TOKENS= in =run_specialist_for_cell=.
+
+** P-X2 — WALL_CAP_PER_CELL_S=400 ships a label, not a kill
+
+The =threading.Timer= guard from R24 design landed as a
+=ThreadPoolExecutor= shim around =run_one_cell= with
+=_fut.result(timeout=400)=. It raises =TimeoutError= and writes
+=wall_cap_killed:400s= into the result record — but the
+surrounding =with _TPE(...)= context manager calls =shutdown(
+wait=True)= on exit, blocking the outer worker until the inner
+zombie thread finishes. *16 K2/B1 cells reported the kill at 400s
+but ran 455-1697s of real wall*; outer workers stayed pinned the
+entire time. Evidence: WALL_CAP_KILLED log lines spread across
+1185s of L1, not clustered at the 400s mark.
+
+*R26 fix.* Replace with =multiprocessing.Process= (terminate-able)
+OR pass a =threading.Event= that =run_one_cell= polls and aborts
+in-flight HTTP. Acceptance: re-run lands L1 ≤650s.
+
+** P-X3 — K33 "qwen3-coder-72b" is the K11 slug
+
+OpenRouter slug =qwen/qwen3-coder= which Together serves as a 480B-
+A35B MoE — *the same model as K11*. The "72b" suffix in K33's
+variant name is invented; no 72B exists at this slug. The single
+K33 cell ($0.71, score=12, 100× K1) and the K11-on-B1 cells
+($0.25/cell, score=12.9 q/cell) are *the same model on the same
+broker* differing only in the cell shape that drove iteration
+count. K33's promotion gate (B7 +3 vs K1 from
+=go-forward-config=) was set against a model identity that does
+not exist.
+
+*R26 fix.* Either rename K33 to =K33-qwen3-coder-480b-tools-on=
+with a real dial difference vs K11 (temperature, tool_surface), or
+drop K33 as a duplicate. Recommend drop unless the dial-difference
+case is load-bearing.
+
+* Bench-correctness bugs surfaced (R26 BLOCKERS)
+
+** Bug A — Top-3 selector picks cells, not variants
+
+*Discovered by:* quality-judge agent.
+
+*Mechanism.* Layer-1's =top3_foss = [c["variant"] for c in
+foss_cells[:3]]= sorts the list of *individual cells* and dedups
+incidentally. In R25 all three top L1 cells were K1-qwen30 →
+=top3_foss_after_layer1: ["K1-qwen30", "K1-qwen30", "K1-qwen30"]=,
+so Layer-2, Layer-3, and Layer-BK all collapsed to K1+Claude+the
+force-list. K2's 32 successful cells (15.19 adj/cell) never saw
+L2; K8's 28 cells were all B1 because L2 didn't pull it through;
+K11/K17 never saw BK.
+
+*Blast radius.* The "BK1-BK5 long-horizon FOSS-vs-Claude" question
+is *partially answered* — K1+K5 dead-even on BK1/BK2/BK4, K5
+edges BK5 — but K2/K8/K11/K17 never got BK cells, so cross-variant
+long-horizon comparison remains incomplete.
+
+*R26 fix.* Aggregate by variant first, rank by per-cell mean (not
+sum, so wall-cap kills don't dilute), take top-3 *distinct*
+variants. R25's corrected top-3 would have been K2 (15.19), K17
+(16.80), K1 (8.41) — diverse pool.
+
+** Bug B — count_bracket_errors still walks cross-line
+
+*Discovered by:* quality-judge agent.
+
+*Mechanism.* R25 patched =count_nested_bracket_depth= per-line
+(R24 FP-1 fixed) but =count_bracket_errors= still walks all added
+text in one pass. When a diff edits a wiki-link with one missing
+=]= on a =+=-line whose closing context is on a context line ten
+lines later, the walker treats the unclosed =[[= as still-open and
+counts every subsequent well-formed =[[id:UUID][label]]= as a new
+"nested" event.
+
+*Blast radius.* ~85 lint points wrongly assigned to K11/K17/K8
+across ~25 cells. *5 of 5 floor-drops* were FP-1 victims (1 real
+broken link per cell, reported as 6-17). G1 floor was triggered by
+inflated input — concept correct, threshold fine, *input
+corrupted*.
+
+| Cell                          | Reported | True | Inflation |
+|-------------------------------+----------+------+-----------|
+| K11 s4 B1                     |       17 |    1 |       16× |
+| K11 s2 B1                     |        8 |    1 |        8× |
+| K17 s4 B1                     |       10 |    1 |       10× |
+| K8 s4-s13 B1 (6 replicates)   |        6 |    1 |        6× |
+
+*R26 fix.* Mirror the per-line walker into =count_bracket_errors=:
+count imbalance + nested per-line, sum across lines. Single-file
+patch to =scripts/quality_lint.py=. Validation: re-run R25 saved
+diffs; K11/K17/K8 collapse to 1.0/cell; K1 clean stays 0; K7-style
+intra-line cascades unchanged.
+
+** Bug C — K34/K35 warmup detects but doesn't skip
+
+*Discovered by:* providers agent.
+
+*Mechanism.* The warmup probe at =_round25_dials.py:167-192=
+prints the failure message ("not a valid model ID" / "no endpoints
+found") but does not pop the variant from =ALL_VARIANTS=. K34 and
+K35 then proceed to a real specialist call which immediately hits
+the same 400/404 — burning warmup probe + cell slot each, $0.0011
+spend total.
+
+*R26 fix.* Pop dead-warmup variants from ALL_VARIANTS pre-launch.
+Either replace K34 with a working DeepSeek slug (or drop as
+redundant with K8's =deepseek-chat-v3-0324=), and K35 with the
+live llama-3.1-405b OpenRouter slug — or drop both.
+
+* R25 net wins (real, durable)
+
+** Layer-BK fired with target_files fix (10/10)
+
+R24 FP-3 (BK =target_files= unset → primary=0 across all 10 cells)
+is *resolved*. R25 BK1-BK5 produced real signal:
+
+| Variant         | Task | Primary | Mech | Note                                   |
+|-----------------+------+---------+------+----------------------------------------|
+| K5-claude-solo  | BK1  |      20 |   20 | 4-file rename, lint-clean              |
+| K1-qwen30       | BK1  |      20 |   20 | identical shape                        |
+| K5-claude-solo  | BK2  |      50 |   50 | full typer subcmd + 42-line test       |
+| K1-qwen30       | BK2  |      50 |   47 | same, 1 stacked-docstring              |
+| K5-claude-solo  | BK3  |       0 |    0 | abstain — defensible                   |
+| K1-qwen30       | BK3  |       0 |    0 | abstain — defensible                   |
+| K5-claude-solo  | BK4  |       3 |    3 | dataclass field; partial               |
+| K1-qwen30       | BK4  |       3 |    3 | matched K5 shape                       |
+| K5-claude-solo  | BK5  |      22 |   22 | 8 in-scope, canonical UUIDs            |
+| K1-qwen30       | BK5  |       0 |    0 | empty diff (no edits)                  |
+
+*K1 is dead-even with K5-claude-solo on BK1/BK2/BK4*; K5 edges BK5
+on the canonical-UUID test; both abstain on BK3. This is the first
+real long-horizon FOSS-vs-Claude data the bench has produced.
+
+** K7-qwen72b drop saved ~5594s of L1 wall
+
+R24's K7 generative role retire (Sp4) was the single biggest R25
+wall save. K7 sum-walls in R24 = 5594s; absent in R25. K7 stays in
+S38 adversarial-critic role only.
+
+** K6-llama70b drop simplified the variant roster
+
+K6 was R24's third Pareto seat but produced via 1 high-score cell
+amid 4 silent_noops — broker-broken, not model-broken. Dropped
+from R25 baseline. (R26 advisory: re-introduce at n=15 on
+Together/Parasail to test the model-vs-broker question.)
+
+** K1 confirmed at n=50 (largest single-variant slice ever)
+
+K1 ran 50 L1 cells + 65 total — the largest single-variant slice
+in any round. $/qpt landed at $0.00057, within the [0.00045,
+0.00078] band that has held for 5 prior rounds (R15-R20-R24).
+
+** Pin-hold rate jumped 58% → 96%
+
+R25's PROVIDER_PINS changes (K17 ignore DeepInfra, glm-4.6 strict
+SiliconFlow) held cleanly. K17 routed 10/10 to SiliconFlow (R24
+had 8/10 misrouted to DeepInfra). K8 held DeepInfra 28/29. K11
+held Together 16/18 with benign Google fallback on 2.
+
+** Throughput +77% at flat parallelism
+
+R25's 4.80 cells/min vs R24's 2.71 cells/min (+77%) at the same
+PARALLELISM=32 — driven by K7 absent + Layer-2/3/BK at theoretical-
+ceiling parallelism. WALL_CAP enforcement bug means the win is
+real but smaller than designed; fix that and R26 lands ~22-25 min
+for similar cell counts.
+
+* R26 must-do list (consolidating all 4 agents)
+
+|  # | Item                                                         | Source agent     | Priority |
+|----+--------------------------------------------------------------+------------------+----------|
+|  1 | Fix top-3 selector to pick variants not cells                | quality          | P0       |
+|  2 | Patch =count_bracket_errors= per-line (mirror nested fix)    | quality          | P0       |
+|  3 | Fix WALL_CAP outer-thread kill (Process or Event-poll)       | walltime         | P0       |
+|  4 | Wire =max_tokens=4096= read path for K2 (dead code)          | providers        | P0       |
+|  5 | Drop K34 + K35 (dead OpenRouter slugs)                       | providers+pareto | P0       |
+|  6 | Rename or drop K33 ("72b" is K11's slug)                     | providers        | P1       |
+|  7 | Pop dead-warmup variants from ALL_VARIANTS                   | providers        | P1       |
+|  8 | Modal-Kimi route for K2 (=MODAL_KIMI_ENABLED=1=)             | walltime         | P1       |
+|  9 | Layer-BK on full advancing pool, not just top-3              | quality          | P1       |
+| 10 | Force K8 + K11 onto non-B1 tasks before promotion            | quality+pareto   | P1       |
+| 11 | K2 raise B1 wall cap from 400s to 600s OR honest median fix  | quality+walltime | P2       |
+| 12 | K17 investigate model-loop pattern (broker-agnostic now)     | providers        | P2       |
+| 13 | K33 contingency: n=5 B7-only behind smoke gate, $4 hard cap  | pareto           | P2       |
+| 14 | Re-introduce K6-llama70b at n=15 on Together/Parasail        | pareto           | P2       |
+| 15 | R26 envelope target $8-12 (115 cells with stratification)    | pareto           | plan     |
+
+* Open questions — answered + still-open
+
+** Answered by R25
+
+1. *Does Layer-BK actually evaluate?* YES — target_files fix
+   landed; 10/10 cells produced real primary scores.
+2. *Is K1 vs Claude on long-horizon a real comparison?* YES (for
+   K1+K5 only). K1 dead-even on BK1/BK2/BK4, K5 edges BK5,
+   both abstain BK3.
+3. *Does the moat hold beyond layer1?* YES at *59× layer1-matched*
+   (grew from R24's 48×); the headline 22× shrink is layer-mix
+   artifact, not real.
+4. *Are large-FOSS K33/K34/K35 worth complexity?* NO — K33 cost
+   100× K1 for 1.5× q/cell on 1 cell; K34/K35 silent_noop on dead
+   slugs.
+5. *Did the K7 generative drop save wall?* YES — ~5594s of L1 wall
+   recovered.
+
+** Still open after R25
+
+1. *Does K8 hold off B1?* R25 force-listed K8 to L2 but its 4 L2
+   cells all silent_noop'd (B5/B7/B11/B25). 28 of 29 K8 cells were
+   B1 — that is *confirmation K8 doesn't generalize off B1*, not
+   recovery. R26 must put K8 on B11+B26 (n=5 each) before any
+   promotion.
+2. *Does K11 earn its premium beyond B25?* K11-B25 sits at
+   $0.00298/qpt (5× K1, near-frontier). K11-B1 burns $0.01960/qpt.
+   R26 should test K11 on B5/B7/B11 (n=5 each).
+3. *Is K17's max_iters loop fixable?* GLM-4.6 looped 9/10 on
+   SiliconFlow this round and 8/10 on DeepInfra last round. *The
+   model loops, not the broker.* R26 question: cap iterations to 8
+   for K17, try a 3rd broker, or drop entirely.
+4. *Will Modal-Kimi K2 route deliver?* P1 self-host endpoints
+   designed in R25 never deployed; =MODAL_KIMI_ENABLED= remained
+   unset. R26 must either deploy or stop projecting based on
+   sub-second TTFT claims.
+5. *Will K20 v2 LoRA ever ship?* Modal billing-cap, RunPod
+   dockerArgs unreliable, Together fine-tuning under
+   investigation. Same status as R24 close.
+6. *Does the 59× layer1-matched moat hold at n=50+ on K5?* R25
+   ran K5 n=14 mixed-layer; layer1-matched n=5. R26 should pull K5
+   to layer1-matched n≥15 to settle within-noise.
+
+* Cross-references
+
+** Input agent reports
+
+- =docs/notes/2026-05-08-r25-quality-judge.org= — FP-1-via-bracket-errors;
+  G1 unfair fires; selector bug; BK fired
+- =docs/notes/2026-05-08-r25-pareto.org= — K1+K8 frontier; K33 100× K1;
+  Claude moat actually 59× layer1-matched
+- =docs/notes/2026-05-08-r25-walltime.org= — 39:23 wall; WALL_CAP label-not-kill;
+  K2 owns 66% of round walls
+- =docs/notes/2026-05-08-r25-providers.org= — K2 max_tokens dead code;
+  K33=K11 slug duplicate; K34/K35 dead slugs
+
+** Related synthesis
+
+- =docs/wiki/2026-05-08-r24-synthesis.org= — drove R25 patch design
+- =docs/wiki/2026-05-08-r18-synthesis.org= — drove R19/R24 wiring patches
+- =docs/wiki/2026-05-08-r15-r23-grand-synthesis.org= — cross-round verdicts
+- =docs/wiki/2026-05-08-r25-design.org= — power-ups + new tests + speed budget
+- =docs/wiki/2026-05-08-r25-progress.org= — live monitoring + auto-repair
+
+** Code artifacts
+
+- =scripts/_round25_dials.py= — the harness that ran
+- =scripts/_round25_dials_artifacts/summary-1778251044.json= — raw cells (189)
+- =scripts/quality_lint.py= — needs =count_bracket_errors= per-line patch
+- =scripts/_r25_slice.py= — per-layer slice helper
+- =scripts/_r25_walltime_analysis.py= — walltime analysis script
