@@ -1,0 +1,249 @@
+#+TITLE: R17 wall-time + parallelism analysis — input to R18 tuning
+#+AUTHOR: Claude
+#+DATE: 2026-05-08
+
+* TL;DR
+
+- Real wall: *1110.7 s = 18.51 min* over 59 cells, $4.4488.
+- Sum of cell walls: 2255.3 s. Achieved parallelism *2.03x* of ideal 8x → efficiency *25.4%*.
+- The single dominant cause is one long pole: *K15-kimi-thinking on B1 took 756.1 s = 12.6 min*. It alone defines the layer1 critical path and pushes the whole run from ~9 min to ~19 min.
+- Adaptive abort fired in *5 cells*; all five had score=0 — *no false positives detected*.
+- *3 cells dodged adaptive abort* via the K7-thrash pattern (failed-edit attempts reset silent_streak). Worst is K11-qwen3coder/B11/layer2: *171.6 s, 15 iterations, 10 consecutive failed edits, 13 self-correction nudges, 1 successful edit*.
+- Three concrete R18 levers: *(a)* fail-edit-streak abort, *(b)* per-cell hard wall cap, *(c)* never co-schedule a known thinking model with downstream-blocking layers.
+
+* 1. Wall-time distribution per variant
+
+Wall is sum of all =specialists[i].duration_seconds= within a cell. n is the
+number of cells the variant was scheduled in across all three layers.
+
+#+CAPTION: Per-variant cell wall (seconds). Long-tail outliers in bold.
+| variant            |  n |   min |    med |    p90 |     max |    sum | iters/cell | edits/cell |
+|--------------------+----+-------+--------+--------+---------+--------+------------+------------|
+| *K15-kimi-thinking* |  1 | 756.1 |  756.1 |  756.1 | *756.1* |  756.1 |        7.0 |        5.0 |
+| *K11-qwen3coder*    | 14 |   1.2 |   16.3 |   52.6 | *171.6* |  411.5 |        6.2 |        3.0 |
+| K2-kimi-k2.6       |  2 | 135.1 |  135.1 |  135.1 |   135.1 |  270.1 |        4.0 |        5.0 |
+| K1-qwen30          | 14 |   0.0 |   11.8 |   49.2 |   121.6 |  378.7 |        5.6 |        2.7 |
+| K8-deepseekV3      | 10 |   2.4 |   26.4 |   68.6 |   102.0 |  337.6 |        2.4 |        2.0 |
+| K17-glm46          |  1 |  73.8 |   73.8 |   73.8 |    73.8 |   73.8 |        8.0 |        5.0 |
+| K6-llama70b        |  1 |  20.6 |   20.6 |   20.6 |    20.6 |   20.6 |        2.0 |        2.0 |
+| K9-mixtral         |  1 |   6.2 |    6.2 |    6.2 |     6.2 |    6.2 |        2.0 |        5.0 |
+| K19-qwen25c-32b    |  1 |   0.3 |    0.3 |    0.3 |     0.3 |    0.3 |        1.0 |        0.0 |
+| K18-llama4         |  1 |   0.3 |    0.3 |    0.3 |     0.3 |    0.3 |        1.0 |        0.0 |
+| K13-deepseekV4     |  3 |   0.0 |    0.0 |    0.0 |     0.0 |    0.0 |        0.0 |        0.0 |
+| K7-qwen72b         |  1 |   0.0 |    0.0 |    0.0 |     0.0 |    0.0 |        0.0 |        0.0 |
+| K16-qwen36-27b     |  1 |   0.0 |    0.0 |    0.0 |     0.0 |    0.0 |        0.0 |        0.0 |
+| K5-claude-solo     |  8 |   0.0 |    0.0 |    0.0 |     0.0 |    0.0 |        0.0 |        0.0 |
+
+Notes:
+- K5-claude-solo cells write =specs=0= (different code path); their wall is not captured here, but they completed in layer2/3 wave windows.
+- K7/K13/K16 with =wall=0= are zero-spec failures (silent / unsupported), not literal zero-time.
+- *K15-kimi-thinking* is the only variant with >300 s; *K11-qwen3coder* (480 B, suspected slow) confirms the suspicion *only on its tail*: median is 16 s but max is 171.6 s thanks to one APPEND-ONLY-violation thrash cell.
+
+* 2. Parallelism efficiency
+
+Layer wall times come from the run log timestamps; cell wall is from
+=cell_result.json::specialists[i].duration_seconds=.
+
+#+CAPTION: Parallelism efficiency by layer (8-way ThreadPoolExecutor)
+| layer  | wall (s) | sum cell wall (s) |    n cells | achieved x | efficiency | bottleneck                      |
+|--------+----------+-------------------+------------+------------+------------+---------------------------------|
+| layer1 |    794.0 |            1074.2 |         15 |       1.35 |      16.9% | K15-kimi-thinking (756.1 s)     |
+| layer2 |    191.0 |             562.0 |         28 |       2.94 |      36.8% | K11-qwen3coder B11 (171.6 s)    |
+| layer3 |    126.0 |             431.2 | 12 (6×2)   |       3.42 |      42.8% | K1-qwen30 B1 d8_min (121.6 s)   |
+| TOTAL  |   1110.7 |            2255.3 |         59 |       2.03 |      25.4% | layer1 long pole dominates      |
+
+- Layer1 burns 794 s of which 756 s = K15 alone. With K15 dropped, layer1 wall would compress to ~135 s (next longest = K2-kimi-k2.6 errored cell or 73.8 s = K17-glm46). *Counterfactual whole-run wall: ≈8.7 min instead of 18.5.*
+- Layer2 efficiency (36.8%) reflects the K11-qwen3coder thrash holding one slot for 171 s while 27 other cells finish in ~100 s of work.
+- Layer3 is six sub-batches of 2 cells, run sequentially per-dial. Each sub-batch is 2-cell × 8-worker = trivially parallel; the bottleneck there is *batch sequencing*, not parallelism.
+
+* 3. Top 10 slowest cells
+
+#+CAPTION: Slowest cells by wall (with diagnosis from events.jsonl)
+| # | variant            | layer            | task | wall (s) | iters | edits OK | diagnosis                                                   |
+|---+--------------------+------------------+------+----------+-------+----------+-------------------------------------------------------------|
+| 1 | K15-kimi-thinking  | layer1           | B1   |    756.1 |     7 |        5 | thinking model — iter 1 = 354 s of pure reasoning, then 36–134 s/iter |
+| 2 | K11-qwen3coder     | layer2           | B11  |    171.6 |    15 |        1 | APPEND-ONLY-violation thrash; 10 failed edits + 13 nudges   |
+| 3 | K2-kimi-k2.6       | layer1           | B1   |    135.1 |     4 |        5 | 4 iter × ~34 s/iter — slow API but productive               |
+| 4 | K1-qwen30          | layer3_d8_min    | B1   |    121.6 |    16 |        9 | minimal-tools dial → many small edits, 16 round-trips       |
+| 5 | K8-deepseekV3      | layer2           | B11  |    102.0 |     4 |        1 | slow per-iter (25.5 s/iter), only 1 successful edit         |
+| 6 | K17-glm46          | layer1           | B1   |     73.8 |     8 |        5 | 9.2 s/iter — productive                                     |
+| 7 | K8-deepseekV3      | layer2           | B5   |     68.6 |     3 |        1 | 22.9 s/iter — slow per-iter                                 |
+| 8 | K11-qwen3coder     | layer3_d5_loose  | B1   |     52.6 |    14 |        8 | 2 consec failed-edit iters then recovers                    |
+| 9 | K1-qwen30          | layer3_d9_relax  | B1   |     49.2 |    12 |        8 | scope_strict=0 → many small edits                            |
+|10 | K1-qwen30          | layer3_d5_loose  | B1   |     40.9 |    10 |        6 | productive but high iter count                              |
+
+Adaptive abort fired on *zero* of the top-10 — by definition, the abort kills
+zero-edit cells fast. The top-10 is a mix of *(a) genuinely slow models
+producing edits* (K15, K2, K17) and *(b) thrash that the abort missed because
+edit attempts kept resetting the silent counter* (K11/B11, K1/B11 partial).
+
+HTTP-error signals across the whole run:
+- =log= contains 1× "HTTP Error" + 1× "504" → K18-llama4 warmup failed
+  (non-fatal, the variant still scheduled).
+- =events.jsonl= scan found tiny incidence: K17-glm46/B1 mentions "504" 2×
+  embedded in tool obs strings; K1-qwen30/B7/layer2 has "429" 1×;
+  K11-qwen3coder/B1/layer3_d5_loose has "5xx" 2×. *No retry events emitted*
+  by the agent runtime — proxy retries are silent.
+
+* 4. Adaptive abort effectiveness
+
+Detection rule: cell terminated with final =silent_streak >= 2= *and*
+=edits_applied_count == 0=.
+
+#+CAPTION: Adaptive abort fires (R17 rule: silent streak ≥2 + 0 edits)
+| variant         | layer           | task | wall (s) | iters | score | verdict       |
+|-----------------+-----------------+------+----------+-------+-------+---------------|
+| K1-qwen30       | layer2          | B7   |     10.8 |     4 |   0.0 | true positive |
+| K1-qwen30       | layer2          | B5   |     12.9 |     3 |   0.0 | true positive |
+| K11-qwen3coder  | layer2          | B7   |     12.9 |     4 |   0.0 | true positive |
+| K1-qwen30       | layer3_d6_tool  | B1   |      8.0 |     4 |   0.0 | true positive |
+| K11-qwen3coder  | layer3_d6_tool  | B1   |      6.7 |     4 |   0.0 | true positive |
+
+- *5 fires; 0 false positives* (no aborted cell scored >0).
+- Total wall saved: aborted at ~10 s each instead of running to default
+  iteration cap (~20-iter safety) → roughly *50–100 s saved* across these 5
+  cells. Modest in absolute terms; valuable as a guardrail.
+
+The abort is *under-tuned*, not over-tuned: it never fires when the model is
+actively making (failed) edits. See section 5.
+
+** Cells that should have aborted but didn't (failed-edit thrash)
+
+#+CAPTION: K7-thrash pattern — model emits edits that all get rejected
+| variant         | layer            | task | wall (s) | iters | edits OK | failed-edit streak | nudges |
+|-----------------+------------------+------+----------+-------+----------+--------------------+--------|
+| K11-qwen3coder  | layer2           | B11  |    171.6 |    15 |        1 |                 10 |     13 |
+| K11-qwen3coder  | layer3_d5_loose  | B1   |     52.6 |    14 |        8 |                  2 |      0 |
+| K1-qwen30       | layer3_d8_min    | B1   |    121.6 |    16 |        9 |                  2 |      0 |
+
+Only the first row (K11/B11) is a *clear* dodge — 10 consecutive iterations
+where every =edit_file= call was reverted with =APPEND-ONLY violation:
+edit produced 0 deletion lines=, and 13 self-correction nudges fired without
+breaking the loop. Wall cost: 171 s of 191 s layer-2 wall.
+
+The other two are borderline — they had short failed-edit streaks but
+recovered and produced legitimate output.
+
+* 5. Per-iteration wall-time breakdown
+
+Per-iteration mean (cell wall / cell iterations) by variant. Captures
+"how long does one model round-trip take" — useful for hedged-retry
+threshold design.
+
+#+CAPTION: Mean seconds per iteration (lower bound on API+tool round-trip)
+| variant            | mean s/iter | n cells |
+|--------------------+-------------+---------|
+| K15-kimi-thinking  |      108.02 |       1 |
+| K2-kimi-k2.6       |       33.77 |       1 |
+| K8-deepseekV3      |       12.37 |       8 |
+| K6-llama70b        |       10.32 |       1 |
+| K17-glm46          |        9.22 |       1 |
+| K1-qwen30          |        4.06 |      13 |
+| K11-qwen3coder     |        3.58 |      14 |
+| K9-mixtral         |        3.10 |       1 |
+| K19-qwen25c-32b    |        0.29 |       1 |
+| K18-llama4         |        0.28 |       1 |
+
+Within K15/B1, per-iter durations were: 21.7, *353.5*, 83.6, 134.2, 83.2,
+36.0, 43.8 s. The first edit-producing iteration (iter 1, 354 s) was almost
+entirely model thinking — tool dispatch is sub-second. Inside the K11/B11
+thrash, iter durations are 1–30 s: most time is in the API call, with each
+edit attempt reverting in <0.5 s.
+
+Implication: *for non-thinking models, p90 iteration ≈ 30 s; p99 ≈ 60 s*.
+A hedged-retry trigger at 60 s would cover most stuck-API cases without
+firing during normal long iters.
+
+* 6. R18 adaptive-abort + parallelism recommendations
+
+** 6a. New abort triggers (replace silent-only rule)
+
+Replace the single =silent_streak >= 2 AND edits == 0= rule with a
+disjunction of three:
+
+#+CAPTION: Proposed R18 abort triggers
+| trigger | rule                                                         | rationale (R17 fit)                                                   |
+|---------+--------------------------------------------------------------+-----------------------------------------------------------------------|
+| A       | =silent_streak >= 2= AND =edits_applied == 0=                | keeps R17's 5/5 true-positive guardrail                              |
+| B       | =consecutive_failed_edit_iters >= 3= regardless of edits     | catches K11/B11 (would fire at iter 4–5, saving ~140 s of 171 s)     |
+| C       | =self_correction_nudges >= 5=                                | redundant but cheap signal; K11/B11 had 13                            |
+| D       | =wall_seconds >= per_cell_hard_cap=                          | catches K15-class thinking-model stalls if the model is non-essential |
+
+Trigger B is the new primary lever. The R17 instrumentation already emits
+=tool_result.ok=False= and we can derive consec_failed_edit_iters from
+existing =iter_total_edit / iter_failed_edit= counts.
+
+** 6b. Per-cell hard wall cap
+
+#+CAPTION: Proposed wall caps by model class
+| model class                     | wall cap (s) | precedent                              |
+|---------------------------------+--------------+----------------------------------------|
+| thinking (K15)                  |          240 | iter 1 alone was 354 s in R17 — costly |
+| frontier non-thinking (K2, K8)  |          180 | covers p99 (135 s) with headroom       |
+| efficient (K1, K11, K17, K19)   |           90 | covers p99 (~50 s) with headroom       |
+| any                             |          300 | absolute global ceiling                |
+
+A 240-s cap on K15-kimi-thinking would have killed it after iter 4
+(produced 4/5 edits, saved 432 s = 7.2 min). Run wall would compress from
+18.5 min → ~11.3 min (saving ~40%).
+
+For R18, recommended default: *180 s soft cap, 300 s hard kill, with
+per-variant overrides for thinking models*. Under no circumstances let any
+single cell hold a worker for >5 min.
+
+** 6c. Hedged retry strategy for HTTP errors
+
+R17 saw very few HTTP errors emitted (1× warmup 504, embedded 429/5xx in
+tool obs). The proxy is already retrying silently. For R18:
+
+- *Per-API-call timeout*: 90 s hard. p99 normal iter is ~60 s; 90 s is
+  pessimistic. On timeout, fire one hedged duplicate request to the same
+  provider; whichever returns first wins.
+- *Provider rotation on consecutive timeouts*: if the same provider hits
+  3 consecutive timeouts in a worker thread, mark it cold for 60 s and
+  route to fallback (OpenRouter auto-route).
+- *Surface retry events*: emit an =api_retry= event into events.jsonl so
+  R19 can re-mine without log-grepping.
+
+** 6d. Parallelism — schedule the long pole first
+
+The single biggest wall lever is *not* abort tuning, it's scheduling:
+
+- *Identify thinking / slow models pre-run* (K15, K2 in R17 setup).
+- *Submit them at t=0 of layer1*, before the cheap-fast variants.
+- Better: run K15 in a *pre-warm side-pool* concurrently with the
+  layer1 tournament. The K15 result is just one row in the leaderboard; it
+  doesn't gate layer2 unless K15 wins (it didn't — score=10).
+- *Skip K15-kimi-thinking from layer-promotion eligibility entirely* — it's
+  too expensive in wall to be a stability candidate even if it scores well.
+
+A two-line change to the layer1 submit order (long-pole-first) plus a
+240-s cap on the K15 worker would have brought R17 from 18.5 min to
+~11 min without changing any quality output.
+
+** 6e. K11-qwen3coder special case
+
+K11-qwen3coder is *not* uniformly slow (median 16.3 s). It's a *bimodal
+risk*: most cells fast and productive, but tail-heavy when its edit format
+hits a guardrail it can't recover from. Recommendation:
+
+- Apply trigger B (consec_failed_edit_iters >= 3) — this catches K11/B11.
+- Keep K11 in the routing pool; the median is competitive.
+- File a follow-up on the APPEND-ONLY guardrail wording — the model never
+  understood "0 deletion lines" after 13 nudges, suggesting the nudge text
+  itself needs revision.
+
+* Appendix — sources
+
+- =scripts/_round17_dials_artifacts/summary-1778213339.json= (canonical wall
+  + cost; total_wall_seconds=1110.7)
+- =scripts/_round17_dials_artifacts/log-1778213339.txt= (layer transitions:
+  layer1 00:10:10→00:23:24, layer2 00:23:24→00:26:35, layer3
+  00:26:35→00:28:41)
+- =scripts/_round17_dials_artifacts/<layer>/<task>/<cell>/cell_result.json=
+  (per-cell duration + iteration + edit data — 55 files)
+- =scripts/_round17_dials_artifacts/<layer>/<task>/<cell>/events.jsonl=
+  (per-iteration event stream — 45 files; K5-claude-solo + 2 silent failures
+  do not write events)
+- Analysis scripts: =/tmp/r17_analyze2.py=, =/tmp/r17_layer_breakdown.py=,
+  =/tmp/r17_http_retries.py=, =/tmp/r17_no_events.py= (read-only).
