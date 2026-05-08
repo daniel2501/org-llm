@@ -2012,6 +2012,220 @@ def execute_cell(task, variant, dial, layer_label):
     return cell
 
 
+# ── R26 P1-11/P1-12/P1-13 — daemon ↔ harness file contracts ─────────────
+def _primary_broker_for_variant(variant):
+    """Return the primary broker name for (variant_name, model_id, mode).
+
+    Used by P1-12 deny-list filtering and P1-13 cell_replay.jsonl. The
+    primary preferred broker (first of PROVIDER_PINS["order"]) is the
+    deny-list key; we don't yet know what OpenRouter actually routed
+    to at submission time. Falls back to "openrouter" if no pin
+    exists.
+    """
+    name, model_id, mode = variant
+    if mode == "claude-solo":
+        return "anthropic"
+    pin = PROVIDER_PINS.get(model_id) if model_id else None
+    if not pin:
+        return "openrouter"
+    order = pin.get("order") or []
+    return order[0] if order else "openrouter"
+
+
+def _check_cost_circuit_breaker(layer_name):
+    """P1-11. If $ARTIFACTS/COST_CIRCUIT_BREAKER exists, abort gracefully.
+
+    Writes a layer-skipped marker, logs the reason, and raises
+    SystemExit(0). Caller is run_layer_parallel; aborting via
+    SystemExit drops out of main() cleanly and lets atexit hooks fire
+    (e.g. K20 endpoint pause).
+    """
+    if not COST_CIRCUIT_BREAKER_FILE.exists():
+        return
+    try:
+        reason = COST_CIRCUIT_BREAKER_FILE.read_text().strip()
+    except Exception:
+        reason = "(unreadable)"
+    log("=" * 80)
+    log(f"[P1-11] COST_CIRCUIT_BREAKER present — aborting {layer_name!r}")
+    log(f"[P1-11] sentinel content: {reason[:200]}")
+    log("=" * 80)
+    safe_layer = re.sub(r"[^A-Za-z0-9_]+", "_", layer_name)[:60]
+    marker = ARTIFACTS / f"LAYER_SKIPPED_{safe_layer}.json"
+    try:
+        marker.write_text(json.dumps({
+            "layer_name": layer_name,
+            "reason": "cost_circuit_breaker",
+            "sentinel": reason,
+            "epoch": int(time.time()),
+        }, indent=2))
+    except Exception as exc:
+        log(f"[P1-11] could not write layer-skipped marker: {exc}")
+    raise SystemExit(0)
+
+
+def _load_live_deny_list():
+    """P1-12. Parse $ARTIFACTS/LIVE_DENY_LIST as JSONL; return set of
+    (variant, broker) tuples to filter at cell-spec construction time.
+
+    File format: each line is a JSON object
+      {"variant": "K11-...", "broker": "Together", "reason": "..."}
+    Tolerant of: missing file, blank lines, malformed lines (skipped
+    with a warning log). A wildcard broker "*" matches any broker for
+    that variant. Also accepts a single JSON array (compat).
+    """
+    if not LIVE_DENY_LIST_FILE.exists():
+        return set()
+    denied = set()
+    try:
+        text = LIVE_DENY_LIST_FILE.read_text()
+    except Exception as exc:
+        log(f"[P1-12] could not read LIVE_DENY_LIST: {exc}")
+        return set()
+    stripped = text.strip()
+    if stripped.startswith("["):
+        try:
+            arr = json.loads(stripped)
+            for entry in arr:
+                v = entry.get("variant"); b = entry.get("broker")
+                if v and b:
+                    denied.add((v, b))
+        except Exception as exc:
+            log(f"[P1-12] LIVE_DENY_LIST array parse failed: {exc}")
+        return denied
+    for i, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception as exc:
+            log(f"[P1-12] LIVE_DENY_LIST line {i} skipped: {exc}")
+            continue
+        v = entry.get("variant"); b = entry.get("broker")
+        if v and b:
+            denied.add((v, b))
+    return denied
+
+
+def _filter_cell_specs_via_deny_list(cell_specs):
+    """P1-12. Drop cell_specs whose (variant, broker) is denied.
+
+    Wildcard broker "*" denies all brokers for that variant. Returns
+    (kept_specs, dropped_specs).
+    """
+    denied = _load_live_deny_list()
+    if not denied:
+        return cell_specs, []
+    kept = []
+    dropped = []
+    for s in cell_specs:
+        _task, variant, _dial, _layer = s
+        v_name = variant[0]
+        broker = _primary_broker_for_variant(variant)
+        if (v_name, broker) in denied or (v_name, "*") in denied:
+            dropped.append((s, broker))
+        else:
+            kept.append(s)
+    return kept, dropped
+
+
+def _classify_cell_status(cell):
+    """P1-13. Map a cell-result dict to a coarse status enum.
+
+    Returns one of: ok | wall_cap | silent_noop | broker_error | exception
+    """
+    if cell.get("wall_cap_killed"):
+        return "wall_cap"
+    err = cell.get("error") or ""
+    if err:
+        if "silent_noop" in err:
+            return "silent_noop"
+        if "wall_cap" in err:
+            return "wall_cap"
+        if "HTTP" in err or "URLError" in err or "broker" in err.lower():
+            return "broker_error"
+        return "exception"
+    # Inspect specialists for silent_noop streaks
+    specs = cell.get("specialists") or []
+    if specs and all((s.get("error") or "").startswith("silent_noop") for s in specs):
+        return "silent_noop"
+    return "ok"
+
+
+def _append_cell_replay(cell, layer_label):
+    """P1-13. Append one JSONL line to cell_replay.jsonl per cell
+    completion. Schema:
+      task_id, variant_name, dial_label, layer, status, wall_seconds,
+      cost_usd, score, broker
+
+    Status from _classify_cell_status. Self-healing daemon reads on
+    round-crash to identify which cells didn't finish; relaunches
+    only those.
+    """
+    try:
+        s = score_cell(cell)
+    except Exception:
+        s = {"score": 0.0}
+    cost = (cell.get("cost_usd")
+              or (cell.get("phase1_cost_usd", 0)
+                   + cell.get("specialist_cost_usd", 0)))
+    v_name = cell.get("variant", "?")
+    broker = "openrouter"
+    for v in VARIANTS:
+        if v[0] == v_name:
+            broker = _primary_broker_for_variant(v)
+            break
+    entry = {
+        "task_id": cell.get("task_id", "?"),
+        "variant_name": v_name,
+        "dial_label": cell.get("dial_label", ""),
+        "layer": cell.get("layer", layer_label),
+        "status": _classify_cell_status(cell),
+        "wall_seconds": cell.get("wall_seconds"),
+        "cost_usd": round(float(cost or 0.0), 6),
+        "score": s.get("score", 0.0),
+        "broker": broker,
+        "epoch": int(time.time()),
+    }
+    try:
+        with CELL_REPLAY_FILE.open("a") as f:
+            f.write(json.dumps(entry, default=str) + "\n")
+    except Exception as exc:
+        log(f"[P1-13] cell_replay append failed: {exc}")
+
+
+def _completed_cells_from_replay():
+    """P1-13/P1-20 helper. Read cell_replay.jsonl + return a set of
+    (task_id, variant_name, dial_label, layer) tuples for cells whose
+    last status is "ok". Used by the self-healing daemon's resumption
+    path (and by harness when relaunching from a previous crash).
+    """
+    if not CELL_REPLAY_FILE.exists():
+        return set()
+    completed = set()
+    try:
+        text = CELL_REPLAY_FILE.read_text()
+    except Exception:
+        return set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        if entry.get("status") == "ok":
+            completed.add((
+                entry.get("task_id"),
+                entry.get("variant_name"),
+                entry.get("dial_label"),
+                entry.get("layer"),
+            ))
+    return completed
+
+
 def run_layer_parallel(layer_name, cell_specs, all_cells):
     """R17 — execute a layer's cells in a thread pool.
 
@@ -2023,6 +2237,17 @@ def run_layer_parallel(layer_name, cell_specs, all_cells):
     log("=" * 80)
     log(f"{layer_name} — {len(cell_specs)} cells, {PARALLELISM}-way parallel")
     log("=" * 80)
+    # R26 P1-11 — daemon-authored COST_CIRCUIT_BREAKER sentinel. If
+    # present, abort the layer (and the round) gracefully. SystemExit(0)
+    # lets atexit hooks (K20 pause) run.
+    _check_cost_circuit_breaker(layer_name)
+    # R26 P1-12 — daemon-authored LIVE_DENY_LIST. Filter (variant,
+    # broker) combos out before submission so denied cells never start.
+    cell_specs, deny_dropped = _filter_cell_specs_via_deny_list(cell_specs)
+    if deny_dropped:
+        sample = ", ".join(f"{s[1][0]}/{br}" for (s, br) in deny_dropped[:5])
+        log(f"  [P1-12] LIVE_DENY_LIST dropped {len(deny_dropped)} cells "
+            f"(sample: {sample})")
     # R26 P1-6 — honor _R25_VARIANT_BUDGETS at submit time. K11 ($1.50
     # cap), K33/K34/K35 caps were declared in R26 prep but the filter
     # function _r25_should_skip_for_budget was never called. Apply it
@@ -2047,7 +2272,12 @@ def run_layer_parallel(layer_name, cell_specs, all_cells):
     # that ALSO scores low does not re-escalate (no recursion).
     escalation_specs: list = []
     with ThreadPoolExecutor(max_workers=PARALLELISM) as pool:
-        futures = {pool.submit(execute_cell, *s): s for s in cell_specs}
+        futures = {}
+        for s in cell_specs:
+            # R26 P1-11 — re-check on every submit so a mid-layer trip
+            # halts further work even after the layer started.
+            _check_cost_circuit_breaker(layer_name)
+            futures[pool.submit(execute_cell, *s)] = s
         for f in as_completed(futures):
             spec = futures[f]
             try:
@@ -2055,6 +2285,18 @@ def run_layer_parallel(layer_name, cell_specs, all_cells):
             except Exception as exc:
                 _, variant, dial, layer_label = spec
                 log(f"  ! pool worker died on {variant[0]}: {exc}")
+                # R26 P1-13 — record exception cells so the daemon can
+                # see what didn't complete cleanly.
+                try:
+                    _append_cell_replay({
+                        "variant": variant[0],
+                        "task_id": spec[0].get("id", "?"),
+                        "dial_label": dial.label() if hasattr(dial, "label") else "",
+                        "error": f"pool_worker_exception:{exc}",
+                        "layer": layer_label,
+                    }, layer_label)
+                except Exception:
+                    pass
                 continue
             with state_lock:
                 layer_results.append(cell)
@@ -2064,6 +2306,8 @@ def run_layer_parallel(layer_name, cell_specs, all_cells):
                 log(f"    {cell.get('variant','?'):>16} score={s.get('score',0):.1f} "
                     f"primary={s.get('primary',0)} fab={s.get('fab',0)} {prog}")
                 update_live_state(all_cells)
+                # R26 P1-13 — append per-cell replay line for crash recovery.
+                _append_cell_replay(cell, spec[3] if len(spec) > 3 else layer_name)
                 if len(all_cells) % 5 == 0:
                     print_leaderboard(all_cells)
                 # S1 hedged-strong escalation
@@ -2098,6 +2342,8 @@ def run_layer_parallel(layer_name, cell_specs, all_cells):
                         f"score={s.get('score',0):.1f} "
                         f"primary={s.get('primary',0)} {prog}")
                     update_live_state(all_cells)
+                    # R26 P1-13 — append S1 fallback cells to replay too
+                    _append_cell_replay(cell, spec[3] if len(spec) > 3 else layer_name)
     return layer_results
 
 
