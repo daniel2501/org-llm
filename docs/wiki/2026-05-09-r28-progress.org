@@ -1,0 +1,125 @@
+:PROPERTIES:
+:ID:       r28-progress
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R27 — self-healing daemon progress log
+#+FILETAGS: :wiki:bench:r27:progress:autorepair:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Live state-machine log for R27's self-healing daemon.
+States: MONITORING → DETECTING → FIXING → RELAUNCHING. 60s in-round
+cadence, 5min between-round. Per docs/wiki/2026-05-09-r28-boost-plan.org §12.
+
+*Expanded.* The R25 daemon was a passive monitor — wrote advice the
+harness ignored. R27 inverts the relationship. Daemon writes COST_
+CIRCUIT_BREAKER and LIVE_DENY_LIST; harness reads them per cell.
+Crash recovery uses cell_replay.jsonl: if PID dies mid-round, daemon
+identifies completed cells, builds a "pending" cell-list, spawns a
+resumption mini-round.
+
+* State transitions
+
+** [r28-daemon 17:33:34] Daemon started. PID-arg=AUTO. Cap $5.00/round.
+
+** [r28-daemon 17:34:34] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 17:35:34] STATE transition DETECTING → MONITORING
+
+** [r28-daemon 17:36:34] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 17:37:34] STATE transition DETECTING → MONITORING
+
+** [r28-daemon 17:38:34] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 17:39:34] STATE transition DETECTING → MONITORING
+
+** [r28-daemon 17:40:34] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 17:41:34] STATE transition DETECTING → MONITORING
+
+** [r28-daemon 17:42:35] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 17:43:35] STATE transition DETECTING → MONITORING
+
+** [r28-daemon 17:44:35] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 17:45:35] STATE transition DETECTING → MONITORING
+
+** [r28-daemon 17:46:35] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 17:47:35] STATE transition DETECTING → FIXING
+
+** [r28-daemon 17:48:35] FIX deny added: K20-foss-distill/openrouter — consecutive_wall_cap
+
+** [r28-daemon 17:48:35] STATE transition FIXING → MONITORING
+
+** [r28-daemon 17:49:35] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 17:50:35] STATE transition DETECTING → FIXING
+
+** [r28-daemon 17:51:35] STATE transition FIXING → MONITORING
+
+** [r28-daemon 17:52:35] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 17:53:35] STATE transition DETECTING → FIXING
+
+** [r28-daemon 17:54:35] STATE transition FIXING → MONITORING
+
+** [r28-daemon 17:55:35] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 17:56:35] STATE transition DETECTING → FIXING
+
+** [r28-daemon 17:57:36] STATE transition FIXING → MONITORING
+
+** [r28-daemon 17:58:36] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 17:59:36] STATE transition DETECTING → FIXING
+
+** [r28-daemon 18:00:36] STATE transition FIXING → MONITORING
+
+** [r28-daemon 18:01:36] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 18:02:36] STATE transition DETECTING → FIXING
+
+** [r28-daemon 18:03:36] STATE transition FIXING → MONITORING
+
+** [r28-daemon 18:04:36] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 18:05:36] STATE transition DETECTING → FIXING
+
+** [r28-daemon 18:06:36] STATE transition FIXING → MONITORING
+
+** [r28-daemon 18:07:36] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 18:08:36] STATE transition DETECTING → FIXING
+
+** [r28-daemon 18:09:36] STATE transition FIXING → MONITORING
+
+** [r28-daemon 18:10:36] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 18:11:36] STATE transition DETECTING → FIXING
+
+** [r28-daemon 18:12:37] STATE transition FIXING → MONITORING
+
+** [r28-daemon 18:13:37] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 18:14:37] STATE transition DETECTING → FIXING
+
+** [r28-daemon 18:15:37] STATE transition FIXING → MONITORING
+
+** [r28-daemon 18:16:37] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 18:17:37] STATE transition DETECTING → FIXING
+
+** [r28-daemon 18:18:37] STATE transition FIXING → MONITORING
+
+** [r28-daemon 18:19:37] STATE transition MONITORING → DETECTING
+
+** [r28-daemon 18:20:37] Daemon exit: round complete.
+
+** [r28-daemon 18:20:37] Daemon exit at 18:20:37.

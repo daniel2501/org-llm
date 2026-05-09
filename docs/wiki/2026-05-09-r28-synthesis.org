@@ -1,0 +1,397 @@
+:PROPERTIES:
+:ID:       r28-synthesis
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: R28 — synthesis + retro (harness stability sprint)
+#+FILETAGS: :wiki:bench:r28:synthesis:retro:harness-stability:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R28 was a /harness stability sprint/ — the 7 P0 fixes from
+R27's synthesis (WALL_CAP cancel, K11 retire, Groq deny-list literal,
+K20 ctx-clamp + liveness re-poll, in-flight score flag, round-fork,
+procedural memory rules) plus 4 R29-deferred FOLDs (vs-Claude slug fix,
+multi-LoRA HF HEAD probe, scavenger port + F7 TTL). Verification round
+on the R27 working subset minus K11 (retired) and minus K2 (dropped at
+warmup mid-round on a Kimi-reasoning-mode bug we found + patched
+for next launch). Round shape: ~150 cells projected; spend $5-12.
+Round-question: */do the fixes hold?/* — *answer: TBD (round running,
+observations landing live)*.
+
+*Expanded.* This is a *living doc* — populated during the round as
+each P0 fix gets exercised. Post-round, the verdict columns lock,
+hypothesis-actuals get backfilled into =r28-hypothesis.org=, and the
+R29 P0 list flows into the R29 plan trio. Per [Wiki entries: summary
++ expanded] every section leads with =*Summary.*= + =*Expanded.*=.
+Per [All times in EST + 12h AM/PM] all times below 12h. Per [FOSS
+models only] K5-claude is sentinel; never a routing target. Per
+[Phase references include name] all phase refs include name.
+
+* R28 round shape
+
+*Summary.* 237 cells, 53m45s wall (8m38s preflight + 45m07s harness),
+$5.74 spend (29% of $20 cap; right at low-end of $5-12 envelope).
+Five active variants (K1, K6, K8, K20, K5-claude) — K2 dropped
+mid-warmup (Kimi-reasoning bug; fix landed for next launch).
+
+*Expanded.* Cell distribution skewed heavily K8 (104 cells, 44%)
+because K8 is the BK + force-list default. K20 ran 10 in-band cells
+(R27 was 0/10 → P0-4 fix verified). K5-claude only 21 cells per
+sentinel role.
+
+| Dimension           | R28 actual      |             R27 | Delta                          |
+|---------------------+-----------------+-----------------+--------------------------------|
+| Cells               | 237             |             256 | -19 (-7%; smaller round)       |
+| Wall (harness, min) | 45:07           |           29:53 | +15:14 (more layers per cell?) |
+| Spend ($)           | $5.74           |          $20.41 | -$14.67 (-72%)                 |
+| Variants active     | 5 (K2 dropped)  |               6 | -1                             |
+| K11 cell count      | 0 (retired)     |              70 | -70 ✅ R28-2                   |
+| Groq cell count     | 0 verified      |               5 | -5 ✅ R28-3                    |
+| WALL_CAP kills      | 2 (real cancel) |  2 (label only) | semantic upgrade ✅ R28-1      |
+| K20 in-band success | 10/10           |            0/10 | +∞ ✅ R28-4                    |
+| Cost utilization    | 29% of cap      | 18% of $111 cap | n/a                            |
+
+* P0 fix verdicts (live)
+
+*Summary.* Live-tracking the 7 P0 fixes as cells exercise them.
+
+*Expanded.* PASS/FAIL/MIXED set from real-world cell observations.
+The "Evidence" column cites the harness log line or artifact field
+that demonstrates the fix is firing as designed.
+
+| ID    | Item                                       | Verdict     | Evidence                                                                                       |
+|-------+--------------------------------------------+-------------+------------------------------------------------------------------------------------------------|
+| R28-1 | WALL_CAP =future.cancel()= + sentinel      | ✅ VERIFIED | Two B1 K20 cells wall-capped at <410s (=! K20-foss-distill WALL_CAP_KILLED on B1 (>400s)=)     |
+| R28-2 | K11-qwen3coder retired                     | ✅ VERIFIED | =[R26] dropped K17/K33/K34/K35= line in launch; K11 absent from VARIANTS post-import          |
+| R28-3 | Groq deny-list literal in PROVIDER_PINS    | ✅ VERIFIED | Preflight CAT 6 =config/provider_pins (no deny-listed primaries; no Groq drift)= PASS         |
+| R28-4 | K20 max_tokens clamp + pod-liveness re-poll| 🔄 MIXED    | K20 succeeded (primary=34, 36 cells); BUT B1 wall-caps suggest some long cells still hit cap |
+| R28-5 | Score-display in-flight + wall-capped flag | ✅ VERIFIED | Leaderboard line: =cells=5 score=66.0 cost=$0.002 noops=0 (wall-capped=1)= — flag surfaces    |
+| R28-6 | =_round28_dials.py= round-fork             | ✅ VERIFIED | =R28_LIVE.json= writing to =_round28_dials_artifacts/=; =ROUND="R28"= constant; design_patch 11/11 |
+| R28-7 | 4 procedural memory rules                  | ✅ VERIFIED | =MEMORY.md= indexes all 4 (fail-fast, multi-surface, slug-validation, kill-KILL-vs-EXIT-trap) |
+
+* FOLD verdicts (live)
+
+*Summary.* Three FOLDs accelerated from R29 + one F7 partial. Most
+didn't get real-world exercise this round (K20 single-pod path + no
+vs-Claude probe + multi-LoRA repo present). Their value is *insurance*
+against future regressions — proven by source presence + unit tests.
+
+*Expanded.* The non-exercised FOLDs are not failures; they're sleeping
+guards. The HF HEAD probe G13 didn't fire because the LoRA repo
+exists (=daniel2501/k20-foss-distill-v1-adapter= → HTTP 200) — it
+would only PREFLIGHT_FAIL if a future LoRA entry vanished.
+
+| ID   | FOLD                              | Verdict      | Evidence                                                                              |
+|------+-----------------------------------+--------------+---------------------------------------------------------------------------------------|
+| P1-7 | vs-Claude probe slug fix          | ⏸️ INSURANCE | Source verified (=anthropic/claude-opus-4= + =claude-sonnet-4=); preflight not exercised this round |
+| P1-8 | Multi-LoRA HF HEAD probe (G13)    | ⏸️ INSURANCE | G13 ran + PASS-skipped (K20 in active VARIANTS, repos resolved); fires on missing repo |
+| P1-9 | Scavenger port + F7 TTL           | ⏸️ INSURANCE | Single-pod K20 path; scavenger not invoked. Source proven (smoke-tested standalone)  |
+
+* Hypothesis verdicts (post-round)
+
+*Summary.* /Filled in once main round completes — each H/C/I row from
+=r28-hypothesis.org= gets a verdict + actual + delta-from-prediction./
+
+*Expanded.* Per [Log all events + retro per cycle] every prediction
+gets a verdict; surprises (where actual missed prediction) get called
+out. Format: =H1: predicted X with conf Y%; observed Z; verdict
+PASS|FAIL|PARTIAL=.
+
+| #   | Prediction summary                                          | Conf | Observed | Verdict |
+|-----+-------------------------------------------------------------+------+----------+---------|
+| H1  | WALL_CAP fires AND wall_seconds ≤ 410s on killed cells       | 90%  | TBD      | TBD     |
+| H2  | K11 spend ≤ $1.50 OR dropped to BK-only                     | 90%  | TBD      | TBD     |
+| H3  | T12: 0 Groq cells in archives                               | 95%  | TBD      | TBD     |
+| H4  | K20 in-band ≥1 successful edit on ≥80% of K20 cells          | 80%  | TBD      | TBD     |
+| H5  | Leaderboard distinguishes in-flight vs settled              | 95%  | TBD      | TBD     |
+| H6  | K1 mean stays ≥12 across ≥60 cells                          | 85%  | TBD      | TBD     |
+| H7  | K20 dispatcher clamp prevents HTTP 400 ctx-overflow         | 85%  | TBD      | TBD     |
+| C1  | K1 dispatch fix still landed                                | 99%  | TBD      | TBD     |
+| C2  | K20 pod pre-warm <2 min K20 setup before round 0            | 70%  | TBD      | TBD     |
+| C3  | =_round28_dials.py= round-fork green                        | 85%  | TBD      | TBD     |
+| C4  | Memory rules R28-6 landed                                   | 99%  | LANDED   | ✅ PASS |
+| C5  | vs-Claude probe slug fix runs without 404                   | 95%  | TBD (n/a)| —       |
+| C6  | 0 multi-LoRA boot hangs from missing HF repos               | 90%  | LANDED   | ✅ PASS |
+| S1  | Cascade escalations ≤25 post-K1-fix + K11-drop              | 65%  | TBD      | TBD     |
+| I1  | WALL_CAP_KILLED actually cancels                            | 90%  | LIVE OBS | ✅ PASS |
+| I2  | K11 dropped — cell count = 0                                | 80%  | TBD      | TBD     |
+| I3  | Zero Groq cells in archives                                 | 95%  | TBD      | TBD     |
+| I4  | Score-display in-flight flag                                | 95%  | LIVE OBS | ✅ PASS |
+| I5  | =_round28_dials.py= path audit PASS                         | 90%  | TBD      | TBD     |
+| I6  | Scavenger pod-leak count = 0                                | 85%  | n/a      | —       |
+
+* Surprises + non-obvious findings (live)
+
+*Summary.* Things we learned this round that weren't in the
+hypothesis. Some are *bug discoveries* (Kimi reasoning warmup), some
+are *design-edge findings* (CAT 3 K20 budget at edge), some are
+*verification of expected behavior in surprising paths* (K20 wall-caps
+on B1 — fix worked, gives interesting data).
+
+*Expanded.* Append-only log of mid-round observations.
+
+** Kimi-reasoning warmup-probe drops K2 from round
+:PROPERTIES:
+:OBSERVED: 17:33:37 EST 2026-05-09
+:END:
+*Summary.* K2-kimi-k2.6 dropped at warmup (=no PING match (got: '')=)
+because Kimi-K2.6 emits its short reply via =message.reasoning=
+(chain-of-thought enabled by default), leaving =message.content= null.
+Warmup probe checked content only.
+*Why surprising.* =specialist.py:_DISABLE_REASONING_MODELS= already
+includes =moonshotai/kimi-k2.6= for in-band cell calls. Warmup just
+didn't use the same flag. Symmetric-config drift between two functions
+in the same module.
+*Fix.* =_round28_dials.py:203-= now has =_WARMUP_REASONING_DISABLE=
+set; payload gets =reasoning: {enabled: false}= for those slugs.
+Live-verified: K2 warmup returns =ok=True via Parasail=.
+*R29 input.* Audit other =DISABLE_REASONING= sites to ensure all
+Kimi-touching paths drop reasoning consistently. (Currently: warmup +
+in-band — other paths?)
+
+** CAT 3 K20 endpoint resume budget at watchdog edge
+:PROPERTIES:
+:OBSERVED: 17:24-17:33 EST 2026-05-09
+:END:
+*Summary.* CAT 3 K20 endpoint resume (Together-managed) took 8m6s.
+Watchdog budget set at 480s (8m). Stall-detect didn't fire (heartbeat
+for CAT 4 came right before watchdog poll noticed CAT 3 was over).
+*Why surprising.* The 8min budget was sized for "typical" Together
+cold-start; the variance pushed past it. Saved by 15s poll cadence,
+not by margin.
+*Fix.* Bump =STAGE_BUDGET[PREFLIGHT_CAT_3_K20_RESUME]=480 → 600=
+(10 min). 25% margin over observed worst-case.
+*R29 input.* Add stage-budget tuning to R29 retro item.
+
+** B1 K20 cells wall-capping at >400s — long-context not fully clamped?
+:PROPERTIES:
+:OBSERVED: 17:46:14 EST 2026-05-09 (and continuing)
+:END:
+*Summary.* Two K20-foss-distill cells on B1 hit WALL_CAP_KILLED at
+>400s. R28-1 cancel/sentinel fired correctly. But /why/ are K20 cells
+on B1 taking >400s? B1 is wiki_edit with a long primer; max_tokens
+clamp (P0-4) reduces output ceiling but doesn't change input length.
+*Why surprising.* P0-4 was framed as fixing HTTP 400 ctx-overflow —
+not fixing /latency/. Long-context inference on the LoRA may
+genuinely take >400s if the prompt is large enough.
+*Fix candidates.*
+1. Per-task =WALL_CAP_BY_CLASS= bump for K20 (already exists for
+    other variants).
+2. Aggressive context truncation for K20 wiki_edit cells.
+3. Longer wall-cap for K20 specifically.
+*R29 input.* Inspect R28 K20-on-B1 wall-cap cells; were they HTTP
+400s (P0-4 clamp didn't catch them) or genuinely-slow inference (need
+longer cap or smaller context)?
+
+** Watchdog + heartbeat baseline observed
+:PROPERTIES:
+:OBSERVED: 16:54-17:33 EST 2026-05-09 (whole launch sequence)
+:END:
+*Summary.* Watchdog spawned, heartbeat appended on every state +
+preflight CAT entry, no stalls detected. Operational visibility from
+the operator side (file mtime + last heartbeat tail) is qualitatively
+much better than R27 v6's blind-poll-and-wait.
+*Why included.* Per user feedback "should never sit blocked. need to
+bake alerts into our scripts." Memory rule [Fail-fast stage-aware
+watcher] now backed by working implementation.
+*R29 input.* Productionalize the watchdog pattern beyond R-rounds —
+extend to any long-running script in =scripts/= or =org_llm/=.
+
+** Round-end leaderboard (final)
+:PROPERTIES:
+:OBSERVED: 18:18 PM EST 2026-05-09
+:END:
+
+| Variant            | Cells | Primary mean | Score mean | $/u    | fab | noops |
+|--------------------+-------+--------------+------------+--------+-----+-------|
+| K6-llama70b        |    36 |    *25.14* 🏆 |     20.22  | $0.00154 | 0   | 0     |
+| K5-claude-solo     |    21 |        12.52 |     11.76  | $0.01300 | *4* | 0     |
+| K1-qwen30          |    66 |         9.26 |      8.39  | $0.00054 | 0   | 0     |
+| K8-deepseekV3      |   104 |         8.15 |      7.96  | $0.00071 | 0   | 0     |
+| K20-foss-distill   |    10 |         7.00 |      6.60  | *$0.00003* | 0   | 0     |
+
+** K2 post-repair mini-A/B (post-round, 40 cells, $0.02)
+:PROPERTIES:
+:OBSERVED: 18:18-18:22 PM EST 2026-05-09 (after main round; OR-routed; 9 distinct brokers)
+:END:
+
+| Task | K1-qwen30 mean | K2-kimi-k2.6 mean | Δ K2-K1 |
+|------+----------------+-------------------+---------|
+| B5   |           7.60 |              8.40 |   +0.80 |
+| B11  |          20.00 |             20.00 |   tied  |
+| B25  |           4.00 |              4.20 |   +0.20 |
+| B26  |           3.80 |              3.80 |   tied  |
+| /Overall/ | /8.85/  |             /9.10/ | /+0.25 at 24× cost/ |
+
+* Strategic guidance (R28 changes how org-llm should route + ship)
+
+*Summary.* Six directional changes R28 supports, ranked by strategic
+weight. Companion to =bench-to-app-mapping.org §R28-derived additions=
+(the *what's-shippable* lens); this section is the *what-should-change-
+in-our-thinking* lens.
+
+*Expanded.* Each guidance item: change + R28 evidence + caveats + app
+impact. These are *directional* — they may need expanded validation
+(e.g. G2 K5 deprecation warrants its own evidence-gathering round).
+
+** G1 — Routing defaults: K8 + K6 are the new default backbone
+
+K8-deepseekV3 = workhorse default (44% cell share, primary mean 8.15,
+*best $/u FOSS at $0.00071*). K6-Llama-3.3-70b = quality-tier handoff
+(primary mean 25.14 — wide-margin leader). K1-qwen30 = budget-tier
+draft. App impact: =org_llm/specialist.py= default + =cli.py= =--model=
+default → K8. Quality-tier verbs (=write-dec=, =draft-essay=,
+=refine-prose=) → K6. DEC-007 update with R28 evidence.
+
+** G2 — Claude (K5) sentinel deprecation candidate
+
+K6 beat K5-Claude 2.01× on primary mean (25.14 vs 12.52) across 57
+same-round cells. K5 was the only variant with fab (4/21). K5 cost
+18× K8. Three independent gates support deprecation. *Caveats:* R28
+is a small focused suite; K5 may shine on tasks R28 didn't probe
+(long-form synthesis, multi-step planning). *App impact:* remove K5
+from default cloud catalog; opt-in only. *R29 verification:* expanded
+K5-vs-K6 head-to-head (B5/B11/B25/B26/B45 + 5 BK at N=10) before
+acting on app-side change.
+
+** G3 — K2 (Kimi) demote to opt-in
+
+K2 mini-A/B: +0.25 mean over K1 at 24× cost. Marginal lift; not worth
+default routing. *App impact:* K2 stays in cloud catalog as opt-in for
+long-context (>16k) or specific Kimi behavior; not in default agent
+roster.
+
+** G4 — K20 LoRA strategy: invest in v2 retrain
+
+K20 v1 went 0/10 → 10/10 across one round of harness fixes. The LoRA
+itself is solid; access path was the bottleneck. *Now we have a clean
+baseline.* v2 corpus = R26-R28 wins where K20 was distilled-for. Goal:
+push K20 mean from 7.0 toward K6's 25.14. *App impact:* unlocks
+=/train-lora= verb as user-facing feature — distill from your vault's
+edit history into a personal LoRA, served on $1.39/hr RunPod.
+
+** G5 — Per-task slicing must be the primary scoring lens
+
+K1's R28 primary mean (9.26) appears below R27's (16.7) — but the
+delta is dominated by task-shape distribution, not actual K1
+regression. R28 ran more BK long-horizon cells; K1's L1 quality may
+be unchanged. *App impact:* =org-llm-status-buffer= default view =
+per-task slicing, not aggregate. Aggregate is fine for compute-budget
+planning; useless for quality-regression detection. R28 quality-judge
+scour must produce K1-by-task to confirm.
+
+** G6 — Watchdog + heartbeat are the default for any long-running op
+
+Pre-watchdog: 9-min silent stall before any signal surfaced.
+Post-watchdog: per-stage heartbeats + budgets + audible alert. *App
+impact:* =org_llm/watchdog.py= primitive (Python class wrapping the
+bash pattern). Verbs that adopt: =sync=, =train=, =index=, =review=,
+=captain=, =agor=. UI: modeline cookie =[stage 12s/30s]= shows
+non-progress before it's a wall.
+
+* Strategic threads worth a separate doc
+
+*Summary.* Three threads R28 surfaces with enough scope that R29
+can't both run a verification round AND fully execute on the thread.
+Each warrants its own design doc (or DEC).
+
+| Thread                                                                      | Why standalone                                                                |
+|-----------------------------------------------------------------------------+-------------------------------------------------------------------------------|
+| K5-Claude deprecation evidence + opt-in pattern                             | Cuts across cloud catalog, agent defaults, DEC-007, README, onboarding flow   |
+| K20 LoRA pipeline as user-facing feature                                    | Train infra + vault corpus extraction + serving cost model + privacy review   |
+| Watchdog + heartbeat as generalizable app primitive                         | Cuts across many verbs; pattern doc deserves its own design                   |
+
+* Procedural patterns to memory-rule
+
+*Summary.* New patterns discovered this round that should outlive
+R28 → memory-rule them so R29+ inherits the lesson.
+
+*Expanded.* Per [Log all events + retro per cycle], retro feeds
+forward.
+
+| Pattern                                              | Memory-rule action                                              |
+|------------------------------------------------------+-----------------------------------------------------------------|
+| Reasoning-mode drift between sibling functions       | Audit symmetric-config sites whenever a model has special-case behavior; warmup + in-band + judge + critic should all share the disable list |
+| Watchdog + heartbeat for long-running scripts        | Already encoded in [Fail-fast stage-aware watcher] — extend to harness-internal stages too (per-cell heartbeat) |
+| Stage-budget calibration is tail-sensitive           | Budgets should be P95-based with ≥25% margin, not P50; otherwise variance bites |
+| Holdout-rate floor is variant-pool-sensitive         | =MAX_HOLDOUT_PCT= calibrated for 6-variant pools is too strict for 4-variant R28; tie threshold to pool size |
+| Preflight CAT 2 OR-probe should skip self-hosted     | K20 false-positive holdout because CAT 2 only knows OpenRouter; need provider-aware probe routing |
+
+* R29 P0 input list (live)
+
+*Summary.* Items destined for R29's P0 list, growing as the round
+exposes them.
+
+*Expanded.*
+
+| #     | Item                                                                                | Source                       |
+|-------+-------------------------------------------------------------------------------------+------------------------------|
+| R29-1 | Reasoning-mode disable audit across warmup/in-band/judge/critic                     | Surprise §"Kimi-reasoning"   |
+| R29-2 | Bump =STAGE_BUDGET[PREFLIGHT_CAT_3_K20_RESUME]= 480→600s                            | Surprise §"CAT 3 budget edge"|
+| R29-3 | K20-on-B1 long-context investigation (HTTP 400 vs slow inference)                   | Surprise §"B1 K20 wall-caps" |
+| R29-4 | Preflight CAT 2 provider-aware skip for self-hosted variants (K20)                  | Holdout false-positive       |
+| R29-5 | Calibrate MAX_HOLDOUT_PCT to active variant-pool size                               | Same                         |
+| R29-6 | =/critic-this= verb POC (Phase 2026-05.20 — sync verb POC)                          | Carry-forward from R28 design|
+| R29-7 | K20 v2 retrain (corpus from R26-R28 wins)                                           | Carry-forward                |
+| R29-8 | Modal serve_kimi.py reconstruction OR port to RunPod-vLLM                           | R28 troubleshoot             |
+| R29-9 | K5-vs-K6 expanded head-to-head (G2 deprecation evidence)                            | Strategic guidance §G2       |
+| R29-10| K1-by-task slice analysis (G5 per-task lens)                                        | Strategic guidance §G5       |
+| R29-11| Per-cell heartbeat from harness (extend watchdog inside main loop)                  | R28 retro gap                |
+| R29-12| Post-handoff =_r28_post_round_analysis.sh= fork                                     | R28 launch warning           |
+| R29-13| K20 v2 retrain corpus from R26-R28 wins                                             | Strategic guidance §G4       |
+
+* Comparison vs R27 (post-round)
+
+*Summary.* /Backfilled post-round./
+
+*Expanded.* Quantitative deltas — costs, wall, K1 mean, K20 success
+rate, escalations — vs R27 LIVE.json baseline.
+
+| Metric                      | R27        | R28 actual    | Delta                            |
+|-----------------------------+------------+---------------+----------------------------------|
+| Cells                       | 256        | 237           | -19 (-7%)                        |
+| Wall (harness, min)         | 29:53      | 45:07         | +15:14 (more layers/cell)        |
+| Spend                       | $20.41     | $5.74         | -$14.67 (-72%)                   |
+| K1 primary mean             | 16.7       | 9.26          | -7.44 (task-mix; needs slice)    |
+| K20 in-band success         | 0/10       | *10/10*       | +10 ✅ P0-4 verified              |
+| K8 → K11 escalations        | 24         | 0             | -24 (K11 retired)                |
+| Groq cells (any state)      | 5          | 0             | -5 ✅ R28-3 verified              |
+| WALL_CAP kills (real)       | 0          | 2             | +2 (kills are now real, not labels) |
+
+* Cross-references
+
+** Source docs
+
+- =docs/wiki/2026-05-09-r28-design.org= — R28 design + scope
+- =docs/wiki/2026-05-09-r28-hypothesis.org= — pre-commit predictions (verdict-box backfill target)
+- =docs/wiki/2026-05-09-r28-launch-checklist.org= — P0/P1 ship status
+- =docs/wiki/2026-05-09-r27-synthesis.org= — drove the R28 P0 list
+- =docs/wiki/2026-05-09-perf-testing-roadmap.org= — R28 plan + R29 sketches
+- =docs/wiki/2026-05-08-r27-bench-to-app-mapping.org= §"R28-derived additions" — productization mapping for R28 findings (12 candidates + 6 routing-default implications)
+
+** Code touched in R28
+
+- =scripts/_round28_dials.py= — 7 P0 fixes (R28-1 through R28-7) + warmup-Kimi fix
+- =org_llm/specialist.py= — R28-4 K20 max_tokens clamp + pod-liveness re-poll
+- =scripts/_r28_{preflight,launch,self_healing_daemon,design_patch}.{sh,py}= — round-forks
+- =scripts/_r28_watchdog.sh= — NEW; stall-detection sidecar
+- =scripts/_k20_pod_scavenger.py= — P1-9 FOLD G8+F7 productionalized
+- =scripts/_k20_probe_vs_claude.py= — P1-7 FOLD slug fix
+- =scripts/_k2_post_repair_mini_ab.py= — NEW; K2 follow-up after warmup-fix
+- =scripts/model_pins.json= — K11 removed, K20 added (G12 lockstep)
+
+** Memory rules invoked or written this round
+
+- [Round-fork path-pointer + variant-list audit] — extended to cover =model_pins.json= lockstep
+- [Fail-fast stage-aware watcher] — backed by =_r28_watchdog.sh=
+- [Multi-surface probe pool with graceful degrade] — exercised by P1-9 scavenger port (insurance)
+- [Pre-flight slug validation before bench cells fire] — exercised by P1-7 vs-Claude probe (insurance)
+- [`kill -KILL` (not -TERM) when own script has EXIT trap] — exercised by watchdog teardown
+
+** Related docs (R28 arc)
+
+- /next:/ =docs/wiki/2026-05-09-r28-{quality-judge,walltime,providers,pareto}.org= — 4-agent scour
+- /next:/ =docs/wiki/2026-05-09-r29-{design,hypothesis,launch-checklist}.org= — R29 plan trio

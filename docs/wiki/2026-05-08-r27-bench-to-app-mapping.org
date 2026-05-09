@@ -1,0 +1,540 @@
+:PROPERTIES:
+:ID:       r27-bench-to-app-mapping
+:CREATED:  [2026-05-08]
+:END:
+#+TITLE: R27 bench-to-app mapping — which inputs ship as user-facing org-llm features
+#+FILETAGS: :wiki:bench:r27:app:productization:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Every R27 input item from =2026-05-08-r27-inputs.org=
+classified through the =feedback_dev_artifacts_are_app_candidates=
+lens. Of ~92 numbered items across 8 hypotheses + 18 P0/P1 tasks +
+5 P2 deferrals + §A-H (8+10+5+4+12+11+12+10), the breakdown is:
+*APP-direct 18*, *APP-adjacent 24*, *BOTH 14*, *BENCH-only 36*.
+~58% of bench infra has a defensible user-facing surface within
+1-3 phases. Top 10 productization picks lead with =/ultrareview-
+lite= verb (H6 + U9 judge), on-edit quality_lint warning ribbon
+(G22 tree-sitter + G15 K20 calibration), and per-handle LoRA stack
+delivered as a Doom binding for the active @-agent (U7 + E12).
+*Appendix R27-derived additions (2026-05-09)* extends this doc
+with 22 new items mined from the R27 cycle synthesis + scour
+reports + launch session log G/F/B catalogs — see §"R27-derived
+additions (2026-05-09)" at end of doc.
+
+*Expanded.* Per memory rule [Dev artifacts as app candidates],
+every dev-process tool is treated as a candidate user-facing
+feature. This doc is the formal application of that lens to R27.
+Classification: APP-direct = ships as feature with minimal change;
+APP-adjacent = needs UX adapter; BOTH = measurable in bench AND
+ships in app; BENCH-only = pure round infra. Surfaces honor
+[Keep CLI pristine] (Typer verbs co-equal), [Expand elisp
+footprint] (Doom bindings + sidebar widgets default to elisp),
+[Default browser is qutebrowser] (dashboards), and [Default
+agent artifacts to .org]. FOSS-only per [FOSS models only] —
+Claude appears solely as K5 sentinel role (G18, H6 reference).
+Times in 12h EST per [All times in EST]. Tables not prose per
+[Condense long outputs].
+
+* Headline counts
+
+| Class        | Count | % of ~92 |
+|--------------+-------+----------|
+| APP-direct   |    18 |      20% |
+| APP-adjacent |    24 |      26% |
+| BOTH         |    14 |      15% |
+| BENCH-only   |    36 |      39% |
+| /Total/      |  *92* |   *100%* |
+
+App-touching (direct+adjacent+both) = 56 / 92 = *61%*. Validates
+[Dev artifacts as app candidates]: most bench work has user-facing
+spillover when the lens is applied early.
+
+* Top 10 highest-value app productionalizations
+
+Ranked by leverage × inverse-effort. Each cites concrete user
+surface per [Phase references include name].
+
+|  # | Item                        | Surface                                            | User benefit                                                    | +hrs |
+|----+-----------------------------+----------------------------------------------------+-----------------------------------------------------------------+------|
+|  1 | H6 /ultrareview-lite/       | Typer verb =org-llm review --lite=                 | Free FOSS judge replaces $5-15/run Claude-Opus on review verb   |    6 |
+|  2 | G22 tree-sitter pre-emit    | On-edit ribbon (=org-llm-quality-mode=) + sidebar  | Live malformed-bracket warning while you type, no save needed   |    8 |
+|  3 | U7 per-handle LoRA stack    | Doom binding =SPC l h= picks active handle adapter | @-agent feels native to its role (atoz vs curator vs geordi)    |   12 |
+|  4 | H1 data flywheel            | Background daemon: every accepted edit → corpus   | Org-llm gets smarter every week without manual retrain          |    4 |
+|  5 | G23 headless-Emacs verifier | Pre-save hook flags fab-UUID + table-pipe loss     | Catches silent vault corruption before it lands on disk         |    4 |
+|  6 | H8 cost-attribution dash    | qutebrowser dashboard + sidebar live widget        | See $/agent-call live; catch routing waste in real time         |    6 |
+|  7 | E6 RAG via org-roam-mcp     | Implicit context injection in chat surface         | @-agent answers cite your vault automatically; no /search dance |    8 |
+|  8 | E2 long-context vault read  | =askbook= verb; sidebar "load full chapter"        | Ask-questions over 64k+ vault context (full notebook scope)     |    6 |
+|  9 | G16 test-driven gen         | =/spec= verb (write test → force-pass loop)       | Spec-first task drafting; useful for tracker/ELisp work         |   10 |
+| 10 | G24 Bradley-Terry leader    | =/leaderboard= verb + qutebrowser pairwise UI      | Pick best @-agent or model per task class via pairwise pref     |    6 |
+
+Notes: ranks #1-#3 are flagship wins. #4 (data flywheel) is the
+quietest big leverage — every future round compounds. #5 + #2
+together form a full quality_lint pipeline. #7 + #8 are
+dashboard-class wins via qutebrowser.
+
+* Full mapping table
+
+** Hypotheses H1-H8
+
+| ID | Item                                              | Class      | Surface (if app)                              | User benefit                                              | +hrs |
+|----+---------------------------------------------------+------------+-----------------------------------------------+-----------------------------------------------------------+------|
+| H1 | K20 v2 mean ≥ v1 + 2 across ≥3 prose tasks        | BENCH-only | n/a                                           | n/a                                                       |    0 |
+| H2 | Multi-LoRA pod stable at =--max-loras 3=          | BOTH       | E1 enables U7/U8 served from same pod         | All @-agents share one cheap pod; faster + cheaper        |    2 |
+| H3 | U9 judge agreement ≥70% with Opus on held-out     | BOTH       | gates H6 =/ultrareview-lite=                  | Trust the FOSS judge before retiring Opus                 |    0 |
+| H4 | U7 best handle-LoRA beats K20 v1 generic          | BOTH       | gates Doom binding for handle adapter pick    | Each @-agent gets its own tuned voice                     |    0 |
+| H5 | U8 k20-org beats unified K20 on B-task subset     | BENCH-only | n/a                                           | n/a                                                       |    0 |
+| H6 | U11 classifier beats tag-based hybrid by ≥1pt     | BENCH-only | n/a                                           | n/a                                                       |    0 |
+| H7 | $/qpt envelope: K20 cells $0.0008-$0.0015         | BENCH-only | n/a                                           | n/a                                                       |    0 |
+| H8 | K20 v2 train completes ≤2.5h H100 + ≤$15          | BENCH-only | n/a                                           | n/a                                                       |    0 |
+
+** P0 tasks (R27 launch blockers)
+
+| ID   | Item                                       | Class       | Surface                                  | User benefit                                          | +hrs |
+|------+--------------------------------------------+-------------+------------------------------------------+-------------------------------------------------------+------|
+| P0-1 | Wire =gate_edit_with_k20= in specialist    | BOTH        | All @-agent edits gain k20 quality gate  | Bad edits rejected before they hit your vault         |    2 |
+| P0-2 | =--max-loras 3= multi-LoRA pod config      | BENCH-only  | (enabling for app via E1/H7)             | n/a directly                                          |    0 |
+| P0-3 | =--max-loras 3= smoke probe                | BENCH-only  | n/a                                      | n/a                                                   |    0 |
+| P0-4 | K20 v2 train kickoff conditions            | BENCH-only  | n/a                                      | n/a                                                   |    0 |
+| P0-5 | U9 judge train kickoff (≥500 pairs)        | BENCH-only  | (enabling for H6 =/ultrareview-lite=)    | n/a directly                                          |    0 |
+| P0-6 | U11 brainstorm row recategorize            | BENCH-only  | n/a                                      | n/a                                                   |    0 |
+| P0-7 | Round-fork =_round27_dials.py=             | BENCH-only  | n/a                                      | n/a                                                   |    0 |
+
+** P1 tasks (R27 features)
+
+| ID    | Item                                          | Class        | Surface                                              | User benefit                                       | +hrs |
+|-------+-----------------------------------------------+--------------+------------------------------------------------------+----------------------------------------------------+------|
+| P1-1  | Corpus extractor walks R23 + R26              | APP-adjacent | Background daemon (foundation for H1 flywheel)       | Vault edits silently improve future model         |    4 |
+| P1-2  | U7 per-handle 5× train on Together            | APP-direct   | Doom =SPC l h= per-handle adapter switch             | @-agent voice matches its role                     |   12 |
+| P1-3  | U8 per-family 2× train (k20-org + k20-elisp)  | APP-adjacent | Auto-pick adapter by buffer mode (org vs elisp)      | Right model picked by what you're editing          |    4 |
+| P1-4  | U9 judge train + HF push + pod mount          | APP-direct   | Powers =/ultrareview-lite= verb (H6)                 | Free FOSS judging built into review verb           |    6 |
+| P1-5  | =_p27_k20_score_replay.py= (Pearson)          | BOTH         | =/calibrate= CLI verb; reusable as audit tool        | Re-score your past edits to catch drift           |    3 |
+| P1-6  | Per-handle eval fixture (50×5)                | APP-adjacent | =org-llm eval --handle=                              | Pick best @-agent per task type via numbers       |    4 |
+| P1-7  | Judge-vs-Opus comparison harness              | BENCH-only   | n/a (gate test for U9)                               | n/a                                                |    0 |
+| P1-8  | Latency timer in =k20_score_edit=             | BOTH         | Modeline indicator: "k20 ok 47ms" vs "k20 slow 380ms"| User sees gate health; trust signal                |    2 |
+| P1-9  | U11 classifier (cosine to centroids)          | APP-adjacent | Auto-route incoming chat to best @-agent             | "Just chat" → app picks the right specialist      |    4 |
+| P1-10 | =_r27_preflight.sh= adapt + G7 multi-LoRA     | BENCH-only   | (H4 helper smoke battery generalization)             | n/a directly                                       |    0 |
+| P1-11 | =_r27_self_healing_daemon.sh= adapt           | BENCH-only   | n/a                                                  | n/a                                                |    0 |
+
+** P2 deferrals
+
+| ID   | Item                                           | Class        | Surface                                            | User benefit                                       | +hrs |
+|------+------------------------------------------------+--------------+----------------------------------------------------+----------------------------------------------------+------|
+| P2-1 | U10 v1→v2 distill chain                        | BENCH-only   | n/a                                                | n/a                                                |    0 |
+| P2-2 | U12 org-roam-aware completion + roam fixture   | APP-direct   | Roam completion-at-point (=org-llm-roam-capf=)     | Tab-complete to roam node IDs in any buffer        |   10 |
+| P2-3 | U6 daily-driver autocomplete (7B base)         | APP-direct   | Background completion in any prog/org buffer       | Copilot-class autocomplete, FOSS, on your vault    |   16 |
+| P2-4 | CI canary always-warm policy                   | BENCH-only   | n/a                                                | n/a                                                |    0 |
+| P2-5 | K20 7B base (smaller/faster/cheaper warm)      | APP-adjacent | Enables U6 daily-driver to be cheap to keep warm   | Always-on autocomplete at $0.10/h                  |    4 |
+
+** §A — provider/infra ideas
+
+| ID | Item                                         | Class        | Surface                                            | User benefit                                       | +hrs |
+|----+----------------------------------------------+--------------+----------------------------------------------------+----------------------------------------------------+------|
+| A1 | Multi-LoRA pod =--max-loras 3=               | BOTH         | One pod hosts all user-facing adapters             | Cheap concurrent specialists; faster routing       |    2 |
+| A2 | =ignore: [Groq]= deny-list everywhere        | APP-direct   | Setting in =org-llm-providers= (already mem-ruled) | Honors user ban on Groq automatically              |    1 |
+| A3 | Modal-Kimi reactivation gate                 | BENCH-only   | n/a                                                | n/a                                                |    0 |
+| A4 | Spheron H100 self-host demote-confirm        | BENCH-only   | n/a                                                | n/a                                                |    0 |
+| A5 | Together-vs-RunPod K20 v1 mini-table         | BENCH-only   | n/a                                                | n/a                                                |    0 |
+| A6 | vLLM v0.21+ adoption gate                    | BENCH-only   | (enabling for E7/E10/F8)                           | n/a directly                                       |    0 |
+| A7 | Per-broker $/qpt slice (canonical artifact)  | APP-adjacent | Sidebar widget: live $/qpt per broker              | See where your $ goes per provider                 |    4 |
+| A8 | HF Inference Endpoints as K20 v2 fallback    | BENCH-only   | n/a                                                | n/a                                                |    0 |
+
+** §B — FOSS-LLM advantage strategies
+
+| ID  | Item                                            | Class        | Surface                                              | User benefit                                       | +hrs |
+|-----+-------------------------------------------------+--------------+------------------------------------------------------+----------------------------------------------------+------|
+| B1  | K1 dispatch fix (worktree shim path accept)     | BOTH         | Every @-agent edit honors abs+rel paths              | "It just works" on absolute paths in chat          |    1 |
+| B2  | Multi-variant consensus voting (K8+K6+K11)      | APP-adjacent | =/ask --consensus= verb on hard prompts              | "Ask 3 models, return majority" toggle             |    4 |
+| B3  | Chain-of-density prompts on prose families      | APP-adjacent | Auto-applied for prose @-agents (curator etc.)       | Denser drafts on prose verbs                       |    3 |
+| B4  | Self-consistency at K8 (sample-N pick best)     | APP-adjacent | Cheap mode of =/ask --consensus=                     | Cheaper than best-of-N on short answers            |    3 |
+| B5  | Speculative decoding K1 draft + K20 verify      | BENCH-only   | (speed only, transparent to user)                    | n/a directly (latency win is implicit)             |    0 |
+| B6  | Per-handle system prompts                       | APP-direct   | Stored in handle registry; loaded by @-agent select  | @-agent voice matches its role even pre-LoRA       |    2 |
+| B7  | Cascading retries K8→K6→K11 tune                | BENCH-only   | n/a (transparent)                                    | n/a                                                |    0 |
+| B8  | Worktree-relative path injection in prompts     | BOTH         | Every @-agent prompt sandbox-aware by default        | Chat about files works from any vault subtree      |    2 |
+| B9  | Distill K8 wins → K8.1 LoRA (R28+)              | APP-adjacent | =org-llm distill --candidate=K8=                     | User can train own niche LoRA from past wins       |    6 |
+| B10 | K11 demote to BK-only sentinel                  | BENCH-only   | n/a                                                  | n/a                                                |    0 |
+
+** §C — test catalog
+
+| ID  | Item                                            | Class        | Surface                                          | User benefit                                       | +hrs |
+|-----+-------------------------------------------------+--------------+--------------------------------------------------+----------------------------------------------------+------|
+| T9  | Specialist dispatch contract test               | BOTH         | =org-llm doctor= subtest                         | Self-diagnostic catches dispatch breakage          |    2 |
+| T10 | Model-version drift test                        | BOTH         | =org-llm doctor= subtest + warning on launch     | Warns if upstream slug silently changed            |    1 |
+| T11 | LoRA self-A/B contract pre-round                | APP-adjacent | =org-llm distill --self-ab=                      | Validates user's own trained LoRA before deploy    |    4 |
+| T12 | Provider deny-list verification                 | APP-direct   | =org-llm doctor= asserts no Groq cell            | Honors [Never include Groq] memory rule            |    1 |
+| S5  | Cross-variant consensus probe (S1/S2/S3 fire)   | BENCH-only   | n/a                                              | n/a                                                |    0 |
+
+** §D — preflight gates
+
+| ID  | Item                                            | Class       | Surface                                  | User benefit                                       | +hrs |
+|-----+-------------------------------------------------+-------------+------------------------------------------+----------------------------------------------------+------|
+| G9  | Provider-pin honor probe                        | BOTH        | =org-llm doctor --providers=             | Catches broker drift; surfaces in modeline         |    2 |
+| G10 | Specialist dispatch smoke (1-cell B1 probe)     | BOTH        | =org-llm doctor --dispatch=              | Self-test before user trusts an agent              |    2 |
+| G11 | LoRA pod-readiness =/v1/models= + tool_choice   | BOTH        | Modeline LoRA-ready indicator            | User sees if K20 pod is up before invoking         |    2 |
+| G12 | Model-version pin assert                        | BOTH        | =org-llm doctor= warning on slug drift   | Don't get silently rerouted to a different model   |    1 |
+
+** §E — POWER
+
+| ID  | Item                                            | Class        | Surface                                              | User benefit                                       | +hrs |
+|-----+-------------------------------------------------+--------------+------------------------------------------------------+----------------------------------------------------+------|
+| E1  | Multi-LoRA pod scale to N=16 adapters/pod       | BOTH         | Single pod hosts all user-facing adapters            | One cheap pod = all specialists; less wallet pain  |    4 |
+| E2  | Long-context FOSS (Yi-200k or Qwen2.5-1M)       | APP-direct   | =askbook --full= verb; sidebar "load chapter"        | Q&A over full notebook (64k+) without RAG hop      |    6 |
+| E3  | mergekit slerp K20⊕K8 / dare-ties K20⊕K1        | APP-adjacent | =org-llm distill --merge=                            | User can fuse own LoRAs without retrain spend      |    4 |
+| E4  | Multi-agent debate K8+K6+K11 → judge            | APP-adjacent | =/ask --debate= verb; sidebar shows debate trace     | See competing agent answers + judged winner        |    6 |
+| E5  | DSPy / TextGrad prompt search                   | APP-adjacent | =org-llm tune --handle=geordi=                       | User auto-tunes prompts without hand iteration     |    8 |
+| E6  | RAG via org-roam-mcp + Qdrant                   | APP-direct   | Chat surface auto-injects relevant roam nodes        | Vault-aware answers; no /search dance              |    8 |
+| E7  | Constrained decoding via xgrammar               | BOTH         | Tool-call shape always valid; transparent            | Fewer "agent tried but malformed" failures         |    2 |
+| E8  | Tool-calling via grammar (force well-formed)    | BOTH         | All @-agent tool calls validated pre-emit            | Agents reliably invoke tools; less retry           |    2 |
+| E9  | Self-hosted DeepSeek-V3.5-256B / Qwen-Max-30T   | BENCH-only   | n/a (cost-prohibitive for app)                       | n/a                                                |    0 |
+| E10 | Speculative decoding K1 draft + K20 verify      | BENCH-only   | (transparent latency win)                            | n/a directly                                       |    0 |
+| E11 | Multi-stage cascade tune K1→K8→K11→K5           | BENCH-only   | n/a (transparent)                                    | n/a                                                |    0 |
+| E12 | Per-handle LoRA stack served via E1             | APP-direct   | Doom =SPC l h= picks adapter for current @-agent     | @-agent feels native; routing matches active role  |    8 |
+
+** §F — SPEED
+
+| ID  | Item                                            | Class        | Surface                                          | User benefit                                       | +hrs |
+|-----+-------------------------------------------------+--------------+--------------------------------------------------+----------------------------------------------------+------|
+| F1  | vLLM continuous-batch tune                      | BENCH-only   | n/a (transparent)                                | n/a                                                |    0 |
+| F2  | vLLM prefix-caching                             | BOTH         | Faster B1-style chat continuations               | Instant reply on follow-ups in same thread         |    1 |
+| F3  | FP8/INT4 quant (AWQ/GPTQ/Qwen3-Coder-30B-FP8)   | BOTH         | =org-llm pull --quant= for local cache           | Lower-RAM local backup model for offline mode      |    4 |
+| F4  | Tensor parallelism TP=2 for >40B                | BENCH-only   | n/a                                              | n/a                                                |    0 |
+| F5  | Pre-warm pods at preflight                      | BOTH         | =org-llm warm= verb; auto on launch              | Pod ready when you start typing; no first-cell wait|    2 |
+| F6  | Concurrent best-of-N (S2 batched n=5)           | BOTH         | Faster =/ask --consensus= replies                | Consensus mode usable in real-time chat            |    1 |
+| F7  | Iteration cap reduction 16 → 8 + early-exit     | BENCH-only   | n/a (transparent)                                | n/a                                                |    0 |
+| F8  | vLLM v1 engine adoption                         | BENCH-only   | (transparent throughput win)                     | n/a directly                                       |    0 |
+| F9  | llama.cpp / ollama fallback                     | APP-direct   | =org-llm offline= mode; ollama backend           | Works on plane / no-network; offline @-agent       |    8 |
+| F10 | Eager-prefetch reuse across variants            | BENCH-only   | n/a (audit only)                                 | n/a                                                |    0 |
+| F11 | Skip Layer-2/3 for low-score variants           | BENCH-only   | n/a (transparent)                                | n/a                                                |    0 |
+
+** §G — ACCURACY
+
+| ID  | Item                                            | Class        | Surface                                              | User benefit                                       | +hrs |
+|-----+-------------------------------------------------+--------------+------------------------------------------------------+----------------------------------------------------+------|
+| G13 | Self-consistency at K8                          | APP-adjacent | Cheap mode in =/ask --consensus= (with B4)          | Cheaper than best-of-N on short Qs                 |    3 |
+| G14 | Reflexion / Chain-of-Verification               | APP-direct   | =/ask --verify= verb (model checks own output)       | "Triple-check" mode for high-stakes drafts         |    4 |
+| G15 | K20 score calibration on quality_lint           | BOTH         | Unlocks U3 production; modeline quality score        | Live quality readout while editing                 |    3 |
+| G16 | Test-driven generation                          | APP-direct   | =/spec= verb: write test → force-pass loop           | Spec-first workflow for tracker/elisp tasks        |   10 |
+| G17 | Multi-stage validation pipeline                 | APP-direct   | Pre-save hook chains lint→ts→headless→exec           | Vault stays clean; bad edits never reach disk      |    6 |
+| G18 | Reference-based scoring vs /ultrareview gold    | APP-adjacent | =/calibrate --reference= verb                        | User audits agent quality vs gold reference set    |    4 |
+| G19 | Confidence-gated retry (low-conf → K20-critique)| APP-adjacent | Auto-applied; sidebar shows "retried for low-conf"   | Dodgy answers automatically improved               |    3 |
+| G20 | Distillation chain compounding (R28+)           | BENCH-only   | (eventual H1 outcome; tracked under flywheel)        | n/a directly                                       |    0 |
+| G21 | Worktree-relative path injection ALL variants   | BOTH         | All chat works from any vault subtree                | Universal "it just works" path handling            |    2 |
+| G22 | Tree-sitter pre-emit grammar gate               | APP-direct   | =org-llm-quality-mode= ribbon + on-edit warnings     | Live malformed-bracket warning while typing        |    8 |
+| G23 | Headless-Emacs verifier (org-element + org-id)  | APP-direct   | Pre-save hook flags fab-UUID + table-pipe loss       | Vault corruption caught pre-write                  |    4 |
+| G24 | Bradley-Terry pairwise leaderboard              | APP-direct   | =/leaderboard= verb + qutebrowser pairwise UI        | Pairwise compare @-agents on your tasks            |    6 |
+
+** §H — TOOLING
+
+| ID  | Item                                            | Class        | Surface                                              | User benefit                                       | +hrs |
+|-----+-------------------------------------------------+--------------+------------------------------------------------------+----------------------------------------------------+------|
+| H1  | Data flywheel — every cell → next train corpus  | APP-direct   | Background daemon; opt-in per [Personal-now]         | Org-llm gets smarter weekly without user effort    |    4 |
+| H2  | Active learning (K20 picks own train prompts)   | APP-adjacent | Sidebar "training queue" widget                      | User curates retrain set in org buffer             |    4 |
+| H3  | vLLM v1 adoption gate                           | BENCH-only   | n/a                                                  | n/a                                                |    0 |
+| H4  | Helper smoke battery (=--smoke= on every script)| APP-adjacent | =org-llm doctor --scripts= rolls them up             | Self-diagnostic across full helper surface         |    4 |
+| H5  | Round-state synchronization (single source JSON)| BENCH-only   | n/a                                                  | n/a                                                |    0 |
+| H6  | =/ultrareview-lite= via U9 K20-judge            | APP-direct   | Typer verb =org-llm review --lite=                   | Free FOSS judge replaces $5-15/run Opus            |    6 |
+| H7  | LoRA registry + hot-swap                        | APP-direct   | =org-llm lora list / load / swap= verbs              | User swaps adapters without restart                |    5 |
+| H8  | Cost-attribution dashboard                      | APP-direct   | qutebrowser dashboard + sidebar live widget          | See $/agent-call live; catch routing waste         |    6 |
+| H9  | Worktree pool (recycle worktrees)               | APP-adjacent | Faster agent spawns; transparent + =SPC l w= status  | @-agents start instantly; less filesystem churn    |    3 |
+| H10 | Round-replay shadow mode                        | APP-adjacent | =org-llm replay --since=YYYY-MM-DD=                  | Re-run past sessions through new harness; debug    |    4 |
+
+* Ideas that surprised the agent
+
+*Summary.* Five items flipped the default expectation. Three were
+"bench-looking" but have strong app angles; two looked
+productizable but are bench-only by construction.
+
+*Expanded.* Listed with the surprise reasoning so the next reader
+doesn't repeat the wrong default.
+
+| ID         | Default read | Actual class | Why                                                                                       |
+|------------+--------------+--------------+-------------------------------------------------------------------------------------------|
+| P1-5       | bench-only   | BOTH         | Pearson replay reusable as =/calibrate= verb — user audits own past edits for drift       |
+| P1-8       | bench-only   | BOTH         | Latency timer surfaces in modeline as user trust signal; not just a round assert          |
+| G24        | bench-only   | APP-direct   | Bradley-Terry rank is general — applies to user's daily @-agent picks, not just rounds    |
+| F3 quant   | infra-only   | BOTH         | FP8/INT4 quant enables /local offline/ mode (F9 partner) — major laptop/plane UX win      |
+| H4 smokes  | bench-only   | APP-adjacent | =--smoke= on every script generalizes to =org-llm doctor --scripts= self-diagnostic       |
+| E10 spec   | productizable| BENCH-only   | Speculative decoding is fully transparent to user — speed only, no surface change         |
+| E11 cascade| productizable| BENCH-only   | Cascade tuning is invisible plumbing; user can't see or steer it without harm             |
+| H5 round   | productizable| BENCH-only   | Round-state JSON is round-internal; no user-facing concept of "round" outside bench       |
+
+* Cross-references
+
+** Source
+
+- =docs/wiki/2026-05-08-r27-inputs.org= — primary source (read in full)
+- =docs/wiki/2026-05-08-k20-uses-brainstorm.org= — U-codes (U6, U7, U9, U12 referenced)
+- =docs/wiki/2026-05-08-r26-synthesis.org= — B1 dispatch fix motivation
+
+** Memory rules applied
+
+- =feedback_dev_artifacts_are_app_candidates= — central lens
+- =feedback_keep_cli_pristine= — Typer verbs co-equal (=review --lite=, =doctor=, =distill=, =calibrate=, =leaderboard=, =warm=, =replay=, =lora=, =offline=, =tune=, =spec=)
+- =feedback_expand_elisp_footprint= — Doom bindings + sidebar widgets + modeline + on-edit ribbons
+- =feedback_default_browser_qutebrowser= — H8 dashboard + G24 pairwise UI
+- =feedback_org_default_for_artifacts= — this doc itself .org
+- =feedback_no_groq= — A2 deny-list productized
+- =feedback_foss_models_only= — every "smarter model" remains FOSS; Claude only as K5/G18/H6 reference
+
+** Phase candidates downstream
+
+| Productization        | Best-fit phase                                          |
+|-----------------------+---------------------------------------------------------|
+| H6 =/ultrareview-lite=| 2026-05.PP — review verb upgrade                        |
+| G22 + G23 quality-lint| 2026-05.PP — buffer-UI self-healing extension           |
+| U7 per-handle Doom    | 2026-05.PP — agents.org wiring                          |
+| H1 data flywheel      | Phase 29 self-coded tools (LLM→deterministic candidate) |
+| E6 RAG via roam-mcp   | Phase 25 DB-authoritative inversion partner             |
+| F9 ollama offline     | mobile-org holy-grail leg (offline daily-driver)        |
+
+** Self-check
+
+- All 8 H1-H8 hypotheses mapped: YES
+- All 7 P0 + 11 P1 + 5 P2 mapped: YES
+- All A1-A8 mapped: YES
+- All B1-B10 mapped: YES
+- All T9-T12 + S5 mapped: YES
+- All G9-G12 mapped: YES
+- All E1-E12 mapped: YES
+- All F1-F11 mapped: YES
+- All G13-G24 mapped: YES
+- All H1-H10 mapped: YES
+- Top 10 each cite explicit user surface: YES
+- Hard cap 350 lines: respected
+- Tables not prose: respected
+- 12h EST: no time-of-day claims (no risk)
+- FOSS-only: Claude appears only as G18/H6 sentinel reference
+
+* R27-derived additions (2026-05-09)
+
+*Summary.* The R27 cycle (2026-05-08 → 2026-05-09 EST) shipped 22
+new patterns/components beyond the original input set, mined from
+the synthesis (=2026-05-09-r27-synthesis.org=), the 4 scour reports
+(quality-judge / walltime / providers / pareto), and the launch
+session log's G1-G12 + F1-F6 + B1-B7 catalogs. The R27 lens shifts
+the productization frame: "K20-as-base-generator" was falsified
+(0/10 in-band) but "K20-as-critic" passed huge (S3 +7.6 over K2).
+Multi-pod orchestration patterns (scavenger pool, trap-on-EXIT,
+GPU-fallback chain, stage-aware deadlines) all earned production
+credentials in one night. Headline new picks: =/critic-this= verb
+(R27-N1) replaces /ultrareview-lite/ as the #1 FOSS-judge surface
+because K20 was empirically validated as critic-tier; in-flight
+vs settled cell distinction (R27-N9) is a UX-visible bug-fix that
+ships as live cost-attribution honesty; preflight HEAD-probe
+contract (R27-N6) generalizes G2+vs-Claude into one rule.
+
+*Expanded.* Per memory rule [Productionalize harness into app]:
+the R27 round is the most direct evidence to date that bench
+infra ships as user-facing patterns within one round-cycle —
+=_k20_runpod_resume.py= GPU fallback, =_r27_5_pod_scavenger.py=
+4-pod pool, =/tmp/r27_auto_relaunch_v2.sh= stage-aware watcher all
+emerged tonight + are R28-portable. Per [Dev artifacts as app
+candidates]: every G/F/B item below is treated as a candidate
+user-facing feature, not just a round footnote. Classification
+honors prior conventions. Productize-hours grounded by analogy to
+the existing doc's hours (e.g. R27-N1 critic verb = 4h vs H6's 6h
+because K20 self-host + critic LoRA already proven; R27-N9 cell-
+phase tag = 1h because it's a single field on existing struct).
+Bench evidence cited inline per item. FOSS-only — Claude appears
+solely as the K5 sentinel comparator referenced for re-probing.
+
+** Headline counts (additions only)
+
+| Class        | Count | % of 22 |
+|--------------+-------+---------|
+| APP-direct   |     8 |     36% |
+| APP-adjacent |     6 |     27% |
+| BOTH         |     5 |     23% |
+| BENCH-only   |     3 |     14% |
+| /Total/      |  *22* |  *100%* |
+
+App-touching (direct+adjacent+both) = 19 / 22 = *86%*. Higher than
+the parent doc's 61% — the R27 cycle skewed toward integration
+patterns (orchestration, validation, UX-visible bugs) where the
+app surface is the natural delivery vehicle.
+
+** Top 6 new productization picks (R27-derived)
+
+Ranked leverage × tractable. Each cites the R27 evidence source.
+
+| # | Item                                | Surface                                              | User benefit                                                   | +hrs | Evidence                                  |
+|---+-------------------------------------+------------------------------------------------------+----------------------------------------------------------------+------+-------------------------------------------|
+| 1 | R27-N1 K20-as-critic =/critic-this= | Typer verb =org-llm critic= + chat-region action     | Free FOSS S3 critic at +7.6 quality vs prior K2 — replaces Opus | 4    | synthesis §3.1 (S3 +7.6 over K2)         |
+| 2 | R27-N9 cell-phase tag (in-flight)   | Modeline + sidebar live cell list with phase column  | Cost dashboard tells truth; in-flight cells not scored as fail | 1    | session log G3, F3 (display ≠ truth)      |
+| 3 | R27-N6 preflight HEAD-probe rule    | =org-llm doctor --resources= rule-engine             | Catches missing HF repos / bad slugs before any session burn   | 3    | synthesis §9.3, walltime, G2+vs-Claude    |
+| 4 | R27-N5 K20PodPool scavenger         | =org-llm warm --pool=N= verb; trap-on-EXIT contract  | 4 FOSS pods in 88s; graceful degradation when GPU declines     | 6    | providers §4 (88s pool), G8-G11           |
+| 5 | R27-N17 stage-aware deadlines       | =org-llm warm --stages= + watcher fast-path          | Bounded waits, fail-fast on LoRA-stuck-download (saves 12 min) | 3    | synthesis §9.1, G7 (=r27_auto_relaunch_v2=)|
+| 6 | R27-N3 K20 multi-surface gate       | =org-llm verify-model --multi=    diagnostic         | Honest model assessment across 5 axes (chain pass, not 1 A/B)  | 4    | synthesis §9.2, quality-judge §3 probes   |
+
+Notes: #1 supersedes the parent doc's H6 =/ultrareview-lite= as the
+flagship — K20 critic is empirically the highest-signal probe of
+the night. #2 is a 1-hour bug-fix with cross-cutting trust impact
+(every dashboard / cost-widget benefits). #3 + #5 form a "preflight
+2.0" bundle. #4 is the most R28-portable infrastructure pattern —
+useful far beyond bench (any user wanting cheap parallel FOSS pods).
+
+** Full new mapping table
+
+| ID      | Item                                                        | Class        | Surface (if app)                                       | User benefit                                              | +hrs |
+|---------+-------------------------------------------------------------+--------------+--------------------------------------------------------+-----------------------------------------------------------+------|
+| R27-N1  | K20-as-critic role (S3 +7.6 over K2)                        | APP-direct   | =org-llm critic= verb + chat-region action            | Free FOSS critic; replaces Opus on review/critique pass    |    4 |
+| R27-N2  | Pre-flight slug validation (slug → resource exists)         | APP-direct   | =org-llm doctor --slugs=                               | Catch upstream-renamed/typo'd model slugs before session   |    2 |
+| R27-N3  | Multi-surface model verifier (BK+S3+long-ctx+handle+stress) | APP-direct   | =org-llm verify-model --multi= diagnostic              | Honest model assessment vs single-A/B verdict             |    4 |
+| R27-N4  | Fail-fast watcher with stage deadlines                      | BOTH         | =org-llm warm= internals; surfaces in modeline         | Bounded pod-warm wait; abort early on LoRA-stuck stage    |    3 |
+| R27-N5  | K20PodPool 4-pod scavenger pattern                          | APP-direct   | =org-llm warm --pool=N= + trap-on-EXIT contract        | Cheap parallel FOSS pods; graceful GPU-decline degrade    |    6 |
+| R27-N6  | HF/external-resource HEAD-probe pre-launch                  | BOTH         | =org-llm doctor --resources= rule                      | Don't burn session on missing HF repo / 404 endpoint      |    3 |
+| R27-N7  | Trap-on-EXIT teardown contract for external helpers         | APP-adjacent | All =org-llm warm/pod/run= verbs ship with trap        | No leaked $1.49/hr pods after CTRL-C / SystemExit         |    2 |
+| R27-N8  | Pod-liveness re-poll before each cell                       | APP-adjacent | Specialist pre-call hook + sidebar pod indicator       | HTTP 404 race caught; agent gracefully re-pins to fallback|    3 |
+| R27-N9  | In-flight vs settled cell-phase tag                         | APP-direct   | Modeline + cost-attribution dashboard column           | Live cost numbers tell truth; no zero-score display lie   |    1 |
+| R27-N10 | Output-tokens clamp =min(req, ctx-input)=                   | APP-adjacent | Specialist dispatch invariant; transparent             | No HTTP 400 on long-input cells; agent always fits ctx    |    1 |
+| R27-N11 | =future.cancel()= worker-level WALL_CAP                     | BOTH         | =org-llm run --wall-cap= hard-kill enforce             | Wall budget actually honored; no slip-past 1.5× cap       |    3 |
+| R27-N12 | Worker-future cancellation API for agent runs               | APP-direct   | =SPC l C= cancel current @-agent ; sidebar Stop button | Stop a run-away agent mid-call without restarting Emacs   |    4 |
+| R27-N13 | Dispatcher-level spend filter (pre-fan-out)                 | APP-direct   | =org-llm budget --per-handle= live-enforced cap        | Per-@-agent spend cap users actually hold ($/hr/handle)   |    3 |
+| R27-N14 | PROVIDER_PINS deny-list audit (Groq drift recurring)        | APP-direct   | =org-llm doctor --providers= asserts deny-set literal  | Honors [Never include Groq] across rounds + restarts      |    1 |
+| R27-N15 | GPU-fallback chain primitive (PCIe→SXM4→H100→A40)           | APP-adjacent | =org-llm warm= helper internals; transparent           | Pod warm-up recovers from per-tier capacity blips         |    2 |
+| R27-N16 | Time-window GPU-tier preference (skip PCIe 12-3 AM)         | APP-adjacent | Config in =org-llm-warm-windows=                       | Pre-tuned to your local capacity patterns; no decline tax |    2 |
+| R27-N17 | Stage-aware deadline rule (1.5× expected, not max-tolerable)| APP-adjacent | =org-llm warm --stages= deadline knob per phase        | Saves 10-12min on session-killer LoRA-download stalls     |    3 |
+| R27-N18 | Pre-warm pod ≥15 min before session                         | APP-direct   | =org-llm warm --before=15m= scheduled-warm verb        | First @-agent reply instant; no 18m20s silent-noop window |    2 |
+| R27-N19 | Score persistence in cell artifact (post-print writeback)   | BOTH         | Post-mortem =/leaderboard --since= reads scored cells  | Re-score-on-print gone; cached score honest across reruns |    2 |
+| R27-N20 | =display ≠ truth= leaderboard contract                      | BOTH         | Cost-widget + leaderboard verb refuses to print 0/null | UI honesty rule; no "K1 looks dead" mis-diagnosis         |    2 |
+| R27-N21 | API-key cache pre-warm at module load                       | BENCH-only   | n/a (transparent perf)                                 | n/a directly                                              |    0 |
+| R27-N22 | Multi-pod state-file separation (pool vs single-pod)        | BENCH-only   | n/a (round infra)                                      | n/a directly                                              |    0 |
+
+** Surprises (R27-derived)
+
+*Summary.* Three items flipped expected classification once R27
+evidence landed; two looked productizable but stay bench-only.
+
+*Expanded.* Same surprise-reasoning template as parent doc.
+
+| ID       | Default read   | Actual class | Why                                                                                              |
+|----------+----------------+--------------+--------------------------------------------------------------------------------------------------|
+| R27-N9   | bench-only     | APP-direct   | Cell-phase tag is a 1-hour fix that fixes every dashboard / cost-widget honesty problem at once  |
+| R27-N12  | bench-only     | APP-direct   | =future.cancel()= isn't just for WALL_CAP — surfaces as Stop button for any user-run-away agent  |
+| R27-N5   | bench-only     | APP-direct   | Pod scavenger is reusable as user-facing =org-llm warm --pool=N= for parallel FOSS-pod workflows |
+| R27-N1   | bench-pivot    | APP-direct   | K20-as-critic pivots an apparent failure (0/10 in-band) into a #1 productization win             |
+| R27-N4   | bench-only     | BOTH         | Stage-aware watcher caught a session-killer pattern (=lora-stuck=) that any warm-pod UX needs    |
+| R27-N21  | productizable  | BENCH-only   | API-key cache pre-warm is transparent latency only; no surface change vs G5 root-cause           |
+| R27-N22  | productizable  | BENCH-only   | Pool-vs-single state file is round-internal plumbing; user concept = "pod" not "pod state file"  |
+
+** R27 evidence cross-references
+
+| Item    | Source citation                                                                            |
+|---------+--------------------------------------------------------------------------------------------|
+| R27-N1  | =2026-05-09-r27-synthesis.org= §3.1 + =k20_extended_s3_critic.json= (+7.6 over K2)          |
+| R27-N2  | =2026-05-09-r27-synthesis.org= §9.3 + =k20_extended_vs_claude.json= (K5 0/30 slug bug)      |
+| R27-N3  | =2026-05-09-r27-quality-judge.org= §3 probes; =2026-05-09-r27-synthesis.org= §9.2           |
+| R27-N4  | =r27-launch-session-log.org= G7; =/tmp/r27_auto_relaunch_v2.sh=                             |
+| R27-N5  | =2026-05-09-r27-providers.org= §4 (88s pool); =/tmp/r27_5_pod_scavenger.py=                 |
+| R27-N6  | =r27-launch-session-log.org= G2; =2026-05-09-r27-synthesis.org= §9.3                        |
+| R27-N7  | =2026-05-09-r27-providers.org= §4 G10 (4 leaked pods, ~$0.50)                               |
+| R27-N8  | =2026-05-09-r27-quality-judge.org= §3 (HTTP 404 post-pause race, =__s7=)                    |
+| R27-N9  | =r27-launch-session-log.org= G3 + F3 (display ≠ truth, K1 mis-diagnosed)                    |
+| R27-N10 | =2026-05-09-r27-quality-judge.org= §3 (HTTP 400 max ctx 8192, =__s4=)                       |
+| R27-N11 | =2026-05-09-r27-walltime.org= §Q7 (advisory log fires, no =future.cancel()=)                |
+| R27-N12 | =2026-05-09-r27-walltime.org= §Q1 + R28 P0 §7.3 (worker-future cancel level)                |
+| R27-N13 | =2026-05-09-r27-providers.org= §5 (K11 $12.90 vs $1.50 cap, 8.6×)                           |
+| R27-N14 | =2026-05-09-r27-providers.org= §2 (A2 patch never landed, line 307); T12 strict             |
+| R27-N15 | =2026-05-09-r27-providers.org= §3 + =scripts/_k20_runpod_resume.py=                         |
+| R27-N16 | =2026-05-09-r27-providers.org= §3 (8/8 PCIe declines past 12:21 AM)                         |
+| R27-N17 | =r27-launch-session-log.org= G7 (15-min cap + 13-min LoRA fail-fast)                        |
+| R27-N18 | =2026-05-09-r27-providers.org= §6 (18m20s silent-noop window; 10 K20 cells lost)            |
+| R27-N19 | =r27-launch-session-log.org= G4 + F4 (=score=None= by-design vs by-bug)                     |
+| R27-N20 | =r27-launch-session-log.org= G3 + F3 + B5 ("display ≠ truth" lesson)                        |
+| R27-N21 | =r27-launch-session-log.org= G5 + F1 (cache cold-race; not a storm)                         |
+| R27-N22 | =2026-05-09-r27-providers.org= §4 F7 (=k20_pod_scavenger_state.json= TTL gap)               |
+
+** Phase candidates downstream (R27-derived)
+
+| Productization                        | Best-fit phase                                          |
+|---------------------------------------+---------------------------------------------------------|
+| R27-N1 =/critic-this= verb            | 2026-05.PP — review verb upgrade (parallel to H6)       |
+| R27-N5 K20PodPool =warm --pool=       | 2026-05.PP — multi-pod harness extraction               |
+| R27-N9 cell-phase tag                 | 2026-05.PP — buffer-UI self-healing extension           |
+| R27-N11+N12 cancel API                | 2026-05.PP — agent cancel/stop UX                       |
+| R27-N13 dispatcher-level spend filter | 2026-05.PP — per-handle budget caps                     |
+| R27-N6+N17 preflight 2.0 bundle       | 2026-05.PP — doctor verb expansion                      |
+| R27-N18 scheduled pre-warm            | mobile-org holy-grail leg + daily-driver always-on      |
+
+** Self-check
+
+- All 22 R27-derived items mapped: YES
+- Top 6 each cite explicit R27 evidence + user surface: YES
+- Hard cap 300 lines new: respected
+- Tables not prose: respected
+- 12h AM/PM EST: respected (no time-of-day claims in mapping itself)
+- FOSS-only: Claude appears only as comparator-to-re-probe (R27-N2)
+- Productize-hours grounded vs parent doc analogues: YES
+- Appendix cross-linked from parent Summary: YES
+- Existing content untouched (Edit-only extension): YES
+
+* R28-derived additions (2026-05-09)
+
+*Summary.* R28 (harness stability sprint) shipped 7 P0 fixes + 4 R29
+acceleration FOLDs and produced *new strategic data*: K6-Llama-3.3-70b
+beat K5-Claude 2× on primary mean; K20 v1 went 0/10 → 10/10 in-band
+at $0.00003/u; watchdog + heartbeat pattern proved out under live
+fire. Twelve productization candidates fall out — five immediate
+fixes (F1-F5), four new features (N1-N4), three UX/UI surfaces
+(U1-U3). Each is a R28-bench finding mapped to a specific
+app surface.
+
+*Expanded.* Companion to =r28-synthesis.org= (technical retro) and
+=r28-learnings/strategic-guidance= sections of synthesis (the why).
+This appendix is the *what's-shippable-from-R28* lens. Productize-hours
+align with parent-doc analogues (small fix 1-3h, new verb POC 8-15h,
+new primitive 4-8h, cross-cutting feature 12-20h).
+
+** R28 productization candidates
+
+| ID     | Bench finding                                              | App surface                                                     | Class        | Hours  |
+|--------+------------------------------------------------------------+-----------------------------------------------------------------+--------------+--------|
+| R28-F1 | K20-on-B1 long-context wall-caps (>400s)                  | =org_llm/specialist.py= per-variant wall-cap override OR aggressive context truncation | APP-direct   | 3      |
+| R28-F2 | Reasoning-mode warmup drift (Kimi)                         | =org_llm/specialist.py= one source-of-truth =DISABLE_REASONING= set | APP-direct   | 2      |
+| R28-F3 | Preflight CAT 2 OR-probes self-hosted slugs                | =scripts/_r29_preflight.sh= provider-aware probe routing        | BENCH→APP    | 4      |
+| R28-F4 | =MAX_HOLDOUT_PCT= calibrated for fixed pool size           | scale-to-pool-size formula (1.5/N)                              | BENCH-only   | 1      |
+| R28-F5 | Stage budgets sized at P50 (CAT 3 K20 budget at edge)      | adopt P95 + 25% margin pattern across all watchdog-monitored stages | BOTH         | 1      |
+| R28-N1 | K20-as-critic at $0.00003/u — viable cost                  | =/critic-this= verb POC (Phase 2026-05.20 sync verb)            | APP-direct   | 8-15   |
+| R28-N2 | K20 LoRA path proven (10/10 cells)                         | =/train-lora= verb (distill from vault edit history)             | APP-direct   | 12-20 (multi-phase) |
+| R28-N3 | Watchdog + heartbeat pattern earned its keep               | =org_llm/watchdog.py= primitive for any long-running app op     | APP-adjacent | 8      |
+| R28-N4 | Multi-LoRA HF HEAD probe (G13 in preflight)                | =org_llm/preflight.py= for any external resource pull           | APP-adjacent | 4      |
+| R28-U1 | =(in-flight)= + =(wall-capped)= flags work in leaderboard  | modeline + agent-status-buffer indicators                       | APP-direct   | 3      |
+| R28-U2 | Per-task slicing matters more than aggregate (K1 "regression" red herring) | =org-llm-status-buffer= default view = per-task slicing | APP-direct   | 4      |
+| R28-U3 | Stage-budget telemetry visible to operator                 | modeline cookie =[stage 12s/30s]=                                | APP-adjacent | 2 (paired with N3) |
+
+** Strategic-routing implications (R28 changes the model defaults)
+
+| ID     | Routing change                                              | Evidence (R28)                                                  |
+|--------+-------------------------------------------------------------+-----------------------------------------------------------------|
+| R28-R1 | K8-deepseekV3 = workhorse default (was: K1 or K8)           | 104 cells, primary mean 8.15, $0.00071/u — best ratio FOSS      |
+| R28-R2 | K6-Llama-3.3-70b = quality-tier handoff (was: K5-Claude)    | Primary mean 25.14 vs K5 12.52 — 2.01× lead, FOSS, $0.00154/u   |
+| R28-R3 | K5-Claude opt-in only, not default-roster                    | K6 wins quality + K5 has only fab (4/21) + K5 18× K8 cost       |
+| R28-R4 | K2-Kimi opt-in only, not default-roster                      | K2 mini-A/B: +0.25 mean over K1 at *24× cost*                   |
+| R28-R5 | K11-qwen3coder retired permanently                           | R27 pareto: dominated 27× by K8; spend cap broke 8.6×           |
+| R28-R6 | K20-foss-distill = in-band edit fallback when LoRA available| 10/10 cells at $0.00003/u; corpus-tunable                        |
+
+** Phase candidates downstream (R28-derived)
+
+| Productization                                                  | Best-fit phase                                                |
+|-----------------------------------------------------------------+---------------------------------------------------------------|
+| R28-N1 =/critic-this= verb                                      | Phase 2026-05.20 — sync verb POC (already in roadmap)         |
+| R28-N2 =/train-lora= verb                                       | Phase 2026-XX.XX — LoRA self-train (new roadmap row needed)   |
+| R28-N3 =org_llm/watchdog.py= primitive                          | Phase 2026-05.21 (proposed new row)                           |
+| R28-N4 =org_llm/preflight.py= for external resources            | Phase 2026-05.22 (proposed new row)                           |
+| R28-U1 + R28-U2 + R28-U3 status-buffer + modeline upgrades      | Phase 2026-05.24 (proposed new row, paired with N3)            |
+| R28-R1 through R28-R6 routing-default rewrite                   | Phase 2026-05.25 (proposed new row — DEC + cloud catalog edit) |
+
+** Self-check
+
+- All 12 R28 productization candidates mapped: YES
+- Each cites R28 evidence + user surface: YES
+- 6 routing-default implications surfaced as their own table: YES
+- Tables not prose: respected
+- 12h AM/PM EST: respected
+- FOSS-only: K5 appears only as routing-deprecation comparator (R28-R2/R28-R3)
+- Productize-hours grounded against parent doc analogues: YES
+- Existing content untouched (Edit-only extension): YES

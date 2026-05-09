@@ -1,0 +1,230 @@
+:PROPERTIES:
+:ID:       r28-providers
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: R28 providers — pin honor, Groq deny verified, K20 RunPod path, K2 broker diversity
+#+FILETAGS: :wiki:bench:r28:providers:runpod:groq:retro:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R28-3 Groq deny verified: *0 cells* touched Groq at /any/
+state across 94 events.jsonl files (vs R27's 5 ever-touched). K8
+held DeepInfra (43/46 = 93%, 3 AtlasCloud advisory drift = 6.5%
+within R18 v2 design). K6 drifted off pin: Novita 19/24, Friendli
+5/24 (zero Together — same R27 pattern, advisory only). K1 strict
+Novita 20/20. K20 ran via *RunPod self-host* (proxy.runpod.net), not
+OR — preflight CAT 3 (Together-managed K20) soft-failed at 8m6s but
+harness's own RunPod path resumed independently and served 10/10
+cells at $0.002. K2 mini-A/B post-round routed across *11 FOSS
+brokers* via OR (none Groq). Modal-Kimi blocked: secret-name bug
+=vllm-bearer-key= vs code read =VLLM_API_KEY=, plus
+=serve_kimi.py= source missing from repo + git history.
+
+*Expanded.* Per Rule 2b every section leads =*Summary.* + *Expanded.*=.
+Per [All times in EST + 12h AM/PM] times are 12h. Per [FOSS models
+only] K5-claude is sentinel; Groq is deny-list reference only. R28
+was a /harness stability/ sprint, so scour focuses on routing
+/correctness/ post-fix. Sample base N=94 events-tagged cells (subset
+of 237 leaderboard); pin verdicts hold structurally.
+
+* §1 — Round-shape (variant × routing surface)
+
+*Summary.* Three routing surfaces: OpenRouter (K1/K6/K8), Anthropic-
+direct (K5), RunPod self-host (K20). K2 dropped at warmup
+(Kimi-reasoning bug); re-introduced post-round via OR mini-A/B.
+
+| Variant            | Surface          | Cells (LB) | Spend  | Pin contract                                      |
+|--------------------+------------------+------------+--------+---------------------------------------------------|
+| K8-deepseekV3      | OpenRouter       |        104 | $0.60  | order=DeepInfra; ignore=[Groq]                    |
+| K1-qwen30          | OpenRouter       |         66 | $0.33  | order=Novita; ignore=[Groq]                       |
+| K6-llama70b        | OpenRouter       |         36 | $1.39  | order=[Together,Parasail]; ignore=[DeepInfra,AkashML,Groq] |
+| K5-claude-solo     | Anthropic-direct |         21 | $3.42  | n/a (sentinel)                                    |
+| K20-foss-distill   | RunPod self-host |         10 | $0.002 | RunPod proxy; OR-bypassed                         |
+| K2-kimi-k2.6 (gate)|        DROPPED   |          0 | —      | reasoning bug → reintroduced post-round via OR    |
+
+* §2 — Provider-routing distribution (per-variant × broker)
+
+*Summary.* Sampled from N=94 events.jsonl files (event-tagged cells).
+K8 has 6.5% AtlasCloud drift (advisory pin working as designed); K6
+has 20.8% Friendli drift (same R27 pattern: pin =order= is advisory
+only). K1 stayed strict-pinned to Novita 100%.
+
+| Variant       | Broker     | Cells | %    | Pin verdict           |
+|---------------+------------+-------+------+-----------------------|
+| K1-qwen30     | Novita     |    20 | 100% | strict honored        |
+| K6-llama70b   | Novita     |    19 |  79% | DRIFT (pin says Together) |
+| K6-llama70b   | Friendli   |     5 |  21% | DRIFT (pin says Together) |
+| K8-deepseekV3 | DeepInfra  |    43 |  93% | strict honored        |
+| K8-deepseekV3 | AtlasCloud |     3 |   7% | advisory drift        |
+| K20-foss-dist.| RunPod     |   4/4 | 100% | self-host, OR-bypassed |
+
+*K6/Together drift.* Same R27 §1 pattern — OR pin =order= is advisory;
+=allow_fallbacks=true= sends to capacity. K6 routed *zero* cells
+through Together; Friendli is the new R28 fallback (R27 was Nebius).
+
+* §3 — Groq verification (R28-3 deploy)
+
+*Summary.* H3 (T12) PASS *strict-reading*: 0 Groq cells across all
+events.jsonl + 0 case-insensitive hits in stdout. =Groq= literal
+landed in every PROVIDER_PINS entry (=_round28_dials.py= 318-341).
+
+| Variant       | Final | Ever-touched | =Groq= literal pinned |
+|---------------+-------+--------------+-----------------------|
+| K1-qwen30     |     0 |            0 | YES (line 323)        |
+| K6-llama70b   |     0 |            0 | YES (line 333)        |
+| K8-deepseekV3 |     0 |            0 | YES (line 321)        |
+| K20-foss-dist.|     0 |            0 | n/a (self-host)       |
+| stdout.log    |   n/a |            0 | —                     |
+
+*Verdict.* H3 PASS. R27's Agent C→B handoff bug corrected; R28
+verifier comment (lines 313-315) gives reproducible audit.
+
+* §4 — K8 advisory drift to AtlasCloud (3/46 events-tagged)
+
+*Summary.* 5 K8 events-cells routed AtlasCloud (3 settled there, 2
+re-attempted to DeepInfra) despite =order=DeepInfra=. R18 v2
+advisory-pin contract: =allow_fallbacks=true= ships to AtlasCloud
+when DeepInfra is at capacity. *Not a regression.*
+
+| Layer            | Task | Cell-dir                       |
+|------------------+------+--------------------------------|
+| layer3_d6_inline | B1   | K8-deepseekV3__bt_pi_m1_tb_s1  |
+| layer3_d9_relaxed| B1   | K8-deepseekV3__bt_pb_m1_tb_s0  |
+| layer3_d5_loose  | B1   | K8-deepseekV3__bl_pb_m1_tb_s1  |
+| layer1_hedged    | B1   | K8-deepseekV3__bt_pb_m1_tb_s1  |
+| layer2           | B5   | K8-deepseekV3__bt_pb_m1_tb_s1  |
+
+*Pattern.* AtlasCloud appears on layer3_d* + layer1_hedged
+(parallel-fanout layers where DeepInfra capacity exhausts first).
+
+* §5 — K2 broker diversity (post-round mini-A/B)
+
+*Summary.* K2 dropped from main round at warmup (Kimi-reasoning
+bug). Post-patch mini-A/B fired 20 K2 cells across *11 distinct FOSS
+brokers* via OR. *Zero Groq*. Best: SiliconFlow 1.58s; worst:
+Inceptron tail 34.09s.
+
+| Broker      | n  | Mean latency (s) | Min  | Max   |
+|-------------+----+------------------+------+-------|
+| SiliconFlow |  2 |             1.58 | 1.53 |  1.62 |
+| Ambient     |  2 |             1.65 | 1.64 |  1.66 |
+| Novita      |  1 |             1.70 | 1.70 |  1.70 |
+| Parasail    |  2 |             1.71 | 1.64 |  1.79 |
+| Moonshot AI |  1 |             2.15 | 2.15 |  2.15 |
+| Chutes      |  1 |             3.79 | 3.79 |  3.79 |
+| DeepInfra   |  1 |             3.98 | 3.98 |  3.98 |
+| Cloudflare  |  2 |             4.81 | 1.34 |  8.27 |
+| AtlasCloud  |  4 |             7.58 | 2.05 | 23.65 |
+| Io Net      |  2 |            14.65 | 13.02|  16.28|
+| Inceptron   |  2 |            17.97 | 1.84 |  34.09|
+
+*Verdict.* K2 reintroduction via OR (Modal-bypassed) succeeded;
+all brokers tool-capable + non-Groq. Synthesis cited "9 brokers";
+actual is *11* (SiliconFlow + Cloudflare missed in enumeration).
+R29-P-5: ignore-list Inceptron + Io Net for K2 latency budgets.
+
+* §6 — K20 RunPod self-host path
+
+*Summary.* K20 ran 10 in-band cells at *$0.002 spend* ($0.0002/cell;
+$/u $0.00003 = round's cheapest by 18×). Pod boot *3m40s* (not 6m
+as synthesis cited). *No HTTP 404 → liveness-check transitions
+fired* (events.jsonl scanned for 404 / liveness / re-poll → 0 across
+all K20 cells). R28-4 re-poll = insurance, not exercised.
+
+| Metric                          | R28 actual                                  |
+|---------------------------------+---------------------------------------------|
+| Pod resume start                | 5:33:39 PM EST                              |
+| Pod ready (=runpod resumed=)    | 5:37:19 PM EST                              |
+| Pod boot wall                   | 3m40s                                       |
+| First K20 cell dispatched       | 5:39:34 PM EST (5m55s post-launch)          |
+| K20 cells served / spend        | 10 cells / $0.002 / $0.0002 per cell        |
+| Pod URL                         | =proxy.runpod.net=                           |
+| HTTP 404 → re-poll transitions  | 0                                           |
+| WALL_CAP_KILLED on B1           | 6 cells (R28-1 cancel verified)             |
+| Pod paused at exit              | 6:18:41 PM EST (=[exit] K20 endpoint paused=)|
+
+*Verdict.* P0-4 RunPod self-host PASSES — first non-zero K20
+in-band ever. Six WALL_CAP_KILLED on B1 = long-context inference,
+not HTTP 400 (synthesis surprise §"B1 K20 wall-caps").
+
+* §7 — Preflight CAT 3 Together-K20 soft-fail vs harness RunPod path
+
+*Summary.* CAT 3 inherited R27's =_k20_endpoint_resume.sh= (Together
+PATCH endpoint + 480s poll). Took 8m6s (486s — *6s past budget*).
+=ready_replicas= never ≥1. =PREFLIGHT_K20_SKIP= written, warn_gate
+soft-degraded. Round started anyway; harness's *own* RunPod resume
+ran independently and served 10/10 K20 cells. Two K20 paths active
+in R28 — preflight unaware of harness's path.
+
+| Time (EST) | Event                                               |
+|------------+-----------------------------------------------------|
+| 5:25:01 PM | HEARTBEAT CAT 3 enter (480s budget for Together)    |
+| 5:33:07 PM | HEARTBEAT CAT 4 enter (CAT 3 elapsed 8m6s, +6s)     |
+| 5:33:07 PM | =PREFLIGHT_K20_SKIP= "K20 dropped — resume failed"  |
+| 5:33:34 PM | =HELD_OUT_VARIANTS= K20-foss-distill listed         |
+| 5:33:39 PM | Harness RunPod resume (IGNORES preflight skip)      |
+| 5:37:19 PM | RunPod proxy live; K20 endpoint ready               |
+| (in-band)  | K20 served 10/10 cells, ignoring CAT 3 verdict      |
+
+*R29 input.* CAT 3 must be *provider-aware* — probe RunPod when
+harness is configured for it, OR drop CAT 3 if harness self-resumes.
+Soft-fail label is misleading; round actually succeeded on K20.
+
+* §8 — Modal-Kimi container troubleshoot (R28 dead-end)
+
+*Summary.* Modal =org-llm-kimi-k26= deployed but containers crash
+on =KeyError 'VLLM_API_KEY'=: Modal secret name is =vllm-bearer-key=
+(env var =VLLM_BEARER_KEY=) while =serve_kimi.py= reads
+=os.environ['VLLM_API_KEY']=. =serve_kimi.py= source is *missing
+from repo + git history*. K2 OR-route (§5) is workaround, not fix.
+
+| Surface              | State                                                          |
+|----------------------+----------------------------------------------------------------|
+| Modal app            | =org-llm-kimi-k26= deployed                                    |
+| Container crash      | =KeyError 'VLLM_API_KEY'= on cold-start                        |
+| Modal secret name    | =vllm-bearer-key= → env =VLLM_BEARER_KEY=                      |
+| Code reads           | =VLLM_API_KEY=                                                 |
+| =serve_kimi.py= file | /MISSING/ — no =scripts/=, no =modal/=, no git log hit         |
+| Related files only   | =_modal_kimi_health_check.py=, =_w2_direct_kimi_probe.py= (no deploy) |
+| R29 path A           | reconstruct + fix env-var read                                 |
+| R29 path B (rec.)    | port to RunPod-vLLM (mirror K20 template; same proxy pattern)  |
+
+*Recommendation.* Path B — inherits K20's working pod template, no
+Modal dependency, kills missing-source mystery. Trade-off: Modal
+queue-based billing (cold-start free) vs RunPod $/hr always-on. For
+K2 sentinel use, RunPod-vLLM pause/resume matches K20 exactly.
+
+* §9 — R29 input items (provider-derived)
+
+*Summary.* Five provider-derived items routing into R29 P0/P1.
+
+| #       | Item                                                                     | Source / why                              |
+|---------+--------------------------------------------------------------------------+-------------------------------------------|
+| R29-P-1 | Preflight CAT 3 provider-aware: probe RunPod path when harness uses it   | §7 CAT 3 soft-fail false-positive         |
+| R29-P-2 | Bump =STAGE_BUDGET[PREFLIGHT_CAT_3_K20_RESUME]= 480→600s (25% margin)    | §7 (also in r28-synthesis surprise §)     |
+| R29-P-3 | Modal-Kimi: reconstruct =serve_kimi.py= OR port to RunPod-vLLM          | §8 troubleshoot dead-end                  |
+| R29-P-4 | K20 pod-liveness telemetry: log re-poll-fired events even when 0 (insurance) | §6 re-poll never-fired (no telemetry hook) |
+| R29-P-5 | K2 broker ignore-list for tail-latency brokers (Inceptron, Io Net)      | §5 mean ≥14s vs Parasail 1.7s             |
+
+* Cross-references
+
+- =docs/wiki/2026-05-09-r28-synthesis.org= — round shape; surprises
+  (Kimi-reasoning, CAT 3 budget edge); G2/G4 guidance
+- =docs/wiki/2026-05-09-r28-design.org= — R28-3 Groq deny + P0-4 K20
+- =docs/wiki/2026-05-09-r28-hypothesis.org= — H3 Groq verdict box
+- =docs/wiki/2026-05-09-r27-providers.org= — R27 baseline (5 K6 Groq
+  ever-touched; advisory-pin drift pattern)
+- =scripts/_round28_dials.py:316-342= — PROVIDER_PINS (every entry
+  has =Groq= in =ignore=)
+- =scripts/_round28_dials_artifacts/R28_LIVE.json= — leaderboard
+- =scripts/_round28_dials_artifacts/k2_post_repair_results.json= —
+  K2 mini-A/B (40 cells, 11 brokers)
+- =scripts/_round28_dials_artifacts/HEARTBEAT.jsonl= — CAT 3 timing
+- =scripts/_round28_dials_artifacts/PREFLIGHT_K20_SKIP= — soft-fail
+  sentinel (K20 still ran via harness RunPod path)
+- =scripts/_k20_endpoint_resume.sh= — Together-managed CAT 3 helper
+  (R29-P-1 candidate for replacement)
+- =scripts/_k20_runpod_resume.py= — harness's own RunPod path

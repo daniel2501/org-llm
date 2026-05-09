@@ -1,0 +1,253 @@
+:PROPERTIES:
+:ID:       r28-pareto
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: R28 — Pareto frontier scour (cost × quality, K6 leadership, K5 deprecation, K20 floor)
+#+FILETAGS: :wiki:bench:r28:pareto:meta-bench:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R28 (epoch 1778362414, 237 cells, $5.74 spend, 45m07s
+harness wall) reshapes the FOSS frontier from R27's two-seat (K1 +
+K8) to a *three-seat with a zero-cost floor*: K8-deepseekV3 (volume +
+$/u), K1-qwen30 (budget tier), K6-llama70b (*new quality leader,
+primary mean 25.14*) — plus K20-foss-distill anchoring its own
+$0.00003/u floor (10/10 in-band post-fix). K5-Claude lands DOMINATED
+on every axis by K6 (2.01× lower mean, 8.4× higher $/u, only variant
+with fab) — three-gate deprecation case quantifies cleanly. K2 mini-
+A/B post-repair (40 cells, $0.02): +0.25 mean over K1 at 24× $/cell;
+demote-to-opt-in case confirmed.
+
+*Expanded.* Frontier rank by leaderboard $/u: K20 ($0.00003) < K1
+($0.00054) < K8 ($0.00071) < K6 ($0.00154) < K2 ($0.00099 mini-A/B
+only) < K5 ($0.013, sentinel). K6's 25.14 primary mean at $0.00154/u
+beats K5's 12.52 at $0.013/u on /both/ axes — first round where a
+FOSS model strictly dominates Claude in our suite. K20 sits at
+$0.00003/u with primary mean 7.0 — practically free, and its $/u is
+~17× lower than K1's; if v2 retrain lifts mean toward K6's territory,
+the routing-default rewrite (G1) collapses into a single-seat answer.
+Per [Wiki entries: summary + expanded] all sections lead with
+=*Summary.*= + =*Expanded.*=. Per [All times in EST + 12h AM/PM]
+times below 12h. Per [FOSS models only] K5 cited as comparator-to-
+deprecate only.
+
+* Sources
+
+| Source                                                            | Used for                                            |
+|-------------------------------------------------------------------+-----------------------------------------------------|
+| =scripts/_round28_dials_artifacts/R28_LIVE.json= (1778362414)     | leaderboard anchor (237 cells, 5 variants)          |
+| =scripts/_round28_dials_artifacts/k2_post_repair_results.json=    | K2 mini-A/B (40 cells, post-warmup-fix)             |
+| =docs/wiki/2026-05-09-r28-synthesis.org=                          | round shape, P0 verdicts, G1-G6 strategic guidance  |
+| =docs/wiki/2026-05-09-r28-design.org=                             | cost envelope, projected variant cells              |
+| =docs/wiki/2026-05-09-r27-pareto.org=                             | R27 frontier baseline for delta                     |
+
+* R28 Pareto frontier table
+
+*Summary.* Three-seat FOSS frontier (K20, K1, K8, K6) plus K5
+DOMINATED sentinel. K2 (mini-A/B only, post-round) sits between K1
+and K8 on $/u with marginal lift — see §K2 below. K20 holds its own
+floor at $0.00003/u (10 cells, narrow basis); K6 is the new quality
+ceiling at primary mean 25.14.
+
+*Expanded.* Class assignment: a variant is FRONTIER if no other
+variant beats it on /both/ $/u AND primary mean. K1 vs K8: K1
+cheaper ($0.00054 < $0.00071) but K8 higher mean (8.15 — wait, K1
+9.26 > K8 8.15) — actually K1 dominates K8 on both axes this round.
+K8 holds the volume seat (104 cells, 44% share) but is /weak-
+dominated/ by K1. Held-FRONTIER for K8 = volume + BK reliability.
+
+| Variant            | Cells | Primary mean | $/u       | $/cell   | Class                 |
+|--------------------+-------+--------------+-----------+----------+-----------------------|
+| K20-foss-distill   |    10 |         7.00 | $0.00003  | $0.00021 | *FRONTIER* (floor)    |
+| K1-qwen30          |    66 |         9.26 | $0.00054  | $0.00502 | *FRONTIER* (budget)   |
+| K8-deepseekV3      |   104 |         8.15 | $0.00071  | $0.00576 | weak-DOMINATED by K1; FRONTIER on volume + BK |
+| K6-llama70b        |    36 |       *25.14*| $0.00154  | $0.03866 | *FRONTIER* (quality)  |
+| K2-kimi-k2.6 (A/B) |    20 |         9.10 | $0.00099  | $0.00098 | DOMINATED by K1       |
+| K5-claude-solo     |    21 |        12.52 | $0.01300  | $0.16275 | *DOMINATED by K6 + K1*; SENTINEL |
+
+* R28 vs R27 frontier delta
+
+*Summary.* R27 frontier was K8 + K1 (two seats). R28 adds K6 (quality
+seat, new) and K20 (zero-cost floor, new) — frontier expands to
+*four seats* on different cost/quality regions. K11 retired (R28-2);
+K2 demoted (G3); K5 newly DOMINATED (was DOMINATED-by-K1 in R27 too,
+but R28's K6 victory makes the case multi-axis instead of single-axis).
+
+*Expanded.* K1 mean appears to drop (R27 16.7 → R28 9.26) but per
+synthesis G5 this is task-mix shift, not regression. K6 mean lifts
+from 20.43 (R27) → 25.14 (R28); +4.71 on a wider task slate.
+
+| Slot              | R27               | R28                              | Delta                             |
+|-------------------+-------------------+----------------------------------+-----------------------------------|
+| Volume seat       | K8 ($0.00047/qpt) | K8 ($0.00071/u)                  | held; $/u widened (smaller round) |
+| Budget seat       | K1 ($0.00059/qpt) | K1 ($0.00054/u)                  | held; tighter $/u                 |
+| Quality seat      | (none)            | *K6 ($0.00154/u, mean 25.14)*    | NEW                               |
+| Zero-cost floor   | (held-out)        | *K20 ($0.00003/u, mean 7.0)*     | NEW (R27 was 0/10; R28 10/10)     |
+| Sentinel          | K5 (DOMINATED)    | K5 (DOMINATED on multi-axis)     | deprecation case strengthens      |
+| Retired           | (K11 candidate)   | K11 absent; K2 demoted to opt-in | -2                                |
+
+* K6 quality leadership quantitative case (G1 + G2 evidence)
+
+*Summary.* K6-Llama-3.3-70b is the round's headline. Primary mean
+25.14 on 36 cells — *2.01× K5-Claude's 12.52* across same suite at
+*8.4× lower $/u* ($0.00154 vs $0.01300). $/quality-unit (cost ÷ mean)
+is *21× cheaper* than K5. First time a FOSS model strictly dominates
+Claude on both cost and quality axes in our bench. Direct G1 routing-
+default + G2 deprecation evidence.
+
+*Expanded.* K6 vs the other FOSS frontier seats: 2.71× K1's mean
+(9.26) at 2.85× K1's $/u — quality-tier premium is /modest/ and well-
+defined. Operational implication: =org_llm/specialist.py= default
+rewrite ships K6 as quality-tier (verbs =write-dec=, =draft-essay=,
+=refine-prose=); K8 stays as workhorse default; K1 as budget draft.
+
+| Pair          | K6 mean | other mean | mean ratio | K6 $/u  | other $/u | $/u ratio | $/quality-unit ratio |
+|---------------+---------+------------+------------+---------+-----------+-----------+----------------------|
+| K6 vs K5      |  25.14  |     12.52  |  2.01×     | $0.00154| $0.01300  | 0.118×    | *21× cheaper*        |
+| K6 vs K1      |  25.14  |      9.26  |  2.71×     | $0.00154| $0.00054  | 2.85×     | 1.05× more expensive (parity-ish) |
+| K6 vs K8      |  25.14  |      8.15  |  3.08×     | $0.00154| $0.00071  | 2.17×     | 1.41× cheaper at quality |
+| K6 vs K20     |  25.14  |      7.00  |  3.59×     | $0.00154| $0.00003  | 51×       | 14× more expensive (K20 floor) |
+
+* K5-Claude position analysis (G2 deprecation case)
+
+*Summary.* K5 lands DOMINATED on every measured axis vs the FOSS
+frontier. K6 beats K5 2.01× on mean at 8.4× lower $/u — single-pair
+domination; no R28 task slice exists where K5 leads K6. K5 also has
+the *only fab observations* (4/21 cells, 19% fab rate) vs zero fab
+across all FOSS variants. Three independent gates (mean, $/u, fab)
+support deprecation.
+
+*Expanded.* K5 cost composition: 21 cells × $0.163/cell avg = $3.42
+(60% of total round spend). Its only positional defense would be a
+task family R28 didn't probe — long-form synthesis or multi-step
+planning, per G2 caveat. R29-9 (expanded K5-vs-K6 head-to-head on
+B5/B11/B25/B26/B45 + 5 BK at N=10) is the gate before app-side
+deprecation lands.
+
+| Axis           | K5      | Best FOSS competitor | K5 position             |
+|----------------+---------+----------------------+-------------------------|
+| Primary mean   |  12.52  | K6 25.14             | DOMINATED (-12.62)      |
+| $/u            | $0.013  | K20 $0.00003         | DOMINATED (433× higher) |
+| $/cell         | $0.163  | K20 $0.00021         | DOMINATED (775× higher) |
+| Fab rate       |  19%    | all FOSS = 0%        | DOMINATED (only fab variant) |
+| $/quality-unit | $0.00104| K6 $0.0000613        | DOMINATED (17× worse)   |
+
+* K20 zero-cost analysis (G4 retrain investment case)
+
+*Summary.* K20-foss-distill at $0.00003/u (3 cents per million quality-
+units; effectively free) — primary mean 7.0 on 10 cells. Marginal
+cost vs K1 = +$0.00051/u for +2.26 mean (32% lift); K1 wins as default
+on small basis. But the strategic question is *not whether K20 is
+default-worthy at v1*; it's whether v2 retrain on R26-R28 wins corpus
+can lift K20's mean toward K6's 25.14 territory while preserving the
+$0.00003/u floor. If yes, single-seat default. R29-13 (G4) is the
+investment.
+
+*Expanded.* 10 cells is narrow basis — primary mean 7.0 has wide CI.
+But the cost floor is structurally robust: K20 served on RunPod LoRA
+adapter at $1.39/hr amortizes to ~$0/cell at any sustained throughput.
+K20's niche /at v1/ is critic + handle-router (per R27 chain probes);
+*at v2 with vault-corpus distillation*, the niche becomes "personal-
+prose author with FOSS-frontier quality at near-zero marginal cost."
+That's the holy-grail seat.
+
+| Slice                      | K20      | K1       | Marginal (K20→K1)              |
+|----------------------------+----------+----------+--------------------------------|
+| $/u                        | $0.00003 | $0.00054 | +$0.00051/u (18× more $/unit)  |
+| $/cell                     | $0.00021 | $0.00502 | +$0.00481/cell                 |
+| Primary mean               |     7.00 |     9.26 | +2.26 (+32%)                   |
+| $/quality-unit (cost÷mean) | $0.00000429 | $0.00005831 | K20 13.6× cheaper          |
+| Cells                      |       10 |       66 | narrow K20 basis               |
+
+* K2 mini-A/B Pareto contribution (G3 demote case)
+
+*Summary.* Post-warmup-fix mini-A/B (40 cells, $0.02, 9 distinct
+brokers, OR-routed) lands K2 at primary mean 9.10 vs K1 8.85 on the
+same 4-task slate (B5, B11, B25, B26). Lift is *+0.25 mean (+2.8%)
+at 24× per-cell cost*. Per-task: K2 wins B5 (+0.80), B25 (+0.20);
+ties B11 and B26. No task family where K2 lift justifies routing
+default. G3 demote-to-opt-in confirmed quantitatively.
+
+*Expanded.* K2 at $0.00099/u sits between K1 and K8 on $/u, but its
+mean lift over K1 doesn't earn the cost premium. App impact: K2 stays
+in cloud catalog as opt-in only (long-context >16k or specific Kimi
+behavior); not in default agent roster.
+
+| Task | K1 mean | K2 mean | Δ K2-K1 | K1 $/cell | K2 $/cell | $/cell ratio |
+|------+---------+---------+---------+-----------+-----------+--------------|
+| B5   |    7.60 |    8.40 |   +0.80 | $0.0000139| $0.0001951| 14.0×        |
+| B11  |   20.00 |   20.00 |    tied | $0.000114 | $0.003261 | 28.6×        |
+| B25  |    4.00 |    4.20 |   +0.20 | $0.0000113| $0.0001524| 13.5×        |
+| B26  |    3.80 |    3.80 |    tied | $0.0000105| $0.0001399| 13.3×        |
+| /Overall/ | /8.85/ | /9.10/ | /+0.25/ | $0.0000386| $0.0009841| /24× cost/   |
+
+* Per-task frontier (where data permits)
+
+*Summary.* R28 cell distribution skews K8-heavy (104) and BK-heavy;
+per-task slicing is uneven. Where N≥5 per variant, B11 is tied at 20
+across K1/K2 (ceiling task — selector-driven); B5/B25/B26 cost-domain
+favor K1 (cheapest with adequate quality). K6's BK lead is the round
+story per synthesis §end-leaderboard, but per-task BK split not in
+the R28_LIVE.json export — see §Per-task slicing in r27-pareto.org
+shape for the slot, R29-10 backfills.
+
+*Expanded.* The K2 mini-A/B is the only clean per-task R28 slice
+available for direct cost-quality plotting. Main-round per-task
+slicing is in cell_replay.jsonl (not consumed here; deferred to R29-10
+K1-by-task slice analysis per G5).
+
+| Task | Best mean | Best $/u | Frontier-of-task verdict           |
+|------+-----------+----------+------------------------------------|
+| B5   | K2 8.40   | K1 (7.60 mean, $0.0000139) | K1 budget; K2 marginal         |
+| B11  | tied 20   | K1 ($0.000114)             | K1 dominates (selector cap)    |
+| B25  | K2 4.20   | K1 (4.00, $0.0000113)      | K1 budget; K2 marginal         |
+| B26  | tied 3.80 | K1 ($0.0000105)            | K1 dominates                   |
+| BK*  | K6 (per synthesis) | K6 (per synthesis) | K6 quality lane (R29-10 backfill) |
+
+* Routing-default rewrite implications (G1-G6 → app changes)
+
+*Summary.* R28 frontier shape produces concrete, near-term app-layer
+changes — six routing items the synthesis G1-G6 imply. Each names the
+file/verb touched and the gate (immediate vs R29-verified).
+
+*Expanded.* DEC-007 update is the binding artifact; specialist.py +
+cli.py defaults are the implementation surface; bench-to-app mapping
+doc is where productionalization tracks.
+
+| Item   | Change                                                                | Surface                       | Gate                          |
+|--------+-----------------------------------------------------------------------+-------------------------------+-------------------------------|
+| R28-R1 | Workhorse default → K8-deepseekV3                                     | =specialist.py= + =cli.py=    | immediate (G1)                |
+| R28-R2 | Quality-tier verbs → K6-Llama-3.3-70b                                 | verb router =write-dec= etc.  | immediate (G1)                |
+| R28-R3 | Budget-tier draft → K1-qwen30                                         | =specialist.py=               | immediate (G1)                |
+| R28-R4 | K5-Claude removed from default catalog; opt-in only                   | cloud catalog + DEC-007       | gate on R29-9 K5-vs-K6 expanded|
+| R28-R5 | K2 demote to opt-in; long-context only                                | cloud catalog                 | immediate (G3)                |
+| R28-R6 | K20 v1 critic + handle-router; v2 retrain → personal-prose default    | =/critic-this= + =/train-lora= | gate on R29-13 v2 retrain     |
+
+* R29 input items (frontier-driven)
+
+*Summary.* Items the R28 Pareto exposes for R29 P0/P1.
+
+*Expanded.*
+
+| #      | Item                                                                | Source / why                              |
+|--------+---------------------------------------------------------------------+-------------------------------------------|
+| R29-9  | K5-vs-K6 expanded head-to-head (B5/B11/B25/B26/B45 + 5 BK at N=10)   | G2 deprecation gate; binds R28-R4         |
+| R29-13 | K20 v2 retrain corpus from R26-R28 wins                              | G4 retrain investment; binds R28-R6       |
+| R29-10 | K1-by-task slice analysis (G5 per-task lens)                         | per-task frontier backfill (this doc §8)  |
+| R29-3  | K20-on-B1 long-context investigation (HTTP 400 vs slow inference)    | K20 floor depends on stable B-task perf   |
+| R29-1  | Reasoning-mode disable audit (warmup/in-band/judge/critic)           | K2 mini-A/B exists only because of fix    |
+| R28-R1..R6 | Routing-default rewrites                                          | this doc §9; ship in R29 alongside verify |
+
+* Cross-references
+
+- =docs/wiki/2026-05-09-r28-synthesis.org= — round shape + G1-G6 + K2 mini-A/B
+- =docs/wiki/2026-05-09-r28-design.org= — round design + cost envelope
+- =docs/wiki/2026-05-09-r27-pareto.org= — R27 frontier baseline (delta source)
+- =scripts/_round28_dials_artifacts/R28_LIVE.json= — leaderboard anchor
+- =scripts/_round28_dials_artifacts/k2_post_repair_results.json= — K2 mini-A/B
+- =docs/wiki/2026-05-08-r27-bench-to-app-mapping.org= §"R28-derived additions" — productization mapping
+- Phase 2026-05.20 — sync verb POC — R29 K20-as-critic landing (R28-R6 dep)

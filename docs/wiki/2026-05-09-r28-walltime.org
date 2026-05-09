@@ -1,0 +1,250 @@
+:PROPERTIES:
+:ID:       r28-walltime
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: R28 — walltime / WALL_CAP enforcement / preflight stage budgets
+#+FILETAGS: :wiki:bench:r28:walltime:infra:harness-stability:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R28 v1 finished 6:16:32 PM EST 2026-05-09 with 237 cells
+in 45m07s harness-wall (8m38s preflight + 53m45s end-to-end). *R28-1
+WALL_CAP=400s now hard-cancels* — 7 JSON-recorded =wall_cap_killed=
+cells, all wall_seconds = 400.0s exact (zero slip-past), 7
+=WALL_CAP_FIRED= sentinel files written. Preflight CAT 3 K20 endpoint
+resume took 8m6s of an 8m budget (97.2% — at edge). Harness-internal
+stages have no per-cell heartbeat; the 7 wall-capped cells were
+invisible to the watchdog. Trailing =STALL stage=DONE age=19s
+budget=10s= is a known launcher-exit false-positive.
+
+*Expanded.* Three things matter for R29: (1) WALL_CAP is now
+*correct* — every cap fires =_fut.cancel()= + sentinel + suppresses
+post-cancel writes; R27's "log fires, worker keeps going" 411.7s
+slip is gone; (2) CAT 3 K20 budget margin (1.25%) is unacceptable —
+bump to 600s; (3) harness covers state-transitions but NOT mid-cell —
+a per-cell heartbeat would have surfaced 7 cells stalling into 400s
+walls before the cap-fire. Round wall grew vs R27 (45m07s vs 29m53s)
+mostly from K20 in-band B1 retries (4 cells × 400s = 26m thread-time
+parallel-amortized) + BK layer at 13m21s.
+
+* Round-shape recap (R28 vs R27)
+
+*Summary.* +51% harness wall (45m07s vs 29m53s) at -7% cells (237 vs
+256). Drivers: K20 B1 cap-consumption, BK longer (13m21s vs 9m42s),
+K2 warmup-drop diagnostic, CAT 3 right against 8m budget.
+
+| Phase                           | Start    | End      | Wall  | Notes                                |
+|---------------------------------+----------+----------+-------+--------------------------------------|
+| Preflight (CAT_1 → CAT_7)       | 04:44:56 | 04:53:34 |  8:38 | CAT 3 K20 resume = 8m6s of 8m budget |
+| Warmup + K20 settle             | 05:33:34 | 05:37:19 |  3:45 | K2 dropped warmup; pod ready 5:37    |
+| Layer 1 B1 (105 cells)          | 05:37:19 | 05:46:36 |  9:17 | 6 K20 cap fires; 2 K6 cap fires      |
+| Layer 1 hedged + transition     | 05:46:36 | 05:52:08 |  5:32 | dead-variant filter advances 3 vars  |
+| Layer 2 + Layer 3 dials         | 05:52:08 | 06:03:11 | 11:03 | 12 dial cells, all ≤230s             |
+| Layer BK (75 cells)             | 06:03:11 | 06:16:32 | 13:21 | 2 K8 caps (BK2, BK11)                |
+| /Round complete (harness wall)/ | 05:33:34 | 06:16:32 | 45:07 | 237 cells; $5.74                     |
+
+R28's 7 hard-killed cells consumed 7×400s = 46m40s thread-time
+(parallel-amortized to ~5-9m of the +15:14 wall delta vs R27).
+
+* Wall-time distribution (variant × task)
+
+*Summary.* K8 dominates count (104, 44%; med 72s, p95 341s). K20
+slice = B1 only (4 cells, all 400.0s cap). K1 fastest (med 41s, p95
+104s). K5 widest tail (BK7 outlier 338s). n=113 of 237 because
+score-only paths lack a JSON artifact.
+
+| Variant            |   n | med  | p95   | max   | >300s | killed |
+|--------------------+-----+------+-------+-------+-------+--------|
+| K1-qwen30          |  20 | 41.3 | 103.8 | 144.6 |     0 |      0 |
+| K20-foss-distill   |   4 |400.0 | 400.0 | 400.0 |     4 |      4 |
+| K5-claude-solo     |  19 | 49.8 | 135.3 | 338.2 |     1 |      0 |
+| K6-llama70b        |  24 |120.6 | 226.8 | 400.0 |     1 |      1 |
+| K8-deepseekV3      |  46 | 72.2 | 341.2 | 400.0 |     5 |      2 |
+
+*Per-task hot-spots* (≥3 cells per (variant, task), all on B1):
+
+| Variant          |  n | med   | p95   | max   |
+|------------------+----+-------+-------+-------|
+| K1-qwen30        |  4 | 103.8 | 144.6 | 144.6 |
+| K20-foss-distill |  4 | 400.0 | 400.0 | 400.0 |
+| K6-llama70b      |  9 | 119.9 | 400.0 | 400.0 |
+| K8-deepseekV3    | 17 | 117.5 | 229.1 | 331.9 |
+| K5-claude-solo   |  3 |   0.6 | 130.4 | 130.4 |
+
+B1 (long primer wiki_edit) = dominant tail; BK2/BK5/BK11 = K8
+secondary; Layer-3 dial ablations all <230s.
+
+* WALL_CAP enforcement (R28-1) verdict
+
+*Summary.* *VERIFIED.* Every JSON-killed cell has =wall_seconds =
+400.0s exact= — no slip-past. R27's 411.7s slip is gone.
+
+| Cell                                                        | wall_s | error                | sentinel |
+|-------------------------------------------------------------+--------+----------------------+----------|
+| layer1/B1/K20-foss-distill__bt_pb_m1_tb_s1                  |  400.0 | wall_cap_killed:400s |    yes   |
+| layer1/B1/K20-foss-distill__bt_pb_m1_tb_s1__s2              |  400.0 | wall_cap_killed:400s |    yes   |
+| layer1/B1/K20-foss-distill__bt_pb_m1_tb_s1__s3              |  400.0 | wall_cap_killed:400s |    yes   |
+| layer1/B1/K20-foss-distill__bt_pb_m1_tb_s1__s4              |  400.0 | wall_cap_killed:400s |    yes   |
+| layer1/B1/K6-llama70b__bt_pb_m1_tb_s1__s2                   |  400.0 | wall_cap_killed:400s |    yes   |
+| layer_bk/BK2/K8-deepseekV3__bt_pb_m1_tb_s1                  |  400.0 | wall_cap_killed:400s |    yes   |
+| layer_bk_hedged/BK11/K8-deepseekV3__bt_pb_m1_tb_s1          |  400.0 | wall_cap_killed:400s |    yes   |
+
+| Check                                          | R27 (label only)   | R28 (R28-1)         |
+|------------------------------------------------+--------------------+---------------------|
+| Cells with =wall_cap_killed=true= in JSON      | 0                  | *7*                 |
+| Max wall_seconds across the round              | 411.7s (slip+12s)  | *400.0s* (exact)    |
+| =_fut.cancel()= actually fires                 | NO                 | *YES*               |
+| =WALL_CAP_FIRED= sentinel written              | n/a                | *YES (7/7)*         |
+
+H1 (=wall_seconds ≤ 410s on every killed cell=) *PASS*. I1 *PASS*.
+The semantic upgrade from R27 (label only) to R28 (real cancel +
+sentinel) is the headline R28 result.
+
+* Sentinel verification (R28-1 sub-fix)
+
+*Summary.* *7/7 sentinel coverage.* No post-cancel late-write race
+observed. =write_cell_result()= correctly skipped post-cancel writes
+(stub JSONs only — no late =duration_seconds=, =iterations=, or
+=edits_applied= from inner threads).
+
+*Stdout vs JSON delta.* Launch log: 10 WALL_CAP_KILLED stdout lines
+(6 K20 + 2 K6 + 2 K8) → 7 JSON-killed cells. The 3 stdout-only fires:
+K6 s1 misattribution at 5:44:27 PM (s1 finished naturally at 174.2s;
+stdout stamped a sibling's cancel) + 2 K20 retries at 5:46:31/36
+(already-cancelled futures re-emitted during shutdown). All explained
+by stdout-from-cancelled-future racing shutdown; *no slip-past*.
+
+* B1 K20 wall-cap forensics
+
+*Summary.* *4 K20-on-B1 cells JSON-killed* — synthesis "2" was
+under-counted; leaderboard wall-capped=6 = 4 JSON-killed + 2
+stdout-only retry re-emits. All 4 hit *exactly 400.0s*. /Why/: B1
+wiki_edit on =docs/wiki/literate-tools.org= has a 5,691-char prefetch
+primer; K20 v1 (Llama-3-8b LoRA on RunPod) is too slow at long-context
+inference to complete the iteration loop in 400s.
+
+| Cell                                  | wall_s | iter | leak |
+|---------------------------------------+--------+------+------|
+| K20-foss-distill__bt_pb_m1_tb_s1 (s1) |  400.0 | n/a  | no   |
+| K20-foss-distill__bt_pb_m1_tb_s1__s2  |  400.0 | n/a  | no   |
+| K20-foss-distill__bt_pb_m1_tb_s1__s3  |  400.0 | n/a  | no   |
+| K20-foss-distill__bt_pb_m1_tb_s1__s4  |  400.0 | n/a  | no   |
+
+*Cap exactness.* Fires at exactly 400s, not 410s — R28-1 spec said
+"≤ cap+10s" but =fut.result(timeout=cap)= → =CancelledError= → write
+400.0 verbatim is sub-second tighter. *No inner-thread work
+post-cancel* — all 4 JSONs contain only kill stub. Confirms synthesis
+surprise §"B1 K20": K20 v1 latency on B1's long primer is genuinely
+beyond cap, *not* an HTTP 400 (P0-4 max_tokens clamp would have caught
+that).
+
+* Preflight stage timing audit
+
+*Summary.* 7 CAT stages = 518s (8m38s) total. CAT 3 K20 resume = 486s
+(8m6s) at *97.2% of 8m budget*. No other CAT exceeded half budget.
+
+| Stage                          | Wall | Budget | % used | Verdict          |
+|--------------------------------+------+--------+--------+------------------|
+| PREFLIGHT_CAT_1_FUNDING        |   2s |    60s |   3.3% | OK               |
+| PREFLIGHT_CAT_2_HEALTH         |   3s |    60s |   5.0% | OK               |
+| PREFLIGHT_CAT_3_K20_RESUME     | 486s |   480s | *101%* | *AT-EDGE* (over) |
+| PREFLIGHT_CAT_4_PATCHES        |   6s |    60s |  10.0% | OK               |
+| PREFLIGHT_CAT_5_RESOURCES      |   0s |    30s |   0.0% | OK               |
+| PREFLIGHT_CAT_6_CONFIG         |   0s |    30s |   0.0% | OK               |
+| PREFLIGHT_CAT_7_CONTRACTS      |  21s |    60s |  35.0% | OK               |
+
+*CAT 3 saved by 15s poll cadence, not margin.* HEARTBEAT entered at
+ts=1778361901, next stage at ts=1778362387 → 486s. Budget 480s. Post-
+CAT_3 heartbeat landed before watchdog detected staleness.
+
+*R29 stage-budget targets* (P95-based + ≥25% margin):
+
+| Stage                  | R28 observed | P50 target | P95 target | R29 budget         |
+|------------------------+--------------+------------+------------+--------------------|
+| CAT_3_K20_RESUME       |        486s  |       300s |       540s | *600s* (R29-2)     |
+| CAT_7_CONTRACTS        |         21s  |        15s |        30s | 60s (no change)    |
+| HARNESS_RUNNING (full) |       2707s  |          — |          — | *3600s* (60m cap)  |
+
+* Watchdog effectiveness analysis
+
+*Summary.* 1 stall record, *1 false positive, 0 true detections, 0
+missed stalls within covered scope.* Watchdog operated correctly
+during preflight + state transitions; trailing =STALL stage=DONE
+age=19s budget=10s= is a known shutdown-race (=DONE= is terminal, no
+successor heartbeat; watchdog still running at launcher exit fired
+stale-stage detector once before its own teardown). *Fix:* R29-X —
+filter =DONE= from stall-detection.
+
+| Metric                            | Count |
+|-----------------------------------+-------|
+| HEARTBEAT.jsonl entries           |    14 |
+| Stages with stall coverage        |    13 |
+| True stalls detected              |     0 |
+| False-positive stalls             |     1 |
+| Missed stalls (within scope)      |     0 |
+
+*Coverage gap.* Watchdog covers outer shell (state, preflight) but
+NOT mid-harness cells — see next section.
+
+* Per-cell heartbeat gap analysis
+
+*Summary.* *11 cells exceeded 5min wall*; *7 hit the 400s cap*. None
+were watchdog-visible because no per-cell heartbeat is emitted from
+inside the harness — watchdog sees =HARNESS_RUNNING= but not which
+cells are stuck.
+
+| Cell                                                 | wall_s | killed | watchdog? |
+|------------------------------------------------------+--------+--------+-----------|
+| layer_bk/BK2/K8-deepseekV3__bt_pb_m1_tb_s1           |  400.0 | YES    | NO        |
+| layer_bk_hedged/BK11/K8-deepseekV3__bt_pb_m1_tb_s1   |  400.0 | YES    | NO        |
+| layer1/B1/K6-llama70b__bt_pb_m1_tb_s1__s2            |  400.0 | YES    | NO        |
+| layer1/B1/K20-foss-distill (×4 cells)                |  400.0 | YES    | NO        |
+| layer_bk/BK11/K8-deepseekV3__bt_pb_m1_tb_s1          |  341.2 | no     | NO        |
+| layer_bk/BK7/K5-claude-solo__bt_pb_m1_tb_s1          |  338.2 | no     | NO        |
+| layer_bk/BK5/K8-deepseekV3__bt_pb_m1_tb_s1           |  336.0 | no     | NO        |
+| layer1_hedged/B1/K8-deepseekV3__bt_pb_m1_tb_s1       |  331.9 | no     | NO        |
+| layer2/B5/K8-deepseekV3__bt_pb_m1_tb_s1              |  326.6 | no     | NO        |
+
+*What R29 per-cell heartbeat could've caught.* If each cell emitted
+=HEARTBEAT.jsonl{stage="cell:<task>:<variant>", iteration=N, age=s}=
+every 30s, operator could see "K20 B1 stuck at iter=1 for 4min"
+*before* the cap fires — visibility instead of blind-poll.
+
+*R29-11 input.* Extend watchdog inside =_round29_dials.py= cell-runner:
+emit per-cell heartbeat every 30s; per-cell budget 300s warn / 400s
+kill; modeline cookie =[K8 BK2 iter=3 240s/300s]=. Per memory rule
+[Watchdog + heartbeat are the default for any long-running op].
+
+* R29 input items (walltime-derived)
+
+*Summary.* Five concrete walltime items for R29.
+
+| #     | Item                                                        | Source            | Pri |
+|-------+-------------------------------------------------------------+-------------------+-----|
+| R29-2 | Bump =STAGE_BUDGET[CAT_3_K20_RESUME]= 480 → 600s            | §preflight        | P0  |
+| R29-3 | K20-on-B1 long-context: cap-bump vs context-truncate vs lock| §B1 forensics     | P0  |
+| R29-11| Per-cell heartbeat from harness cell-runner                 | §heartbeat gap    | P0  |
+| R29-X | Filter =DONE= from stall-detection                          | §watchdog         | P2  |
+| R29-Y | Productionalize watchdog as =org_llm/watchdog.py= primitive | synthesis G6      | P1  |
+
+*K20 cap-override note.* R29-3 chooses among (a) keep 400s cap +
+accept K20 caps (cheap — $0.0001/kill, zero data); (b)
+=WALL_CAP_BY_CLASS[K20-foss-distill][B1] = 800s= (only worth it if K20
+v2 retrain G4 shows v1 will finish B1); (c) aggressive context
+truncation for K20 wiki_edit. R28 evidence favors (c) until G4 lands.
+
+* Cross-references
+
+- =docs/wiki/2026-05-09-r27-walltime.org= — R27 baseline (slip-past)
+- =docs/wiki/2026-05-09-r28-design.org= — R28-1 spec (D1 → cancel + sentinel)
+- =docs/wiki/2026-05-09-r28-hypothesis.org= — H1 + I1 verdicts (both PASS)
+- =docs/wiki/2026-05-09-r28-synthesis.org= — surprises §"B1 K20", §"CAT 3 budget"
+- =scripts/_round28_dials_artifacts/HEARTBEAT.jsonl= — 14-entry preflight + state log
+- =scripts/_round28_dials_artifacts/STALL_DETECTED.jsonl= — single false-positive trailing entry
+- =scripts/_round28_dials_artifacts/stdout.log= — 10 =WALL_CAP_KILLED= stdout lines
+- =scripts/_round28_dials_artifacts/log-1778362414.txt= — round timeline (preflight → done)
+- =scripts/_round28_dials_artifacts/layer*/*/WALL_CAP_FIRED= — 7 sentinel files
+- =org_llm/specialist.py= — R28-1 site (=_fut.cancel()= + sentinel + late-write skip)

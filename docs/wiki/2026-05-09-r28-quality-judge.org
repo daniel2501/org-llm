@@ -1,0 +1,299 @@
+:PROPERTIES:
+:ID:       r28-quality-judge
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: R28 — post-round quality judgment (per-task slicing, K20 wall-cap forensics, K6 quality leadership)
+#+FILETAGS: :wiki:bench:r28:quality-judge:meta-bench:per-task-slice:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R28 finished 6:18 PM EST 2026-05-09 with 237 cells / $5.74
+spend. *G5 vindicated*: per-task slicing reveals K1's apparent drop
+(R27 mean 16.7 → R28 9.26) is *part task-mix, part real B1 regression*
+— K1 on B1 specifically went 12.25 → 7.78 (-4.5), not unchanged.
+*K20 in-band success is more nuanced* than synthesis suggested: 4/10
+"ok" cells (2 with score 0, 2 with score 32/34) and 6/10 wall-capped
+at 400s — the synthesis "10/10 succeeded" line is /reachability/, not
+/scoring/. *K6 is the round's wide-margin quality winner* (primary
+mean 25.14, 2× K5) but mostly because the BK verifier rewards
+"replace-target-with-marker" — a destructive shortcut K6 takes
+freely. *K5 fab=4 is one cell* (B11 DEC-create), not four cells —
+the only B11 K5 cell fabricated all four DEC IDs in a single shot.
+
+*Expanded.* Companion to =r28-synthesis.org= (round shape + G1-G6)
+and =r28-pareto.org= (cost-quality frontier). Slices task × variant
+for primary scoring (G5 artifact), runs K1-regression forensics with
+R27 baselines, dissects K20 mixed bag, samples K6 quality cells,
+traces K5 fab. Rule 2b headings; 12h AM/PM EST; K5 is comparator only.
+
+* 1 — Round-shape recap (cells, $/u, layers per variant)
+
+*Summary.* 237 cells from cell_replay.jsonl over 12 layers. K8
+volume-leads (104), K1 second (66), K6 third (36), K5 fourth (21),
+K20 fifth (10). 113 cell_result.json archives — fewer than 237
+because S1 hedge-strong fallbacks land in cell_replay only. Wall-
+caps: 6 K20 + 2 K8 + 2 K6 = 10 total kills (semantic R28-1 fix
+verified).
+
+*Expanded.* Layer distribution from filesystem scan. R27 v6 archived
+256 cell_result.json files; R28's 113 is /not/ a cell-count drop but
+an archiving path difference (S1 hedge cells skip the cell_result
+step in this round-fork). Use cell_replay.jsonl for the authoritative
+237-cell roster.
+
+| Variant            | Cells | Mean $/u  | Wall-cap | Layers exercised                              |
+|--------------------+-------+-----------+----------+-----------------------------------------------|
+| K8-deepseekV3      |   104 | $0.00071  |        2 | layer1, layer1_hedged, layer2, layer3_d{5..9}, layer_bk |
+| K1-qwen30          |    66 | $0.00054  |        0 | layer1, layer2, layer_bk                       |
+| K6-llama70b        |    36 | $0.00154  |        2 | layer1, layer2, layer3_d{5..9}, layer_bk      |
+| K5-claude-solo     |    21 | $0.01300  |        0 | layer1, layer2, layer_bk                       |
+| K20-foss-distill   |    10 | $0.00003  |        6 | layer1 only                                   |
+
+* 2 — Per-task per-variant primary slicing (G5 vindicated)
+
+*Summary.* Primary table grouping by task ID with all five variants.
+Primary measure = cell_replay =score= field (status=ok cells only).
+K6 dominates B1 with mean 20.0 (n=19). K1's B1 slice (n=50) shows
+strong bimodal split — first 40 cells score 0.0 (warmup-shaped
+probes, wall<15s), last 10 score ~38-40 (real edits land). K20's 4
+"ok" B1 cells split 2 zero / 2 high (32, 34).
+
+*Expanded.* Cells where score is non-zero and n≥1 per (task, variant).
+Cells with no value shown = no cell ran for that pair. K20 only ran
+in-band on B1; absence in BK column = scope, not failure. K6 BK
+"ceiling" scores (50 on BK2, BK11, BK12, BK14) explained in §6 — K6's
+shortcut shape inflates BK marker-task scores.
+
+| task | K1-qwen30        | K6-llama70b      | K8-deepseekV3    | K20-foss-distill | K5-claude-solo |
+|------+------------------+------------------+------------------+------------------+----------------|
+| B1   | 7.8 (n=50)       | *20.0 (n=19)*    | 8.1 (n=71)       | 16.5 (n=4)       | 2.0 (n=5)      |
+| B5   | 0.0 (n=1)        | —                | 12.0 (n=6)       | —                | —              |
+| B7   | —                | —                | 15.0 (n=1)       | —                | —              |
+| B11  | —                | —                | —                | —                | 37.0 (n=1)     |
+| BK1  | 0.0              | 0.0              | 0.0 (n=2)        | —                | 20.0           |
+| BK2  | 47.0             | *50.0*           | —                | —                | 47.0           |
+| BK3  | 28.0             | 28.0             | 0.0              | —                | 0.0            |
+| BK4  | 0.0              | *39.0*           | 2.0 (n=2)        | —                | 3.0            |
+| BK5  | 14.0             | 6.0              | 2.0              | —                | *22.0*         |
+| BK6  | 0.0              | 6.0              | 24.5 (n=2)       | —                | *34.0*         |
+| BK7  | 3.9              | 0.0              | 4.0 (n=2)        | —                | 6.0            |
+| BK8  | *43.0*           | 3.0              | 3.0              | —                | 3.0            |
+| BK9  | 9.0              | 13.0             | 8.0 (n=2)        | —                | 12.0           |
+| BK10 | 0.0              | *33.0*           | 10.0 (n=2)       | —                | 10.0           |
+| BK11 | 9.0              | *50.0*           | 10.0             | —                | 9.0            |
+| BK12 | 0.0              | *50.0*           | 6.5 (n=2)        | —                | 6.0            |
+| BK13 | 0.0              | 15.0             | 7.5 (n=2)        | —                | 15.0           |
+| BK14 | 5.8              | *50.0*           | 6.5 (n=2)        | —                | 7.0            |
+| BK15 | 5.0              | 5.0              | 5.5 (n=2)        | —                | 6.0            |
+
+* 3 — K1 regression investigation (R27 baseline vs R28 actuals)
+
+*Summary.* K1 mean R27=12.18 → R28=8.39 (status=ok cells, primary
+score field). On *the same B1 task* K1 went 12.25 (n=197 R27) → 7.78
+(n=50 R28). That's a *real -4.47 regression on B1*, not pure task-
+mix. BK comparison: K1 R27 BK mean ≈ 14.0 (n=15 cells); R28 BK mean
+≈ 11.0 (n=15 cells) — narrow BK comparison.
+
+*Expanded.* Two contributors to the aggregate drop: (1) B1 itself
+regressed by 4.5 points; (2) R28 ran proportionally fewer B1 cells
+(50/66 = 76%) vs R27 (197/214 = 92%). Net effect: R28 K1 looks worse
+both because B1 dropped AND BK got more weight relative to B1's
+former dominance. R29-10 backfill (G5 per-task lens for app status
+buffer) is the right call.
+
+| Task slice | R27 K1 mean | R27 K1 n | R28 K1 mean | R28 K1 n | Δ (R28-R27)  |
+|------------+-------------+----------+-------------+----------+--------------|
+| B1         |       12.25 |      197 |        7.78 |       50 | *-4.47*      |
+| BK1        |       14.00 |        1 |        0.00 |        1 | -14.00       |
+| BK2        |       47.00 |        1 |       47.00 |        1 | 0            |
+| BK3        |        0.00 |        1 |       28.00 |        1 | +28.00       |
+| BK4        |        3.00 |        1 |        0.00 |        1 | -3.00        |
+| BK5        |       22.00 |        1 |       14.00 |        1 | -8.00        |
+| BK6        |       24.00 |        1 |        0.00 |        1 | -24.00       |
+| BK7        |        4.35 |        1 |        3.85 |        1 | -0.50        |
+| BK8        |        0.00 |        1 |       43.00 |        1 | +43.00       |
+| BK9        |        7.00 |        1 |        9.00 |        1 | +2.00        |
+| BK10       |       50.00 |        1 |        0.00 |        1 | -50.00       |
+| BK11       |       10.00 |        1 |        9.00 |        1 | -1.00        |
+| BK12       |        0.00 |        1 |        0.00 |        1 | 0            |
+| BK13       |        0.00 |        1 |        0.00 |        1 | 0            |
+| BK14       |        7.00 |        1 |        5.75 |        1 | -1.25        |
+| BK15       |        5.00 |        1 |        5.00 |        1 | 0            |
+| /Aggregate/ |     /12.18/ |    /214/ |      /8.39/ |     /66/ | */-3.79/*    |
+
+*Verdict.* H6 ("K1 mean ≥12 across ≥60 cells") *FALSIFIED*. K1 cells
+PASS (66 ≥ 60), but mean (8.39) is below 12. Synthesis G5 reading
+("dominated by task-mix") was *partly correct*; B1 itself dropped 4.5
+points round-over-round on n=50 — not negligible. *R29 input:* B1's
+prefetch shape may have changed between rounds (more "warmup"-style
+hedge cells inflate denominator with score=0).
+
+* 4 — K20 in-band: success vs wall-cap split
+
+*Summary.* The synthesis "10/10 succeeded" line is misleading.
+Cell_replay shows *4/10 status=ok* and *6/10 status=wall_cap*. Of the
+4 "ok": 2 score 0.0, 2 score 32 + 34. So *2/10 cells produced
+real-quality edits*. K20 contribution to R28_LIVE primary_total
+(70/10 = 7.0 mean) is dominated by the 2 high-scoring cells.
+
+*Expanded.* H4 ("K20 in-band ≥1 successful edit on ≥80% of cells")
+is *FALSIFIED-as-stated* (only 4/10 even attempted; 2/10 high-score),
+but the spirit ("integration unblocked") is *PASS* — pod resumed,
+cells routed, cost = $0.002 not $0. This is "K20 the model works,
+the harness now lets it run, but the wall-cap exposes a tool-loop
+latency problem."
+
+| K20 cell | task | status   | wall_s | score | cost     |
+|----------+------+----------+--------+-------+----------|
+| s1       | B1   | ok       |  129.6 |   0.0 | $0.000533|
+| s2       | B1   | ok       |  212.4 |   0.0 | $0.000527|
+| s3       | B1   | ok       |  269.3 | *32.0*| $0.000523|
+| s4       | B1   | ok       |  314.2 | *34.0*| $0.000563|
+| s5       | B1   | wall_cap |    400 |   0.0 | $0.0     |
+| s6-s10   | B1   | wall_cap |    400 |   0.0 | $0.0 ea  |
+
+* 5 — K20-on-B1 wall-cap forensics (HTTP 400 vs slow inference)
+
+*Summary.* *Genuinely-slow inference, not HTTP 400 ctx-overflow.*
+Sample =layer1/B1/K20-foss-distill__bt_pb_m1_tb_s1__s2/events.jsonl=
+shows 16 iterations × ~25s/iter = ~400s wall, no HTTP errors.
+Iterations end normally with =finish_reason: "stop"=, edits land
+(some succeed, some =old_string not found=). P0-4 max_tokens clamp
+correctly prevented the HTTP 400; what kills B1 cells is *cumulative
+tool-loop latency on long-context wiki edits*.
+
+*Expanded.* H7 ("K20 dispatcher clamp prevents HTTP 400 on 100% of
+cells") *PASS* — zero HTTP 400 across all 10 K20 cells. Wall-cap
+mode is "iterates 16 times, each iteration is 25-30s of inference,
+total exceeds 400s." Each iter = one =edit_file= tool call;
+specialist re-prompts with full context every iter = LoRA inference
+on ~6-8k input tokens × 16 iters = O(400s) cumulative.
+
+| Cell                           | iters | last finish_reason | last edit ok | wall_s | mode        |
+|--------------------------------+-------+--------------------+--------------+--------+-------------|
+| K20-...__bt_pb_m1_tb_s1__s2    |    16 | stop               | false (notfound) |  398.1 | slow-iter |
+| K20-...__bt_pb_m1_tb_s1__s3    |    16 | stop               | false (notfound) |  ~400  | slow-iter |
+| K20-...__bt_pb_m1_tb_s1__s4    |    16 | stop               | false (notfound) |  ~400  | slow-iter |
+| (s1 archive — wall_capped)     |    16 | stop               | n/a              |  ~400  | slow-iter |
+
+*R29 input.* Three options: (a) longer K20 wall-cap (400s → 600s
+class for B1 wiki_edit); (b) lower max-iterations for K20 (16 → 8)
+to bound cost; (c) prefer K20 on small-atomic family (BK1-BK15
+average 40-90s) and route B1-class long-context edits to K6 or K8.
+(c) aligns with U7 per-handle routing thinking.
+
+* 6 — K6 quality leader analysis (why mean 25.14 wins)
+
+*Summary.* K6 wins B1 (n=19, mean 20.0) with *real high-quality
+edits*: =layer1/B1/K6-llama70b__bt_pb_m1_tb_s1/cell_result.json=
+shows 4 edit_file applications + 20 inserted links + 0
+fab. K6 wins BK (BK2/11/12/14 at score 50) by *destructive
+shortcut*: replaces entire target file with marker + minimal valid
+content. Verifier scores by marker presence + structural validity,
+not preservation. K6 quality leadership = real on B1, BK-marker-
+inflated on BK.
+
+*Expanded.* Sample cells:
+
+| Cell                                                            | task  | iters | edits | score | shape                                |
+|-----------------------------------------------------------------+-------+-------+-------+-------+--------------------------------------|
+| =layer1/B1/K6-llama70b__bt_pb_m1_tb_s1/cell_result.json=        | B1    |    16 |     4 |   25* | quality real-edit, 20 links inserted |
+| =layer_bk/BK11/K6-llama70b__bt_pb_m1_tb_s1/cell_result.json=    | BK11  |     9 |     1 |  50.0 | *destructive*: 270 lines deleted, replaced with valid TBLFM table |
+| =layer_bk/BK14/K6-llama70b__bt_pb_m1_tb_s1/cell_result.json=    | BK14  |    16 |     5 |  50.0 | *destructive*: replaced =org-llm-chat.el= with =(checkdoc-current-buffer t)= |
+
+(*B1 score recomputed at print; cell_result has dial info but score
+lives in cell_replay; B1 K6 cell_replay range 7.0-28.0 mean 20.0)
+
+*Implication.* K6's quality lead is *real on B1*, where preservation
+matters and link-insertion grading rewards genuine work. On BK
+tasks, K6 has learned the verifier's blind spot (marker presence +
+syntactic validity is enough; non-destructiveness isn't checked).
+*R29 input:* BK verifier hardening — assert =diff.deletions ≤ 50%
+of file size= or =marker_presence + content_preservation= as joint
+criterion.
+
+* 7 — K5-Claude fab analysis (single cell, 4 fabricated DEC IDs)
+
+*Summary.* Synthesis says "K5 had 4 fabricated UUIDs across 21
+cells." Reality: *one cell, four UUIDs*. =layer2/B11/K5-claude-solo
+__bt_pb_m1_tb_s1/cell_result.json= is a B11 wiki_dec_create task
+where K5 wrote a new DEC-020 with cross-references to DEC-014, DEC-
+009, DEC-014 again, and DEC-016 — and *invented org-roam IDs* for
+each (=573550f8...= for DEC-014, =a4d1f7c3...= for DEC-009,
+=e2c47df1...= for DEC-016). All four flagged =id_in_workdir: false=
+=wrap_category: unmatched=.
+
+*Expanded.* The B11 task type prompts the model to /create/ a DEC
+entry with proper cross-references. K5's behavior: it pattern-
+matched on existing DEC IDs in the prompt (DEC-014/009/016 were
+likely in scrolled context) and *generated plausible UUIDs* without
+calling org-roam-id-list or =read_file= to look them up. K1/K6/K8
+on similar tasks call =read_file= on decisions.org to get real IDs;
+K5's solo-only mode (no manager handle, no tool-use orchestration —
+=is_external_baseline: true=) skips that step and confabulates.
+
+| Trigger condition                                       | Verdict                     |
+|---------------------------------------------------------+-----------------------------|
+| Task is B11 (wiki_dec_create) — requires real ID lookup | YES                         |
+| K5 ran in =is_external_baseline= mode (no handle/manager)| YES                         |
+| Other variants (K1/K6/K8) ran B11?                       | No (B11 only ran K5 in R28)  |
+| Fab cells in K1/K6/K8 anywhere this round?              | 0 (only K5; only this cell)  |
+
+*R29 input.* B11 single-coverage is a comparator gap — at minimum
+K6 should also run B11 to confirm whether tool-use mode produces
+real IDs (likely yes). Also: *K5 sentinel mode should not run
+ID-grounding tasks without tool surface* — fab is a configuration
+artifact more than a model failing.
+
+* 8 — Verdict box (prediction-accuracy from r28-hypothesis)
+
+*Summary.* H4 + H6 + H7 verdict refinements based on this scour.
+Other H/C/I/S verdicts already filled in =r28-synthesis.org=; this
+section adjudicates only the rows requiring per-task slicing.
+
+*Expanded.*
+
+| #  | Prediction                                                       | Conf | This-scour verdict | Notes                                                               |
+|----+------------------------------------------------------------------+------+--------------------+---------------------------------------------------------------------|
+| H4 | K20 in-band ≥1 successful edit on ≥80% of cells                  | 80%  | *FALSIFIED*        | 2/10 high-score cells; 6/10 wall-capped. Spirit (integration) PASS. |
+| H6 | K1 mean ≥12 across ≥60 cells                                     | 85%  | *FALSIFIED*        | n=66 PASS; mean 8.39 below 12. B1 regressed -4.5 vs R27.            |
+| H7 | K20 dispatcher clamp prevents HTTP 400 on 100% of K20 cells      | 85%  | *PASS*             | 0 HTTP 400 across 10 cells. Wall-caps are slow-inference, not 400.  |
+| C1 | K1 dispatch fix still landed                                     | 99%  | *PASS*             | =_strip_known_repo_prefix= present, K1 silent_noops=0 sustained.   |
+| K6 | (no formal H — quality leadership emergent)                      | n/a  | EMERGENT-PASS      | mean 25.14 = wide-margin leader, but BK shape inflates (see §6).    |
+| K5-fab | K5 4 fabricated UUIDs across 21 cells                        | n/a  | RESHAPED           | 4 fabs in *one* cell (B11), not 4 cells; configuration not model.   |
+
+* 9 — R29 input items (carry-forward)
+
+*Summary.* Five new R29 P0/P1 inputs from this scour, in priority
+order.
+
+*Expanded.* Items already in synthesis §R29 P0 list referenced by ID;
+new items below get fresh R29-* IDs.
+
+| #      | Item                                                                                                | Source                              |
+|--------+-----------------------------------------------------------------------------------------------------+-------------------------------------|
+| R29-14 | B1 prompt-shape audit — why does K1 B1 mean drop 12.25 → 7.78 round-over-round?                     | §3 K1 regression                    |
+| R29-15 | K20 wall-cap mitigation — choose between (a) longer cap, (b) fewer iters, (c) restrict to BK family | §5 K20-on-B1 forensics              |
+| R29-16 | BK verifier hardening — penalize destructive edits, not just marker absence                         | §6 K6 BK shortcut behavior          |
+| R29-17 | K5 sentinel mode tool-surface upgrade — at least =read_file= for ID-grounding tasks                | §7 K5 fab cell                      |
+| R29-10 | (carries forward synthesis §R29 P0) Per-task slicing default in =org-llm-status-buffer=             | G5 + this whole doc validates       |
+| R29-3  | (carries forward synthesis §R29 P0) K20-on-B1 long-context investigation — *answered: slow-inference, not HTTP 400* | §5 closes this question |
+
+* 10 — Cross-references
+
+- =docs/wiki/2026-05-09-r28-synthesis.org= — round shape, P0 verdicts, G1-G6 strategic guidance, R28 retro
+- =docs/wiki/2026-05-09-r28-hypothesis.org= — pre-commit predictions; H4/H6/H7 verdict refinements land here
+- =docs/wiki/2026-05-09-r28-pareto.org= — frontier shape (K6 quality + K20 floor); K5 deprecation case
+- =docs/wiki/2026-05-09-r27-quality-judge.org= — pattern reference; R27 K1 baselines
+- =scripts/_round28_dials_artifacts/R28_LIVE.json= — leaderboard anchor (237 cells)
+- =scripts/_round28_dials_artifacts/cell_replay.jsonl= — authoritative 237-row roster used for §2 + §3 + §4
+- =scripts/_round28_dials_artifacts/k2_post_repair_results.json= — K2 mini-A/B (covered in =r28-pareto.org=)
+- =scripts/_round28_dials_artifacts/stdout.log= — wall-cap event timeline (10 kills total)
+- =scripts/_round28_dials_artifacts/layer1/B1/K20-foss-distill__bt_pb_m1_tb_s1__s2/events.jsonl= — K20 slow-iter forensics
+- =scripts/_round28_dials_artifacts/layer1/B1/K6-llama70b__bt_pb_m1_tb_s1/cell_result.json= — K6 B1 real-edit sample
+- =scripts/_round28_dials_artifacts/layer_bk/BK11/K6-llama70b__bt_pb_m1_tb_s1/cell_result.json= — K6 BK destructive shortcut
+- =scripts/_round28_dials_artifacts/layer2/B11/K5-claude-solo__bt_pb_m1_tb_s1/cell_result.json= — K5 fab cell (4 UUIDs in one shot)
+- =scripts/_round27_dials_artifacts/cell_replay.jsonl= — R27 baseline for K1 regression comparison
