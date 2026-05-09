@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.error
@@ -548,11 +549,26 @@ class SpecialistResult:
 
 
 # ── HTTP / API helpers ───────────────────────────────────────────────────
+_API_KEY_CACHE: dict[str, str] = {}
+
+
 def _read_api_key(pass_slug: str) -> str:
-    return subprocess.run(
+    """Per-process cache for pass-derived API keys.
+
+    R26 v1 hit a gpg-agent rate-limit storm at PARALLELISM=32 with ~10
+    iterations per cell × 100+ cells: thousands of `pass` invocations
+    cascaded into rc=2 failures on K8. Cache once per slug per process
+    so the gpg decrypt happens at most once per (slug, harness run).
+    """
+    cached = _API_KEY_CACHE.get(pass_slug)
+    if cached is not None:
+        return cached
+    val = subprocess.run(
         ["pass", pass_slug],
         capture_output=True, text=True, check=True,
     ).stdout.strip()
+    _API_KEY_CACHE[pass_slug] = val
+    return val
 
 
 # Models whose internal reasoning chain has consumed the entire max_tokens
@@ -567,6 +583,119 @@ _DISABLE_REASONING_MODELS = {
 }
 
 
+_K20_FN_RE = re.compile(
+    r'<function=(\w+)>\s*(.*?)\s*</function>',
+    re.DOTALL,
+)
+_K20_PARAM_RE = re.compile(
+    r'<parameter=(\w+)>\s*(.*?)\s*</parameter>',
+    re.DOTALL,
+)
+
+
+def _maybe_inject_k20_tool_calls(data: dict) -> None:
+    """In-place mutate `data` if K20-style tool calls are in content.
+
+    K20 (Together-fine-tuned Qwen3-Coder-30B-A3B) emits:
+        <tool_call>
+        <function=NAME>
+        <parameter=KEY>VALUE</parameter>
+        ...
+        </function>
+        </tool_call>
+
+    vLLM v0.20.1 hermes/pythonic parsers don't extract this format.
+    Parse the text + populate `tool_calls` so the agent loop sees them.
+    """
+    try:
+        msg = data["choices"][0]["message"]
+    except Exception:
+        return
+    if msg.get("tool_calls"):
+        return  # parser already populated; nothing to do
+    content = msg.get("content") or ""
+    if "<function=" not in content:
+        return
+    parsed = []
+    for fn_idx, m in enumerate(_K20_FN_RE.finditer(content)):
+        name, body = m.group(1), m.group(2)
+        args = {}
+        for p in _K20_PARAM_RE.finditer(body):
+            args[p.group(1)] = p.group(2).strip()
+        parsed.append({
+            "id": f"k20_call_{fn_idx}",
+            "type": "function",
+            "function": {"name": name, "arguments": json.dumps(args)},
+        })
+    if parsed:
+        msg["tool_calls"] = parsed
+        # Strip the tool-call XML from content so the model's textual
+        # commentary (if any) shows separately.
+        msg["content"] = re.sub(r'<tool_call>.*?</tool_call>', '',
+                                content, flags=re.DOTALL).strip()
+
+
+# R28-4: K20 max-context clamp + pod-liveness re-poll.
+# K20-v1 LoRA on RunPod ships with --max-model-len 32768 (R27 v6 fix from
+# the 8192 default). Even at 32k, we MUST clamp output tokens so input +
+# output ≤ ctx, or HTTP 400 fires (R27 cell_layer1/B1/K20-...__s4).
+_K20_MAX_CTX = 32768
+_K20_SAFETY_BUFFER = 256  # drop a bit for tokenizer edge-cases
+
+
+def _estimate_tokens(messages: list, tools: list) -> int:
+    """Rough char/4 heuristic — adequate for clamp purposes (we only need
+    to pick max_tokens that won't blow the context, not exact accounting)."""
+    total_chars = 0
+    for m in messages:
+        c = m.get("content")
+        if isinstance(c, str):
+            total_chars += len(c)
+        elif isinstance(c, list):
+            for part in c:
+                if isinstance(part, dict):
+                    total_chars += len(part.get("text", ""))
+    for t in tools:
+        # function name + description + JSON schema is non-trivial
+        total_chars += len(json.dumps(t)) if isinstance(t, dict) else len(str(t))
+    return total_chars // 4 + 200  # +200 for system overhead
+
+
+def _clamp_max_tokens_for_k20(model: str, messages: list, tools: list,
+                              max_tokens: int) -> int:
+    """R28-4 — clamp output tokens to (K20_MAX_CTX - input - safety) for
+    K20 models. R27 v5 cell ran HTTP 400 because wiki-prompt input was
+    >8192 tokens with default ctx=8192 + max_tokens=8000. Now: ctx=32768
+    AND clamped output, so we can never exceed ctx regardless of input."""
+    if not model.startswith("k20-"):
+        return max_tokens
+    in_tokens = _estimate_tokens(messages, tools)
+    available = _K20_MAX_CTX - in_tokens - _K20_SAFETY_BUFFER
+    if available <= 0:
+        return 256  # absolute floor; will likely fail but lets caller see cause
+    return min(max_tokens, available)
+
+
+def _k20_pod_liveness_check(api_endpoint: str) -> bool:
+    """R28-4 — confirm K20 pod is live + serving k20-v1 model. Called on
+    HTTP 404/empty-body to distinguish "pod paused at exit" (R27 v6 race)
+    from a real model-not-found error. Returns True if /v1/models lists
+    k20-v1, False otherwise (including any network failure)."""
+    if "/v1/" not in api_endpoint:
+        return False
+    base = api_endpoint.split("/v1/")[0]
+    try:
+        req = urllib.request.Request(
+            f"{base}/v1/models",
+            headers={"User-Agent": "org-llm/0.1"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+            ids = [m.get("id") for m in data.get("data", [])]
+            return "k20-v1" in ids
+    except Exception:
+        return False
+
+
 def _chat_completions(api_endpoint: str, api_key: str, model: str,
                        messages: list, tools: list,
                        temperature: float = 0.1,
@@ -574,6 +703,8 @@ def _chat_completions(api_endpoint: str, api_key: str, model: str,
                        response_format: Optional[dict] = None,
                        provider_pin: Optional[dict] = None,
                        max_retries: int = 2) -> dict:
+    # R28-4: clamp max_tokens for K20 to avoid HTTP 400 ctx-overflow.
+    max_tokens = _clamp_max_tokens_for_k20(model, messages, tools, max_tokens)
     payload = {
         "model": model,
         "messages": messages,
@@ -600,14 +731,33 @@ def _chat_completions(api_endpoint: str, api_key: str, model: str,
         req = urllib.request.Request(
             api_endpoint, data=body, method="POST",
             headers={"Authorization": f"Bearer {api_key}",
-                     "Content-Type": "application/json"})
+                     "Content-Type": "application/json",
+                     "User-Agent": "org-llm/0.1 (https://github.com/daniel2501/org-llm)"})
         try:
             with urllib.request.urlopen(req, timeout=180) as resp:
-                return json.loads(resp.read())
+                data = json.loads(resp.read())
+                # R27 K20 fix: Together-fine-tuned Qwen3-Coder-30B emits
+                # tool calls in text format `<function=NAME><parameter=K>V
+                # </parameter>...</function>` which vLLM's hermes parser
+                # doesn't recognize. Detect + parse + inject into
+                # tool_calls when serving k20-* models and tool_calls is
+                # empty. Belt-and-suspenders fix paired with pod-side
+                # `--tool-call-parser pythonic` swap.
+                if model.startswith("k20-"):
+                    _maybe_inject_k20_tool_calls(data)
+                return data
         except urllib.error.HTTPError as e:
             try: err_body = e.read().decode()
             except Exception: err_body = "(no body)"
             last_err = {"_http_error": e.code, "_err_body": err_body}
+            # R28-4: on K20 HTTP 404 / empty-body, distinguish "pod paused
+            # at exit" (race) from real model-404. If pod is not live,
+            # mark cell with k20_unavailable so the cell isn't scored 0.
+            if model.startswith("k20-") and e.code in (404, 502, 503):
+                if not _k20_pod_liveness_check(api_endpoint):
+                    return {"_http_error": e.code,
+                              "_err_body": err_body,
+                              "k20_unavailable": True}
             if e.code in (429, 502, 503, 504) and attempt < max_retries:
                 wait = (2 ** attempt) + _random.uniform(0, 1)
                 time.sleep(wait)
@@ -645,6 +795,20 @@ def _resolve_in_workdir(target: Path, workdir: Path,
     Python's cwd — models naturally use paths like "docs/wiki/foo.org"
     expecting them to be repo-relative).
 
+    R27 B1 — K1 dispatch fix (Option A from r26-synthesis §4). The
+    qwen3-coder-30B-A3B specialist defaults to emitting *absolute*
+    worktree paths derived from =run_start.target_files= (file_blocks
+    inject the absolute path at line ~1420). When the model echoes
+    those back, we now strip any absolute prefix that matches a known
+    repo root (worktree root OR parent =/home/daniel/repos/org-llm=)
+    and treat the remainder as workdir-relative. This catches:
+      (1) the canonical bug: model emits worktree-prefix/foo.org
+          and we resolve it under workdir cleanly;
+      (2) the cross-pollination bug: model emits org-llm-main-prefix/
+          foo.org because the prefetch contained that path; we still
+          resolve under the worktree.
+    Bar (T9): K1 reads abs+rel path on B1 → both succeed.
+
     Returns (ok, error_message_if_not_ok, resolved_path_if_ok).
 
     Always-on: must resolve inside workdir. When scope_strict=True AND a
@@ -652,11 +816,17 @@ def _resolve_in_workdir(target: Path, workdir: Path,
     Read ops only honor the workdir check; scope_strict applies to
     edit/write only.
     """
+    workdir_resolved = workdir.resolve()
+    # B1 — strip-to-relative prefix normalization. Apply BEFORE the
+    # workdir-relative prepend so absolute paths beginning with any
+    # known repo root behave identically to relative ones.
+    if target.is_absolute():
+        target = _strip_known_repo_prefix(target, workdir_resolved)
     if not target.is_absolute():
         target = workdir / target
     try:
         rp = target.resolve()
-        rp.relative_to(workdir.resolve())
+        rp.relative_to(workdir_resolved)
     except ValueError:
         return False, f"refused: path outside workdir {workdir}", None
     if scope_strict and target_files_set:
@@ -665,6 +835,56 @@ def _resolve_in_workdir(target: Path, workdir: Path,
             return False, (f"refused (scope_strict): {rp} not in target_files "
                             f"allow-list [{allowed}]"), None
     return True, "", rp
+
+
+def _strip_known_repo_prefix(target: Path, workdir_resolved: Path) -> Path:
+    """R27 B1 — strip any known repo-root prefix from an absolute path,
+    returning a workdir-relative remainder when possible.
+
+    Strip order:
+      1. The current worktree root (workdir_resolved) — exact prefix.
+      2. The parent /home/daniel/repos/org-llm/... main repo root,
+         when the model accidentally echoes a main-repo path despite
+         working in a worktree clone of the same tree shape.
+      3. Any sibling worktree root under /home/daniel/repos/org-llm-
+         worktrees/ — also fall through to the workdir-relative tail.
+
+    If no prefix matches, the original absolute path is returned
+    unchanged; the downstream =relative_to(workdir)= guard will then
+    reject it as "path outside workdir" — same behavior as before.
+    """
+    try:
+        target_resolved = target.resolve()
+    except (OSError, RuntimeError):
+        target_resolved = target
+    target_str = str(target_resolved)
+    # 1. Current worktree root — already-correct case; nothing to do.
+    workdir_str = str(workdir_resolved)
+    if target_str == workdir_str or target_str.startswith(workdir_str + "/"):
+        return target_resolved
+    # 2 + 3. Strip known repo roots and rebase on workdir.
+    KNOWN_ROOTS = (
+        "/home/daniel/repos/org-llm-worktrees",
+        "/home/daniel/repos/org-llm",
+    )
+    for root in KNOWN_ROOTS:
+        if target_str.startswith(root + "/"):
+            tail = target_str[len(root) + 1:]
+            # tail may itself start with a worktree dir name like
+            # "r27-B1-K1-qwen30-...".  If so, drop that first segment
+            # and treat the rest as workdir-relative.
+            if root.endswith("worktrees"):
+                # drop the worktree-name segment
+                slash = tail.find("/")
+                if slash != -1:
+                    tail = tail[slash + 1:]
+                else:
+                    tail = ""
+            if not tail:
+                # caller meant the root itself
+                return Path(".")
+            return Path(tail)
+    return target_resolved
 
 
 def _validate_org_file(target: Path) -> tuple[bool, str]:
@@ -835,9 +1055,16 @@ def _dispatch_tool_call(name: str, args: dict, workdir: Path,
         # defects BEFORE the edit lands in the diff, so the cell loop
         # forces a retry instead of penalizing post-emit. Default OFF
         # via EDIT_GATE_ENABLED env var (R27 will flip ON).
-        from org_llm.edit_gate import edit_gate_enabled, gate_edit_file
-        if edit_gate_enabled():
-            ok_g, reason = gate_edit_file(path, old, new)
+        # Tier A U3 — gate_edit_with_k20 composes structural gate with
+        # the optional K20 LoRA score (behind EDIT_GATE_K20_SCORE=1).
+        # When K20 path is OFF, behavior is identical to gate_edit_file.
+        from org_llm.edit_gate import (
+            edit_gate_enabled,
+            gate_edit_with_k20,
+            k20_score_gate_enabled,
+        )
+        if edit_gate_enabled() or k20_score_gate_enabled():
+            ok_g, reason = gate_edit_with_k20(path, old, new)
             if not ok_g:
                 return False, (
                     f"edit rejected by pre-emit gate: {reason}; "

@@ -1,0 +1,354 @@
+:PROPERTIES:
+:ID:       r28-design
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: R28 design — harness stability sprint (7 P0 fixes + 150-cell verification)
+#+FILETAGS: :wiki:bench:r28:design:inputs:harness-stability:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R28 is a *harness stability sprint*, not a capability
+round. Scope = ship the 7 P0 fixes that R27 synthesis §7 identified
+(WALL_CAP enforce, K11 dispatcher-spend, Groq deny-list literal, K20
+ctx-clamp + liveness re-poll, leaderboard in-flight flag, four
+procedural memory-rules, =_round28_dials.py= fork) + run a *small
+150-cell verification round* on R27's working subset (K1, K6, K8,
+K5-claude sentinel, K20-foss-distill) — *no new variants, no new
+strategies*. K11 retired per pareto §R28 implications. K2 stays
+gated on Modal-Kimi billing. Projected spend $5-12 (verification,
+not capability). The single round-question: *do the fixes hold?*
+
+*Expanded.* R27 v6 (29:53 wall, 256 cells, $20.41) shipped the K1
+dispatch fix (mean 4.9 → 16.7, +11.8) but exposed five race
+conditions + one deploy-gap + one display bug at the harness layer.
+Each is a /correctness/ defect — fixes that don't earn round
+re-baseline, just stop the leaks. The R28 round itself is a
+*verification harness* for those fixes: same task set as R27 minus
+B13/B20/B25/B26 (didn't run R27 anyway), same variant pool minus
+K11, same strategies (no S5+, no new orchestration). If R28 ships
+clean, R29 — Phase 2026-05.20 sync verb POC — re-pins K20 as critic
+(extended-chain gate, not mini-A/B gate) and resumes capability
+work. Per [Wiki entries: summary + expanded] memory rule, every
+section leads with =*Summary.*= + =*Expanded.*=. Per [Phase
+references include name], phases name + number throughout. Per
+[FOSS models only], K5-claude appears only as ceiling sentinel;
+Groq is a deny-list reference, never a target.
+
+* What R27 left unfixed (R28 input list)
+
+*Summary.* Five race conditions + one deploy-gap + one display bug.
+Each blocks something that R27 already validated /could/ work — so
+R28 is "make the working things actually work in production."
+Citations to R27 scour reports + file:line.
+
+*Expanded.* Severity column = blocking severity for any future
+round, not for R28 itself (R28 is the fix-verification round, so
+severity ≥ MED is by definition R28-blocking). Sources: R27
+synthesis §7, R27 walltime §Q7, R27 providers §2 + §5, R27
+quality-judge §3, R27 pareto §R28 implications.
+
+| #   | Defect                                    | Source            | File:line                                  | Sev  |
+|-----+-------------------------------------------+-------------------+--------------------------------------------+------|
+| D1  | WALL_CAP advisory only (no future.cancel) | r27-walltime §Q7  | =org_llm/specialist.py= cap-fire site      | HIGH |
+| D2  | K11 dispatcher-budget races PARALLELISM=32| r27-providers §5  | =scripts/_round27_dials.py:319-339,2407-2424= | HIGH |
+| D3  | =PROVIDER_PINS ignore: ["Groq"]= absent   | r27-providers §2  | =scripts/_round27_dials.py:290-316= (line 307) | HIGH |
+| D4  | K20 max_tokens not clamped to (8192−in)   | r27-quality-judge §3 | K20 dispatcher (=specialist.py= K20 site)  | HIGH |
+| D5  | K20 dispatcher no pod-liveness re-poll    | r27-quality-judge §3 | K20 dispatcher (=specialist.py= K20 site)  | HIGH |
+| D6  | Leaderboard prints in-flight cells score=0| r27-quality-judge G3 | leaderboard print site                     | MED  |
+| D7  | 4 R27 procedural patterns un-rule'd       | r27-synthesis §9  | memory rules dir                           | LOW  |
+
+D1-D5 are race/lifecycle bugs around correct logic that exists. D6
+is cosmetic but mis-led the R27 K1-dispatch debug for ~25 minutes
+(F3 in launch-session-log). D7 codifies four patterns from R27 (G7
+fail-fast watcher, multi-surface probe, pre-flight slug validation,
+trap-on-EXIT) so R29+ inherits them.
+
+** Items deferred to R29 (from R27 synthesis §7) — and 4 FOLDs accelerated into R28
+
+R27 synthesis §7 lists 13 items; the R28 sprint absorbs *11* (7 P0
++ 4 FOLDs accelerated from R29-candidates per acceleration audit
+2026-05-09 11:55 AM EST). The remaining 4 are still R29-or-later
+because they require capability work, not just fixes:
+
+| #     | Item                                   | R28/R29 landing                                       |
+|-------+----------------------------------------+-------------------------------------------------------|
+| §7-#7 | Sample-up K1+K8 onto B13/B20/B25/B26  | R29 (capability — new tasks)                          |
+| §7-#8 | Re-pin K20 as critic + agor + handle   | R29 (=/critic-this= verb POC)                         |
+| §7-#9 | Pre-warm K20 pod 12-15 min             | *R28* ramp-step P1-1 (cheap, $0.37)                   |
+| §7-#10| Skip A100-PCIe in 12-3 AM EST window  | *R28* launch-checklist P1-2 (config-only)             |
+| §7-#11| K20 vs Claude probe valid slugs        | *R28 FOLD → P1-7* (15-min slug literal change, $0)    |
+| §7-#12| Multi-LoRA HF HEAD pre-launch probe    | *R28 FOLD → P1-8* (rides P1-2 preflight; $0)          |
+| §7-#13| K20 edit-gate (U3) wire path live      | R29 (after re-pin; sequencing dep on R28-4 first)     |
+| G8    | Port =r27_5_pod_scavenger.py= → harness| *R28 FOLD → P1-9* (productionalize; per harness rule) |
+| F7    | Pool-state JSON TTL + 24h gc           | *R28 FOLD → P1-9b* (rides G8; $0)                     |
+
+*FOLD rationale.* All 4 are *integrity-hardening of the same
+harness surface R28 already owns* — not capability work. §7-#11 is
+a string-literal change unblocking the comparator that fed R27's
+INVALID-COMPARATOR verdict; §7-#12 closes the multi-LoRA boot gap
+that already cost a 20-min cold-start in R27; G8 promotes a working
+=/tmp/= script into a first-class harness primitive (=/tmp/= violates
+[Productionalize harness into app] memory rule). Total fold delta:
++3.25h prep, $0 round-cost, zero risk to the 7 P0 fixes.
+
+* R28 round shape
+
+*Summary.* Narrow scope: 150 cells (vs R27's 256), reuse R27's
+working subset, no new variants, no new strategies, no new tasks.
+Goal = "do the fixes hold?" not "extend capability." Round budget
+$5-12, wall <30 min, single launcher invocation.
+
+*Expanded.* Cell-budget breakdown: ~80 L1 (B1, B5, B7, B11) + ~50
+L_BK (BK1-BK15) + ~10 K20 in-band (the cells that scored 0 in R27
+must score >0 in R28) + ~10 K5-claude sentinel ceiling. No L2
+prose, no L3 dial ablation (R27's L3 ran fine; not the gate). No
+top-3 selector promotion of new tasks; B13/B20/B25/B26 stay absent
+(R29 picks them up).
+
+| Dimension                | R27 value          | R28 value           |
+|--------------------------+--------------------+---------------------|
+| Cells                    | 256                | ~150 (verification) |
+| Wall                     | 29:53              | <30 min target      |
+| Spend                    | $20.41             | $5-12 (no K11)      |
+| Variants                 | 6 (incl. K11)      | 5 (K11 retired)     |
+| Strategies               | S1, S2 (S3 skipped)| same as R27         |
+| New tasks                | 0 vs R26           | 0 vs R27            |
+| Layers                   | L1, L2, BK, L3     | L1, BK only         |
+| Top-3 selector promotion | active             | static (no promote) |
+
+* R28 engineering tasks
+
+*Summary.* P0 = the 7 fixes (R28-1 through R28-7), all blocking R28
+launch. P1 = supporting work (memory-rule writes for the four R27
+procedural patterns, doc updates, pre-warm K20 ramp step). *No P2
+this round* — anything else defers to R29 per scope discipline.
+
+*Expanded.* Hours estimates assume single-operator AM/PM EST work.
+Cost only when external spend. Source citations to R27 retro docs.
+
+** P0 — R28 cannot launch without these
+
+| ID    | Item                                                                | Hours | $    | Source             | Maps to D# |
+|-------+---------------------------------------------------------------------+-------+------+--------------------+------------|
+| R28-1 | WALL_CAP cancel at worker-future level (=future.cancel()=)         |     2 | $0   | r27-walltime §Q7   | D1         |
+| R28-2 | Dispatcher-level spend filter — block submission, not config-intent |     3 | $0   | r27-providers §5   | D2         |
+| R28-3 | =PROVIDER_PINS= add =ignore: ["Groq"]= literal + verify it lands   |   0.5 | $0   | r27-providers §2   | D3         |
+| R28-4 | K20 dispatcher: =max_tokens= clamp to (8192−input) + liveness re-poll |  3 | $0   | r27-quality-judge §3| D4 + D5    |
+| R28-5 | Leaderboard: mark in-flight cells with =(in-flight)= flag          |     2 | $0   | r27-quality-judge G3| D6         |
+| R28-6 | Memory-rule the 4 R27 procedural patterns (writes only, no harness)|     1 | $0   | r27-synthesis §9   | D7         |
+| R28-7 | Round-fork =_round28_dials.py= from =_round27_dials.py=            |     1 | $0   | round-fork pattern | —          |
+
+Total R28-P0: *~12.5 h eng + $0 compute*.
+
+** P1 — supporting work (parallelizable with P0)
+
+| ID    | Item                                                                | Hours | $    | Source             |
+|-------+---------------------------------------------------------------------+-------+------+--------------------|
+| P1-1  | Pre-warm K20 pod 12-15 min before round (skip 18m silent-noop window)|   0.5 | $0.37| r27-providers §6   |
+| P1-2  | Launch-checklist gate: A100-PCIe skip during 12-3 AM EST            |   0.5 | $0   | r27-providers §3   |
+| P1-3  | Doc updates: roadmap §R28 row + perf-testing-roadmap §6 cross-link  |   0.5 | $0   | wiki sync          |
+| P1-4  | =_r28_preflight.sh= forked from =_r27_preflight.sh= (no new gates)  |     1 | $0   | preflight pattern  |
+| P1-5  | =_r28_self_healing_daemon.sh= forked from R27 (no new detectors)    |   0.5 | $0   | daemon pattern     |
+| P1-6  | T-12 (capability sweep) hold-out: regression check after R28-1..5   |     1 | $0.50| perf-roadmap §T-12 |
+| P1-7  | *FOLD §7-#11.* Fix slug literals in =scripts/_k20_probe_vs_claude.py= (=anthropic/claude-opus-4=, =anthropic/claude-sonnet-4=) | 0.25 | $0 | r27-quality-judge §3 INVALID-COMPARATOR |
+| P1-8  | *FOLD §7-#12 + G12.* Multi-LoRA HF HEAD pre-launch probe (HEAD =hf.co/api/models/<repo>= per =--lora-modules= entry; PREFLIGHT_FAIL on miss) | 1 | $0 | r27-providers §4 G12 |
+| P1-9  | *FOLD G8 + F7.* Port =/tmp/r27_5_pod_scavenger.py= → harness primitive (=scripts/_k20_pod_pool.py= or =org_llm/=); =trap '_pod_teardown' EXIT INT TERM=; pool-state JSON TTL + 24h gc | 1.5 | $0 | r27-providers §4 G8 + F7 |
+
+Total R28-P1: *~7.25 h eng + ~$1 compute* (FOLDs add 2.75h prep, $0 round-cost).
+
+** P2 — explicitly deferred to R29
+
+Per scope discipline, *no R28 P2 list*. Anything not in P0/P1 above
+is R29 input, not R28 input. The 6 R27-§7 items routed to R29 (in
+§"Items deferred to R29" above) are the R29 design seed.
+
+* Test types used in R28
+
+*Summary.* R28 uses *T-1 (smaller in-band round)*, *T-8 (daemon
+battery)*, *T-9 (pre-test smokes)* as the core cycle, plus *T-12
+(capability sweep)* as a regression check after fixes land. No new
+test types defined. No T-2/T-3/T-7/T-10/T-11 (those are capability
+probes; defer to R29). Test catalog defined in
+=docs/wiki/2026-05-09-perf-testing-roadmap.org §T-1..T-12=.
+
+*Expanded.* Each test type below cites the perf-testing-roadmap row
+verbatim. R28 inherits R27's bar-text per type (no bar tightening
+this round — R28 is verification, not exploration).
+
+| ID   | Test type                  | R28 use                                                | Bar (perf-roadmap)            |
+|------+----------------------------+--------------------------------------------------------+-------------------------------|
+| T-1  | In-band round (smaller)    | 150-cell verification on R27 working subset            | hypothesis-conf ≥ verdict-acc |
+| T-8  | Daemon battery (T1-T8)     | preflight gate; runs every round                       | 7/7 detector tests PASS       |
+| T-9  | Pre-test smokes (S0-S4)    | preflight gate; <30s wall                              | all S-tier rc=0; <60s wall    |
+| T-12 | Capability sweep (regression)| post-fix smoke that R28-1..R28-5 didn't regress chain | composite of constituents      |
+
+*Test types NOT used* (deferred to R29):
+
+- T-2 mini-A/B (K20 vs K1) — capability probe, not stability
+- T-3 agor mode probe — already passed R27; not a fix-verification
+- T-4 BK probe — covered by T-1 BK layer slice
+- T-5 stress concurrency — already passed R27 (30/30 @ 3.76s avg)
+- T-6 long-context — already passed R27 (40/40 to 24k)
+- T-7 vs-Claude suite — needs valid slugs (R29 §7-#11)
+- T-10 per-handle probe — R30 (U7 LoRAs)
+- T-11 S3 critic probe — R29 (=/critic-this= verb POC)
+
+* Variants in R28
+
+*Summary.* R28 keeps R27's working subset minus K11 (retired per
+pareto §R28 implications: dominated by K8 27× on cost, only 1 BK
+win at $1.59, spend cap broke 8.6×). K2 stays gated on Modal-Kimi
+billing reset (R28 launch-time check; if billing-cap not reset,
+K2 conditionally skipped). K5-claude sentinel role preserved per
+[FOSS models only] — Claude exists only as ceiling reference.
+
+*Expanded.* Per-variant role + R28 expectation. =Cells= column =
+projected R28 cell count (rough). =Bar= column = R28 falsifiable
+expectation (full hypothesis row in =r28-hypothesis.org= when
+written).
+
+| Variant            | Role             | Cells | $ proj | Bar (R28)                                  |
+|--------------------+------------------+-------+--------+--------------------------------------------|
+| K1-qwen30          | primary L1       |   ~50 |  $0.50 | mean ≥ 14 (R27 was 16.7; tolerate -2.5)    |
+| K8-deepseekV3      | primary L1 + BK  |   ~60 |  $0.40 | mean ≥ 11 (R27 was 13.3; tolerate -2)      |
+| K6-llama70b        | BK + L_BK fall   |   ~25 |  $0.65 | mean ≥ 18 (R27 was 20.4; tolerate -2)      |
+| K20-foss-distill   | in-band hold-out |   ~10 |  $0.40 | ≥80% cells produce ≥1 successful edit (R27 was 0/10) |
+| K5-claude-solo     | ceiling sentinel |   ~10 |  $2.50 | mean ≥ 12 (R27 was 13.7; tolerate -2)      |
+| K2-kimi (gated)    | Modal-Kimi only  |   ~0  |  $0    | conditional-skip if billing-cap not reset  |
+| K11-qwen3coder     | RETIRED          |     0 |  $0    | n/a (dominated by K8 27×; cap broke 8.6×)  |
+
+Total projected: *~155 cells, ~$5 baseline + ~$2.50 K5 + ~$0.50
+margin = ~$8 expected.* No K11 row = ~$12.40 saved vs R27.
+
+*K2 conditional gate.* R28 launch-checklist runs the Modal billing
+probe pre-flight; if =MODAL_KIMI_BILLING_RESET= unset OR billing-
+cap not reset by 2026-05-09, K2 cells skipped (warn-not-fail).
+Source: r27-inputs §A3.
+
+* Cost envelope
+
+*Summary.* Projected total: *$5-12* (R27 baseline minus K11 spend,
+plus ~$0.37 K20 pre-warm, plus ~$2.50 K5 sentinel). Hard cap target
+$20 (well under R27's $111 ceiling). No train spend, no LoRA work,
+no probe sweeps — verification only.
+
+*Expanded.* Two scenarios: A (clean — fixes work first try, K2
+skipped) and B (one fix needs a second pass; round re-fired).
+
+** Scenario A — fixes hold first try
+
+| Bucket                                              | Subtotal     |
+|-----------------------------------------------------+--------------|
+| K1 + K6 + K8 baseline (no K11)                      | $1.50 - $2.50|
+| K20-foss-distill in-band 10 cells (post-clamp fix)  | $0 - $0.05   |
+| K20 pod pre-warm (12-15 min @ $1.49/hr)             | $0.37        |
+| K5-claude sentinel (10 cells, R27 rate)             | $2.50        |
+| Pod cold-start margin (1 retry budget)              | $0.50        |
+| /Total Scenario A/                                  | *$5-7*       |
+
+** Scenario B — one fix needs second pass; round re-fires
+
+| Bucket                                              | Subtotal     |
+|-----------------------------------------------------+--------------|
+| Scenario A baseline                                 | $5-7         |
+| Re-fire round (one full re-run after fix iteration) | $5           |
+| /Total Scenario B/                                  | *$10-12*     |
+
+Both scenarios under $20 hard cap. R28 cost ≪ R27 ($20.41) ≪ R29
+projected (capability work resumes). Memory rule check:
+=ignore: ["Groq"]= verified at every PROVIDER_PINS entry per [Never
+include Groq]; no Claude routing target per [FOSS models only] —
+K5 is sentinel ceiling reference only.
+
+* Self-check
+
+*Summary.* Verification that the prompt's required structure (1-9)
+landed and constraints held.
+
+*Expanded.*
+
+1. *Summary + Expanded leads everywhere?* YES — every section per
+   Rule 2b.
+2. *7 R28 P0 items present?* YES — table in §"R28 engineering
+   tasks" rows R28-1 through R28-7, each citing a D# from §"What
+   R27 left unfixed". Mapped 1:1 to perf-testing-roadmap §6.
+3. *No P2?* YES — explicit "no P2 this round; defer to R29".
+4. *Test types referenced by ID from perf-testing-roadmap?* YES —
+   T-1, T-8, T-9, T-12 used; T-2/T-3/T-4/T-5/T-6/T-7/T-10/T-11
+   listed under "NOT used" with R29+ destinations.
+5. *Variants = R27 minus K11?* YES — K1, K6, K8, K5-claude, K20-
+   foss-distill in pool; K11 row marked RETIRED with rationale; K2
+   gated on Modal-Kimi billing.
+6. *Cost envelope $5-12?* YES — Scenario A $5-7, Scenario B
+   $10-12, both under $20 cap.
+7. *FOSS-only language?* YES — K5-claude marked sentinel ceiling
+   only; Groq referenced only as deny-list literal target; per
+   [Never include Groq] and [FOSS models only].
+8. *Phase references include name?* YES — "Phase 2026-05.20 —
+   sync verb POC" cited (not bare number).
+9. *12h AM/PM EST?* YES — "12-3 AM EST" used (P1-2); no UTC/PT.
+10. *Tables not prose?* YES — every multi-row data block in table
+    form per [Condense long outputs].
+11. *350-line cap?* targeted; this doc reads as ~280-310 lines.
+12. *No code edits, no commits?* YES — design doc only.
+
+* Cross-references
+
+** Source docs (read in full to author this)
+
+- =docs/wiki/2026-05-09-r27-synthesis.org= §7 — the 13 P0 list (R28
+  takes 7; R29 takes 6)
+- =docs/wiki/2026-05-09-r27-quality-judge.org= §3 — K20 in-band
+  failure modes (HTTP 400 + HTTP 404 → D4 + D5)
+- =docs/wiki/2026-05-09-r27-walltime.org= §Q7 — WALL_CAP advisory
+  verdict (→ D1)
+- =docs/wiki/2026-05-09-r27-providers.org= §2 + §5 + §6 — Groq deny
+  patch lost + K11 dispatcher race + K20 pre-warm cost (→ D2 + D3)
+- =docs/wiki/2026-05-09-r27-pareto.org= §"R28 implications" —
+  retire K11; sample-up gate-shape (→ R29 input)
+- =docs/wiki/2026-05-09-perf-testing-roadmap.org= §6 R28 plan —
+  high-level shape (this design fills out)
+- =docs/wiki/2026-05-08-r27-inputs.org= — template (this doc's
+  shape, but ~half the size since R28 scope is narrower)
+
+** Code that will change in R28
+
+- =org_llm/specialist.py= — D1 (=future.cancel()=), D4 + D5 (K20
+  dispatcher max_tokens clamp + liveness re-poll)
+- =scripts/_round28_dials.py= — R28-7 fork from =_round27_dials.py=
+- =scripts/_round28_dials.py:290-316= equivalent — D3 (Groq literal)
+- =scripts/_round28_dials.py:319-339,2407-2424= equivalent — D2
+  (dispatcher-level spend filter)
+- =scripts/_r28_preflight.sh= — P1-4 fork (+ P1-8 multi-LoRA HF HEAD gate)
+- =scripts/_r28_self_healing_daemon.sh= — P1-5 fork
+- =scripts/_k20_probe_vs_claude.py= — P1-7 slug literals
+- =scripts/_k20_pod_pool.py= (NEW or extended) — P1-9 scavenger port + F7 TTL
+- leaderboard print site — D6 (=(in-flight)= flag)
+
+** Memory rules to write (R28-6 / D7)
+
+- =feedback_fail_fast_watcher.md= — bound waits at 1.5× expected,
+  not = max-tolerable (R27 G7)
+- =feedback_multi_surface_probe.md= — model verdict requires
+  multi-surface probe, not just in-band leaderboard (R27 §9-#2)
+- =feedback_preflight_slug_validation.md= — every config string
+  naming an external resource gets a HEAD-check at preflight (R27
+  §9-#3)
+- =feedback_trap_on_exit_teardown.md= — external-resource helpers
+  use =trap '_pod_teardown' EXIT INT TERM= contract (R27 §9-#4;
+  partly covered by =project_harness_to_app_productionalize.md=)
+
+** Related round arc
+
+- =docs/wiki/2026-05-09-r27-synthesis.org= — drove R28
+- (this doc) =docs/wiki/2026-05-09-r28-design.org= — R28 design
+- (next) =docs/wiki/2026-05-09-r28-hypothesis.org= — R28 falsifiable
+  bars (H1-H5 from perf-roadmap §R28-hypotheses-preview)
+- (next) =docs/wiki/2026-05-09-r28-launch-checklist.org= — R28 ship
+  list (P0-1..7 + P1-1..6 + Modal-Kimi + A100-PCIe gates)
+- (after R28) =docs/wiki/2026-05-09-r28-synthesis.org= — verdict
+  on D1-D7 fixes; R29 capability seed
+- Phase 2026-05.20 — sync verb POC — R29 K20-as-critic landing

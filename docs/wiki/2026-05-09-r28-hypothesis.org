@@ -1,0 +1,231 @@
+:PROPERTIES:
+:ID:       r28-hypothesis
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: R28 — pre-commit hypothesis (harness stability sprint predictions)
+#+FILETAGS: :wiki:bench:r28:hypothesis:meta-bench:harness-stability:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Pre-commit hypothesis for R28, the /harness stability
+sprint/ round. R27 delivered the K1 dispatch fix (mean 4.9 → 16.7
+CONFIRMED-BIG) but exposed five integration races: WALL_CAP advisory
+not enforced, K11 spend cap broken 8.6×, Groq deny-list patch never
+landed, K20 in-band 0/10 (HTTP 400 ctx-overflow + HTTP 404 lifecycle),
+score-display in-flight gap. R28 ships seven P0 fixes (R28-1 through
+R28-7) and re-runs a small round to verify the fixes hold — *no new
+variants, no new strategies, no new LoRA train*. Predictions below
+are about whether the /fixes/ stick, not about new model capability.
+
+*Expanded.* Smaller scope → fewer rows (H1-H7 + four cross-cuts).
+H1-H5 carry verbatim from =perf-testing-roadmap §6=; H6+H7 added
+to cover (a) K1 mean ≥12 post-fix and (b) K20 in-band edits ≥80%
+post-clamp. K1 should track R27 mean=16.7 (CONFIRMED-BIG persists);
+K20 should produce non-zero in-band cells. Cost envelope $5-12
+(verification, not capability). Per Rule 2b every section leads
+with =*Summary.*= + =*Expanded.*=. Times in 12h AM/PM EST per [All
+times in EST]. FOSS-only per [FOSS models only] — Claude (K5) is
+ceiling sentinel only; never a routing target.
+
+* Sources grounding the predictions
+
+*Summary.* Seven R27-era sources ground these predictions — R27
+synthesis (P0 §7), perf-testing-roadmap (R28 plan §6), quality-judge
+(K20 §3), R27 hypothesis (template), providers/walltime/pareto
+(harness-race root causes).
+
+*Expanded.* Each source contributed specific bars + criteria.
+
+| Source                                                       | Used for                                                       |
+|--------------------------------------------------------------+----------------------------------------------------------------|
+| =docs/wiki/2026-05-09-r27-synthesis.org=                     | R28 P0 list §7; verdict tables; surprise headlines             |
+| =docs/wiki/2026-05-09-perf-testing-roadmap.org=              | R28 plan §6; H1-H5 preview verbatim; cost envelope             |
+| =docs/wiki/2026-05-09-r27-quality-judge.org=                 | K20 in-band failure modes §3; H4 falsification bar             |
+| =docs/wiki/2026-05-08-r27-hypothesis.org=                    | Template shape (this doc follows R27-hypothesis structure)     |
+| =docs/wiki/2026-05-09-r27-providers.org=                     | A2 Groq drift root cause; K11 dispatcher race; H2/H3/C2 bars  |
+| =docs/wiki/2026-05-09-r27-walltime.org=                      | WALL_CAP advisory-only; H1 falsification bar                   |
+| =docs/wiki/2026-05-09-r27-pareto.org=                        | Frontier (K1+K8 two-seat); K11 demote; variant carry-forward   |
+| =scripts/_round27_dials_artifacts/R27_LIVE.json=             | R27 final leaderboard (carry-forward baselines for K1/K8/K6)   |
+
+* R28 active variants
+
+*Summary.* R28 carries R27's working subset minus K11 (dropped per
+pareto, dominated 27× + spend cap broke 8.6×). Active: K1, K6, K8,
+K5, K20. K2 stays gated on Modal-Kimi reset. U7/U8/U9/K20-v2 stay
+deferred — R28 is verification, not capability expansion.
+
+*Expanded.* Pool isolates harness-race fixes from variant-mix
+changes. K20 returns in-band with R28-4 clamp + re-poll landed;
+chain-pass capability already passed R27 (BK 15/15, S3 +7.6, long-ctx
+40/40, per-handle 25/25). Bar this round: "in-band routing post-fix."
+
+| Variant            | Status R28               | Source                                                        |
+|--------------------+--------------------------+---------------------------------------------------------------|
+| K1-qwen30          | active L1 + L2           | R27 dispatch-fix winner (mean 16.7); carry forward            |
+| K6-llama70b        | active; A2 deny-list now in source | r27-providers §A2; =ignore: ['Groq']= literal landed |
+| K8-deepseekV3      | active L1 + L2 frontier  | R27 cheapest $0.00047/qpt; carry forward                      |
+| K5-claude-solo     | sentinel reference only  | [FOSS models only]; never a routing target for generation     |
+| K20-foss-distill   | active in-band post-fix  | R28-4 dispatcher clamp + re-poll; chain-grade R27             |
+| K11-qwen3coder     | *DROPPED*                | r27-pareto §6 dominated 27×; spend cap broken; per R28 P0 §6 |
+| K2-kimi-k2.6       | reintroduce IFF gate met | unchanged from R27 (Modal-Kimi billing reset)                 |
+| K20 v2 / U7 / U8 / U9 | DEFERRED              | R29+ per perf-testing-roadmap; not in R28 scope               |
+
+* Variant predictions (R28 bands)
+
+*Summary.* Five active variants with cells/mean/$/qpt/Pareto/conf
+bands. K1 tracks R27 mean=16.7. K20 produces *non-zero* in-band cells.
+
+*Expanded.* Tight bands (verification). Falsified if any variant
+lands outside its band without an explanatory new bug.
+
+| Variant            | Cells (predicted) | Mean band  | $/qpt band       | Pareto       | Conf | Verdict (post-round) |
+|--------------------+-------------------+------------+------------------+--------------+------+----------------------|
+| K1-qwen30          | 60-80             | 14-19      | $0.0005-$0.0008  | FRONTIER     | 75%  | TBD                  |
+| K8-deepseekV3      | 80-100            | 11-15      | $0.0004-$0.0006  | FRONTIER     | 80%  | TBD                  |
+| K6-llama70b        | 25-35             | 18-22      | $0.0007-$0.0010  | DOMINATED-BK | 70%  | TBD                  |
+| K5-claude-solo     | 15-25             | 12-15      | $0.015-$0.020    | sentinel     | 80%  | TBD                  |
+| K20-foss-distill   | 8-15              | 9-13       | $0.0005-$0.0010  | held-out     | 55%  | TBD                  |
+
+* R28 hypotheses (H1-H7)
+
+*Summary.* Seven predictions with conf % + falsification bar. H1-H5
+verbatim from =perf-testing-roadmap §6=; H6 (K1 mean ≥12) and H7
+(K20 ctx clamp) added. Headline: WALL_CAP cancels (90%); K11 ≤$1.50
+or dropped (90%); zero Groq (95%); K20 edit-ok ≥80% (80%); in-flight
+flag (95%).
+
+*Expanded.* Each row = assertion + falsification bar. Post-round
+verdict-box scores these the same way R27 does.
+
+| #   | Prediction                                                                | Conf | Falsified if                                            |
+|-----+---------------------------------------------------------------------------+------+---------------------------------------------------------|
+|  H1 | WALL_CAP fires N times AND wall_seconds ≤ 410s on ALL killed cells        | 90%  | any cell wall_seconds > 410s with wall_cap_killed=true  |
+|  H2 | K11 spend ≤ $1.50 OR K11 dropped to BK-only with hard enforcement         | 90%  | K11 spend > $1.50 OR K11 served any non-BK cell         |
+|  H3 | T12 (Groq deny-list) verifier: 0 Groq cells in cell archives              | 95%  | any K6 cell shows =provider=Groq= ever-touched          |
+|  H4 | K20 in-band cells produce ≥1 successful edit on ≥80% of K20 cells         | 80%  | <80% K20 cell-edit-ok rate (vs R27 0/10)                |
+|  H5 | Leaderboard distinguishes in-flight vs settled cells in display           | 95%  | any in-flight cell shown without =(in-flight)= flag     |
+|  H6 | K1 mean stays ≥12 across ≥60 cells (post-fix lift persists)               | 85%  | K1 mean <12 OR K1 cell count <60                        |
+|  H7 | K20 dispatcher clamp prevents HTTP 400 ctx-overflow on 100% of K20 cells  | 85%  | ≥1 K20 cell HTTP 400 with max-context-overflow message  |
+
+** Falsification mechanics (one-line each)
+
+| #  | Mechanic                                                                                |
+|----+-----------------------------------------------------------------------------------------|
+| H1 | For every =wall_cap_killed=true=, assert =wall_seconds ≤ 410s=                          |
+| H2 | Sum K11 spend; assert ≤$1.50 AND all K11 cells in BK1-BK15 (or K11 dropped, count=0)    |
+| H3 | grep archives for =provider=Groq=; assert 0 (incl. ever-touched, not just final-broker) |
+| H4 | Count =edit_file ok=true= per K20 cell; assert ≥80% have ≥1                             |
+| H5 | Leaderboard renders =(in-flight)= for any cell missing =cell_result.json= at print time |
+| H6 | K1 mean from R28 LIVE json ≥12 across ≥60 cells                                         |
+| H7 | For every K20 cell, =max_tokens + input_tokens ≤ 8192=; no HTTP 400 ctx-overflow        |
+
+* Cross-cutting predictions (R28 P0 deploy verification + 4 FOLDs)
+
+*Summary.* Six cross-cuts (C1-C6) covering R28 P0 items not directly
+headlined plus the 4 FOLDs from R29-acceleration: dispatch-fix
+non-regression, pod pre-warm, round-fork path audit, memory-rule
+landing, vs-Claude slug fix (P1-7 FOLD), multi-LoRA HF HEAD probe
+(P1-8 FOLD).
+
+*Expanded.* Complement H1-H7 by covering R28 P0 items that are
+deploy-verification rather than headline-measurable. C5/C6 added
+2026-05-09 11:55 AM EST per acceleration audit.
+
+| ID  | Prediction                                                                  | Conf | Falsified if                                            |
+|-----+-----------------------------------------------------------------------------+------+---------------------------------------------------------|
+| C1  | K1 dispatch fix still landed: =_strip_known_repo_prefix= present in source  | 99%  | helper deleted/regressed in =specialist.py:710-758=     |
+| C2  | K20 pod pre-warm saves silent-noop window: <2 min K20 setup before round 0 | 70%  | K20 cells start >2min after round-start                 |
+| C3  | =_round28_dials.py= round-fork green: PROGRESS_DOC + LIVE_LOG paths audit  | 85%  | path-audit fails OR LIVE_LOG points to R27 archive      |
+| C4  | Memory rules R28-6 landed: 4 patterns from R27 §10 in =~/.claude/projects/= | 99%  | <4 of {fail-fast watcher, multi-surface probe, slug HEAD-check, trap-on-EXIT} (already landed 2026-05-09) |
+| C5  | *FOLD P1-7.* vs-Claude probe runs without slug-404; =/v1/models= contains both =claude-opus-4= + =claude-sonnet-4= | 95% | vs-Claude probe returns 404 OR slug missing from preflight |
+| C6  | *FOLD P1-8.* 0 multi-LoRA boot hangs from missing HF repos; HEAD probe FAILs preflight on injected nonexistent/repo | 90% | injected =--lora-modules nonexistent/repo= reaches vLLM startup; OR real LoRA hang regresses |
+
+* Strategy predictions
+
+*Summary.* Minimal strategy work; S1 cascade re-tune is the only
+item. Post-K1-dispatch-fix the escalation rate should drop from
+R27's 67 (43 K1→K8 + 24 K8→K11) to ≤25 per R26 carry-forward.
+
+*Expanded.* S2-S6 unchanged from R27. K11 drop means cascade stops
+at K1→K8 (no third tier). R28 verifies the ≤25 prediction.
+
+| ID  | Prediction                                                                  | Conf | Falsified if                                            |
+|-----+-----------------------------------------------------------------------------+------+---------------------------------------------------------|
+| S1  | S1 cascade escalations ≤25 total post-K1-fix + K11-drop                     | 65%  | total escalations >25 OR cascade fires K8→K11 (dropped) |
+
+* Infra predictions
+
+*Summary.* Six infra predictions covering WALL_CAP cancel, K11
+demote/drop, Groq cell count, score-display in-flight flag, R28
+round-fork audit, and (FOLD G8) zero scavenger pod-leaks.
+
+*Expanded.* Concrete-fix verifications; each maps to a specific R28
+P0 line item from =perf-testing-roadmap §6=. I6 added 2026-05-09
+11:55 AM EST per acceleration audit (FOLD G8 scavenger port).
+
+| ID  | Prediction                                                                  | Conf | Falsified if                                            |
+|-----+-----------------------------------------------------------------------------+------+---------------------------------------------------------|
+| I1  | WALL_CAP_KILLED actually cancels (=future.cancel()= fires, not just logs)   | 90%  | any cell with kill-fire log but wall_seconds > cap+10s  |
+| I2  | K11 dropped (preferred per pareto) — cell count = 0 across R28 archive      | 80%  | K11 cell count > 0 in R28 archive                       |
+| I3  | Zero Groq cells across R28 archives (final-broker AND ever-touched)         | 95%  | ≥1 K6 cell touched Groq at any point                    |
+| I4  | Score-display in-flight flag rendered for cells lacking =cell_result.json= | 95%  | leaderboard prints score=0 for in-flight without flag   |
+| I5  | =_round28_dials.py= path audit: PROGRESS_DOC + LIVE_LOG point to R28 paths  | 90%  | round-fork path audit FAIL or paths reference R27       |
+| I6  | *FOLD P1-9.* Scavenger pod-leak count = 0 across R28 round (kill watcher mid-pool-build → all child pods torn down) | 85% | ≥1 orphan pod in =/v1/pods= post-round attributed to R28 scavenger |
+
+* Cost predictions
+
+*Summary.* R28 spend lands in *$5-12* envelope per
+=perf-testing-roadmap §6=. R28 is verification — no new train, no
+new variants, no new probes. R27 was $20.41; subtract K11's $12.90
++ K5's $5.42 → R28 lands near R27-K11-K5. Confidence: 75%.
+
+*Expanded.* Falsified if <$3 (under-ran) OR >$15 (races persist).
+
+| Layer / item                                               | Subtotal       |
+|------------------------------------------------------------+----------------|
+| Active FOSS variants (K1+K6+K8 cells)                      | $1.50 - 3.00   |
+| K20-foss-distill in-band post-fix (~10-15 cells)           | $0.01 - 0.05   |
+| K5-claude-solo sentinel slice (~20 cells)                  | $4.00 - 6.00   |
+| K20 pod uptime (pre-warm + round + buffer ~1.5h)           | $1.50 - 2.25   |
+| /Total R28 (verification round)/                           | *$5 - 12*      |
+
+* Verdicts (filled in after R28)
+
+/Placeholder. Post-round R28 quality-judge fills observed values,
+computes prediction-accuracy, notes which falsifications fired.
+Subsections: H1-H7, C1-C4, S1, I1-I5, cost, prediction-accuracy./
+
+* Self-check — R28 P0 + FOLD coverage
+
+*Summary.* All seven R28 P0 items + four FOLDs covered by ≥1
+falsifiable hypothesis.
+
+| R28 item                                       | Covered by |
+|------------------------------------------------+------------|
+| R28-1 WALL_CAP cancel at worker level          | H1 + I1    |
+| R28-2 K11 dispatcher spend filter / drop       | H2 + I2    |
+| R28-3 PROVIDER_PINS Groq deny literal          | H3 + I3    |
+| R28-4 K20 max_tokens clamp + re-poll           | H4 + H7    |
+| R28-5 score-display in-flight marking          | H5 + I4    |
+| R28-6 Memory-rule 4 procedural patterns        | C4         |
+| R28-7 =_round28_dials.py= round-fork           | C3 + I5    |
+| P1-7 FOLD §7-#11 vs-Claude slug fix            | C5         |
+| P1-8 FOLD §7-#12 multi-LoRA HF HEAD probe      | C6         |
+| P1-9 FOLD G8 scavenger port + F7 TTL           | I6         |
+
+* Cross-references
+
+- =docs/wiki/2026-05-09-r27-synthesis.org= — R28 P0 list §7; carry-forward
+- =docs/wiki/2026-05-09-perf-testing-roadmap.org= — R28 plan §6; H1-H5 verbatim
+- =docs/wiki/2026-05-09-r27-quality-judge.org= — K20 in-band failure modes §3
+- =docs/wiki/2026-05-08-r27-hypothesis.org= — template shape
+- =docs/wiki/2026-05-09-r27-{walltime,providers,pareto}.org= — root-cause cites
+- =docs/wiki/2026-05-09-r28-{design,launch-checklist}.org= — R28 design + P0 status (planned)
+- =scripts/_round27_dials_artifacts/R27_LIVE.json= — R27 baseline leaderboard
+- =scripts/_round28_dials.py= — R28 active config (round-fork target)
+- =org_llm/specialist.py:710-758= — =_strip_known_repo_prefix= (R27 dispatch fix)
+- =org_llm/specialist.py= — WALL_CAP enforcement site (R28-1 target)

@@ -1,0 +1,377 @@
+:PROPERTIES:
+:ID:       r28-launch-checklist
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: R28 launch checklist — every item to ship before round fires
+#+FILETAGS: :wiki:bench:r28:checklist:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+#+STARTUP: overview content
+#+TODO: TODO DOING BLOCKED | DONE CANCELLED
+
+* Summary
+
+*Summary.* Living checklist for every prep item that must ship
+before R28 launches. Sourced from =r27-synthesis §7= (R28 P0
+list) + =perf-testing-roadmap §6= (R28 plan) + the four R27
+scour docs. R28 is a *harness stability sprint* — 7 P0 fixes;
+small round to verify; no new variants / no new strategies.
+Each item has status, estimate, dependencies, and an acceptance
+probe (PM6 lesson; R27 lost the A2 Groq patch in Agent C→B
+handoff).
+
+*Expanded.* R27 v6 finished 2:30:33 AM EST 2026-05-09 (256
+cells / $20.41 / 29:44 wall) and exposed 5 race conditions + 1
+deploy gap + 1 advisory-not-enforcement bug. R28 fixes those
+against the proven R27 dial set so verdicts are clean. Template
+is =2026-05-08-r26-launch-checklist.org=. Items already shipped
+(BK fixtures, MCP wiring, COST_CIRCUIT_BREAKER, cell_replay) not
+repeated — only deltas vs R27-launch state.
+
+* Status legend
+
+| TODO | DOING | BLOCKED | DONE (probe passed) | CANCELLED (with rationale) |
+|------+-------+---------+---------------------+----------------------------|
+
+* Plan-change log
+
+| Date              | Item                | Change                                                                 |
+|-------------------+---------------------+------------------------------------------------------------------------|
+| 2026-05-09 11:55 AM EST | P1-7/P1-8/P1-9 added | Acceleration audit FOLDed §7-#11 (vs-Claude slug), §7-#12 (HF HEAD), G8+F7 (scavenger port) into R28 |
+| 2026-05-09 11:50 AM EST | P0-7                | Memory rules LANDED ahead of round (4 feedback_*.md files indexed in MEMORY.md) |
+| 2026-05-09 12:35 PM EST | P1-6 BLOCKED→DONE   | K2 reintroduced via OpenRouter; Modal redeploy deferred to R29 (serve_kimi.py source missing; OR Parasail @ 0.83s TTFT validated) |
+| 2026-05-09 12:30 PM EST | P0-1..P0-5, P0-6, P1-7 LANDED | All 7 P0 fixes + slug-fix FOLD verified in =_round28_dials.py= + =org_llm/specialist.py= + =_k20_probe_vs_claude.py=; AST + Groq-literal + helper-unit-tests all green |
+| 2026-05-09 1:05 PM EST  | P1-2..P1-9 LANDED   | All P1 forks done: =_r28_preflight.sh= + G13 multi-LoRA HF HEAD (P1-8 FOLD) + =_r28_self_healing_daemon.sh= + =_r28_launch.sh= + =_r28_design_patch.py= verifier (11/11 PASS) + =_k20_pod_scavenger.py= P1-9 FOLD with EXIT/INT/TERM handlers + F7 24h TTL gc |
+
+* P0 — correctness blockers (R28 cannot launch without these)
+
+** DONE P0-1: WALL_CAP worker-future cancel (not just label)
+:PROPERTIES:
+:ESTIMATE: 2 hr
+:SOURCE:   r27-walltime §Q7; r27-synthesis §7 item 3
+:DEPS:     none
+:END:
+R27: 1 stdout WALL_CAP_KILLED but =future.cancel()= never fired;
+2 cells slipped past 400s (400.5s + 411.7s); =wall_cap_killed=
+absent in JSON. Fix at =org_llm/specialist.py= enforcement site:
+on deadline cross, =future.cancel()= AND write
+=wall_cap_killed: true= to cell_result.json.
+*Acceptance probe.* Synthetic 500s cell (=time.sleep(500)= in
+tool); kill <410s AND
+=cell_result.json["wall_cap_killed"] == true=. Repeat 3×.
+
+** DONE P0-2: K11 retired entirely (path A — see plan-change-log)
+:PROPERTIES:
+:ESTIMATE: 3 hr
+:SOURCE:   r27-providers §5; r27-synthesis §7 items 5+6
+:DEPS:     none — *blocks P0-3* (both touch _round28_dials.py)
+:END:
+R27 K11 $12.90 vs $1.50 cap (8.6×).
+=_r25_should_skip_for_budget= reads cumulative =all_cells= at
+submit; =PARALLELISM=32= fans 32 cells before cell #1 completes;
+K11 served 16 buckets incl. B1/B5/B7. *Decide before P0-3:*
+retire K11 OR move gate inside submit loop with worst-case
+projection. *Recommend retire* — only win BK6 ($1.59) vs K6 BK
+row $0.79; dominated by K8 at 27× cost (r27-pareto §Frontier).
+Path A: drop K11 from =VARIANTS= + =TASK_FAMILY_VARIANTS=. Path
+B: pre-admit projection at variant-pool-build time.
+*Acceptance probe.* 50-cell synthetic with $1.50 cap; K11 ≤
+$1.50 OR K11 absent from variant list. Run 3×.
+
+** DONE P0-3: PROVIDER_PINS add =ignore: ['Groq']= everywhere
+:PROPERTIES:
+:ESTIMATE: 30 min
+:SOURCE:   r27-providers §2; r27-synthesis §7 item 4
+:DEPS:     P0-2 (both touch _round28_dials.py PROVIDER_PINS block)
+:END:
+R27 =PROVIDER_PINS["meta-llama/llama-3.3-70b-instruct"]["ignore"]=
+= =["DeepInfra", "AkashML"]= — *Groq missing*. Agent C→B handoff
+11:46 PM 2026-05-08 wrote a comment "anti-Groq rule" but no
+=ignore: ["Groq"]= literal landed; 5 K6 cells touched Groq before
+OR retry rolled them off ([Never include Groq] memory rule
+violated at first-attempt). Add literal =Groq= to ignore-list of
+every entry in =PROVIDER_PINS= in =scripts/_round28_dials.py=
+(R27 L290-316 lineage; verify with =grep -n '"Groq"'=).
+*Acceptance probe.* =python -c 'import _round28_dials as m;
+assert all("Groq" in v.get("ignore",[]) for v in
+m.PROVIDER_PINS.values())'= exits 0. Plus 5-cell K6 smoke; 0
+cells have Groq in events.jsonl =openrouter_provider= (any
+state — first-attempt or final).
+
+** DONE P0-4: K20 dispatcher max_tokens clamp + pod-liveness re-poll
+:PROPERTIES:
+:ESTIMATE: 3 hr
+:SOURCE:   r27-quality-judge §3; r27-synthesis §7 items 1+2
+:DEPS:     none
+:END:
+R27 K20 in-band 0/10 = TWO unrelated bugs. (a) HTTP 400: max
+ctx 8192 vs 8000 output + wiki prompt > 8192 — config bug; cell
+=layer1/B1/K20-foss-distill__bt_pb_m1_tb_s1__s4=. (b) HTTP 404
+empty body, pod paused at exit; cell =__s7=. Fix in K20
+dispatcher (R26 dials L1238-1251 lineage): cap output_tokens to
+=(8192 - input_tokens - 200 safety)=; re-poll =/v1/models=
+before each cell; on HTTP 404 graceful re-pin to K8/K1 (do NOT
+score 0).
+*Acceptance probe.* 8500-token wiki-prompt cell to K20; request
+body =max_tokens ≤ 8192 - input_tokens=. Then delete pod
+mid-cell; next cell either re-routes to K8 (score > 0) OR skips
+with =k20_unavailable= log line (NOT silent score=0).
+
+** DONE P0-5: score-display in-flight vs settled flag
+:PROPERTIES:
+:ESTIMATE: 2 hr
+:SOURCE:   r27-quality-judge G3; perf-testing-roadmap §R28 plan
+:DEPS:     none
+:END:
+R27 K1→K8 escalation distorted by display: 28 escalations in
+47s during L1 B1 cold-start because leaderboard checked
+primary=0 before K1 cells finished prefetch. True K1
+silent_noops far rarer than display suggested. Leaderboard +
+S1 gate must distinguish =in-flight= (cell_result absent or
+=completed=false=) from =settled=; in-flight must NOT trigger
+primary=0 escalation.
+*Acceptance probe.* Synthetic L1 32-way concurrency; print
+leaderboard at 5s. In-flight cells display =(in-flight)= flag,
+NOT =score: 0=. S1 escalator does not fire on in-flight.
+
+** DONE P0-6: Round-fork =_round28_dials.py= from R27
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   round-fork pattern (R26-launch-checklist P1-21 lineage)
+:DEPS:     P0-1 through P0-5 (fork applies all 5 patches)
+:END:
+Fork =scripts/_round27_dials.py= → =_round28_dials.py=. Apply
+P0-1..P0-5. =ast.parse= clean. Update =ROUND= constant +
+artifact-dir name.
+*Acceptance probe.* =python -c 'import _round28_dials'= exits 0.
+=scripts/_r28_design_patch.py= (forked from
+=_r27_design_patch.py=) verifies all 5 P0 acceptance probes
+inline; aborts non-zero on any miss.
+
+** DONE P0-7: Memory-rule the 4 procedural patterns from R27 §10
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   r27-synthesis §10
+:DEPS:     none
+:END:
+Codify before they erode. Each as a memory-rule file under
+=~/.claude/projects/-home-daniel-repos-org-llm/memory/=.
+| Rule candidate                             | R27 source                            |
+|--------------------------------------------+---------------------------------------|
+| =bound-waits-1.5x-not-max=                 | G7 fail-fast watcher (15-min cap, 13-min LoRA fail-fast) |
+| =model-verdict-needs-multi-surface-probe=  | K20 paradox — in-band 0/10 yet chain-grade |
+| =preflight-head-check-every-external-slug= | G2 multi-LoRA hang + vs-Claude probe  |
+| =trap-on-EXIT-for-external-resources=      | G10 4-pod scavenger leak (~$0.50)     |
+*Acceptance probe.* =ls= the 4 new memory files; each has
+*Summary.* + 1-paragraph *Expanded.* + concrete R27 cell or
+artifact citation.
+
+* P1 — config + setup for the R28 launch itself
+
+** DONE P1-1: R28 design + hypothesis + this checklist (the trio)
+:PROPERTIES:
+:ESTIMATE: 2 hr
+:SOURCE:   round-fork pattern (R26/R27 trio)
+:DEPS:     none
+:END:
+Three pre-launch docs: =2026-05-09-r28-design.org= (dial set;
+reuse R27 except K11 + K20 fixes); =2026-05-09-r28-hypothesis.org=
+(H1-H5 from =perf-testing-roadmap §R28 hypotheses preview=); *this
+doc*.
+
+** DONE P1-2: =scripts/_r28_preflight.sh= fork from R27 (+ P1-8 FOLD G13)
+:PROPERTIES:
+:ESTIMATE: 2 hr
+:SOURCE:   R27 preflight; G7 multi-LoRA pod gate (working post-fix)
+:DEPS:     P0-3, P0-6
+:END:
+Fork =_r27_preflight.sh= → =_r28_preflight.sh=. Verify G7
+multi-LoRA pod gate works post-fix (HF HEAD pre-launch probe
+per =--lora-modules= entry). Add P0-3 Groq-literal grep gate.
+*Acceptance probe.* =./scripts/_r28_preflight.sh= writes
+=$ARTIFACTS/PREFLIGHT_PASS=. Inject =--lora-modules
+nonexistent/repo=; =PREFLIGHT_FAIL= written + HF HEAD failure
+named in stderr.
+
+** DONE P1-3: =scripts/_r28_self_healing_daemon.sh= fork
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   R26/R27 daemon lineage
+:DEPS:     P0-6
+:END:
+Fork; update artifact-dir paths. No new detectors planned for
+R28 (stability sprint).
+
+** DONE P1-4: =scripts/_r28_launch.sh= fork
+:PROPERTIES:
+:ESTIMATE: 30 min
+:SOURCE:   R26/R27 launcher lineage
+:DEPS:     P1-2, P1-3, P0-6
+:END:
+Fork =_r27_launch.sh=. Sequence: preflight → K20 pod pre-warm
+(15 min) → harness launch with daemon.
+
+** DONE P1-5: K20 pod pre-warm policy (via preflight CAT 3 + G11 wait — 13+ min ramp)
+:PROPERTIES:
+:ESTIMATE: 30 min wiring; ~$0.37/round cost
+:SOURCE:   r27-providers §6; r27-synthesis §7 item 9
+:DEPS:     P1-4
+:END:
+R27 round 02:00:48; K20 live 02:19:07 = *18m20s silent-noop
+window*; 10 K20 cells lost. Pre-warm ~$0.37 ($1.49/hr × 0.21h)
+buys back the entire window. =_r28_launch.sh= calls
+=_k20_runpod_resume.py= ≥15 min before harness; blocks on
+=/v1/models[].id == k20-v1=. Skip A100-PCIe optimistic during
+12-3 AM EST (R27 blip: 8/8 declines past 12:21 AM); default
+SXM4 +$0.10/hr.
+*Acceptance probe.* Dry-run launcher; K20 READY + =/v1/models=
+contains =k20-v1= before round-start timestamp.
+
+** DONE P1-6: K2 reintroduction — via OpenRouter (not Modal)
+:PROPERTIES:
+:ESTIMATE: complete (decision landed 2026-05-09 12:35 PM EST)
+:SOURCE:   R26 P1-4 lineage; PM1 in bench-arc-post-mortems; Modal troubleshoot 2026-05-09
+:DEPS:     none
+:END:
+*Decision (2026-05-09 12:35 PM EST):* K2 returns to R28 via OpenRouter
+=order: [Moonshot, Parasail]= (already wired in =PROVIDER_PINS=).
+=MODAL_KIMI_ENABLED= stays OFF.
+
+*Modal troubleshoot summary.* User reported Modal billing topped off;
+probe revealed billing was not the issue — Modal app =org-llm-kimi-k26=
+is deployed v1 (2026-05-08 01:16 EDT) but containers crash on startup
+with =KeyError: 'VLLM_API_KEY'= (secret-name mismatch: secret is
+=vllm-bearer-key=, code reads =VLLM_API_KEY=). Local =serve_kimi.py=
+source is gone (not in repo, not in git history). OR Parasail probe
+returned HTTP 200 in 0.83s — well within R28-1's 400s WALL_CAP.
+
+*Why skip Modal redeploy this round.* (1) OR Kimi works fine. (2)
+Modal's value was sub-second TTFT vs Parasail's 2-200s tail (R25 saw
+16 K2 WALL_CAP_KILLED) — with R28-1 WALL_CAP cancel + ctx clamp,
+Parasail's tail is bounded. (3) Reconstructing =serve_kimi.py= from a
+black-box deployed container is half-day capability work — wrong
+shape for R28 stability-sprint scope. *Deferred to R29.*
+
+*Acceptance probe.* =curl -m 15 -X POST openrouter.ai/api/v1/chat/completions=
+with K2 model + provider=={"order":["Moonshot","Parasail"]} → 200 <
+5s. ✅ Verified 2026-05-09 12:33 PM EST: HTTP 200 in 0.83s via
+Parasail. K2 active for R28.
+
+** DONE P1-7: FOLD §7-#11 — vs-Claude probe slug literal fix
+:PROPERTIES:
+:ESTIMATE: 15 min
+:SOURCE:   r27-quality-judge §3 INVALID-COMPARATOR; acceleration audit 11:55 AM EST 2026-05-09
+:DEPS:     none
+:END:
+R27 K20 vs Claude probe failed silently — =anthropic/claude-3.5-sonnet=
+returned 404 ("No endpoints found"). Fix in
+=scripts/_k20_probe_vs_claude.py=: replace slug literal with
+=anthropic/claude-opus-4= + =anthropic/claude-sonnet-4= (both
+verified valid 2026-05-09). Pure source-code change; does NOT
+fire any new K5 cells in R28 (R28 round still runs without this
+probe; the FOLD just makes the probe ride-along usable when
+needed).
+*Acceptance probe.* HEAD =openrouter.ai/api/v1/models= contains
+=anthropic/claude-opus-4=; the probe script runs preflight slug
+check and exits 0. If injected =anthropic/claude-3.5-sonnet=,
+preflight fails fast with =slug_invalid= log line.
+
+** DONE P1-8: FOLD §7-#12 + G12 — multi-LoRA HF HEAD pre-launch probe (G13)
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   r27-providers §4 G12; r27-synthesis §9
+:DEPS:     P1-2 (rides preflight invocation)
+:END:
+R27 multi-LoRA pod cold-start cost 20+ min when an HF repo for a
+=--lora-modules= entry was unreachable; vLLM hung at startup
+without surfacing the cause. Add HEAD probe per
+=--lora-modules= entry: =HEAD https://hf.co/api/models/<repo>= →
+HTTP 200 required pre-launch; PREFLIGHT_FAIL named repo on miss.
+Folds into =_r28_preflight.sh= (P1-2) — same surface, same gate.
+*Acceptance probe.* Inject =--lora-modules nonexistent/repo=;
+=PREFLIGHT_FAIL= written + HF HEAD failure named in stderr (not
+post-vLLM-startup).
+
+** DONE P1-9: FOLD G8 + F7 — port scavenger to harness primitive
+:PROPERTIES:
+:ESTIMATE: 1.5 hr
+:SOURCE:   r27-providers §4 G8 + F7; [Productionalize harness into app] memory rule
+:DEPS:     P0-6 (new harness file lives next to round-fork)
+:END:
+=/tmp/r27_5_pod_scavenger.py= proved out R27 (88s 4-pod build)
+but stayed in =/tmp/=, violating [Productionalize harness into
+app]. Port to =scripts/_k20_pod_pool.py= (or =org_llm/=); add
+=trap '_pod_teardown' EXIT INT TERM= contract; expose
+=launch_pod()= as harness primitive. Concurrent F7 fold:
+=k20_pod_scavenger_state.json= gets timestamp + 24h gc
+(prevents stale-pod-id reuse across days). Memory rule
+[`kill -KILL` not `-TERM` with EXIT trap] applies — document the
+trap-on-EXIT contract in module docstring.
+*Acceptance probe.* Kill watcher mid-pool-build with
+=kill -TERM=; assert all child pods torn down via
+=/v1/pods= empty for matching tag. Artificially-aged
+state-file (mtime -25h) gets gc'd on next launch_pod().
+
+Capability investments deferred until harness is bullet-proof.
+
+| Deferred                       | R-round | Why deferred                                    |
+|--------------------------------+---------+-------------------------------------------------|
+| K20 v2 retrain                 | R29     | corpus extender needs R28 wins; v1 chain-grade  |
+| K20-as-critic productionalize  | R29     | =/critic-this= verb; gated on R28 stability     |
+| Per-handle LoRAs (U7)          | R30     | infra 25/25 ready; train spend is the gate      |
+| U9 LoRA-as-judge               | R31     | judge corpus needs R28+R29 wins (≥500 pairs)    |
+| Multi-LoRA 3-slot pod (G2)     | R30     | vLLM 0.20.1 hang; pin newer or change pattern   |
+
+* Dependencies graph (key blockers)
+
+#+begin_src text
+P0-2 (K11 decision) ─── P0-3 (Groq deny-list) [both touch _round28_dials.py]
+P0-1..P0-5 ──────────── P0-6 (fork applies 5 patches) ─── P1-2 (preflight invokes probes)
+P0-6 ──────────────── P1-3 + P1-4 (daemon + launcher read fork)
+P1-2/P1-3/P1-4 + P1-5 ── _r28_launch.sh sequence (preflight + K20 pre-warm + harness)
+P1-2 ──────────────── P1-8 (HF HEAD probe rides preflight)
+P0-6 ──────────────── P1-9 (scavenger port lives next to round-fork)
+P1-7 (no deps) — slug fix is independent
+#+end_src
+
+* Sequence to ship (EST 12h AM/PM)
+
+| Slot         | Items                                                     |
+|--------------+-----------------------------------------------------------|
+| Day 1 AM     | P0-1 (2h) ‖ P0-5 (2h); then P0-2 K11 decision (3h, *blocks P0-3*) |
+| Day 1 PM     | P0-3 (30m); P0-4 (3h); P0-7 (1h); P1-7 slug fix (15m, parallel) |
+| Day 2 AM     | P0-6 fork (1h); P1-1 trio (2h); P1-2 preflight fork (2h); P1-8 HF HEAD probe (1h, in P1-2) |
+| Day 2 PM     | P1-3 daemon (1h); P1-4 launcher (30m); P1-5 (30m); P1-6 (30m); P1-9 scavenger port (1.5h) |
+| Launch       | preflight gate → K20 pre-warm 15m → harness + daemon       |
+
+* Total budget
+
+| Phase                | Wall                  | Cost                                 |
+|----------------------+-----------------------+--------------------------------------|
+| P0 (7 items)         | ~12.5 hr              | $0 (code only)                       |
+| P1 (9 items, +3 FOLD)| ~9.75 hr (+3.25 FOLD) | ~$0.37 K20 pre-warm; FOLDs $0        |
+| /Total to launch/    | *~22.25 hr (~2.5 days)*| *~$0.50*                            |
+| R28 round            | 30-60 min             | $10-17 if K11 retired (P0-2 path A); $15-25 otherwise |
+
+* Cross-references
+
+| Doc / file                                                 | Why |
+|------------------------------------------------------------+-----|
+| =2026-05-09-r27-synthesis.org §7 + §10=                    | R28 P0 list + 4 procedural memory-rule candidates |
+| =2026-05-09-r27-quality-judge.org §3=                      | K20 in-band failure modes (HTTP 400 + 404) |
+| =2026-05-09-r27-walltime.org §Q7=                          | WALL_CAP advisory-not-enforcement |
+| =2026-05-09-r27-providers.org §2/§3/§5/§6=                 | Groq patch lost / PCIe decline / K11 race / K20 noop window |
+| =2026-05-09-perf-testing-roadmap.org §6=                   | R28 plan + hypotheses preview |
+| =2026-05-08-r26-launch-checklist.org=                      | structural template |
+| =2026-05-09-r28-{design,hypothesis}.org= (P1-1, planned)   | dial set + H1-H5 |
+| =scripts/_round27_dials.py:290-316=                        | PROVIDER_PINS source (Groq missing L307) |
+| =scripts/_round27_dials.py:319-339, 2407-2424=             | K11 cap + submit-race filter |
+| =scripts/_round27_dials.py=                                | fork → =_round28_dials.py= (P0-6) |
+| =org_llm/specialist.py=                                    | WALL_CAP enforcement site (P0-1) |
+| =org_llm/specialist.py:710-758=                            | K1 dispatch fix (untouched, working) |
+| =scripts/_r27_{preflight,self_healing_daemon,launch}.sh=   | fork → =_r28_*= (P1-2..P1-4) |
+| =scripts/_r27_design_patch.py=                             | fork → =_r28_design_patch.py= (P0-6 verifier) |
+| =scripts/_k20_runpod_resume.py=                            | pre-warm primitive for P1-5 |
+| =scripts/_k20_probe_vs_claude.py=                          | P1-7 FOLD slug literals (claude-opus-4 / claude-sonnet-4) |
+| =/tmp/r27_5_pod_scavenger.py=                              | source for P1-9 FOLD port → =scripts/_k20_pod_pool.py= |
+| 4 new =feedback_*.md= (bound-waits / multi-surface / head-check / trap-on-EXIT) | P0-7 memory rules (LANDED 2026-05-09 11:50 AM EST) |
