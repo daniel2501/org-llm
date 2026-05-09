@@ -58,6 +58,8 @@ LAUNCH_STATE_FILE="$ARTIFACTS/LAUNCH_STATE"
 COST_CB="$ARTIFACTS/COST_CIRCUIT_BREAKER"
 LIVE_JSON="$ARTIFACTS/R28_LIVE.json"
 STDOUT_LOG="$ARTIFACTS/stdout.log"
+HEARTBEAT="$ARTIFACTS/HEARTBEAT.jsonl"
+WATCHDOG_PID=""
 
 # Defaults
 R28_MAX_SPEND_USD=${R28_MAX_SPEND_USD:-20}
@@ -82,6 +84,8 @@ for arg in "$@"; do
 done
 
 mkdir -p "$ARTIFACTS"
+# Truncate heartbeat per-launch so watchdog starts from a clean slate.
+: > "$HEARTBEAT"
 
 # ── helpers ───────────────────────────────────────────────────────────────
 ts() { date +%H:%M:%S; }
@@ -90,9 +94,18 @@ say() {
     echo "[r28-launch $(ts)] $*"
     log_live "$*"
 }
+heartbeat() {
+    # R28 stall-watchdog feed. Append one JSON line per stage transition
+    # AND on long-running progress events. Watchdog reads tail -1 + age.
+    local stage="$1"; shift
+    local msg="${1:-}"
+    printf '{"ts":%d,"stage":"%s","msg":"%s"}\n' \
+        "$(date +%s)" "$stage" "${msg//\"/\\\"}" >> "$HEARTBEAT"
+}
 state() {
     echo "$1" > "$LAUNCH_STATE_FILE"
     say "STATE → $1"
+    heartbeat "$1" "state-transition"
 }
 fail_step() {
     local step="$1" reason="$2"
@@ -133,6 +146,15 @@ say "── R28 launcher starting (dry-run=$DRY_RUN, skip-preflight=$SKIP_PREFLI
 say "  artifacts:        $ARTIFACTS"
 say "  cost ceiling:     \$${R28_MAX_SPEND_USD}"
 say "  parallelism:      $R28_PARALLELISM"
+
+# R28: spawn watchdog sidecar (per [Fail-fast stage-aware watcher] rule).
+# Per [`kill -KILL` not `-TERM` with EXIT trap] memory rule: use SIGKILL
+# to terminate watchdog at exit so its (none) trap doesn't fire.
+ARTIFACTS="$ARTIFACTS" bash "$REPO/scripts/_r28_watchdog.sh" &
+WATCHDOG_PID=$!
+trap '[ -n "$WATCHDOG_PID" ] && kill -KILL "$WATCHDOG_PID" 2>/dev/null' EXIT
+say "  watchdog spawned: PID=$WATCHDOG_PID (kill -KILL on launcher exit)"
+
 state STARTED
 
 # ── 1. Design patch + verification ─────────────────────────────────────────

@@ -2,5 +2,6 @@
   "K1-qwen30": "qwen/qwen3-coder-30b-a3b-instruct",
   "K2-kimi-k2.6": "moonshotai/kimi-k2.6",
   "K6-llama70b": "meta-llama/llama-3.3-70b-instruct",
-  "K8-deepseekV3": "deepseek/deepseek-chat-v3-0324"
+  "K8-deepseekV3": "deepseek/deepseek-chat-v3-0324",
+  "K20-foss-distill": "k20-v1"
 }

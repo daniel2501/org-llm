@@ -81,6 +81,16 @@ say() {
     log_live "$*"
 }
 
+# R28: heartbeat for stall watchdog. Stages match _r28_watchdog.sh
+# STAGE_BUDGET map. Called at every "── CAT N: ──" boundary.
+HEARTBEAT="$ARTIFACTS/HEARTBEAT.jsonl"
+heartbeat() {
+    local stage="$1"; shift
+    local msg="${1:-}"
+    printf '{"ts":%d,"stage":"%s","msg":"%s"}\n' \
+        "$(date +%s)" "$stage" "${msg//\"/\\\"}" >> "$HEARTBEAT" 2>/dev/null
+}
+
 pass_gate() {
     local cat="$1" name="$2"
     say "[PASS] $cat/$name"
@@ -131,6 +141,7 @@ say "  dials:     $DIALS"
 # CAT 1 — Provider funding
 # ─────────────────────────────────────────────────────────────────────────
 say ""
+heartbeat PREFLIGHT_CAT_1_FUNDING "enter"
 say "── CAT 1: provider funding ──"
 
 # 1.1 OpenRouter headroom > $40
@@ -239,6 +250,7 @@ fi
 # CAT 2 — Endpoint health (real chat completion per variant)
 # ─────────────────────────────────────────────────────────────────────────
 say ""
+heartbeat PREFLIGHT_CAT_2_HEALTH "enter"
 say "── CAT 2: endpoint health ──"
 
 # Extract VARIANTS from dials file via python.
@@ -384,6 +396,7 @@ fi
 # CAT 3 — K20 endpoint resume (soft-fail: skip K20)
 # ─────────────────────────────────────────────────────────────────────────
 say ""
+heartbeat PREFLIGHT_CAT_3_K20_RESUME "enter (8-min budget for Together cold-start)"
 say "── CAT 3: K20 endpoint resume (soft-fail) ──"
 
 K20_IN_VARIANTS=$(echo "$VARIANTS_JSON" | jq -r '.variants[] | select(.name | startswith("K20")) | .name' | head -1)
@@ -410,6 +423,7 @@ fi
 # CAT 4 — Patch verification (R26 P0 patches behavior probes — retained)
 # ─────────────────────────────────────────────────────────────────────────
 say ""
+heartbeat PREFLIGHT_CAT_4_PATCHES "enter"
 say "── CAT 4: patch verification ──"
 
 # 4.1 max_tokens cap (P0-2): synthetic check — reads _R25_VARIANT_MAX_TOKENS
@@ -715,6 +729,7 @@ fi
 # CAT 5 — Resource gates
 # ─────────────────────────────────────────────────────────────────────────
 say ""
+heartbeat PREFLIGHT_CAT_5_RESOURCES "enter"
 say "── CAT 5: resources ──"
 
 # 5.1 Disk free > 5GB (FAKE_DISK_FREE injection for meta-test)
@@ -770,6 +785,7 @@ fi
 # CAT 6 — Configuration sanity
 # ─────────────────────────────────────────────────────────────────────────
 say ""
+heartbeat PREFLIGHT_CAT_6_CONFIG "enter"
 say "── CAT 6: configuration sanity ──"
 
 CONFIG_RESULT=$(python3 - <<PYEOF 2>/dev/null
@@ -901,6 +917,7 @@ fi
 # CAT 7 — R27 contract probes (G9-G12 per r27-inputs.org §D)
 # ─────────────────────────────────────────────────────────────────────────
 say ""
+heartbeat PREFLIGHT_CAT_7_CONTRACTS "enter"
 say "── CAT 7: R27 contract probes (G9-G12) ──"
 
 # G9 — Provider-pin honor probe
