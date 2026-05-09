@@ -200,6 +200,18 @@ def get_prefetch(task: dict) -> dict:
 WARMED_VARIANTS: set = set()
 
 
+_WARMUP_REASONING_DISABLE = {
+    # R28-warmup-fix 2026-05-09: Kimi-K2 emits its short reply via
+    # message.reasoning (chain-of-thought enabled by default), leaving
+    # message.content null. Warmup probe checked content only → K2
+    # always failed → dropped from round. specialist.py already has
+    # `_DISABLE_REASONING_MODELS` and gets correct K2 behavior; warmup
+    # missed the same flag. Match here so warmup speaks Kimi.
+    "moonshotai/kimi-k2.6",
+    "moonshotai/kimi-k2-thinking",
+}
+
+
 def _warmup_one(name, model_id, or_key):
     """Send a real chat completion. Return (ok: bool, reason: str)."""
     payload = {
@@ -208,6 +220,8 @@ def _warmup_one(name, model_id, or_key):
                       "content": "Reply with exactly: PING"}],
         "max_tokens": 10, "temperature": 0,
     }
+    if model_id in _WARMUP_REASONING_DISABLE:
+        payload["reasoning"] = {"enabled": False}
     pin = PROVIDER_PINS.get(model_id)
     if pin: payload["provider"] = pin
     req = urllib.request.Request(
