@@ -51,7 +51,7 @@ sentinel role.
 | K11 cell count      | 0 (retired)     |              70 | -70 ✅ R28-2                   |
 | Groq cell count     | 0 verified      |               5 | -5 ✅ R28-3                    |
 | WALL_CAP kills      | 2 (real cancel) |  2 (label only) | semantic upgrade ✅ R28-1      |
-| K20 in-band success | 10/10           |            0/10 | +∞ ✅ R28-4                    |
+| K20 in-band success | 4/10 ok + 6/10 wall_cap | 0/10            | integration unblocked; mid-task caps real (see r28-quality-judge §3) |
 | Cost utilization    | 29% of cap      | 18% of $111 cap | n/a                            |
 
 * P0 fix verdicts (live)
@@ -67,7 +67,7 @@ that demonstrates the fix is firing as designed.
 | R28-1 | WALL_CAP =future.cancel()= + sentinel      | ✅ VERIFIED | Two B1 K20 cells wall-capped at <410s (=! K20-foss-distill WALL_CAP_KILLED on B1 (>400s)=)     |
 | R28-2 | K11-qwen3coder retired                     | ✅ VERIFIED | =[R26] dropped K17/K33/K34/K35= line in launch; K11 absent from VARIANTS post-import          |
 | R28-3 | Groq deny-list literal in PROVIDER_PINS    | ✅ VERIFIED | Preflight CAT 6 =config/provider_pins (no deny-listed primaries; no Groq drift)= PASS         |
-| R28-4 | K20 max_tokens clamp + pod-liveness re-poll| 🔄 MIXED    | K20 succeeded (primary=34, 36 cells); BUT B1 wall-caps suggest some long cells still hit cap |
+| R28-4 | K20 max_tokens clamp + pod-liveness re-poll| 🔄 MIXED    | Clamp WORKED (no HTTP 400; r28-quality-judge §3); 4/10 K20 cells ok at primary 7.0; 4 wall-caps slow-iter (16-iter tool-loop ~25s/iter), not ctx-overflow |
 | R28-5 | Score-display in-flight + wall-capped flag | ✅ VERIFIED | Leaderboard line: =cells=5 score=66.0 cost=$0.002 noops=0 (wall-capped=1)= — flag surfaces    |
 | R28-6 | =_round28_dials.py= round-fork             | ✅ VERIFIED | =R28_LIVE.json= writing to =_round28_dials_artifacts/=; =ROUND="R28"= constant; design_patch 11/11 |
 | R28-7 | 4 procedural memory rules                  | ✅ VERIFIED | =MEMORY.md= indexes all 4 (fail-fast, multi-surface, slug-validation, kill-KILL-vs-EXIT-trap) |
@@ -177,14 +177,17 @@ clamp (P0-4) reduces output ceiling but doesn't change input length.
 *Why surprising.* P0-4 was framed as fixing HTTP 400 ctx-overflow —
 not fixing /latency/. Long-context inference on the LoRA may
 genuinely take >400s if the prompt is large enough.
-*Fix candidates.*
-1. Per-task =WALL_CAP_BY_CLASS= bump for K20 (already exists for
-    other variants).
-2. Aggressive context truncation for K20 wiki_edit cells.
-3. Longer wall-cap for K20 specifically.
-*R29 input.* Inspect R28 K20-on-B1 wall-cap cells; were they HTTP
-400s (P0-4 clamp didn't catch them) or genuinely-slow inference (need
-longer cap or smaller context)?
+*Resolved by post-scour analysis (2026-05-09 PM EST).* Per
+=r28-quality-judge.org §6= + =r28-walltime.org §6=: actually *4*
+K20-on-B1 cells JSON-killed (synthesis under-counted). Cause is
+*16-iteration tool-loop ~25s/iter* on long-context wiki edit, NOT
+HTTP 400 ctx-overflow. P0-4 clamp WORKED (H7 PASS); the wall-cap
+fires because tool-loop iteration is slow on the LoRA, not because
+context overflows. Mitigation per quality-judge: restrict K20 to
+*BK family only* (not B1 wiki_edit) — K20 v1 was distilled on small-
+atomic + BK shapes; B1's verbose-prefix primer is out of distribution.
+*R29 input.* R29-15 — K20 dispatcher exclusion of B1/B5/B20 wiki_edit
+tasks; route those to K6/K8 only.
 
 ** Watchdog + heartbeat baseline observed
 :PROPERTIES:
@@ -211,7 +214,7 @@ extend to any long-running script in =scripts/= or =org_llm/=.
 | K5-claude-solo     |    21 |        12.52 |     11.76  | $0.01300 | *4* | 0     |
 | K1-qwen30          |    66 |         9.26 |      8.39  | $0.00054 | 0   | 0     |
 | K8-deepseekV3      |   104 |         8.15 |      7.96  | $0.00071 | 0   | 0     |
-| K20-foss-distill   |    10 |         7.00 |      6.60  | *$0.00003* | 0   | 0     |
+| K20-foss-distill   |   *4 ok + 6 wall_cap* |         7.00 |      6.60  | *$0.00003* | 0   | 0     |
 
 ** K2 post-repair mini-A/B (post-round, 40 cells, $0.02)
 :PROPERTIES:
@@ -246,16 +249,34 @@ draft. App impact: =org_llm/specialist.py= default + =cli.py= =--model=
 default → K8. Quality-tier verbs (=write-dec=, =draft-essay=,
 =refine-prose=) → K6. DEC-007 update with R28 evidence.
 
-** G2 — Claude (K5) sentinel deprecation candidate
+** G2 — Claude (K5) sentinel deprecation candidate /(weakened by scour — defer)/
 
 K6 beat K5-Claude 2.01× on primary mean (25.14 vs 12.52) across 57
 same-round cells. K5 was the only variant with fab (4/21). K5 cost
-18× K8. Three independent gates support deprecation. *Caveats:* R28
-is a small focused suite; K5 may shine on tasks R28 didn't probe
-(long-form synthesis, multi-step planning). *App impact:* remove K5
-from default cloud catalog; opt-in only. *R29 verification:* expanded
-K5-vs-K6 head-to-head (B5/B11/B25/B26/B45 + 5 BK at N=10) before
-acting on app-side change.
+18× K8. *Three independent gates initially supported deprecation —
+two of them weakened post-scour:*
+
+- *K6 lead partly verifier loophole (r28-quality-judge §7).* K6's
+  BK 50-scores (BK2/11/12/14) come from /destructive/ edits — K6
+  deletes ~270 lines of recipes.org and writes a marker + valid
+  TBLFM. Verifier rewards marker presence + structural validity; no
+  preservation gate. K6's quality lead survives on non-BK tasks but
+  the headline 25.14 mean is partly artifact.
+- *K5 fab=4 is one cell (r28-quality-judge §8).* All 4 fabricated
+  UUIDs came from a single B11 wiki_dec_create cell where K5 ran in
+  =is_external_baseline= solo mode without read_file tool surface,
+  confabulating plausible UUIDs for missing DEC-014/009/016. Config
+  artifact, not Claude failure mode.
+
+*Revised stance.* Deprecation case still has merit on cost ($/u 18×
+K8) and on non-BK quality, but headline framing tempered. *R29 must
+ship verifier hardening (R29-16: BK preservation gate) before any
+app-side K5 change.* The K5-vs-K6 expanded probe (R29-9) gathers
+fresh evidence post-hardening.
+
+*App impact (revised).* Don't remove K5 from default cloud catalog
+yet; defer until R29 hardening + expanded probe. Mark as
+"deprecation-candidate-pending-verification" in cloud catalog.
 
 ** G3 — K2 (Kimi) demote to opt-in
 
@@ -264,24 +285,39 @@ default routing. *App impact:* K2 stays in cloud catalog as opt-in for
 long-context (>16k) or specific Kimi behavior; not in default agent
 roster.
 
-** G4 — K20 LoRA strategy: invest in v2 retrain
+** G4 — K20 LoRA strategy: invest in v2 retrain (with task-shape constraint)
 
-K20 v1 went 0/10 → 10/10 across one round of harness fixes. The LoRA
-itself is solid; access path was the bottleneck. *Now we have a clean
-baseline.* v2 corpus = R26-R28 wins where K20 was distilled-for. Goal:
-push K20 mean from 7.0 toward K6's 25.14. *App impact:* unlocks
-=/train-lora= verb as user-facing feature — distill from your vault's
-edit history into a personal LoRA, served on $1.39/hr RunPod.
+K20 v1 went 0/10 → *4/10 ok + 6/10 wall_cap* across one round of
+harness fixes (synthesis initially reported 10/10; corrected per
+r28-quality-judge §3 + r28-walltime §6). The LoRA *succeeds on its
+distilled task-shapes* (small-atomic, BK) and *wall-caps on out-of-
+distribution shapes* (B1 wiki_edit's long primer triggers 16-iter
+tool-loop @ ~25s/iter). The fix is two-fold:
 
-** G5 — Per-task slicing must be the primary scoring lens
+1. *Restrict K20 routing to BK + small-atomic families* (R29-15) —
+   honor the LoRA's actual training distribution.
+2. *v2 retrain corpus = R26-R28 wins where K20 was distilled-for*
+   plus broader task-shape coverage if we want K20 on wiki_edit.
 
-K1's R28 primary mean (9.26) appears below R27's (16.7) — but the
-delta is dominated by task-shape distribution, not actual K1
-regression. R28 ran more BK long-horizon cells; K1's L1 quality may
-be unchanged. *App impact:* =org-llm-status-buffer= default view =
+*App impact:* unlocks =/train-lora= verb — distill from vault edit
+history into a personal LoRA, served on $1.39/hr RunPod. The
+task-shape constraint becomes part of the verb's contract: "distill
+on the shapes you'll actually use."
+
+** G5 — Per-task slicing must be the primary scoring lens /(strengthened by scour)/
+
+K1's R28 primary mean (9.26) appears below R27's (16.7). Initially
+framed as pure task-shape distribution (more BK long-horizon in
+R28). *Per-task scour reveals ~60% real regression on the same
+task:* K1 B1 12.25 (R27) → 7.78 (R28) at n=197 → 50. The remaining
+~40% IS task-mix, but the bare-aggregate framing missed real
+regression that per-task slicing surfaced. /This guidance is the
+roundtake-away most validated by R28./
+*App impact (strengthened):* =org-llm-status-buffer= default view =
 per-task slicing, not aggregate. Aggregate is fine for compute-budget
-planning; useless for quality-regression detection. R28 quality-judge
-scour must produce K1-by-task to confirm.
+planning; *actively misleading* for quality-regression detection.
+*R29 input.* R29-14: B1 prompt-shape audit — what changed about B1
+between R27 and R28 (primer length? task wording? scoring rubric?).
 
 ** G6 — Watchdog + heartbeat are the default for any long-running op
 
@@ -291,6 +327,83 @@ impact:* =org_llm/watchdog.py= primitive (Python class wrapping the
 bash pattern). Verbs that adopt: =sync=, =train=, =index=, =review=,
 =captain=, =agor=. UI: modeline cookie =[stage 12s/30s]= shows
 non-progress before it's a wall.
+
+* Captain's call (R28 close-out)
+
+*Summary.* R28 was a /qualified PASS/. The 7 P0 fixes mostly
+stuck — WALL_CAP cancel + sentinel verified strong (7/7 JSON-kills
+exact at 400.0s); K11 retired; Groq 0/0 strict; round-fork clean;
+in-flight flag lands. Two P0 verdicts honest-MIXED: K20 P0-4 clamp
+worked but task-shape mismatch surfaced as wall-caps; in-flight
+display works at leaderboard but harness lacks per-cell heartbeats.
+Strategic guidance G2 (K5 deprecation) and G4 (K20 retrain) tempered
+post-scour; G5 (per-task slicing) strengthened. R28 ships under cap
+($5.74 of $20) and validates the round-question /do the fixes hold?/
+with caveats clearly delineated.
+
+*Expanded.* Per [Three quality gates] each P0 fix checked: (1)
+really good at the job — yes for 5/7, mixed for R28-4/R28-5, (2)
+not too complex — yes; commits 90f4abc + ce2ed3b were tightly
+scoped, (3) manages required complexity well — yes; the watchdog +
+heartbeat addition was a meaningful primitive, not over-engineered.
+
+*R28 final P0 verdict matrix:*
+
+| ID    | Verdict     | Caveat                                                                            |
+|-------+-------------+-----------------------------------------------------------------------------------|
+| R28-1 | ✅ PASS-strong | 7/7 JSON-kills exact at 400.0s; sentinel 7/7; semantic upgrade verified         |
+| R28-2 | ✅ PASS     | K11 0 cells; cascade re-routed K1 → K8 only                                       |
+| R28-3 | ✅ PASS-strict | 0/94 events.jsonl + 0 stdout Groq hits across all variants                     |
+| R28-4 | 🔄 MIXED    | Clamp PASS (no HTTP 400); 4/10 ok in-band + 6 wall-caps from task-shape mismatch  |
+| R28-5 | ✅ PASS     | Leaderboard wall-capped flag works; harness per-cell heartbeat gap → R29-11      |
+| R28-6 | ✅ PASS     | Round-fork clean; 11/11 design_patch verifier; round-fork-audit memory rule extended for model_pins |
+| R28-7 | ✅ PASS     | 4 procedural memory rules indexed in MEMORY.md before round fired                 |
+
+*R28 final FOLD verdict matrix:*
+
+| ID    | Verdict       | Caveat                                                                          |
+|-------+---------------+---------------------------------------------------------------------------------|
+| P1-7  | ⏸️ INSURANCE | Source verified; vs-Claude probe not exercised this round                       |
+| P1-8  | ⏸️ INSURANCE | G13 PASS-skipped (LoRA repo present); fires only on missing repo                |
+| P1-9  | ⏸️ INSURANCE | Single-pod K20 path; scavenger not invoked. Smoke-tested standalone             |
+
+*R28 hypothesis prediction-accuracy:*
+
+- *Headline H1-H7:* H1 PASS, H2 PASS, H3 PASS, *H4 FALSIFIED-as-stated*
+  (K20 4/10 ok + 6 wall_cap; integration unblocked but mid-task caps
+  real), H5 PASS, *H6 FALSIFIED* (K1 mean 8.39 < 12; per-task slice
+  shows real B1 regression), H7 PASS.
+- *Cross-cuts C1-C6:* C1-PASS, C2-PASS, C3-PASS, C4-PASS, C5/C6-INSURANCE.
+- *Strategy S1:* PASS (K8→K11 cascade dropped; K1→K8 stops there).
+- *Infra I1-I6:* I1-PASS, I2-PASS, I3-PASS, I4-PASS, I5-PASS, I6-INSURANCE.
+- *Net: 14/16 graded predictions correct = 88% accuracy* (2 falsified
+  in ways that were /actually informative/ — H4 surfaced K20 task-shape
+  mismatch; H6 surfaced real B1 regression hidden by aggregate framing).
+
+*Go/no-go for R29:*
+
+| Question                                                           | Answer                                                                          |
+|--------------------------------------------------------------------+---------------------------------------------------------------------------------|
+| Did the harness-stability sprint work?                              | YES — 5/7 strict PASS + 2 honest-MIXED with clear scope                         |
+| Are we ready to ship app-facing routing changes (G1-G6)?            | PARTIAL — G1, G3, G5, G6 ready; G2, G4 need R29 verifier hardening + retrain    |
+| Is the cost envelope predictable post-fixes?                        | YES — $5.74 of $20 cap; 29% utilization; smaller variance than R26-R27 alone    |
+| Are remaining bugs blocking R29?                                    | NO — Modal-Kimi dead-end (port to RunPod option clear); BK verifier loophole is R29 P0 not blocker |
+| Should R29 be another stability sprint or capability pivot?         | *Capability pivot WITH 6 small fixes* (R29-1 through R29-6 P0 from synthesis §"R29 P0 input list" + verifier hardening) |
+
+*R29 must ship (per scour findings):*
+
+1. R29-14 B1 prompt-shape audit (G5 strengthened)
+2. R29-15 K20 dispatcher restrict to BK + small-atomic (G4 nuance)
+3. R29-16 BK verifier preservation gate (G2 verifier hardening)
+4. R29-17 K5 sentinel tool-surface fix (config artifact resolution)
+5. R29-9 K5-vs-K6 expanded probe (post-hardening) for clean G2 evidence
+6. The four small-fix R29 P0s from synthesis §"R29 P0 input list" (R29-1, R29-2, R29-3, R29-12)
+
+*Strategic outcome.* R28 was the sprint we needed; R29 is the
+/capability + correctness/ round that builds on a stable harness. The
+bench is more honest about its own findings now (per-task slicing,
+verifier preservation, task-shape distribution awareness) — that's
+worth more than the round's primary metrics.
 
 * Strategic threads worth a separate doc
 
