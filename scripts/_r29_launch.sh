@@ -77,7 +77,7 @@ for arg in "$@"; do
             exit 0
             ;;
         *)
-            echo "[r28-launch] unknown arg: $arg (try --help)" >&2
+            echo "[r29-launch] unknown arg: $arg (try --help)" >&2
             exit 1
             ;;
     esac
@@ -112,7 +112,7 @@ fail_step() {
     say "[FAIL] $step — $reason"
     echo "FAIL=$step" >> "$LAUNCH_STATE_FILE"
     echo "REASON=$reason" >> "$LAUNCH_STATE_FILE"
-    echo "[r28-launch] FAIL at $step: $reason" >&2
+    echo "[r29-launch] FAIL at $step: $reason" >&2
     print_summary
     exit 1
 }
