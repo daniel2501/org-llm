@@ -578,9 +578,28 @@ def _read_api_key(pass_slug: str) -> str:
 # thinking phase; tool_calls still fire correctly, completion drops to ~33
 # tokens, cost ~4-7x lower, latency 2-4x faster. Allow-list — do NOT blanket
 # this for all reasoning models (deepseek-r1 regresses with reasoning off).
-_DISABLE_REASONING_MODELS = {
+# R29-1 (2026-05-09): canonical source-of-truth for reasoning-mode
+# disable. Models whose internal reasoning chain has consumed the
+# entire max_tokens budget BEFORE answering — observed mostly on
+# Kimi-K2-family (chain-of-thought enabled by default; short-reply
+# completion goes to message.reasoning, leaving message.content null).
+# OpenRouter's `reasoning: {enabled: false}` eliminates this. Allow-list
+# only — DO NOT blanket for all reasoning models (deepseek-r1 regresses
+# with reasoning off).
+#
+# Per [Stratify before generalizing] memory rule, additions to this
+# set need ≥3-cell evidence of the empty-content failure mode, not N=1.
+#
+# Imported by:
+#   - scripts/_round{N}_dials.py:_warmup_one (R28 warmup fix)
+#   - scripts/_round{N}_dials.py:_chat_completions (in-band)
+#   - any other module that calls OR chat-completions for these models
+DISABLE_REASONING_MODELS = {
     "moonshotai/kimi-k2.6",
+    "moonshotai/kimi-k2-thinking",  # R29-1: parity with warmup set
 }
+# Keep alias for in-file backward-compat (existing call site at line ~716)
+_DISABLE_REASONING_MODELS = DISABLE_REASONING_MODELS
 
 
 _K20_FN_RE = re.compile(

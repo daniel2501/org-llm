@@ -1,0 +1,484 @@
+:PROPERTIES:
+:ID:       testing-team-self-management-design
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: Self-managed perf-testing — manager-agent + team-of-agents design
+#+FILETAGS: :wiki:design:bench:agents:self-management:orchestration:
+#+OPTIONS: toc:2 num:nil
+#+CATEGORY: design
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Design for a self-managing performance-testing system: a
+*manager agent* (=@picard= extended, NOT a new persona) coordinates a
+*team of 6 specialist agents* (quality-judge, walltime, providers,
+pareto, synthesis, plan-trio) that handle quality-of-functioning,
+outcomes, and timelines across an R-round without operator polling.
+Runs on Agor (per [Agor = multi-agent-org-llm], DEC-017 mode-(b));
+crew uses FOSS-only routing (per [Agor crew uses no Claude]). Ships
+gradually in 4 phases (manager-only → persistent specialists →
+self-grading loop → cross-round memory) so each layer earns its
+keep via A/B vs solo-Claude (per [Validate orchestration with A/B]).
+Pre-committed bar: faster + cheaper + at-least-equal-quality vs the
+current human+Claude pipeline; otherwise the layer is removed.
+
+*Expanded.* The current state — operator + Claude drive each round
+manually with 4 ad-hoc scour agents per cycle — works (R28 shipped
+under cap with 88% hypothesis accuracy) but doesn't scale to the
+post-R27 productionalization arc (per [Productionalize harness into
+app]) where multiple rounds may run weekly. The core friction is
+that the round retro spawns scour agents per-round but they don't
+persist or learn across rounds. The proposed system makes the
+testing process itself a *first-class application of org-llm* —
+which honors [Dev artifacts as app candidates] and the broader
+[App purpose] frame. Per [Wiki entries: summary + expanded] every
+section leads with =*Summary.*= + =*Expanded.*=. Per [All times in
+EST + 12h AM/PM] all times below are 12h EST. Per [Phase references
+include name] every phase ref includes its short name. Tables not
+prose per [Condense long outputs].
+
+* 1. Current state (manual, R13-R28)
+
+*Summary.* Operator + Claude drive each round through 7 stages.
+Works for R13-R28 (16 rounds shipped). What works: tight feedback
+loop, quality verdict in <24h. What doesn't: doesn't scale beyond
+~1 round/day; scour agents are ephemeral; cross-round patterns
+re-discovered each cycle.
+
+*Expanded.* The 7-stage manual workflow for round R(N):
+
+| Stage | What happens                                                            | Driven by              |
+|-------+-------------------------------------------------------------------------+------------------------|
+| 1     | Plan trio: design + hypothesis + launch-checklist for R(N)              | Operator + Claude      |
+| 2     | P0 code work (R(N) launch blockers from R(N-1) synthesis)               | Claude (operator review)|
+| 3     | Preflight: =scripts/_r{N}_preflight.sh= 7 CAT gates                     | Bash (operator gates)  |
+| 4     | Fire round: =scripts/_r{N}_launch.sh=; watchdog + heartbeat             | Bash + watcher          |
+| 5     | 4-agent scour: quality-judge / walltime / providers / pareto            | Claude (4 ad-hoc tasks) |
+| 6     | Synthesis: Captain's call from the 4 scours                             | Claude (1 ad-hoc task)  |
+| 7     | R(N+1) plan trio (cycle restart)                                        | Operator + Claude      |
+
+*What works:*
+- Tight loop. Round verdict in <24h (R28: 53m45s harness wall).
+- High prediction accuracy (R28: 14/16 = 88% hypothesis verdicts).
+- Per-round retro feeds forward (R29-1 through R29-13 from R28).
+
+*What doesn't:*
+- *Scour agents are ephemeral.* Quality-judge for R28 has no memory
+  of quality-judge for R27 — patterns get re-discovered.
+- *Operator must be in-loop continuously.* Watchdog beeps;
+  operator decides whether to abort. Doesn't scale to overnight.
+- *Cross-round corpus is doc-only.* Plan trios reference past
+  retros by file path, not by structured query.
+- *Synthesis-to-plan-trio handoff is manual.* Claude reads
+  synthesis, drafts R(N+1) docs by hand each time.
+
+* 2. Manager agent design — extends @picard
+
+*Summary.* The manager is *=@picard= (Captain) extended* with
+round-orchestration tools, NOT a new persona. Per [Agent ideas →
+interaction lens]: overlap audit shows =@picard= already plays
+"manager: decompose → delegate → sanity-check → synthesise" (per
+agents.org L93). Adding a "round mode" honors design rule 4
+(personas earn breadth); a new =@orchestrator= would have ≥80%
+trigger overlap and would be merged anyway per design rule 1.
+
+*Expanded.*
+
+** 2.1 Overlap audit — why @picard, not a new agent
+
+| Candidate                | Overlap with @picard                                          | Verdict |
+|--------------------------+---------------------------------------------------------------+---------|
+| =@orchestrator= (new)    | ≥90% trigger ("manage", "delegate", "decompose", "synthesise")| MERGE   |
+| =@bench-captain= (new)   | ≥80% — round-specific subset of manager work                  | MERGE   |
+| =@picard= round mode     | Native fit; just adds a tool roster                            | ✅ SHIP |
+
+** 2.2 Composition
+
+@picard gains a *round-mode tool roster* (in addition to existing
+delegate / classify_items / list_agents). The mode triggers on
+=R{N}=, =round=, =bench=, =scour=, =synthesis= keywords; otherwise
+@picard runs vanilla.
+
+** 2.3 Tool roster (new tools the manager owns)
+
+| Tool                            | Purpose                                                       | Type           |
+|---------------------------------+---------------------------------------------------------------+----------------|
+| =heartbeat_tail(N)=             | Read last N HEARTBEAT.jsonl entries; report stage + age       | MCP (read-only)|
+| =leaderboard_query(round)=      | Read R{N}_LIVE.json; return per-variant means + cost          | MCP (read-only)|
+| =scour_agent_spawn(kind, args)= | Spawn one of the 4 specialist agents on the round artifacts   | MCP (Agor)     |
+| =synthesis_agent_spawn(round)=  | Spawn synthesis after all 4 scours land                       | MCP (Agor)     |
+| =plan_trio_agent_spawn(round)=  | Spawn R(N+1) design+hypothesis+launch-checklist trio          | MCP (Agor)     |
+| =round_state_check()=           | Read LAUNCH_STATE + COST_CIRCUIT_BREAKER + STALL_DETECTED     | MCP (read-only)|
+| =escalate_to_human(reason)=     | Beep + pin to operator inbox; pause manager state machine     | MCP (write)    |
+| =round_memory_query(pattern)=   | Cross-round retrieval (Phase D)                                | MCP (read-only)|
+
+** 2.4 State machine
+
+| State          | Entry trigger                  | Manager action                                | Exit                          |
+|----------------+--------------------------------+-----------------------------------------------+-------------------------------|
+| PRE-ROUND      | Operator: "run R(N)"           | Read R(N-1) synthesis; spawn plan-trio agent  | 3 docs landed                 |
+| PREFLIGHT      | Plan-trio done                 | Run =_r{N}_preflight.sh= (7 CAT gates)        | All PASS or FAIL→escalate     |
+| IN-ROUND       | Preflight green                | Fire launch.sh; poll heartbeat every 60s      | Round done / cost CB / stall  |
+| POST-ROUND     | Round done                     | Spawn 4 scour agents (parallel) → synthesis   | Synthesis emitted             |
+| HANDOFF        | Synthesis green                | Spawn plan-trio for R(N+1); operator gate     | Operator approves/redirects   |
+
+** 2.5 Decision criteria
+
+| Trigger                                              | Manager action                            |
+|------------------------------------------------------+-------------------------------------------|
+| Cost circuit-breaker tripped                         | ABORT round; escalate to human            |
+| Stall >2× stage budget                               | Re-poll heartbeat; if still stalled, escalate |
+| Scour agent returns malformed output                 | Re-spawn with constraint-tightening (1 retry)|
+| Hypothesis falsified at >2σ from prediction          | Flag in synthesis; escalate before R(N+1) |
+| Strategic guidance proposes routing-default change   | Pause at HANDOFF; require human approval  |
+| All 4 scours PASS + synthesis green                  | Auto-proceed to plan-trio for R(N+1)      |
+
+** 2.6 Hand-off contract
+
+| Boundary                          | Manager autonomous | Needs human approval |
+|-----------------------------------+--------------------+----------------------|
+| Spawn scour after round completes | ✅                | —                    |
+| Re-spawn scour with tightened constraint | ✅          | —                    |
+| Draft R(N+1) plan trio            | ✅                | —                    |
+| Edit memory rules                 | —                  | ✅                   |
+| Trip cost circuit-breaker mid-round | ✅              | (escalates anyway)   |
+| Approve routing-default change    | —                  | ✅                   |
+| Promote round to "ship" status    | —                  | ✅                   |
+
+* 3. Team-of-agents design — 6 specialists
+
+*Summary.* Six specialist agents the manager coordinates. Four are
+extracted from today's ad-hoc 4-scour pattern; two (synthesis,
+plan-trio) productionalize what Claude does manually today. Each
+is a new =@-agent= with persona + tools + risks per [Agent ideas →
+interaction lens]. All run FOSS-only models (per [Agor crew uses
+no Claude]).
+
+*Expanded.* Existing agents reused where possible; new ones
+justified per design rule 4 (breadth). Models routed through
+OpenRouter per [FOSS models only] — K8 (DeepSeekV3) workhorse for
+narrative, K6 (Llama-3.3-70b) for high-quality synthesis, K20
+(self-hosted distill) for critic-class work post-R29 retrain.
+
+** 3.1 @bench-quality-judge
+
+*Summary.* Per-task slicing, anomaly stratification, fab analysis.
+
+| Field              | Value                                                                    |
+|--------------------+--------------------------------------------------------------------------|
+| Overlap audit      | 30% with =@geordi= ANALYZE mode (analytics); diverges on bench-task slicing — distinct enough to ship |
+| Composition        | New persona; specializes on =cell_archive.jsonl= + =leaderboard.json=    |
+| Model_role         | =text_model= (K8 default, K6 for finals)                                 |
+| Tools              | =leaderboard_query=, =cell_query(task=, variant=)=, =fab_count=, =per_task_slice= |
+| Risks              | Over-stratifies (per-task × per-variant × per-broker = combinatoric)     |
+| Manager interaction| Spawned post-round; output: =r{N}-quality-judge.org=                     |
+
+** 3.2 @bench-walltime
+
+*Summary.* WALL_CAP enforcement, stage-budget calibration, watchdog effectiveness audit.
+
+| Field              | Value                                                                    |
+|--------------------+--------------------------------------------------------------------------|
+| Overlap audit      | 0% with existing roster; novel concern (round wall budgets)              |
+| Composition        | New persona; reads =HEARTBEAT.jsonl= + =STALL_DETECTED.jsonl= + per-cell wall |
+| Model_role         | =text_model= (K8)                                                        |
+| Tools              | =heartbeat_tail(all)=, =stage_budget_compare=, =wall_cap_audit=          |
+| Risks              | Single-round sample size; budget tuning may overfit to one variant       |
+| Manager interaction| Spawned post-round; output: =r{N}-walltime.org=; feeds N+1 stage budgets |
+
+** 3.3 @bench-providers
+
+*Summary.* Groq verification, broker drift, provider-pin honor, K20 path consolidation.
+
+| Field              | Value                                                                    |
+|--------------------+--------------------------------------------------------------------------|
+| Overlap audit      | 25% with =@ops= (ops is config/diagnostics, broader); distinct enough    |
+| Composition        | New persona; reads =events.jsonl= + =provider_pins.json= + =cell_archive.jsonl= |
+| Model_role         | =text_model= (K8)                                                        |
+| Tools              | =provider_audit(deny_list=)=, =broker_drift_check=, =pin_honor_count=    |
+| Risks              | Lags upstream slug renames; needs HF/OpenRouter HEAD-probe access        |
+| Manager interaction| Spawned post-round; output: =r{N}-providers.org=                         |
+
+** 3.4 @bench-pareto
+
+*Summary.* Frontier shifts, deprecation candidacy, retrain priority.
+
+| Field              | Value                                                                    |
+|--------------------+--------------------------------------------------------------------------|
+| Overlap audit      | 35% with =@geordi= ANALYZE; this one is bench-Pareto-specific (frontier curves) |
+| Composition        | New persona; reads cross-round leaderboards (R26+R27+R28 …)              |
+| Model_role         | =reason_model= (K6 — quality-tier, since Pareto needs careful comparison) |
+| Tools              | =frontier_compute(round=)=, =deprecation_candidates=, =cost_per_qpt_curve= |
+| Risks              | Over-weights latest round; needs N≥3 round window for trend confidence  |
+| Manager interaction| Spawned post-round; output: =r{N}-pareto.org=                            |
+
+** 3.5 @bench-synthesis
+
+*Summary.* Captain's call from the 4 scours; productionalizes today's manual synthesis.
+
+| Field              | Value                                                                    |
+|--------------------+--------------------------------------------------------------------------|
+| Overlap audit      | 60% with @picard summarise mode — but synthesis is a /distinct artifact shape/ (verdict matrix, hypothesis-vs-actual table, R(N+1) P0 list); breaks out per design rule 4 |
+| Composition        | New persona; reads all 4 scour outputs + =r{N}-design.org= + =r{N}-hypothesis.org= |
+| Model_role         | =reason_model= (K6 quality-tier — output-quality-sensitive)              |
+| Tools              | =scour_collect(round)=, =hypothesis_grade(round)=, =synthesis_emit=      |
+| Risks              | Echoes scours uncritically; needs adversarial rule (= must surface ≥1 disagreement across scours OR mark explicit "consensus") |
+| Manager interaction| Spawned after all 4 scours land; output: =r{N}-synthesis.org=            |
+
+** 3.6 @bench-plan-trio
+
+*Summary.* R(N+1) design + hypothesis + launch-checklist generator.
+
+| Field              | Value                                                                    |
+|--------------------+--------------------------------------------------------------------------|
+| Overlap audit      | 40% with =@scribe= DRAFTING mode — but plan-trio is a /3-doc structured artifact/ with cross-doc consistency invariants; distinct |
+| Composition        | New persona; reads R(N) synthesis + perf-testing-roadmap.org             |
+| Model_role         | =reason_model= (K6) for design + hypothesis; =text_model= (K8) for checklist |
+| Tools              | =synthesis_read(round)=, =roadmap_read=, =plan_trio_emit=, =hypothesis_predict= |
+| Risks              | Hypothesis-confidence calibration drifts; cross-doc consistency hard to enforce post-emission |
+| Manager interaction| Spawned post-synthesis; output: 3 files for R(N+1); operator review gate |
+
+* 4. Self-management mechanics
+
+*Summary.* Three measurement axes — quality of functioning, outcomes,
+timelines — each with acceptance probes. Manager grades each agent
+run + each round; deviations trigger constraint-tightened re-runs.
+
+*Expanded.*
+
+| Axis                    | Measure                                          | Acceptance probe                                     |
+|-------------------------+--------------------------------------------------+------------------------------------------------------|
+| Quality of functioning  | Did each agent emit expected-shape output?       | Schema check (required headings, table count, *Summary.* + *Expanded.* leads); fail → re-run with tightened constraints |
+| Outcomes                | Did the round answer its round-question?         | Round-question framing per r28-design.org pattern; synthesis must explicitly answer Y/N/PARTIAL with evidence cite |
+| Timelines               | Did the round ship within budget?                | Cost ≤ R{N}_MAX_SPEND_USD, wall ≤ R{N}_WALL_CAP, agent-turn count ≤ N×6 (4 scour + 1 synth + 1 plan-trio) |
+
+*Self-correction loop:* When a scour output fails the schema probe,
+manager re-spawns with the failing constraint surfaced in the new
+prompt (e.g. "previous output omitted *Summary.*; emit one in
+≤3 sentences before any other heading"). Max 1 retry; second fail
+escalates to human.
+
+* 5. Agor integration
+
+*Summary.* Per [Agor = multi-agent-org-llm], Agor is the runtime;
+this design maps to *DEC-017 mode-(b)*: Claude pilots Agor (manager
+narrates) and Agor spawns the FOSS crew (specialist agents). No
+direct Claude-on-crew calls (per [Agor crew uses no Claude]) — all
+6 specialists run FOSS via OpenRouter or self-hosted K20.
+
+*Expanded.*
+
+| Layer                | Runtime                              | Models                            |
+|----------------------+--------------------------------------+-----------------------------------|
+| Manager (=@picard=)  | Claude Code session (interactive)    | Claude (operator-facing)          |
+| 4 scour specialists  | Agor crew workers                    | K8 (workhorse) + K6 (final pass)  |
+| Synthesis specialist | Agor crew worker                     | K6 (quality-tier)                 |
+| Plan-trio specialist | Agor crew worker                     | K6 design+hypothesis, K8 checklist|
+| MCP tools (heartbeat, leaderboard, etc.) | =org_llm/mcp_server.py= | n/a (deterministic)            |
+
+Per [Manager pre-fetch + agent narrates]: manager pre-fetches
+=R{N}_LIVE.json= deterministically AND injects it into the scour
+prompts; specialists narrate over pre-fetched data in one cloud
+call instead of round-tripping.
+
+Per [OpenCode + Anthropic silently fails]: opencode-bridge sessions
+cannot be the spawn mechanism here. Use claude-code direct (manager)
++ Agor (crew). Documented as a constraint of the runtime.
+
+* 6. Hand-off to operator (human-in-loop boundary)
+
+*Summary.* Manager handles routine round work autonomously. Five
+escalation triggers force human handoff.
+
+*Expanded.*
+
+| Trigger                                                | Why                                              | What manager does                          |
+|--------------------------------------------------------+--------------------------------------------------+--------------------------------------------|
+| Cost circuit-breaker tripped                           | Spend > =R{N}_MAX_SPEND_USD= cap                 | Halt round; pin alert; await human         |
+| Hypothesis falsified at >2σ from prediction            | Strategic surprise — process or model change     | Synthesis flag; gate R(N+1) on operator OK |
+| Strategic guidance proposes routing-default change     | App-facing; affects users beyond bench           | Plan-trio pauses at HANDOFF; need approval |
+| Process anomaly (>3 stalls in one round)               | Watchdog tuning needed; not just a transient     | Synthesis includes "stall budget tuning" task |
+| Memory-rule edit proposed by any specialist            | Cross-cutting policy change                      | Surface in synthesis; never auto-write     |
+
+Per [Verify in-flight claims]: manager NEVER trusts handoff docs as
+authoritative — checks Agor daemon status + filesystem + git before
+declaring "round complete".
+
+* 7. Memory + learning across rounds
+
+*Summary.* Three-tier memory: (a) per-round artifacts (today's
+=r{N}-*.org= docs); (b) cross-round corpus (new) — structured query
+over all past rounds' artifacts; (c) memory rules (existing) for
+durable patterns.
+
+*Expanded.*
+
+| Tier                | Persistence       | Who writes                  | Who reads                       |
+|---------------------+-------------------+-----------------------------+---------------------------------|
+| Per-round artifacts | Round-scoped      | Specialists                 | Specialists in same round       |
+| Cross-round corpus  | Indefinite        | Synthesis (post-round)      | Plan-trio (R+1), pareto (any R) |
+| Memory rules        | Permanent         | Operator (human approval)   | All agents (loaded at start)    |
+
+The cross-round corpus is a SQLite table or JSONL append-only file
+under =scripts/_cross_round_corpus/= keyed on =(round, question,
+verdict, evidence_path)=. Plan-trio queries it at R(N+1) seed time:
+"prior rounds where K1 mean regressed >5pt" → 3 hits, references
+included in R(N+1) hypothesis.
+
+Specialists are *stateless within a round* (manager re-supplies
+context each spawn); cross-round learning lives in the corpus, not
+in agent state.
+
+* 8. Risks + counterpoints
+
+*Summary.* Three primary risks. The system must EARN its keep via
+A/B (per [Validate orchestration with A/B]) before any phase ships.
+
+*Expanded.*
+
+** 8.1 Risk register
+
+| Risk                                      | Likelihood | Mitigation                                                       |
+|-------------------------------------------+------------+------------------------------------------------------------------|
+| Silent failures (manager green; round bad)| Med        | Outcomes axis (§4); synthesis must answer round-question Y/N     |
+| Runaway spend                             | Med        | Cost circuit-breaker (existing); hard cap unchanged              |
+| Lost-in-the-loop (manager retries forever)| Low        | Max 1 retry per spawn; second fail → escalate                    |
+| Echo chamber (all FOSS scours agree wrongly)| Med      | Synthesis adversarial rule (§3.5)                                 |
+| Manager replaces operator judgment        | High       | Phasing (§9) — operator stays gate-keeper through Phase C        |
+| Cross-round corpus poisoning              | Low        | Append-only; verdict column is human-graded only                  |
+
+** 8.2 A/B harness — does the system earn its keep?
+
+Per [Validate orchestration with A/B]: pre-commit bar before
+shipping any phase.
+
+| Variant            | Drives R(N) round                                    |
+|--------------------+------------------------------------------------------|
+| A (control)        | Operator + Claude (current state, manual)            |
+| B (manager-only)   | =@picard= round mode + ad-hoc scours (Phase A)       |
+| C (full team)      | =@picard= + 6 specialists + cross-round corpus       |
+
+*Pre-committed bar:* B (or C) must beat A on *all three* of:
+1. Cost ≤ A's cost (no $ regression)
+2. Wall ≤ A's wall (no time regression)
+3. Synthesis quality ≥ A's per blinded Opus judge using
+   =scripts/recipe_ab_judge.py= template
+
+If ANY of three fails → revert to prior phase, redesign, re-A/B.
+
+** 8.3 Lean assess — don't ship the whole team at once
+
+Per [Lean assess + iterate]: ship Phase A first; assess with the
+A/B harness; only proceed to Phase B if Phase A passes the bar.
+Smallest-reading-of-symptom first per the rule. Preflight smoke
+each phase before paid sweeps.
+
+* 9. Phasing — gradual rollout
+
+*Summary.* Four phases, each a candidate Phase 2026-XX.XX entry
+with name. Each phase A/B-validated before next.
+
+*Expanded.*
+
+| Phase | Name                                                    | Scope                                                  | A/B vs              | Gate to next             |
+|-------+---------------------------------------------------------+--------------------------------------------------------+---------------------+--------------------------|
+| A     | Phase 2026-05.30 — testing-team manager-only             | =@picard= round mode + spawn ad-hoc scours (no persistent specialists) | A (manual baseline) | A/B passes 3/3 bar       |
+| B     | Phase 2026-05.31 — testing-team persistent specialists  | 4 scour + synthesis + plan-trio agents land as personas in agents.org | Phase A baseline    | A/B passes 3/3 bar       |
+| C     | Phase 2026-05.32 — testing-team self-grading loop       | Manager grades own runs (quality/outcomes/timelines axes); auto-retry on probe fail | Phase B baseline    | A/B passes; ≥3 rounds clean |
+| D     | Phase 2026-05.33 — testing-team cross-round memory      | Cross-round corpus + plan-trio queries it for R(N+1) seed | Phase C baseline    | A/B passes; corpus N≥10 rounds |
+
+Each phase is a separate ship: smallest unit that earns its keep,
+roll back if not. Per [Personal-now, FOSS-later]: every exit-state
+must be defensible for unknown users on unknown vaults — so the
+manager + corpus must work without operator's accumulated context.
+
+* 10. Three-quality-gates self-check
+
+Per [Three quality gates]: every feature/decision tested.
+
+| Gate                                | Verdict | Evidence                                                       |
+|-------------------------------------+---------|----------------------------------------------------------------|
+| (1) Really good at the job          | TBD     | A/B bar at each phase boundary forces it; not assumed          |
+| (2) Not too complex                 | RISK    | 6 agents + manager + corpus is not lean; phasing mitigates     |
+| (3) Manages required complexity well| YES     | State machine (§2.4), escalation triggers (§6), corpus tiering (§7) all explicit; nothing implicit |
+
+Gate 2 is the live risk. Phase A (manager-only, ad-hoc scours)
+tests whether the manager-layer alone earns its keep; if NOT,
+Phase B-D are speculative and don't ship.
+
+* 11. Self-check — memory-rule honor roll
+
+Per [Agent ideas → interaction lens] this section explicitly checks
+each cited memory rule.
+
+| Memory rule                                  | Honored where                                     |
+|----------------------------------------------+---------------------------------------------------|
+| [Agor = multi-agent-org-llm]                 | §5 (Agor mode-(b))                                |
+| [Manager pre-fetch + agent narrates]         | §5 (manager fetches LIVE.json, scours narrate)    |
+| [Productionalize harness into app]           | §0 framing; phasing in §9 ships into app proper   |
+| [Agent ideas → interaction lens]             | §3 each new agent has overlap audit + tools + risks |
+| [Orchestration top priority]                 | §8.2 A/B bar pre-committed = orchestration must beat solo |
+| [Validate orchestration with A/B]            | §8.2                                              |
+| [Lean assess + iterate]                      | §8.3 + §9 phasing                                 |
+| [Three quality gates]                        | §10                                               |
+| [FOSS models only]                           | §3 + §5 — all crew FOSS; Claude is manager only   |
+| [Agor crew uses no Claude]                   | §5 routing table                                  |
+| [Wiki entries: summary + expanded]           | every section above leads with both              |
+| [Phase references include name]              | §9 phase rows include short names                 |
+| [Condense long outputs]                      | tables throughout                                 |
+| [All times in EST + 12h AM/PM]               | no time-of-day mentions in body (no risk)        |
+| [Personal-now, FOSS-later]                   | §9 exit-state defensibility note                  |
+| [Verify in-flight claims]                    | §6 manager checks fs+git+daemon                   |
+| [Log all events + retro per cycle]           | §3 specialists are exactly this pattern made native|
+| [Buffer-UI needs self-healing]               | §4 schema-probe + retry on malformed scour output|
+| [Captains-log files are legit rotated logs]  | n/a — corpus is separate file; doesn't conflict   |
+
+* 12. Open questions (deferred to Phase A discovery)
+
+| Question                                                              | Why deferred                                    |
+|-----------------------------------------------------------------------+-------------------------------------------------|
+| Cross-round corpus schema (SQLite vs JSONL)                           | Phase D scope                                   |
+| Specialist model_role per agent (K6 vs K8 split)                      | Phase B; needs Phase A scour-quality data       |
+| Specialists in elisp or Python?                                       | Per [Expand elisp footprint] favor elisp later; Python now mirrors scripts/ |
+| Manager state-machine in elisp or Python?                             | Phase A design choice                            |
+| Trigger words for round-mode vs vanilla =@picard=                     | Phase A design                                  |
+| Heartbeat poll cadence (60s? 30s? 15s?)                               | Phase A; copy watchdog default, tune from there |
+
+* 13. Cross-references
+
+** Source docs
+
+- =docs/wiki/agents.org= — agent roster (overlap audit baseline)
+- =docs/wiki/2026-05-09-r28-synthesis.org= — current 4-scour pattern
+- =docs/wiki/2026-05-09-perf-testing-roadmap.org= — round chronology
+- =docs/wiki/2026-05-08-r27-bench-to-app-mapping.org= — productionalization frame
+
+** Code anchors (existing primitives this design extends)
+
+- =scripts/_r28_launch.sh= — single-entry-point launcher (state machine pattern)
+- =scripts/_r28_self_healing_daemon.sh= — daemon (TN tests; cost CB)
+- =scripts/_r28_watchdog.sh= — stall-detection sidecar (heartbeat pattern)
+- =scripts/_r28_preflight.sh= — 7 CAT gates (preflight pattern)
+- =scripts/recipe_ab_harness.py= + =scripts/recipe_ab_judge.py= — A/B harness template (per [Validate orchestration with A/B])
+- =org_llm/mcp_server.py= — =delegate()= + =list_agents()= for new MCP tools
+- =org_llm/cli.py= — =_PRECONFIGURED_AGENT_PROMPTS= for new specialist personas
+
+** Memory rules cited
+
+orchestration_top_priority, agor_is_multi_agent_integration,
+manager_prefetch_pattern, harness_to_app_productionalize,
+agent_idea_interaction_lens, validate_orchestration_with_ab,
+lean_assess_pattern, quality_gates, foss_models_only, agor_no_claude,
+wiki_summary_plus_expanded, phase_reference_style, condense_long_outputs,
+times_in_est, personal_now_foss_later, verify_in_flight_claims,
+log_all_events_retro_per_cycle, buffer_ui_self_healing.
+
+** Phase candidates (downstream)
+
+| Phase                                                  | Triggered by phase exit                          |
+|--------------------------------------------------------+--------------------------------------------------|
+| Phase 2026-05.30 — testing-team manager-only           | Approved + A/B passes Phase A bar                 |
+| Phase 2026-05.31 — testing-team persistent specialists | Phase A green                                     |
+| Phase 2026-05.32 — testing-team self-grading loop      | Phase B green                                     |
+| Phase 2026-05.33 — testing-team cross-round memory     | Phase C green + N≥10 rounds in corpus             |

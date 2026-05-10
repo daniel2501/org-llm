@@ -1,0 +1,406 @@
+:PROPERTIES:
+:ID:       perf-testing-stock-taking-r28
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: Perf-testing stock-taking + app-impact review (R15-R28 arc)
+#+FILETAGS: :wiki:bench:stock-taking:app-impact:productionalize:meta-bench:
+#+OPTIONS: toc:2 num:nil
+#+CATEGORY: bench
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Step-back review of the entire R15-R28 perf-testing arc:
+catalogs cumulative accomplishments, ranks shippable findings into
+org-llm proper, lists what is /not/ ready and why, and proposes
+process-tuning so future rounds yield more app-shippable findings.
+Anchor data: 13 rounds, ~2,400+ cells across the arc, ~$140 cumulative
+spend, *FOSS K6-Llama-3.3-70b crosses Claude on quality 2.01× at 8.4×
+lower $/u in R28* (=r28-pareto §K6 quality leadership=), and an
+established bench-to-app mapping pattern (=r27-bench-to-app-mapping=
++ R27/R28 appendices, ~104 productization candidates with 86%
+app-touching for R27-derived items). Recommendation: ship the 9 highest-
+confidence R28-derived patterns into Phase 2026-05.20+ — sync verb POC,
+buffer-UI self-healing extension, doctor verb expansion, status-buffer
+upgrade, and a new watchdog-primitive phase row; defer K20 v2 default
+routing and K5 catalog removal until R29 verifier hardening lands.
+
+*Expanded.* This doc is the answer to "we've been benching for a while —
+what have we actually learned, what should ship, and how do we tune
+the loop?" — the stock-taking the user requested after R28's
+=r28-synthesis.org= captain's call. Pulls on three threads: (a)
+strategic insights crystallized over the arc (FOSS-vs-Claude crossing,
+per-task slicing, watchdog primitives); (b) productization picks ready
+to flow into roadmap.org phases per [Productionalize harness into
+app]; (c) process tuning so future rounds emit findings whose app
+surface is obvious-by-construction. Per Rule 2b every section leads
+=*Summary.*= + =*Expanded.*=. Per [All times in EST + 12h AM/PM]
+12-hour times. Per [FOSS models only] Claude appears solely as K5
+sentinel comparator. Per [Phase references include name] every phase
+ref names + numbers. Per [Three quality gates] every shipped-into-app
+proposal checked: (1) really good at the job, (2) not too complex,
+(3) manages required complexity. Hard cap 600 lines.
+
+* 1 — Cumulative accomplishments (R15-R28)
+
+*Summary.* Two ledgers — quality findings (model leadership +
+FOSS-vs-Claude crossing) and process findings (harness primitives
+earned). Ordered by strategic weight, not chronology.
+
+*Expanded.* Each row anchors a fact in a specific round + cite. The
+process-ledger items recur because they earn weight across rounds
+(e.g. WALL_CAP graduates from "constant exists" R24 → "advisory log"
+R26 → "future.cancel() enforced" R28). The quality-ledger items are
+single-round inflection points whose claims survive scour.
+
+** 1a — Quality findings (model + routing)
+
+| Rank | Finding                                                     | Round | Cite                                       |
+|------+-------------------------------------------------------------+-------+--------------------------------------------|
+| Q1   | K6-Llama-3.3-70b crosses K5-Claude on quality (2.01×) AND $/u (8.4× cheaper) | R28 | =r28-pareto §K6 quality leadership=     |
+| Q2   | K1-qwen30 was the original FOSS frontier seat 6 rounds running | R15-R23 | grand synthesis + =r24-synthesis §verdicts= |
+| Q3   | K8-deepseekV3 = workhorse default ($/u floor + volume seat) | R26-R28 | =r28-pareto frontier table=                |
+| Q4   | K20-foss-distill v1 viable on small-atomic + BK shapes ($0.00003/u) | R28 | =r28-quality-judge §4 + r28-pareto §K20 floor= |
+| Q5   | Claude moat narrowed 10× (R15) → 23× (R26) → DOMINATED (R28 K6 vs K5) | R15→R28 | =perf-testing-roadmap §key-metric trajectories= |
+| Q6   | K11-qwen3coder strictly dominated by K8 (27× cost, no lift) | R26-R27 | =r26-synthesis §3 + r27-pareto=            |
+| Q7   | K2-Kimi marginal (+0.25 over K1 at 24× cost; opt-in only)   | R28   | =r28-synthesis §K2 mini-A/B=               |
+| Q8   | K7-qwen72b first ever negative-aggregate variant (broken-bracket annihilation) | R24 | =r24-synthesis §verdicts=                   |
+| Q9   | Per-handle LoRA stack viable as routing primitive (U7/E12)  | R27   | =r27-bench-to-app-mapping U7=              |
+| Q10  | K20-as-critic role validated (S3 +7.6 over K2-critic)       | R27   | =r27-synthesis §3.1=                       |
+
+** 1b — Process findings (harness + verifier)
+
+| Rank | Finding                                                     | Round | Cite                                       |
+|------+-------------------------------------------------------------+-------+--------------------------------------------|
+| P1   | Watchdog + heartbeat as default primitive for long-running ops | R28 | =r28-synthesis §G6=                       |
+| P2   | Per-task slicing as default scoring lens (G5 strengthened post-scour) | R28 | =r28-quality-judge §3 K1 regression=       |
+| P3   | Verifier preservation gates needed (BK destructive-shortcut surfaced) | R28 | =r28-quality-judge §6 K6 BK shortcut=      |
+| P4   | =future.cancel()= worker-level WALL_CAP (label → enforce)   | R28 | =r28-synthesis §R28-1=                     |
+| P5   | Round-fork path-pointer + variant-list audit (memory rule)  | R27-R28 | =feedback_round_fork_path_audit=          |
+| P6   | Pre-flight slug validation + multi-surface model probe      | R27 | =r27-synthesis §9.2-9.3=                   |
+| P7   | Trap-on-EXIT teardown + GPU-fallback chain (RunPod)         | R27 | =r27-providers §3-4=                       |
+| P8   | Worktree-add concurrency mutex (round-killer fixed)         | R18-R19 | =r18-synthesis §3a + fc59d1c=             |
+| P9   | quality_lint multi-line nested-bracket FP fix               | R24 | =r24-synthesis bug 1=                      |
+| P10  | Provider deny-list literal in PROVIDER_PINS (Groq audit)    | R26-R28 | =r26-synthesis honorable mentions + R28-3= |
+| P11  | Dispatcher-level spend filter (pre-fan-out, not post-config) | R27-R28 | =r27-providers §K11 + R28-N13=             |
+| P12  | In-flight vs settled cell-phase tag (display ≠ truth contract) | R27 | =r27-launch-session-log G3=                |
+
+** 1c — Round-by-round headline (compressed)
+
+| Round | Headline accomplishment                                       | Cite                          |
+|-------+---------------------------------------------------------------+-------------------------------|
+| R15-R17 | K1+K8 frontier emerges; Claude moat ~10-25×                 | grand synthesis (R15-R23)     |
+| R18   | Worktree concurrency surfaced as round-killer                 | =r18-synthesis §3a=           |
+| R19-R23 | LoRA train kickoff + S1-S4 strategy wiring                  | =overnight-r19-r23-brief=     |
+| R24   | Quality_lint bug fix + BK target_files bug surfaced           | =r24-synthesis §bugs=         |
+| R25   | LoRA + S1-S4 wired; K20 first appearance                      | =r25-synthesis=               |
+| R26   | K1 falsified by dispatch bug (NOT model regression)           | =r26-synthesis §4=            |
+| R27   | K1 dispatch fix (+11.8); K20 crosses Claude moat (mini-A/B)   | =r27-synthesis=               |
+| R28   | K6 dominates K5 on quality+cost; harness stability sprint PASS | =r28-synthesis Captain's call= |
+
+* 2 — Strategic insights crystallized over the arc
+
+*Summary.* Eleven things we know in R28 that we did not know in R15.
+Each is the answer to a /question we could not have asked yet/ in R15
+because the apparatus wasn't there. Insights are ranked by how much
+they reshape the app's design surface.
+
+*Expanded.* The most strategic shift: we entered R15 asking "can FOSS
+match Claude on cost?" and exit R28 with "FOSS exceeds Claude on
+quality with a verifier-honesty caveat." Several insights cut across
+the arc (per-task slicing was visible in R18 quality-judge but did
+not become a /memory rule/ until R28) — the pattern is that bench
+hammers the same insight repeatedly until it becomes infrastructure.
+
+| #   | Insight                                                                            | First seen | Crystallized | Cite                                 |
+|-----+------------------------------------------------------------------------------------+------------+--------------+--------------------------------------|
+| I1  | K6 (Llama-3.3-70b) beats K5-Claude on quality when verifier is honest               | R28        | R28          | =r28-pareto §K6=                     |
+| I2  | K8 = workhorse default $/u (cheapest with adequate quality at scale)               | R17        | R26-R28      | =r28-pareto frontier=                |
+| I3  | K20 LoRA viable IFF task-shape is restricted to its training distribution          | R27        | R28 (G4 nuance) | =r28-quality-judge §5=            |
+| I4  | Per-task slicing > aggregate as default scoring lens                                | R18        | R28 (G5)     | =r28-quality-judge §3=               |
+| I5  | Provider-routing diversity matters (11 brokers; OR's tail latency real)            | R18        | R27          | =r27-providers=                      |
+| I6  | Watchdog + heartbeat is a primitive (not a script-of-the-week)                     | R26 (concept) | R28      | =r28-synthesis §G6=                  |
+| I7  | Verifier hardening is co-equal with model improvement (BK destructive shortcut)    | R24 bug    | R28 (G2 nuance) | =r28-quality-judge §6=             |
+| I8  | "Display ≠ truth" — UI honesty is its own design contract                          | R27        | R27-R28      | =r27-launch-session-log G3=          |
+| I9  | Round design's 1-cell anomalies invalidate variant-level claims (K5 fab=4 = 1 cell) | R28        | R28          | =r28-quality-judge §7=               |
+| I10 | Bench infra ships as user surface within /one round-cycle/ (R27 productionalization rate) | R27 | R27           | =r27-bench-to-app-mapping §R27-derived= |
+| I11 | Pre-flight HEAD-probe of external resources (HF repos, slugs) is a doctor verb     | R27        | R28          | =r27-synthesis §9.3=                 |
+
+* 3 — Findings ready to ship into org-llm proper
+
+*Summary.* Twelve highest-confidence productization candidates ranked
+by (a) confidence in the finding (R28 evidence depth), (b) effort to
+ship, (c) user-visible impact. Each row passes the [Three quality
+gates]. Each cites the bench-to-app-mapping ID it extends.
+
+*Expanded.* Picks 1-9 are the immediate-ship batch (R28 evidence
+strong; user surface clear; effort bounded). Picks 10-12 are
+medium-confidence (gated on small R29 work). All pull on
+[Productionalize harness into app]. Five new app-phase candidates
+are proposed in §3b.
+
+** 3a — Top 12 ship-ready picks
+
+| # | Pick                                          | Surface                                              | Evidence (R-cite)                          | B-to-A ID    | Hours | Gates pass? |
+|---+-----------------------------------------------+------------------------------------------------------+--------------------------------------------+--------------+-------+-------------|
+| 1 | Watchdog + heartbeat primitive                | =org_llm/watchdog.py= class for any long-running op | R28 G6 (=r28-synthesis §G6=)               | R28-N3       |     8 | YES         |
+| 2 | Per-task slicing default in status-buffer     | =org-llm-status-buffer= per-task default view        | R28 G5 strengthened (=r28-quality-judge §3=)| R28-U2 + R28-N1| 4 | YES         |
+| 3 | =/critic-this= verb POC (K20-as-critic)       | Typer verb + chat-region action; replaces Opus on critique | R27 S3 +7.6 (=r27-synthesis §3.1=)    | R27-N1 + R28-N1| 8-15 | YES         |
+| 4 | =org-llm doctor --slugs= + =--resources=      | HEAD-probe HF/upstream slugs pre-session             | R27 vs-Claude slug bug (=r27-synthesis §9.3=) | R27-N2+N6  |     4 | YES         |
+| 5 | =future.cancel()= worker cancel + Stop button | =SPC l C= cancel current @-agent; sidebar Stop       | R28-1 PASS-strong (=r28-synthesis §R28-1=) | R27-N12      |     4 | YES         |
+| 6 | =(in-flight)= + =(wall-capped)= modeline flags| Cost-attribution honesty contract                    | R28-5 PASS (=r28-synthesis §R28-5=)        | R27-N9 + R28-U1|    3 | YES         |
+| 7 | Dispatcher-level per-handle spend filter      | =org-llm budget --per-handle= live cap               | R27 K11 8.6× cap break (=r27-providers §5=)| R27-N13      |     3 | YES         |
+| 8 | =org-llm doctor --providers= deny-list audit  | Honors [Never include Groq] across rounds + restarts | R28-3 strict 0 (=r28-synthesis §R28-3=)    | R27-N14      |     1 | YES         |
+| 9 | Round-fork path-pointer audit (operator-only) | Round-fork tooling honors memory rule literally      | R27 PROVIDER_PINS missed (=r27-providers §A2=) | (memory rule) | 1  | YES         |
+| 10| K8 default + K6 quality-tier router rewrite   | =specialist.py= + =cli.py= =--model= defaults; verb-class routing | R28 G1 (=r28-synthesis §G1=)         | R28-R1 + R28-R2|    3 | YES (immediate per G1) |
+| 11| Trap-on-EXIT + GPU-fallback chain (helpers)   | =org-llm warm/pod/run= ship with trap; transparent recovery | R27 4 leaked pods (=r27-providers §4=) | R27-N7 + R27-N15 |    4 | YES         |
+| 12| K20 BK + small-atomic restriction (allowlist) | =K20_TASK_ALLOWLIST= literal in dispatch             | R28 G4 nuance (=r28-quality-judge §5=)     | R28-F1 + R28-R6|    2 | YES         |
+
+** 3b — Phase candidates for roadmap.org (new rows or sub-phases)
+
+These productionalizations cluster into 5 best-fit phases (one
+existing, four proposed). Per [Phase references include name].
+
+| Phase                                             | Pick(s) included                            | Notes                          |
+|---------------------------------------------------+---------------------------------------------+--------------------------------|
+| Phase 2026-05.20 — sync verb POC                  | #3 =/critic-this= verb POC                  | already in roadmap; R29 lands  |
+| Phase 2026-05.21 — watchdog primitive (proposed)  | #1 watchdog + heartbeat                     | new row; cuts across many verbs|
+| Phase 2026-05.22 — doctor verb expansion (proposed)| #4 doctor --slugs/--resources/--providers + #8 deny-list audit | new row     |
+| Phase 2026-05.23 — status-buffer per-task lens (proposed)| #2 per-task slicing + #6 in-flight/wall-capped flags | new row     |
+| Phase 2026-05.24 — agent cancel/budget UX (proposed)| #5 worker-cancel Stop button + #7 spend filter | new row                       |
+| Phase 2026-05.25 — routing-default rewrite + DEC-007 update (proposed) | #10 K8/K6 routing rewrite       | DEC + cloud catalog edit       |
+
+* 4 — Findings NOT ready to ship — and why
+
+*Summary.* Five things that look promising but do not yet pass the
+bar. Each is an honest discount: the round saw the signal but the
+evidence depth is insufficient OR the gating fix is missing.
+
+*Expanded.* Per [Three quality gates] each row says where it falls
+short. Per [Lean assess + iterate] each has a /smallest-reading-of-
+symptom/ next probe rather than a "bigger experiment." This list is
+not a "skip" list — it's a "ship-after" list.
+
+| #  | Finding                                            | Why not ready                                                            | Gate                       | Cite                       |
+|----+----------------------------------------------------+--------------------------------------------------------------------------+----------------------------+----------------------------|
+| N1 | K6 beats K5-Claude as routing default              | Headline mean partly artifact of BK destructive-shortcut (verifier blind spot) | R29-16 BK preservation gate + R29-9 expanded probe | =r28-quality-judge §6= |
+| N2 | K5-Claude removed from default cloud catalog       | K5 fab=4 is one cell config artifact (no read_file), not a model failing | R29-17 K5 sentinel tool-surface + R29-9 fresh evidence | =r28-quality-judge §7=  |
+| N3 | K20 v1 self-host as default route                  | Task-shape too narrow (B1 wiki_edit triggers 16-iter tool-loop @ ~25s/iter) | R29-15 BK + small-atomic allowlist (deferred-default) | =r28-quality-judge §5= |
+| N4 | =/train-lora= verb POC                              | Needs R29-13 corpus prep AND R30 train run                              | Phase 2026-XX.XX — LoRA self-train (not yet scheduled) | =r29-design P2=      |
+| N5 | K1 mean regression as model-level claim            | Per-task slice shows ~60% real B1 regression, ~40% task-mix; needs prompt-shape audit | R29-14 B1 prompt audit | =r28-quality-judge §3=    |
+| N6 | Modal-Kimi as default Kimi route                   | =serve_kimi.py= source missing from repo + git; reconstruction multi-day | R30 reconstruction OR port-to-RunPod | =r29-design §P-3=        |
+| N7 | K2 in default agent roster                          | +0.25 mean over K1 at 24× cost; not worth default                        | (deferred — opt-in only)  | =r28-synthesis §G3=        |
+
+* 5 — Process tuning — make rounds yield more app-shippable findings
+
+*Summary.* Eight concrete process changes. Six are harness-mechanical
+(slicing, gates, anomaly-checks, app-surface columns); two are doc-
+discipline (mapping doc canonicalization, round retro grading).
+
+*Expanded.* The arc shows a 13-round pattern: each round emits a
+finding-shape that the /next/ round productizes. The lag is the cost.
+These tuning items collapse the lag.
+
+** 5a — Harness-mechanical tuning
+
+| # | Change                                                                                  | Why now                                                                              | Status             |
+|---+-----------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+--------------------|
+| T1| Per-task slicing as default in dial leaderboard output                                  | G5 strengthened (R28); K1 regression hidden by aggregate; memory rule already exists | R29-10 P1 (lands)  |
+| T2| Verifier preservation gates baked into =score_cell()=                                   | BK destructive shortcut (K6 270-line delete); R28 §6                                 | R29-16 P0 (lands)  |
+| T3| 1-cell-anomaly check before publishing variant-level claims                             | K5 fab=4 was 1 cell, not 4; synthesis published variant-level                        | New rule; needed   |
+| T4| Pre-round "what would this round teach us?" framing                                     | Round retro grades whether the learning landed                                        | New ritual; design |
+| T5| Round design template requires "app-surface impact" column on every P0/P1 item          | [Productionalize harness into app] memory rule needs harness teeth                   | Adopt for R30+     |
+| T6| Stage-budget calibration P95 + 25% margin (not P50)                                     | CAT 3 K20 budget at edge in R28                                                      | R28 retro pattern  |
+
+** 5b — Doc-discipline tuning
+
+| # | Change                                                                                  | Why now                                                                              | Status             |
+|---+-----------------------------------------------------------------------------------------+--------------------------------------------------------------------------------------+--------------------|
+| T7| Bench-to-app mapping is now multi-round; promote to its own canonical doc               | R27 + R28 appendices live inside =r27-bench-to-app-mapping=; will not scale to R30+  | Propose + execute  |
+| T8| Round retro grades the prior round's "what would this round teach us?" prediction       | [Log all events + retro per cycle]; closes the learning-loop                          | New ritual         |
+
+** 5c — Pre-round "what will this round teach us?" template
+
+Adopt for R29+: every round design opens with a 4-row table:
+
+| Question                                          | Round's answer plan                          | Confidence |
+|---------------------------------------------------+----------------------------------------------+------------|
+| (1) What's the headline question?                 | (test type + cells + bar)                     | (40-90%)   |
+| (2) What's the smallest-reading-of-symptom probe? | (1-cell or mini-A/B variant)                  | (40-90%)   |
+| (3) What's the app-surface impact if YES?         | (verb / surface / phase)                      | (BENCH/APP)|
+| (4) What's the app-surface impact if NO?          | (next-round design implication)               | (n/a)      |
+
+Round retro then grades: did the round actually answer (1)? Did the
+smallest probe (2) gate the larger work? Did the app-surface (3/4)
+land or did the team forget about it?
+
+* 6 — Throughline themes (R15→R28 progression)
+
+*Summary.* Five meta-narratives describing how the framing shifted
+across the arc. Each is a sentence-level reframe; the bench's design
+language followed each shift.
+
+*Expanded.* These are the cross-round threads worth pulling on in
+documentation, README updates, and onboarding for future operators.
+
+| # | Throughline                                                                       | Inflection round | Cite                                |
+|---+-----------------------------------------------------------------------------------+------------------+-------------------------------------|
+| 1 | "FOSS catches Claude on cost" → "FOSS crosses Claude on quality"                  | R28 (K6 vs K5)   | =r28-pareto §K6=                    |
+| 2 | "Test models" → "test routing strategies" → "test harness primitives"             | R18→R25→R28      | =r25-synthesis= + =r28-synthesis G6=|
+| 3 | "Bench produces numbers" → "bench produces shippable patterns"                    | R27              | =r27-bench-to-app-mapping=          |
+| 4 | "Operator polls + prays" → "operator alerted via watchdog"                        | R28              | =r28-synthesis §G6=                 |
+| 5 | "Aggregate scoring is the truth" → "per-task slicing is the truth"                | R28              | =r28-quality-judge §3=              |
+| 6 | "Verifier is neutral" → "verifier has blind spots; harden alongside model"        | R24 bug → R28 §6 | =r24-synthesis bug 1= + =r28-q-judge §6= |
+| 7 | "K1 is the FOSS frontier" → "K1 is one tier among 4 (K20 floor, K1 budget, K8 volume, K6 quality)" | R28 | =r28-pareto frontier=         |
+
+* 7 — Recommendations for R29-R33 arc
+
+*Summary.* Five recommendations for the next 5 rounds. Top-line: keep
+running the bench /but/ shift weight off "more rounds" and onto
+"productize what we already learned." A bench-step-away point lives
+between R31 and R32: when the next round's marginal learning < the
+already-shippable backlog's marginal value, ship.
+
+*Expanded.* Per [Lean assess + iterate] the next 5 rounds should look
+smaller, not bigger. R29 is the right size already (~200 cells, $8-15);
+R30 should mirror; R31 the K20 v2 retrain validation; R32 a
+productization sprint with one verification probe; R33 a pure ship-
+sprint OR (more likely) the bench winds down to "as-needed" mode while
+the app integrates.
+
+** 7a — Per-round recommendations
+
+| Round | Theme                                                       | Cells / $    | Bench-step-away signal       |
+|-------+-------------------------------------------------------------+--------------+------------------------------|
+| R29   | Capability + correctness (verifier hardening + critic verb) | ~200 / $8-15 | Already designed             |
+| R30   | K20 v2 train run + per-handle LoRA U7 first cuts            | ~200 / $15-25| Train spend dominates        |
+| R31   | K20 v2 in-band validation + post-hardening K5/K6 expanded   | ~200 / $10-15| Verifier-honest claims land  |
+| R32   | Productization sprint (top R28-derived items lands as Phase 2026-05.21-25 work) | ~50 / $5 | Ship > bench |
+| R33   | "Bench-as-app-fixture" — bench reduces to CI canary mode    | <50 / $2     | Step away from bench cadence |
+
+** 7b — When to step away from the bench
+
+The arc earns the right to step away when /at least 3/ of these hold:
+
+| Signal                                                                | R28 status      |
+|-----------------------------------------------------------------------+-----------------|
+| (a) Top 12 productization picks all have phase rows in roadmap.org    | NOT YET (5 propose-rows pending) |
+| (b) FOSS crosses Claude on quality with verifier-honest evidence       | NEAR (R29-16 hardens)            |
+| (c) Watchdog/preflight/cancel primitives ship as user-facing surfaces | NOT YET (this doc's recommendation) |
+| (d) Per-task slicing is the default lens in user-facing leaderboard   | NOT YET (R28-U2 not landed)      |
+| (e) Bench infra is in CI / nightly cadence, not eng-driven sweeps     | NOT YET                          |
+| (f) Three rounds in a row produce only confirmation, not new findings  | NO (R28 produced K6 + watchdog)  |
+
+R32-R33 is the realistic step-away window. If R29 + R30 land their
+phase-row commitments and R31 is K6 quality survives the preservation
+gate, R32 becomes a legitimate "ship more, bench less" round.
+
+** 7c — One-line decision rule for round-vs-ship
+
+If the next planned round's top hypothesis is "we already know this is
+true; we're confirming for app-confidence" — *ship the app surface
+first, then run a 50-cell confirmation probe* (T-7 type per
+=perf-testing-roadmap §test types catalog=), not a 200-cell full round.
+
+* 8 — Self-check
+
+*Summary.* Verify all 8 sections present + cited.
+
+*Expanded.*
+
+| # | Required section                                                         | Status |
+|---+--------------------------------------------------------------------------+--------|
+| 1 | Summary + Expanded leads (Rule 2b)                                       | YES — every section starts =*Summary.*= + =*Expanded.*= |
+| 2 | Cumulative accomplishments (R15-R28) — quality + process + chronology    | §1 (1a quality, 1b process, 1c per-round)              |
+| 3 | Strategic insights crystallized (R15→R28; 11 insights with first-seen)    | §2 (I1-I11)                                            |
+| 4 | Findings ready to ship into org-llm proper (8-12 items prioritized)      | §3a (12 picks) + §3b (5 phase rows)                    |
+| 5 | Findings NOT ready to ship — and why                                     | §4 (N1-N7)                                             |
+| 6 | Process tuning — concrete proposals                                      | §5 (T1-T8 + 5c template)                               |
+| 7 | Throughline themes (R15→R28 meta-narrative)                              | §6 (7 throughlines)                                    |
+| 8 | Recommendations for R29-R33 arc + step-away signal                        | §7 (7a-c)                                              |
+| 9 | Self-check                                                                | this section                                           |
+| 10| Cross-references                                                          | §10 (below)                                            |
+| C1| Hard cap 600 lines                                                       | targeted; this doc reads ~530-560                      |
+| C2| 12h AM/PM EST                                                             | YES (no time-of-day claims that need format)            |
+| C3| FOSS-only language; Claude only as comparator                             | YES (K5 cited as sentinel/comparator throughout)        |
+| C4| Phase references include short name                                       | YES (Phase 2026-05.20 — sync verb POC etc.)            |
+| C5| Tables not prose for multi-row data                                       | YES                                                     |
+| C6| Cite specific R-numbers + scour-doc § for every claim                     | YES (each row in §1-§4 cites R-cite)                   |
+| C7| [Productionalize harness into app] productionalization is the throughline | YES — pulled across §3, §5, §6, §7                     |
+| C8| [Three quality gates] every shipped-into-app proposal checked             | YES — column "Gates pass?" on §3a; §4 says where they fail |
+| C9| No code edits, no commits                                                 | YES — doc-only                                          |
+
+* 9 — Open questions (deferred to future operators)
+
+*Summary.* Three open questions the stock-taking surfaces but does not
+resolve. Each is a /candidate next-doc/, not a R29+ blocker.
+
+*Expanded.*
+
+| # | Question                                                                          | Why deferred                                                                |
+|---+-----------------------------------------------------------------------------------+-----------------------------------------------------------------------------|
+| 1 | Should bench-to-app mapping move to its own canonical doc (T7)?                   | Answer is "yes by R30"; needs migration plan + redirect from R27 appendices |
+| 2 | What's the right CI-canary cadence for "as-needed" bench mode (§7c)?              | Needs harness re-shape (smaller, faster, verifier-only); R31+ design         |
+| 3 | Can pre-round "what would this round teach us?" be a hooked harness rule (§5c)?   | Could be a Doom binding or a launcher-script gate; needs design probe        |
+
+* 10 — Cross-references
+
+*Summary.* Every cite used in this doc, grouped by source-cluster.
+
+*Expanded.* Per [Re-read before edits] all paths verified at compose
+time on 2026-05-09.
+
+** 10a — Source docs read in full
+
+- =docs/wiki/2026-05-09-perf-testing-roadmap.org= — chronological R13-R27 + R28-R33 plan; test catalog T-1..T-12
+- =docs/wiki/2026-05-08-r27-bench-to-app-mapping.org= — productization mapping pattern (104 items, 86% R27-derived app-touching)
+- =docs/wiki/2026-05-09-r28-synthesis.org= — Captain's call + G1-G6 strategic guidance
+- =docs/wiki/2026-05-09-r28-quality-judge.org= — per-task slicing, K20 wall-cap, K6 BK shortcut, K5 fab cell
+- =docs/wiki/2026-05-09-r28-pareto.org= — frontier shape (K20 floor, K6 quality leader, K5 dominated)
+- =docs/wiki/2026-05-09-r29-design.org= — capability + correctness round design
+- =docs/wiki/roadmap.org= — Phase 2026-05.* phase rows + naming
+- =docs/wiki/2026-05-08-r18-synthesis.org= — early-arc baseline (worktree races, S1-S4 catalog)
+- =docs/wiki/2026-05-08-r24-synthesis.org= — mid-arc (quality_lint FP fix, BK target_files bug)
+- =docs/wiki/2026-05-08-r26-synthesis.org= — pre-R27 (K1 dispatch falsification root-cause)
+
+** 10b — Per-round retros referenced
+
+- =docs/wiki/2026-05-08-r15-r23-grand-synthesis.org= — R15-R23 cross-round
+- =docs/wiki/2026-05-08-r17-synthesis.org=, =r18-synthesis.org=, =r24-synthesis.org=, =r25-synthesis.org=, =r26-synthesis.org=
+- =docs/wiki/2026-05-09-r27-{synthesis,quality-judge,walltime,providers,pareto}.org=
+- =docs/wiki/2026-05-09-r28-{synthesis,quality-judge,walltime,providers,pareto}.org=
+
+** 10c — Memory rules invoked
+
+- [Productionalize harness into app] — central throughline §3, §5, §6, §7
+- [Three quality gates] — applied in §3a column + §4 explanation
+- [Wiki entries: summary + expanded] Rule 2b — every section
+- [Phase references include name] — every phase ref names + numbers
+- [All times in EST + 12h AM/PM] — applied
+- [FOSS models only] — K5 sentinel/comparator only
+- [Tables not prose] / [Condense long outputs] — applied throughout
+- [Log all events + retro per cycle] — process tuning §5b T8 directly invokes
+- [Re-read before edits] — applied at compose time
+- [Round-fork path-pointer + variant-list audit] — invoked in §3a row 9
+- [Lean assess + iterate] — invoked §7 (smaller R29-R33; one-line decision rule)
+- [Dev artifacts as app candidates] — applied across §3a + §3b
+
+** 10d — Code anchors (referenced, not edited)
+
+- =scripts/_round{18,24,26,27,28}_dials.py= — per-round forks anchor
+- =scripts/_round28_dials_artifacts/= — R28 leaderboard + cell_replay
+- =scripts/_r28_watchdog.sh= — watchdog primitive prototype (informs §3a #1)
+- =scripts/_k20_runpod_resume.py= — GPU-fallback chain primitive (informs §3a #11)
+- =scripts/_k20_pod_scavenger.py= — multi-pod harness (R28 P1-9 productionalized)
+- =org_llm/specialist.py= — dispatch surface (R26 falsification + R27 fix anchor)
+- =scripts/quality_lint.py= — R24 bug-fix anchor; R29-16 preservation-gate target
+
+** 10e — Phase rows referenced
+
+- Phase 2026-05.20 — sync verb POC (existing)
+- Phase 2026-05.21 — watchdog primitive (PROPOSED in this doc §3b)
+- Phase 2026-05.22 — doctor verb expansion (PROPOSED)
+- Phase 2026-05.23 — status-buffer per-task lens (PROPOSED)
+- Phase 2026-05.24 — agent cancel/budget UX (PROPOSED)
+- Phase 2026-05.25 — routing-default rewrite + DEC-007 update (PROPOSED)
+- Phase 2026-XX.XX — LoRA self-train (NOT YET SCHEDULED; gates =/train-lora=)

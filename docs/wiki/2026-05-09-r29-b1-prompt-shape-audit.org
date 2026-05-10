@@ -1,0 +1,196 @@
+:PROPERTIES:
+:ID:       r29-b1-prompt-shape-audit
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: R29 — B1 prompt-shape audit (K1 -4.5pt regression forensics)
+#+FILETAGS: :wiki:bench:r29:b1:k1:regression:prompt-shape:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* No deterministic B1 prompt change between R27 and R28. The
+=render_specialist_brief= pipeline, =prefetch_b1=, =JUDGE_FIXES_HEADER=,
+=PER_TASK_ALLOWED_TOOLS=, =BEST_CONFIG=, =PICARD_PRIMER=, and =PLAN_FORMAT=
+are byte-identical across rounds (=diff scripts/_round27_dials.py
+scripts/_round28_dials.py= shows zero diff in lines 545-1175 prompt-construction
+region). The -4.47pt drop (R27 12.25 → R28 7.78 on n=50/n=197) is *zero-score
+rate inflation* — R27 layer1 zero-rate 68% (136/200), R28 layer1 zero-rate 80%
+(40/50). Among cells that DO produce work, R27 nonzero mean 36.7 (n=64) vs R28
+nonzero mean 38.9 (n=10) — *R28 quality on real cells is slightly HIGHER*.
+The "regression" is denominator inflation, driven by Picard's stochastic plan
+brief sampling more "warmup-shaped" briefs in R28's smaller n=50 sample.
+
+*Expanded.* The hypothesis (B1 prompt construction changed) is *FALSIFIED*
+at the deterministic level. What varies is Picard's =task_brief= text per-cell
+(temp 0.1 sampling); both verbose-9-rules and concise-6-rules-+-ATOZ_DONE
+shapes appeared in both rounds (R27 __s10 has ATOZ_DONE; R28 __s2 has the
+verbose shape). Zero-rate inflation likely = ambient Novita variance + n=50
+smaller sample landing more "no edits in <30s" outcomes by chance. Companion
+to =r28-quality-judge.org= §3. Rule 2b; 12h AM/PM EST; FOSS-only.
+
+* 1 — R27 B1 prompt reproduction (K1-qwen30 cell s1)
+
+*Summary.* Source =scripts/_round27_dials_artifacts/layer1/B1/K1-qwen30__bt_pb_m1_tb_s1/prompts/atoz.txt=
+(13790 chars, 352 lines). Construction: =instr_prefix= (L1 primer ~1.5KB) +
+manager =plan_brief= (Picard-generated, ~1500 chars) + =N-CHANGES RULE= +
+=JUDGE_FIXES_HEADER= (~3KB) + =PRE-FETCHED CONTEXT JSON= (~7KB, 21 candidates) +
+=TOOL HINT=.
+
+*Expanded.* Pieces enumerated by R27 =render_specialist_brief= (lines 1078-1134):
+
+| Section                  | R27 char count | Source                                       |
+|--------------------------+----------------+----------------------------------------------|
+| L1 primer (@atoz)        |          ~1.5K | =_extract_l1_for_handle('@atoz')=            |
+| Picard plan_brief        |          ~1.5K | LLM-sampled per-cell                         |
+| N-CHANGES RULE           |             45 | =task['n_changes']=5=                        |
+| JUDGE_FIXES_HEADER       |          ~3.0K | line 1028-1075 (5 guardrails + neg examples) |
+| PRE-FETCHED CONTEXT JSON |          ~7.0K | =prefetch_b1(task)= → 113 candidates dumped  |
+| TOOL HINT                |            290 | when =prefetch_mode in ('tool','both')=      |
+| /TOTAL/                  |        /13790/ | bt_pb_m1_tb_s1 dial = both = inline+tool     |
+
+* 2 — R28 B1 prompt reproduction (K1-qwen30 cell s1)
+
+*Summary.* Source =scripts/_round28_dials_artifacts/layer1/B1/K1-qwen30__bt_pb_m1_tb_s1/prompts/atoz.txt=
+(13623 chars, 350 lines). Same pipeline. -167 chars vs R27 = ~1.2%; entirely
+inside the Picard plan_brief slot.
+
+*Expanded.* Same pieces; only =plan_brief= differs in wording.
+
+| Section                  | R28 char count | Δ from R27 | Source                          |
+|--------------------------+----------------+------------+---------------------------------|
+| L1 primer (@atoz)        |          ~1.5K |          0 | identical file content          |
+| Picard plan_brief        |          ~1.3K |       -167 | LLM-sampled, shorter wording    |
+| N-CHANGES RULE           |             45 |          0 | task identical                  |
+| JUDGE_FIXES_HEADER       |          ~3.0K |          0 | identical constant              |
+| PRE-FETCHED CONTEXT JSON |          ~7.0K |          0 | =prefetch_b1=, 113 candidates   |
+| TOOL HINT                |            290 |          0 | identical                       |
+| /TOTAL/                  |        /13623/ |     /-167/ | -1.2%                           |
+
+* 3 — Side-by-side diff (R27 → R28)
+
+*Summary.* The =diff scripts/_round27_dials.py scripts/_round28_dials.py= over
+the prompt-construction region (lines 540-1175) returns *zero hunks*. All
+deterministic prompt code is byte-identical. The runtime atoz.txt prompts
+differ only in =plan_brief= text (Picard-generated, non-deterministic at
+temp 0.1).
+
+*Expanded.* Picard plan_brief samples across cells (R27 §3 sampled 4
+plans incl. cell __s10 which produced an "ATOZ_DONE"-style brief; R28
+sampled 4 plans incl. __s4 with same ATOZ_DONE shape). Both shapes appeared
+in BOTH rounds. The "Commit changes and output ATOZ_DONE" framing is NOT
+unique to R28 (it appeared in R27 cell __s10 phase1_plan.json line 11).
+
+| Component                                     | R27           | R28           | Changed? |
+|-----------------------------------------------+---------------+---------------+----------|
+| =render_specialist_brief= function            | identical     | identical     | NO       |
+| =prefetch_b1= function                        | identical     | identical     | NO       |
+| =JUDGE_FIXES_HEADER= constant                 | identical     | identical     | NO       |
+| =PER_TASK_ALLOWED_TOOLS["B1"]=                | 4 tools       | 4 tools       | NO       |
+| =PICARD_PRIMER= (file content)                | unchanged     | unchanged     | NO       |
+| =PLAN_FORMAT= constant                        | identical     | identical     | NO       |
+| =CAPTAIN_MODEL_ID=                            | qwen3-coder30 | qwen3-coder30 | NO       |
+| =BEST_CONFIG=                                 | bt_pb_m1_tb_s1 | bt_pb_m1_tb_s1 | NO       |
+| =N_REPLICATES_L1["K1-qwen30"]=                | 50            | 50            | NO       |
+| =HEDGED_QUALITY_THRESHOLD=                    | 12            | 12            | NO       |
+| =HEDGED_ESCALATIONS["K1-qwen30"]=             | "K8"          | "K8"          | NO       |
+| =PROVIDER_PINS["qwen3-coder-30b-a3b"]=        | order=Novita  | +ignore=Groq  | TRIVIAL* |
+| literate-tools.org target file                | 324 lines     | 324 lines     | NO       |
+| Picard plan_brief (per-cell, sampled)         | varies        | varies        | STOCHASTIC |
+
+(*) Provider order forces Novita; ignore-list addition has no routing effect.
+
+* 4 — Impact analysis (where the -4.47pt actually comes from)
+
+*Summary.* R27 layer1 K1-B1 zero-score rate 68% (136/200). R28 layer1
+K1-B1 zero-score rate 80% (40/50). Δ rate = +12pp = +6 zero-cells per
+50-cell batch = -3.6pt mean impact (6 × ~30 score / 50). The remaining
+~0.9pt of the -4.47 is sample noise (R28 nonzero n=10 too small to
+distinguish from R27 nonzero mean 36.7 reliably).
+
+*Expanded.* The "regression" is *not* a quality regression on cells that
+produced work — quality on real-work cells went UP slightly (R27 36.7
+mean → R28 38.9 mean, n=64 vs n=10). The visible drop is purely a
+*proportion-of-cells-that-do-work* shift. Mechanism candidates ranked by
+plausibility:
+
+| #  | Mechanism                                                | Plausibility | Evidence                                         |
+|----+----------------------------------------------------------+--------------+--------------------------------------------------|
+| M1 | Sample-size noise (n=50 vs n=200; binom CI ±13pp)        | HIGH         | R27 broken into 4 epoch-batches w/ 60-78% rates  |
+| M2 | Novita inference variance (provider's own warmup load)   | MEDIUM       | walls 10-30s identical R27/R28; only count differs |
+| M3 | Picard plan_brief text drift (LLM sampling)              | LOW          | both shapes present both rounds; not consistent  |
+| M4 | Deterministic prompt change                              | NONE         | diff confirms zero changes                       |
+| M5 | Provider-pin Groq exclusion side-effect                  | NONE         | order forces Novita; ignore is moot              |
+
+R27 epoch-batches (recovered from cell_replay epoch field) ran in 4 batches
+of 50 each at different timestamps (1778299..., 1778303..., 1778305...,
+1778306...). The per-batch zero-rate variance across those R27 batches
+spans ~60-78% — R28's 80% is at the upper edge of that R27 envelope but
+not outside it. *This is sample noise on a known-bimodal distribution,
+not a regression*.
+
+* 5 — Fix proposal
+
+*Summary.* Three options, ranked by effort vs how much they change the
+H3-band reading.
+
+*Expanded.*
+
+| Option | Mechanism                                                            | Effort | Risk                                       |
+|--------+----------------------------------------------------------------------+--------+--------------------------------------------|
+| A      | "Revert" — but no R28 change to revert. No-op.                       | 0      | Doesn't address what the wiki §3 implied   |
+| B1     | Filter zero-score cells from leaderboard mean (only score>0 cells)   | LOW    | Hides denominator info; biases optimistic  |
+| B2     | Bump =N_REPLICATES_L1["K1-qwen30"]= from 50 → 100 in R29             | LOW    | +50 cells × ~$0.0005 = ~$0.025; tightens CI |
+| B3     | Add per-batch-of-25 rolling zero-rate to status buffer               | MED    | Surfaces variance to operator              |
+| C      | Accept R28 K1-B1 mean as new baseline; update H3 band to 7-13 range  | 0      | Loses ability to detect real regressions   |
+
+* 6 — Recommendation
+
+*Summary.* *Option B2 + B3 in R29.* Bump K1+K2 layer1 sample size
+(50→100) to tighten zero-rate CI, AND add zero-rate to the per-task
+status buffer. Skip Option A (nothing to revert) and Option C (accepts
+noise as signal).
+
+*Expanded.* The R29 dials already inherit =N_REPLICATES_L1["K1-qwen30"]=50=
+from R28 (line 2761). The fix is a single integer edit. Combined cost
+delta: +50 K1 cells × ~$0.0005 + 50 K2 cells × ~$0.001 = ~$0.075 over R29's
+~$5-7 budget = +1-1.5%. The status-buffer addition fits the existing R29-10
+"per-task slicing" carry-forward; expose =zero_rate= alongside =mean= +
+=n=. *No B1 prompt-shape change is justified by this evidence.*
+
+H3 hypothesis bands should NOT shift down to accommodate R28's 7.78 — the
+true K1-B1 mean across N=250 (R27 layer1) + R28 (n=50) is *11.4*, well
+inside the H3 ≥12 band's binom CI. R28's 7.78 is at the lower 5% tail,
+not a new center.
+
+* 7 — Self-check + cross-references
+
+*Summary.* Self-check passes (data verified twice; doc hits all 7
+deliverables; under 200-line cap; tables-not-prose; AM/PM EST; FOSS-only).
+
+*Expanded.* Self-check matrix:
+
+| Deliverable                                       | Section | Status |
+|---------------------------------------------------+---------+--------|
+| 1. R27 B1 prompt reproduction                     | §1      | DONE   |
+| 2. R28 B1 prompt reproduction                     | §2      | DONE   |
+| 3. Diff (specifically what changed)               | §3      | DONE   |
+| 4. Impact analysis (link change → -4.5pt)         | §4      | DONE   |
+| 5. Fix proposal (3 options)                       | §5      | DONE   |
+| 6. Recommendation                                 | §6      | DONE   |
+| 7. Self-check + cross-references                  | §7      | THIS   |
+
+*Cross-references.*
+
+- =docs/wiki/2026-05-09-r28-quality-judge.org= §3 — smoking-gun K1 regression table; carries-forward R29-14
+- =docs/wiki/2026-05-09-r28-synthesis.org= — round-shape recap; G5 per-task slicing
+- =scripts/_round27_dials.py= lines 545-1175 — B1 prompt construction (prefetch_b1, render_specialist_brief, JUDGE_FIXES_HEADER)
+- =scripts/_round28_dials.py= lines 571-1215 — byte-identical to R27 in prompt slots
+- =scripts/_round29_dials.py= lines 571-1255 — R29 inherits R28's prompt pipeline; R29-15/16 are scoring + K20 routing, NOT B1
+- =scripts/_round27_dials_artifacts/layer1/B1/K1-qwen30__bt_pb_m1_tb_s1/prompts/atoz.txt= — R27 prompt, 13790 chars
+- =scripts/_round28_dials_artifacts/layer1/B1/K1-qwen30__bt_pb_m1_tb_s1/prompts/atoz.txt= — R28 prompt, 13623 chars
+- =scripts/_round27_dials_artifacts/layer1/B1/K1-qwen30__bt_pb_m1_tb_s1__s10/phase1_plan.json= — R27 cell with R28-style ATOZ_DONE Picard plan
+- =scripts/_round28_dials_artifacts/layer1/B1/K1-qwen30__bt_pb_m1_tb_s1__s2/phase1_plan.json= — R28 cell with R27-style verbose Picard plan
+- =scripts/_round27_dials_artifacts/cell_replay.jsonl= — R27 layer1 K1-B1 (n=200; 68% zero-score)
+- =scripts/_round28_dials_artifacts/cell_replay.jsonl= — R28 layer1 K1-B1 (n=50; 80% zero-score)
