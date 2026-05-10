@@ -1,0 +1,393 @@
+:PROPERTIES:
+:ID:       r29-design
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: R29 design — capability + correctness round (~200 cells, 8 small fixes + 1-2 narrow capability picks)
+#+FILETAGS: :wiki:bench:r29:design:inputs:capability:correctness:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* R29 is a /capability + correctness/ round — *not* another
+stability sprint like R28. R28's harness-stability work held (5/7
+strict P0 PASS + 2 honest-MIXED) so R29 can take more risk: ship 8-10
+small fixes from the R28 four-agent scour (synthesis + quality-judge
++ walltime + providers + pareto) AND begin one or two narrow
+capability picks (=/critic-this= verb POC for Phase 2026-05.20 — sync
+verb POC, K20 v2 retrain corpus prep). Projected ~200 cells, $8-15
+spend. Round-question: */do the post-scour fixes hold AND can we
+begin shipping capability without breaking the verifier?/*
+
+*Expanded.* R28 closed with G2 (K5 deprecation) tempered + G4 (K20
+retrain) constrained + G5 (per-task slicing) strengthened — three
+pieces of strategic guidance that gate R29's app-layer routing
+changes (R28-R1..R28-R6) on R29 ship of: (a) BK verifier preservation
+gate (R29-16); (b) K20 dispatcher restricted to BK + small-atomic
+families (R29-15); (c) K5-vs-K6 expanded probe post-hardening
+(R29-9); (d) K5 sentinel tool-surface fix (R29-17). Per [Wiki entries:
+summary + expanded] every section leads with =*Summary.*= +
+=*Expanded.*=. Per [All times in EST + 12h AM/PM] all times below 12h.
+Per [FOSS models only] K5-Claude is sentinel-pending-verification;
+never a routing target. Per [Phase references include name] all
+phases include name + number. Per [Productionalize harness into app]
+each R29 work-item that produces a user-facing surface is annotated
+with its bench-to-app-mapping ID (R28-F*/R28-N*/R28-U*/R28-R*).
+
+* R28 carry-forward — what R28 left unfixed
+
+*Summary.* The R29 P0 input list = 13 items emitted by the R28
+synthesis + scour reports. Eight small fixes need to ship (R29-1, -2,
+-11, -12, -14, -15, -16, -17 + R29-9 expanded probe gated on
+hardening); the rest defer to R30 by scope (Modal-Kimi reconstruction,
+full K20 v2 retrain, full app-side K5 deprecation post-evidence).
+
+*Expanded.* Source column cites the scour report + section. Severity
+≥ MED is R29-blocking; LOW/insurance items P1 or P2.
+
+| #      | Item                                                                          | Source                                | Sev  |
+|--------+-------------------------------------------------------------------------------+---------------------------------------+------|
+| R29-1  | Reasoning-mode disable audit across warmup/in-band/judge/critic               | synthesis surprise §"Kimi-reasoning"  | HIGH |
+| R29-2  | Bump =STAGE_BUDGET[CAT_3_K20_RESUME]= 480→600s (P95 + 25% margin)             | walltime §preflight (97.2% at edge)   | MED  |
+| R29-3  | K20-on-B1 long-context — *answered* (slow-iter, not HTTP 400); ROUTE-AROUND  | walltime §B1 forensics; synthesis G4  | n/a  |
+| R29-9  | K5-vs-K6 expanded head-to-head (gates R28-R3 K5-deprecation routing)          | synthesis §G2 + pareto §K5            | HIGH |
+| R29-10 | K1-by-task slice analysis default in =org-llm-status-buffer= (R28-U2)         | quality-judge §3; synthesis §G5       | MED  |
+| R29-11 | Per-cell heartbeat from harness cell-runner (no mid-cell visibility)          | walltime §heartbeat-gap               | HIGH |
+| R29-12 | Post-handoff =_r29_post_round_analysis.sh= round-fork                          | R28 launch-warning carryover          | MED  |
+| R29-13 | K20 v2 retrain *corpus prep* (R26-R28 wins; full retrain → R30)               | synthesis §G4; pareto §K20            | MED  |
+| R29-14 | B1 prompt-shape audit — why K1 B1 went 12.25 → 7.78 R27→R28                   | quality-judge §3 K1 regression        | HIGH |
+| R29-15 | K20 dispatcher restrict to BK + small-atomic only (drop B1/B5/B20 wiki_edit)  | quality-judge §5; synthesis §G4       | HIGH |
+| R29-16 | BK verifier preservation gate (penalize destructive edits)                    | quality-judge §6 K6 destructive-shortcut | HIGH |
+| R29-17 | K5 sentinel tool-surface fix (=read_file= for ID-grounding tasks)             | quality-judge §7 K5 fab cell          | HIGH |
+| R29-P-1| Preflight CAT 3 provider-aware (probe RunPod when harness uses it)            | providers §7 CAT 3 false-positive     | MED  |
+| R29-P-3| Modal-Kimi reconstruct OR port to RunPod-vLLM                                 | providers §8 dead-end                 | LOW  |
+| R29-P-4| K20 pod-liveness telemetry (log re-poll-fired even when 0)                    | providers §6 insurance                | LOW  |
+| R29-P-5| K2 broker ignore-list (Inceptron, Io Net) for tail-latency                    | providers §5 mini-A/B                 | LOW  |
+
+** Items deferred to R30 (per R28 strategic guidance + scope discipline)
+
+| #             | Item                                                          | Why R30                                                     |
+|---------------+---------------------------------------------------------------+-------------------------------------------------------------|
+| R29-7 / R29-8 | Modal =serve_kimi.py= reconstruction (full)                   | Source missing from repo + git; reconstruction is multi-day |
+| R29-13 (full) | K20 v2 *training run* (not just corpus prep)                  | Multi-day train + serve cycle; R30 with corpus from R29     |
+| R28-R3 (app)  | App-side K5 removal from default cloud catalog                | Gated on R29-9 expanded probe + R29-16 verifier hardening   |
+| R28-N2        | =/train-lora= verb POC (full)                                 | Phase 2026-XX.XX — LoRA self-train; needs R29-13 corpus     |
+
+* R29 round shape
+
+*Summary.* Capability + correctness — narrow scope on capability (one
+verb POC + one corpus-prep), broad scope on correctness fixes (8-10
+small ships from scour). ~200 cells, $8-15 spend, wall <60 min,
+single launcher invocation with 5 active variants + K2 opt-in.
+
+*Expanded.* Cell-budget breakdown: ~80 L1 (B1, B5, B7, B11) + ~60
+L_BK (BK1-BK15) + ~10 K20 in-band (BK + small-atomic ONLY per R29-15;
+no B1) + ~10 K5-claude sentinel (post-tool-surface-fix) + ~20
+K2-kimi-k2.6 opt-in cells (B25/B26 elisp where K2's family lives) +
+~10 K5-vs-K6 expanded probe (R29-9; gated on R29-16 verifier hardening
+landing first). No B1 K20 cells = no 6×400s wall-cap waste.
+
+| Dimension                | R28 actual            | R29 target              |
+|--------------------------+-----------------------+-------------------------|
+| Cells                    | 237                   | ~200 (capability scope) |
+| Wall (harness, min)      | 45:07                 | <60 min                 |
+| Spend                    | $5.74                 | $8-15                   |
+| Variants active          | 5 (K2 dropped)        | 5 + K2 opt-in (6)       |
+| Strategies               | S1, S2                | S1, S2 + S3 critic POC  |
+| New tasks                | 0 vs R27              | 0 vs R28                |
+| Layers                   | L1, L2, BK + L3 dials | L1, L2, BK (no L3 ablation) |
+| Capability picks         | 0                     | 1-2 (R29-6 + R29-13a)   |
+
+* R29 engineering tasks
+
+*Summary.* P0 = the 8-10 must-ship items (correctness + critical
+hardening). P1 = 1-2 narrow capability picks (R29-6 critic verb POC,
+R29-13a corpus prep). P2 = explicit deferrals to R30. Hours assume
+single-operator AM/PM EST work; cost only when external spend.
+
+*Expanded.* Each P0 row maps to a scour-report finding (Source) and,
+where applicable, the bench-to-app-mapping productization ID
+(B-to-A) per [Productionalize harness into app] memory rule.
+
+** P0 — R29 must-ship (correctness + hardening)
+
+| ID    | Item                                                                          | Hours | $    | Source                          | B-to-A      |
+|-------+-------------------------------------------------------------------------------+-------+------+---------------------------------+-------------|
+| R29-1 | Reasoning-mode disable audit + single-source-of-truth =DISABLE_REASONING= set |     2 | $0   | synthesis §Kimi-reasoning       | R28-F2      |
+| R29-2 | Bump =STAGE_BUDGET[CAT_3_K20_RESUME]= 480→600s (25% margin over 486s observed)|   0.5 | $0   | walltime §preflight             | R28-F5      |
+| R29-11| Per-cell heartbeat from harness cell-runner (30s cadence; modeline cookie)    |     4 | $0   | walltime §heartbeat-gap         | R28-N3 + U3 |
+| R29-12| Post-handoff =_r29_post_round_analysis.sh= round-fork from R28 equiv          |     1 | $0   | R28 launch-warning              | —           |
+| R29-14| B1 prompt-shape audit — diff R27 vs R28 prompt + scoring rubric              |     2 | $0   | quality-judge §3                | R28-U2      |
+| R29-15| K20 dispatcher restrict to BK + small-atomic (=K20_TASK_ALLOWLIST= literal)   |     2 | $0   | quality-judge §5; synthesis §G4 | R28-F1 + R6 |
+| R29-16| BK verifier preservation gate (=diff.deletions ≤ 50%= AND marker presence)    |     4 | $0   | quality-judge §6                | (verifier)  |
+| R29-17| K5 sentinel tool-surface fix — give =read_file= for ID-grounding tasks        |     2 | $0   | quality-judge §7                | (config)    |
+| R29-9 | K5-vs-K6 expanded probe (B5/B11/B25/B26 + 5 BK at N=10) — *post-hardening*    |     1 | $1   | synthesis §G2; pareto §K5       | gates R28-R3|
+
+Total R29-P0: *~18.5 h eng + ~$1 compute*. R29-9 fires AFTER R29-16
+verifier hardening lands; otherwise it just re-confirms the R28
+artifact (K6 BK destructive shortcut).
+
+** P1 — narrow capability picks (parallelizable with P0)
+
+| ID     | Item                                                                          | Hours | $    | Source                          | B-to-A     |
+|--------+-------------------------------------------------------------------------------+-------+------+---------------------------------+------------|
+| R29-6  | =/critic-this= verb POC (Phase 2026-05.20 — sync verb POC); K20-as-critic     |  8-15 | $0.50| pareto §K20; synthesis §end     | R28-N1     |
+| R29-13a| K20 v2 retrain *corpus prep* (extract R26-R28 wins; *no train run yet*)       |     6 | $0   | synthesis §G4; pareto §K20      | R28-N2 (prep)|
+| R29-10 | K1-by-task slice analysis → status-buffer default view                        |     4 | $0   | synthesis §G5; quality-judge §3 | R28-U2     |
+| R29-P-1| Preflight CAT 3 provider-aware probe (RunPod path when harness uses it)       |     3 | $0   | providers §7                    | R28-F3     |
+
+Total R29-P1: *~21-28 h eng + ~$0.50 compute*. The capability picks
+(R29-6 + R29-13a) are the *narrow* picks; R29-10 + R29-P-1 are
+correctness-adjacent and can fall to R30 if scope tightens.
+
+** P2 — explicitly deferred to R30
+
+| ID            | Item                                                          | Why R30                                                     |
+|---------------+---------------------------------------------------------------+-------------------------------------------------------------|
+| R29-7 / R29-8 | Modal =serve_kimi.py= reconstruction (full)                   | Source missing from repo + git; multi-day reconstruction    |
+| R29-13b       | K20 v2 *training run* (not just corpus prep)                  | Multi-day train + serve cycle; R30 with R29 corpus          |
+| R28-R3 (app)  | App-side K5 removal from default cloud catalog                | Gated on R29-9 evidence + R29-16 verifier hardening landing  |
+| R28-N2 (verb) | =/train-lora= verb POC (full)                                 | Phase 2026-XX.XX — LoRA self-train; needs R29-13b train run |
+| R29-P-3       | Modal-Kimi reconstruction OR port-to-RunPod-vLLM              | OR-routed K2 mini-A/B works; not blocking                   |
+| R29-P-4       | K20 pod-liveness telemetry (re-poll-fired log even when 0)    | Insurance only; R28 path never fired the re-poll            |
+| R29-P-5       | K2 broker ignore-list                                         | OR-routed; mini-A/B already routed around tail brokers      |
+
+* Test types used in R29
+
+*Summary.* R29 uses *T-1 (in-band round)*, *T-7 (vs-Claude probe re-run
+post-slug-fix + post-hardening)*, *T-8 (daemon battery)*, *T-9 (pre-
+test smokes)*, and *T-12 (capability sweep)* — adds T-7 + T-12
+relative to R28 because R29 is capability + correctness, not pure
+verification. T-11 (S3 critic probe) deferred to R29-6 verb POC
+itself, not as a separate test type. Test catalog defined in
+=docs/wiki/2026-05-09-perf-testing-roadmap.org §T-1..T-12=.
+
+*Expanded.* Each test type below cites the perf-roadmap row verbatim.
+R29 inherits R28's bar-text per type with one tightening: T-7 K5-vs-
+K6 expanded probe gates R28-R3 K5 deprecation routing change.
+
+| ID   | Test type                  | R29 use                                                  | Bar (perf-roadmap)            |
+|------+----------------------------+----------------------------------------------------------+-------------------------------|
+| T-1  | In-band round              | ~200-cell capability + correctness round                 | hypothesis-conf ≥ verdict-acc |
+| T-7  | Vs-Claude suite            | K5-vs-K6 expanded N=10 per task; post-hardening (R29-9)  | K6 lead survives preservation gate |
+| T-8  | Daemon battery (T1-T8)     | preflight gate; runs every round                         | 7/7 detector tests PASS       |
+| T-9  | Pre-test smokes (S0-S4)    | preflight gate; <30s wall                                | all S-tier rc=0; <60s wall    |
+| T-12 | Capability sweep           | post-fix smoke that R29-15..17 didn't regress chain      | composite of constituents     |
+
+*Test types NOT used* (deferred to R30+):
+
+- T-2 mini-A/B — covered by R29-9 expanded probe
+- T-3 agor mode probe — already passed R27/R28; not gating
+- T-4 BK probe — covered by T-1 BK layer slice
+- T-5 stress concurrency — already passed R27 (30/30 @ 3.76s avg)
+- T-6 long-context — already passed R27 (40/40 to 24k)
+- T-10 per-handle probe — R30+ (U7 LoRAs)
+- T-11 S3 critic probe — folded INTO R29-6 verb POC, not separate
+
+* Variants in R29
+
+*Summary.* R29 keeps R28's working subset + K2 reactivated (warmup-fix
+landed in R28; opt-in for B25/B26 elisp where K2's family lives).
+K20-foss-distill restricted to BK + small-atomic only (R29-15) — no
+B1 K20 cells = no 6×400s wall-cap waste. K5-claude-solo sentinel role
+preserved post-tool-surface-fix (R29-17); marked "deprecation-
+candidate-pending-verification" pending R29-9 + R29-16 evidence.
+
+*Expanded.* Per-variant role + R29 expectation. =Cells= column =
+projected R29 cell count. =Bar= column = R29 falsifiable expectation
+(full hypothesis row in =r29-hypothesis.org= when written).
+
+| Variant            | Role                                | Cells | $ proj | Bar (R29)                                  |
+|--------------------+-------------------------------------+-------+--------+--------------------------------------------|
+| K1-qwen30          | primary L1 + budget tier            |   ~50 |  $0.40 | mean ≥ 9 (R28 was 9.26; tolerate -1)       |
+| K8-deepseekV3      | workhorse L1 + BK                   |   ~70 |  $0.50 | mean ≥ 8 (R28 was 8.15; tolerate -1)       |
+| K6-llama70b        | quality tier + BK + R29-9 probe     |   ~30 |  $0.55 | BK mean drops modestly post-R29-16 hardening (no destruction shortcut); B1 mean ≥ 18 |
+| K20-foss-distill   | BK + small-atomic ONLY (R29-15)     |   ~10 |  $0.05 | ≥80% K20 cells score >0; *zero* B1 cells   |
+| K5-claude-solo     | sentinel-pending-verification       |   ~10 |  $2.00 | post-R29-17, fab=0 across 10 cells         |
+| K2-kimi-k2.6 opt-in| B25/B26 elisp opt-in (warmup-fixed) |   ~20 |  $0.50 | warmup ok=true; mean ≥ K1 mean (no regress)|
+| K5-vs-K6 probe (R29-9)| post-hardening expanded probe    |   ~10 |  $1.00 | gates R28-R3 routing change                |
+
+Total projected: *~200 cells, ~$5 baseline + ~$2 K5 sentinel + ~$1
+R29-9 probe + ~$0.50 K2 + ~$0.50 R29-6 verb POC + ~$1 margin = ~$8-12
+expected*. K20 spend collapses (~$0.05) because BK + small-atomic
+class = no 400s wall-cap waste.
+
+*K2 reactivation gate.* Warmup-fix landed in R28 commit chain
+(=_round28_dials.py:203-= =_WARMUP_REASONING_DISABLE=); R29 launch-
+checklist re-verifies K2 warmup =ok=True= before in-band cells fire.
+Per R29-1, the audit ensures warmup + in-band + judge + critic ALL
+share the disable list.
+
+* Cost envelope
+
+*Summary.* Projected total: *$8-15* (R28 baseline + capability picks +
+K5-vs-K6 expanded probe + K2 opt-in). Hard cap target $20 (well under
+R26-R27 ceiling). R29 spends more than R28 because capability work +
+expanded comparator probe; still under cap.
+
+*Expanded.* Two scenarios: A (clean — capability picks land; one
+launcher invocation) and B (R29-6 verb POC needs second-pass on
+K20-as-critic chain integration; round re-fires partial).
+
+** Scenario A — capability picks land first try
+
+| Bucket                                              | Subtotal     |
+|-----------------------------------------------------+--------------|
+| K1 + K6 + K8 baseline (~150 cells)                  | $1.50 - $2.50|
+| K20-foss-distill BK + small-atomic (10 cells)       | $0 - $0.05   |
+| K20 pod resume (already-running from R28 pattern)   | $0.10        |
+| K5-claude sentinel (10 cells, post-tool-surface)    | $2.00        |
+| K5-vs-K6 R29-9 expanded probe (~20 cells; 10 each)  | $1.00        |
+| K2-kimi-k2.6 opt-in (~20 cells, OR-routed)          | $0.50        |
+| R29-6 =/critic-this= verb POC capability cells       | $0.50        |
+| Pod cold-start margin (1 retry budget)              | $0.50        |
+| /Total Scenario A/                                  | *$6-9*       |
+
+** Scenario B — R29-6 verb POC needs second pass
+
+| Bucket                                              | Subtotal     |
+|-----------------------------------------------------+--------------|
+| Scenario A baseline                                 | $6-9         |
+| R29-6 verb POC re-fire + extra critic chain probes  | $3-5         |
+| /Total Scenario B/                                  | *$9-14*      |
+
+Both scenarios under $20 hard cap. R29 costs more than R28's $5.74
+because capability scope returns + expanded comparator + K2 opt-in
+re-engaged. Memory rule check: =ignore: ["Groq"]= verified at every
+PROVIDER_PINS entry per [Never include Groq]; no Claude routing
+target per [FOSS models only] — K5 is sentinel pending R29-9 +
+R29-16 evidence.
+
+* Self-check
+
+*Summary.* Verification that the prompt's required structure (1-9)
+landed and constraints held.
+
+*Expanded.*
+
+1. *Summary + Expanded leads everywhere?* YES — every section per
+   Rule 2b.
+2. *R28 carry-forward present (R29 P0 input list R29-1..R29-13 +
+   strategic guidance G1-G6 deferral notes)?* YES — §"R28 carry-
+   forward" lists 13 items + §"Items deferred to R30" lists
+   what R28 strategic guidance defers.
+3. *R29 round shape — capability + correctness, ~200 cells, not
+   stability sprint?* YES — §"R29 round shape" cites scope explicitly.
+4. *R29 P0 (8-10 must-ship items) covering R29-1, -2, -11, -12, -14,
+   -15, -16, -17, -9?* YES — table in §"P0 — R29 must-ship" rows 9
+   items, each with Source + B-to-A mapping.
+5. *P1 (1-2 narrow capability picks) — R29-6 critic verb POC AND/OR
+   R29-13a corpus prep?* YES — both present + R29-10 + R29-P-1
+   correctness-adjacent.
+6. *P2 explicit deferrals (Modal-Kimi → R30; full K20 v2 retrain →
+   R30; full app-side K5 deprecation → R30)?* YES — §"P2 — explicitly
+   deferred to R30" lists each with R30-rationale.
+7. *Test types USED referenced by ID from perf-testing-roadmap?* YES
+   — T-1, T-7, T-8, T-9, T-12 used (T-7 = vs-Claude re-run post-slug
+   + post-hardening); T-2/T-3/T-4/T-5/T-6/T-10/T-11 listed under
+   "NOT used" with R30+ destinations.
+8. *Variants in R29 — K1, K6, K8, K20-foss-distill (BK + small-
+   atomic only), K5-claude-solo (sentinel pending), K2-kimi-k2.6
+   opt-in?* YES — variant table with role + bar per variant.
+9. *Cost envelope $8-15?* YES — Scenario A $6-9, Scenario B $9-14,
+   both under $20 cap.
+10. *FOSS-only language?* YES — K5-claude marked sentinel pending;
+    Groq referenced only as deny-list literal target.
+11. *Phase references include name?* YES — "Phase 2026-05.20 — sync
+    verb POC", "Phase 2026-XX.XX — LoRA self-train" cited.
+12. *12h AM/PM EST?* YES — no UTC/PT/24h in user-facing text.
+13. *Tables not prose for multi-row data?* YES — every multi-row data
+    block in table form per [Condense long outputs].
+14. *400-line cap?* targeted; this doc reads ~360-380 lines.
+15. *No code edits, no commits?* YES — design doc only.
+16. *Bench-to-app-mapping IDs cited where relevant?* YES — R29-1
+    (R28-F2), R29-2 (R28-F5), R29-11 (R28-N3 + U3), R29-15 (R28-F1 +
+    R6), R29-14 (R28-U2), R29-6 (R28-N1), R29-13a (R28-N2 prep),
+    R29-10 (R28-U2), R29-P-1 (R28-F3), R29-9 (gates R28-R3) per
+    [Productionalize harness into app] memory rule.
+
+* Cross-references
+
+** Source docs (read in full to author this)
+
+- =docs/wiki/2026-05-09-r28-synthesis.org= §"Captain's call" +
+  §"R29 P0 input list" (R29-1..R29-13) + §"Strategic guidance G1-G6"
+  (G2 + G4 tempered post-scour; G5 strengthened)
+- =docs/wiki/2026-05-09-r28-quality-judge.org= §3 K1 B1 regression
+  (12.25 → 7.78), §5 K20-on-B1 slow-iter forensics, §6 K6 BK
+  destructive shortcut, §7 K5 fab = 1 cell config artifact
+- =docs/wiki/2026-05-09-r28-walltime.org= §"WALL_CAP enforcement"
+  (R28-1 PASS-strong 7/7 exact 400.0s), §"preflight stage timing"
+  (CAT 3 at 97.2% budget edge), §"per-cell heartbeat gap"
+- =docs/wiki/2026-05-09-r28-providers.org= §1 routing surfaces, §3
+  Groq strict-zero verification, §6 K20 RunPod 3m40s boot, §8
+  Modal-Kimi dead-end (=serve_kimi.py= source missing)
+- =docs/wiki/2026-05-09-r28-pareto.org= §"frontier shift" (3-seat
+  + zero-cost floor), §"K6 quality leadership" (tempered post-scour
+  per quality-judge §6), §"R28-R1..R6 routing implications"
+- =docs/wiki/2026-05-08-r27-bench-to-app-mapping.org= §"R28-derived
+  additions" — 12 productization candidates (R28-F1..F5 + R28-N1..N4
+  + R28-U1..U3) + 6 routing implications (R28-R1..R28-R6)
+- =docs/wiki/2026-05-09-perf-testing-roadmap.org= §T-1..T-12 — test
+  catalog (T-1, T-7, T-8, T-9, T-12 used in R29)
+- =docs/wiki/2026-05-09-r28-design.org= — *template* (this doc
+  matches its shape with capability section added)
+
+** Code that will change in R29
+
+- =org_llm/specialist.py= — R29-1 single-source-of-truth
+  =DISABLE_REASONING= set; R29-15 K20 task-allowlist; R29-17 K5
+  sentinel tool-surface
+- =scripts/_round29_dials.py= — round-fork from =_round28_dials.py=;
+  R29-2 stage budget bump; R29-11 per-cell heartbeat in cell-runner
+- =scripts/_r29_preflight.sh= — fork from R28; R29-P-1 provider-
+  aware CAT 3 (probe RunPod path when harness uses it)
+- =scripts/_r29_self_healing_daemon.sh= — fork from R28
+- =scripts/_r29_post_round_analysis.sh= — R29-12 NEW round-fork
+- =scripts/_r29_b1_prompt_shape_audit.py= — R29-14 NEW (diff R27 vs
+  R28 B1 prompt + scoring rubric)
+- BK verifier (=org_llm/quality_lint.py= or harness verifier) —
+  R29-16 preservation gate (=diff.deletions ≤ 50%= + marker
+  presence joint criterion)
+- =scripts/_r29_k5_vs_k6_expanded.py= — R29-9 NEW (post-hardening
+  N=10 per task on B5/B11/B25/B26 + 5 BK)
+- =scripts/_r29_critic_this_poc.py= — R29-6 NEW (verb POC + chain
+  integration scaffold; productionalizes per R28-N1)
+- =scripts/_r29_k20_corpus_prep.py= — R29-13a NEW (extract R26-R28
+  wins where K20 was distilled-for; output = HF dataset card +
+  shape coverage report; *no training run*)
+
+** Memory rules invoked
+
+- [Productionalize harness into app] — every R29 P0/P1 row maps to
+  its bench-to-app-mapping ID where applicable
+- [Round-fork path-pointer + variant-list audit] — R29-12 fork
+  audit must verify daemon PROGRESS_DOC + LIVE_LOG + status/
+  preflight/smoke companion scripts re-pointed to R29
+- [Wiki entries: summary + expanded] Rule 2b — every section
+- [FOSS models only] — K5 sentinel-pending-verification; never
+  routing target
+- [Never include Groq] — deny-list literal verified per
+  PROVIDER_PINS entry (R28-3 carries forward)
+- [Phase references include name] — Phase 2026-05.20 — sync verb
+  POC, Phase 2026-XX.XX — LoRA self-train
+- [Three quality gates] — each P0/P1 item must pass: (1) really
+  good at the job, (2) not too complex, (3) manages required
+  complexity well
+
+** Related round arc
+
+- =docs/wiki/2026-05-09-r28-synthesis.org= — drove R29
+- (this doc) =docs/wiki/2026-05-09-r29-design.org= — R29 design
+- (next) =docs/wiki/2026-05-09-r29-hypothesis.org= — R29 falsifiable
+  bars (H1-Hn from this design's bars + R29-9 verifier-hardening
+  bar + R29-15 K20 task-allowlist bar)
+- (next) =docs/wiki/2026-05-09-r29-launch-checklist.org= — R29 ship
+  list (P0-1..9 + P1-1..4 + P2 deferrals + K2 reactivation gate)
+- (after R29) =docs/wiki/2026-05-09-r29-synthesis.org= — verdict on
+  R29-1..R29-17 fixes + R29-6 verb POC + R29-13a corpus prep; R30
+  capability seed
+- Phase 2026-05.20 — sync verb POC — R29-6 K20-as-critic landing
+- Phase 2026-XX.XX — LoRA self-train — R29-13b R30 train run +
+  R28-N2 =/train-lora= verb full

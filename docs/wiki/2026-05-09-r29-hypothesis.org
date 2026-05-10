@@ -1,0 +1,260 @@
+:PROPERTIES:
+:ID:       r29-hypothesis
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: R29 — pre-commit hypothesis (capability + correctness round predictions)
+#+FILETAGS: :wiki:bench:r29:hypothesis:meta-bench:capability-correctness:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+
+#+STARTUP: overview content
+
+* Summary
+
+*Summary.* Pre-commit hypothesis for R29, the /capability + correctness/
+round following R28's harness-stability sprint. Per R28 Captain's
+call: ship 6+ small fixes from R28 scour findings (R29-1, R29-2, R29-3,
+R29-11, R29-12, R29-14, R29-15, R29-16, R29-17) plus 1-2 narrow capability
+picks (R29-6 =/critic-this= verb POC + R29-13 K20 v2 retrain corpus prep).
+~200 cells; cost envelope $8-15. Predictions below ask whether the
+/fixes hold AND whether the capability picks deliver/, NOT whether new
+model capability emerges.
+
+*Expanded.* H1-H8 + C1-C6 + S1-S2 + I1-I4 + cost. Bands set from R28
+actuals as baseline (not from thin air). Per Rule 2b every section
+leads with =*Summary.*= + =*Expanded.*=. Times in 12h AM/PM EST per
+[All times in EST]. FOSS-only per [FOSS models only] — K5-claude is
+sentinel-pending-verification (R29-17 tool-surface fix gate); never a
+routing target. Phase references include name per [Phase references
+include name].
+
+* Sources grounding the predictions
+
+*Summary.* Six R28-era sources ground these predictions — R28
+synthesis (Captain's call + R29 P0 list + G1-G6), four scour docs
+(quality-judge, walltime, providers, pareto), and the R28 hypothesis
+verdict-box as carry-forward baseline.
+
+*Expanded.* Each source contributed specific bars, baselines, and
+falsification criteria.
+
+| Source                                                       | Used for                                                         |
+|--------------------------------------------------------------+------------------------------------------------------------------|
+| =docs/wiki/2026-05-09-r28-synthesis.org=                     | R29 P0 input list §; G1-G6 strategic guidance; Captain's call    |
+| =docs/wiki/2026-05-09-r28-quality-judge.org=                 | K1 B1 regression baseline 7.78; K6 BK shortcut behavior; K5 fab  |
+| =docs/wiki/2026-05-09-r28-walltime.org=                      | WALL_CAP exact-400.0s; per-cell heartbeat gap; CAT 3 budget edge |
+| =docs/wiki/2026-05-09-r28-providers.org=                     | 0/0 Groq strict; K20 RunPod path; 2 K20 paths (CAT 3 + harness)  |
+| =docs/wiki/2026-05-09-r28-pareto.org=                        | Frontier shape; K6 quality lead; K20 floor; K2 mini-A/B baseline |
+| =docs/wiki/2026-05-09-r28-hypothesis.org=                    | R28 verdict-box carry-forward; template shape for this doc       |
+| =scripts/_round28_dials_artifacts/R28_LIVE.json=             | R28 final leaderboard (carry-forward variant baselines)          |
+
+* R29 active variants
+
+*Summary.* R28's working subset minus K11 (retired R28) plus K2
+returning (warmup-fix landed, opt-in for B25/B26 per G3). Active: K1,
+K6, K8, K20 (BK + small-atomic only per G4 task-shape constraint),
+K5-claude (sentinel pending hardening — R29-17 gate), K2-kimi-k2.6
+(warmup-fix verified by post-round mini-A/B; in-round opt-in).
+
+*Expanded.* K20 routing now restricts to BK + small-atomic shapes
+per R29-15 (its trained distribution); B1 wiki_edit routes to K6/K8
+only. K5 stays in roster but with R29-17 tool-surface (read_file)
+attached so B11 fab cell from R28 §7 can't repeat. K2 enters via
+opt-in B25/B26 cells (per K2 mini-A/B Pareto contribution).
+
+| Variant            | Status R29                                  | Source                                                     |
+|--------------------+---------------------------------------------+------------------------------------------------------------|
+| K1-qwen30          | active L1 + L2 + BK                         | R28 frontier (budget); B1 prompt-shape audit pending       |
+| K6-llama70b        | active; quality leader; BK verifier hardened | R28 mean 25.14; R29-16 BK preservation gate                |
+| K8-deepseekV3      | active L1 + L2 + BK; volume default         | R28 workhorse; carry forward unchanged                     |
+| K20-foss-distill   | *active BK + small-atomic only* (R29-15)    | R28 §G4: out-of-distribution on B1 wiki_edit               |
+| K5-claude-solo     | sentinel pending (R29-17 read_file fix)     | [FOSS models only]; never a routing target                 |
+| K2-kimi-k2.6       | active opt-in B25/B26                       | post-warmup-fix mini-A/B (40 cells); R28 §G3 opt-in case   |
+| K11-qwen3coder     | RETIRED                                     | R28-2 verified; cascade now K1→K8 only                     |
+| K20 v2 / U7-U9     | DEFERRED                                    | R29-13 corpus prep starts; v2 train is post-R29            |
+
+* Variant predictions (R29 bands)
+
+*Summary.* Six active variants with cells/mean/$/u/Pareto/conf bands.
+Bands set from R28 actuals + expected fix lift. Falsified if any
+variant lands outside its band without an explanatory new bug.
+
+*Expanded.* K1 mean recovers as R29-14 B1 prompt-shape audit lands;
+K6 mean drops somewhat as R29-16 BK preservation gate removes the
+destructive-edit 50-score loophole; K20 mean rises with task-shape
+restriction; K5 fab drops to 0 with R29-17 tool surface; K2 lands
+just above K1 per mini-A/B.
+
+| Variant            | Cells (predicted) | Mean band  | $/u band         | Pareto                | Conf | Observed (cells / mean / $/u) | Verdict (post-round) |
+|--------------------+-------------------+------------+------------------+-----------------------+------+-------------------------------+----------------------|
+| K1-qwen30          | 60-80             | 11-15      | $0.0005-$0.0008  | FRONTIER (budget)     | 70%  | TBD                           | TBD                  |
+| K6-llama70b        | 30-40             | 15-22      | $0.0008-$0.0018  | FRONTIER (quality, post-hardening) | 65% | TBD                       | TBD                  |
+| K8-deepseekV3      | 90-110            | 8-12       | $0.0006-$0.0009  | FRONTIER (volume)     | 80%  | TBD                           | TBD                  |
+| K20-foss-distill   | 8-15 (BK + small-atomic only) | 10-15 | $0.00003-$0.0001 | FRONTIER (floor) | 60% | TBD                       | TBD                  |
+| K5-claude-solo     | 15-25             | 11-15      | $0.012-$0.016    | sentinel (DOMINATED)  | 75%  | TBD                           | TBD                  |
+| K2-kimi-k2.6       | 15-25             | 9-12       | $0.0008-$0.0011  | DOMINATED by K1       | 65%  | TBD                           | TBD                  |
+
+* R29 hypotheses (H1-H8)
+
+*Summary.* Eight predictions with conf% + falsification bar. H1-H8
+build off R28's H1-H7 verdicts plus new R29-specific items covering
+the R29 P0 fix list. Headline: WALL_CAP rate ≤3% (90%); K20 mean ≥10
+on restricted task-set (70%); K1 B1 mean recovers ≥11 (65%); K6 BK
+mean drops 30-50% post-hardening (70%); K5 fab=0 (85%); K2 active
+≥15 cells (90%); zero Groq + zero K11 + pins honored (95%); per-cell
+heartbeats land + watchdog detects mid-cell stalls (75%).
+
+*Expanded.* Each row = assertion + falsification bar. Post-round
+verdict-box scores these the same way R28 did. Confidence reflects
+whether the underlying fix is well-scoped (high conf) vs depends on
+emergent task-mix interaction (lower conf).
+
+| #   | Prediction                                                                        | Conf | Falsified if                                            |
+|-----+-----------------------------------------------------------------------------------+------+---------------------------------------------------------|
+|  H1 | WALL_CAP_KILLED rate ≤ 3% of cells (R28 was 7/237 = 2.95%)                         | 90%  | wall_cap_killed >3% OR any K20 cell hit cap on BK/small-atomic |
+|  H2 | K20 primary mean ≥ 10 across BK + small-atomic only (vs R28 mixed 7.0)             | 70%  | K20 mean <10 across R29 cells (excluding any B1 leak)   |
+|  H3 | K1 B1 primary mean ≥ 11 (vs R28's 7.78; assumes R29-14 B1 prompt-shape audit lands) | 65%  | K1 B1 mean <11 OR R29-14 audit not landed pre-round    |
+|  H4 | K6 BK mean drops 30-50% post R29-16 verifier hardening (R28 BK mean ~30)           | 70%  | K6 BK mean drop <30% OR >60% (overshoot)                |
+|  H5 | K5 fab count = 0 across R29 (vs R28's 4 from one B11 cell; R29-17 tool fix)        | 85%  | ≥1 K5 cell shows fabricated UUIDs / unmatched IDs       |
+|  H6 | K2 active in round (warmup-fix landed) AND K2 cells ≥ 15                           | 90%  | K2 cell count <15 OR K2 dropped at warmup again         |
+|  H7 | Zero Groq cells, zero K11 cells, all PROVIDER_PINS honored (advisory drift OK)     | 95%  | ≥1 Groq-touched cell OR ≥1 K11 cell OR pin-deny breach  |
+|  H8 | Per-cell heartbeats land (R29-11) AND watchdog detects ≥1 mid-cell stall if any cell exceeds 5min wall | 75% | R29-11 not landed OR cells >300s wall with no heartbeat record |
+
+** Falsification mechanics (one-line each)
+
+| #  | Mechanic                                                                                |
+|----+-----------------------------------------------------------------------------------------|
+| H1 | Sum =wall_cap_killed=true= cells; assert ≤3% of total cells                             |
+| H2 | Filter K20 cells to BK + small-atomic; mean of =score= field ≥10                        |
+| H3 | Filter K1 cells to task=B1; mean ≥11; verify R29-14 commit landed pre-round-fork        |
+| H4 | Compute K6 mean across BK1-BK15 R29 vs R28; assert 30-50% drop                          |
+| H5 | grep cell_result.json for =id_in_workdir: false= or =wrap_category: unmatched=; assert 0 |
+| H6 | K2 cell count from R29 LIVE json ≥15; warmup probe returns =ok=True= for K2 slug         |
+| H7 | grep events.jsonl for =provider=Groq= AND grep cell_replay for =variant=K11=; assert 0  |
+| H8 | grep HEARTBEAT.jsonl for per-cell entries (=stage=cell:*=); assert ≥1 mid-cell stall row if any cell >300s |
+
+* Cross-cutting predictions (C1-C6)
+
+*Summary.* Six cross-cuts covering capability picks, infra
+consolidation, and R29 deploy verification. C1 + C2 = capability
+picks (R29-6 critic verb, R29-13 K20 v2 corpus). C3-C6 = R29 P0
+items not directly headlined (CAT 3 budget bump, R29-12 post-round
+analysis fork, K20 path consolidation, R29-1 reasoning-mode audit).
+
+*Expanded.* Capability picks ship as POC + tested; corpus prep is a
+deliverable file, not a trained model. Infra consolidation is a
+single-source-of-truth fix to the two-K20-paths problem from R28
+providers §7.
+
+| ID  | Prediction                                                                  | Conf | Falsified if                                            |
+|-----+-----------------------------------------------------------------------------+------+---------------------------------------------------------|
+| C1  | =/critic-this= verb POC ships (R29-6); tested in-round on ≥3 cells          | 70%  | verb not registered OR tested cells <3 OR fails smoke   |
+| C2  | K20 v2 retrain corpus extracted from R26-R28 wins (R29-13); ≥100 examples   | 75%  | corpus file <100 examples OR not committed pre-round    |
+| C3  | =STAGE_BUDGET[CAT_3_K20_RESUME]= 480→600s (R29-2); CAT 3 ≤90% utilization   | 90%  | budget not bumped OR CAT 3 >90% of new 600s budget      |
+| C4  | =_r29_post_round_analysis.sh= forked + runs post-round (R29-12)              | 85%  | script not forked OR fails on R29 artifacts             |
+| C5  | 2 K20 paths consolidated to 1 (R29-P-1 from providers §8): CAT 3 either provider-aware OR removed | 80% | both Together-CAT-3 + harness-RunPod paths still active |
+| C6  | Reasoning-mode disable audit lands (R29-1); all 4 sites (warmup/in-band/judge/critic) share disable list | 80% | <4 sites use shared list OR audit doc not committed |
+
+* Strategy predictions (S1-S2)
+
+*Summary.* Cascade behavior holds (K1→K8 only; K8→K11 dropped per
+R28 verdict). BK verifier hardening (R29-16) doesn't break BK
+pass-rate — only removes the destructive-shortcut loophole.
+
+*Expanded.* S1 verifies the post-K11-drop cascade shape from R28
+holds at R29 cell-count. S2 is the most-likely-to-falsify strategy
+prediction — verifier hardening could over-fire and reduce K6's
+legitimate BK wins, not just the destructive shortcuts.
+
+| ID  | Prediction                                                                  | Conf | Falsified if                                            |
+|-----+-----------------------------------------------------------------------------+------+---------------------------------------------------------|
+| S1  | Cascade escalations K1→K8 only; zero K8→K11 (K11 retired)                    | 95%  | any K8→K11 escalation OR cascade fires K11 path         |
+| S2  | BK pass-rate (K6 + K8 combined) on BK1-BK15 within ±15% of R28 baseline      | 65%  | BK pass-rate drops >15% (verifier hardening over-fires) |
+
+* Infra predictions (I1-I4)
+
+*Summary.* Four infra predictions: CAT 3 budget bump verified, 2 K20
+paths consolidated to 1, per-cell heartbeats cover ≥80% of harness
+wall-time, round-fork path audit clean.
+
+*Expanded.* I3 is the per-cell heartbeat productionalization (R29-11
++ memory rule [Watchdog + heartbeat are the default for any
+long-running op]). I4 is the round-fork path audit per memory rule
+[Round-fork path-pointer audit] — extended for R29 to cover model_pins
++ progress doc + live log.
+
+| ID  | Prediction                                                                  | Conf | Falsified if                                            |
+|-----+-----------------------------------------------------------------------------+------+---------------------------------------------------------|
+| I1  | CAT 3 budget bump verified (R29-2); CAT 3 wall ≤540s (≤90% of new 600s)      | 90%  | CAT 3 wall >540s OR exceeds 600s                        |
+| I2  | 2 K20 paths consolidated to 1 (R29-P-1); single resume script in preflight  | 80%  | both =_k20_endpoint_resume.sh= + harness-RunPod active  |
+| I3  | Per-cell heartbeats cover ≥80% of harness wall-time (R29-11 emits every 30s) | 75%  | <80% wall covered by per-cell heartbeat entries         |
+| I4  | =_round29_dials.py= round-fork green: PROGRESS_DOC + LIVE_LOG paths audit     | 90%  | round-fork path-audit fails OR LIVE_LOG points to R28   |
+
+* Cost predictions
+
+*Summary.* R29 spend lands in *$8-15* envelope per R28 Captain's call.
+R28 was $5.74 (verification round); R29 adds capability-pick spend
+(R29-6 critic POC + R29-13 corpus extraction) plus K2 in-round opt-in.
+Confidence: 70%.
+
+*Expanded.* Falsified if <$5 (under-ran — capability picks didn't
+fire) OR >$18 (capability spend uncontrolled). K5 sentinel slice is
+the largest single line; K20 stays cheap; K6 BK at hardened verifier
+may run hotter (more iterations to find non-destructive solutions).
+
+| Layer / item                                               | Subtotal       |
+|------------------------------------------------------------+----------------|
+| Active FOSS variants (K1+K6+K8 cells)                      | $2.50 - 4.50   |
+| K20-foss-distill restricted (~10-15 cells, BK + small-atomic) | $0.01 - 0.05  |
+| K2-kimi-k2.6 opt-in (B25/B26, ~15-20 cells)                | $0.10 - 0.30   |
+| K5-claude-solo sentinel slice (~20 cells)                  | $4.00 - 6.00   |
+| K20 pod uptime (pre-warm + round + buffer ~1.5h)           | $1.50 - 2.25   |
+| =/critic-this= verb POC test cells (~3-5 cells)            | $0.05 - 0.20   |
+| K20 v2 corpus extraction (deterministic, no inference)     | $0.00          |
+| /Total R29 (capability + correctness round)/               | *$8 - 15*      |
+
+* Verdicts (filled in after R29)
+
+/Placeholder. Post-round R29 quality-judge fills observed values,
+computes prediction-accuracy, notes which falsifications fired.
+Subsections: H1-H8, C1-C6, S1-S2, I1-I4, cost, prediction-accuracy./
+
+* Self-check — R29 P0 + capability coverage
+
+*Summary.* All R29 P0 items from R28 synthesis Captain's call covered
+by ≥1 falsifiable hypothesis. Both capability picks (R29-6 critic verb,
+R29-13 K20 v2 corpus) covered.
+
+*Expanded.* Cross-references R29 P0 list (R28 synthesis §"R29 P0 input
+list" + §"R29 must ship") to specific H/C/S/I rows.
+
+| R29 item                                                  | Covered by   |
+|-----------------------------------------------------------+--------------|
+| R29-1 reasoning-mode disable audit                        | C6           |
+| R29-2 STAGE_BUDGET CAT 3 bump 480→600s                    | C3 + I1      |
+| R29-3 K20-on-B1 long-context investigation (resolved)     | H2 (via R29-15 routing) |
+| R29-6 =/critic-this= verb POC                              | C1           |
+| R29-11 per-cell heartbeat from harness                    | H8 + I3      |
+| R29-12 =_r29_post_round_analysis.sh= fork                  | C4           |
+| R29-13 K20 v2 retrain corpus prep                         | C2           |
+| R29-14 B1 prompt-shape audit                              | H3           |
+| R29-15 K20 dispatcher restrict to BK + small-atomic       | H1 + H2      |
+| R29-16 BK verifier preservation gate                      | H4 + S2      |
+| R29-17 K5 sentinel tool-surface fix                       | H5           |
+| R29-P-1 2 K20 paths consolidated to 1                     | C5 + I2      |
+| Cascade K1→K8 only (K11 retired carry-forward)            | S1           |
+| Zero Groq + pins honored                                  | H7           |
+
+* Cross-references
+
+- =docs/wiki/2026-05-09-r28-synthesis.org= — Captain's call; R29 P0 list; G1-G6
+- =docs/wiki/2026-05-09-r28-quality-judge.org= — K1 B1 7.78 baseline; K6 BK shortcut; K5 fab forensics
+- =docs/wiki/2026-05-09-r28-walltime.org= — WALL_CAP exact-400s; per-cell heartbeat gap; CAT 3 edge
+- =docs/wiki/2026-05-09-r28-providers.org= — 0/0 Groq strict; 2 K20 paths; R29-P-1 input
+- =docs/wiki/2026-05-09-r28-pareto.org= — frontier shape; K6 lead; K20 floor; K2 mini-A/B
+- =docs/wiki/2026-05-09-r28-hypothesis.org= — template shape; verdict-box carry-forward
+- =docs/wiki/2026-05-09-r29-{design,launch-checklist}.org= — R29 design + P0 status (planned)
+- =scripts/_round28_dials_artifacts/R28_LIVE.json= — R28 baseline leaderboard
+- =scripts/_round29_dials.py= — R29 active config (round-fork target, planned)
+- =org_llm/specialist.py= — R29-15 K20 routing restriction site; R29-17 K5 tool surface
+- =org_llm/watchdog.py= — R29-11 per-cell heartbeat primitive (planned)

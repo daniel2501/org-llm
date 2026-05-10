@@ -1,0 +1,400 @@
+:PROPERTIES:
+:ID:       r29-launch-checklist
+:CREATED:  [2026-05-09]
+:END:
+#+TITLE: R29 launch checklist — every item to ship before round fires
+#+FILETAGS: :wiki:bench:r29:checklist:
+#+OPTIONS: toc:1 num:nil
+#+CATEGORY: bench
+#+STARTUP: overview content
+#+TODO: TODO DOING BLOCKED | DONE CANCELLED
+
+* Summary
+
+*Summary.* Living checklist for every prep item that must ship
+before R29 launches. Sourced from =r28-synthesis §"R29 must
+ship"= + the four R28 scour docs (quality-judge, walltime,
+providers, pareto). R29 is a /capability + correctness round/ —
+*not* a stability sprint: 10 small P0 fixes (R29-P0-1..10) plus
+2 narrow capability picks (=/critic-this= POC; K20 v2 retrain
+corpus prep). Each item has status, estimate, source, deps,
+acceptance probe.
+
+*Expanded.* R28 finished 6:18 PM EST 2026-05-09 (237 cells /
+$5.74 / 45m07s wall) with 5/7 strict-PASS + 2 honest-MIXED P0
+fixes. Captain's call: R29 = /capability pivot WITH small
+fixes/, ~200 cells projected. Template is
+=2026-05-09-r28-launch-checklist.org=. Already shipped (BK
+fixtures, COST_CIRCUIT_BREAKER, cell_replay, watchdog v1, K20
+RunPod self-host, scavenger port, vs-Claude slug fix, multi-LoRA
+HF HEAD probe) not repeated — only deltas vs R28-launch. Per
+[Round-fork path-pointer audit] every R29-fork must re-point
+PROGRESS_DOC + LIVE_LOG + companion scripts.
+
+* Status legend
+
+| TODO | DOING | BLOCKED | DONE (probe passed) | CANCELLED (with rationale) |
+|------+-------+---------+---------------------+----------------------------|
+
+* Plan-change log
+
+| Date | Item | Change |
+|------+------+--------|
+
+* P0 — correctness blockers (R29 cannot launch without these)
+
+** TODO R29-P0-1: Reasoning-mode disable audit (one source-of-truth =_DISABLE_REASONING=)
+:PROPERTIES:
+:ESTIMATE: 2 hr
+:SOURCE:   r28-synthesis surprise §"Kimi-reasoning warmup-probe"; R29-1
+:DEPS:     none
+:END:
+R28 K2 dropped at warmup; =_DISABLE_REASONING_MODELS= covered
+in-band only; mid-round patch added /sibling/ list at
+=_round28_dials.py:203=. Unify across *warmup, in-band, judge,
+critic* — one set, four call-sites import it.
+*Acceptance probe.* Grep names exactly one definition + four
+imports. Inject K2 reasoning-enabled; warmup ping non-empty;
+in-band =message.content= length > 0.
+
+** TODO R29-P0-2: Bump =STAGE_BUDGET[PREFLIGHT_CAT_3_K20_RESUME]= 480→600s
+:PROPERTIES:
+:ESTIMATE: 30 min
+:SOURCE:   r28-walltime §"Preflight stage timing"; r28-providers §7; R29-2
+:DEPS:     none
+:END:
+R28 CAT 3 took 486s of 480s budget (97.2%; 6s OVER). Saved by
+15s poll cadence, not margin. Adopt P95+25%-margin pattern
+(walltime §R29 stage-budget targets). Bump to 600s in
+=_round29_dials.py= STAGE_BUDGET dict; document the rule inline.
+*Acceptance probe.* =python -c 'import _round29_dials as m;
+assert m.STAGE_BUDGET["PREFLIGHT_CAT_3_K20_RESUME"] == 600'=
+exits 0; dry-run preflight HEARTBEAT.jsonl shows budget=600s.
+
+** TODO R29-P0-3: Per-cell heartbeat from harness cell-runner
+:PROPERTIES:
+:ESTIMATE: 4 hr
+:SOURCE:   r28-walltime §"Per-cell heartbeat gap"; r28-synthesis G6; R29-11
+:DEPS:     R29-P0-9 (touches _round29_dials.py)
+:END:
+R28 had 11 cells >5min wall + 7 hitting 400s cap; none
+watchdog-visible (heartbeat outer-shell only). Emit
+=HEARTBEAT.jsonl{stage="cell:<task>:<variant>", iteration=N,
+age_s}= every 30s from cell-runner; per-cell 300s warn / 400s
+kill. Seeds =org_llm/watchdog.py= (G6).
+*Acceptance probe.* Synthetic 200s cell → ≥6 =stage=cell:*=
+entries monotone +30s ±5s; stall-detect fires on synthetic 350s
+no-progress cell BEFORE 400s cap.
+
+** TODO R29-P0-4: =scripts/_r29_post_round_analysis.sh= fork
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   r28-synthesis R29-12 (R28 launch warning carry-forward)
+:DEPS:     R29-P0-9
+:END:
+Fork =_r28_post_round_analysis.sh= → =_r29_*=. Re-point all
+artifact-dir + LIVE.json paths at =_round29_dials_artifacts/=.
+Per [Round-fork path-pointer audit] sed-rename insufficient.
+*Acceptance probe.* =grep -n 'round28\|R28\|_r28' scripts/_r29_post_round_analysis.sh=
+zero hits; =bash -n= clean; dry-run against R28 artifacts via
+symlink runs without =No such file= errors.
+
+** TODO R29-P0-5: B1 prompt-shape audit (R28 → R27 -4.5pt regression)
+:PROPERTIES:
+:ESTIMATE: 3 hr
+:SOURCE:   r28-quality-judge §3; r28-synthesis G5; R29-14
+:DEPS:     none
+:END:
+K1-on-B1 mean dropped 12.25 (R27, n=197) → 7.78 (R28, n=50). G5
+strengthened by per-task slice. Find the diff: prefetch primer
+length, task wording, scoring rubric, OR cell-shape mix (warmup-
+style hedge cells with wall<15s inflating denominator at
+score=0). Diff =_round27_dials.py= vs =_round28_dials.py= B1 +
+cell_replay bimodality analysis. Output: finding doc at
+=docs/wiki/2026-05-09-r29-b1-shape.org=.
+*Acceptance probe.* Finding names ≥1 concrete contributor with
+cell-citation evidence; cites ≥4 cells across both rounds.
+
+** TODO R29-P0-6: K20 dispatcher restrict to BK + small-atomic family
+:PROPERTIES:
+:ESTIMATE: 2 hr
+:SOURCE:   r28-quality-judge §5; r28-synthesis G4; R29-15
+:DEPS:     R29-P0-9
+:END:
+R28 K20 wall-capped 6/10 cells on B1 (16-iter tool-loop ~25s/iter
+on long-context). K20 v1 distilled on small-atomic + BK; B1's
+verbose-prefix primer is /out of distribution/. Drop K20 from
+B1/B5/B20 wiki_edit routing in =TASK_FAMILY_VARIANTS=; keep BK +
+small-atomic. Not permanent — v2 retrain (R29-P1-7 corpus prep)
+targets broader coverage.
+*Acceptance probe.* =python -c 'import _round29_dials as m;
+assert "K20-foss-distill" not in m.TASK_FAMILY_VARIANTS["B1"];
+assert "K20-foss-distill" in m.TASK_FAMILY_VARIANTS["BK1"]'=
+exits 0; R29 cell_replay.jsonl shows 0 K20 cells on B1/B5/B20.
+
+** TODO R29-P0-7: BK verifier preservation gate
+:PROPERTIES:
+:ESTIMATE: 4 hr
+:SOURCE:   r28-quality-judge §6; r28-synthesis G2; R29-16
+:DEPS:     none — *blocks R29-P1-8* (K5-vs-K6 evidence depends on hardened verifier)
+:END:
+R28 K6 BK 50-scores (BK2/BK11/BK12/BK14) come from /destructive/
+edits — K6 deletes ~270 lines of recipes.org and writes marker +
+valid TBLFM, OR replaces =org-llm-chat.el= with
+=(checkdoc-current-buffer t)=. Verifier rewards marker presence
++ structural validity; no preservation gate. Add joint criterion:
+reject cells where =diff.deletions > N lines= without
+preservation justification (=N=50= OR >50% file size). Touches
+BK verifier in =org_llm/verifier.py= or task-side fixture.
+*Captain's call: this gate must land before R29-P1-8 runs*, else
+the comparison inherits the same loophole.
+*Acceptance probe.* Replay R28 K6 BK11 (270-line deletion) →
+score drops to 0 (<10) with =preservation_violation=. Replay R28
+K6 BK1 (non-destructive) → score unchanged. 5 R28 K8 BK cells
+(non-destructive) → all within ±2 of original.
+
+** TODO R29-P0-8: K5 sentinel tool-surface fix (=read_file= in solo mode)
+:PROPERTIES:
+:ESTIMATE: 2 hr
+:SOURCE:   r28-quality-judge §7; r28-synthesis G2; R29-17
+:DEPS:     none
+:END:
+R28 K5 fab=4 was /one cell/ (B11 wiki_dec_create) where K5 ran
+=is_external_baseline=true= solo mode without =read_file=,
+confabulating UUIDs for DEC-014/009/016. Configuration artifact,
+not Claude failure. Fix in =org_llm/specialist.py=
+=is_external_baseline= dispatch: grant =read_file= in solo mode
+for ID-grounding tasks. /Per [FOSS models only] K5 stays
+comparator-only sentinel hardening./
+*Acceptance probe.* Replay R28 B11 K5 scenario; K5 calls
+=read_file= ≥1× AND =cell_result.json["fab"] == 0=. Negative:
+drop tool surface again → fab returns (audit caught it).
+
+** TODO R29-P0-9: Round-fork =_round29_dials.py= from R28
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   round-fork pattern; [Round-fork path-pointer audit]
+:DEPS:     R29-P0-1, R29-P0-2, R29-P0-3, R29-P0-6 (fork applies all 4 patches)
+:END:
+Fork =_round28_dials.py= → =_round29_dials.py=. Apply P0-1
+(one-source =_DISABLE_REASONING=), P0-2 (CAT_3 budget), P0-3
+(per-cell heartbeat hooks), P0-6 (K20 family restrict). Update
+=ROUND= + artifact-dir. Per [Round-fork path-pointer audit]
+sed-rename necessary but not sufficient — grep-sweep verify.
+*Acceptance probe.* =import _round29_dials= clean; =ast.parse=
+clean; =grep -n 'round28\|_r28\|R28_LIVE' scripts/_round29_dials.py=
+zero hits; =_r29_design_patch.py= (forked) verifies all 4 P0
+probes inline + aborts non-zero on miss.
+
+** TODO R29-P0-10: Memory-rule new procedural patterns from R28 retro
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   r28-synthesis §"Procedural patterns to memory-rule"
+:DEPS:     none
+:END:
+R28 retro surfaced 5 candidate patterns (codify those not
+already covered):
+| Candidate                                  | R28 source                       |
+|--------------------------------------------+----------------------------------|
+| =reasoning-mode-symmetric-config-audit=    | surprise §"Kimi-reasoning"       |
+| =stage-budget-p95-plus-25pct-margin=       | surprise §"CAT 3 budget edge"    |
+| =holdout-rate-floor-tied-to-pool-size=     | retro patterns table             |
+| =preflight-cat2-or-probe-self-host-aware=  | retro; r28-providers §7          |
+| =bk-verifier-preservation-gate=            | quality-judge §6 (also R29-P0-7) |
+*Acceptance probe.* New memory files in =memory/= each have
+=*Summary.*= + =*Expanded.*= + R28 citation; indexed in
+=MEMORY.md=.
+
+* P1 — capability + setup for the R29 launch itself
+
+** TODO R29-P1-1: R29 design + hypothesis + this checklist (trio)
+:PROPERTIES:
+:ESTIMATE: 2 hr (design + hypothesis landed; this doc)
+:SOURCE:   round-fork pattern (R26/R27/R28 trio)
+:DEPS:     none
+:END:
+=r29-design.org= (capability + correctness scope; landed),
+=r29-hypothesis.org= (H1-Hn; landed); /this doc/ (ship status).
+
+** TODO R29-P1-2: =scripts/_r29_preflight.sh= fork (with budget bump)
+:PROPERTIES:
+:ESTIMATE: 1.5 hr
+:SOURCE:   R28 preflight + R29-P0-2 budget; [Round-fork path-pointer audit]
+:DEPS:     R29-P0-2, R29-P0-9
+:END:
+Fork =_r28_preflight.sh= → =_r29_preflight.sh=. Re-point
+artifact-dir; bake R29-P0-2 budget bump into stage-map. Per
+[Round-fork path-pointer audit] verify PROGRESS_DOC + LIVE_LOG
+re-aim.
+*Acceptance probe.* Writes =PREFLIGHT_PASS= under
+=_round29_dials_artifacts/=; =grep 'round28\|_r28'= zero hits;
+HEARTBEAT.jsonl CAT_3 budget=600s.
+
+** TODO R29-P1-3: =scripts/_r29_self_healing_daemon.sh= fork
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   R26-R28 daemon lineage; [Round-fork path-pointer audit]
+:DEPS:     R29-P0-9
+:END:
+Fork =_r28_self_healing_daemon.sh= → =_r29_*=. Re-point
+artifact-dir. No new detectors (capability round; daemon stays
+running).
+*Acceptance probe.* Daemon runs 60s against
+=_round29_dials_artifacts/=, writes heartbeat trace, exits clean
+on SIGTERM; zero =round28= path hits.
+
+** TODO R29-P1-4: =scripts/_r29_launch.sh= fork (single-K20-path consolidation)
+:PROPERTIES:
+:ESTIMATE: 1 hr
+:SOURCE:   R28 launcher + r28-providers §7 CAT 3 false-positive cleanup
+:DEPS:     R29-P1-2, R29-P1-3, R29-P0-9
+:END:
+Fork =_r28_launch.sh=. Sequence: preflight → K20 RunPod pre-warm
+(15m) → harness + daemon. /Important:/ CAT 3 Together-K20 SKIP
+becomes *hard-skip not soft-fail* — RunPod-K20 served 10/10 in
+R28; Together-K20 dead since R27. Drop soft-fail false-positive
+or gate CAT 3 behind =if K20_PROVIDER == "together"=.
+*Acceptance probe.* Dry-run; CAT 3 skipped (RunPod path) OR
+hard-fails (no =PREFLIGHT_K20_SKIP= soft-degrade artifact).
+=grep 'PREFLIGHT_K20_SKIP' scripts/_r29_*= zero (or only behind
+the dead Together branch).
+
+** TODO R29-P1-5: =scripts/_r29_watchdog.sh= fork (per-cell stage budgets)
+:PROPERTIES:
+:ESTIMATE: 1.5 hr
+:SOURCE:   R28 watchdog + R29-P0-3 per-cell heartbeat
+:DEPS:     R29-P0-3, R29-P0-9
+:END:
+Fork =_r28_watchdog.sh=. Add per-cell stage budgets (300s warn
+/ 400s kill per =stage=cell:<task>:<variant>=). Filter =DONE=
+terminal stage from stall detection (R28 trailing false-positive
+per =r28-walltime §watchdog effectiveness=).
+*Acceptance probe.* Synthetic HEARTBEAT.jsonl =stage=cell:B1:K20
+iteration=1 age=350s= → =STALL_DETECTED= fires. Same with
+=stage=DONE age=19s budget=10s= → *no* false-positive entry.
+
+** TODO R29-P1-6: =/critic-this= verb POC (narrow scope — K20-vs-K2 critic on 5 R26 wins)
+:PROPERTIES:
+:ESTIMATE: 4 hr
+:SOURCE:   r28-synthesis R29-6 carry-forward; Phase 2026-05.20 — sync verb POC
+:DEPS:     R29-P0-9
+:END:
+*Narrow scope only* — not productionalization. Verify K20
+(post-BK-restrict) outperforms K2 as critic on 5 R26 winning
+cells. Reuse R26 cell I/O + critic prompt; swap critic variant.
+Compare K20 vs K2 verdicts against R26 ground-truth labels. /Do
+NOT/ build verb plumbing into =cli.py= or =specialist.py= — that
+is R30 per P2.
+*Acceptance probe.* =scripts/_r29_critic_this_poc.py= produces
+=critic_results.json= for 5 cells × {K20, K2} = 10 verdicts;
+agreement rate per critic reported; winner named. No app-side
+verb wiring asserted.
+
+** TODO R29-P1-7: K20 v2 retrain corpus prep (collect + size + lint, NO training)
+:PROPERTIES:
+:ESTIMATE: 3 hr
+:SOURCE:   r28-synthesis G4 + R29-13; r28-pareto §K20 zero-cost
+:DEPS:     none
+:END:
+*Narrow scope only* — corpus assembly + quality-lint, /not/
+training. Collect R26-R28 winning cells where K20 was
+distilled-for (small-atomic + BK; cross-ref R29-P0-6); plus
+broader task-shape coverage candidates. Apply =quality_lint=
+pipeline (r24/r25 lineage). Output:
+=docs/wiki/2026-05-09-r29-k20-v2-corpus.org= with row count,
+retrain $-estimate, lint stats (% pass, fab rate, dup rate).
+Training itself is /R30/ scope.
+*Acceptance probe.* Corpus doc names totals, shape-split, lint
+pass rate, est training cost. =_r29_k20_v2_corpus_prep.py=
+produces =k20_v2_corpus.jsonl= ≥200 rows; lint pass rate ≥0.8.
+
+** TODO R29-P1-8: K5-vs-K6 expanded probe (post-verifier-hardening)
+:PROPERTIES:
+:ESTIMATE: 2 hr
+:SOURCE:   r28-pareto §K5 deprecation; r28-synthesis G2; R29-9
+:DEPS:     *R29-P0-7 (BK verifier preservation gate must land first)*
+:END:
+*Blocked on R29-P0-7.* R28 G2 case tempered post-scour because
+K6's BK 50-scores partly exploit the verifier loophole. Expanded
+head-to-head produces post-hardening evidence for G2 K5
+deprecation: B5/B11/B25/B26/B45 + 5 BK at N=10. /Captain's call:
+must run AFTER R29-P0-7 ships, else inherits same loophole./
+*Acceptance probe.* =_r29_k5_vs_k6_probe.py= produces ~80-100
+cells across 5 B-tasks × N=10 × 2 variants. Output: per-task
+mean + $/u + fab rate + aggregate winner. Verifier hash matches
+R29-P0-7 hardened version (inject destructive-edit cell;
+verdict=0 =preservation_violation=).
+
+* P2 — explicit deferrals (track, don't ship in R29)
+
+*Summary.* Capability investments deferred until R29 lands + scour evidence is fresh.
+
+| Deferred                                       | R-round | Why                                                                |
+|------------------------------------------------+---------+--------------------------------------------------------------------|
+| K20 v2 retrain (full)                          | R30     | corpus prep is R29-P1-7; training + serving = next round           |
+| =/critic-this= verb productionalization        | R30     | R29-P1-6 is POC; verb plumbing in =cli.py=/=specialist.py= = R30   |
+| Modal =serve_kimi.py= recon OR RunPod-vLLM port| R30     | r28-providers §8 dead-end; recommend port to RunPod-vLLM           |
+| Full app-side K5 deprecation                   | R30     | gate on R29-P1-8 evidence post R29-P0-7 hardening                  |
+| Per-handle LoRAs (U7)                          | R31     | infra ready; train spend is the gate                               |
+| U9 LoRA-as-judge                               | R31     | judge corpus needs R28+R29 wins (≥500 pairs)                       |
+| Multi-LoRA 3-slot pod (G2)                     | R30     | vLLM 0.20.1 hang; pin newer or change pattern                      |
+
+* Sequence to ship (EST 12h AM/PM)
+
+| Slot      | Items                                                                                            |
+|-----------+--------------------------------------------------------------------------------------------------|
+| Day 1 AM  | R29-P0-1 reasoning (2h) ‖ R29-P0-2 budget (30m) ‖ R29-P0-10 memory rules (1h)                    |
+| Day 1 PM  | R29-P0-3 per-cell heartbeat (4h); R29-P0-7 BK verifier gate (4h, *blocks R29-P1-8*)              |
+| Day 2 AM  | R29-P0-5 B1 audit (3h) ‖ R29-P0-6 K20 restrict (2h); R29-P0-8 K5 tool-surface (2h)               |
+| Day 2 PM  | R29-P0-9 fork _round29_dials.py (1h); R29-P0-4 post-round-analysis fork (1h)                     |
+| Day 3 AM  | R29-P1-2 preflight (1.5h); R29-P1-3 daemon (1h); R29-P1-4 launcher (1h); R29-P1-5 watchdog (1.5h)|
+| Day 3 PM  | R29-P1-7 K20 v2 corpus prep (3h); R29-P1-6 /critic-this POC (4h)                                 |
+| Day 4 AM  | R29-P1-8 K5-vs-K6 expanded probe (2h, *post-P0-7*)                                               |
+| Launch    | preflight gate → K20 RunPod pre-warm 15m → harness + daemon + watchdog                           |
+
+* Total budget
+
+| Phase                              | Wall                | Cost                                              |
+|------------------------------------+---------------------+---------------------------------------------------|
+| P0 (10 items) + P1 (8 items)       | ~34 hr (~3.5 days)  | ~$0.50 K20 pre-warm carry-over (code only)        |
+| R29 main round                     | 60-90 min           | $8-15 (~200 cells, capability shape)              |
+| R29-P1-6 critic POC + R29-P1-8 K5/K6 | 15-35 min         | $1-3 (POC negligible; K5/K6 probe dominates cost) |
+
+* Dependencies graph (key blockers)
+
+#+begin_src text
+P0-1, P0-2, P0-3, P0-6 ─── P0-9 (fork applies 4 patches)
+P0-9 ─── P0-4 + P1-2 + P1-3 + P1-4 + P1-5 (forks consume round-fork)
+P0-3 ─── P1-5 (watchdog stall-map needs cell-stage names)
+P0-2 ─── P1-2 (preflight bakes budget bump)
+*P0-7 (BK verifier preservation) ─── P1-8 (K5-vs-K6 evidence)*  /critical/
+P0-5, P0-8, P0-10, P1-1, P1-6, P1-7 — independent (no graph deps)
+#+end_src
+
+* Self-check (per task brief)
+
+| Check                                                            | Status                                                  |
+|------------------------------------------------------------------+---------------------------------------------------------|
+| Each P0 has concrete acceptance probe                            | YES (10/10)                                             |
+| R29-P0-7 BK verifier blocks R29-P1-8 K5-vs-K6 evidence           | YES (DEPS + dep-graph + Day 4 AM sequence annotation)   |
+| Each P0 cites source doc / file:line                             | YES (all 10 cite r28-synthesis or scour-doc §)          |
+| R29-P1-6 + R29-P1-7 framed /narrow scope/ (not productization)   | YES (both lead with "*Narrow scope only*")              |
+
+* Cross-references
+
+| Doc / file                                                                          | Why                                                                       |
+|-------------------------------------------------------------------------------------+---------------------------------------------------------------------------|
+| =2026-05-09-r28-synthesis.org= §"Captain's call" + §"R29 P0 input list" + §retro    | R29 P0 list + 5 procedural memory-rule candidates                         |
+| =2026-05-09-r28-quality-judge.org= §3/§5/§6/§7                                      | B1 K1 regression / K20 wall-cap / K6 BK shortcut / K5 fab                 |
+| =2026-05-09-r28-walltime.org= §preflight + §per-cell heartbeat                      | CAT 3 budget edge / per-cell heartbeat gap                                |
+| =2026-05-09-r28-providers.org= §7/§8                                                | CAT 3 false-positive (Together vs RunPod) / Modal-Kimi dead-end           |
+| =2026-05-09-r28-pareto.org= §K5 deprecation + §K20 zero-cost                        | G2 K5 deprecation / G4 K20 v2 retrain                                     |
+| =2026-05-09-r29-{design,hypothesis}.org=                                            | dial set + Hn predictions (R29-P1-1)                                      |
+| =2026-05-09-r28-launch-checklist.org=                                               | structural template (Rule 2b + status legend + dep-graph)                 |
+| =scripts/_round28_dials.py= (incl. :203 =_WARMUP_REASONING_DISABLE=)                | fork → =_round29_dials.py=; R29-P0-1 unify target                         |
+| =org_llm/specialist.py= (=_DISABLE_REASONING_MODELS=, =is_external_baseline=)       | R29-P0-1 unify source; R29-P0-8 K5 tool-surface fix site                  |
+| =org_llm/verifier.py= (or task-side BK fixture)                                     | R29-P0-7 preservation gate site                                           |
+| =scripts/_r28_{preflight,launch,self_healing_daemon,watchdog,post_round_analysis,design_patch}.{sh,py}= | fork → =_r29_*= (R29-P0-4, R29-P0-9, R29-P1-2..P1-5)            |
+| =scripts/_k20_runpod_resume.py=                                                     | pre-warm primitive (R29-P1-4)                                             |
+| =scripts/_round28_dials_artifacts/cell_replay.jsonl= + (BK11 K6 / B11 K5) cell_result.json | source for R29-P0-5/P0-7/P0-8/P1-7 replay targets                   |
+| =~/.claude/projects/-home-daniel-repos-org-llm/memory/MEMORY.md=                    | R29-P0-10 index target                                                    |
