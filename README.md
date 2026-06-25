@@ -4,6 +4,11 @@
 
 # org-llm
 
+> **⚠️ ARCHIVED.** org-llm was an earlier, Python-first attempt at an org-roam LLM
+> IDE. It is archived and kept read-only for history. The orgbuild ecosystem
+> (`orgbuild`, `orgconfer`, `issue-worker`, `orgcore`) is the going-forward line;
+> the shared LLM seam is `orgcore-llm`. See orgsuite ADR-0005.
+
 **Your org-roam vault, augmented by FOSS LLMs — and a whole IDE for the second brain that lives there.**
 
 A self-hosted system that indexes your `~/org/` notes into SQLite + sqlite-vec,
